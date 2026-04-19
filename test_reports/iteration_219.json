@@ -1,0 +1,39 @@
+{
+  "summary": "v2.5.2 Weekly Digest + U6 SO-learning telemetry end-to-end verified. All 9 unit tests (6 test_weekly_digest.py + 3 test_u6_so_telemetry.py) pass. All 7 new HTTP API regression tests in test_weekly_digest_api_iter219.py pass (shape/idempotency/404/latest/list newest-first/invalid-week_of-error). Scheduler smoke: backend logs show 'Weekly Digest scheduler started (interval: 24h, rebuilds current-week digest)'. UI /learning/ops mounts WeeklyDigestCard with every required data-testid; Rebuild button fires POST /api/learning/digest/rebuild → 200; JSON download emits file named 'learning-digest-2026-W16.json'. Regression: /intake/learning (14 pattern-health nodes) and /ai-learning (7 pattern-health nodes) still render and pre-existing U5 endpoints (leaderboard, drift/summary, drift/alerts, events) all return 200. No seed data left behind.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/learning/digest", "issue": "List payload uses key 'digests' (with 'total') instead of a plain array or 'items' — inconsistent with other list-style learning endpoints that return raw arrays. Harmless, but worth aligning naming across the Learning Core surface."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "/learning/ops, /intake/learning, /ai-learning", "issues": ["Same pre-existing React hydration console warnings documented in iteration_218 (<span> wrapping <tr>/<tbody>/<option>/<select>) — comes from the Emergent visual-editor's data-ve-dynamic span wrappers, NOT from app code. Safe to ignore."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_weekly_digest.py",
+    "/app/backend/tests/test_u6_so_telemetry.py",
+    "/app/backend/tests/test_weekly_digest_api_iter219.py",
+    "/app/test_reports/pytest/digest_u6_results.xml",
+    "/app/test_reports/pytest/digest_api_iter219.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "digest_service.py emits a benign 'coroutine FakeCursor.to_list was never awaited' warning during the unit tests because production code does `async for a in db['learning_drift_alerts'].find(...)` on the same cursor object the test's FakeColl also exposes `.to_list` on. Production code is correct (motor supports both); the warning is test-harness-only and already flagged by main agent as expected.",
+    "GET /api/learning/digest returns {total, digests: [...]}, while similar endpoints (e.g. /api/learning/events, /api/learning/drift/alerts) return bare arrays or {items: [...]}. Inconsistent envelope shape across Learning Core; pick one convention.",
+    "Rebuild endpoint returns HTTP 200 with {error: '...'} on invalid week_of rather than HTTP 400 — matches the request spec but deviates from typical REST behaviour. Intentional per requirement.",
+    "WeeklyDigestCard 'Top Reviewer' renders `digest-top-reviewer` container even when there is no reviewer data (shows '—' + 'No activity'); `digest-top-reviewer-0` is only rendered when list populated. Contract matches the request."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_weekly_digest_api_iter219.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "admin / admin (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None by this iteration. The rebuild endpoint naturally upserts a current-week (2026-W16) row into learning_digests; this is expected production state (scheduler would produce the same). No learning_events_v2 rows were seeded by the testing agent.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "v2.5.2 Weekly Digest (preview-only, no email) + U6 SO-learning telemetry on sales_order_learning_suggestion_apply_service are GREEN. New endpoints: POST /api/learning/digest/rebuild[?week_of=YYYY-MM-DD], GET /api/learning/digest/latest, GET /api/learning/digest/{week_key} (404 if unknown), GET /api/learning/digest?limit=N → envelope shape {total, digests:[slim...]}. Digest doc shape: week_key, week_start, week_end, headline, events{total,by_domain,by_event_type}, top_reviewers[], drift_summary, pattern_health_snapshot, trend_7d{sales_intake,ap_posting}, generated_at, id. Idempotent upsert by week_key verified. Scheduler logged on startup. WeeklyDigestCard on /learning/ops exposes testids: weekly-digest-card, digest-headline, digest-events-total, digest-top-reviewer, digest-drift-new, digest-generated-at, digest-rebuild-btn, digest-download-btn (+ digest-top-reviewer-0..N when populated). U6: approve_suggestion/reject_suggestion/apply_suggestion on sales_order_learning_suggestion_apply_service now emit learning_events_v2 rows (domain=sales_intake, event_type=so_suggestion_{approved|rejected|applied}, scope_value=customer_no, source=sales_order_learning_suggestion_apply_service). Invalid transitions return {error} AND do NOT emit telemetry — confirmed. U5 leaderboard + drift + pattern-health regressions unaffected. NOTE: /api/learning/digest envelope is {total, digests:[...]} (not 'items')."
+}

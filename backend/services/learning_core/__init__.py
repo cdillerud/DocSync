@@ -43,6 +43,13 @@ from services.learning_core.feedback_service import (
     record_unified_feedback,
     SCOPE_TYPES as FEEDBACK_SCOPE_TYPES,
 )
+from services.learning_core.digest_service import (
+    build_weekly_digest,
+    get_latest_digest,
+    get_digest_by_week,
+    list_digests,
+    DIGESTS_COLL,
+)
 
 __all__ = [
     # Events (U1)
@@ -70,4 +77,10 @@ __all__ = [
     # Shared feedback ingest (U4)
     "record_unified_feedback",
     "FEEDBACK_SCOPE_TYPES",
+    # Weekly digest (U5+)
+    "build_weekly_digest",
+    "get_latest_digest",
+    "get_digest_by_week",
+    "list_digests",
+    "DIGESTS_COLL",
 ]

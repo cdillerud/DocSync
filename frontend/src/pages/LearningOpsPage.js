@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, Activity, Bell, Trophy, Users, CheckCircle2, AlertTriangle } from 'lucide-react';
 import PatternHealthPanel from '../components/PatternHealthPanel';
+import WeeklyDigestCard from '../components/WeeklyDigestCard';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -136,6 +137,9 @@ export default function LearningOpsPage() {
           testId="ops-kpi-feedback-events"
         />
       </div>
+
+      {/* Weekly Digest — "This Week" snapshot (U5+) */}
+      <WeeklyDigestCard onRebuilt={load} />
 
       {/* Cross-domain pattern health (reuses U5 component) */}
       <PatternHealthPanel refreshKey={phRefreshKey} title="Cross-domain Pattern Health" />

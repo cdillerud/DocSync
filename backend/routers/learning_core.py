@@ -246,3 +246,44 @@ async def unified_feedback(body: UnifiedFeedbackBody):
         actor=body.actor or "user",
         extra=body.extra,
     )
+
+
+# ─────────────────────────────────────────────────────────────
+# Weekly Digest (U5+)
+# ─────────────────────────────────────────────────────────────
+
+@router.get("/digest/latest")
+async def digest_latest():
+    """Return the most recent weekly digest, or `null` if none exists yet."""
+    from services.learning_core import get_latest_digest
+    d = await get_latest_digest()
+    return d or {"digest": None, "hint": "No digest generated yet. POST /api/learning/digest/rebuild to generate one."}
+
+
+@router.get("/digest/{week_key}")
+async def digest_by_week(week_key: str):
+    """Fetch a specific digest by its ISO week_key (e.g. '2026-W16')."""
+    from services.learning_core import get_digest_by_week
+    d = await get_digest_by_week(week_key)
+    if not d:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"No digest for week_key '{week_key}'")
+    return d
+
+
+@router.get("/digest")
+async def digest_history(limit: int = Query(12, ge=1, le=52)):
+    """History of weekly digests, newest first."""
+    from services.learning_core import list_digests
+    digests = await list_digests(limit=limit)
+    return {"total": len(digests), "digests": digests}
+
+
+@router.post("/digest/rebuild")
+async def digest_rebuild(
+    week_of: Optional[str] = Query(None, description="YYYY-MM-DD — any date in the target week; defaults to current week"),
+):
+    """Rebuild the digest for the week containing `week_of`. Idempotent
+    per week_key. Normally fires on the weekly scheduler."""
+    from services.learning_core import build_weekly_digest
+    return await build_weekly_digest(week_of=week_of, actor="user")

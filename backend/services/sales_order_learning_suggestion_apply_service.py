@@ -112,6 +112,29 @@ async def apply_suggestion(db, suggestion_id: str, applier: str) -> Dict[str, An
         mutation_result.get("no_op"), mutation_result.get("summary"),
     )
 
+    # U6 — emit unified event so apply actions surface in Learning Ops
+    try:
+        from services.learning_core.events_service import record_event
+        await record_event(
+            domain="sales_intake",
+            event_type="so_suggestion_applied",
+            scope_type="customer",
+            scope_value=customer_no,
+            target={
+                "suggestion_id": suggestion_id,
+                "suggestion_type": stype,
+            },
+            applied={
+                "no_op": mutation_result.get("no_op", False),
+                "summary": mutation_result.get("summary", ""),
+            },
+            actor=applier,
+            source="sales_order_learning_suggestion_apply_service",
+            db=db,
+        )
+    except Exception as e:
+        logger.debug("[SuggestionApply] unified event tick failed: %s", e)
+
     return {
         "status": "applied",
         "suggestion_id": suggestion_id,
@@ -156,6 +179,28 @@ async def _transition(db, suggestion_id: str, target: str, actor: str) -> Dict[s
 
     logger.info("[SuggestionWorkflow] %s → %s: id=%s customer=%s by=%s",
                 current, target, suggestion_id, suggestion.get("customer_no"), actor)
+
+    # U6 — tick the unified learning log so reviewer activity on SO
+    # suggestions shows up in the Learning Ops leaderboard + weekly digest.
+    # Never blocks the primary transition.
+    try:
+        from services.learning_core.events_service import record_event
+        await record_event(
+            domain="sales_intake",
+            event_type=f"so_suggestion_{target}",
+            scope_type="customer",
+            scope_value=suggestion.get("customer_no"),
+            target={
+                "suggestion_id": suggestion_id,
+                "suggestion_type": suggestion.get("suggestion_type"),
+            },
+            applied={"from_status": current, "to_status": target},
+            actor=actor,
+            source="sales_order_learning_suggestion_apply_service",
+            db=db,
+        )
+    except Exception as e:
+        logger.debug("[SuggestionWorkflow] unified event tick failed: %s", e)
 
     return {
         "suggestion_id": suggestion_id,

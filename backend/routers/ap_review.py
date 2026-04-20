@@ -439,7 +439,18 @@ async def override_po_check(doc_id: str):
 # =============================================================================
 
 @ap_review_router.post("/documents/{doc_id}/post-to-bc")
-async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = None):
+async def post_document_to_bc(
+    doc_id: str,
+    request: Optional[PostToBCRequest] = None,
+    auto_mark_ready: bool = Query(
+        False,
+        description="Demo/admin safety valve: if the doc has status='ReadyForPost' "
+                    "but review_status is not yet 'ready_for_post' (the two-step "
+                    "workflow was half-completed), set review_status inline before "
+                    "posting. Defaults to False so the normal review gate still "
+                    "applies in production."
+    ),
+):
     """
     Post a document to Business Central as a purchase invoice.
     Creates a purchase invoice in BC with the document's extracted data.
@@ -447,23 +458,52 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
     On failure, records error details for retry.
     """
     logger.info(f"AP Review Post to BC: doc_id={doc_id}")
-    
+
     db = get_db()
-    
+
     # Find document
     doc = await db.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    
+
     # Check document is ready for posting
     review_status = doc.get("review_status", "")
+    queue_status = doc.get("status", "")
+
     if review_status not in ("ready_for_post", "data_correction_pending"):
-        # Allow posting from ready_for_post or retry from data_correction
-        if doc.get("bc_posting_status") != "failed":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Document must be marked 'ready_for_post' before posting. Current status: {review_status}"
+        # Safety valve: queue-status-says-ready but review_status is stale.
+        # A known workflow gap where status="ReadyForPost" ≠ review_status.
+        if auto_mark_ready and queue_status == "ReadyForPost":
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    "review_status": "ready_for_post",
+                    "review_marked_ready_by": "auto_mark_ready",
+                    "review_marked_ready_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_utc": datetime.now(timezone.utc).isoformat(),
+                }},
             )
+            review_status = "ready_for_post"
+            logger.info(
+                f"post-to-bc auto-promoted review_status for doc_id={doc_id} "
+                f"(queue_status=ReadyForPost but review_status was stale)"
+            )
+        elif doc.get("bc_posting_status") != "failed":
+            # Clearer, actionable error — tells the UI exactly which button
+            # to click next instead of showing raw internal state.
+            if queue_status == "ReadyForPost":
+                detail = (
+                    "This invoice is in the ReadyForPost queue but hasn't been "
+                    "reviewer-approved yet. Click 'Mark Ready for Post' in the "
+                    "AP Review panel, then retry Post to BC."
+                )
+            else:
+                detail = (
+                    f"This invoice is not yet ready for posting. "
+                    f"Current queue status: '{queue_status or 'n/a'}'. "
+                    f"Please complete review first (Mark Ready for Post)."
+                )
+            raise HTTPException(status_code=400, detail=detail)
     
     # Check not already posted
     if doc.get("bc_posting_status") == "posted":

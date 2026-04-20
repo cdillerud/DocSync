@@ -135,6 +135,39 @@ def normalize_ref(value: Any) -> Optional[str]:
     return cleaned or None
 
 
+def ref_variants(ref: Optional[str]) -> List[str]:
+    """Return every variant of a reference string the DB might store.
+
+    Different ingestion paths normalize POs differently — some keep the
+    `PO` prefix, some strip it, some strip leading zeros. We query
+    ALL of them so an exact match in any one field surfaces the doc.
+
+    Examples:
+        PO019363 → ['PO019363', '019363', '19363']
+        P0024333 → ['P0024333', '0024333', '24333']
+        112753   → ['112753']
+    """
+    if not ref:
+        return []
+    variants: List[str] = [ref]
+    # Strip the P/PO prefix to expose the numeric core.
+    m = re.match(r"^P(?:O)?(\d+)$", ref)
+    if m:
+        numeric = m.group(1)
+        if numeric and numeric not in variants:
+            variants.append(numeric)
+        stripped = numeric.lstrip("0")
+        if stripped and stripped != numeric and stripped not in variants:
+            variants.append(stripped)
+    else:
+        # Pure-numeric seed — also try leading-zero-stripped.
+        if ref.isdigit():
+            stripped = ref.lstrip("0")
+            if stripped and stripped != ref and stripped not in variants:
+                variants.append(stripped)
+    return variants
+
+
 def _extract_value(doc: Dict[str, Any], dotted: str) -> Any:
     """Walk `a.b.c` through a dict. Returns None if missing."""
     node: Any = doc
@@ -275,47 +308,61 @@ async def build_graph(
     for hop in range(3):
         if len(nodes) >= max_nodes:
             break
-        # Build a query that hits any doc mentioning any known key.
+        # Build a query that hits any doc mentioning any known key in
+        # any of its common storage variants (PO019363 / 019363 / 19363).
         or_clauses: List[Dict[str, Any]] = []
+        po_query_values: Set[str] = set()
         for k in po_keys:
-            or_clauses.extend([
-                {"po_number_clean": k},
-                {"po_number": k},
-                {"linked_po": k},
-                {"order_number": k},
-                {"extracted_fields.po_number": k},
-                {"normalized_fields.po_number": k},
-            ])
+            for v in ref_variants(k):
+                po_query_values.add(v)
+        so_query_values: Set[str] = set()
         for k in so_keys:
-            or_clauses.extend([
-                {"so_number": k},
-                {"linked_so": k},
-                {"sales_order_number": k},
-                {"extracted_fields.so_number": k},
-                {"normalized_fields.so_number": k},
-                {"reference_numbers": k},
-            ])
+            for v in ref_variants(k):
+                so_query_values.add(v)
+        ship_query_values: Set[str] = set()
         for k in shipment_keys:
+            for v in ref_variants(k):
+                ship_query_values.add(v)
+
+        for v in po_query_values:
             or_clauses.extend([
-                {"shipment_number": k},
-                {"bol_number": k},
-                {"container_number": k},
-                {"extracted_fields.bol_number": k},
-                {"extracted_fields.shipment_number": k},
-                {"extracted_fields.container_number": k},
-                {"normalized_fields.bol_number": k},
-                {"normalized_fields.shipment_number": k},
+                {"po_number_clean": v},
+                {"po_number": v},
+                {"linked_po": v},
+                {"order_number": v},
+                {"extracted_fields.po_number": v},
+                {"extracted_fields.order_number": v},
+                {"normalized_fields.po_number": v},
+            ])
+        for v in so_query_values:
+            or_clauses.extend([
+                {"so_number": v},
+                {"linked_so": v},
+                {"sales_order_number": v},
+                {"extracted_fields.so_number": v},
+                {"normalized_fields.so_number": v},
+                {"reference_numbers": v},
+            ])
+        for v in ship_query_values:
+            or_clauses.extend([
+                {"shipment_number": v},
+                {"bol_number": v},
+                {"container_number": v},
+                {"extracted_fields.bol_number": v},
+                {"extracted_fields.shipment_number": v},
+                {"extracted_fields.container_number": v},
+                {"normalized_fields.bol_number": v},
+                {"normalized_fields.shipment_number": v},
             ])
         # Fuzzy filename regex — finds docs whose only reference to a key
         # is embedded in the filename (e.g. Ball Metal
         # `P0024333 - 07 - W117765 - ...pdf`). Only when include_fuzzy.
         if include_fuzzy:
             for k in po_keys | so_keys | shipment_keys:
-                # Escape key for safe regex usage (all normalized refs are
-                # alphanumeric already, but stay defensive).
-                or_clauses.append({
-                    "file_name": {"$regex": re.escape(k), "$options": "i"},
-                })
+                for v in ref_variants(k):
+                    or_clauses.append({
+                        "file_name": {"$regex": re.escape(v), "$options": "i"},
+                    })
         if not or_clauses:
             break
 
@@ -343,23 +390,32 @@ async def build_graph(
             if include_fuzzy:
                 fz = fuzzy_refs_from_filename(d.get("file_name"))
                 for k in fz["po"]:
-                    if k in po_keys or k in new_po:
+                    # Normalize comparison via variants so a filename
+                    # containing the bare numeric `019363` matches
+                    # seed `PO019363` and vice versa.
+                    canonical = _canonical_match(k, po_keys | new_po)
+                    if canonical:
                         edges.append({
-                            "ref_type": "po", "ref_value": k,
+                            "ref_type": "po", "ref_value": canonical,
+                            "matched_value": k,
                             "matched_field": "filename_fuzzy",
                             "match_type": "fuzzy", "confidence": 0.60,
                         })
                 for k in fz["so"]:
-                    if k in so_keys or k in new_so:
+                    canonical = _canonical_match(k, so_keys | new_so)
+                    if canonical:
                         edges.append({
-                            "ref_type": "so", "ref_value": k,
+                            "ref_type": "so", "ref_value": canonical,
+                            "matched_value": k,
                             "matched_field": "filename_fuzzy",
                             "match_type": "fuzzy", "confidence": 0.60,
                         })
                 for k in fz["shipment"]:
-                    if k in shipment_keys or k in new_ship:
+                    canonical = _canonical_match(k, shipment_keys | new_ship)
+                    if canonical:
                         edges.append({
-                            "ref_type": "shipment", "ref_value": k,
+                            "ref_type": "shipment", "ref_value": canonical,
+                            "matched_value": k,
                             "matched_field": "filename_fuzzy",
                             "match_type": "fuzzy", "confidence": 0.60,
                         })
@@ -401,20 +457,55 @@ async def build_graph(
     }
 
 
+def _canonical_match(candidate: str, known_keys: Set[str]) -> Optional[str]:
+    """Return the canonical seed key that `candidate` matches via any
+    variant, or None if none match. Used for fuzzy-filename edge
+    attribution so `019363` in a filename correctly credits seed
+    `PO019363`."""
+    if not candidate:
+        return None
+    cand_variants = set(ref_variants(candidate))
+    for k in known_keys:
+        if k == candidate:
+            return k
+        k_variants = set(ref_variants(k))
+        if cand_variants & k_variants:
+            return k
+    return None
+
+
 def _edges_from(
     doc: Dict[str, Any],
     po_keys: Set[str], so_keys: Set[str], shipment_keys: Set[str],
 ) -> List[Dict[str, Any]]:
-    """Figure out exactly which field of `doc` matched one of our keys."""
+    """Figure out exactly which field of `doc` matched one of our keys.
+
+    Matching is variant-aware: e.g., a seed key `PO019363` matches a
+    field value stored as `019363` or `19363`. We canonicalize the edge
+    back to the seed form so the response is consistent regardless of
+    which variant the DB happens to hold."""
+    # Pre-expand each key into its variants and keep a reverse map so
+    # we can report the canonical (seed) key in the edge output.
+    def _expand(keys: Set[str]) -> Dict[str, str]:
+        out: Dict[str, str] = {}
+        for k in keys:
+            for v in ref_variants(k):
+                out.setdefault(v, k)  # first-seen canonical wins
+        return out
+    po_variants = _expand(po_keys)
+    so_variants = _expand(so_keys)
+    ship_variants = _expand(shipment_keys)
+
     edges: List[Dict[str, Any]] = []
     for field in _PO_FIELDS:
         v = _extract_value(doc, field)
         vals = v if isinstance(v, list) else [v]
         for vv in vals:
             n = normalize_ref(vv)
-            if n and n in po_keys:
+            if n and n in po_variants:
                 edges.append({
-                    "ref_type": "po", "ref_value": n,
+                    "ref_type": "po", "ref_value": po_variants[n],
+                    "matched_value": n,
                     "matched_field": field,
                     "match_type": "exact", "confidence": 1.0,
                 })
@@ -423,9 +514,10 @@ def _edges_from(
         vals = v if isinstance(v, list) else [v]
         for vv in vals:
             n = normalize_ref(vv)
-            if n and n in so_keys:
+            if n and n in so_variants:
                 edges.append({
-                    "ref_type": "so", "ref_value": n,
+                    "ref_type": "so", "ref_value": so_variants[n],
+                    "matched_value": n,
                     "matched_field": field,
                     "match_type": "exact", "confidence": 1.0,
                 })
@@ -434,9 +526,10 @@ def _edges_from(
         vals = v if isinstance(v, list) else [v]
         for vv in vals:
             n = normalize_ref(vv)
-            if n and n in shipment_keys:
+            if n and n in ship_variants:
                 edges.append({
-                    "ref_type": "shipment", "ref_value": n,
+                    "ref_type": "shipment", "ref_value": ship_variants[n],
+                    "matched_value": n,
                     "matched_field": field,
                     "match_type": "exact", "confidence": 1.0,
                 })

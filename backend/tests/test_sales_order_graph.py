@@ -208,6 +208,55 @@ async def test_build_graph_role_counts(db):
 
 
 # ──────────────────────────────────────────────────────────────
+# ref_variants — cross-format PO matching (the PO019363 bug)
+# ──────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("seed,expected", [
+    ("PO019363", ["PO019363", "019363", "19363"]),
+    ("P0024333", ["P0024333", "0024333", "24333"]),
+    ("112753", ["112753"]),
+    ("0000123", ["0000123", "123"]),
+    ("", []),
+    (None, []),
+])
+def test_ref_variants(seed, expected):
+    assert sog.ref_variants(seed) == expected
+
+
+@pytest.mark.asyncio
+async def test_build_graph_matches_PO_prefix_vs_bare_numeric(db):
+    """Prod bug: incomplete_orders listed PO PO019363 as having an
+    AP_Invoice, but build_graph returned 0 nodes. Root cause: seed
+    `PO019363` didn't match DB value stored as bare `019363` in
+    `po_number_clean`. Variant expansion fixes this."""
+    # AP invoice with PO stored WITHOUT the "PO" prefix
+    await _doc(db, id="ap-stripped", doc_type="AP_Invoice",
+               po_number_clean="019363",
+               file_name="111244.pdf")
+    # And one with the full prefix
+    await _doc(db, id="ap-prefixed", doc_type="AP_Invoice",
+               po_number="PO019363",
+               file_name="other.pdf")
+
+    # Seed: the prefixed form — both docs should match
+    r = await sog.build_graph(po_number="PO019363", db=db)
+    ids = {n["id"] for n in r["nodes"]}
+    assert "ap-stripped" in ids, "Bare-numeric DB value must match prefixed seed"
+    assert "ap-prefixed" in ids
+
+
+@pytest.mark.asyncio
+async def test_build_graph_matches_leading_zero_variants(db):
+    """P0024333 in the seed must match a doc whose po_number_clean is
+    the leading-zero-stripped `24333`."""
+    await _doc(db, id="d1", doc_type="Shipping_Document",
+               po_number_clean="24333")
+    r = await sog.build_graph(po_number="P0024333", db=db)
+    ids = {n["id"] for n in r["nodes"]}
+    assert "d1" in ids
+
+
+# ──────────────────────────────────────────────────────────────
 # incomplete_orders
 # ──────────────────────────────────────────────────────────────
 

@@ -213,13 +213,10 @@ async def test_build_graph_role_counts(db):
 
 @pytest.mark.asyncio
 async def test_incomplete_orders_flags_missing_roles(db):
-    # SO "S1" — has PO + SO + Shipping but NO AP_Invoice
-    await _doc(db, id="p1", doc_type="Purchase_Order", so_number="S1")
-    await _doc(db, id="s1", doc_type="Sales_Order", so_number="S1")
+    # SO "S1" — has Shipping but NO AP_Invoice
     await _doc(db, id="sh1", doc_type="Shipping_Document", so_number="S1")
-    # SO "S2" — complete, should NOT appear
-    await _doc(db, id="p2", doc_type="Purchase_Order", so_number="S2")
-    await _doc(db, id="s2", doc_type="Sales_Order", so_number="S2")
+    await _doc(db, id="bol1", doc_type="BOL", so_number="S1")
+    # SO "S2" — has both Shipping + AP_Invoice, should NOT appear
     await _doc(db, id="sh2", doc_type="Shipping_Document", so_number="S2")
     await _doc(db, id="ap2", doc_type="AP_Invoice", so_number="S2")
 
@@ -243,65 +240,99 @@ async def test_incomplete_orders_respects_min_nodes_per_order(db):
 @pytest.mark.asyncio
 async def test_incomplete_orders_po_grouping_for_po_centric_schema(db):
     """Prod case: no so_number ever populated, only po_number. The
-    grouper must auto-pivot to PO."""
-    # PO P1 — has PO + Shipping but missing SO and AP_Invoice
-    await _doc(db, id="po-1", doc_type="Purchase_Order", po_number="P1")
-    await _doc(db, id="sh-1", doc_type="Shipping_Document", po_number="P1")
-    # PO P2 — fully referenced (PO + SO + Shipping + AP_Invoice)
-    await _doc(db, id="po-2", doc_type="Purchase_Order", po_number="P2")
-    await _doc(db, id="so-2", doc_type="Sales_Order", po_number="P2")
-    await _doc(db, id="sh-2", doc_type="Shipping_Document", po_number="P2")
-    await _doc(db, id="ap-2", doc_type="AP_Invoice", po_number="P2")
+    grouper must auto-pivot to PO. Default expected_roles is
+    (Shipping, AP_Invoice) for PO-centric shops."""
+    # PO P55555 — has Shipping only, missing AP_Invoice
+    await _doc(db, id="sh-1", doc_type="Shipping_Document", po_number="P55555")
+    await _doc(db, id="bol-1", doc_type="BOL", po_number="P55555")
+    # PO P66666 — has both Shipping + AP_Invoice, complete
+    await _doc(db, id="sh-2", doc_type="Shipping_Document", po_number="P66666")
+    await _doc(db, id="ap-2", doc_type="AP_Invoice", po_number="P66666")
 
     r = await sog.incomplete_orders(db=db, group_by="auto")
     assert r["group_by_effective"] == "po"
     po_gaps = {row["po_number"]: row for row in r["sample"]}
-    assert "P1" in po_gaps
-    assert set(po_gaps["P1"]["roles_missing"]) == {"SO", "AP_Invoice"}
-    assert "P2" not in po_gaps
+    assert "P55555" in po_gaps
+    assert po_gaps["P55555"]["roles_missing"] == ["AP_Invoice"]
+    assert "P66666" not in po_gaps
 
 
 @pytest.mark.asyncio
 async def test_incomplete_orders_po_grouping_consumes_filename_fuzzy(db):
     """Ball Metal style: PO# only in filename. PO grouper must pick it up."""
-    # PO doc explicitly referencing P0024333
-    await _doc(db, id="po-doc", doc_type="Purchase_Order", po_number="P0024333")
+    # AP Invoice explicitly referencing P0024333
+    await _doc(db, id="ap-doc", doc_type="AP_Invoice", po_number="P0024333")
     # Ball Metal shipping with PO# only in filename
     await _doc(db, id="ball-ship", doc_type="Shipping_Document",
                file_name="P0024333 - 07 - W117765 - CN.pdf")
 
     r = await sog.incomplete_orders(db=db, group_by="po")
     po_gaps = {row["po_number"]: row for row in r["sample"]}
-    assert "P0024333" in po_gaps
-    # Missing SO + AP_Invoice but not Shipping (filename fuzzy caught it)
-    assert "Shipping" not in po_gaps["P0024333"]["roles_missing"]
+    # Full pair (Shipping + AP_Invoice) present → NOT in gaps
+    assert "P0024333" not in po_gaps
 
 
 @pytest.mark.asyncio
 async def test_incomplete_orders_filters_peripheral_noise(db):
     """A PO# referenced ONLY by Vendor_Document / Other docs is NOT
-    'stuck in pipeline' — it's a peripheral reference. Must be filtered
-    out, not shown as 'missing all 4 roles' noise (the prod bug that
-    surfaced this fix)."""
-    # Peripheral case: 2 Vendor_Documents with a PO# but no real
-    # lifecycle doc for that PO.
+    'stuck in pipeline' — it's a peripheral reference."""
+    # Peripheral: 2 Vendor_Documents with a PO# but no real lifecycle doc
     await _doc(db, id="vd1", doc_type="Vendor_Document",
-               po_number="P-PERIPHERAL", file_name="copier@x.com_1.pdf")
+               po_number="P123456", file_name="copier@x.com_1.pdf")
     await _doc(db, id="vd2", doc_type="Other",
-               po_number="P-PERIPHERAL", file_name="copier@x.com_2.pdf")
-    # Real gap case: has Shipping but missing AP_Invoice
+               po_number="P123456", file_name="copier@x.com_2.pdf")
+    # Real gap: has Shipping but missing AP_Invoice
     await _doc(db, id="sh-real", doc_type="Shipping_Document",
-               po_number="P-REAL-GAP")
-    await _doc(db, id="po-real", doc_type="Purchase_Order",
-               po_number="P-REAL-GAP")
+               po_number="P999888")
+    await _doc(db, id="bol-real", doc_type="BOL",
+               po_number="P999888")
 
     r = await sog.incomplete_orders(db=db, group_by="po")
     gaps = {row["po_number"]: row for row in r["sample"]}
-    assert "PPERIPHERAL" not in gaps
-    assert "PREALGAP" in gaps
+    assert "P123456" not in gaps
+    assert "P999888" in gaps
     assert r["noise_filtered_count"] >= 1
-    assert r["orders_with_gaps"] == 1
-    assert gaps["PREALGAP"]["lifecycle_roles_present"] == ["PO", "Shipping"]
+    assert gaps["P999888"]["lifecycle_roles_present"] == ["Shipping"]
+
+
+@pytest.mark.asyncio
+async def test_incomplete_orders_rejects_non_po_shaped_refs(db):
+    """W117649 is a shipment number, not a PO. Must be rejected from
+    the PO-grouping bucket (prod bug that surfaced this filter)."""
+    # W-prefix shipment ref mis-extracted as PO
+    await _doc(db, id="bogus", doc_type="Shipping_Document",
+               po_number="W117649", file_name="shipping.pdf")
+    # CN-prefix container ref
+    await _doc(db, id="bogus2", doc_type="Shipping_Document",
+               po_number="CN000106", file_name="container.pdf")
+    # Valid PO
+    await _doc(db, id="ok", doc_type="Shipping_Document", po_number="P123456")
+
+    r = await sog.incomplete_orders(db=db, group_by="po")
+    buckets = {row["po_number"] for row in r["sample"]}
+    assert "W117649" not in buckets
+    assert "CN000106" not in buckets
+    assert r["po_references_rejected"] >= 2
+    rejected_vals = {v for v, _ in r["po_rejected_samples"]}
+    assert "W117649" in rejected_vals
+
+
+@pytest.mark.asyncio
+async def test_incomplete_orders_expected_roles_override(db):
+    """Caller can override the default (Shipping, AP_Invoice) pair."""
+    await _doc(db, id="ap-only", doc_type="AP_Invoice", po_number="P111111")
+    await _doc(db, id="ship-only", doc_type="Shipping_Document",
+               po_number="P111111")
+    # Default (Shipping, AP_Invoice): P111111 is complete
+    r_default = await sog.incomplete_orders(db=db, group_by="po")
+    assert not any(row["po_number"] == "P111111" for row in r_default["sample"])
+    # Strict override: also require BOL
+    r_strict = await sog.incomplete_orders(
+        db=db, group_by="po",
+        expected_roles=["Shipping", "AP_Invoice", "BOL"],
+    )
+    gap_pos = {row["po_number"] for row in r_strict["sample"]}
+    assert "P111111" in gap_pos
 
 
 # ──────────────────────────────────────────────────────────────

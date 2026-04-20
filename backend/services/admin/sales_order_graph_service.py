@@ -69,18 +69,41 @@ _ROLE_MAP: Dict[str, str] = {
     "shipping_document": "Shipping",
     "receiving_report": "Shipping",
     "warehouse_activity": "Shipping",
+    "packing_slip": "Shipping",
+    "order_confirmation": "Shipping",
     # AP / invoicing
     "ap_invoice": "AP_Invoice",
     "freight_invoice": "AP_Invoice",
     "ar_statement": "AR_Invoice",
     "sales_invoice": "AR_Invoice",
+    "sales_credit_memo": "AR_Invoice",
     # Ancillary / compliance
     "w9_form": "Compliance",
     "loa": "Compliance",
     "quality_doc": "Compliance",
+    "certificate": "Compliance",
     # Fallback
     "unknown": "Unknown",
 }
+
+
+# Realistic default pair-check for this (PO-centric, vendor-receivable)
+# schema. PO/SO docs originate in BC — they almost never show up in the
+# hub — so expecting them forces 100% false-positives. Override per call
+# via the `expected_roles` arg.
+_EXPECTED_ROLES: tuple = ("Shipping", "AP_Invoice")
+
+# Valid PO number shapes — used to filter noise from the PO-grouping
+# bucket. Accepts:
+#   P<5-8 digits>          e.g. P0024333  (Ball Metal style)
+#   PO<4-7 digits>         e.g. PO019363
+#   <5-7 pure digits>      e.g. 155192
+# Rejects W-prefix (BOL/shipment), CN-prefix (container), anything < 5 chars.
+_VALID_PO_REGEX = re.compile(r"^(P\d{5,8}|PO\d{4,7}|\d{5,7})$")
+
+
+def _is_plausible_po(ref: str) -> bool:
+    return bool(_VALID_PO_REGEX.match(ref or ""))
 
 
 def _role_for(doc_type: Optional[str]) -> str:
@@ -422,16 +445,13 @@ def _edges_from(
 # Exception hunt — orders with incomplete doc-type coverage
 # ─────────────────────────────────────────────────────────────
 
-# The "complete" lifecycle we expect for a healthy order. Keyed by role,
-# value = min expected count.
-_EXPECTED_ROLES = ("PO", "SO", "Shipping", "AP_Invoice")
-
 
 async def incomplete_orders(
     *,
     limit: int = 500,
     min_nodes_per_order: int = 2,
     group_by: str = "auto",
+    expected_roles: Optional[List[str]] = None,
     db=None,
 ) -> Dict[str, Any]:
     """Scan hub_documents, group by every SO# (or PO# for SO-empty
@@ -443,8 +463,14 @@ async def incomplete_orders(
             "auto" (default) — pick whichever field has coverage.
             PO-centric shops like this one will auto-fall back to PO
             grouping since `so_number` is rarely populated.
+        expected_roles: Which lifecycle roles must be present. Defaults
+            to ["Shipping", "AP_Invoice"] — the realistic pair for
+            PO-centric shops where PO/SO docs originate in BC and don't
+            land in the hub. Override with e.g.
+            ["BOL", "Shipping", "AP_Invoice"] for stricter checks.
     """
     db = db if db is not None else get_db()
+    roles_required = tuple(expected_roles) if expected_roles else _EXPECTED_ROLES
     cursor = db.hub_documents.find(
         {"duplicate_of": {"$in": [None, "", False]}},
         _NODE_PROJECTION,
@@ -452,17 +478,25 @@ async def incomplete_orders(
 
     by_so: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     by_po: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    po_rejected: Counter = Counter()
     async for d in cursor:
         refs = doc_references(d)
         for so in refs["so"]:
             by_so[so].append(d)
         for po in refs["po"]:
-            by_po[po].append(d)
+            if _is_plausible_po(po):
+                by_po[po].append(d)
+            else:
+                po_rejected[po] += 1
         # Also consume filename-fuzzy for PO grouping (Ball Metal etc.)
         fz = fuzzy_refs_from_filename(d.get("file_name"))
         for po in fz["po"]:
-            if po not in refs["po"]:  # dedupe same-doc entries
+            if po in refs["po"]:
+                continue
+            if _is_plausible_po(po):
                 by_po[po].append(d)
+            else:
+                po_rejected[po] += 1
 
     # Auto-select the grouping that has meaningful coverage.
     effective = group_by
@@ -479,7 +513,7 @@ async def incomplete_orders(
         if len(docs) < min_nodes_per_order:
             continue
         role_set = {_role_for(d.get("doc_type")) for d in docs}
-        missing = [r for r in _EXPECTED_ROLES if r not in role_set]
+        missing = [r for r in roles_required if r not in role_set]
         if not missing:
             complete_count += 1
             continue
@@ -487,7 +521,7 @@ async def incomplete_orders(
         # whose only docs are Other / Vendor_Document / OTHER aren't
         # "stuck in pipeline" — they're peripheral references. Filtering
         # these out is the difference between signal and noise.
-        present_expected = [r for r in _EXPECTED_ROLES if r in role_set]
+        present_expected = [r for r in roles_required if r in role_set]
         if not present_expected:
             noise_filtered += 1
             continue
@@ -510,10 +544,12 @@ async def incomplete_orders(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "group_by_requested": group_by,
         "group_by_effective": effective,
-        "expected_roles": list(_EXPECTED_ROLES),
+        "expected_roles": list(roles_required),
         "scanned_docs_cap": 20000,
         "so_groups_found": len(by_so),
         "po_groups_found": len(by_po),
+        "po_references_rejected": sum(po_rejected.values()),
+        "po_rejected_samples": list(po_rejected.most_common(10)),
         "complete_count": complete_count,
         "noise_filtered_count": noise_filtered,
         "orders_with_gaps": len(results),

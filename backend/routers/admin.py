@@ -1293,15 +1293,26 @@ async def sales_order_graph_incomplete_orders(
                     "schemas). PO grouping also consumes filename-fuzzy P-prefix "
                     "extractions for Ball-Metal-style docs."
     ),
+    expected_roles: Optional[str] = Query(
+        None,
+        description="Comma-separated lifecycle roles that must be present. "
+                    "Default (when omitted) = 'Shipping,AP_Invoice' — realistic "
+                    "pair for PO-centric shops. Pass e.g. 'Shipping,AP_Invoice,BOL' "
+                    "for stricter checks."
+    ),
 ):
-    """Find orders missing any of the 4 lifecycle roles
-    (PO / SO / Shipping / AP_Invoice). Sorted by most-missing first."""
+    """Find orders missing expected lifecycle roles. Sorted by
+    most-missing first. Filters out peripheral-only POs and rejects
+    non-PO-shaped ref values (W/CN prefixes etc.)."""
     from services.admin.sales_order_graph_service import incomplete_orders
     if group_by not in ("so", "po", "auto"):
         group_by = "auto"
+    roles_list = None
+    if expected_roles:
+        roles_list = [r.strip() for r in expected_roles.split(",") if r.strip()]
     return await incomplete_orders(
         limit=limit, min_nodes_per_order=min_nodes_per_order,
-        group_by=group_by,
+        group_by=group_by, expected_roles=roles_list,
     )
 
 

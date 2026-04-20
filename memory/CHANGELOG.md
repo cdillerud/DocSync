@@ -1,6 +1,45 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-20] v2.5.22 — Pre-existing BC API `$select` Bug + Manual Profile Override
+
+**Two issues surfaced during v2.5.21 live validation on XPOLOGI (`76410e9e`):**
+
+1. **`fetch_vendor_invoices_from_bc` has been 400-ing on this BC tenant since day one.**
+   ```
+   BC API 400: Could not find a property named 'totalAmountExcludingTax' 
+   on type 'Microsoft.NAV.purchaseInvoiceLine'
+   ```
+   The `$expand=purchaseInvoiceLines($select=...,totalAmountExcludingTax)` selected a header-level field on the line sub-entity. Valid field is `amountExcludingTax`. Every open-invoice line-pattern learning request has been silently failing — affecting every vendor, not just XPOLOGI.
+
+2. **This BC tenant doesn't expose `postedPurchaseInvoices` on `/api/v2.0/`** (404). My v2.5.21 Tier B fallback can't help tenants whose posted invoices live only on v1.0 or a custom API page. Without line-level historical data, the profile builder legitimately cannot learn a default GL for a vendor — so reviewers need a way to teach it directly.
+
+**Fixes:**
+
+1. **`services/vendor_invoice_profile_service.fetch_vendor_invoices_from_bc`** — line `$select` corrected: `totalAmountExcludingTax` → `amountExcludingTax`. Profile builder now successfully learns from open-invoice lines on this BC tenant. Benefits every vendor with open PIs, not just XPOLOGI.
+2. **`fetch_vendor_posted_invoices_from_bc`** — 404 response now logged at DEBUG level instead of WARNING (it's a tenant-config reality, not an error), and falls through cleanly to the other fallback tiers.
+3. **NEW** `POST /api/ap-review/vendor-profile/{vendor_no}/overrides` — reviewers can set `default_line_type`, `default_gl_account`, `default_item_code`, and `description_pattern` directly. Stored in the profile cache with `sources.manual_override` provenance (who set it, when, which fields) for auditability. Body: `{"default_gl_account": "60500", "actor": "admin"}` — only the keys provided are updated, the rest stay intact.
+
+**Verified:**
+- 24/24 pytests pass across reconciliation + fallback suites
+- Backend healthy, 13 routes on `ap_review_router`, imports clean
+- Lint clean on new code
+
+**User impact (XPOLOGI demo path):**
+After redeploy, run a one-shot curl to teach the system XPOLOGI's GL, then re-run preflight:
+```bash
+curl -s -X POST "http://localhost:8080/api/ap-review/vendor-profile/XPOLOGI/overrides" \
+  -H "Content-Type: application/json" \
+  -d '{"default_gl_account":"60500","actor":"admin"}' | jq
+
+curl -s "http://localhost:8080/api/ap-review/pi-preflight/76410e9e-d6bb-4957-b4fb-6b4a46644037" \
+  | jq '{default_gl: .profile_summary.default_gl_account, fallback_warnings: [.deviations[] | select(.type=="default_fallback")] | length, line_sources: [.planned_lines[].source] | unique}'
+```
+Expected: `default_gl: "60500"`, `fallback_warnings: 0`, `line_sources: ["vendor_profile_gl"]`. The audit trail (`sources.manual_override.set_by/set_at/fields`) is visible via `GET /api/ap-review/vendor-profile/XPOLOGI`.
+
+
+
+
 ## [2026-04-20] v2.5.21 — Vendor Profile Learns from Posted Invoices (Empty-GL Fix)
 
 **Problem surfaced from v2.5.20 preflight output on XPOLOGI doc `76410e9e`:**

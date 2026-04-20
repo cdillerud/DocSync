@@ -124,7 +124,7 @@ async def fetch_vendor_invoices_from_bc(
     params = {
         "$filter": f"buyFromVendorNumber eq '{vendor_no}'",
         "$select": "id,number,vendorInvoiceNumber,buyFromVendorNumber,buyFromVendorName,postingDate,dueDate,currencyCode,totalAmountIncludingTax,totalAmountExcludingTax,status,paymentTermsId",
-        "$expand": "purchaseInvoiceLines($select=id,lineType,lineObjectNumber,description,quantity,unitCost,totalAmountExcludingTax)",
+        "$expand": "purchaseInvoiceLines($select=id,lineType,lineObjectNumber,description,quantity,unitCost,amountExcludingTax)",
         "$top": str(max_invoices),
         "$orderby": "postingDate desc",
     }
@@ -246,6 +246,15 @@ async def fetch_vendor_posted_invoices_from_bc(
                 )
                 invoices = await _fetch_posted_invoices_lines_fallback(
                     adapter, token, company_id, env, vendor_no, max_invoices
+                )
+            elif resp.status_code == 404:
+                # This tenant doesn't expose postedPurchaseInvoices on v2.0.
+                # Silent — this is a tenant-config reality, not an error. The
+                # cache/local-history fallbacks will still run.
+                logger.debug(
+                    "[VendorProfile] postedPurchaseInvoices not exposed on this "
+                    "BC tenant for %s (404) — relying on other sources",
+                    vendor_no,
                 )
             else:
                 logger.warning(

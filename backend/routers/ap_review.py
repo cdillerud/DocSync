@@ -847,6 +847,74 @@ async def get_vendor_profile(vendor_no: str, refresh: bool = False):
     }
 
 
+@ap_review_router.post("/vendor-profile/{vendor_no}/overrides")
+async def set_vendor_profile_overrides(vendor_no: str, data: dict):
+    """Manually set profile defaults for vendors whose BC tenant doesn't
+    expose line-level history (e.g. freight carriers where posted invoices
+    live outside v2.0 API).
+
+    Body: ``{"default_line_type": "Account", "default_gl_account": "60500",
+             "default_item_code": "", "description_pattern": "po_reference",
+             "actor": "admin@example.com"}``
+
+    Any omitted key is left unchanged. The override is written directly to
+    the cached profile and marked in ``sources.manual_override`` so
+    downstream consumers can surface the provenance to reviewers.
+    """
+    from services.vendor_invoice_profile_service import get_or_build_profile
+
+    db = get_db()
+    # Ensure a base profile exists before merging overrides
+    await get_or_build_profile(db, vendor_no)
+
+    allowed = {
+        "default_line_type", "default_gl_account",
+        "default_item_code", "description_pattern",
+    }
+    updates = {k: v for k, v in data.items() if k in allowed and v is not None}
+    if not updates:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No valid override keys provided. Allowed: {sorted(allowed)}",
+        )
+
+    actor = data.get("actor") or "admin"
+    override_meta = {
+        "set_by": actor,
+        "set_at": datetime.now(timezone.utc).isoformat(),
+        "fields": list(updates.keys()),
+    }
+    # Merge overrides into the cached profile and flag provenance
+    await db.vendor_invoice_profiles.update_one(
+        {"vendor_no": vendor_no},
+        {
+            "$set": {
+                **updates,
+                "sources.manual_override": override_meta,
+                "last_updated": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+        upsert=True,
+    )
+
+    refreshed = await db.vendor_invoice_profiles.find_one(
+        {"vendor_no": vendor_no}, {"_id": 0}
+    )
+    return {
+        "vendor_no": vendor_no,
+        "applied": updates,
+        "override_meta": override_meta,
+        "profile": {
+            "default_line_type": refreshed.get("default_line_type"),
+            "default_gl_account": refreshed.get("default_gl_account"),
+            "default_item_code": refreshed.get("default_item_code"),
+            "description_pattern": refreshed.get("description_pattern"),
+            "bc_invoice_count": refreshed.get("bc_invoice_count", 0),
+            "sources": refreshed.get("sources", {}),
+        },
+    }
+
+
 @ap_review_router.get("/pi-preflight/{doc_id}")
 async def pi_preflight(doc_id: str):
     """Preview what the Purchase Invoice will look like before posting to BC.

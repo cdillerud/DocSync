@@ -1,6 +1,40 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-20] v2.5.20 — PI Line Reconciliation + Invoice-Total Sanity Gate
+
+**Problem surfaced from demo prep (XPOLOGI freight invoice `76410e9e`):**
+`pi-preflight` returned `ready: true` for an AP invoice whose `planned_lines` summed to **$715,398.29** vs the actual invoice total of **$649.97** — a 1000× discrepancy that would have posted a catastrophic purchase invoice to Business Central.
+
+**Root cause — three layers of missing reconciliation:**
+1. **LLM extraction** (`invoice_extractor.py`): For freight carrier invoices with weight/class/rate columns, the LLM populated `{quantity: 2600 (weight), unit_price: 277.68 (garbage), total: 7219.68 (correct)}`. `quantity × unit_price ≠ total`, but the trio was stored as-is.
+2. **PI builder** (`vendor_invoice_profile_service.build_smart_pi_lines`): Read `quantity` and `unit_price` blindly and multiplied them for BC. The correct `total` field sat unused.
+3. **Preflight endpoint** (`ap_review.pi_preflight`): Summed `qty × unitCost` of planned lines for the BC payload but never compared that sum against the invoice's extracted total amount. Additionally, `ready` was hardcoded to `True` regardless of critical deviations.
+
+**Fix — three defensive layers (all idempotent, no-op on clean data):**
+
+1. **New shared helper** (`services/line_reconciliation.py`):
+   `reconcile_line_amounts(li)` — treats the line's printed `total` as ground truth. When `qty × unit_price` disagrees (tolerance max of $0.01 or 0.1% of total), derives `unit_cost = total / qty` if qty > 0 (preserve-qty strategy) or collapses to `qty=1, unit_cost=total`. Returns `(qty, unit_cost, info)` where `info` is non-None only when reconciliation fired. Accepts camelCase/snake_case key variants (`quantity`/`qty`, `unit_price`/`unitCost`/`rate`, `total`/`amount`/`line_total`).
+2. **PI builder hardening** (`vendor_invoice_profile_service.build_smart_pi_lines`):
+   Every incoming line now passes through `reconcile_line_amounts`. Reconciled lines are tagged `{reconciled: true, reconcile_info: {...}}` and their BC description is suffixed with `[reconciled: qty=N x rate=$X.XXXX = $Y.YY]` for full audit trail.
+3. **Preflight sanity gate** (`vendor_invoice_profile_service.detect_deviations`):
+   New `total_mismatch` deviation with `severity: critical`. Compares `sum(qty × unitCost)` across planned lines against the invoice's extracted total (tolerance max of $1.00 or 0.5%). Any material drift is flagged critical.
+4. **Preflight endpoint bug fix** (`routers/ap_review.pi_preflight`):
+   `ready` is now `not has_critical` (was hardcoded `True`). New `critical_deviations` field surfaces the blocking reasons so the UI / CLI can render them without filtering the full `deviations` array.
+5. **Extraction-time reconciliation** (`services/invoice_extractor.py`):
+   Same reconciler is applied to the LLM's `line_items` output before writing to Mongo. Raw LLM values preserved under `_raw_extracted` + `_reconcile_reason` for audit. Prompt also hardened to prefer `quantity=1, unit_price=<line total>` when freight-style columns are ambiguous.
+
+**Verified:**
+- 16 new pytests in `tests/test_pi_preflight_reconcile.py` — all green. Covers: consistent lines (no-op), XPOLOGI regression payload, zero-qty collapse, missing-qty default, absent-total fallback, tolerance absorption, camelCase/snake_case interop, PI-builder integration, and all 5 branches of the invoice-total sanity check.
+- Backend service healthy (`/api/health` 200).
+- Pre-existing code-shape tests (`test_vendor_profile_learning`, `test_knowledge_seed`, `test_validation_gaps`) unchanged — their failures predate this work (verified via git stash).
+
+**User impact (production VM):**
+After `cd /opt/gpi-hub && git pull && docker compose build --no-cache && docker compose up -d`, the same preflight curl on doc `76410e9e` will now return `ready: false` with a critical `total_mismatch` deviation explaining the $715K vs $649.97 disagreement — posting is blocked until the line data is fixed. Clean invoices remain unaffected.
+
+
+
+
 ## [2026-04-19] v2.5.10 — Email-Poller Dedup Fix + Auto-Proposed Filename Rules
 
 **Problem surfaced from prod triage-scan dump**

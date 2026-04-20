@@ -894,11 +894,13 @@ async def pi_preflight(doc_id: str):
     total_amount = sum(l.get("unitCost", 0) * l.get("quantity", 1) for l in planned_lines)
     
     has_critical = any(d["severity"] == "critical" for d in deviations)
+    critical_list = [d for d in deviations if d["severity"] == "critical"]
     
     return {
         "doc_id": doc_id,
-        "ready": True,
+        "ready": not has_critical,
         "needs_review": has_critical,
+        "critical_deviations": critical_list or None,
         "vendor": {
             "vendor_no": vendor_no,
             "vendor_name": vendor_name,

@@ -523,23 +523,35 @@ def build_smart_pi_lines(
             "unit_price": total_amount,
         }]
 
+    from services.line_reconciliation import (
+        reconcile_line_amounts,
+        format_reconcile_suffix,
+    )
+
     bc_lines = []
     for li in line_items:
         desc = str(li.get("description", "")).strip()
-        qty = float(li.get("quantity", 1) or 1)
-        unit_cost = float(li.get("unit_price", 0) or li.get("unitCost", 0) or li.get("unit_cost", 0) or 0)
-        if unit_cost == 0:
-            unit_cost = float(li.get("total", 0) or li.get("amount", 0) or 0)
+
+        # Reconcile qty/unit_cost against the line's printed `total` when
+        # present. Catches cases where extraction populated quantity with
+        # a weight/distance value and unit_price with a rate that does not
+        # multiply out to the printed line total.
+        qty, unit_cost, reconcile_info = reconcile_line_amounts(li)
 
         # Check for explicit item/GL from extraction first
         explicit_item = li.get("item_number") or li.get("sku") or li.get("lineObjectNumber") or ""
         explicit_gl = li.get("gl_account") or li.get("account_number") or ""
 
+        chosen_desc = description if description else desc
+        if reconcile_info is not None:
+            suffix = format_reconcile_suffix(reconcile_info)
+            chosen_desc = f"{chosen_desc} {suffix}".strip() if chosen_desc else suffix
+
         if explicit_item:
             bc_line = {
                 "lineType": "Item",
                 "lineObjectNumber": explicit_item,
-                "description": description if description else desc,
+                "description": chosen_desc,
                 "quantity": qty,
                 "unitCost": unit_cost,
                 "source": "extracted_item",
@@ -548,7 +560,7 @@ def build_smart_pi_lines(
             bc_line = {
                 "lineType": "Account",
                 "lineObjectNumber": explicit_gl,
-                "description": description if description else desc,
+                "description": chosen_desc,
                 "quantity": qty,
                 "unitCost": unit_cost,
                 "source": "extracted_gl",
@@ -558,7 +570,7 @@ def build_smart_pi_lines(
             bc_line = {
                 "lineType": "Account",
                 "lineObjectNumber": default_gl,
-                "description": description if description else desc,
+                "description": chosen_desc,
                 "quantity": qty,
                 "unitCost": unit_cost,
                 "source": "vendor_profile_gl",
@@ -568,7 +580,7 @@ def build_smart_pi_lines(
             bc_line = {
                 "lineType": "Item",
                 "lineObjectNumber": default_item,
-                "description": description if description else desc,
+                "description": chosen_desc,
                 "quantity": qty,
                 "unitCost": unit_cost,
                 "source": "vendor_profile_item",
@@ -578,11 +590,15 @@ def build_smart_pi_lines(
             bc_line = {
                 "lineType": "Account" if fallback_gl else "Item",
                 "lineObjectNumber": fallback_gl or fallback_item,
-                "description": description if description else desc,
+                "description": chosen_desc,
                 "quantity": qty,
                 "unitCost": unit_cost,
                 "source": "env_default",
             }
+
+        if reconcile_info is not None:
+            bc_line["reconciled"] = True
+            bc_line["reconcile_info"] = reconcile_info
 
         bc_lines.append(bc_line)
 
@@ -599,6 +615,34 @@ def detect_deviations(
     deviations = []
     amount_stats = profile.get("amount_stats", {})
     line_patterns = profile.get("line_patterns", {})
+
+    # 0. Invoice-total sanity check — sum of planned lines must match the
+    # invoice's extracted total (within tolerance). This catches cases
+    # where line-level qty/unit_price are internally inconsistent or the
+    # reconciliation layer couldn't recover the truth. A mismatch here
+    # is *critical* — posting would send incorrect amounts to BC.
+    extracted_total = _extract_total_amount(doc)
+    if extracted_total > 0 and planned_lines:
+        planned_total = sum(
+            float(line.get("quantity", 1) or 1) * float(line.get("unitCost", 0) or 0)
+            for line in planned_lines
+        )
+        tolerance = max(1.0, extracted_total * 0.005)
+        diff = abs(planned_total - extracted_total)
+        if diff > tolerance:
+            deviations.append({
+                "type": "total_mismatch",
+                "severity": "critical",
+                "message": (
+                    f"Planned line total (${planned_total:,.2f}) disagrees "
+                    f"with invoice total (${extracted_total:,.2f}) by "
+                    f"${diff:,.2f}. Posting blocked until lines are reviewed."
+                ),
+                "planned_total": round(planned_total, 2),
+                "invoice_total": round(extracted_total, 2),
+                "difference": round(diff, 2),
+                "tolerance": round(tolerance, 2),
+            })
 
     if not amount_stats.get("sample_count"):
         deviations.append({

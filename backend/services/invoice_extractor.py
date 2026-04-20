@@ -134,7 +134,14 @@ Extract the following fields from the invoice:
     - description: Item/service description
     - quantity: Quantity as a number
     - unit_price: Price per unit as a number
-    - total: Line total as a number
+    - total: Line total as a number (MUST equal quantity * unit_price)
+    IMPORTANT: `quantity * unit_price` must equal `total` for every line.
+    For freight/logistics invoices that show weight/class/rate columns,
+    DO NOT populate `quantity` with a weight value and `unit_price` with a
+    per-pound/per-mile rate unless their product equals the printed line
+    total. If the printed line is ambiguous, prefer
+    `quantity=1, unit_price=<printed line total>, total=<printed line total>`
+    — the line total is always the source of truth.
 12. **confidence**: Your confidence in the extraction accuracy (0.0 to 1.0)
 
 For freight/transportation invoices, common line item fields may include:
@@ -306,15 +313,38 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
         
         data = json.loads(json_str)
         
-        # Parse line items
+        # Parse line items. Any line where qty*unit_price disagrees with the
+        # printed `total` is reconciled so downstream consumers never see
+        # internally inconsistent amounts. Raw LLM values are preserved
+        # in `_raw_extracted` for audit when reconciliation fires.
+        from services.line_reconciliation import reconcile_line_amounts
         line_items = []
         for item in data.get("line_items", []):
-            line_items.append({
+            raw = {
                 "description": item.get("description", ""),
                 "quantity": float(item.get("quantity", 1)) if item.get("quantity") else 1,
                 "unit_price": float(item.get("unit_price", 0)) if item.get("unit_price") else 0,
-                "total": float(item.get("total", 0)) if item.get("total") else 0
-            })
+                "total": float(item.get("total", 0)) if item.get("total") else 0,
+            }
+            qty, unit_price, info = reconcile_line_amounts(raw)
+            line_item = {
+                "description": raw["description"],
+                "quantity": qty,
+                "unit_price": unit_price,
+                "total": raw["total"] if raw["total"] else round(qty * unit_price, 2),
+            }
+            if info is not None:
+                line_item["_raw_extracted"] = {
+                    "quantity": info["raw_qty"],
+                    "unit_price": info["raw_unit_price"],
+                    "total": info["raw_total"],
+                }
+                line_item["_reconcile_reason"] = info["reason"]
+                logger.info(
+                    "[InvoiceExtract] Line reconciled: %s -> qty=%s, unit_price=%s (reason: %s)",
+                    raw["description"][:60], qty, unit_price, info["reason"],
+                )
+            line_items.append(line_item)
         
         return InvoiceExtractionResult(
             success=True,

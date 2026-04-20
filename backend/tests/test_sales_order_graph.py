@@ -223,7 +223,8 @@ async def test_incomplete_orders_flags_missing_roles(db):
     await _doc(db, id="sh2", doc_type="Shipping_Document", so_number="S2")
     await _doc(db, id="ap2", doc_type="AP_Invoice", so_number="S2")
 
-    r = await sog.incomplete_orders(db=db)
+    # Force "so" grouping; "auto" would fall back to po when so_count < 5
+    r = await sog.incomplete_orders(db=db, group_by="so")
     gaps = {row["so_number"]: row for row in r["sample"]}
     assert "S1" in gaps
     assert "AP_Invoice" in gaps["S1"]["roles_missing"]
@@ -234,9 +235,46 @@ async def test_incomplete_orders_flags_missing_roles(db):
 async def test_incomplete_orders_respects_min_nodes_per_order(db):
     # SO referenced by exactly 1 doc — likely extraction noise
     await _doc(db, id="lone", doc_type="AP_Invoice", so_number="SNOISE")
-    r = await sog.incomplete_orders(db=db, min_nodes_per_order=2)
+    r = await sog.incomplete_orders(db=db, min_nodes_per_order=2, group_by="so")
     gaps = {row["so_number"] for row in r["sample"]}
     assert "SNOISE" not in gaps
+
+
+@pytest.mark.asyncio
+async def test_incomplete_orders_po_grouping_for_po_centric_schema(db):
+    """Prod case: no so_number ever populated, only po_number. The
+    grouper must auto-pivot to PO."""
+    # PO P1 — has PO + Shipping but missing SO and AP_Invoice
+    await _doc(db, id="po-1", doc_type="Purchase_Order", po_number="P1")
+    await _doc(db, id="sh-1", doc_type="Shipping_Document", po_number="P1")
+    # PO P2 — fully referenced (PO + SO + Shipping + AP_Invoice)
+    await _doc(db, id="po-2", doc_type="Purchase_Order", po_number="P2")
+    await _doc(db, id="so-2", doc_type="Sales_Order", po_number="P2")
+    await _doc(db, id="sh-2", doc_type="Shipping_Document", po_number="P2")
+    await _doc(db, id="ap-2", doc_type="AP_Invoice", po_number="P2")
+
+    r = await sog.incomplete_orders(db=db, group_by="auto")
+    assert r["group_by_effective"] == "po"
+    po_gaps = {row["po_number"]: row for row in r["sample"]}
+    assert "P1" in po_gaps
+    assert set(po_gaps["P1"]["roles_missing"]) == {"SO", "AP_Invoice"}
+    assert "P2" not in po_gaps
+
+
+@pytest.mark.asyncio
+async def test_incomplete_orders_po_grouping_consumes_filename_fuzzy(db):
+    """Ball Metal style: PO# only in filename. PO grouper must pick it up."""
+    # PO doc explicitly referencing P0024333
+    await _doc(db, id="po-doc", doc_type="Purchase_Order", po_number="P0024333")
+    # Ball Metal shipping with PO# only in filename
+    await _doc(db, id="ball-ship", doc_type="Shipping_Document",
+               file_name="P0024333 - 07 - W117765 - CN.pdf")
+
+    r = await sog.incomplete_orders(db=db, group_by="po")
+    po_gaps = {row["po_number"]: row for row in r["sample"]}
+    assert "P0024333" in po_gaps
+    # Missing SO + AP_Invoice but not Shipping (filename fuzzy caught it)
+    assert "Shipping" not in po_gaps["P0024333"]["roles_missing"]
 
 
 # ──────────────────────────────────────────────────────────────

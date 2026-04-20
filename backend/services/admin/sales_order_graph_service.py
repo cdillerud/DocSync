@@ -51,6 +51,8 @@ _SO_FIELDS = (
 _SHIPMENT_FIELDS = (
     "shipment_number", "bol_number", "container_number",
     "extracted_fields.shipment_number", "extracted_fields.bol_number",
+    "extracted_fields.container_number",
+    "normalized_fields.bol_number", "normalized_fields.shipment_number",
 )
 
 # Doc_type → role in the lifecycle (used for timeline swimlanes).
@@ -273,6 +275,11 @@ async def build_graph(
                 {"shipment_number": k},
                 {"bol_number": k},
                 {"container_number": k},
+                {"extracted_fields.bol_number": k},
+                {"extracted_fields.shipment_number": k},
+                {"extracted_fields.container_number": k},
+                {"normalized_fields.bol_number": k},
+                {"normalized_fields.shipment_number": k},
             ])
         # Fuzzy filename regex — finds docs whose only reference to a key
         # is embedded in the filename (e.g. Ball Metal
@@ -424,10 +431,18 @@ async def incomplete_orders(
     *,
     limit: int = 500,
     min_nodes_per_order: int = 2,
+    group_by: str = "auto",
     db=None,
 ) -> Dict[str, Any]:
-    """Scan hub_documents, group by every SO# found across all reference
-    fields, and flag those missing any of the expected lifecycle roles.
+    """Scan hub_documents, group by every SO# (or PO# for SO-empty
+    schemas) found across reference fields, and flag those missing
+    any of the expected lifecycle roles.
+
+    Args:
+        group_by: "so" (group by SO#), "po" (group by PO#), or
+            "auto" (default) — pick whichever field has coverage.
+            PO-centric shops like this one will auto-fall back to PO
+            grouping since `so_number` is rarely populated.
     """
     db = db if db is not None else get_db()
     cursor = db.hub_documents.find(
@@ -436,13 +451,29 @@ async def incomplete_orders(
     ).limit(20000)
 
     by_so: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_po: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     async for d in cursor:
         refs = doc_references(d)
         for so in refs["so"]:
             by_so[so].append(d)
+        for po in refs["po"]:
+            by_po[po].append(d)
+        # Also consume filename-fuzzy for PO grouping (Ball Metal etc.)
+        fz = fuzzy_refs_from_filename(d.get("file_name"))
+        for po in fz["po"]:
+            if po not in refs["po"]:  # dedupe same-doc entries
+                by_po[po].append(d)
+
+    # Auto-select the grouping that has meaningful coverage.
+    effective = group_by
+    if group_by == "auto":
+        effective = "so" if len(by_so) >= 5 else "po"
+
+    buckets = by_so if effective == "so" else by_po
+    group_label = "so_number" if effective == "so" else "po_number"
 
     results: List[Dict[str, Any]] = []
-    for so, docs in by_so.items():
+    for ref, docs in buckets.items():
         if len(docs) < min_nodes_per_order:
             continue
         role_set = {_role_for(d.get("doc_type")) for d in docs}
@@ -450,7 +481,7 @@ async def incomplete_orders(
         if not missing:
             continue
         results.append({
-            "so_number": so,
+            group_label: ref,
             "nodes_total": len(docs),
             "roles_present": sorted(role_set),
             "roles_missing": missing,
@@ -465,8 +496,12 @@ async def incomplete_orders(
                  reverse=False)
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "group_by_requested": group_by,
+        "group_by_effective": effective,
         "expected_roles": list(_EXPECTED_ROLES),
         "scanned_docs_cap": 20000,
+        "so_groups_found": len(by_so),
+        "po_groups_found": len(by_po),
         "orders_with_gaps": len(results),
         "sample": results[:limit],
     }

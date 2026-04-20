@@ -1286,12 +1286,22 @@ async def sales_order_graph_incomplete_orders(
                     "(noise filter — a SO# referenced by a single doc is probably "
                     "an extraction false-positive)."
     ),
+    group_by: str = Query(
+        "auto",
+        description="'so' | 'po' | 'auto' (default: auto falls back to PO "
+                    "grouping when so_number is sparse — correct for PO-centric "
+                    "schemas). PO grouping also consumes filename-fuzzy P-prefix "
+                    "extractions for Ball-Metal-style docs."
+    ),
 ):
-    """Find sales orders missing any of the 4 lifecycle roles
+    """Find orders missing any of the 4 lifecycle roles
     (PO / SO / Shipping / AP_Invoice). Sorted by most-missing first."""
     from services.admin.sales_order_graph_service import incomplete_orders
+    if group_by not in ("so", "po", "auto"):
+        group_by = "auto"
     return await incomplete_orders(
         limit=limit, min_nodes_per_order=min_nodes_per_order,
+        group_by=group_by,
     )
 
 

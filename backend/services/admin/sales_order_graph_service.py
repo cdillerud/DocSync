@@ -97,9 +97,11 @@ _EXPECTED_ROLES: tuple = ("Shipping", "AP_Invoice")
 # bucket. Accepts:
 #   P<5-8 digits>          e.g. P0024333  (Ball Metal style)
 #   PO<4-7 digits>         e.g. PO019363
-#   <5-7 pure digits>      e.g. 155192
-# Rejects W-prefix (BOL/shipment), CN-prefix (container), anything < 5 chars.
-_VALID_PO_REGEX = re.compile(r"^(P\d{5,8}|PO\d{4,7}|\d{5,7})$")
+#   <5-12 pure digits>     e.g. 155192, 4503355096 (SAP-style long POs)
+# Rejects W-prefix (BOL/shipment), CN-prefix (container), anything < 5 chars,
+# anything with non-digit characters like "SSTOYSFORGTSREPACKS", and mixed
+# alnum like "911TRANSFERTO046".
+_VALID_PO_REGEX = re.compile(r"^(P\d{5,8}|PO\d{4,7}|\d{5,12})$")
 
 
 def _is_plausible_po(ref: str) -> bool:

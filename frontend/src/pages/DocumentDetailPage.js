@@ -142,6 +142,49 @@ function ExtractedDataCard({ doc }) {
   );
 }
 
+/**
+ * RelatedDocsLink — v2.5.18
+ * Surfaces a "Show related docs" CTA that deep-links to /order-graph
+ * pre-seeded with this doc's PO (preferred) or SO. Hidden when neither
+ * ref is present.
+ */
+function RelatedDocsLink({ doc }) {
+  const ef = doc?.extracted_fields || {};
+  const nf = doc?.normalized_fields || {};
+  const po =
+    doc?.po_number_clean || doc?.po_number || doc?.linked_po ||
+    ef.po_number || nf.po_number || doc?.order_number || ef.order_number;
+  const so =
+    doc?.so_number || doc?.linked_so || doc?.sales_order_number ||
+    ef.so_number || nf.so_number;
+  if (!po && !so) return null;
+  const qs = po ? `po=${encodeURIComponent(po)}` : `so=${encodeURIComponent(so)}`;
+  return (
+    <a
+      href={`/order-graph?${qs}`}
+      className="block no-underline"
+      data-testid="related-docs-link"
+    >
+      <div className="rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 px-4 py-3 transition-colors flex items-center gap-3 group">
+        <div className="w-9 h-9 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+          <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 100-4 2 2 0 000 4zm6-8a2 2 0 100-4 2 2 0 000 4zm0 16a2 2 0 100-4 2 2 0 000 4zM10.5 15.5l3-4m0 0l-3-4" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold">Show related documents</div>
+          <div className="text-xs text-muted-foreground font-mono truncate">
+            {po ? `PO ${po}` : `SO ${so}`} · timeline of every doc tied to this order
+          </div>
+        </div>
+        <span className="text-xs text-primary font-semibold">Open →</span>
+      </div>
+    </a>
+  );
+}
+
+
+
 function ReadinessPanel({ readiness, docStatus }) {
   if (!readiness) return null;
 
@@ -823,6 +866,9 @@ export default function DocumentDetailPage() {
 
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />
+
+          {/* Show-related-docs action — links to Order Graph (v2.5.18) */}
+          <RelatedDocsLink doc={doc} />
 
           {/* Decision Explainability Panel */}
           <DecisionExplainabilityPanel

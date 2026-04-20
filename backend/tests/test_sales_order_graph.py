@@ -277,6 +277,33 @@ async def test_incomplete_orders_po_grouping_consumes_filename_fuzzy(db):
     assert "Shipping" not in po_gaps["P0024333"]["roles_missing"]
 
 
+@pytest.mark.asyncio
+async def test_incomplete_orders_filters_peripheral_noise(db):
+    """A PO# referenced ONLY by Vendor_Document / Other docs is NOT
+    'stuck in pipeline' — it's a peripheral reference. Must be filtered
+    out, not shown as 'missing all 4 roles' noise (the prod bug that
+    surfaced this fix)."""
+    # Peripheral case: 2 Vendor_Documents with a PO# but no real
+    # lifecycle doc for that PO.
+    await _doc(db, id="vd1", doc_type="Vendor_Document",
+               po_number="P-PERIPHERAL", file_name="copier@x.com_1.pdf")
+    await _doc(db, id="vd2", doc_type="Other",
+               po_number="P-PERIPHERAL", file_name="copier@x.com_2.pdf")
+    # Real gap case: has Shipping but missing AP_Invoice
+    await _doc(db, id="sh-real", doc_type="Shipping_Document",
+               po_number="P-REAL-GAP")
+    await _doc(db, id="po-real", doc_type="Purchase_Order",
+               po_number="P-REAL-GAP")
+
+    r = await sog.incomplete_orders(db=db, group_by="po")
+    gaps = {row["po_number"]: row for row in r["sample"]}
+    assert "PPERIPHERAL" not in gaps
+    assert "PREALGAP" in gaps
+    assert r["noise_filtered_count"] >= 1
+    assert r["orders_with_gaps"] == 1
+    assert gaps["PREALGAP"]["lifecycle_roles_present"] == ["PO", "Shipping"]
+
+
 # ──────────────────────────────────────────────────────────────
 # record_link_feedback
 # ──────────────────────────────────────────────────────────────

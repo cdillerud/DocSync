@@ -473,18 +473,30 @@ async def incomplete_orders(
     group_label = "so_number" if effective == "so" else "po_number"
 
     results: List[Dict[str, Any]] = []
+    noise_filtered = 0
+    complete_count = 0
     for ref, docs in buckets.items():
         if len(docs) < min_nodes_per_order:
             continue
         role_set = {_role_for(d.get("doc_type")) for d in docs}
         missing = [r for r in _EXPECTED_ROLES if r not in role_set]
         if not missing:
+            complete_count += 1
+            continue
+        # Require at least ONE expected lifecycle role present. Orders
+        # whose only docs are Other / Vendor_Document / OTHER aren't
+        # "stuck in pipeline" — they're peripheral references. Filtering
+        # these out is the difference between signal and noise.
+        present_expected = [r for r in _EXPECTED_ROLES if r in role_set]
+        if not present_expected:
+            noise_filtered += 1
             continue
         results.append({
             group_label: ref,
             "nodes_total": len(docs),
             "roles_present": sorted(role_set),
             "roles_missing": missing,
+            "lifecycle_roles_present": present_expected,
             "sample_file_names": [d.get("file_name") for d in docs[:3]],
             "latest_activity_utc": max(
                 (d.get("updated_utc") or d.get("created_utc") or "" for d in docs),
@@ -502,6 +514,8 @@ async def incomplete_orders(
         "scanned_docs_cap": 20000,
         "so_groups_found": len(by_so),
         "po_groups_found": len(by_po),
+        "complete_count": complete_count,
+        "noise_filtered_count": noise_filtered,
         "orders_with_gaps": len(results),
         "sample": results[:limit],
     }

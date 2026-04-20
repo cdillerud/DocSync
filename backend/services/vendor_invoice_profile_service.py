@@ -158,6 +158,201 @@ async def fetch_vendor_invoices_from_bc(
     return invoices
 
 
+async def fetch_vendor_posted_invoices_from_bc(
+    vendor_no: str,
+    environment: str = None,
+    max_invoices: int = MAX_INVOICES_TO_ANALYZE,
+) -> List[Dict]:
+    """Fetch POSTED purchase invoices (with lines) for a vendor from BC.
+
+    Unlike ``fetch_vendor_invoices_from_bc`` (which queries ``purchaseInvoices``
+    and only returns open/draft records), this hits ``postedPurchaseInvoices``
+    — the finalized historical data. For vendors whose invoices are routinely
+    posted immediately (freight carriers, utilities, high-volume AP), the
+    open endpoint returns 0 while the posted endpoint carries years of
+    line-level GL/item history. Without this, the profile builder falls back
+    to ``env_default`` GL for every line — even when thousands of posted
+    invoices exist.
+
+    Normalizes the returned records into the same shape as the open-invoice
+    query so ``_analyze_line_patterns`` can consume them uniformly.
+    """
+    adapter = get_bc_adapter()
+    token, company_id = await _bc_token_and_company(adapter)
+    if not token or not company_id:
+        return []
+
+    env = environment or BC_READ_ENVIRONMENT
+    base = (
+        f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/"
+        f"companies({company_id})/postedPurchaseInvoices"
+    )
+    select = (
+        "id,number,vendorInvoiceNumber,vendorNumber,vendorName,"
+        "invoiceDate,postingDate,dueDate,currencyCode,"
+        "totalAmountIncludingTax,totalAmountExcludingTax,status"
+    )
+    line_select = (
+        "id,lineType,lineObjectNumber,description,quantity,unitCost,"
+        "amountExcludingTax"
+    )
+    params = {
+        "$filter": f"vendorNumber eq '{vendor_no}'",
+        "$select": select,
+        "$expand": f"postedPurchaseInvoiceLines($select={line_select})",
+        "$top": str(max_invoices),
+        "$orderby": "postingDate desc",
+    }
+
+    invoices: List[Dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(
+                base, headers={"Authorization": f"Bearer {token}"}, params=params
+            )
+            if resp.status_code == 200:
+                raw = resp.json().get("value", [])
+                for inv in raw:
+                    # Normalize line shape: `postedPurchaseInvoiceLines` ->
+                    # `purchaseInvoiceLines` (consumer expects the latter).
+                    lines = inv.get("postedPurchaseInvoiceLines", [])
+                    normalized = []
+                    for line in lines:
+                        normalized.append({
+                            "id": line.get("id"),
+                            "lineType": line.get("lineType", ""),
+                            "lineObjectNumber": line.get("lineObjectNumber", ""),
+                            "description": line.get("description", ""),
+                            "quantity": line.get("quantity", 0),
+                            "unitCost": line.get("unitCost", 0),
+                            "totalAmountExcludingTax": line.get(
+                                "amountExcludingTax", 0
+                            ),
+                        })
+                    inv["purchaseInvoiceLines"] = normalized
+                    invoices.append(inv)
+                logger.info(
+                    "[VendorProfile] Fetched %d POSTED invoices for %s from %s "
+                    "(lines expanded inline)",
+                    len(invoices), vendor_no, env,
+                )
+            elif resp.status_code == 400:
+                # Some BC tenants don't support $expand on posted invoices.
+                # Fall back to header-only query + per-invoice line fetch.
+                logger.info(
+                    "[VendorProfile] postedPurchaseInvoices $expand rejected "
+                    "for %s (400), falling back to per-invoice line fetch",
+                    vendor_no,
+                )
+                invoices = await _fetch_posted_invoices_lines_fallback(
+                    adapter, token, company_id, env, vendor_no, max_invoices
+                )
+            else:
+                logger.warning(
+                    "[VendorProfile] postedPurchaseInvoices %d for %s: %s",
+                    resp.status_code, vendor_no, resp.text[:300],
+                )
+    except Exception as e:
+        logger.warning(
+            "[VendorProfile] postedPurchaseInvoices fetch error for %s: %s",
+            vendor_no, e,
+        )
+    return invoices
+
+
+async def _fetch_posted_invoices_lines_fallback(
+    adapter: BCAccessAdapter,
+    token: str,
+    company_id: str,
+    env: str,
+    vendor_no: str,
+    max_invoices: int,
+) -> List[Dict]:
+    """Two-step fallback when $expand on postedPurchaseInvoices fails:
+    fetch headers first, then fetch lines for each. Limited to half the normal
+    cap to control API call fan-out."""
+    cap = max(5, max_invoices // 2)
+    base = (
+        f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/"
+        f"companies({company_id})/postedPurchaseInvoices"
+    )
+    params = {
+        "$filter": f"vendorNumber eq '{vendor_no}'",
+        "$select": "id,number,totalAmountIncludingTax,postingDate,vendorNumber",
+        "$top": str(cap),
+        "$orderby": "postingDate desc",
+    }
+    invoices: List[Dict] = []
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.get(
+                base, headers={"Authorization": f"Bearer {token}"}, params=params
+            )
+            if resp.status_code != 200:
+                return []
+            headers_only = resp.json().get("value", [])
+            for inv in headers_only:
+                line_url = f"{base}({inv['id']})/postedPurchaseInvoiceLines"
+                try:
+                    line_resp = await client.get(
+                        line_url, headers={"Authorization": f"Bearer {token}"}
+                    )
+                    if line_resp.status_code == 200:
+                        raw_lines = line_resp.json().get("value", [])
+                        inv["purchaseInvoiceLines"] = [
+                            {
+                                "id": line.get("id"),
+                                "lineType": line.get("lineType", ""),
+                                "lineObjectNumber": line.get("lineObjectNumber", ""),
+                                "description": line.get("description", ""),
+                                "quantity": line.get("quantity", 0),
+                                "unitCost": line.get("unitCost", 0),
+                                "totalAmountExcludingTax": line.get(
+                                    "amountExcludingTax", 0
+                                ),
+                            }
+                            for line in raw_lines
+                        ]
+                        invoices.append(inv)
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.warning(
+            "[VendorProfile] posted-invoice line fallback error for %s: %s",
+            vendor_no, e,
+        )
+    return invoices
+
+
+def _extract_lines_from_local_history(local_history: List[Dict]) -> List[Dict]:
+    """Re-shape our own successful BC postings into the invoice/lines format
+    expected by ``_analyze_line_patterns``. Each local doc carries
+    ``bc_pi_lines_posted`` — a list of the exact lines we created in BC.
+    These are authoritative because we know the posting succeeded."""
+    synthetic = []
+    for doc in local_history:
+        lines = doc.get("bc_pi_lines_posted") or []
+        if not lines:
+            continue
+        synthetic.append({
+            "number": doc.get("bc_purchase_invoice", {}).get("bc_record_no", ""),
+            "totalAmountIncludingTax": (doc.get("normalized_fields") or {}).get(
+                "amount"
+            ) or (doc.get("extracted_fields") or {}).get("amount"),
+            "purchaseInvoiceLines": [
+                {
+                    "lineType": line.get("lineType", ""),
+                    "lineObjectNumber": line.get("lineObjectNumber", ""),
+                    "description": line.get("description", ""),
+                    "quantity": line.get("quantity", 0),
+                    "unitCost": line.get("unitCost", 0),
+                }
+                for line in lines
+            ],
+        })
+    return synthetic
+
+
 
 async def _learn_from_reference_cache(db, vendor_no: str) -> Optional[Dict]:
     """Learn vendor patterns from the BC reference cache.
@@ -363,7 +558,36 @@ async def build_vendor_profile(
     bc_invoices = await fetch_vendor_invoices_from_bc(vendor_no)
     local_history = await fetch_local_posting_history(db, vendor_no)
 
-    # ── FALLBACK: Learn from BC reference cache when API returns 0 ──
+    # ── FALLBACK A: Posted invoices when open/draft endpoint is empty ──
+    # The ``purchaseInvoices`` endpoint only holds open/draft records.
+    # Vendors whose invoices are immediately posted (freight carriers, utilities,
+    # high-volume AP) appear there as 0 — but their line-level GL/item history
+    # lives on ``postedPurchaseInvoices``. Without this fallback the profile
+    # builder has no line patterns and every posting falls back to env_default.
+    if not bc_invoices:
+        posted = await fetch_vendor_posted_invoices_from_bc(vendor_no)
+        if posted:
+            bc_invoices = posted
+            logger.info(
+                "[VendorProfile] Open-invoice endpoint empty for %s; "
+                "learned from %d POSTED invoices instead",
+                vendor_no, len(posted),
+            )
+
+    # ── FALLBACK B: Our own successful postings carry authoritative lines ──
+    # When both BC endpoints are unreachable/empty, fall back to the lines we
+    # ourselves successfully posted (``bc_pi_lines_posted`` on hub_documents).
+    if not bc_invoices:
+        synthetic = _extract_lines_from_local_history(local_history)
+        if synthetic:
+            bc_invoices = synthetic
+            logger.info(
+                "[VendorProfile] Both BC endpoints empty for %s; "
+                "learned from %d local successful postings",
+                vendor_no, len(synthetic),
+            )
+
+    # ── FALLBACK C: Cache stats (header-only — no line patterns possible) ──
     # The cache has posted purchase invoices synced from BC.
     # This covers cases where API calls fail (creds, timeout) but cache has rich data.
     # ALWAYS compute cache stats — the cache often has more data than the API

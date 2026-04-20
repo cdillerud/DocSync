@@ -1,6 +1,58 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-20] v2.5.21 — Vendor Profile Learns from Posted Invoices (Empty-GL Fix)
+
+**Problem surfaced from v2.5.20 preflight output on XPOLOGI doc `76410e9e`:**
+Even after line-reconciliation corrected the freight math, the preflight still emitted 4× `default_fallback` warnings — every line falling back to env_default GL `60500` despite the vendor profile reporting `bc_invoices_analyzed: 1108`.
+
+```json
+"profile_summary": {
+  "default_gl_account": "",           ← empty, despite 1108 historical PIs
+  "sample_count": 1108
+}
+```
+
+**Root cause:**
+`fetch_vendor_invoices_from_bc` queries only BC's `purchaseInvoices` endpoint (open/draft records). For vendors whose invoices are immediately posted — freight carriers (XPOLOGI), utilities, high-volume AP — this endpoint returns 0 because there are no open drafts. The 1108 historical invoices live on the separate `postedPurchaseInvoices` endpoint, which the profile builder never queried. Result:
+- `bc_invoices = []` (API open-endpoint empty)
+- `line_patterns = {}` (no lines to analyze)
+- `default_gl_account = ""` (falls through to `[{}]` sentinel)
+- Every PI line uses env_default GL with `default_fallback` warning
+
+The `bc_reference_cache` aggregation fallback captured header stats (`sample_count: 1108`, amount stats, po_rate) but header fields only — no line-level data.
+
+**Fix — three-tier learning fallback chain in `build_vendor_profile`:**
+
+1. **NEW `fetch_vendor_posted_invoices_from_bc`** (`services/vendor_invoice_profile_service.py`):
+   Queries BC's `postedPurchaseInvoices` with `$expand=postedPurchaseInvoiceLines(...)` when the open endpoint is empty. Normalizes `postedPurchaseInvoiceLines` → `purchaseInvoiceLines` so `_analyze_line_patterns` consumes both uniformly. Includes a two-step header+lines fallback (`_fetch_posted_invoices_lines_fallback`) for BC tenants that reject `$expand` on posted invoices (HTTP 400).
+
+2. **NEW `_extract_lines_from_local_history`**:
+   When both BC endpoints are empty/unreachable, harvests `bc_pi_lines_posted` from our own successful postings in `hub_documents` and re-shapes them as synthetic invoice records. These are authoritative: we know the posting succeeded. Feeds `_analyze_line_patterns` via the same code path.
+
+3. **Fallback order in `build_vendor_profile`:**
+   - A. Open/draft `purchaseInvoices` (pre-existing, unchanged for active vendors)
+   - B. `postedPurchaseInvoices` (NEW — fills XPOLOGI-class gap)
+   - C. Local `bc_pi_lines_posted` (NEW — works in air-gapped/creds-down scenarios)
+   - D. `bc_reference_cache` header stats (pre-existing, amount/po_rate only)
+
+**Verified:**
+- 8 new pytests in `tests/test_vendor_profile_fallbacks.py` — all green. Covers: empty history, malformed docs, synthetic re-shaping, end-to-end line-pattern extraction, each fallback tier fires in order, open-invoices take precedence (no unnecessary API calls), whiteout yields safe empty GL.
+- Combined 24/24 pytests across reconciliation + fallback suites.
+- Backend service healthy (`/api/health` 200).
+
+**User impact (production VM):**
+After `cd /opt/gpi-hub && git pull && docker compose build --no-cache && docker compose up -d`, rebuild the XPOLOGI profile:
+```bash
+curl -s -X POST "http://localhost:8080/api/ap-review/vendor-profile/XPOLOGI/refresh" | jq
+curl -s "http://localhost:8080/api/ap-review/pi-preflight/76410e9e-d6bb-4957-b4fb-6b4a46644037" \
+  | jq '{default_gl: .profile_summary.default_gl_account, warnings: [.deviations[] | select(.type=="default_fallback")] | length}'
+```
+Expected: `default_gl_account` populated with XPOLOGI's most-common historical GL, `default_fallback` warnings drop to 0 (lines now source from `vendor_profile_gl` instead of `env_default`). Every AP reviewer stops seeing the "no vendor history available" warning for every freight carrier line.
+
+
+
+
 ## [2026-04-20] v2.5.20 — PI Line Reconciliation + Invoice-Total Sanity Gate
 
 **Problem surfaced from demo prep (XPOLOGI freight invoice `76410e9e`):**

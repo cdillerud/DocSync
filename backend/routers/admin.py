@@ -2,6 +2,7 @@
 
 import uuid
 import logging
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks
 from datetime import datetime, timezone
 from deps import get_db
@@ -1245,3 +1246,68 @@ async def filename_heuristics_vendor_history(
         include_heuristic_applied=include_heuristic_applied,
         limit=limit,
     )
+
+
+# ─────────── Sales Order Graph (v2.5.13, Phase 1 — backend) ───────────
+
+@router.get("/sales-order-graph/diagnostic")
+async def sales_order_graph_diagnostic():
+    """One-shot introspection: doc_type distribution + which reference
+    fields are actually populated across your data. Use this FIRST to
+    validate that build_graph's field conventions match your schema."""
+    from services.admin.sales_order_graph_service import diagnostic_snapshot
+    return await diagnostic_snapshot()
+
+
+@router.get("/sales-order-graph/build")
+async def sales_order_graph_build(
+    so_number: Optional[str] = Query(None),
+    po_number: Optional[str] = Query(None),
+    include_fuzzy: bool = Query(True,
+                                description="Include filename pattern matches (P0024333 etc.)"),
+    max_nodes: int = Query(200, ge=1, le=2000),
+):
+    """Walk hub_documents and return every doc related to the given SO
+    or PO. Returns `nodes[]` sorted by `created_utc` (timeline-ready)
+    with `edges[]` per node explaining which field(s) linked it."""
+    from services.admin.sales_order_graph_service import build_graph
+    return await build_graph(
+        so_number=so_number, po_number=po_number,
+        include_fuzzy=include_fuzzy, max_nodes=max_nodes,
+    )
+
+
+@router.get("/sales-order-graph/incomplete-orders")
+async def sales_order_graph_incomplete_orders(
+    limit: int = Query(500, ge=1, le=5000),
+    min_nodes_per_order: int = Query(
+        2, ge=1, le=20,
+        description="Only flag orders that have at least this many related docs "
+                    "(noise filter — a SO# referenced by a single doc is probably "
+                    "an extraction false-positive)."
+    ),
+):
+    """Find sales orders missing any of the 4 lifecycle roles
+    (PO / SO / Shipping / AP_Invoice). Sorted by most-missing first."""
+    from services.admin.sales_order_graph_service import incomplete_orders
+    return await incomplete_orders(
+        limit=limit, min_nodes_per_order=min_nodes_per_order,
+    )
+
+
+@router.post("/sales-order-graph/feedback")
+async def sales_order_graph_feedback(
+    so_number: str = Query(...),
+    doc_id: str = Query(...),
+    confirmed: bool = Query(..., description="True if reviewer agrees the link is real"),
+    actor: str = Query("reviewer"),
+    reason: Optional[str] = Query(None),
+):
+    """Log a reviewer's confirm/reject on a fuzzy link. Seeds Phase 4
+    confidence-tuning — this endpoint is intentionally write-only."""
+    from services.admin.sales_order_graph_service import record_link_feedback
+    return await record_link_feedback(
+        so_number=so_number, doc_id=doc_id, confirmed=confirmed,
+        actor=actor, reason=reason,
+    )
+

@@ -1,0 +1,44 @@
+{
+  "summary": "Validated AP Path Consolidation v2.5.25 (Phase 2 + Phase 3). Ran the new 36-case regression suite (test_ap_path_consolidation.py) plus the 5 carry-over suites listed by main agent (test_auth_enforcement, test_bc_post_claim, test_bc_line_routing, test_pi_preflight_reconcile, test_vendor_profile_fallbacks). Verified Path A canonical surface, JWT enforcement, Path B deprecation flags + X-Deprecated headers on error responses, pre-existing /api/ap-review/* endpoints still healthy, and frontend lib/api.js AP mutation helpers repointed correctly. All 8 review-request bullets pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ap_path_consolidation.py",
+    "/app/test_reports/pytest/iteration_215_ap_consolidation.xml",
+    "/app/test_reports/pytest/iteration_215_regression.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Pre-existing test file backend/tests/test_ap_workflow_queues.py still uses a stale admin/admin fixture (documented by main agent). Not caused by this change but should be cleaned up in a future hygiene pass.",
+    "Path A pi-preflight is exposed as /api/ap-review/pi-preflight/{doc_id} (not under /documents/{doc_id}/...). Consistency-wise it would be cleaner to nest under documents/, but it is a pre-existing shape — not in scope for this consolidation."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only review per request)"},
+  "test_credentials": "hub-admin@gamerpackaging.com / ChangeMeOnFirstDeploy-K8p2q (from /app/memory/test_credentials.md, login verified working — JWT issued)",
+  "seed_data_creation": "None. All tests used doc_id='nonexistent' / 'nonexistent-id' to avoid touching real customer records.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.5.25 AP Path Consolidation is GREEN. Path A (/api/ap-review/documents/{doc_id}/{set-vendor|update-fields|override-bc-validation|start-approval|approve|reject}) is registered, JWT-gated (returns 401 without token, 404 with token+nonexistent doc), and exposed in OpenAPI. Path B (/api/workflows/ap_invoice/{doc_id}/{action}) stays live, is flagged deprecated=True in OpenAPI, and every response (including HTTPException 404 paths) carries X-Deprecated:true / X-Deprecated-Sunset:next-release / X-Deprecated-Use:/api/ap-review/documents/{doc_id}/{action}. Pre-existing /api/ap-review/* mutation routes (post-to-bc auth-gated, mark-ready, override-po, extract-invoice-data, vendors, purchase-orders, vendor-profile/{vendor_no}) all still registered. Frontend lib/api.js lines 229-234 correctly repointed to Path A; lines 212-218 (read-only queue/metrics) intentionally left on Path B per consolidation plan. Phase 4 (deletion of Path B) is the next planned step.",
+  "validated_review_bullets": {
+    "1_path_a_six_routes_in_openapi": "PASS (test_path_a_registered x6)",
+    "2_path_a_returns_401_without_jwt": "PASS (test_requires_jwt x6)",
+    "3_path_a_authed_reaches_handler_404_or_400": "PASS (test_authenticated_reaches_handler x6)",
+    "4_path_b_live_and_deprecated_true": "PASS (test_path_b_still_present x6 + test_path_b_marked_deprecated x6)",
+    "5_path_b_error_responses_carry_x_deprecated_headers": "PASS (test_error_response_carries_deprecation_headers x6 + manual curl confirmation on 404 path)",
+    "6_carryover_pytest_suites_pass": "PASS (75 passed, 3 skipped — concurrency tests skipped by design)",
+    "7_preexisting_path_a_routes_intact": "PASS (post-to-bc 401 without auth, 422 with auth+empty body — handler is reached; mark-ready/override-po/extract-invoice-data/vendors/purchase-orders/vendor-profile present in OpenAPI)",
+    "8_frontend_lib_api_js_repointed": "PASS (grep verified setVendor/updateFields/overrideBcValidation/startApproval/approveDocument/rejectDocument all hit /ap-review/documents/{id}/...)"
+  },
+  "test_run_summary": {
+    "test_ap_path_consolidation.py": "36 passed / 0 failed",
+    "carryover_suites": "75 passed / 3 skipped (concurrency) / 0 failed"
+  },
+  "rca of the issue": "N/A — no defects found. Consolidation work is correctly implemented end-to-end."
+}

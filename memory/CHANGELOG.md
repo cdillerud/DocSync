@@ -1,6 +1,48 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-21] v2.5.25 — AP Path Consolidation (Phases 2 + 3)
+
+**Scope:** Completes AP_PATH_CONSOLIDATION.md Phases 2 and 3. Eliminates the dual AP workflow paths documented in the 2026-04-21 engineering review (Finding #8). Pure backend/frontend hygiene — no user-facing behavior change.
+
+### Canonical Path A surface (`routers/ap_review.py`)
+Six new mutation endpoints, each gated by `Depends(get_current_user)` JWT and delegating to the authoritative handlers in `services/workflow_handlers.py`:
+- `POST /api/ap-review/documents/{doc_id}/set-vendor`
+- `POST /api/ap-review/documents/{doc_id}/update-fields`
+- `POST /api/ap-review/documents/{doc_id}/override-bc-validation`
+- `POST /api/ap-review/documents/{doc_id}/start-approval`
+- `POST /api/ap-review/documents/{doc_id}/approve`
+- `POST /api/ap-review/documents/{doc_id}/reject`
+
+Every transition now flows through a single `WorkflowEngine.advance_workflow` callsite regardless of entry point.
+
+### Path B deprecation (`routers/workflows.py`)
+- Six `/api/workflows/ap_invoice/{id}/{action}` routes marked `deprecated=True` in OpenAPI.
+- New `_deprecate(handler, canonical_path)` wrapper attaches three response headers on **every** response — including HTTPException paths (404/400):
+  - `X-Deprecated: true`
+  - `X-Deprecated-Sunset: next-release`
+  - `X-Deprecated-Use: <canonical Path A URL>`
+- Query-only routes (`status-counts`, `*-pending`, `metrics`) untouched — no drift risk.
+
+### Frontend (`frontend/src/lib/api.js`)
+- `setVendor`, `updateFields`, `overrideBcValidation`, `startApproval`, `approveDocument`, `rejectDocument` repointed to `/api/ap-review/documents/{id}/{action}`.
+- Request bodies normalized to match the canonical Pydantic models (`SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverrideRequest`, `ApprovalActionRequest`).
+
+### Tests
+- New `tests/test_ap_path_consolidation.py` — **36/36 passing**:
+  - Path A route registration (6)
+  - Path B retained + deprecated flag in OpenAPI (12)
+  - Path A JWT enforcement (401 without, 400/404 with) (12)
+  - Path B X-Deprecated headers on error responses (6)
+- No regression: `test_auth_enforcement.py`, `test_bc_post_claim.py`, `test_bc_line_routing.py`, `test_pi_preflight_reconcile.py`, `test_vendor_profile_fallbacks.py` — all green (75/75).
+
+### Deferred to Phase 4 (next release)
+- Delete the Path B AP mutation routes and `start_approval_generic` / `approve_generic` / `reject_generic` dead orphan functions in `server.py` L6590–6760.
+- Remove now-unused `APWorkflowsPage.js` / `WorkflowQueue.js` AP paths.
+
+
+
+
 ## [2026-04-21] v2.5.24 — Security Hardening (Reviewer Findings #1, #3, #4 bundle)
 
 **Scope:** Three reviewer-flagged defects resolved in one release plus a decision memo for the fourth:

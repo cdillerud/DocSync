@@ -3,9 +3,17 @@
 Mutation routes (set-vendor, approve, reject, etc.) are sourced from
 services.workflow_handlers (authoritative) and registered via add_api_route.
 Simple query routes are implemented directly using deps.get_db().
+
+DEPRECATION NOTICE (2026-04-21, AP_PATH_CONSOLIDATION.md Phase 2):
+  The six /api/workflows/ap_invoice/{doc_id}/{action} mutation endpoints are
+  DEPRECATED. Use the canonical /api/ap-review/documents/{doc_id}/{action}
+  equivalents on Path A. These are kept live for one release with
+  deprecated=True and an X-Deprecated response header; they will be removed
+  in Phase 4.
 """
 
 import logging
+from functools import wraps
 from typing import Optional, Dict
 
 from fastapi import APIRouter, HTTPException, Query
@@ -14,6 +22,42 @@ from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workflows", tags=["Workflows"])
+
+
+# =============================================================================
+# DEPRECATION WRAPPER — adds X-Deprecated response header
+# =============================================================================
+
+def _deprecate(handler, canonical_path: str):
+    """Wrap a workflow handler so every response carries X-Deprecated headers.
+
+    Catches HTTPException raised by the inner handler and converts it to a
+    JSONResponse so the deprecation headers survive error responses (404 on
+    missing doc, 400 on invalid transitions, etc.). Success responses are
+    re-wrapped in JSONResponse with the same headers attached.
+    """
+    from fastapi.responses import JSONResponse
+    from fastapi.encoders import jsonable_encoder
+
+    headers = {
+        "X-Deprecated": "true",
+        "X-Deprecated-Sunset": "next-release",
+        "X-Deprecated-Use": canonical_path,
+    }
+
+    @wraps(handler)
+    async def wrapper(*args, **kwargs):
+        try:
+            result = await handler(*args, **kwargs)
+        except HTTPException as e:
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"detail": e.detail},
+                headers={**(e.headers or {}), **headers},
+            )
+        return JSONResponse(content=jsonable_encoder(result), headers=headers)
+
+    return wrapper
 
 
 # =============================================================================
@@ -56,30 +100,37 @@ def register_server_routes(app=None):
         export_document,
     )
 
-    # AP Invoice mutation routes
+    # AP Invoice mutation routes — DEPRECATED. Use /api/ap-review/documents/{id}/{action}.
+    # Kept live for one release with X-Deprecated header; removed in Phase 4.
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/set-vendor", set_vendor_for_document,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/set-vendor",
+        _deprecate(set_vendor_for_document, "/api/ap-review/documents/{doc_id}/set-vendor"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/update-fields", update_document_fields,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/update-fields",
+        _deprecate(update_document_fields, "/api/ap-review/documents/{doc_id}/update-fields"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/override-bc-validation", override_bc_validation,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/override-bc-validation",
+        _deprecate(override_bc_validation, "/api/ap-review/documents/{doc_id}/override-bc-validation"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/start-approval", start_approval,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/start-approval",
+        _deprecate(start_approval, "/api/ap-review/documents/{doc_id}/start-approval"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/approve", approve_document,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/approve",
+        _deprecate(approve_document, "/api/ap-review/documents/{doc_id}/approve"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
-        "/api/workflows/ap_invoice/{doc_id}/reject", reject_document,
-        methods=["POST"], tags=["Workflows"]
+        "/api/workflows/ap_invoice/{doc_id}/reject",
+        _deprecate(reject_document, "/api/ap-review/documents/{doc_id}/reject"),
+        methods=["POST"], tags=["Workflows"], deprecated=True,
     )
 
     # Generic workflow mutation routes

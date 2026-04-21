@@ -437,6 +437,112 @@ async def override_po_check(doc_id: str):
 
 
 # =============================================================================
+# CANONICAL AP WORKFLOW MUTATIONS (formerly /api/workflows/ap_invoice/*)
+# =============================================================================
+#
+# Per AP_PATH_CONSOLIDATION.md (Phase 2, 2026-04-21):
+#   These routes are the canonical AP workflow mutation surface. They delegate
+#   to services.workflow_handlers (the authoritative state-machine driver) so
+#   every transition goes through WorkflowEngine.advance_workflow.
+#
+#   The old /api/workflows/ap_invoice/* routes in routers/workflows.py are kept
+#   live for one release with deprecated=True + X-Deprecated response header,
+#   then retired in Phase 4.
+# =============================================================================
+
+from services.workflow_handlers import (
+    SetVendorRequest,
+    UpdateFieldsRequest,
+    BCValidationOverrideRequest,
+    ApprovalActionRequest,
+    set_vendor_for_document as _wf_set_vendor,
+    update_document_fields as _wf_update_fields,
+    override_bc_validation as _wf_override_bc,
+    start_approval as _wf_start_approval,
+    approve_document as _wf_approve,
+    reject_document as _wf_reject,
+)
+
+
+@ap_review_router.post("/documents/{doc_id}/set-vendor")
+async def ap_review_set_vendor(
+    doc_id: str,
+    request: SetVendorRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: manually resolve vendor for a VENDOR_PENDING document.
+
+    Drives the workflow through ON_VENDOR_RESOLVED -> BC_VALIDATION_PENDING.
+    """
+    return await _wf_set_vendor(doc_id, request)
+
+
+@ap_review_router.post("/documents/{doc_id}/update-fields")
+async def ap_review_update_fields(
+    doc_id: str,
+    request: UpdateFieldsRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: update extracted fields on a document in a correction state.
+
+    Advances the workflow via ON_DATA_CORRECTED when applicable.
+    """
+    return await _wf_update_fields(doc_id, request)
+
+
+@ap_review_router.post("/documents/{doc_id}/override-bc-validation")
+async def ap_review_override_bc_validation(
+    doc_id: str,
+    request: BCValidationOverrideRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: privileged override of a failed BC validation.
+
+    Drives the workflow through ON_BC_VALIDATION_OVERRIDE -> READY_FOR_APPROVAL.
+    """
+    return await _wf_override_bc(doc_id, request)
+
+
+@ap_review_router.post("/documents/{doc_id}/start-approval")
+async def ap_review_start_approval(
+    doc_id: str,
+    request: ApprovalActionRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: begin the approval process.
+
+    READY_FOR_APPROVAL -> APPROVAL_IN_PROGRESS (via ON_APPROVAL_STARTED).
+    """
+    return await _wf_start_approval(doc_id, request)
+
+
+@ap_review_router.post("/documents/{doc_id}/approve")
+async def ap_review_approve(
+    doc_id: str,
+    request: ApprovalActionRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: approve a document.
+
+    Transitions via ON_APPROVED to APPROVED status, with vendor-alias learning.
+    """
+    return await _wf_approve(doc_id, request)
+
+
+@ap_review_router.post("/documents/{doc_id}/reject")
+async def ap_review_reject(
+    doc_id: str,
+    request: ApprovalActionRequest,
+    _user: dict = Depends(get_current_user),
+):
+    """Canonical Path A: reject a document with a required reason.
+
+    Transitions via ON_REJECTED to REJECTED status.
+    """
+    return await _wf_reject(doc_id, request)
+
+
+# =============================================================================
 # POST TO BC ENDPOINT
 # =============================================================================
 

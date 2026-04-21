@@ -39,21 +39,40 @@ Justification — pragmatic, not aesthetic:
 - [x] CHANGELOG entry calling Path A canonical
 - [x] Path A's `post-to-bc` flow is race-safe + amount-safe + classification-safe (v2.5.20–24)
 
-### Phase 2 — Port the useful Path-B logic into Path A (1–2 days)
-- [ ] Audit each `/workflows/ap_invoice/*` endpoint. For each, either:
-  - **Already exists on Path A** (confirm parity, no port needed), OR
-  - **Genuinely missing** (port the state-machine transition into `routers/ap_review.py`, backed by `workflow_engine.advance_workflow`)
-- [ ] Specific endpoints to audit:
-  - `set-vendor` — has Path A analogue in `PUT /ap-review/documents/{id}`
-  - `update-fields` — same
-  - `override-bc-validation` — needs porting
-  - `start-approval` / `approve` / `reject` — approval chain NOT present on Path A; needs full port through workflow_engine
-- [ ] The guard handlers in `server.py:6612,6670,6728` that redirect to Path B must be inverted — they should now allow Path A calls.
+### Phase 2 — Port the useful Path-B logic into Path A (1–2 days) ✅ 2026-04-21
+- [x] Audit each `/workflows/ap_invoice/*` endpoint. The six mutation endpoints
+      (`set-vendor`, `update-fields`, `override-bc-validation`, `start-approval`,
+      `approve`, `reject`) were re-exposed on Path A as thin delegators that
+      reuse the authoritative handlers in `services/workflow_handlers.py`.
+      The query endpoints (status-counts, *-pending queues, metrics) stay on
+      Path B — they are read-only and carry no state-machine drift risk.
+- [x] Specific endpoints audited:
+  - `set-vendor` → Path A: `POST /api/ap-review/documents/{id}/set-vendor`
+  - `update-fields` → Path A: `POST /api/ap-review/documents/{id}/update-fields`
+  - `override-bc-validation` → Path A: `POST /api/ap-review/documents/{id}/override-bc-validation`
+  - `start-approval` → Path A: `POST /api/ap-review/documents/{id}/start-approval`
+  - `approve` → Path A: `POST /api/ap-review/documents/{id}/approve`
+  - `reject` → Path A: `POST /api/ap-review/documents/{id}/reject`
+- [x] All Path A mutation routes are gated by `Depends(get_current_user)` JWT.
+- [x] Frontend `lib/api.js` helpers (`setVendor`, `updateFields`,
+      `overrideBcValidation`, `startApproval`, `approveDocument`,
+      `rejectDocument`) repointed to Path A with correct body shapes for
+      `SetVendorRequest` / `UpdateFieldsRequest` / `BCValidationOverrideRequest` /
+      `ApprovalActionRequest`.
+- [x] Regression suite: `tests/test_ap_path_consolidation.py` (36 cases)
+      covers route registration, deprecation flags, JWT enforcement on Path A,
+      and X-Deprecated header survival on Path B error responses.
 
-### Phase 3 — Deprecate Path B (half day)
-- [ ] Mark every `/workflows/ap_invoice/*` handler with `deprecated=True` + add `X-Deprecated` response header pointing at the Path A equivalent
-- [ ] Keep the routes live for 1 release so any outside caller (BC extension, test scripts) has a window to migrate
-- [ ] Update `frontend/src/lib/api.js` lines 212–232 — all `getWorkflowStatusCounts`, `setVendor`, `startApproval`, etc. → point at Path A
+### Phase 3 — Deprecate Path B (half day) ✅ 2026-04-21
+- [x] Every `/workflows/ap_invoice/{id}/{action}` mutation handler is
+      registered with `deprecated=True` (shows in OpenAPI) AND wrapped in
+      `routers/workflows.py::_deprecate(...)` so every response — including
+      handler-raised HTTPException paths — carries:
+        - `X-Deprecated: true`
+        - `X-Deprecated-Sunset: next-release`
+        - `X-Deprecated-Use: /api/ap-review/documents/{doc_id}/{action}`
+- [x] Routes remain live for one release window so any outside caller (BC
+      extension, test scripts) has time to migrate.
 
 ### Phase 4 — Delete Path B (half day, next release)
 - [ ] Remove `routers/workflows.py` (AP portion — leave the shell if it routes other doc types)

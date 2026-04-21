@@ -222,13 +222,16 @@ export const getGenericQueue = (docType, params) => api.get('/workflows/generic/
 export const getStatusCountsByType = () => api.get('/workflows/generic/status-counts-by-type');
 export const getMetricsByType = (days, docType) => api.get('/workflows/generic/metrics-by-type', { params: { days, doc_type: docType } });
 
-// AP Invoice Workflow Actions
-export const setVendor = (docId, vendorNo, vendorName, actor) => api.post(`/workflows/ap_invoice/${docId}/set-vendor`, { vendor_no: vendorNo, vendor_name: vendorName, actor });
-export const updateFields = (docId, fields, actor) => api.post(`/workflows/ap_invoice/${docId}/update-fields`, { ...fields, actor });
-export const overrideBcValidation = (docId, reason, actor) => api.post(`/workflows/ap_invoice/${docId}/override-bc-validation`, { reason, actor });
-export const startApproval = (docId, actor) => api.post(`/workflows/ap_invoice/${docId}/start-approval`, { actor });
-export const approveDocument = (docId, comment, actor) => api.post(`/workflows/ap_invoice/${docId}/approve`, { comment, actor });
-export const rejectDocument = (docId, reason, actor) => api.post(`/workflows/ap_invoice/${docId}/reject`, { reason, actor });
+// AP Invoice Workflow Actions — CANONICAL PATH A (/api/ap-review/documents/*)
+// Per AP_PATH_CONSOLIDATION.md Phase 2 (2026-04-21): these were moved off
+// /api/workflows/ap_invoice/* (now deprecated) onto the single ap-review
+// surface so every AP mutation goes through services.workflow_handlers.
+export const setVendor = (docId, vendorNo, vendorName, actor) => api.post(`/ap-review/documents/${docId}/set-vendor`, { vendor_id: vendorNo, vendor_name: vendorName, reason: actor });
+export const updateFields = (docId, fields, actor) => api.post(`/ap-review/documents/${docId}/update-fields`, { ...fields, reason: actor });
+export const overrideBcValidation = (docId, reason, actor) => api.post(`/ap-review/documents/${docId}/override-bc-validation`, { override_reason: reason, override_user: actor });
+export const startApproval = (docId, actor) => api.post(`/ap-review/documents/${docId}/start-approval`, { approver: actor });
+export const approveDocument = (docId, comment, actor) => api.post(`/ap-review/documents/${docId}/approve`, { reason: comment, approver: actor });
+export const rejectDocument = (docId, reason, actor) => api.post(`/ap-review/documents/${docId}/reject`, { reason, approver: actor });
 
 // Generic Workflow Actions (for any doc type)
 export const exportDocument = (docId, destination, user) => api.post(`/workflows/${docId}/export`, null, { params: { export_destination: destination, user } });

@@ -31,6 +31,15 @@ services:
     environment:
       - MONGO_URL=mongodb://mongodb:27017
       - DB_NAME=gpi_document_hub
+      # -- Auth / startup-validator secrets (added v2.5.24) ------------
+      # These are baked into the compose file so `git pull && docker
+      # compose up -d` works with zero VM-side env editing. The startup
+      # validator WILL crash the backend if any are missing or match a
+      # known-insecure default, so they need to actually live somewhere.
+      # ROTATE BEFORE REAL PRODUCTION — this VM is pilot/staging.
+      - JWT_SECRET=2bead0bb18a553323c80e3448a68a7d6dda908259cf1fe8fac4e17d814dec26fada7419bda50f4af6fe6ce49557ec748
+      - ADMIN_EMAIL=hub-admin@gamerpackaging.com
+      - ADMIN_PASSWORD=ChangeMeOnFirstDeploy-K8p2q
     volumes:
       - uploads_data:/app/uploads
     networks:

@@ -62,13 +62,13 @@ export default function LoginPage() {
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4" data-testid="login-form">
               <div className="space-y-2">
-                <Label htmlFor="username">Username</Label>
+                <Label htmlFor="username">Email</Label>
                 <Input
                   id="username"
-                  type="text"
+                  type="email"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="admin"
+                  placeholder="hub-admin@gamerpackaging.com"
                   required
                   data-testid="login-username-input"
                 />
@@ -111,10 +111,10 @@ export default function LoginPage() {
             </form>
             <div className="mt-4 pt-4 border-t border-border">
               <p className="text-xs text-muted-foreground text-center">
-                Test credentials: <span className="font-mono text-foreground">admin</span> / <span className="font-mono text-foreground">admin</span>
+                Staging credentials: <span className="font-mono text-foreground">hub-admin@gamerpackaging.com</span> / <span className="font-mono text-foreground">ChangeMeOnFirstDeploy-K8p2q</span>
               </p>
               <p className="text-xs text-muted-foreground text-center mt-1.5">
-                SSO integration available for production
+                Rotate via <span className="font-mono">docker-compose.yml</span> before production
               </p>
             </div>
           </CardContent>

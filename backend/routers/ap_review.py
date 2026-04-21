@@ -13,7 +13,9 @@ import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+
+from services.auth_deps import get_current_user
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -450,6 +452,7 @@ async def post_document_to_bc(
                     "posting. Defaults to False so the normal review gate still "
                     "applies in production."
     ),
+    _user: dict = Depends(get_current_user),
 ):
     """
     Post a document to Business Central as a purchase invoice.

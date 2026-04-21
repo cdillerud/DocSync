@@ -3,9 +3,10 @@
 import uuid
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Depends
 from datetime import datetime, timezone
 from deps import get_db
+from services.auth_deps import require_admin
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -17,9 +18,10 @@ async def backfill_ap_mailbox(
     days_back: int = Query(7, description="How many days back to search"),
     max_messages: int = Query(25, description="Maximum messages to process"),
     dry_run: bool = Query(False, description="If true, only report what would be processed"),
-    mailbox: str = Query(None, description="Mailbox to poll (defaults to EMAIL_POLLING_USER)")
+    mailbox: str = Query(None, description="Mailbox to poll (defaults to EMAIL_POLLING_USER)"),
+    _user: dict = Depends(require_admin),
 ):
-    """Backfill AP documents from email mailbox."""
+    """Backfill AP documents from email mailbox. ADMIN ONLY."""
     from services.email_service import get_email_service
     email_service = get_email_service()
     if not email_service:
@@ -35,9 +37,10 @@ async def backfill_sales_mailbox(
     background_tasks: BackgroundTasks,
     days_back: int = Query(30, description="How many days back to search"),
     max_messages: int = Query(50, description="Maximum messages to process"),
-    dry_run: bool = Query(False, description="If true, only report what would be processed")
+    dry_run: bool = Query(False, description="If true, only report what would be processed"),
+    _user: dict = Depends(require_admin),
 ):
-    """Backfill sales documents from email mailbox."""
+    """Backfill sales documents from email mailbox. ADMIN ONLY."""
     from services.email_service import get_email_service
     email_service = get_email_service()
     if not email_service:

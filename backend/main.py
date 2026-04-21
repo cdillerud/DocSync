@@ -12,8 +12,21 @@ by router modules.  It does NOT register any routes itself.
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
-import os
 import logging
+import os
+
+# -- Load .env FIRST so the validator sees the right values -------------------
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# -- Startup secret validation (fail-fast) ------------------------------------
+# Runs at import time BEFORE anything else. If JWT_SECRET / ADMIN_EMAIL /
+# ADMIN_PASSWORD / MONGO_URL are missing or insecure defaults, the process
+# crashes with a clear checklist rather than booting silently insecure.
+from services.startup_validator import validate_startup_secrets
+
+validate_startup_secrets()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -198,6 +211,21 @@ async def startup():
     """Delegate to server.py's comprehensive startup initialization."""
     logger.info("main.py startup — delegating to server.startup()")
     await server.startup()
+
+    # ── Auth: expose DB on app.state and seed admin user ───────────────────
+    # ``services.auth_deps.get_current_user`` resolves the request user by
+    # pulling ``request.app.state.db``. Attach the Motor DB and then seed
+    # the admin account from ADMIN_EMAIL / ADMIN_PASSWORD env vars.
+    from deps import get_db
+    from services.auth_deps import seed_admin_user
+    app.state.db = get_db()
+    try:
+        seed_result = await seed_admin_user(app.state.db)
+        logger.info("[Auth] Admin seed: %s", seed_result)
+    except Exception as e:
+        logger.error("[Auth] Admin seed FAILED: %s", e)
+        raise
+
     # Register server.py handler functions directly on app (deferred to avoid circular import)
     register_doc_routes(app)
     register_wf_routes(app)

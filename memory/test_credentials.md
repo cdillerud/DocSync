@@ -1,23 +1,37 @@
-# Test Credentials
+# GPI Hub Test Credentials
 
-## Login
-- Username: `admin`
-- Password: `admin`
+## Admin Account (seeded from env on startup)
 
-## Demo Data
-- Run `POST /api/sales-dashboard/demo/run-batch` to seed batch demo docs and dunnage patterns
-- Use batch-child docs with C-9874 items (e.g., `batch-child-*`) to test dunnage suggestions
-- Giovanni customer: C-10250
-- Rep Overrides demo fixture: `C-DEMO-OVRD-1` / "Acme Demo Co." → Demo Rep (`demo.rep@example.com`, salesperson_code `DEMO01`). Persisted in `customer_rep_overrides` so `/admin/rep-overrides` always has one visible row. Do NOT delete permanently.
-- Prior-week digest fixture: `2026-W15` row in `learning_digests`. Persisted so the `/learning/ops` Week-over-Week banner always has data to compare against. Do NOT delete.
+**Environment variables that drive the seed:**
+- `ADMIN_EMAIL` — admin account email
+- `ADMIN_PASSWORD` — plain-text admin password (hashed to bcrypt at seed time, not stored in .env after rotation)
 
+**Preview/dev environment (v2.5.24+):**
+- Email: `hub-admin@gamerpackaging.com`
+- Password: `ChangeMeOnFirstDeploy-K8p2q`
+- Role: `admin`
 
-## Intake Learning (new — hub-wide Giovanni pattern)
-- `POST /api/intake/learning/backfill` — run learning across all eligible docs + staging
-- `POST /api/intake/learning/refresh-active?lookback_hours=24` — re-learn for customers with new BC activity
-- `GET /api/intake/learning/summary` — dashboard metrics
-- `GET /api/intake/flagged` — docs with actionable BC/Spiro findings
-- `GET /api/intake/insights/{doc_id}` — per-doc intake insights
-- `GET /api/intake/insights-xls/{staging_id}` — per-XLS-staging insights
-- UI: `/intake/learning`
-- Daily scheduler refreshes active customers automatically (interval: 24h, configurable via `INTAKE_LEARNING_INTERVAL_SECONDS`)
+**Production VM:** rotate both values via docker-compose env. The startup validator will refuse to boot with any known-insecure default (`admin`, `admin123`, `changeme`, `admin@example.com`, `gpi-hub-secret-key`, etc.).
+
+## Auth flow for tests
+
+```bash
+# 1. Login -> JWT
+TOKEN=$(curl -s -X POST http://localhost:8001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"hub-admin@gamerpackaging.com","password":"ChangeMeOnFirstDeploy-K8p2q"}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['token'])")
+
+# 2. Use on mutating routes
+curl -X POST http://localhost:8001/api/admin/backfill-ap-mailbox?dry_run=true \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## JWT_SECRET
+
+- Preview/dev: 96-char hex string in `/app/backend/.env` (rotate via `python -c "import secrets; print(secrets.token_hex(48))"`)
+- Production VM: set in `docker-compose.yml` environment, NEVER commit to git
+
+## Do NOT use
+
+The pre-v2.5.24 `admin/admin` plaintext credentials are removed and the startup validator will refuse to boot with any of them.

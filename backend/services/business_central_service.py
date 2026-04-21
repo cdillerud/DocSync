@@ -772,16 +772,54 @@ class BusinessCentralService:
                 }
             
             data = resp.json()
-            
+            bc_invoice_id = data.get("id")
+
             # Add line items if provided
             line_result = None
             if invoice_data.get("lines") and len(invoice_data["lines"]) > 0:
-                logger.info("Adding %d line items to invoice %s", len(invoice_data["lines"]), data.get("id"))
-                line_result = await self._add_invoice_lines(data["id"], invoice_data["lines"], token, company_id)
-            
+                logger.info("Adding %d line items to invoice %s", len(invoice_data["lines"]), bc_invoice_id)
+                line_result = await self._add_invoice_lines(bc_invoice_id, invoice_data["lines"], token, company_id)
+
+            # ── PARTIAL-POST DETECTION ─────────────────────────────────────
+            # A header-created + lines-failed situation would previously return
+            # success=True with linesAdded=0. Downstream code then flipped the
+            # document to 'posted' and the user saw "Posted ✅" while BC held
+            # an empty draft. That's a bookkeeping trap — detect & report.
+            if line_result is not None:
+                lines_total = line_result.get("total", 0)
+                lines_added = line_result.get("added", 0)
+                if lines_total > 0 and lines_added < lines_total:
+                    partial_msg = (
+                        f"BC header created (id={bc_invoice_id}, "
+                        f"number={data.get('number')}) but only "
+                        f"{lines_added}/{lines_total} lines were accepted. "
+                        f"Draft header is orphaned in BC and must be "
+                        f"deleted or completed manually."
+                    )
+                    logger.error(
+                        "[BCCreatePI] Partial posting detected: %s", partial_msg
+                    )
+                    # Best-effort cleanup of the orphaned draft header so we
+                    # don't leak empty drafts on repeated retries.
+                    deletion_status = await self._try_delete_draft_invoice(
+                        bc_invoice_id, token, company_id
+                    )
+                    return {
+                        "success": False,
+                        "error": "partial_post",
+                        "details": partial_msg,
+                        "bcDocumentId": bc_invoice_id,
+                        "bcDocumentNumber": data.get("number"),
+                        "linesAdded": lines_added,
+                        "linesTotal": lines_total,
+                        "lineErrors": line_result.get("errors", []),
+                        "orphan_header_deletion": deletion_status,
+                        "bc_write_environment": BC_WRITE_ENVIRONMENT,
+                    }
+
             return {
                 "success": True,
-                "bcDocumentId": data.get("id"),
+                "bcDocumentId": bc_invoice_id,
                 "bcDocumentNumber": data.get("number"),
                 "status": data.get("status", "Draft"),
                 "message": "Purchase invoice created successfully",
@@ -793,96 +831,283 @@ class BusinessCentralService:
                 "lineErrors": line_result.get("errors", []) if line_result else [],
                 "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
+
+    async def _try_delete_draft_invoice(
+        self, invoice_id: str, token: str, company_id: str
+    ) -> str:
+        """Best-effort delete of a draft PI header whose lines failed. Only
+        valid when the invoice is still Draft — BC rejects deletion of
+        posted invoices. Returns one of {'deleted','failed','skipped'}."""
+        try:
+            url = (
+                f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}"
+                f"/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})"
+            )
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.delete(
+                    url, headers={"Authorization": f"Bearer {token}"}
+                )
+                if resp.status_code in (200, 204):
+                    logger.info(
+                        "[BCCreatePI] Orphan draft %s deleted after partial-post",
+                        invoice_id,
+                    )
+                    return "deleted"
+                logger.warning(
+                    "[BCCreatePI] Failed to delete orphan draft %s: %d %s",
+                    invoice_id, resp.status_code, resp.text[:200],
+                )
+                return "failed"
+        except Exception as e:
+            logger.warning(
+                "[BCCreatePI] Exception deleting orphan draft %s: %s",
+                invoice_id, e,
+            )
+            return "failed"
     
     async def _add_invoice_lines(self, invoice_id: str, lines: List[Dict], token: str, company_id: str):
+        """Add line items to a purchase invoice.
+
+        HONORS each line's ``lineType`` and ``lineObjectNumber`` produced by
+        ``vendor_invoice_profile_service.build_smart_pi_lines`` — previously
+        every line was posted as ``lineType=Item`` with a single hardcoded
+        ``BC_DEFAULT_ITEM_CODE`` (e.g. "FREIGHT"), which collapsed the
+        vendor-profile-learned GL mapping and produced uniformly wrong
+        postings.
+
+        Supported line types:
+          * ``"Account"`` -> posts ``{"lineType": "Account", "accountId": <guid>}``
+            (the GL account GUID is looked up from ``lineObjectNumber``)
+          * ``"Item"``    -> posts ``{"lineType": "Item", "itemId": <guid>}``
+
+        If a line's ``lineObjectNumber`` cannot be resolved to a BC GUID,
+        that line is marked as failed — we do NOT silently fall back to
+        the legacy FREIGHT item (that's the class of bug we're removing).
+        Invoice-level partial-post detection (upstream in
+        ``create_purchase_invoice``) then blocks success-reporting if any
+        line failed.
+
+        The legacy ``BC_DEFAULT_ITEM_CODE`` / ``BC_PI_FREIGHT_ITEM`` env
+        vars remain as a compatibility bridge ONLY when a line arrives with
+        neither a ``lineType`` nor a ``lineObjectNumber`` (truly unclassified
+        extraction).
         """
-        Add line items to a purchase invoice using Item type.
-        
-        BC Purchase Invoice Lines API for Item type requires:
-        - lineType: "Item"
-        - itemId: The Item's GUID (REQUIRED - BC won't accept item number alone)
-        - description: Line description (optional)
-        - quantity: Quantity
-        - unitCost: Cost per unit
-        
-        Uses BC_DEFAULT_ITEM_CODE (e.g., "FREIGHT") as the default item for all lines.
-        """
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices({invoice_id})/purchaseInvoiceLines"
-        
+        url = (
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/"
+            f"companies({company_id})/purchaseInvoices({invoice_id})/"
+            f"purchaseInvoiceLines"
+        )
+
+        # Legacy fallback — only used when a line has no lineType/lineObjectNumber.
+        legacy_item_code = os.environ.get(
+            "BC_DEFAULT_ITEM_CODE", os.environ.get("BC_PI_FREIGHT_ITEM", "")
+        )
+
+        # Per-call caches so N lines referencing the same GL/item don't
+        # trigger N lookups against BC.
+        account_id_cache: Dict[str, Optional[str]] = {}
+        item_id_cache: Dict[str, Optional[str]] = {}
+
+        async def resolve_account(code: str) -> Optional[str]:
+            if code in account_id_cache:
+                return account_id_cache[code]
+            gid = await self._get_account_id_by_number(code, token, company_id)
+            account_id_cache[code] = gid
+            return gid
+
+        async def resolve_item(code: str) -> Optional[str]:
+            if code in item_id_cache:
+                return item_id_cache[code]
+            gid = await self._get_item_id_by_code(code, token, company_id)
+            item_id_cache[code] = gid
+            return gid
+
         added_count = 0
-        errors = []
-        
-        # Get default Item code and look up its GUID
-        default_item_code = os.environ.get("BC_DEFAULT_ITEM_CODE", "FREIGHT")
-        default_item_id = await self._get_item_id_by_code(default_item_code, token, company_id)
-        
-        if not default_item_id:
-            logger.error("Could not find Item '%s' in BC - cannot add invoice lines", default_item_code)
-            return {"added": 0, "total": len(lines), "errors": [{"line": 0, "error": f"Item '{default_item_code}' not found in BC. Please verify this item exists in Business Central."}]}
-        
-        logger.info("Using Item '%s' (ID: %s) for %d invoice lines", default_item_code, default_item_id, len(lines))
-        
+        errors: List[Dict[str, Any]] = []
+
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
             for idx, line in enumerate(lines):
-                # Get values with fallbacks - support both AI extraction format and direct format
-                description = line.get("description", "")
+                description = str(line.get("description", "") or "").strip()
                 quantity = float(line.get("quantity", 1) or 1)
-                # AI extraction uses "unit_price", BC uses "unitCost"
-                unit_price = float(line.get("unit_price") or line.get("unitCost") or 0)
-                # AI extraction uses "total", also support "line_total"
+                unit_price = float(
+                    line.get("unitCost") or line.get("unit_price") or 0
+                )
                 line_total = float(line.get("total") or line.get("line_total") or 0)
-                
-                # If we have a total but no unit price, calculate unit price
-                if line_total > 0 and unit_price == 0 and quantity > 0:
+
+                # Derive unit_price from total when missing (same math as before).
+                if line_total and unit_price == 0 and quantity > 0:
                     unit_price = line_total / quantity
-                
-                # If we still have no unit price but have a total, use total as unit price (qty=1)
-                if unit_price == 0 and line_total > 0:
+                if unit_price == 0 and line_total:
                     unit_price = line_total
                     quantity = 1
-                
-                # Skip truly empty lines (no description AND no amount)
+
                 if not description and unit_price == 0 and line_total == 0:
                     logger.debug("Skipping empty invoice line %d", idx)
                     continue
-                
-                # Build line payload using Item type with itemId (GUID)
-                line_payload = {
-                    "lineType": "Item",
-                    "itemId": default_item_id,
-                    "description": description[:100] if description else f"Line {idx + 1}",
-                    "quantity": quantity,
-                    "unitCost": unit_price,
-                }
-                
-                logger.info("Adding invoice line %d: desc='%s', itemId=%s, qty=%s, unitCost=$%.2f", 
-                           idx + 1, description[:40], default_item_id[:8] + "...", quantity, unit_price)
-                logger.debug("Line payload: %s", line_payload)
-                
+
+                # ── Resolve BC reference (Account or Item) ──
+                requested_type = (line.get("lineType") or "").strip()
+                requested_obj = (line.get("lineObjectNumber") or "").strip()
+
+                bc_line: Optional[Dict[str, Any]] = None
+                resolution_error: Optional[str] = None
+
+                if requested_type == "Account" and requested_obj:
+                    account_id = await resolve_account(requested_obj)
+                    if account_id:
+                        bc_line = {
+                            "lineType": "Account",
+                            "accountId": account_id,
+                            "description": description[:100] or f"Line {idx + 1}",
+                            "quantity": quantity,
+                            "unitCost": unit_price,
+                        }
+                    else:
+                        resolution_error = (
+                            f"GL account '{requested_obj}' not found in BC"
+                        )
+
+                elif requested_type == "Item" and requested_obj:
+                    item_id = await resolve_item(requested_obj)
+                    if item_id:
+                        bc_line = {
+                            "lineType": "Item",
+                            "itemId": item_id,
+                            "description": description[:100] or f"Line {idx + 1}",
+                            "quantity": quantity,
+                            "unitCost": unit_price,
+                        }
+                    else:
+                        resolution_error = (
+                            f"Item '{requested_obj}' not found in BC"
+                        )
+
+                elif not requested_type and not requested_obj and legacy_item_code:
+                    # No classification at all — last-ditch fallback to the
+                    # env default. Emits a warning so we can see how often
+                    # this path is still hit in production.
+                    item_id = await resolve_item(legacy_item_code)
+                    if item_id:
+                        logger.warning(
+                            "[BCAddLines] Line %d had no lineType/lineObjectNumber "
+                            "— falling back to legacy default item '%s'. "
+                            "This indicates an incomplete vendor-profile GL "
+                            "mapping and should be fixed upstream.",
+                            idx + 1, legacy_item_code,
+                        )
+                        bc_line = {
+                            "lineType": "Item",
+                            "itemId": item_id,
+                            "description": description[:100] or f"Line {idx + 1}",
+                            "quantity": quantity,
+                            "unitCost": unit_price,
+                        }
+                    else:
+                        resolution_error = (
+                            f"Legacy default item '{legacy_item_code}' "
+                            f"not found in BC; cannot post unclassified line"
+                        )
+                else:
+                    resolution_error = (
+                        f"Unsupported line classification: "
+                        f"lineType={requested_type!r}, "
+                        f"lineObjectNumber={requested_obj!r}"
+                    )
+
+                if bc_line is None:
+                    logger.error(
+                        "[BCAddLines] Line %d NOT posted: %s (desc=%r)",
+                        idx + 1, resolution_error, description[:40],
+                    )
+                    errors.append({
+                        "line": idx + 1,
+                        "description": description[:50],
+                        "error": resolution_error,
+                        "requested_type": requested_type,
+                        "requested_obj": requested_obj,
+                    })
+                    continue
+
+                logger.info(
+                    "[BCAddLines] Posting line %d: %s/%s qty=%s unit=$%.2f desc=%r",
+                    idx + 1, bc_line["lineType"],
+                    requested_obj or legacy_item_code,
+                    quantity, unit_price, description[:40],
+                )
+
                 resp = await client.post(
                     url,
                     headers={
                         "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
                     },
-                    json=line_payload
+                    json=bc_line,
                 )
-                
                 if resp.status_code in (200, 201):
                     added_count += 1
-                    logger.info("Successfully added invoice line %d", idx + 1)
                 else:
                     error_msg = resp.text[:300]
-                    logger.warning("Failed to add invoice line %d: HTTP %d - %s", 
-                                  idx + 1, resp.status_code, error_msg)
+                    logger.warning(
+                        "[BCAddLines] Line %d HTTP %d: %s",
+                        idx + 1, resp.status_code, error_msg,
+                    )
                     errors.append({
                         "line": idx + 1,
                         "description": description[:50],
-                        "error": error_msg
+                        "error": error_msg,
+                        "http_status": resp.status_code,
                     })
-        
-        logger.info("Invoice line addition complete: %d/%d lines added", added_count, len(lines))
+
+        logger.info(
+            "[BCAddLines] Invoice line addition complete: %d/%d lines added",
+            added_count, len(lines),
+        )
         return {"added": added_count, "total": len(lines), "errors": errors}
+
+    async def _get_account_id_by_number(
+        self, account_number: str, token: str, company_id: str
+    ) -> Optional[str]:
+        """Look up a BC GL account's GUID by its number (e.g. '60500').
+        Returns None if not found. Mirrors ``_get_item_id_by_code``."""
+        url = (
+            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/"
+            f"companies({company_id})/accounts"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+                resp = await client.get(
+                    url,
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "$filter": f"number eq '{account_number}'",
+                        "$select": "id,number,displayName",
+                    },
+                )
+                if resp.status_code == 200:
+                    accounts = resp.json().get("value", [])
+                    if accounts:
+                        acc = accounts[0]
+                        logger.info(
+                            "[BCAddLines] Resolved GL '%s' -> %s (%s)",
+                            account_number, acc.get("displayName"), acc["id"],
+                        )
+                        return acc["id"]
+                    logger.warning(
+                        "[BCAddLines] GL account '%s' not found in BC",
+                        account_number,
+                    )
+                    return None
+                logger.error(
+                    "[BCAddLines] Failed GL lookup '%s': HTTP %d",
+                    account_number, resp.status_code,
+                )
+                return None
+        except Exception as e:
+            logger.error(
+                "[BCAddLines] Exception looking up GL '%s': %s",
+                account_number, e,
+            )
+            return None
     
     async def _get_item_id_by_code(self, item_code: str, token: str, company_id: str) -> Optional[str]:
         """

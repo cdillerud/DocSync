@@ -1,6 +1,84 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-21] v2.5.24 — Security Hardening (Reviewer Findings #1, #3, #4 bundle)
+
+**Scope:** Three reviewer-flagged defects resolved in one release plus a decision memo for the fourth:
+1. **Line-item BC routing** (Finding: "posts to BC using a single FREIGHT item code for every line")
+2. **Partial-post silent success** (Finding: header-created + lines-rejected reported as success)
+3. **AP path consolidation decision** (Finding #8: dual `/ap-review/` vs `/workflows/ap_invoice/` paths)
+4. **Auth enforcement + startup validator** (Findings #1, #10: no auth, JWT default, hardcoded admin/admin)
+
+### Fix 1 — Per-line BC routing honors preflight classification (`services/business_central_service.py`)
+- `_add_invoice_lines` rewritten: each line's `lineType` + `lineObjectNumber` (from `build_smart_pi_lines`) is now respected.
+  - `Account` → resolves GL number → BC `accountId` (GUID) → `POST {lineType:"Account", accountId:...}`
+  - `Item` → resolves item number → BC `itemId` → `POST {lineType:"Item", itemId:...}`
+  - Per-call caches so N lines with the same GL don't trigger N lookups.
+- **No more silent FREIGHT fallback:** an unresolvable `lineObjectNumber` produces a per-line error; BC is NOT called with a substituted Item. Legacy `BC_DEFAULT_ITEM_CODE` fallback still runs ONLY when a line arrives with neither lineType nor lineObjectNumber (truly unclassified) — and emits a WARNING log so the gap is visible.
+- New helper `_get_account_id_by_number` mirrors the existing `_get_item_id_by_code` pattern.
+
+### Fix 2 — Partial-post detection in `create_purchase_invoice`
+- After `_add_invoice_lines` returns, compare `added` vs `total`. If any line failed:
+  - Return `{"success": False, "error": "partial_post", ...}` so downstream flow marks the doc `failed` not `posted`.
+  - Best-effort DELETE of the orphan draft header in BC (supported only while Draft; logged either way).
+  - Response includes `lineErrors[]`, `orphan_header_deletion` status, BC doc id/number for manual cleanup if the delete fails.
+- Previously: header-created + all-lines-rejected returned `success=True, linesAdded=0`, and the doc was marked "posted" while BC held an empty draft. This was a silent bookkeeping trap.
+
+### Fix 3 — AP path consolidation decision (`/app/memory/AP_PATH_CONSOLIDATION.md`)
+- Declared **`/api/ap-review/*` the canonical AP workflow** going forward. All 5 hardening releases (v2.5.20–24) landed there; `/workflows/ap_invoice/*` serves a removed frontend page.
+- 5-phase consolidation plan documented with bounded effort (~3 days total), rollback path, and explicit Phase 5 adoption of `workflow_engine.py` state transitions into Path A.
+
+### Fix 4 — Auth enforcement + startup validator (Findings #1 + #10)
+
+**New modules:**
+- `services/auth_deps.py` — single source of truth for:
+  - `hash_password` / `verify_password` (bcrypt, constant-time)
+  - `create_access_token` / `decode_access_token` (PyJWT, 8-hour TTL, explicit `type: "access"` claim)
+  - `get_current_user` FastAPI dependency — extracts token from `Authorization: Bearer` OR `access_token` cookie, decodes, validates, loads user from `db.users`, raises 401 on any failure
+  - `require_admin` — layers role check on top of `get_current_user`
+  - `seed_admin_user` — idempotent bcrypt-hashed admin seed from `ADMIN_EMAIL` + `ADMIN_PASSWORD` env
+  - **Refuses to operate** with any known-insecure `JWT_SECRET` default (`gpi-hub-secret-key`, `changeme`, `secret`, empty)
+- `services/startup_validator.py` — runs at import time. Crashes the process with a clear checklist if `JWT_SECRET` / `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `MONGO_URL` are missing or set to known-insecure defaults.
+
+**Replaced:**
+- `routers/auth.py` — new secure login/me/logout. Login now bcrypt-verifies against MongoDB `users` collection (no more hardcoded `admin/admin`). Returns JWT in both response body AND httpOnly cookie for flexibility. `/me` is now `Depends(get_current_user)` (the pre-fix version returned a hardcoded dict).
+- `main.py` — loads `.env` → runs `validate_startup_secrets()` → registers `app.state.db` → seeds admin user on every boot (idempotent; re-hashes if env password rotated).
+
+**Protected endpoints (high-risk mutating routes the reviewer flagged):**
+- `POST /api/admin/backfill-ap-mailbox` — now `Depends(require_admin)`
+- `POST /api/admin/backfill-sales-mailbox` — now `Depends(require_admin)`
+- `POST /api/ap-review/documents/{id}/post-to-bc` — now `Depends(get_current_user)`
+
+**Deferred to follow-up PR (scoped but not in this release):**
+- Apply `Depends(get_current_user)` to the remaining 140+ mutating routes (needs coordinated frontend AuthContext change to inject the token on every fetch).
+- Brute-force rate limiting on `/auth/login` (per-IP + per-email).
+- Frontend AuthContext reset on 401 (today the UI silently fails).
+
+**Env additions required on production VM (via docker-compose.yml):**
+- `JWT_SECRET` — 64+ char random hex (`python -c "import secrets; print(secrets.token_hex(48))"`)
+- `ADMIN_EMAIL` — seed admin email
+- `ADMIN_PASSWORD` — seed admin password (bcrypt-hashed on first boot)
+
+**⚠ DEPLOYMENT WARNING:** The startup validator will **crash the backend** on the next deploy if any of these env vars are missing. This is intentional. Add them to `docker-compose.yml` before `git pull && docker compose build`.
+
+### Testing
+- **78/78 pytests pass** across all of today's fixes:
+  - `test_auth_enforcement.py` — 26 tests (hashing, tokens, startup validator, live login flow, protected-endpoint rejections)
+  - `test_bc_line_routing.py` — 10 tests (per-line routing, partial-post detection)
+  - `test_bc_post_claim.py` — 18 tests (atomic claim + real concurrency)
+  - `test_pi_preflight_reconcile.py` — 16 tests (line reconciliation + invoice total sanity)
+  - `test_vendor_profile_fallbacks.py` — 8 tests (profile learning fallback chain)
+- Live backend verified: login → JWT → `/me` → 200; anonymous → 401; wrong password → 401; unknown email → 401.
+
+### Known follow-ups
+- REFACTOR_PLAN.md Phase 3 still outstanding (`server.py` decomposition)
+- Sales order BC write-back closure (Finding #5)
+- Inventory module (Finding #7)
+- Per-field extraction confidence (Finding #4 discussed in reviewer's writeup but not in my remediation scope today)
+
+
+
+
 ## [2026-04-21] v2.5.23 — Atomic BC Post Claim (Race Condition Fix, P0 Financial Integrity)
 
 **Problem (from external engineering review, Finding #2):**

@@ -45,6 +45,14 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
 - Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
+### 2026-04-21 — AP Path Consolidation v2.5.25 (Phases 2 + 3)
+- Single canonical AP mutation surface: **`POST /api/ap-review/documents/{doc_id}/{action}`** for `set-vendor`, `update-fields`, `override-bc-validation`, `start-approval`, `approve`, `reject`.
+- All Path A mutation routes JWT-gated via `Depends(get_current_user)`; all delegate to `services/workflow_handlers.py` so every transition drives through `WorkflowEngine.advance_workflow`.
+- Legacy `/api/workflows/ap_invoice/{doc_id}/{action}` kept live for one release with `deprecated=True` in OpenAPI and `X-Deprecated` headers attached to every response (including HTTPException paths).
+- Frontend `lib/api.js` helpers (`setVendor`, `updateFields`, `overrideBcValidation`, `startApproval`, `approveDocument`, `rejectDocument`) repointed to Path A with bodies normalized to canonical Pydantic shapes.
+- New regression suite `tests/test_ap_path_consolidation.py` — 36/36 passing. Phase 4 (deletion of Path B) scheduled for next release.
+
+
 
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
 

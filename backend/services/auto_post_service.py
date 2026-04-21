@@ -309,20 +309,44 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
     }
     
     try:
-        # Update status to posting
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "bc_posting_status": "auto_posting",
+        # ── ATOMIC CLAIM ─────────────────────────────────────────────────
+        # Replaces the old non-atomic "update_one then call BC" flow that
+        # allowed two concurrent callers (poller + manual retry, double
+        # click, two worker pods) to both flip status and both call BC,
+        # producing duplicate purchase invoices. See services/bc_post_claim.py.
+        from services.bc_post_claim import (
+            claim_for_bc_post, release_claim, ClaimRejectionReason,
+        )
+        claim = await claim_for_bc_post(
+            db,
+            doc_id=doc_id,
+            target_state="auto_posting",
+            worker_id=f"auto_post_service-{os.getpid()}",
+            extra_set={
                 "auto_post_attempted": True,
                 "auto_post_attempted_at": utcnow(),
-                "updated_utc": utcnow()
-            }}
+            },
         )
-        
+        if not claim.claimed:
+            logger.info(
+                "AUTO-POST skipped for doc %s — %s (existing_status=%s, holder=%s)",
+                doc_id, claim.reason, claim.existing_status, claim.existing_holder,
+            )
+            # Terminal state means another worker already posted successfully
+            # — this is the "already posted" short-circuit; surface it cleanly.
+            if claim.reason == ClaimRejectionReason.ALREADY_TERMINAL:
+                return AutoPostResult(
+                    eligible=True, attempted=False, success=False,
+                    reason=f"Already in terminal state: {claim.existing_status}",
+                )
+            return AutoPostResult(
+                eligible=True, attempted=False, success=False,
+                reason=f"Claim rejected: {claim.reason}",
+            )
+
         # Call BC service to create purchase invoice
         result = await bc_service.create_purchase_invoice(invoice_data)
-        
+
         if result.get("success"):
             bc_document_id = result.get("bcDocumentId")
             bc_document_number = result.get("bcDocumentNumber")
@@ -344,13 +368,14 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                     logger.warning("Auto-post link writeback failed for %s: %s", doc_id, wb_err)
                     link_writeback_status = "failed"
             
-            # Update document with success
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
+            # Release claim into the terminal success state atomically.
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="posted",
+                extra_set={
                     "bc_document_id": bc_document_id,
                     "bc_document_number": bc_document_number,
-                    "bc_posting_status": "posted",
                     "bc_posting_error": None,
                     "bc_link_writeback_status": link_writeback_status,
                     "review_status": "auto_posted",
@@ -358,10 +383,9 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                     "workflow_status": "posted",
                     "auto_post_success": True,
                     "posted_to_bc_utc": utcnow(),
-                    "updated_utc": utcnow()
-                }}
+                },
             )
-            
+
             logger.info("AUTO-POST SUCCESS: Doc %s -> BC Invoice %s", doc_id, bc_document_number)
             
             return AutoPostResult(
@@ -373,20 +397,21 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
                 reason="Auto-posted successfully"
             )
         else:
-            # Post failed
+            # Post failed — release the claim into the failure state so the
+            # document is eligible for future retries but not currently held.
             error_msg = result.get("error") or result.get("details") or "Unknown error"
-            
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "bc_posting_status": "auto_post_failed",
+
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="auto_post_failed",
+                extra_set={
                     "bc_posting_error": error_msg,
                     "review_status": "needs_review",
                     "auto_post_success": False,
-                    "updated_utc": utcnow()
-                }}
+                },
             )
-            
+
             logger.warning("AUTO-POST FAILED: Doc %s - %s", doc_id, error_msg)
             
             return AutoPostResult(
@@ -400,18 +425,29 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
     except Exception as e:
         error_msg = str(e)
         logger.error("AUTO-POST EXCEPTION: Doc %s - %s", doc_id, error_msg)
-        
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "bc_posting_status": "auto_post_failed",
-                "bc_posting_error": error_msg,
-                "review_status": "needs_review",
-                "auto_post_success": False,
-                "updated_utc": utcnow()
-            }}
-        )
-        
+
+        # Best-effort release of the claim so a retry isn't blocked by a
+        # stale in-flight marker. release_claim is idempotent — if we never
+        # successfully claimed (exception before claim), this is a no-op
+        # beyond updating the error fields, which is still correct behavior.
+        try:
+            from services.bc_post_claim import release_claim
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="auto_post_failed",
+                extra_set={
+                    "bc_posting_error": error_msg,
+                    "review_status": "needs_review",
+                    "auto_post_success": False,
+                },
+            )
+        except Exception as release_err:
+            logger.error(
+                "AUTO-POST release_claim after exception failed for %s: %s",
+                doc_id, release_err,
+            )
+
         return AutoPostResult(
             eligible=True,
             attempted=True,
@@ -583,49 +619,65 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
         logger.info("AUTO-CREATE: Assigning salesperson '%s' to SO for doc %s", salesperson_code, doc_id)
     
     try:
-        # Update status to creating
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "bc_posting_status": "auto_creating",
+        # ── ATOMIC CLAIM — SO auto-create ────────────────────────────────
+        from services.bc_post_claim import (
+            claim_for_bc_post, release_claim, ClaimRejectionReason,
+        )
+        claim = await claim_for_bc_post(
+            db,
+            doc_id=doc_id,
+            target_state="auto_creating",
+            worker_id=f"auto_create_so-{os.getpid()}",
+            extra_set={
                 "auto_create_attempted": True,
                 "auto_create_attempted_at": utcnow(),
-                "updated_utc": utcnow()
-            }}
+            },
         )
-        
+        if not claim.claimed:
+            logger.info(
+                "AUTO-CREATE skipped for doc %s — %s (existing_status=%s, holder=%s)",
+                doc_id, claim.reason, claim.existing_status, claim.existing_holder,
+            )
+            if claim.reason == ClaimRejectionReason.ALREADY_TERMINAL:
+                return AutoPostResult(
+                    eligible=True, attempted=False, success=False,
+                    reason=f"Already in terminal state: {claim.existing_status}",
+                )
+            return AutoPostResult(
+                eligible=True, attempted=False, success=False,
+                reason=f"Claim rejected: {claim.reason}",
+            )
+
         # Call BC service to create sales order
         result = await bc_service.create_sales_order(order_data)
-        
+
         if result.get("success"):
             bc_document_id = result.get("bcDocumentId")
             bc_document_number = result.get("bcDocumentNumber")
             
-            # Update document with success
-            update_fields = {
-                    "bc_document_id": bc_document_id,
-                    "bc_document_number": bc_document_number,
-                    "bc_sales_order_id": bc_document_id,
-                    "bc_sales_order_number": bc_document_number,
-                    "bc_posting_status": "created",
-                    "bc_posting_error": None,
-                    "review_status": "auto_created",
-                    "status": "Created",
-                    "workflow_status": "exported",
-                    "auto_create_success": True,
-                    "created_in_bc_utc": utcnow(),
-                    "updated_utc": utcnow()
+            # Build terminal-state extras including the SO-specific mirror fields.
+            release_extras = {
+                "bc_document_id": bc_document_id,
+                "bc_document_number": bc_document_number,
+                "bc_sales_order_id": bc_document_id,
+                "bc_sales_order_number": bc_document_number,
+                "bc_posting_error": None,
+                "review_status": "auto_created",
+                "status": "Created",
+                "workflow_status": "exported",
+                "auto_create_success": True,
+                "created_in_bc_utc": utcnow(),
             }
-            
-            # Store salesperson assignment for audit trail
             if salesperson_code:
-                update_fields["assigned_salesperson_code"] = salesperson_code
-            
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": update_fields}
+                release_extras["assigned_salesperson_code"] = salesperson_code
+
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="created",
+                extra_set=release_extras,
             )
-            
+
             logger.info("AUTO-CREATE SUCCESS: Doc %s -> BC Sales Order %s", doc_id, bc_document_number)
             
             return AutoPostResult(
@@ -638,18 +690,18 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
             )
         else:
             error_msg = result.get("error") or result.get("details") or "Unknown error"
-            
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "bc_posting_status": "auto_create_failed",
+
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="auto_create_failed",
+                extra_set={
                     "bc_posting_error": error_msg,
                     "review_status": "needs_review",
                     "auto_create_success": False,
-                    "updated_utc": utcnow()
-                }}
+                },
             )
-            
+
             logger.warning("AUTO-CREATE FAILED: Doc %s - %s", doc_id, error_msg)
             
             return AutoPostResult(
@@ -663,18 +715,25 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
     except Exception as e:
         error_msg = str(e)
         logger.error("AUTO-CREATE EXCEPTION: Doc %s - %s", doc_id, error_msg)
-        
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "bc_posting_status": "auto_create_failed",
-                "bc_posting_error": error_msg,
-                "review_status": "needs_review",
-                "auto_create_success": False,
-                "updated_utc": utcnow()
-            }}
-        )
-        
+
+        try:
+            from services.bc_post_claim import release_claim
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="auto_create_failed",
+                extra_set={
+                    "bc_posting_error": error_msg,
+                    "review_status": "needs_review",
+                    "auto_create_success": False,
+                },
+            )
+        except Exception as release_err:
+            logger.error(
+                "AUTO-CREATE release_claim after exception failed for %s: %s",
+                doc_id, release_err,
+            )
+
         return AutoPostResult(
             eligible=True,
             attempted=True,

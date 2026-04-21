@@ -1,6 +1,66 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-21] v2.5.23 — Atomic BC Post Claim (Race Condition Fix, P0 Financial Integrity)
+
+**Problem (from external engineering review, Finding #2):**
+Three BC-write paths used a non-atomic "update status, then call BC" sequence:
+1. `services/auto_post_service.attempt_auto_post` (AP auto-post)
+2. `services/auto_post_service.attempt_auto_create_sales_order` (SO auto-create)
+3. `routers/ap_review.post_document_to_bc` (manual Post-to-BC button)
+
+All three were racy. Two concurrent triggers — background poller + manual retry, two worker pods, UI double-click, browser retry — could both:
+1. Read the document and see an eligible status
+2. Both set `bc_posting_status` to an in-flight value via `update_one`
+3. Both call `bc_service.create_purchase_invoice` / `create_sales_order`
+
+Result: **duplicate purchase invoices or sales orders in Business Central** — a real-money financial defect requiring manual correction.
+
+**Fix — shared atomic claim primitive (`services/bc_post_claim.py`):**
+- `claim_for_bc_post(db, doc_id, target_state, worker_id, extra_set)` — single `find_one_and_update` that:
+  - Rejects documents in terminal success states (`posted`, `created`, `auto_posted`) to prevent re-posting.
+  - Rejects documents already claimed by another worker (`auto_posting`, `posting`, `auto_creating`) unless their claim has exceeded the TTL (default 300s, env-tunable via `BC_POST_CLAIM_TTL_SECONDS`).
+  - On success, atomically sets the new state + `bc_posting_claimed_at` + `bc_posting_claimed_by` + any caller-provided `extra_set` fields.
+- `release_claim(db, doc_id, final_state, extra_set)` — finalizes the claim (success or failure path), clears the `claimed_*` fields idempotently.
+- **Self-healing:** If a worker crashes mid-BC-call, the in-flight claim becomes reclaimable by any other worker after TTL — no document stranded forever.
+- **Legacy-row tolerance:** Documents left in an in-flight state by pre-fix code (no `bc_posting_claimed_at`) are treated as stale and reclaimable on first retry.
+
+**All three call sites refactored:**
+- `attempt_auto_post` → claims with `target_state="auto_posting"`, releases to `posted` or `auto_post_failed`.
+- `attempt_auto_create_sales_order` → claims with `target_state="auto_creating"`, releases to `created` or `auto_create_failed`.
+- `post_document_to_bc` (manual) → claims with `target_state="posting"`, returns HTTP 409 with explanatory message if another worker holds the claim (UX signal that prevents confused double-clicks).
+
+**Verified:**
+- 18/18 pytests in `tests/test_bc_post_claim.py` pass, including:
+  - 15 filter-logic tests (every state × TTL × holder combination)
+  - **3 real-MongoDB concurrency tests** that launch 50 parallel asyncio claimers at a single document and assert exactly **1 wins**, with the other 49 returning `reason="active_claim"`. These are the regression tests that would have caught the pre-fix defect.
+  - Terminal-state protection: 30 concurrent claims against an already-posted doc → all 30 rejected with `ALREADY_TERMINAL`, DB state unchanged.
+  - Retry path: released-to-failed → new thundering-herd retry wave → exactly 1 wins.
+- 42/42 pytests pass across reconciliation + fallback + claim suites combined.
+- Lint clean on new code; backend service healthy.
+
+**Other non-atomic posting/creation paths audited:**
+The three patched sites are the only BC-write paths in the backend. Grep for all `bc_service.create_*` calls confirms each is now gated by `claim_for_bc_post`. Background poll loop (`email_service.py`) queues docs for `attempt_auto_post` which goes through the claim — the poller itself holds no BC writes directly.
+
+**User impact (production VM):**
+After `cd /opt/gpi-hub && git pull && docker compose build --no-cache && docker compose up -d`, the system is safe against:
+- UI double-click posting
+- Two worker pods (future horizontal scaling)
+- Background poller colliding with manual retry
+- Crashed-worker recovery (automatic after TTL)
+- Any sequence of concurrent attempts at the same doc
+
+Duplicate BC records from race conditions are eliminated as a defect class.
+
+**Schema additions to `hub_documents`:**
+- `bc_posting_claimed_at` (ISO-8601 string or null) — when the current in-flight claim was acquired
+- `bc_posting_claimed_by` (string or null) — worker id that holds the claim
+
+No migration required — fields default to null on first write; legacy docs in in-flight states are handled by the "stale / no claimed_at" fallback clause of the filter.
+
+
+
+
 ## [2026-04-20] v2.5.22 — Pre-existing BC API `$select` Bug + Manual Profile Override
 
 **Two issues surfaced during v2.5.21 live validation on XPOLOGI (`76410e9e`):**

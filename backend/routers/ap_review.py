@@ -546,15 +546,39 @@ async def post_document_to_bc(
     if not invoice_data.get("invoiceDate"):
         raise HTTPException(status_code=400, detail="Invoice date is required for posting")
     
-    # Update status to posting
-    await db.hub_documents.update_one(
-        {"id": doc_id},
-        {"$set": {
-            "bc_posting_status": "posting",
-            "updated_utc": datetime.now(timezone.utc).isoformat()
-        }}
+    # ── ATOMIC CLAIM — manual Post-to-BC ──────────────────────────────────
+    # Replaces the pre-existing "update status then call BC" pattern which
+    # allowed a double-click / two-tab race to create duplicate BC invoices.
+    from services.bc_post_claim import (
+        claim_for_bc_post, release_claim, ClaimRejectionReason,
     )
-    
+    claim = await claim_for_bc_post(
+        db,
+        doc_id=doc_id,
+        target_state="posting",
+        worker_id=f"ap_review.post_to_bc-{os.getpid()}",
+    )
+    if not claim.claimed:
+        if claim.reason == ClaimRejectionReason.NOT_FOUND:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if claim.reason == ClaimRejectionReason.ALREADY_TERMINAL:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Document already posted (status={claim.existing_status}). "
+                    f"Refusing to re-post to avoid duplicate BC records."
+                ),
+            )
+        # ACTIVE_CLAIM — another worker or click holds it
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Another Post-to-BC request is already in flight for this "
+                f"document (held by {claim.existing_holder}). Wait for it to "
+                f"complete or retry after the claim TTL expires."
+            ),
+        )
+
     try:
         # Call BC service to create purchase invoice
         result = await service.create_purchase_invoice(invoice_data)
@@ -605,13 +629,14 @@ async def post_document_to_bc(
                 link_writeback_status = "skipped"
                 link_writeback_error = "No SharePoint URL available"
             
-            # Success - update document with BC details and writeback status
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
+            # Success — release claim into terminal "posted" state atomically.
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="posted",
+                extra_set={
                     "bc_document_id": bc_document_id,
                     "bc_document_number": bc_document_number,
-                    "bc_posting_status": "posted",
                     "bc_posting_error": None,
                     "bc_link_writeback_status": link_writeback_status,
                     "bc_link_writeback_error": link_writeback_error,
@@ -619,10 +644,9 @@ async def post_document_to_bc(
                     "status": "Posted",
                     "workflow_status": "posted",
                     "posted_to_bc_utc": datetime.now(timezone.utc).isoformat(),
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
-                }}
+                },
             )
-            
+
             updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             
             return PostToBCResponse(
@@ -636,18 +660,19 @@ async def post_document_to_bc(
                 bc_link_writeback_error=link_writeback_error
             )
         else:
-            # Failure - record error
+            # Failure — release claim into "failed" state so the doc is
+            # retry-eligible but no longer actively held.
             error_msg = result.get("error") or result.get("details") or "Unknown error"
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "bc_posting_status": "failed",
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="failed",
+                extra_set={
                     "bc_posting_error": error_msg,
                     "review_status": "ready_for_post",  # Keep ready for retry
-                    "updated_utc": datetime.now(timezone.utc).isoformat()
-                }}
+                },
             )
-            
+
             return PostToBCResponse(
                 success=False,
                 bc_posting_status="failed",
@@ -656,20 +681,28 @@ async def post_document_to_bc(
             )
             
     except Exception as e:
-        # Exception - record error
+        # Exception — always release the claim so a crashed attempt doesn't
+        # strand the document in-flight forever (TTL would eventually rescue
+        # it, but explicit release is cleaner).
         error_msg = str(e)
         logger.error("Post to BC failed for doc %s: %s", doc_id, error_msg)
-        
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "bc_posting_status": "failed",
-                "bc_posting_error": error_msg,
-                "review_status": "ready_for_post",
-                "updated_utc": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        
+
+        try:
+            await release_claim(
+                db,
+                doc_id=doc_id,
+                final_state="failed",
+                extra_set={
+                    "bc_posting_error": error_msg,
+                    "review_status": "ready_for_post",
+                },
+            )
+        except Exception as release_err:
+            logger.error(
+                "Post-to-BC release_claim after exception failed for %s: %s",
+                doc_id, release_err,
+            )
+
         return PostToBCResponse(
             success=False,
             bc_posting_status="failed",

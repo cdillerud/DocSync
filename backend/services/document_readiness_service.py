@@ -677,6 +677,49 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     except Exception as cow_err:
         logger.warning("[Readiness:COW] skipped for %s: %s", doc_id[:8], cow_err)
 
+    # === CONSIGNMENT HARD BLOCK (Lane C Step 2) ===
+    # All 5 rules (R1–R5) are hard blocks per signed declaration. Same
+    # canonical readiness path. No auto-transitions; registry state is only
+    # mutated via the admin endpoint.
+    try:
+        from workflows.inventory.ownership import (
+            check_consignment_rules,
+            apply_consignment_blocker_to_readiness,
+        )
+        cons_evidence = await check_consignment_rules(db, doc)
+        _cons_all_codes = (
+            "consigned_item_on_ap_invoice",
+            "consigned_item_wrong_state_on_ap",
+            "consigned_item_on_sales_doc",
+            "consigned_item_post_lifecycle_on_so",
+            "consigned_item_wrong_location_on_adj",
+        )
+        if cons_evidence:
+            apply_consignment_blocker_to_readiness(readiness, cons_evidence)
+            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                readiness["status"] = STATUS_NEEDS_REVIEW
+                readiness["recommended_action"] = ACTION_REVIEW
+            new_blocking = readiness["blocking_reasons"]
+            codes = sorted({e["blocker_code"] for e in cons_evidence})
+            logger.info(
+                "[Readiness:Consignment] doc=%s — hard block, codes=%s, %d line(s)",
+                doc_id[:8], codes, len(cons_evidence),
+            )
+        else:
+            # Idempotent clear of any prior consignment blockers on re-eval
+            cleared = False
+            for _code in _cons_all_codes:
+                if _code in new_blocking:
+                    readiness["blocking_reasons"] = [
+                        b for b in new_blocking if b != _code
+                    ]
+                    new_blocking = readiness["blocking_reasons"]
+                    cleared = True
+            if cleared:
+                readiness.pop("consigned_items", None)
+    except Exception as cons_err:
+        logger.warning("[Readiness:Consignment] skipped for %s: %s", doc_id[:8], cons_err)
+
     # === VENDOR BYPASS: Route to manual review if vendor flagged ===
     if doc.get("_vendor_bypass_active"):
         if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):

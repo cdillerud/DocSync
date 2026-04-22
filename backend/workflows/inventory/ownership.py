@@ -622,3 +622,383 @@ def require_retirement_actor(actor: str) -> None:
                 f"Actor {actor!r} is not authorized."
             ),
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# LANE C STEP 2 — VENDOR CONSIGNMENT (LANE_A_SIGNED_SCOPE.md §3 row 2)
+# ═════════════════════════════════════════════════════════════════════════════
+#
+# Scope locked 2026-04-22 (signed):
+#   * Separate registry collection `consigned_item_registry`
+#   * Vendor-only consignor (no customer-consignor in this pass)
+#   * All 5 rules hard-block
+#   * Terminal `consumed` and `returned` — no reopen path
+#   * R3 widened: any sales doc referencing a consigned_in item blocks
+# ─────────────────────────────────────────────────────────────────────────────
+
+CONSIGNED_ITEM_REGISTRY = "consigned_item_registry"
+
+# Env-configured actor email authorized to transition registry state.
+# Default matches COW actor (items@gamerpackaging.com) but separately tunable.
+CONSIGNMENT_STATE_ACTOR_EMAIL = os.environ.get(
+    "CONSIGNMENT_STATE_ACTOR_EMAIL",
+    os.environ.get("COW_RETIREMENT_ACTOR_EMAIL", "items@gamerpackaging.com"),
+).strip().lower()
+
+# Blocking-reason codes (names locked in signed declaration)
+BLOCKER_CODE_CONS_AP = "consigned_item_on_ap_invoice"
+BLOCKER_CODE_CONS_AP_WRONG_STATE = "consigned_item_wrong_state_on_ap"
+BLOCKER_CODE_CONS_SO = "consigned_item_on_sales_doc"
+BLOCKER_CODE_CONS_SO_POST = "consigned_item_post_lifecycle_on_so"
+BLOCKER_CODE_CONS_ADJ_LOC = "consigned_item_wrong_location_on_adj"
+
+ConsignmentState = Literal["not_consigned", "consigned_in", "consumed", "returned"]
+LegalTransitionTarget = Literal["consumed", "returned"]
+
+
+class ConsignedItemCreate(BaseModel):
+    item_no: str = Field(..., description="Consigned item number (uppercased on insert)")
+    vendor_no: str = Field(..., description="BC vendor_no of the consignor")
+    physical_location: str = Field(..., description="Warehouse where the goods sit at Gamer")
+    notes: str = Field("", description="Admin notes")
+
+    @field_validator("item_no", "vendor_no", "physical_location")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v:
+            raise ValueError("must be non-empty")
+        return v
+
+
+# ── Index management ────────────────────────────────────────────────────────
+
+async def ensure_consignment_indexes(db) -> None:
+    """Ensure indexes for consigned_item_registry. Idempotent."""
+    await db[CONSIGNED_ITEM_REGISTRY].create_index(
+        "item_no", unique=True, name="consigned_item_no_uniq"
+    )
+    await db[CONSIGNED_ITEM_REGISTRY].create_index(
+        [("vendor_no", 1), ("state", 1)],
+        name="consigned_vendor_state",
+    )
+    logger.info("[Consignment] consigned_item_registry indexes ensured")
+
+
+# ── CRUD ────────────────────────────────────────────────────────────────────
+
+async def get_consigned_item(db, item_no: str) -> Optional[Dict[str, Any]]:
+    if not item_no:
+        return None
+    return await db[CONSIGNED_ITEM_REGISTRY].find_one(
+        {"item_no": item_no.strip().upper()}, {"_id": 0}
+    )
+
+
+async def list_consigned_items(
+    db,
+    vendor_no: Optional[str] = None,
+    state: Optional[str] = None,
+    limit: int = 500,
+) -> List[Dict[str, Any]]:
+    q: Dict[str, Any] = {}
+    if vendor_no:
+        q["vendor_no"] = vendor_no
+    if state:
+        q["state"] = state
+    cursor = db[CONSIGNED_ITEM_REGISTRY].find(q, {"_id": 0}).limit(limit)
+    return await cursor.to_list(length=limit)
+
+
+async def upsert_consigned_item(
+    db, payload: ConsignedItemCreate, actor: str
+) -> Dict[str, Any]:
+    """Create a new registry row in state=consigned_in, or update editable fields
+    on an existing row. Never flips `state` — that is state-machine-gated.
+    """
+    item_no = payload.item_no.strip().upper()
+    now = _now_iso()
+
+    existing = await db[CONSIGNED_ITEM_REGISTRY].find_one(
+        {"item_no": item_no}, {"_id": 0}
+    )
+    if existing is None:
+        doc = {
+            "item_no": item_no,
+            "vendor_no": payload.vendor_no,
+            "physical_location": payload.physical_location,
+            "state": "consigned_in",
+            "linked_receipt_ids": [],
+            "linked_consumption_ids": [],
+            "linked_return_ids": [],
+            "notes": payload.notes,
+            "created_utc": now,
+            "updated_utc": now,
+            "created_by": actor,
+            "state_changed_by": actor,
+            "state_changed_at": now,
+        }
+        await db[CONSIGNED_ITEM_REGISTRY].insert_one(dict(doc))
+        logger.info("[Consignment] Created %s (vendor=%s) by %s", item_no, payload.vendor_no, actor)
+        return doc
+
+    await db[CONSIGNED_ITEM_REGISTRY].update_one(
+        {"item_no": item_no},
+        {"$set": {
+            "vendor_no": payload.vendor_no,
+            "physical_location": payload.physical_location,
+            "notes": payload.notes,
+            "updated_utc": now,
+        }},
+    )
+    logger.info("[Consignment] Updated %s by %s", item_no, actor)
+    return await db[CONSIGNED_ITEM_REGISTRY].find_one(
+        {"item_no": item_no}, {"_id": 0}
+    )
+
+
+async def transition_consigned_item(
+    db,
+    item_no: str,
+    new_state: str,
+    actor: str,
+    evidence_id: str,
+) -> Dict[str, Any]:
+    """State-machine-gated transition. Only two legal paths per signed §3:
+          consigned_in → consumed
+          consigned_in → returned
+    Both target states are terminal. Actor email must match
+    CONSIGNMENT_STATE_ACTOR_EMAIL. evidence_id is required and appended to the
+    appropriate `linked_*_ids` array.
+    """
+    actor_clean = (actor or "").strip().lower()
+    if actor_clean != CONSIGNMENT_STATE_ACTOR_EMAIL:
+        raise PermissionError(
+            f"Transition actor {actor!r} is not authorized. "
+            f"Only {CONSIGNMENT_STATE_ACTOR_EMAIL} may change consignment state."
+        )
+    if not evidence_id:
+        raise ValueError("evidence_id is required for every state transition")
+    if new_state not in ("consumed", "returned"):
+        raise ValueError(
+            f"Illegal target state {new_state!r}. Legal targets: consumed, returned."
+        )
+
+    item_no_clean = item_no.strip().upper()
+    row = await db[CONSIGNED_ITEM_REGISTRY].find_one(
+        {"item_no": item_no_clean}, {"_id": 0}
+    )
+    if row is None:
+        raise ValueError(f"Consigned item {item_no_clean} not found")
+
+    current = row.get("state")
+    if current != "consigned_in":
+        raise ValueError(
+            f"Illegal transition: {current!r} → {new_state!r}. "
+            f"Only 'consigned_in' can transition; terminal states cannot be reopened."
+        )
+
+    now = _now_iso()
+    link_field = {
+        "consumed": "linked_consumption_ids",
+        "returned": "linked_return_ids",
+    }[new_state]
+
+    result = await db[CONSIGNED_ITEM_REGISTRY].find_one_and_update(
+        {"item_no": item_no_clean, "state": "consigned_in"},
+        {
+            "$set": {
+                "state": new_state,
+                "state_changed_by": actor,
+                "state_changed_at": now,
+                "updated_utc": now,
+            },
+            "$addToSet": {link_field: evidence_id},
+        },
+        projection={"_id": 0},
+    )
+    if result is None:
+        # Lost a race against another transition; surface it as illegal
+        raise ValueError(f"Transition on {item_no_clean} was raced by another actor")
+    # find_one_and_update returns the pre-update document by default; fetch post.
+    return await db[CONSIGNED_ITEM_REGISTRY].find_one(
+        {"item_no": item_no_clean}, {"_id": 0}
+    )
+    logger.info(
+        "[Consignment] Transitioned %s: consigned_in → %s by %s (evidence=%s)",
+        item_no_clean, new_state, actor, evidence_id,
+    )
+    return result
+
+
+# ── Classifier ──────────────────────────────────────────────────────────────
+
+async def classify_consignment_state(db, item_no: str) -> ConsignmentState:
+    if not item_no:
+        return "not_consigned"
+    row = await get_consigned_item(db, item_no)
+    if row is None:
+        return "not_consigned"
+    state = row.get("state")
+    if state in ("consigned_in", "consumed", "returned"):
+        return state  # type: ignore[return-value]
+    return "not_consigned"
+
+
+# ── Rule check (single pass over lines, all 5 rules) ────────────────────────
+
+async def check_consignment_rules(
+    db, doc: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Evaluate all 5 signed consignment rules against a single document.
+
+    Returns a list of evidence dicts, each carrying a `blocker_code`. Empty
+    list = no rule fired. All 5 rules are hard blocks per signed declaration.
+    """
+    # Pre-compute doc context
+    is_po = _is_purchase_order_doc(doc)
+    is_adj = _is_adjustment_journal_doc(doc)
+    is_sales = _is_sales_doc(doc)
+
+    # Early exit: rule space only covers AP invoice / PO / Sales / adj journal
+    # (AP invoice is handled as "not-PO, not-sales, not-adj" via document_type).
+    doc_type = str(
+        doc.get("document_type")
+        or doc.get("doc_type")
+        or doc.get("suggested_job_type")
+        or ""
+    ).strip().lower().replace(" ", "_")
+    is_ap_invoice = doc_type in ("ap_invoice", "purchase_invoice", "apinvoice")
+
+    if not (is_po or is_adj or is_sales or is_ap_invoice):
+        return []
+
+    evidence: List[Dict[str, Any]] = []
+
+    for line in _iter_doc_lines(doc):
+        item_no = (line.get("item_no") or "").strip()
+        if not item_no:
+            continue
+        state = await classify_consignment_state(db, item_no)
+        if state == "not_consigned":
+            continue
+
+        row = await get_consigned_item(db, item_no) or {}
+
+        # ── R1 / R2: AP invoice or PO side ─────────────────────────────────
+        if is_po or is_ap_invoice:
+            if state == "consigned_in":
+                evidence.append({
+                    "blocker_code": BLOCKER_CODE_CONS_AP,
+                    "item_no": item_no,
+                    "state": state,
+                    "vendor_no": row.get("vendor_no"),
+                    "reason": "consigned_in_item_on_ap_or_po",
+                })
+            else:  # consumed / returned
+                evidence.append({
+                    "blocker_code": BLOCKER_CODE_CONS_AP_WRONG_STATE,
+                    "item_no": item_no,
+                    "state": state,
+                    "vendor_no": row.get("vendor_no"),
+                    "reason": "ap_or_po_on_terminal_consignment_state",
+                })
+            continue
+
+        # ── R3 (widened) / R4: Sales side ──────────────────────────────────
+        if is_sales:
+            if state == "consigned_in":
+                evidence.append({
+                    "blocker_code": BLOCKER_CODE_CONS_SO,
+                    "item_no": item_no,
+                    "state": state,
+                    "vendor_no": row.get("vendor_no"),
+                    "reason": "consigned_in_item_on_sales_doc",
+                })
+            else:  # consumed / returned
+                evidence.append({
+                    "blocker_code": BLOCKER_CODE_CONS_SO_POST,
+                    "item_no": item_no,
+                    "state": state,
+                    "vendor_no": row.get("vendor_no"),
+                    "reason": "sales_doc_after_consignment_cycle_ended",
+                })
+            continue
+
+        # ── R5: Adjustment journal, location mismatch ──────────────────────
+        if is_adj:
+            line_loc = str(
+                line.get("location")
+                or line.get("location_code")
+                or doc.get("location")
+                or doc.get("location_code")
+                or ""
+            ).strip()
+            physical_loc = str(row.get("physical_location") or "").strip()
+            if physical_loc and line_loc != physical_loc:
+                evidence.append({
+                    "blocker_code": BLOCKER_CODE_CONS_ADJ_LOC,
+                    "item_no": item_no,
+                    "state": state,
+                    "vendor_no": row.get("vendor_no"),
+                    "location": line_loc or None,
+                    "physical_location": physical_loc or None,
+                    "reason": "adjustment_journal_location_mismatch",
+                })
+
+    return evidence
+
+
+def apply_consignment_blocker_to_readiness(
+    readiness: Dict[str, Any], evidence: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Fold consignment evidence into readiness using existing conventions.
+
+    Each distinct `blocker_code` appears once in `readiness.blocking_reasons`.
+    One explanation line per code category that fired. Structured evidence
+    lives in the new additive field `readiness.consigned_items`.
+    """
+    if not evidence:
+        return readiness
+
+    codes_present = {e["blocker_code"] for e in evidence}
+    blockers = list(readiness.get("blocking_reasons") or [])
+    for code in codes_present:
+        if code not in blockers:
+            blockers.append(code)
+    readiness["blocking_reasons"] = blockers
+
+    explanations = list(readiness.get("explanations") or [])
+
+    msgs = {
+        BLOCKER_CODE_CONS_AP: "CONSIGNMENT BLOCK: AP invoice / PO references item(s) still in consignment (state=consigned_in). Gamer does not own this stock — it must not post as a regular vendor invoice.",
+        BLOCKER_CODE_CONS_AP_WRONG_STATE: "CONSIGNMENT BLOCK: AP invoice references item(s) whose consignment cycle is already consumed or returned. Likely a duplicate or misclassified invoice.",
+        BLOCKER_CODE_CONS_SO: "CONSIGNMENT BLOCK: sales document references item(s) still in consignment (state=consigned_in). Gamer does not own consigned stock and cannot sell it through the standard sales flow.",
+        BLOCKER_CODE_CONS_SO_POST: "CONSIGNMENT BLOCK: sales document references item(s) whose consignment cycle is already consumed or returned. If a new cycle has begun, update the registry explicitly first.",
+        BLOCKER_CODE_CONS_ADJ_LOC: "CONSIGNMENT BLOCK: inventory adjustment journal is targeting a location that does not match the registered physical_location for the consigned item(s).",
+    }
+
+    for code in codes_present:
+        items = ", ".join(sorted({
+            e["item_no"] for e in evidence if e["blocker_code"] == code
+        }))
+        msg = msgs.get(code, code)
+        explanations.append(f"{msg} Item(s): {items}.")
+
+    readiness["explanations"] = explanations
+    readiness["consigned_items"] = evidence
+    return readiness
+
+
+def require_consignment_actor(actor: str) -> None:
+    """Router-facing guard used by POST .../transition."""
+    actor_clean = (actor or "").strip().lower()
+    if actor_clean != CONSIGNMENT_STATE_ACTOR_EMAIL:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Consignment state transitions require actor email "
+                f"{CONSIGNMENT_STATE_ACTOR_EMAIL}. Actor {actor!r} is not authorized."
+            ),
+        )
+

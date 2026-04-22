@@ -74,6 +74,21 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-22 — Lane C Step 2: Vendor Consignment v2.5.32
+- **`consigned_item_registry` collection** — separate from `cp_item_registry`. Schema: `item_no` (unique), `vendor_no`, `physical_location`, `state ∈ {consigned_in, consumed, returned}`, `linked_receipt_ids[]`, `linked_consumption_ids[]`, `linked_return_ids[]` (all append-only), audit fields. Vendor-only consignor per signed Q2.
+- **State machine** — exactly two legal transitions: `consigned_in → consumed` and `consigned_in → returned`. Terminal states; no reopen path. Transition requires `CONSIGNMENT_STATE_ACTOR_EMAIL` (env, default `items@gamerpackaging.com`) + mandatory `evidence_id` appended to the relevant link array.
+- **5 hard-block rules** (all append to `readiness.blocking_reasons`, evidence in new `readiness.consigned_items[]`):
+  - `consigned_item_on_ap_invoice` — AP invoice / PO with a `consigned_in` item
+  - `consigned_item_wrong_state_on_ap` — AP invoice on a `consumed`/`returned` item
+  - `consigned_item_on_sales_doc` — **any** sales doc with a `consigned_in` item (R3 widened per signoff)
+  - `consigned_item_post_lifecycle_on_so` — sales doc on a `consumed`/`returned` item (R4 upgraded from warn per signoff)
+  - `consigned_item_wrong_location_on_adj` — adjustment journal with non-matching `physical_location`
+- **Wire-in** — single `try` block in `services/document_readiness_service.py::evaluate_and_persist`, immediately after the two existing COW blocks. Symmetric structure with idempotent clear on explicit re-eval.
+- **Admin HTTP surface** — new `routers/consigned_item_registry.py` with 4 JWT-gated operations across 3 paths (`GET /api/consigned-items`, `GET /api/consigned-items/{item_no}`, `POST /api/consigned-items`, `POST /api/consigned-items/{item_no}/transition`).
+- **Admin UI** — new `Consigned Items` tab in `SettingsHubPage.js`, component `ConsignedItemRegistryPanel.jsx`. List + vendor/state filters + create modal + per-row Consume/Return buttons (visible only in `consigned_in`). Evidence doc ID required on every transition; terminal-state policy explained in footer.
+- **Tests**: `tests/test_cow_step2_consignment.py` — **27/27 green** (K1–K22 + helpers). Combined Step 1 + Step 2 ownership suite: **55/55**.
+- **Regression**: Lane B-adjacent suite unchanged at 317P / 35F / 14E (normalized diff empty). OpenAPI: exactly +3 paths (862 total), 0 removed.
+
 ### 2026-04-22 — Lane C Step 1 Follow-up: COW SO-side gate + admin UI v2.5.31
 - **SO-side hard block** — new `check_cow_so_uses_base_item` in `workflows/inventory/ownership.py`; fires for `SALES_INVOICE`, `SALES_ORDER`, `SO_CONFIRMATION`, `DS_SALES_ORDER`, `WH_SALES_ORDER`. Wired into `services/document_readiness_service.py::evaluate_and_persist` alongside the Step 1 PO block. Same canonical path, same explicit-reeval semantics, no new schedulers.
 - **Two distinct blocker codes (per amendment):**

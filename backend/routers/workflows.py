@@ -103,6 +103,19 @@ def _deprecate(handler, canonical_path: str, deprecated_path_template: str):
 
     The observability tails are fire-and-forget — they never block the
     response or raise back into the caller.
+
+    OBSERVABILITY LIMITATION (documented per user directive 2026-04-22):
+      Pydantic body validation runs BEFORE this wrapper is reached, so
+      requests with malformed bodies (HTTP 422) are NOT recorded in
+      ``db.deprecation_hits`` and do NOT emit ``[DEPRECATED]`` log lines.
+      This means the counter reflects *valid* Path B requests that
+      reached the deprecated wrapper — not every attempted call.
+      401 (no JWT) and 404 (bad doc_id) DO reach this wrapper and ARE
+      recorded. In practice any real caller sends well-formed bodies,
+      so the blind spot is narrow.
+      A future enhancement could move recording into a starlette
+      middleware keyed on the matched route template BEFORE body
+      parsing — deferred per user directive until after Phase 4.
     """
     from fastapi.responses import JSONResponse
     from fastapi.encoders import jsonable_encoder

@@ -1,0 +1,42 @@
+{
+  "summary": "v2.5.27 verified: phase_4_gate projection on /api/admin/deprecation-metrics + 422 observability blind-spot disclosed in all 3 required places. 7 new tests in test_deprecation_metrics.py PASS. Full regression across 8 suites: 122 passed, 3 skipped (matches expected). Zero new routers/services introduced. Additive-only release.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_deprecation_metrics.py",
+    "/app/test_reports/pytest/iter235_deprecation_metrics.xml",
+    "/app/test_reports/pytest/iter235_full.xml"
+  ],
+  "verification_checklist": {
+    "phase_4_gate_block_shape": "PASS — gate_met(bool), gate_description(str), window_days=7, window_since_day_bucket(date), ap_mutation_routes_monitored(6 items), total_hits_in_window(int), hits_by_template(dict of 6 templates), offending_callers(list), action_if_gate_not_met(str), observability_limitations(3-item list) all present.",
+    "gate_bool_flips_correctly": "PASS — empty hits → gate_met=true, total=0, offenders=[]. Single today hit → gate_met=false, total=1, offender has last_client_host+last_user_agent.",
+    "gate_window_hardcoded_7_days": "PASS — hit 30 days ago does NOT block (gate_met=true). ?days=1 query does NOT shrink gate (still 7-day window, gate_met=false when a hit sits 4 days ago).",
+    "422_disclosure_3_places": "PASS — (a) admin.py observability_limitations[0] literally contains '422' (5 total '422' occurrences in file); (b) routers/workflows.py::_deprecate() docstring lines 107-118 name 'HTTP 422' explicitly; (c) /app/memory/PATH_B_REMOVAL_PLAN.md §2c (line 113) 'Observability limitation — disclosed truthfully' includes the scenario table with 'Malformed body (Pydantic 422)' at line 122.",
+    "admin_auth_enforcement": "PASS — GET without JWT returns 401; days=0 returns 422 (Query ge=1 validator).",
+    "new_pytest_7_cases": "PASS — all 7 tests in tests/test_deprecation_metrics.py green (0.44s).",
+    "no_regression": "PASS — test_ap_path_consolidation.py (36), test_partial_post_detection.py (4), test_auth_enforcement.py (26), test_bc_post_claim.py (18, 3 skipped), test_bc_line_routing.py (10), test_pi_preflight_reconcile.py (16), test_vendor_profile_fallbacks.py (8), test_deprecation_metrics.py (7) → 122 passed, 3 skipped (matches expected).",
+    "convergence_discipline": "PASS — git diff shows only 2 backend file edits (routers/admin.py, routers/workflows.py), 1 new test file, 3 memo updates. Zero new routers, zero new services, zero new endpoints. Phase_4_gate is purely an additive projection on the pre-existing /api/admin/deprecation-metrics response."
+  },
+  "critical_code_review_comments": [
+    "phase_4_gate.gate_met logic is correct and uses a hard-coded 7-day window independent of the caller's days query param — exactly what the user directive requires. The gate is the only signal the user will use for Phase 4 safety so this isolation matters.",
+    "422 blind-spot disclosure is exhaustive and literal — no paraphrasing. Per user directive 'I want truthfulness about that blind spot', this is satisfied.",
+    "Route-totals section still respects the caller's days param for audit/trend analysis while gate window is fixed — clean separation of concerns.",
+    "Minor nit (non-blocking): admin.py L46 has a redundant `from datetime import datetime, timezone, timedelta` inside the function even though datetime/timezone are already imported at module level (L7). Works fine, just style.",
+    "Minor nit (non-blocking): test file fixture _load_env() opens /app/backend/.env directly rather than using python-dotenv — fine because pymongo MONGO_URL is needed in-process, but if .env path ever moves the fixture breaks silently. Acceptable for now."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "n/a (backend-only request)"},
+  "test_credentials": "hub-admin@gamerpackaging.com / ChangeMeOnFirstDeploy-K8p2q (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None by me. The new test fixture `clean_hits_collection` wipes db.deprecation_hits before/after each gate test — does not affect other suites which don't depend on deprecation_hits state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "v2.5.27 shipped cleanly. Phase 4 gate projection is live on GET /api/admin/deprecation-metrics.phase_4_gate. For Phase 4 removal in next release, the 'TestDeprecatedPathBFlagged::test_path_b_still_present' test in test_ap_path_consolidation.py needs to flip to 'test_path_b_removed' asserting /openapi.json no longer contains the 6 AP mutation Path B URLs (see PATH_B_REMOVAL_PLAN.md §2b). Also retry/backoff + posting-attempt history is prioritized over server.py decomposition per user directive.",
+  "rca of the issue": "N/A — no bugs found. All acceptance criteria met."
+}

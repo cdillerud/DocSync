@@ -1,6 +1,67 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-22] v2.5.27 — Phase 4 Gate Projection + 422 Blind-Spot Disclosure
+
+**Scope:** Three user-directed follow-ups on top of v2.5.26:
+1. **Drain-window confirmation** — collapse the "is Phase 4 safe?" check into a single boolean that can be answered with one curl. User's directive: "confirmation during the drain window whether any callers still remain".
+2. **Explicit 422 observability limitation** — disclose the Pydantic-before-wrapper blind spot in three places (response payload, `_deprecate` docstring, removal plan). User's directive: "I want truthfulness about that blind spot".
+3. **Backlog reorder** — retry/backoff and posting-attempt history sit ahead of server decomposition. User's directive: "closer to workflow integrity than server decomposition".
+
+Explicitly **not** done in this release per user directive: no Slack/email deprecation alert (deferred until after Phase 4 removal ships).
+
+### A. Phase 4 gate projection (`routers/admin.py`)
+`GET /api/admin/deprecation-metrics` response now carries a `phase_4_gate` object:
+```json
+{
+  "phase_4_gate": {
+    "gate_met": true,
+    "gate_description": "Zero hits on all six AP mutation Path B templates across 7 consecutive days AND regression suite green.",
+    "window_days": 7,
+    "window_since_day_bucket": "2026-04-15",
+    "ap_mutation_routes_monitored": [ ...6 templates... ],
+    "total_hits_in_window": 0,
+    "hits_by_template": { "...": 0, ... },
+    "offending_callers": [],
+    "action_if_gate_not_met": "Identify caller via last_client_host + last_user_agent, repoint to the canonical Path A URL, then restart the 7-day drain clock.",
+    "observability_limitations": [ ...3 items, first mentions 422... ]
+  }
+}
+```
+
+Properties:
+- The 7-day window is hard-coded inside the endpoint — the caller's `days=N` query param only affects the detailed `route_totals` breakdown, never the gate window. Prevents accidental narrowing.
+- `offending_callers[]` carries `last_client_host` and `last_user_agent` so any outlier is identifiable in one read.
+- `gate_met = True` only when all six templates have zero hits inside the 7-day window.
+
+### B. 422 blind-spot disclosure (in three places)
+Pydantic body validation and HTTP method matching run **before** the `routers/workflows.py::_deprecate()` wrapper. Therefore `db.deprecation_hits` only records Path B requests that pass Pydantic/method validation. HTTP 422 responses (malformed bodies) and 405 responses (wrong method on a registered path) never reach the counter.
+
+Impact in practice: narrow. Real production callers (BC extensions, AL scripts, automated flows, our own frontend) send well-formed bodies; 422s typically originate from ad-hoc human testing. But we say so explicitly rather than let the gate be perceived as a complete census.
+
+Disclosure locations (all added in v2.5.27):
+- `_deprecate()` docstring in `routers/workflows.py`
+- `deprecation_metrics()` docstring in `routers/admin.py`
+- `phase_4_gate.observability_limitations[]` field in the response payload
+- `/app/memory/PATH_B_REMOVAL_PLAN.md` §2c "Observability limitation — disclosed truthfully" (with a table of covered vs uncovered scenarios)
+
+### C. Backlog priority shift (per user directive)
+PRD and Next-Actions list reorder: retry/backoff on BC 429/503 and historical posting-attempts array sit **ahead of** `server.py` decomposition. Both closer to workflow integrity.
+
+### Tests
+- NEW `tests/test_deprecation_metrics.py` — **7/7 passing**:
+  - 401 without JWT (auth regression)
+  - 422 on `days=0` (query validator)
+  - Response shape guarantees (`phase_4_gate` + 422 disclosure literal)
+  - `gate_met=true` on empty collection
+  - `gate_met=false` on a single in-window hit, with caller identification
+  - `gate_met=true` when the only hit is outside the 7-day window
+  - Gate window immune to caller's `days=N` narrowing
+- Full regression: **122 passed, 3 skipped** across all suites.
+
+
+
+
 ## [2026-04-22] v2.5.26 — Path B Observability + Partial-Post Integrity + Phase 4 Plan
 
 **Scope:** Three user-directed deliverables on top of v2.5.25:

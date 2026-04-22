@@ -63,6 +63,13 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
 
 ## Critical Data Rule
+
+### 2026-04-22 — Phase 4 gate projection + 422 disclosure v2.5.27
+- **Phase 4 one-curl gate check:** `GET /api/admin/deprecation-metrics` response now includes a `phase_4_gate` object with `gate_met` boolean, `offending_callers[]` (caller IP + UA), `hits_by_template`, and `action_if_gate_not_met`. The 7-day window is hard-coded so `?days=N` cannot narrow the gate accidentally.
+- **422 blind-spot disclosed in three places:** `_deprecate()` docstring, admin endpoint docstring, `phase_4_gate.observability_limitations[]` field in the payload, plus a dedicated §2c in `PATH_B_REMOVAL_PLAN.md` with a covered-vs-uncovered scenario table. We explicitly say `deprecation_hits` captures valid Path B requests that reach the wrapper — not every malformed attempt.
+- **Backlog reorder:** retry/backoff + posting-attempt history sit ahead of server.py decomposition per workflow-integrity priority.
+- 7 new tests (`test_deprecation_metrics.py`), full regression 122/125 (3 concurrency skips by design).
+
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 ## Completed Features

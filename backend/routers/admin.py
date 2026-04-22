@@ -23,6 +23,25 @@ async def deprecation_metrics(
     received traffic in the lookback window. Used as the gating metric for
     AP_PATH_CONSOLIDATION Phase 4 — removal is safe once the six AP mutation
     routes show zero hits across the required drain window.
+
+    Response also carries a ``phase_4_gate`` projection so a single curl
+    answers "can we ship Phase 4?" with a boolean + reasons, AND an
+    ``observability_limitations`` field that explicitly names the blind
+    spot (see below).
+
+    OBSERVABILITY LIMITATION (documented per user directive 2026-04-22):
+      HTTP 422 body-validation failures are raised by FastAPI/Pydantic
+      BEFORE the ``routers/workflows.py::_deprecate()`` wrapper runs, so
+      malformed requests to Path B are NOT recorded in
+      ``db.deprecation_hits`` and do NOT emit ``[DEPRECATED]`` log lines.
+      This means ``deprecation_hits`` reflects *valid* Path B requests
+      that reached the deprecated wrapper — not every attempted call.
+      In practice any real caller (BC extension, AL script, automated
+      flow, or our own frontend) sends well-formed bodies, so this blind
+      spot is narrow. A future enhancement could move hit recording into
+      a starlette middleware keyed on the matched route template BEFORE
+      body parsing. Not implemented in v2.5.27 per user directive
+      ("finish drain + Phase 4 first, then decide").
     """
     from datetime import datetime, timezone, timedelta
 
@@ -59,12 +78,96 @@ async def deprecation_metrics(
             bucket["last_user_agent"] = row.get("last_user_agent")
             bucket["last_auth_present"] = row.get("last_auth_present")
 
+    route_totals = sorted(totals.values(), key=lambda r: r["total_hits"], reverse=True)
+
+    # ── Phase 4 gate projection ──────────────────────────────────────────
+    # Hard gate per user directive (2026-04-22): the six AP mutation
+    # templates must show zero hits for 7 consecutive days plus a green
+    # regression suite. This projection computes the first half (the hit
+    # count) so one curl answers "gate met?".
+    AP_MUTATION_TEMPLATES = [
+        "/api/workflows/ap_invoice/{doc_id}/set-vendor",
+        "/api/workflows/ap_invoice/{doc_id}/update-fields",
+        "/api/workflows/ap_invoice/{doc_id}/override-bc-validation",
+        "/api/workflows/ap_invoice/{doc_id}/start-approval",
+        "/api/workflows/ap_invoice/{doc_id}/approve",
+        "/api/workflows/ap_invoice/{doc_id}/reject",
+    ]
+    GATE_WINDOW_DAYS = 7
+    gate_cutoff = (
+        datetime.now(timezone.utc) - timedelta(days=GATE_WINDOW_DAYS)
+    ).strftime("%Y-%m-%d")
+
+    # Query the 7-day gate window directly (independent of the caller's
+    # `days` arg, so /deprecation-metrics?days=1 still reports the full
+    # 7-day gate truthfully).
+    gate_rows = await db.deprecation_hits.find(
+        {
+            "day_bucket": {"$gte": gate_cutoff},
+            "deprecated_path": {"$in": AP_MUTATION_TEMPLATES},
+        },
+        {"_id": 0, "deprecated_path": 1, "count": 1, "last_seen_utc": 1,
+         "last_client_host": 1, "last_user_agent": 1, "day_bucket": 1},
+    ).to_list(500)
+
+    hits_by_template: dict = {t: 0 for t in AP_MUTATION_TEMPLATES}
+    offending_callers: list = []
+    for row in gate_rows:
+        hits_by_template[row["deprecated_path"]] = (
+            hits_by_template.get(row["deprecated_path"], 0) + row.get("count", 0)
+        )
+        offending_callers.append({
+            "deprecated_path": row["deprecated_path"],
+            "day_bucket": row.get("day_bucket"),
+            "count": row.get("count", 0),
+            "last_seen_utc": row.get("last_seen_utc"),
+            "last_client_host": row.get("last_client_host"),
+            "last_user_agent": row.get("last_user_agent"),
+        })
+
+    total_hits_in_gate_window = sum(hits_by_template.values())
+    gate_met = total_hits_in_gate_window == 0
+
+    phase_4_gate = {
+        "gate_met": gate_met,
+        "gate_description": (
+            "Zero hits on all six AP mutation Path B templates across "
+            f"{GATE_WINDOW_DAYS} consecutive days AND regression suite green."
+        ),
+        "window_days": GATE_WINDOW_DAYS,
+        "window_since_day_bucket": gate_cutoff,
+        "ap_mutation_routes_monitored": AP_MUTATION_TEMPLATES,
+        "total_hits_in_window": total_hits_in_gate_window,
+        "hits_by_template": hits_by_template,
+        "offending_callers": offending_callers,  # empty when gate_met
+        "action_if_gate_not_met": (
+            "Identify caller via last_client_host + last_user_agent, "
+            "repoint to the canonical Path A URL, then restart the "
+            f"{GATE_WINDOW_DAYS}-day drain clock."
+        ),
+        "observability_limitations": [
+            "HTTP 422 body-validation failures are raised by FastAPI/Pydantic "
+            "BEFORE the _deprecate() wrapper runs, so malformed requests to "
+            "Path B are NOT recorded here. `deprecation_hits` reflects valid "
+            "Path B requests that reached the deprecated wrapper, not every "
+            "attempted call. In practice real callers send well-formed bodies, "
+            "so the blind spot is narrow.",
+            "401 (missing JWT) and 404 (missing doc) DO reach the wrapper and "
+            "are recorded — so callers hitting a deprecated URL without auth "
+            "or against a bad doc_id are still visible.",
+            "The counter is day-bucketed in UTC. A caller that hits the route "
+            "twice in the same UTC day shows as count=2 on one row; across "
+            "two UTC days shows as two rows with count=1 each.",
+        ],
+    }
+
     return {
         "window_days": days,
         "since_day_bucket": cutoff,
         "as_of_utc": datetime.now(timezone.utc).isoformat(),
-        "route_totals": sorted(totals.values(), key=lambda r: r["total_hits"], reverse=True),
+        "route_totals": route_totals,
         "daily_breakdown": raw,
+        "phase_4_gate": phase_4_gate,
     }
 
 

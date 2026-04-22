@@ -58,24 +58,42 @@ Query helpers calling `/workflows/ap_invoice/*` stay — they are read-only, not
 Removal is **only** safe when BOTH are true:
 
 ### 2a. Zero Path B hits for 7 consecutive days
-Query on the production VM:
+
+**One-curl gate check** (v2.5.27+ returns the verdict directly in the response):
 ```bash
 # From /opt/gpi-hub on the remote VM
 TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"<admin>","password":"<pw>"}' | jq -r .token)
 
-curl -s "http://localhost:8080/api/admin/deprecation-metrics?days=7" \
-  -H "Authorization: Bearer $TOKEN" | jq '.route_totals[] |
-    select(.deprecated_path | startswith("/api/workflows/ap_invoice/")) |
-    select(.deprecated_path | endswith("/set-vendor") or endswith("/update-fields")
-        or endswith("/override-bc-validation") or endswith("/start-approval")
-        or endswith("/approve") or endswith("/reject"))'
+curl -s "http://localhost:8080/api/admin/deprecation-metrics" \
+  -H "Authorization: Bearer $TOKEN" | jq '.phase_4_gate'
 ```
 
-Expected output: **empty** (no AP mutation Path B row whose `total_hits > 0` in the window).
+Expected when safe to ship Phase 4:
+```json
+{
+  "gate_met": true,
+  "total_hits_in_window": 0,
+  "offending_callers": [],
+  "hits_by_template": {
+    "/api/workflows/ap_invoice/{doc_id}/set-vendor": 0,
+    "/api/workflows/ap_invoice/{doc_id}/update-fields": 0,
+    ...
+  }
+}
+```
 
-If any row appears, inspect `last_client_host` and `last_user_agent` to identify the offending caller, repoint it to Path A, and restart the 7-day clock.
+If `gate_met: false`, inspect `phase_4_gate.offending_callers[]` — each entry carries `last_client_host` and `last_user_agent` so the offender can be pinpointed. Migrate them to Path A, then restart the 7-day drain clock.
+
+**Detailed route-level view** (optional, for audit / trend analysis):
+```bash
+curl -s "http://localhost:8080/api/admin/deprecation-metrics?days=7" \
+  -H "Authorization: Bearer $TOKEN" | jq '.route_totals[] |
+    select(.deprecated_path | startswith("/api/workflows/ap_invoice/"))'
+```
+
+Expected: **empty** (no AP mutation Path B row whose `total_hits > 0` in the window).
 
 ### 2b. Regression suite green
 Re-run:
@@ -86,10 +104,31 @@ Re-run:
   - `TestPathAAuthEnforcement` → still 12/12
   - `TestPathBDeprecationHeaders` → REMOVED
 - `tests/test_partial_post_detection.py` — 4/4 must still pass
+- `tests/test_deprecation_metrics.py` — gate_met projection tests must still pass
 - `tests/test_auth_enforcement.py`, `test_bc_post_claim.py`, `test_bc_line_routing.py`, `test_pi_preflight_reconcile.py`, `test_vendor_profile_fallbacks.py` — 75/75 must still pass
 
 New smoke:
 - `curl -sI -X POST http://localhost:8080/api/workflows/ap_invoice/any/set-vendor` → HTTP 404 (route gone, not 405)
+
+### 2c. Observability limitation — disclosed truthfully
+
+Per user directive (2026-04-22): **`deprecation_hits` only captures Path B requests that reach the `_deprecate()` wrapper.** Specifically:
+
+| Scenario                                         | Recorded in deprecation_hits? | Shows in phase_4_gate? |
+|--------------------------------------------------|-------------------------------|------------------------|
+| Valid body, valid auth, valid doc_id             | **Yes** (status 200 or 201)   | Yes                    |
+| Valid body, valid auth, bad doc_id               | **Yes** (status 404)          | Yes                    |
+| Valid body, missing/invalid JWT                  | **Yes** (status 401)          | Yes                    |
+| **Malformed body (Pydantic 422)**                | **NO — pre-wrapper failure**  | **NO**                 |
+| Wrong HTTP method (POST-only route hit with GET) | **NO — pre-wrapper failure**  | **NO**                 |
+
+Why: FastAPI/Pydantic runs body validation and method matching BEFORE the wrapper executes. That's a framework-level ordering we accept, not a bug.
+
+Practical impact: narrow. Any real caller (BC extension, AL script, internal frontend, curl-based cron) sends well-formed bodies and matching methods. A 422 on a deprecated URL typically indicates a human ad-hoc test, not production traffic.
+
+If a caller turns out to be emitting 422s repeatedly against Path B (we'd see them in NGINX / ingress logs but not in `deprecation_hits`), escalate before Phase 4 removal and migrate them manually. The gate is still meaningful; it is not a complete census.
+
+Future hardening (not in scope for v2.5.27): move recording into a starlette middleware keyed on the matched route template, BEFORE body parsing. That would catch 422s. Gate is being kept strict for now — per user directive "finish drain + Phase 4 first, then decide".
 
 ---
 
@@ -97,7 +136,7 @@ New smoke:
 
 If any of these is true, **do not** remove; document the blocker in this file and defer one more release:
 
-1. An external BC extension or integration script is still calling Path B (spotted via non-empty `deprecation_hits`). Action: notify owner, migrate them to Path A, restart 7-day clock.
+1. An external BC extension or integration script is still calling Path B (spotted via non-empty `phase_4_gate.offending_callers` OR via NGINX/ingress 422 logs — see §2c). Action: notify owner, migrate them to Path A, restart 7-day clock.
 2. A scheduled batch job inside the repo calls Path B from a code path that isn't exercised by routine traffic. Action: `grep -rn "/api/workflows/ap_invoice/" /app/backend /app/frontend` — should return only the registration file; if it returns a caller, migrate it first.
 3. A test file (other than `test_ap_path_consolidation.py`) hits Path B URLs directly. Action: rewrite it against Path A.
 
@@ -116,23 +155,29 @@ Data impact: none. Both paths write the same `hub_documents` / `vendor_invoice_p
 ## 5. Sequencing
 
 ```
-T+0 days    v2.5.25 ships (this PR)
-T+1..7 days drain window — watch /api/admin/deprecation-metrics daily
-T+7 days    checkpoint: AP mutation route_totals empty for 7d?
+T+0 days    v2.5.25 ships — Path A canonical + Path B deprecated
+            v2.5.26 ships — observability + partial-post integrity
+            v2.5.27 ships — phase_4_gate projection + 422 disclosure
+T+1..7 days drain window — GET /api/admin/deprecation-metrics | jq .phase_4_gate
+T+7 days    checkpoint: gate_met == true?
             YES → proceed to Phase 4 branch
-            NO  → investigate, migrate caller, reset clock
+            NO  → investigate offending_callers, migrate, reset clock
 T+8 days    Phase 4 PR:
               - Delete the 6 _deprecate() registrations
               - Delete start_approval_generic / approve_generic / reject_generic orphans
               - Flip TestDeprecatedPathBFlagged to TestPathBRemoved
               - Update AP_PATH_CONSOLIDATION.md Phase 4 status
-T+8..9 days Ship Phase 4, verify deprecation_hits stays empty (no 404 spike)
+T+8..9 days Ship Phase 4, verify no 404 spike (no new caller broken)
 T+14 days   If clean, delete the _deprecate/_record_deprecation_hit helpers
+            (leave db.deprecation_hits collection + admin endpoint in place —
+            generic, reusable for any future deprecation)
 ```
 
 ---
 
 ## 6. Open questions for the user (before Phase 4 merge)
 
-- Any external system (Power Automate flow, BC AL extension, custom script) that still calls `/api/workflows/ap_invoice/*`? If so, give us its `User-Agent` / host so we can cross-check against `deprecation_hits.last_user_agent`.
+- Any external system (Power Automate flow, BC AL extension, custom script) that still calls `/api/workflows/ap_invoice/*`? If so, give us its `User-Agent` / host so we can cross-check against `phase_4_gate.offending_callers[].last_user_agent`.
 - OK with permanent keep of `/api/admin/deprecation-metrics` and the `deprecation_hits` collection? (Recommended: yes — generic, cheap, reusable.)
+- Want NGINX/ingress 422 log sampling added before Phase 4 to close the disclosed blind spot in §2c? (Recommended: no, per your directive "finish drain + Phase 4 first, then decide".)
+

@@ -74,6 +74,14 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-22 — Blocker-Code Rendering Tidy v2.5.34
+- **New shared util** `frontend/src/lib/blockerLabels.js` — `BLOCKER_LABELS` map + `labelForBlocker(code)` function. Covers all 8 Lane C COW/consignment codes + 6 common pre-Lane-C codes. Unknown codes gracefully fall through to the existing snake→Title Case behavior — zero risk of "???".
+- **6 call sites swapped** across 3 files: `DashboardPage.js` (failure-reasons chart label + top-blockers + top-warnings), `DocumentDetailPage.js` (plain blocking_reasons + warning_reasons lists below the ownership evidence panel), `AutomationMetricsCard.js` (blocking + warning lines).
+- **Wording tweak per signoff:** `consigned_item_post_lifecycle_on_so` → "Consigned item on Sales after lifecycle closed".
+- **Zero backend changes, zero new endpoints, zero data mutations.** Raw blocker codes remain unchanged in `readiness.blocking_reasons[]` / `top_blocking_reasons[]` payloads — display-layer only.
+- **Verification** — 0 lint issues across 4 touched files; Lane B regression unchanged at 317P/35F/14E; COW+consignment 55/55 unchanged; OpenAPI path set byte-identical at 862; screenshot smoke confirmed all mapped codes render with human labels, unmapped code falls through correctly.
+- **Deferred**: `BCResolutionWidget.js` line 178 renders BC resolution miss-reasons from a *different* taxonomy (`missReasons`, not readiness blockers) — not in scope; flagged for a future BC-telemetry pass.
+
 ### 2026-04-22 — Reviewer UI Polish: Ownership Evidence Panel v2.5.33
 - **New component** `frontend/src/components/OwnershipEvidencePanel.jsx` — structured renderer for `readiness.cow_items[]`, `readiness.cow_so_items[]`, and `readiness.consigned_items[]`. Three guarded sections, each shown only when its array is non-empty. Zero visual impact on docs without ownership evidence.
 - **Integration** — inserted into `pages/DocumentDetailPage.js` inside the existing Readiness card, after Warnings. Reads the payload that `GET /api/documents/{doc_id}` already returns — **zero backend changes, zero new fetches, zero new endpoints**.

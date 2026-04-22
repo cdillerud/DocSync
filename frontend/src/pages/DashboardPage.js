@@ -17,6 +17,7 @@ import {
   Gauge, ShieldAlert, Eye, Ban, HelpCircle, Calendar, Inbox, Mail, Archive, Loader2
 } from 'lucide-react';
 import AutomationMetricsCard from '../components/AutomationMetricsCard';
+import { labelForBlocker } from '../lib/blockerLabels';
 import BCResolutionWidget from '../components/BCResolutionWidget';
 import DocTypeDashboardPage from './DocTypeDashboardPage';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LineChart, Line, PieChart as RechartsPieChart, Pie, Legend } from 'recharts';
@@ -330,7 +331,7 @@ function ValidationMetricsCard({ data }) {
 
   const failureData = Object.entries(data.failure_reasons || {})
     .map(([reason, count]) => ({
-      name: reason.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      name: labelForBlocker(reason),
       value: count
     }))
     .sort((a, b) => b.value - a.value)
@@ -920,7 +921,7 @@ function ReadinessSummaryCard({ data }) {
               <div className="space-y-1">
                 {topBlockers.map((b) => (
                   <div key={b.reason} className="flex items-center justify-between text-xs">
-                    <span className="truncate text-muted-foreground">{b.reason.replace(/_/g, ' ')}</span>
+                    <span className="truncate text-muted-foreground">{labelForBlocker(b.reason)}</span>
                     <Badge variant="destructive" className="text-[10px] h-4 px-1.5">{b.count}</Badge>
                   </div>
                 ))}
@@ -935,7 +936,7 @@ function ReadinessSummaryCard({ data }) {
               <div className="space-y-1">
                 {topWarnings.map((w) => (
                   <div key={w.reason} className="flex items-center justify-between text-xs">
-                    <span className="truncate text-muted-foreground">{w.reason.replace(/_/g, ' ')}</span>
+                    <span className="truncate text-muted-foreground">{labelForBlocker(w.reason)}</span>
                     <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{w.count}</Badge>
                   </div>
                 ))}

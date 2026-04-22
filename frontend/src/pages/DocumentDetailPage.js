@@ -19,6 +19,7 @@ import {
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import OwnershipEvidencePanel from '../components/OwnershipEvidencePanel';
+import { labelForBlocker } from '../lib/blockerLabels';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import SplitPreviewPanel from '../components/SplitPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
@@ -245,7 +246,7 @@ function ReadinessPanel({ readiness, docStatus }) {
             {readiness.blocking_reasons.map((r, i) => (
               <div key={i} className="flex items-start gap-1.5 text-xs text-red-600 dark:text-red-400">
                 <XCircle className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>{r.replace(/_/g, ' ')}</span>
+                <span>{labelForBlocker(r)}</span>
               </div>
             ))}
           </div>
@@ -258,7 +259,7 @@ function ReadinessPanel({ readiness, docStatus }) {
             {readiness.warning_reasons.map((r, i) => (
               <div key={i} className="flex items-start gap-1.5 text-xs text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="w-3 h-3 mt-0.5 shrink-0" />
-                <span>{r.replace(/_/g, ' ')}</span>
+                <span>{labelForBlocker(r)}</span>
               </div>
             ))}
           </div>

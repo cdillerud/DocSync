@@ -9,6 +9,7 @@ import { Badge } from '../components/ui/badge';
 import {
   Brain, Zap, Eye, Ban, TrendingUp, Target, BarChart3, Loader2
 } from 'lucide-react';
+import { labelForBlocker } from '../lib/blockerLabels';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
@@ -174,7 +175,7 @@ export default function AutomationMetricsCard() {
               <div className="space-y-0.5">
                 {topReview.map(r => (
                   <div key={r.reason} className="flex items-center justify-between text-xs">
-                    <span className="truncate text-muted-foreground">{r.reason.replace(/_/g, ' ')}</span>
+                    <span className="truncate text-muted-foreground">{labelForBlocker(r.reason)}</span>
                     <Badge variant="secondary" className="text-[10px] h-4 px-1.5">{r.count}</Badge>
                   </div>
                 ))}
@@ -189,7 +190,7 @@ export default function AutomationMetricsCard() {
               <div className="space-y-0.5">
                 {topBlocking.map(r => (
                   <div key={r.reason} className="flex items-center justify-between text-xs">
-                    <span className="truncate text-muted-foreground">{r.reason.replace(/_/g, ' ')}</span>
+                    <span className="truncate text-muted-foreground">{labelForBlocker(r.reason)}</span>
                     <Badge variant="destructive" className="text-[10px] h-4 px-1.5">{r.count}</Badge>
                   </div>
                 ))}

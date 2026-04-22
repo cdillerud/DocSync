@@ -54,6 +54,12 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 
 
+### 2026-04-22 — Deprecation observability + Partial-post integrity v2.5.26
+- **Server-side observability of Path B hits:** every `/api/workflows/ap_invoice/{id}/{action}` call emits a `WARNING` log and increments a template-keyed counter in `db.deprecation_hits`. New admin endpoint `GET /api/admin/deprecation-metrics?days=N` aggregates hit counts — used as the hard gate before Phase 4 route removal.
+- **Partial-post integrity (auto-post path):** `routers/gpi_integration.py::create_purchase_invoice_from_document` now mirrors `business_central_service` partial-post detection. Header-accepted + lines-rejected flips `success=False`, attempts orphan-draft deletion, and blocks `ap_auto_post_service` from writing `bc_posting_status="posted"`. Financial-integrity leak closed; 4/4 integration tests green.
+- **Phase 4 removal plan:** `/app/memory/PATH_B_REMOVAL_PLAN.md` locks the symbols to delete, the hard metric gate (zero hits for 7 days), the rollback path, and the sequence.
+
+
 - `/app/frontend/src/pages/MonitoringDashboard.js` — Vendor mapping UI
 
 ## Critical Data Rule

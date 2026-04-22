@@ -12,6 +12,62 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+@router.get("/deprecation-metrics")
+async def deprecation_metrics(
+    days: int = Query(14, ge=1, le=180, description="Lookback window in days (UTC day buckets)"),
+    _user: dict = Depends(require_admin),
+):
+    """Observability for deprecated-route usage. ADMIN ONLY.
+
+    Returns day-bucketed hit counts for every deprecated route that has
+    received traffic in the lookback window. Used as the gating metric for
+    AP_PATH_CONSOLIDATION Phase 4 — removal is safe once the six AP mutation
+    routes show zero hits across the required drain window.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    db = get_db()
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    raw = await db.deprecation_hits.find(
+        {"day_bucket": {"$gte": cutoff}},
+        {"_id": 0},
+    ).sort([("deprecated_path", 1), ("day_bucket", 1)]).to_list(5000)
+
+    # Aggregate totals per route.
+    totals: dict = {}
+    for row in raw:
+        key = f"{row['method']} {row['deprecated_path']}"
+        bucket = totals.setdefault(key, {
+            "method": row["method"],
+            "deprecated_path": row["deprecated_path"],
+            "canonical_path": row.get("canonical_path"),
+            "total_hits": 0,
+            "days_with_traffic": 0,
+            "last_seen_utc": None,
+            "last_status": None,
+            "last_client_host": None,
+            "last_user_agent": None,
+            "last_auth_present": None,
+        })
+        bucket["total_hits"] += row.get("count", 0)
+        bucket["days_with_traffic"] += 1
+        if not bucket["last_seen_utc"] or row.get("last_seen_utc", "") > bucket["last_seen_utc"]:
+            bucket["last_seen_utc"] = row.get("last_seen_utc")
+            bucket["last_status"] = row.get("last_status")
+            bucket["last_client_host"] = row.get("last_client_host")
+            bucket["last_user_agent"] = row.get("last_user_agent")
+            bucket["last_auth_present"] = row.get("last_auth_present")
+
+    return {
+        "window_days": days,
+        "since_day_bucket": cutoff,
+        "as_of_utc": datetime.now(timezone.utc).isoformat(),
+        "route_totals": sorted(totals.values(), key=lambda r: r["total_hits"], reverse=True),
+        "daily_breakdown": raw,
+    }
+
+
 @router.post("/backfill-ap-mailbox")
 async def backfill_ap_mailbox(
     background_tasks: BackgroundTasks,

@@ -1,0 +1,44 @@
+{
+  "summary": "v2.5.26 backend validation — Path B observability (logs + template-keyed counter), admin metrics endpoint, partial-post detection (BC service + auto-post path + true E2E financial-integrity), full regression. All 8 review-request bullets PASS. 115 passed, 3 skipped (concurrency tests skipped by design) — exact expected count.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/admin/deprecation-metrics?days=0", "issue": "days=0 returns a non-200 / error payload (KeyError 'route_totals' when parsed). Likely intentional (window must be >=1) but no documented behavior. Cosmetic."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_partial_post_detection.py",
+    "/app/backend/tests/test_ap_path_consolidation.py",
+    "/app/test_reports/pytest/iteration_234_full.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Pydantic body validation runs BEFORE the _deprecate() wrapper, so requests with malformed bodies (HTTP 422) are NOT recorded in deprecation_hits and do NOT emit [DEPRECATED] WARNING log lines. In practice this is fine — real Path B callers send valid bodies — but if the user wants 100% visibility into deprecated-route discovery (incl. broken clients), consider moving the deprecation hit recorder to a middleware layer keyed on the route TEMPLATE before request body parsing. Not blocking for v2.5.26.",
+    "Phase 4 plan artifact /app/memory/PATH_B_REMOVAL_PLAN.md is complete and concrete: enumerates the 6 routes to delete, the 3 orphan server.py functions (start_approval_generic / approve_generic / reject_generic, lines L6590-6760), the 7-day zero-hits gate measured via /api/admin/deprecation-metrics, rollback procedure (single-commit revert), and sequencing timeline (T+0 ship → T+7 checkpoint → T+8 Phase 4 PR → T+14 helper deletion). Meets all four user directives."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "not tested (backend-only review)"},
+  "test_credentials": "hub-admin@gamerpackaging.com / ChangeMeOnFirstDeploy-K8p2q (login verified — JWT 281 chars issued; /api/admin/deprecation-metrics 401 without JWT, 200 with JWT)",
+  "seed_data_creation": "None. Used throwaway doc_ids (smk-1..smk-5, doc-A/B/C, smoke-*). deprecation_hits collection wiped before and after to keep counts clean.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "v2.5.26 is GREEN. Path B observability live: every wrapper-reaching POST to /api/workflows/ap_invoice/{id}/{set-vendor|update-fields|override-bc-validation|start-approval|approve|reject} emits a 'routers.workflows - WARNING - [DEPRECATED] METHOD PATH -> canonical CANONICAL_PATH status=N client=IP auth=BOOL ua=UA' line and increments db.deprecation_hits keyed by route TEMPLATE (not substituted URL). Aggregation verified: 3x /approve with doc-A/doc-B/doc-C produced one row with total_hits=3, last_instance_path tracked separately in daily_breakdown. /api/admin/deprecation-metrics: 401 anon, 200 with admin JWT, returns {window_days, since_day_bucket, as_of_utc, route_totals[], daily_breakdown[]}. days=N query param honored (days=7 → since 2026-04-15; days=1 → today only). Note for next iteration: Pydantic 422 hits are NOT recorded (body parse failure short-circuits before wrapper) — this is acceptable per current scope but flagged as a potential observability gap for production use cases involving malformed clients. Phase 4 removal plan exists, gated on 7-day zero-hits window measured via the metrics endpoint.",
+  "validated_review_bullets": {
+    "1_path_b_warning_log_lines": "PASS — backend.err.log shows '[DEPRECATED] POST <path> -> canonical <canonical> status=N client=IP auth=BOOL ua=UA' for every wrapper-reaching hit (verified 14 lines incl. test suite + smoke curls).",
+    "2_template_keyed_counter_aggregation": "PASS — 3x POST to /api/workflows/ap_invoice/{doc-A,doc-B,doc-C}/approve produced ONE deprecation_hits row with deprecated_path='/api/workflows/ap_invoice/{doc_id}/approve' and total_hits=3.",
+    "3_admin_metrics_auth_and_template_coverage": "PASS — 401 without JWT, 200 with admin JWT, all 6 AP mutation templates visible in route_totals after one valid-body hit each, days=7 / days=1 windows honored.",
+    "4_bc_service_partial_post_detection": "PASS — test_bc_service_header_accepted_lines_rejected_returns_partial_post + test_bc_service_all_lines_accepted_returns_success both green.",
+    "5_auto_post_partial_post_flips_success_false": "PASS — test_auto_post_path_detects_partial_post_and_flips_success_false green; bc_purchase_invoice.success=False, lines_added=0, lines_total=2, error_message starts with 'partial_post:'.",
+    "6_e2e_financial_integrity": "PASS — test_ap_auto_post_service_does_not_mark_posted_on_partial_post green; on partial-post, attempt_ap_auto_post NEVER writes bc_posting_status='posted', workflow_status='posted', or status='Posted'; result.posted is not True.",
+    "7_full_regression": "PASS — 115 passed, 3 skipped (concurrency tests skipped by design). Exact expected count from review request.",
+    "8_phase_4_plan_artifact": "PASS — /app/memory/PATH_B_REMOVAL_PLAN.md present, enumerates 6 deprecated routes, 3 orphan functions in server.py (lines 6590-6760), 7-day zero-hits gate via /api/admin/deprecation-metrics, rollback procedure (single revert commit), and T+0..T+14 sequencing timeline."
+  },
+  "test_run_summary": {
+    "test_partial_post_detection.py": "4 passed / 0 failed",
+    "test_ap_path_consolidation.py": "32 passed / 0 failed (header-tests changed wording vs the 36 reported earlier — current suite has 32 cases, all green)",
+    "test_auth_enforcement.py + test_bc_post_claim.py + test_bc_line_routing.py + test_pi_preflight_reconcile.py + test_vendor_profile_fallbacks.py": "79 passed / 3 skipped (concurrency)",
+    "grand_total": "115 passed / 3 skipped / 0 failed"
+  },
+  "rca of the issue": "N/A — no defects found in the v2.5.26 surface. Only one minor cosmetic observation: HTTP 422 (Pydantic body-validation) hits are not recorded by the deprecation wrapper because FastAPI runs body validation before the route handler executes. This is a non-blocker for v2.5.26 as documented above."
+}

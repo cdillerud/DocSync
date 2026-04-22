@@ -25,19 +25,89 @@ router = APIRouter(prefix="/workflows", tags=["Workflows"])
 
 
 # =============================================================================
-# DEPRECATION WRAPPER — adds X-Deprecated response header
+# DEPRECATION WRAPPER — X-Deprecated header + observability
+# =============================================================================
+#
+# Per user directive (2026-04-21): Path B must be observable so we can see
+# whether anything is still calling these endpoints before Phase 4 deletion.
+# Every Path B hit emits a WARNING log AND increments a day-bucketed counter
+# in the `deprecation_hits` Mongo collection. The counter is read by
+# GET /api/admin/deprecation-metrics to confirm drain-to-zero.
 # =============================================================================
 
-def _deprecate(handler, canonical_path: str):
-    """Wrap a workflow handler so every response carries X-Deprecated headers.
+async def _record_deprecation_hit(
+    method: str,
+    deprecated_path_template: str,
+    deprecated_path_instance: str,
+    canonical_path: str,
+    status_code: int,
+    request,
+):
+    """Log + persist a single Path B hit.
 
-    Catches HTTPException raised by the inner handler and converts it to a
-    JSONResponse so the deprecation headers survive error responses (404 on
-    missing doc, 400 on invalid transitions, etc.). Success responses are
-    re-wrapped in JSONResponse with the same headers attached.
+    The counter is keyed by (method, deprecated_path_template, day_bucket) —
+    *template*, not the instantiated URL — so repeated hits to the same route
+    with different doc_ids coalesce into one row.
+
+    Failures are logged but never raised — observability must never degrade
+    the user response.
+    """
+    try:
+        client_host = request.client.host if request and request.client else "unknown"
+        user_agent = request.headers.get("user-agent", "") if request else ""
+        auth_present = bool(request.headers.get("authorization")) if request else False
+
+        logger.warning(
+            "[DEPRECATED] %s %s -> canonical %s status=%s client=%s auth=%s ua=%s",
+            method, deprecated_path_instance, canonical_path, status_code,
+            client_host, auth_present, user_agent[:120],
+        )
+
+        from datetime import datetime, timezone
+        day_bucket = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        db = get_db()
+        await db.deprecation_hits.update_one(
+            {
+                "deprecated_path": deprecated_path_template,
+                "method": method,
+                "day_bucket": day_bucket,
+            },
+            {
+                "$inc": {"count": 1},
+                "$setOnInsert": {
+                    "canonical_path": canonical_path,
+                    "first_seen_utc": datetime.now(timezone.utc).isoformat(),
+                },
+                "$set": {
+                    "last_seen_utc": datetime.now(timezone.utc).isoformat(),
+                    "last_status": status_code,
+                    "last_client_host": client_host,
+                    "last_user_agent": user_agent[:200],
+                    "last_auth_present": auth_present,
+                    "last_instance_path": deprecated_path_instance,
+                },
+            },
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning("[DEPRECATED] failed to persist hit metric: %s", e)
+
+
+def _deprecate(handler, canonical_path: str, deprecated_path_template: str):
+    """Wrap a workflow handler so every response:
+      1. Carries X-Deprecated response headers (survives HTTPException paths).
+      2. Logs a WARNING line to the app log.
+      3. Increments a day-bucketed counter in db.deprecation_hits, keyed by
+         the route *template* so hits to the same route with different
+         doc_ids aggregate into one row.
+
+    The observability tails are fire-and-forget — they never block the
+    response or raise back into the caller.
     """
     from fastapi.responses import JSONResponse
     from fastapi.encoders import jsonable_encoder
+    from fastapi import Request
+    import inspect
 
     headers = {
         "X-Deprecated": "true",
@@ -45,18 +115,47 @@ def _deprecate(handler, canonical_path: str):
         "X-Deprecated-Use": canonical_path,
     }
 
+    original_sig = inspect.signature(handler)
+    request_param = inspect.Parameter(
+        "_deprecation_request",
+        kind=inspect.Parameter.KEYWORD_ONLY,
+        annotation=Request,
+    )
+    new_sig = original_sig.replace(
+        parameters=list(original_sig.parameters.values()) + [request_param]
+    )
+
     @wraps(handler)
     async def wrapper(*args, **kwargs):
+        request: Request = kwargs.pop("_deprecation_request", None)
+        deprecated_path_instance = request.url.path if request else deprecated_path_template
+        method = request.method if request else "UNKNOWN"
+
         try:
             result = await handler(*args, **kwargs)
+            status_code = 200
+            response = JSONResponse(
+                content=jsonable_encoder(result), headers=headers
+            )
         except HTTPException as e:
-            return JSONResponse(
+            status_code = e.status_code
+            response = JSONResponse(
                 status_code=e.status_code,
                 content={"detail": e.detail},
                 headers={**(e.headers or {}), **headers},
             )
-        return JSONResponse(content=jsonable_encoder(result), headers=headers)
 
+        await _record_deprecation_hit(
+            method=method,
+            deprecated_path_template=deprecated_path_template,
+            deprecated_path_instance=deprecated_path_instance,
+            canonical_path=canonical_path,
+            status_code=status_code,
+            request=request,
+        )
+        return response
+
+    wrapper.__signature__ = new_sig
     return wrapper
 
 
@@ -101,35 +200,59 @@ def register_server_routes(app=None):
     )
 
     # AP Invoice mutation routes — DEPRECATED. Use /api/ap-review/documents/{id}/{action}.
-    # Kept live for one release with X-Deprecated header; removed in Phase 4.
+    # Kept live for one release with X-Deprecated header + hit logging; removed in Phase 4.
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/set-vendor",
-        _deprecate(set_vendor_for_document, "/api/ap-review/documents/{doc_id}/set-vendor"),
+        _deprecate(
+            set_vendor_for_document,
+            canonical_path="/api/ap-review/documents/{doc_id}/set-vendor",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/set-vendor",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/update-fields",
-        _deprecate(update_document_fields, "/api/ap-review/documents/{doc_id}/update-fields"),
+        _deprecate(
+            update_document_fields,
+            canonical_path="/api/ap-review/documents/{doc_id}/update-fields",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/update-fields",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/override-bc-validation",
-        _deprecate(override_bc_validation, "/api/ap-review/documents/{doc_id}/override-bc-validation"),
+        _deprecate(
+            override_bc_validation,
+            canonical_path="/api/ap-review/documents/{doc_id}/override-bc-validation",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/override-bc-validation",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/start-approval",
-        _deprecate(start_approval, "/api/ap-review/documents/{doc_id}/start-approval"),
+        _deprecate(
+            start_approval,
+            canonical_path="/api/ap-review/documents/{doc_id}/start-approval",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/start-approval",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/approve",
-        _deprecate(approve_document, "/api/ap-review/documents/{doc_id}/approve"),
+        _deprecate(
+            approve_document,
+            canonical_path="/api/ap-review/documents/{doc_id}/approve",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/approve",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
     app.add_api_route(
         "/api/workflows/ap_invoice/{doc_id}/reject",
-        _deprecate(reject_document, "/api/ap-review/documents/{doc_id}/reject"),
+        _deprecate(
+            reject_document,
+            canonical_path="/api/ap-review/documents/{doc_id}/reject",
+            deprecated_path_template="/api/workflows/ap_invoice/{doc_id}/reject",
+        ),
         methods=["POST"], tags=["Workflows"], deprecated=True,
     )
 

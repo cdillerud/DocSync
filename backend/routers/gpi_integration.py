@@ -2202,6 +2202,60 @@ async def create_purchase_invoice_from_document(
                 logger.error("Failed to add lines to PI %s from doc %s: %s", result.get("bc_record_no"), doc_id, str(e))
                 line_results = {"added": 0, "total": len(bc_lines), "errors": [{"error": str(e)}]}
 
+        # ── PARTIAL-POST DETECTION (auto-post path) ────────────────────────
+        # Financial-integrity gate: if BC accepted the header but rejected
+        # (or failed to receive) any line, the invoice is an orphaned empty
+        # draft. Refusing to mark the doc "posted" is the whole point — a
+        # silent success here would cause the reviewer to believe the
+        # invoice is in BC when it is not. Mirrors the detection in
+        # services/business_central_service.create_purchase_invoice so both
+        # BC write entry points share the same failure contract.
+        if line_results is not None:
+            lines_total = line_results.get("total", 0)
+            lines_added = line_results.get("added", 0)
+            if lines_total > 0 and lines_added < lines_total:
+                partial_msg = (
+                    f"BC header created (record_no={result.get('bc_record_no')}, "
+                    f"system_id={result.get('bc_system_id')}) but only "
+                    f"{lines_added}/{lines_total} lines were accepted. "
+                    f"Draft header is orphaned in BC and must be deleted or "
+                    f"completed manually. Line errors: {line_results.get('errors', [])}"
+                )
+                logger.error(
+                    "[PI-PartialPost] Auto-post path detected partial success for doc %s: %s",
+                    doc_id, partial_msg,
+                )
+                # Best-effort delete of the orphan draft via bc_service.
+                try:
+                    from services.business_central_service import (
+                        get_bc_service, BC_WRITE_ENVIRONMENT, get_bc_token,
+                    )
+                    bc_svc = get_bc_service()
+                    bc_token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+                    bc_company_id = await bc_svc._get_company_id(
+                        environment=BC_WRITE_ENVIRONMENT
+                    )
+                    orphan_status = await bc_svc._try_delete_draft_invoice(
+                        result["bc_system_id"], bc_token, bc_company_id
+                    )
+                except Exception as del_err:
+                    orphan_status = f"exception: {del_err}"
+                    logger.warning("[PI-PartialPost] orphan delete failed for doc %s: %s", doc_id, del_err)
+
+                # Flip the result contract so downstream auto-post logic
+                # does NOT mark the document 'posted'.
+                result = {
+                    **result,
+                    "success": False,
+                    "error_message": f"partial_post: {partial_msg}",
+                    "error": "partial_post",
+                    "partial_post": True,
+                    "orphan_header_deletion": orphan_status,
+                    "linesAdded": lines_added,
+                    "linesTotal": lines_total,
+                    "lineErrors": line_results.get("errors", []),
+                }
+
     # Step 3: Create GPI Document Link in BC (populates the GPI Documents factbox)
     link_result = None
     if result.get("success") and result.get("bc_system_id"):

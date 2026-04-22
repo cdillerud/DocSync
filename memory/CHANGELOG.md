@@ -1,6 +1,54 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-22] v2.5.26 — Path B Observability + Partial-Post Integrity + Phase 4 Plan
+
+**Scope:** Three user-directed deliverables on top of v2.5.25:
+1. Server-side observability for deprecated Path B hits (directive: "do not add client-side console warning; add logging/metrics").
+2. End-to-end partial-post integrity on the auto-post path (directive: "partial-post detection is a financial-integrity concern and matters more than decomposition").
+3. Concrete, measurable Phase 4 removal plan for Path B (directive: "temporary deprecations must not become permanent drift").
+
+### A. Path B observability (`routers/workflows.py`, `routers/admin.py`)
+- `_deprecate()` wrapper extended to:
+  - Log a `WARNING` line on every Path B hit: `[DEPRECATED] METHOD /path -> canonical /path status=N client=IP auth=BOOL ua=STRING`.
+  - `$inc` a counter in `db.deprecation_hits`, **keyed by route template** `(method, deprecated_path_template, day_bucket)` so hits with different `doc_id` substitutions collapse into one row.
+  - Fire-and-forget on persistence failure — never block the caller's response.
+- New endpoint `GET /api/admin/deprecation-metrics?days=N` (admin-gated via `require_admin`): returns route totals + daily breakdown, sorted by hit count desc. Used as the hard gating signal before Phase 4 removal.
+- Headers (`X-Deprecated`, `X-Deprecated-Sunset`, `X-Deprecated-Use`) still attached to every response including HTTPException paths.
+
+### B. Partial-post integrity on the auto-post path (`routers/gpi_integration.py`)
+**Pre-existing silent bug found and fixed:**
+- `create_purchase_invoice_from_document` (called from `ap_auto_post_service.attempt_ap_auto_post`) previously based `result["success"]` solely on BC *header* creation. If `add_purchase_invoice_lines` returned `added=0, total=N>0`, the doc was marked `bc_posting_status="posted"` and `workflow_status="posted"` while BC held only an orphan empty draft.
+- Now mirrors the detection already in `services/business_central_service.create_purchase_invoice`:
+  - Detects `lines_added < lines_total`.
+  - Best-effort delete of the orphan draft header via `bc_service._try_delete_draft_invoice`.
+  - Flips the returned dict to `success=False, error="partial_post", partial_post=True, error_message="partial_post: ..."`.
+  - Hub doc write-back records `bc_purchase_invoice.success=False, lines_added, lines_total, error_message`, so downstream auto-post falls through to the failure branch (`bc_posting_status="pending_retry"`, NOT `"posted"`).
+- Single failure contract shared between both BC write entry points (manual `POST /api/ap-review/documents/{id}/post-to-bc` and auto-post via `ap_auto_post_service`).
+
+### C. Phase 4 removal plan (`/app/memory/PATH_B_REMOVAL_PLAN.md`)
+Measurable gating criterion, exact symbols/routes to delete, rollback path, and sequencing:
+- Exact six Path B AP mutation registrations to delete in `routers/workflows.py`.
+- Three dead orphan functions in `server.py` L6590–6760 (`start_approval_generic`, `approve_generic`, `reject_generic`) queued for deletion (confirmed no callers via grep).
+- Hard gate: zero hits on all six AP mutation templates in `/api/admin/deprecation-metrics?days=7` for 7 consecutive days, AND full pytest suite green.
+- Rollback: pure subtraction, revertable by re-adding six `add_api_route` calls.
+
+### Tests
+- `tests/test_partial_post_detection.py` (new) — **4/4 passing**:
+  - `bc_service` flips success=False when lines rejected (patched httpx).
+  - `bc_service` keeps success=True when all lines accepted.
+  - Auto-post path `create_purchase_invoice_from_document` flips success=False + records partial truth in hub doc.
+  - `ap_auto_post_service.attempt_ap_auto_post` never writes `bc_posting_status="posted"` / `workflow_status="posted"` on partial post (true end-to-end proof).
+- Full regression green: 115 passed, 3 skipped across `test_auth_enforcement`, `test_bc_post_claim`, `test_bc_line_routing`, `test_pi_preflight_reconcile`, `test_vendor_profile_fallbacks`, `test_ap_path_consolidation` (36), `test_partial_post_detection` (4).
+
+### What did NOT happen (intentionally)
+- No client-side console warning added (user directive). Observability is entirely server-side via logs + Mongo counter + admin metrics endpoint.
+- No changes to Path A routes or frontend `lib/api.js` — still pointing at canonical surface as shipped in v2.5.25.
+- No deletion of Path B routes in this release — that is the explicit Phase 4 action gated by the drain metric.
+
+
+
+
 ## [2026-04-21] v2.5.25 — AP Path Consolidation (Phases 2 + 3)
 
 **Scope:** Completes AP_PATH_CONSOLIDATION.md Phases 2 and 3. Eliminates the dual AP workflow paths documented in the 2026-04-21 engineering review (Finding #8). Pure backend/frontend hygiene — no user-facing behavior change.

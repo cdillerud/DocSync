@@ -74,6 +74,25 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-22 — Lane C Step 1: Customer-Owned Ware v2.5.30
+- **CP-item registry** — new MongoDB collection `cp_item_registry` with unique `item_no` index + `{customer_no, status}` compound index. Signed §4b schema: item_no, customer_no, base_item_no, canonical_location, linked_invoice_ids[] (append-only), status (active|retired), audit fields. Never programmatically retired — only `items@gamerpackaging.com` (env-configurable via `COW_RETIREMENT_ACTOR_EMAIL`) can flip status.
+- **Ownership module** (`workflows/inventory/ownership.py`) — single source of truth for item ownership classification (`classify_item_ownership` returns `gamer | customer_owned_active | customer_owned_retired | unknown_cp_pattern`), CRUD helpers, CP-pattern regex `.*-CP[A-Z0-9]+$`, and the hard-block check `check_cow_item_on_po(doc)`.
+- **Hard-block enforcement** — wired into the canonical readiness path (`services/document_readiness_service.py::evaluate_and_persist`). Block logic: active-registered CP item on PO → block; unknown-CP-pattern on PO → block; retired CP on PO → allow; inventory adjustment journal into `canonical_location` with positive qty → allow (signed §4b carve-out); adjustment journal into any other location → block. Writes `"cow_item_on_po"` to `readiness.blocking_reasons`, detail to `readiness.explanations`, structured evidence to `readiness.cow_items[]` (additive field).
+- **Admin HTTP surface** — `routers/cp_item_registry.py` (3 paths / 4 operations): `GET /api/cp-items`, `GET /api/cp-items/{item_no}`, `POST /api/cp-items` (upsert), `POST /api/cp-items/{item_no}/retire`. All JWT-gated; retire also guards on actor email.
+- **Test matrix** — `tests/test_cow_step1.py` 17/17 green (T1–T14 per signed pre-change declaration + 3 supplementary). T13/T14 use explicit canonical re-evaluation (not any background propagation, per amendment).
+- **What is NOT included** — no gate_framework coupling (deferred to Step 2.75), no SO-side `COW_SO_USES_BASE_ITEM` gate, no frontend admin UI, no BC read/write of registry, no background re-evaluator.
+- **OpenAPI diff**: +3 paths, 0 removals (additive). Regression: 317P/35F/14E on Lane B-adjacent suite unchanged; +17 new passes from COW suite.
+
+### 2026-04-22 — Lane B Structural Carve-out v2.5.29
+- **New `backend/workflows/` tree** per signed §2.1: 7 real files moved (workflow_engine → workflows.core.engine; learning_core dir; line_reconciliation; vendor_profile_helpers → rules/vendor_profile; freight_business_rules → freight/item_charges; inventory_ledger_service → inventory/ledger/service; inventory_xls_staging_service → inventory/planning/staging). 32 inert scaffold modules + 3 READMEs.
+- **Real-file rule honored**: `vendor_profile_helpers.py` used in place of signed `vendor_profile_service.py` (file not present on disk); `bc_preflight` omitted (no source file existed).
+- **163 import rewrites** across 54 files. Removed dead re-export from `services/__init__.py` (no shim layer per Amendment 2).
+- **Verification**: `/openapi.json` byte-identical (856 paths, sha256 match). pytest diff empty vs baseline (317P/35F/14E). Supervisor clean.
+
+### 2026-04-22 — Hygiene patch (post-Lane-A)
+- JWT auth added to `GET /api/ap-review/documents/{id}/bc-status` (was unauthenticated).
+- Frontend `limit=0` callers fixed for endpoints with `ge=1` constraint: `UnifiedQueuePage.js` (readiness exception-queue + po-pending), `SalesInventoryHubPage.js` (triage-queue). `/documents?limit=0` left untouched (backend accepts it).
+
 ### 2026-04-22 — Lane A Integrity v2.5.28
 - **A1 Historical posting-attempts array** — `hub_documents.bc_posting_attempts[]` append-only audit log replaces overwrite-on-failure `bc_posting_error`. Frontend accordion on the AP review panel (collapsed by default, auto-expands on failed/partial/pending_retry). Legacy migration on startup.
 - **A2 Retry/backoff on BC 429/503** — `bc_http_with_retry()` wraps the header POST and per-line POST inside `create_purchase_invoice`. 3 retries, 1s/2s/4s + jitter, circuit-break on exhaustion. Non-retriable 4xx passes through immediately.

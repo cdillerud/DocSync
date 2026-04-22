@@ -113,6 +113,7 @@ from routers.inventory_xls import router as inventory_xls_router
 from routers.intake_learning import router as intake_learning_router
 from routers.learning_core import router as learning_core_router
 from routers.workflow_observer import router as workflow_observer_router
+from routers.cp_item_registry import router as cp_item_registry_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -194,6 +195,7 @@ app.include_router(inventory_xls_router, prefix="/api")
 app.include_router(intake_learning_router, prefix="/api")
 app.include_router(learning_core_router, prefix="/api")
 app.include_router(workflow_observer_router, prefix="/api")
+app.include_router(cp_item_registry_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)
@@ -245,6 +247,14 @@ async def startup():
         await inv_xls_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory XLS staging index creation failed: %s", e)
+
+    # Customer-Owned Ware (COW) CP-item registry indexes — Lane C Step 1
+    try:
+        from workflows.inventory.ownership import ensure_indexes as cow_ensure_indexes
+        from deps import get_db
+        await cow_ensure_indexes(get_db())
+    except Exception as e:
+        logger.warning("CP-item registry index creation failed: %s", e)
 
     # Vendor matching: backfill name_normalized on cached BC vendors
     try:

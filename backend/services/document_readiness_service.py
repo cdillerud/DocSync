@@ -616,6 +616,39 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     new_signals = readiness.get("signals") or {}
     new_blocking = readiness.get("blocking_reasons") or []
 
+    # === COW HARD BLOCK (Lane C Step 1): Customer-Owned Ware on PO ===
+    # Invokes workflows.inventory.ownership.check_cow_item_on_po, which
+    # enforces signed §4b: CP items may not flow via PO. Runs on every
+    # evaluate_and_persist call — this IS the canonical re-evaluation path.
+    try:
+        from workflows.inventory.ownership import (
+            check_cow_item_on_po,
+            apply_cow_blocker_to_readiness,
+        )
+        cow_evidence = await check_cow_item_on_po(db, doc)
+        if cow_evidence:
+            apply_cow_blocker_to_readiness(readiness, cow_evidence)
+            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                readiness["status"] = STATUS_NEEDS_REVIEW
+                readiness["recommended_action"] = ACTION_REVIEW
+            new_blocking = readiness["blocking_reasons"]
+            logger.info(
+                "[Readiness:COW] doc=%s — hard block, %d CP line(s) flagged",
+                doc_id[:8], len(cow_evidence),
+            )
+        else:
+            # Idempotent unblock: if doc was previously blocked and the registry
+            # entry has since been retired, the prior cow_item_on_po reason is
+            # purged on this re-eval. No auto-trigger — caller drove us here.
+            if "cow_item_on_po" in new_blocking:
+                readiness["blocking_reasons"] = [
+                    b for b in new_blocking if b != "cow_item_on_po"
+                ]
+                new_blocking = readiness["blocking_reasons"]
+                readiness.pop("cow_items", None)
+    except Exception as cow_err:
+        logger.warning("[Readiness:COW] skipped for %s: %s", doc_id[:8], cow_err)
+
     # === VENDOR BYPASS: Route to manual review if vendor flagged ===
     if doc.get("_vendor_bypass_active"):
         if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):

@@ -245,7 +245,7 @@ async def test_acknowledge_alert_moves_to_acknowledged():
 
 @pytest.mark.asyncio
 async def test_build_fingerprint_customer_from_patterns():
-    from services.learning_core import fingerprint_service as fp
+    from workflows.core.learning_core import fingerprint_service as fp
     db = FakeDb()
     await db.order_line_patterns.insert_one({
         "customer_no": "C-10250",
@@ -266,7 +266,7 @@ async def test_build_fingerprint_customer_from_patterns():
 
 @pytest.mark.asyncio
 async def test_build_fingerprint_vendor_from_posting_profile():
-    from services.learning_core import fingerprint_service as fp
+    from workflows.core.learning_core import fingerprint_service as fp
     db = FakeDb()
     await db.posting_pattern_analysis.insert_one({
         "vendor_no": "V-ACME",
@@ -286,7 +286,7 @@ async def test_build_fingerprint_vendor_from_posting_profile():
 
 @pytest.mark.asyncio
 async def test_find_similar_shared_math():
-    from services.learning_core import fingerprint_service as fp
+    from workflows.core.learning_core import fingerprint_service as fp
     db = FakeDb()
     # Seed two customer fingerprints
     await db["scope_fingerprints"].insert_one({
@@ -310,7 +310,7 @@ async def test_find_similar_shared_math():
 
 @pytest.mark.asyncio
 async def test_fingerprint_invalidate_ages_timestamp():
-    from services.learning_core import fingerprint_service as fp
+    from workflows.core.learning_core import fingerprint_service as fp
     db = FakeDb()
     await db["scope_fingerprints"].insert_one({
         "scope_type": "customer", "scope_value": "C-1",
@@ -325,7 +325,7 @@ async def test_fingerprint_invalidate_ages_timestamp():
 
 @pytest.mark.asyncio
 async def test_fingerprint_rejects_unknown_scope_type():
-    from services.learning_core import fingerprint_service as fp
+    from workflows.core.learning_core import fingerprint_service as fp
     db = FakeDb()
     result = await fp.build_fingerprint("alien", "X", db=db)
     assert "error" in result

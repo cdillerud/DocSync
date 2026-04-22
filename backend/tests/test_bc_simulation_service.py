@@ -47,7 +47,7 @@ from services.bc_simulation_service import (
     SIMULATED_BC_COMPANY_NAME,
 )
 
-from services.workflow_engine import (
+from workflows.core.engine import (
     WorkflowEvent,
     SimulationHistoryEntry,
 )

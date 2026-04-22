@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 from deps import get_db
-from services.inventory_ledger_service import (
+from workflows.inventory.ledger.service import (
     list_customers, get_customer, create_customer, update_customer,
     create_movement, list_movements, get_history, item_audit_summary,
     derive_balances, customer_summary,
@@ -250,7 +250,7 @@ async def api_health_summary(
       - recent XLS import activity (last 7 days, last 30 days)
     """
     from datetime import datetime, timedelta, timezone
-    from services.inventory_ledger_service import INCOMING_COLL, MOVEMENTS_COLL
+    from workflows.inventory.ledger.service import INCOMING_COLL, MOVEMENTS_COLL
 
     db = get_db()
     now = datetime.now(timezone.utc)
@@ -487,7 +487,7 @@ async def api_manual_movement(body: ManualMovementReq):
 
     # Duplicate opening_balance check
     if body.movement_type == "opening_balance":
-        from services.inventory_ledger_service import MOVEMENTS_COLL
+        from workflows.inventory.ledger.service import MOVEMENTS_COLL
         existing = await db[MOVEMENTS_COLL].find_one({
             "customer_id": body.customer_id,
             "item": body.item.strip(),
@@ -505,7 +505,7 @@ async def api_manual_movement(body: ManualMovementReq):
 
     # Idempotency guard
     if body.idempotency_key:
-        from services.inventory_ledger_service import MOVEMENTS_COLL
+        from workflows.inventory.ledger.service import MOVEMENTS_COLL
         dup = await db[MOVEMENTS_COLL].find_one(
             {"idempotency_key": body.idempotency_key},
             {"_id": 0, "id": 1},
@@ -533,7 +533,7 @@ async def api_manual_movement(body: ManualMovementReq):
         )
         # Store idempotency_key on the movement if provided
         if body.idempotency_key and result.get("success"):
-            from services.inventory_ledger_service import MOVEMENTS_COLL
+            from workflows.inventory.ledger.service import MOVEMENTS_COLL
             await db[MOVEMENTS_COLL].update_one(
                 {"id": result["movement"]["id"]},
                 {"$set": {"idempotency_key": body.idempotency_key}},

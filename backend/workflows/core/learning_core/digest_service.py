@@ -24,10 +24,10 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from deps import get_db
-from services.learning_core.events_service import (
+from workflows.core.learning_core.events_service import (
     list_events, get_trend, get_reviewer_leaderboard, EVENTS_COLL,
 )
-from services.learning_core.pattern_health_service import get_health
+from workflows.core.learning_core.pattern_health_service import get_health
 
 logger = logging.getLogger(__name__)
 

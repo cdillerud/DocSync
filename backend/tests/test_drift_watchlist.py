@@ -16,7 +16,7 @@ from unittest.mock import patch, AsyncMock
 
 import pytest
 
-from services.learning_core.drift_watchlist_service import (
+from workflows.core.learning_core.drift_watchlist_service import (
     build_watchlist,
     format_teams_card,
     format_email_html,
@@ -249,7 +249,7 @@ async def test_send_teams_webhook_success():
         "TEAMS_DRIFT_WEBHOOK_URL": "https://example.com/hook",
     }
     with patch.dict(os.environ, env, clear=False), \
-         patch("services.learning_core.drift_watchlist_service._send_teams_webhook",
+         patch("workflows.core.learning_core.drift_watchlist_service._send_teams_webhook",
                new_callable=AsyncMock) as mock_send:
         mock_send.return_value = {"status": 200, "body": "ok"}
         result = await send_watchlist(db=db, actor="test")
@@ -264,9 +264,9 @@ async def test_send_one_failing_channel_does_not_kill_others():
     db = _FakeDB(events_agg=[{"_id": "V1", "count": 1, "last_at": now}])
     env = {"DRIFT_WATCHLIST_CHANNELS": "teams_webhook,email"}
     with patch.dict(os.environ, env, clear=False), \
-         patch("services.learning_core.drift_watchlist_service._send_teams_webhook",
+         patch("workflows.core.learning_core.drift_watchlist_service._send_teams_webhook",
                new_callable=AsyncMock) as mock_teams, \
-         patch("services.learning_core.drift_watchlist_service._send_email",
+         patch("workflows.core.learning_core.drift_watchlist_service._send_email",
                new_callable=AsyncMock) as mock_email:
         mock_teams.side_effect = RuntimeError("boom")
         mock_email.return_value = {"status": 202}

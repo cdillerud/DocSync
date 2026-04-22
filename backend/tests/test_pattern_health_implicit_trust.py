@@ -15,7 +15,7 @@ state, regardless of template confidence tier.
 """
 import pytest
 
-from services.learning_core.pattern_health_service import (
+from workflows.core.learning_core.pattern_health_service import (
     _ap_health,
     AP_IMPLICIT_TRUST_MIN_SAMPLES,
 )

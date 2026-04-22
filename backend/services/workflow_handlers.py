@@ -67,7 +67,7 @@ class ApprovalActionRequest(BaseModel):
 
 def _get_workflow_deps():
     """Import workflow engine types (avoids circular imports at module level)."""
-    from services.workflow_engine import (
+    from workflows.core.engine import (
         WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType,
     )
     return WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType

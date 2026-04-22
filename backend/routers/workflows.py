@@ -326,7 +326,7 @@ async def list_workflows(skip: int = Query(0), limit: int = Query(50), status: s
 @router.get("/ap_invoice/status-counts")
 async def get_ap_workflow_status_counts():
     """Get counts of AP_INVOICE documents by workflow status."""
-    from services.workflow_engine import WorkflowEngine, DocType
+    from workflows.core.engine import WorkflowEngine, DocType
 
     db = get_db()
     pipeline = [
@@ -358,7 +358,7 @@ async def get_vendor_pending_queue(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None)
 ):
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
 
     db = get_db()
     fq: Dict = {
@@ -391,7 +391,7 @@ async def get_bc_validation_pending_queue(
     min_amount: Optional[float] = Query(None),
     max_amount: Optional[float] = Query(None)
 ):
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
 
     db = get_db()
     fq: Dict = {
@@ -418,7 +418,7 @@ async def get_bc_validation_failed_queue(
     skip: int = Query(0), limit: int = Query(50),
     vendor_canonical: Optional[str] = Query(None)
 ):
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
 
     db = get_db()
     fq: Dict = {
@@ -441,7 +441,7 @@ async def get_data_correction_pending_queue(
     skip: int = Query(0), limit: int = Query(50),
     vendor_canonical: Optional[str] = Query(None)
 ):
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
 
     db = get_db()
     fq: Dict = {
@@ -466,7 +466,7 @@ async def get_ready_for_approval_queue(
     min_amount: Optional[float] = Query(None),
     max_amount: Optional[float] = Query(None)
 ):
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
 
     db = get_db()
     fq: Dict = {
@@ -496,7 +496,7 @@ async def get_generic_workflow_queue(
     skip: int = Query(0),
     limit: int = Query(50)
 ):
-    from services.workflow_engine import DocType
+    from workflows.core.engine import DocType
 
     db = get_db()
     non_ap_types = [dt.value for dt in DocType if dt != DocType.AP_INVOICE]
@@ -514,7 +514,7 @@ async def get_generic_workflow_queue(
 
 @router.get("/generic/status-counts-by-type")
 async def get_generic_status_counts_by_type():
-    from services.workflow_engine import DocType
+    from workflows.core.engine import DocType
 
     db = get_db()
     non_ap_types = [dt.value for dt in DocType if dt != DocType.AP_INVOICE]
@@ -537,7 +537,7 @@ async def get_generic_status_counts_by_type():
 
 @router.get("/generic/metrics-by-type")
 async def get_generic_metrics_by_type():
-    from services.workflow_engine import DocType
+    from workflows.core.engine import DocType
 
     db = get_db()
     non_ap_types = [dt.value for dt in DocType if dt != DocType.AP_INVOICE]
@@ -572,7 +572,7 @@ async def get_generic_metrics_by_type():
 
 @router.get("/ap_invoice/metrics")
 async def get_ap_workflow_metrics():
-    from services.workflow_engine import DocType
+    from workflows.core.engine import DocType
 
     db = get_db()
     pipeline = [

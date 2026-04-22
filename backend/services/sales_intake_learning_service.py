@@ -425,8 +425,8 @@ async def run_intake_learning_for_xls_staging(
     back on the staging doc.
     """
     db = db if db is not None else get_db()
-    from services.inventory_xls_staging_service import STAGING_COLL
-    from services.inventory_ledger_service import CUSTOMERS_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
+    from workflows.inventory.ledger.service import CUSTOMERS_COLL
 
     staging = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
     if not staging:
@@ -576,7 +576,7 @@ async def backfill_intake_learning(
     Pass `only_missing=False` to force re-learning of every eligible doc.
     """
     db = db if db is not None else get_db()
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
 
     # Hub docs — restrict to doc_types in scope
     hub_q: Dict[str, Any] = {
@@ -694,7 +694,7 @@ async def refresh_active_customers(
     """
     from datetime import timedelta
     from services.order_line_patterns import learn_from_bc_posted_orders
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
 
     db = db if db is not None else get_db()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
@@ -780,7 +780,7 @@ async def refresh_active_customers(
                 docs_refreshed += doc_count
 
                 # XLS staging — customer workspace may map to this BC customer
-                from services.inventory_ledger_service import CUSTOMERS_COLL
+                from workflows.inventory.ledger.service import CUSTOMERS_COLL
                 cust_hits = await db[CUSTOMERS_COLL].find(
                     {"$or": [{"bc_customer_no": customer_no}, {"code": customer_no}]},
                     {"_id": 0, "id": 1},
@@ -828,7 +828,7 @@ async def refresh_active_customers(
 async def get_intake_learning_summary(db=None) -> Dict[str, Any]:
     """Dashboard aggregation of intake-learning coverage across the hub."""
     db = db if db is not None else get_db()
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
 
     total_hub = await db.hub_documents.count_documents(
         {"doc_type": {"$regex": "purchase|sales|invoice|freight|bol|packing|quote", "$options": "i"}}

@@ -1411,7 +1411,7 @@ async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type:
     if so_type != "dropship":
         return False
 
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:

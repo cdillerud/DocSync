@@ -14,7 +14,7 @@ and a shared feedback ingest endpoint. See
 /app/memory/CHANGELOG.md — v2.4.1 for the multi-phase rollout plan.
 """
 
-from services.learning_core.events_service import (
+from workflows.core.learning_core.events_service import (
     record_event,
     list_events,
     get_domain_summary,
@@ -23,7 +23,7 @@ from services.learning_core.events_service import (
     DOMAINS,
     EVENTS_COLL,
 )
-from services.learning_core.fingerprint_service import (
+from workflows.core.learning_core.fingerprint_service import (
     tokenize,
     build_fingerprint,
     get_or_build,
@@ -33,17 +33,17 @@ from services.learning_core.fingerprint_service import (
     FINGERPRINTS_COLL,
     SCOPE_TYPES,
 )
-from services.learning_core.pattern_health_service import (
+from workflows.core.learning_core.pattern_health_service import (
     get_health,
     run_hygiene,
     HEALTH_ADAPTERS,
     HYGIENE_ADAPTERS,
 )
-from services.learning_core.feedback_service import (
+from workflows.core.learning_core.feedback_service import (
     record_unified_feedback,
     SCOPE_TYPES as FEEDBACK_SCOPE_TYPES,
 )
-from services.learning_core.digest_service import (
+from workflows.core.learning_core.digest_service import (
     build_weekly_digest,
     get_latest_digest,
     get_digest_by_week,

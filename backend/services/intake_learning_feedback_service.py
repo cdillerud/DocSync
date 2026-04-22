@@ -97,7 +97,7 @@ async def record_feedback_event(
     # blocks the primary ingest. Legacy collection still receives the
     # event during the 30-day migration window.
     try:
-        from services.learning_core import record_event
+        from workflows.core.learning_core import record_event
         scope_type = "customer" if customer_no else "global"
         if staging_id and not customer_no:
             scope_type = "xls_staging"

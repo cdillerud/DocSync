@@ -12,7 +12,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-from services.workflow_engine import DocType, DocumentClassifier
+from workflows.core.engine import DocType, DocumentClassifier
 from services.ai_classifier import classify_doc_type_with_ai
 
 logger = logging.getLogger(__name__)

@@ -28,7 +28,7 @@ from services.inventory_xls_classifier import classify_xls
 from services.inventory_xls_parser import (
     build_column_map, extract_effective_date_from_filename, normalize_rows,
 )
-from services.inventory_xls_staging_service import (
+from workflows.inventory.planning.staging import (
     approve_staging, get_learning_summary, get_staging, list_staging,
     reject_staging, stage_import, suggest_customer_workspace, update_staging,
 )
@@ -240,7 +240,7 @@ async def api_renormalize_staging(staging_id: str):
     """
     import base64 as _b64
     import hashlib as _h
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
 
     db = get_db()
     staging = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
@@ -346,7 +346,7 @@ async def api_resuggest_customers(only_unassigned: bool = Query(True)):
     current filename-aware logic. Useful after creating new customer workspaces
     or upgrading the classifier rules.
     """
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
 
     db = get_db()
     q: Dict[str, Any] = {"status": "pending_review"}

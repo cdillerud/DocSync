@@ -11,7 +11,7 @@ from fastapi import APIRouter, Query
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
-from services.learning_core import list_events, get_domain_summary, DOMAINS
+from workflows.core.learning_core import list_events, get_domain_summary, DOMAINS
 from services.drift_alert_service import (
     run_drift_scan,
     list_drift_alerts,
@@ -63,7 +63,7 @@ async def reviewers_leaderboard(
     """Who's been giving the most feedback in the last `days` days?
     Aggregates `learning_events_v2` by actor across all domains, returns
     a ranked leaderboard with per-domain + top-event-type breakdown."""
-    from services.learning_core import get_reviewer_leaderboard
+    from workflows.core.learning_core import get_reviewer_leaderboard
     return await get_reviewer_leaderboard(days=days, limit=limit)
 
 
@@ -128,7 +128,7 @@ async def fingerprints_rebuild(
     scope_type: str = Query("customer", description="customer | vendor"),
 ):
     """Rebuild all fingerprints for the given scope_type."""
-    from services.learning_core import rebuild_all
+    from workflows.core.learning_core import rebuild_all
     return await rebuild_all(scope_type)
 
 
@@ -141,7 +141,7 @@ async def fingerprints_similar(
     """Find peer fingerprints most similar to the given scope. Useful
     both for customer cold-start peer exploration and AP vendor-alias
     discovery."""
-    from services.learning_core import get_or_build, find_similar
+    from workflows.core.learning_core import get_or_build, find_similar
     if not scope_value:
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="scope_value is required")
@@ -167,7 +167,7 @@ async def pattern_health_unified(
 ):
     """Cross-domain trust/drift/retire aggregate. Omit `domain` for
     a combined view across AP + intake (+ future domains)."""
-    from services.learning_core import get_health
+    from workflows.core.learning_core import get_health
     return await get_health(domain=domain, limit=limit)
 
 
@@ -178,7 +178,7 @@ async def hygiene_run(
     """Run hygiene across one or all domains. Replaces the per-domain
     triggers (`/api/intake/learning/hygiene` still works but now
     delegates here)."""
-    from services.learning_core import run_hygiene
+    from workflows.core.learning_core import run_hygiene
     return await run_hygiene(domain=domain, actor="user")
 
 
@@ -229,7 +229,7 @@ async def unified_feedback(body: UnifiedFeedbackBody):
     200 so the caller can surface the message without a 5xx. HTTP
     error statuses are reserved for infra-level failures.
     """
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     return await record_unified_feedback(
         scope_type=body.scope_type,
         scope_value=body.scope_value,
@@ -255,7 +255,7 @@ async def unified_feedback(body: UnifiedFeedbackBody):
 @router.get("/digest/latest")
 async def digest_latest():
     """Return the most recent weekly digest, or `null` if none exists yet."""
-    from services.learning_core import get_latest_digest
+    from workflows.core.learning_core import get_latest_digest
     d = await get_latest_digest()
     return d or {"digest": None, "hint": "No digest generated yet. POST /api/learning/digest/rebuild to generate one."}
 
@@ -263,7 +263,7 @@ async def digest_latest():
 @router.get("/digest/{week_key}")
 async def digest_by_week(week_key: str):
     """Fetch a specific digest by its ISO week_key (e.g. '2026-W16')."""
-    from services.learning_core import get_digest_by_week
+    from workflows.core.learning_core import get_digest_by_week
     d = await get_digest_by_week(week_key)
     if not d:
         from fastapi import HTTPException
@@ -274,7 +274,7 @@ async def digest_by_week(week_key: str):
 @router.get("/digest")
 async def digest_history(limit: int = Query(12, ge=1, le=52)):
     """History of weekly digests, newest first."""
-    from services.learning_core import list_digests
+    from workflows.core.learning_core import list_digests
     digests = await list_digests(limit=limit)
     return {"total": len(digests), "digests": digests}
 
@@ -285,7 +285,7 @@ async def digest_rebuild(
 ):
     """Rebuild the digest for the week containing `week_of`. Idempotent
     per week_key. Normally fires on the weekly scheduler."""
-    from services.learning_core import build_weekly_digest
+    from workflows.core.learning_core import build_weekly_digest
     return await build_weekly_digest(week_of=week_of, actor="user")
 
 
@@ -297,7 +297,7 @@ async def drift_watchlist_preview():
     """Dry-run the weekly Drift Watchlist — returns the aggregated vendor
     list + rendered Teams card + email HTML without sending anywhere. Use
     this to verify channel payloads before enabling the scheduler."""
-    from services.learning_core.drift_watchlist_service import (
+    from workflows.core.learning_core.drift_watchlist_service import (
         build_watchlist, format_teams_card, format_email_html,
     )
     wl = await build_watchlist()
@@ -319,7 +319,7 @@ async def drift_watchlist_send_now(
 ):
     """Immediately build + dispatch the watchlist. Safe — still honours
     'empty watchlist = skip' and logs the run in `drift_watchlist_runs`."""
-    from services.learning_core.drift_watchlist_service import send_watchlist
+    from workflows.core.learning_core.drift_watchlist_service import send_watchlist
     override = [c.strip() for c in channels.split(",")] if channels else None
     return await send_watchlist(channels=override, actor="manual_trigger")
 

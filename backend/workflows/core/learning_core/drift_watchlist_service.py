@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from deps import get_db
-from services.learning_core.pattern_health_service import (
+from workflows.core.learning_core.pattern_health_service import (
     AP_DRIFT_WINDOW_DAYS,
     AP_NEGATIVE_EVENT_TYPES,
 )

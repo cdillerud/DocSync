@@ -19,7 +19,7 @@ from services.bc_sandbox_service import (
     validate_purchase_order_in_bc, get_bc_sandbox_status,
     PilotModeWriteBlockedError, BCSandboxError, BCLookupResult
 )
-from services.workflow_engine import BCValidationHistoryEntry
+from workflows.core.engine import BCValidationHistoryEntry
 
 
 @router.get("/bc-sandbox/status")

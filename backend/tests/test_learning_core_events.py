@@ -77,7 +77,7 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_record_event_happy_path():
-    from services.learning_core import record_event, EVENTS_COLL
+    from workflows.core.learning_core import record_event, EVENTS_COLL
     db = FakeDb()
     res = await record_event(
         domain="sales_intake",
@@ -99,7 +99,7 @@ async def test_record_event_happy_path():
 
 @pytest.mark.asyncio
 async def test_record_event_coerces_unknown_domain_to_generic():
-    from services.learning_core import record_event
+    from workflows.core.learning_core import record_event
     db = FakeDb()
     res = await record_event(domain="bogus_domain", event_type="x", db=db)
     assert res["domain"] == "generic"
@@ -107,7 +107,7 @@ async def test_record_event_coerces_unknown_domain_to_generic():
 
 @pytest.mark.asyncio
 async def test_list_events_filters_by_domain():
-    from services.learning_core import record_event, list_events
+    from workflows.core.learning_core import record_event, list_events
     db = FakeDb()
     await record_event(domain="sales_intake", event_type="a", db=db)
     await record_event(domain="ap_posting",  event_type="b", db=db)
@@ -119,7 +119,7 @@ async def test_list_events_filters_by_domain():
 
 @pytest.mark.asyncio
 async def test_get_domain_summary_shape():
-    from services.learning_core import record_event, get_domain_summary
+    from workflows.core.learning_core import record_event, get_domain_summary
     db = FakeDb()
     await record_event(domain="sales_intake", event_type="suggestion_accepted", db=db)
     await record_event(domain="sales_intake", event_type="suggestion_accepted", db=db)
@@ -136,7 +136,7 @@ async def test_get_domain_summary_shape():
 async def test_get_trend_returns_dense_series_with_zero_fill():
     """7-day trend must always return exactly `days` buckets, zero-filled."""
     from datetime import datetime, timezone, timedelta
-    from services.learning_core import get_trend, EVENTS_COLL
+    from workflows.core.learning_core import get_trend, EVENTS_COLL
 
     db = FakeDb()
     now = datetime.now(timezone.utc)
@@ -164,7 +164,7 @@ async def test_get_trend_returns_dense_series_with_zero_fill():
 @pytest.mark.asyncio
 async def test_get_trend_clamps_days_range():
     """days is clamped to [1, 90]."""
-    from services.learning_core import get_trend
+    from workflows.core.learning_core import get_trend
     db = FakeDb()
     assert len(await get_trend(days=0, db=db)) == 1
     assert len(await get_trend(days=-5, db=db)) == 1
@@ -174,7 +174,7 @@ async def test_get_trend_clamps_days_range():
 @pytest.mark.asyncio
 async def test_get_trend_filters_by_domain():
     from datetime import datetime, timezone
-    from services.learning_core import get_trend, EVENTS_COLL
+    from workflows.core.learning_core import get_trend, EVENTS_COLL
 
     db = FakeDb()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -194,7 +194,7 @@ async def test_get_trend_filters_by_domain():
 async def test_leaderboard_ranks_actors_by_event_count():
     """Most active reviewer appears first; bots (actor='test') are skipped."""
     from datetime import datetime, timezone
-    from services.learning_core import get_reviewer_leaderboard, EVENTS_COLL
+    from workflows.core.learning_core import get_reviewer_leaderboard, EVENTS_COLL
 
     db = FakeDb()
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -229,7 +229,7 @@ async def test_leaderboard_ranks_actors_by_event_count():
 @pytest.mark.asyncio
 async def test_leaderboard_respects_window_and_limit():
     from datetime import datetime, timezone
-    from services.learning_core import get_reviewer_leaderboard
+    from workflows.core.learning_core import get_reviewer_leaderboard
 
     db = FakeDb()
     # Empty DB

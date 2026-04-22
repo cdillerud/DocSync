@@ -40,7 +40,7 @@ from services.file_ingestion_service import (
 )
 
 # Workflow Engine Service
-from services.workflow_engine import (
+from workflows.core.engine import (
     WorkflowEngine, WorkflowStatus, WorkflowEvent, 
     DocType, SourceSystem, CaptureChannel, DocumentClassifier
 )
@@ -2594,13 +2594,13 @@ def _derive_workflow_status(final_status: str, doc_type: str, decision: str) -> 
 
 async def _update_vendor_profile_incremental(db, doc_id: str, vendor_name: str, update_data: dict, final_status: str):
     """COMPATIBILITY WRAPPER — authoritative source:
-    services.vendor_profile_helpers.update_vendor_profile_incremental
+    workflows.ap_invoice.rules.vendor_profile.update_vendor_profile_incremental
 
     Moved out of server.py during Orchestration Extraction so
     `services/document_handlers.py` no longer needs a late
     `from server import ...`.
     """
-    from services.vendor_profile_helpers import update_vendor_profile_incremental as _impl
+    from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental as _impl
     return await _impl(db, doc_id, vendor_name, update_data, final_status)
 
 
@@ -2823,7 +2823,7 @@ async def _maybe_stage_inventory_xls(doc_id: str) -> None:
     from services.inventory_xls_parser import (
         build_column_map, extract_effective_date_from_filename, normalize_rows,
     )
-    from services.inventory_xls_staging_service import (
+    from workflows.inventory.planning.staging import (
         stage_import, suggest_customer_workspace,
     )
 
@@ -7134,7 +7134,7 @@ from services.bc_sandbox_service import (
     validate_purchase_order_in_bc, get_bc_sandbox_status,
     PilotModeWriteBlockedError, BCSandboxError, BCLookupResult
 )
-from services.workflow_engine import BCValidationHistoryEntry
+from workflows.core.engine import BCValidationHistoryEntry
 
 
 
@@ -7156,7 +7156,7 @@ from services.bc_simulation_service import (
     run_full_export_simulation, calculate_simulation_summary,
     get_simulation_service_status, SimulationResult, SimulationType, SimulationStatus
 )
-from services.workflow_engine import SimulationHistoryEntry
+from workflows.core.engine import SimulationHistoryEntry
 
 
 
@@ -7263,7 +7263,7 @@ async def reingest_single_document(doc_id: str):
         raise ValueError(f"Document {doc_id} not found")
     
     # Import classification and workflow functions
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
     
     # Step 1: Determine doc_type from existing data or re-classify
     doc_type = doc.get("doc_type", "OTHER")
@@ -7736,7 +7736,7 @@ async def startup():
         await asyncio.sleep(600)  # Let refresh scheduler run first
         while True:
             try:
-                from services.learning_core import run_hygiene
+                from workflows.core.learning_core import run_hygiene
                 result = await run_hygiene(domain="all", actor="scheduler")
                 logger.info(
                     "[PatternHygiene.scheduler] done — scanned=%d retired=%d promoted=%d",
@@ -7778,7 +7778,7 @@ async def startup():
         await asyncio.sleep(1200)  # 20-min startup delay
         while True:
             try:
-                from services.learning_core import build_weekly_digest
+                from workflows.core.learning_core import build_weekly_digest
                 d = await build_weekly_digest(actor="scheduler")
                 logger.info(
                     "[WeeklyDigest.scheduler] built %s — events=%d reviewers=%d drift=%d",
@@ -7817,7 +7817,7 @@ async def startup():
                     and now.hour == target_hour
                     and last_sent_day != day_key
                 ):
-                    from services.learning_core.drift_watchlist_service import send_watchlist
+                    from workflows.core.learning_core.drift_watchlist_service import send_watchlist
                     result = await send_watchlist(actor="scheduler")
                     last_sent_day = day_key
                     logger.info(

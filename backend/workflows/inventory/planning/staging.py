@@ -10,7 +10,7 @@ Phases C & D of the Inventory XLS pipeline:
   • Update mapping — user corrects the column map before approving
   • Learn   — persist approved mapping keyed by (sender_domain, header_hash)
 
-Every ledger write goes through `services.inventory_ledger_service.create_movement`,
+Every ledger write goes through `workflows.inventory.ledger.service.create_movement`,
 so every row picks up:
   • source_type = "spreadsheet_import"
   • reference_type = "xls_import"
@@ -26,7 +26,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from services.inventory_ledger_service import (
+from workflows.inventory.ledger.service import (
     CUSTOMERS_COLL, MOVEMENTS_COLL, create_movement, get_customer,
 )
 
@@ -443,7 +443,7 @@ async def approve_staging(
 
 async def _apply_forecast_rows(db, staging: Dict[str, Any], approved_by: str) -> Dict[str, Any]:
     """Forecast rows → inv_incoming_supply planned records."""
-    from services.inventory_ledger_service import INCOMING_COLL
+    from workflows.inventory.ledger.service import INCOMING_COLL
     customer_id = staging["assigned_customer_id"]
     staging_id = staging["id"]
     applied_ids: List[str] = []

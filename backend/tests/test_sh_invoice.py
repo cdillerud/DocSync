@@ -99,13 +99,13 @@ class TestSHInvoiceWorkflow:
 
     def test_workflow_defined(self):
         """SH_INVOICE workflow must be in WORKFLOW_DEFINITIONS."""
-        from services.workflow_engine import WorkflowEngine, DocType, WORKFLOW_DEFINITIONS
+        from workflows.core.engine import WorkflowEngine, DocType, WORKFLOW_DEFINITIONS
         assert DocType.SH_INVOICE.value in WORKFLOW_DEFINITIONS
         print("[PASS] SH_INVOICE workflow defined")
 
     def test_workflow_transitions(self):
         """Test full SH_Invoice workflow: captured → classified → pending_approval → approved → exported."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
         doc = {"id": "test-wf", "doc_type": "SH_INVOICE"}
 
@@ -133,7 +133,7 @@ class TestSHInvoiceWorkflow:
 
     def test_sh_rejected_transition(self):
         """SH_REJECTED moves from pending_approval to rejected."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
         doc = {"id": "test-rej", "doc_type": "SH_INVOICE", "workflow_status": "pending_approval", "workflow_history": []}
         doc, _, ok = WorkflowEngine.advance_workflow(doc, WorkflowEvent.SH_REJECTED.value)
@@ -142,7 +142,7 @@ class TestSHInvoiceWorkflow:
 
     def test_rejected_retry(self):
         """Retry from rejected returns to pending_approval."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
         doc = {"id": "test-retry", "doc_type": "SH_INVOICE", "workflow_status": "rejected", "workflow_history": []}
         doc, _, ok = WorkflowEngine.advance_workflow(doc, WorkflowEvent.ON_RETRY.value)
@@ -151,7 +151,7 @@ class TestSHInvoiceWorkflow:
 
     def test_ai_classifier_maps_sh_invoice(self):
         """AI classification should map SH_Invoice to SH_INVOICE DocType."""
-        from services.workflow_engine import DocumentClassifier, DocType
+        from workflows.core.engine import DocumentClassifier, DocType
         result = DocumentClassifier.classify_from_ai_result("SH_Invoice")
         assert result == DocType.SH_INVOICE
         print("[PASS] AI classifier maps SH_Invoice correctly")

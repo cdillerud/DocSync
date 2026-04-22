@@ -96,7 +96,7 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_unknown_scope_type_returns_error():
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     res = await record_unified_feedback(scope_type="alien", db=db)
     assert "error" in res
@@ -106,7 +106,7 @@ async def test_unknown_scope_type_returns_error():
 
 @pytest.mark.asyncio
 async def test_customer_without_event_type_returns_error():
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     res = await record_unified_feedback(scope_type="customer", db=db)
     assert "error" in res
@@ -117,7 +117,7 @@ async def test_customer_without_event_type_returns_error():
 
 @pytest.mark.asyncio
 async def test_vendor_without_document_id_returns_error():
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     res = await record_unified_feedback(
         scope_type="vendor",
@@ -131,7 +131,7 @@ async def test_vendor_without_document_id_returns_error():
 
 @pytest.mark.asyncio
 async def test_vendor_without_reviewer_assessment_returns_error():
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     res = await record_unified_feedback(
         scope_type="vendor",
@@ -150,7 +150,7 @@ async def test_vendor_without_reviewer_assessment_returns_error():
 async def test_customer_feedback_routes_and_dual_writes():
     """scope_type='customer' goes through intake_learning_feedback_service
     which dual-writes to intake_learning_events + learning_events_v2."""
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     res = await record_unified_feedback(
         scope_type="customer",
@@ -179,7 +179,7 @@ async def test_customer_feedback_routes_and_dual_writes():
 async def test_vendor_feedback_routes_and_writes_unified_telemetry():
     """scope_type='vendor' goes through ap_invoice_feedback_service AND
     drops a learning_events_v2 row so the 7-day sparklines light up."""
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     # Seed a minimal hub_documents record so submit_ap_feedback succeeds
     await db["hub_documents"].insert_one({
@@ -224,7 +224,7 @@ async def test_vendor_feedback_routes_and_writes_unified_telemetry():
 async def test_vendor_feedback_propagates_invalid_assessment_error():
     """If the underlying AP service rejects the assessment, the
     dispatcher must surface the error and NOT write a telemetry event."""
-    from services.learning_core import record_unified_feedback
+    from workflows.core.learning_core import record_unified_feedback
     db = FakeDb()
     await db["hub_documents"].insert_one({
         "id": "doc-ap-bad", "bc_vendor_number": "V-BAD",

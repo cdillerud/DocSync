@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _get_workflow_engine():
     """Lazy import to avoid circular dependency at module level."""
-    from services.workflow_engine import WorkflowEngine
+    from workflows.core.engine import WorkflowEngine
     return WorkflowEngine
 
 

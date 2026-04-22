@@ -664,7 +664,7 @@ async def post_document_to_bc(
     from services.bc_posting_attempts import (
         build_attempt, new_correlation_id, next_attempt_n,
     )
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     # A4: drive the workflow engine through ON_BC_POSTING_STARTED BEFORE the
     # claim. Fetches the doc, advances the engine, and then folds the new

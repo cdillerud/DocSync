@@ -69,7 +69,7 @@ async def get_document_insights(doc_id: str):
 async def get_xls_insights(staging_id: str):
     """Return persisted intake_insights for an XLS staging record."""
     db = get_db()
-    from services.inventory_xls_staging_service import STAGING_COLL
+    from workflows.inventory.planning.staging import STAGING_COLL
     staging = await db[STAGING_COLL].find_one(
         {"id": staging_id},
         {"_id": 0, "id": 1, "filename": 1, "intake_insights": 1},

@@ -13,7 +13,7 @@ from services.migration import (
 )
 from services.migration.sources import LegacyDocumentMetadata, LegacyDocument
 from services.migration.job import MigrationMode, MigrationStats
-from services.workflow_engine import WorkflowStatus, DocType
+from workflows.core.engine import WorkflowStatus, DocType
 
 
 class TestLegacyDocumentMetadata:

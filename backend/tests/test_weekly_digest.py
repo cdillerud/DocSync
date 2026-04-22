@@ -98,7 +98,7 @@ class FakeDb:
 
 def _seed_events(db, events):
     """events = [(actor, domain, event_type, datetime-iso), ...]"""
-    from services.learning_core.events_service import EVENTS_COLL
+    from workflows.core.learning_core.events_service import EVENTS_COLL
     for (actor, dom, et, ts) in events:
         db[EVENTS_COLL].docs.append({
             "id": f"e-{actor}-{et}-{ts[:10]}",
@@ -113,7 +113,7 @@ def _seed_events(db, events):
 
 @pytest.mark.asyncio
 async def test_digest_empty_week_returns_quiet_headline():
-    from services.learning_core import build_weekly_digest, DIGESTS_COLL
+    from workflows.core.learning_core import build_weekly_digest, DIGESTS_COLL
     db = FakeDb()
     d = await build_weekly_digest(week_of="2026-04-15", db=db)
     assert d["week_key"] == "2026-W16"
@@ -129,7 +129,7 @@ async def test_digest_empty_week_returns_quiet_headline():
 
 @pytest.mark.asyncio
 async def test_digest_aggregates_reviewers_and_narrative():
-    from services.learning_core import build_weekly_digest
+    from workflows.core.learning_core import build_weekly_digest
 
     db = FakeDb()
     # Seed events inside the target week (2026-W16, Apr 13–19)
@@ -156,7 +156,7 @@ async def test_digest_aggregates_reviewers_and_narrative():
 @pytest.mark.asyncio
 async def test_digest_idempotent_upsert_by_week_key():
     """Rebuilding for the same week should not create duplicate rows."""
-    from services.learning_core import build_weekly_digest, DIGESTS_COLL
+    from workflows.core.learning_core import build_weekly_digest, DIGESTS_COLL
     db = FakeDb()
     await build_weekly_digest(week_of="2026-04-15", db=db)
     await build_weekly_digest(week_of="2026-04-15", db=db)
@@ -167,7 +167,7 @@ async def test_digest_idempotent_upsert_by_week_key():
 
 @pytest.mark.asyncio
 async def test_digest_rejects_invalid_week_of():
-    from services.learning_core import build_weekly_digest
+    from workflows.core.learning_core import build_weekly_digest
     db = FakeDb()
     r = await build_weekly_digest(week_of="not-a-date", db=db)
     assert "error" in r
@@ -176,7 +176,7 @@ async def test_digest_rejects_invalid_week_of():
 
 @pytest.mark.asyncio
 async def test_get_latest_returns_most_recent_week():
-    from services.learning_core import build_weekly_digest, get_latest_digest
+    from workflows.core.learning_core import build_weekly_digest, get_latest_digest
     db = FakeDb()
     await build_weekly_digest(week_of="2026-04-01", db=db)  # earlier
     await build_weekly_digest(week_of="2026-04-15", db=db)  # later
@@ -186,7 +186,7 @@ async def test_get_latest_returns_most_recent_week():
 
 @pytest.mark.asyncio
 async def test_list_digests_returns_newest_first_and_clamps_limit():
-    from services.learning_core import build_weekly_digest, list_digests
+    from workflows.core.learning_core import build_weekly_digest, list_digests
     db = FakeDb()
     for off in range(0, 40, 7):  # 6 different weeks
         dt = (date(2026, 4, 15) - timedelta(days=off)).isoformat()

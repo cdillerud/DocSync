@@ -29,7 +29,7 @@ import pytest
 
 
 def test_new_events_exist():
-    from services.workflow_engine import WorkflowEvent
+    from workflows.core.engine import WorkflowEvent
     assert WorkflowEvent.ON_BC_POSTING_STARTED.value == "on_bc_posting_started"
     assert WorkflowEvent.ON_BC_POSTED.value == "on_bc_posted"
     assert WorkflowEvent.ON_BC_PARTIAL_POSTED.value == "on_bc_partial_posted"
@@ -37,7 +37,7 @@ def test_new_events_exist():
 
 
 def test_new_states_exist():
-    from services.workflow_engine import WorkflowStatus
+    from workflows.core.engine import WorkflowStatus
     assert WorkflowStatus.BC_POSTING_IN_PROGRESS.value == "bc_posting_in_progress"
     assert WorkflowStatus.BC_POSTED.value == "bc_posted"
     assert WorkflowStatus.BC_POST_PARTIAL.value == "bc_post_partial"
@@ -48,7 +48,7 @@ def test_ap_invoice_on_bc_posting_started_from_valid_states(start_state):
     """APPROVED and READY_FOR_APPROVAL both advance into
     BC_POSTING_IN_PROGRESS on ON_BC_POSTING_STARTED — per the pilot flow
     where reviewers post directly from the review panel."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t1", "doc_type": "AP_INVOICE",
            "workflow_status": start_state}
@@ -64,7 +64,7 @@ def test_ap_invoice_on_bc_posting_started_from_valid_states(start_state):
 def test_ap_invoice_on_bc_posting_started_from_invalid_state_is_rejected():
     """Engine refuses ON_BC_POSTING_STARTED from CAPTURED — that's the
     guarantee the endpoint relies on to 409 before calling BC."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t2", "doc_type": "AP_INVOICE", "workflow_status": "captured"}
     result, history, ok = WorkflowEngine.advance_workflow(
@@ -81,7 +81,7 @@ def test_ap_invoice_on_bc_posting_started_from_invalid_state_is_rejected():
 
 def test_ap_invoice_posting_lifecycle_happy_path():
     """APPROVED → BC_POSTING_IN_PROGRESS → BC_POSTED → ARCHIVED."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t3", "doc_type": "AP_INVOICE", "workflow_status": "approved"}
 
@@ -106,7 +106,7 @@ def test_ap_invoice_posting_lifecycle_happy_path():
 
 def test_ap_invoice_posting_lifecycle_partial_path():
     """IN_PROGRESS + partial → bc_post_partial (exception state, not posted)."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t4", "doc_type": "AP_INVOICE", "workflow_status": "approved"}
     doc, _, _ = WorkflowEngine.advance_workflow(
@@ -129,7 +129,7 @@ def test_ap_invoice_posting_lifecycle_partial_path():
 def test_ap_invoice_posting_lifecycle_hard_failure_rolls_back_to_approved():
     """Hard failure from IN_PROGRESS returns the doc to APPROVED — retry-eligible
     without the reviewer having to re-approve."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t5", "doc_type": "AP_INVOICE", "workflow_status": "approved"}
     doc, _, _ = WorkflowEngine.advance_workflow(
@@ -149,7 +149,7 @@ def test_in_progress_cannot_jump_directly_back_to_ready_for_approval():
     """From IN_PROGRESS, no direct transition back to READY_FOR_APPROVAL exists;
     the only backwards path is via ON_BC_POST_FAILED → APPROVED or
     ON_BC_PARTIAL_POSTED → BC_POST_PARTIAL."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t6", "doc_type": "AP_INVOICE", "workflow_status": "approved"}
     doc, _, _ = WorkflowEngine.advance_workflow(
@@ -170,7 +170,7 @@ def test_in_progress_cannot_jump_directly_back_to_ready_for_approval():
 
 def test_workflow_history_records_bc_post_events():
     """Every BC-post transition leaves a history entry with event id + actor."""
-    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+    from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
     doc = {"id": "t7", "doc_type": "AP_INVOICE", "workflow_status": "approved"}
     doc, h1, _ = WorkflowEngine.advance_workflow(

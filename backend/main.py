@@ -232,7 +232,7 @@ async def startup():
     register_ri_routes(app)
     # Inventory ledger indexes
     try:
-        from services.inventory_ledger_service import ensure_indexes as inv_ensure_indexes
+        from workflows.inventory.ledger.service import ensure_indexes as inv_ensure_indexes
         from deps import get_db
         await inv_ensure_indexes(get_db())
     except Exception as e:
@@ -240,7 +240,7 @@ async def startup():
 
     # Inventory XLS staging + learning indexes
     try:
-        from services.inventory_xls_staging_service import ensure_indexes as inv_xls_ensure_indexes
+        from workflows.inventory.planning.staging import ensure_indexes as inv_xls_ensure_indexes
         from deps import get_db
         await inv_xls_ensure_indexes(get_db())
     except Exception as e:

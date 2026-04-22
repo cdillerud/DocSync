@@ -112,7 +112,7 @@ async def build_fingerprint(customer_no: str, db=None) -> Dict[str, Any]:
     so existing diagnostic tooling keeps working.
     """
     db = db if db is not None else get_db()
-    from services.learning_core.fingerprint_service import (
+    from workflows.core.learning_core.fingerprint_service import (
         build_fingerprint as shared_build,
     )
     fp = await shared_build("customer", customer_no, db=db)
@@ -232,7 +232,7 @@ async def find_similar_customers(
     suggestions (which is sales-intake-specific).
     """
     db = db if db is not None else get_db()
-    from services.learning_core.fingerprint_service import find_similar as _shared_find
+    from workflows.core.learning_core.fingerprint_service import find_similar as _shared_find
     query_tokens = _line_items_to_tokens(line_items)
     if len(query_tokens) < MIN_TOKENS_IN_QUERY:
         return []
@@ -244,7 +244,7 @@ async def find_similar_customers(
         {"_id": 0, "scope_value": 1},
     )
     if not any_fp:
-        from services.learning_core.fingerprint_service import rebuild_all
+        from workflows.core.learning_core.fingerprint_service import rebuild_all
         await rebuild_all("customer", db=db)
 
     shared_matches = await _shared_find(
@@ -396,7 +396,7 @@ async def promote_inherited_suggestion(
 
     # Dual-write to unified learning_events_v2 (U1, v2.4.1)
     try:
-        from services.learning_core import record_event
+        from workflows.core.learning_core import record_event
         await record_event(
             domain="sales_intake",
             event_type="inherited_suggestion_promoted",

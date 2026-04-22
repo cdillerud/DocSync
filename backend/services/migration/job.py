@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List, Tuple
 from enum import Enum
 
-from ..workflow_engine import (
+from workflows.core.engine import (
     DocType, SourceSystem, CaptureChannel, DocumentClassifier,
     WorkflowStatus, ZETADOCS_SET_MAPPING, SQUARE9_WORKFLOW_MAPPING
 )

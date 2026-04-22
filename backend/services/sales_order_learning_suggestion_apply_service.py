@@ -114,7 +114,7 @@ async def apply_suggestion(db, suggestion_id: str, applier: str) -> Dict[str, An
 
     # U6 — emit unified event so apply actions surface in Learning Ops
     try:
-        from services.learning_core.events_service import record_event
+        from workflows.core.learning_core.events_service import record_event
         await record_event(
             domain="sales_intake",
             event_type="so_suggestion_applied",
@@ -184,7 +184,7 @@ async def _transition(db, suggestion_id: str, target: str, actor: str) -> Dict[s
     # suggestions shows up in the Learning Ops leaderboard + weekly digest.
     # Never blocks the primary transition.
     try:
-        from services.learning_core.events_service import record_event
+        from workflows.core.learning_core.events_service import record_event
         await record_event(
             domain="sales_intake",
             event_type=f"so_suggestion_{target}",

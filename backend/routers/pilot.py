@@ -1080,7 +1080,7 @@ from services.bc_simulation_service import (
     run_full_export_simulation, calculate_simulation_summary,
     get_simulation_service_status, SimulationResult, SimulationType, SimulationStatus
 )
-from services.workflow_engine import SimulationHistoryEntry
+from workflows.core.engine import SimulationHistoryEntry
 
 
 @router.get("/simulation/status")
@@ -1685,7 +1685,7 @@ async def reingest_single_document(doc_id: str):
         raise ValueError(f"Document {doc_id} not found")
     
     # Import classification and workflow functions
-    from services.workflow_engine import DocType, WorkflowStatus
+    from workflows.core.engine import DocType, WorkflowStatus
     from services.bc_simulation_service import run_full_export_simulation
     
     # Step 1: Determine doc_type from existing data or re-classify
@@ -1737,7 +1737,7 @@ async def reingest_single_document(doc_id: str):
         await db.pilot_simulation_results.insert_one(result_copy)
     
     # Step 5: Create simulation history entry
-    from services.workflow_engine import SimulationHistoryEntry
+    from workflows.core.engine import SimulationHistoryEntry
     sim_history_entry = SimulationHistoryEntry.create_batch_simulation_entry(
         document_id=doc_id,
         simulation_results=results_dict

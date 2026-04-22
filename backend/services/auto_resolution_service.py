@@ -415,7 +415,7 @@ class AutoResolutionService:
                         )
                         # Emit workflow event
                         try:
-                            from services.workflow_engine import WorkflowEvent
+                            from workflows.core.engine import WorkflowEvent
                             if self._event_service:
                                 await self._event_service.emit(
                                     event_type=WorkflowEvent.SO_SUBTYPE_CLASSIFIED.value,

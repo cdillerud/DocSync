@@ -317,7 +317,7 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
         # printed `total` is reconciled so downstream consumers never see
         # internally inconsistent amounts. Raw LLM values are preserved
         # in `_raw_extracted` for audit when reconciliation fires.
-        from services.line_reconciliation import reconcile_line_amounts
+        from workflows.ap_invoice.rules.line_reconciliation import reconcile_line_amounts
         line_items = []
         for item in data.get("line_items", []):
             raw = {

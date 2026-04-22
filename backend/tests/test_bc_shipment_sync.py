@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from unittest.mock import AsyncMock, patch
 from datetime import datetime, timezone
 
-from services.inventory_ledger_service import (
+from workflows.inventory.ledger.service import (
     MOVEMENT_TYPES, SOURCE_TYPES, MOVEMENTS_COLL, CUSTOMERS_COLL,
     create_movement, get_customer,
 )

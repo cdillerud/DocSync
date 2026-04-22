@@ -327,7 +327,7 @@ class FreightGLRoutingService:
         direction_scores = {"inbound": 0.0, "outbound": 0.0, "transfer": 0.0, "unknown": 0.0}
 
         # --- Step 0: Apply controller-defined business rules ---
-        from services.freight_business_rules import classify_freight_document
+        from workflows.freight.item_charges import classify_freight_document
         controller_result = classify_freight_document(doc)
         ctrl_direction = controller_result.get("direction")
         ctrl_confidence = controller_result.get("confidence", 0)

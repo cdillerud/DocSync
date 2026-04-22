@@ -34,7 +34,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from deps import get_db
-from services.learning_core.events_service import list_events, get_trend
+from workflows.core.learning_core.events_service import list_events, get_trend
 
 logger = logging.getLogger(__name__)
 

@@ -66,7 +66,7 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_noop_on_empty_vendor_name():
-    from services.vendor_profile_helpers import update_vendor_profile_incremental
+    from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental
     db = FakeDb()
     await update_vendor_profile_incremental(db, "doc-1", "", {}, "completed")
     assert db.vendor_intelligence_profiles.docs == []
@@ -74,7 +74,7 @@ async def test_noop_on_empty_vendor_name():
 
 @pytest.mark.asyncio
 async def test_creates_new_profile_with_counters():
-    from services.vendor_profile_helpers import update_vendor_profile_incremental
+    from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental
     db = FakeDb()
     await update_vendor_profile_incremental(
         db, "doc-1", "Acme Supplies Inc.",
@@ -98,7 +98,7 @@ async def test_creates_new_profile_with_counters():
 
 @pytest.mark.asyncio
 async def test_increments_existing_profile():
-    from services.vendor_profile_helpers import update_vendor_profile_incremental
+    from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental
     db = FakeDb()
     for i in range(3):
         await update_vendor_profile_incremental(
@@ -118,7 +118,7 @@ async def test_increments_existing_profile():
 @pytest.mark.asyncio
 async def test_flags_stable_vendor_after_threshold():
     """>=10 invoices + high rates → is_stable=True."""
-    from services.vendor_profile_helpers import update_vendor_profile_incremental
+    from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental
     db = FakeDb()
     for i in range(12):
         await update_vendor_profile_incremental(

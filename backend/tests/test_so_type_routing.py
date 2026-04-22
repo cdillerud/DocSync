@@ -300,7 +300,7 @@ class TestDropshipAutoApprove:
 
     def test_workflow_allows_direct_approval_from_extracted(self):
         """Sales_Invoice workflow allows ON_APPROVED directly from 'extracted'."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent, DocType
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent, DocType
         can, next_status, _ = WorkflowEngine.can_transition(
             DocType.SALES_INVOICE.value, "extracted", WorkflowEvent.ON_APPROVED.value
         )
@@ -309,7 +309,7 @@ class TestDropshipAutoApprove:
 
     def test_workflow_allows_approval_from_ready_for_approval(self):
         """Sales_Invoice workflow allows ON_APPROVED from 'ready_for_approval'."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent, DocType
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent, DocType
         can, next_status, _ = WorkflowEngine.can_transition(
             DocType.SALES_INVOICE.value, "ready_for_approval", WorkflowEvent.ON_APPROVED.value
         )
@@ -318,7 +318,7 @@ class TestDropshipAutoApprove:
 
     def test_workflow_allows_mark_ready_from_extracted(self):
         """Sales_Invoice workflow allows ON_MARK_READY_FOR_APPROVAL from 'extracted'."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent, DocType
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent, DocType
         can, next_status, _ = WorkflowEngine.can_transition(
             DocType.SALES_INVOICE.value, "extracted", WorkflowEvent.ON_MARK_READY_FOR_APPROVAL.value
         )
@@ -327,7 +327,7 @@ class TestDropshipAutoApprove:
 
     def test_auto_approve_advances_document(self):
         """Simulate the auto-approve logic in-memory."""
-        from services.workflow_engine import WorkflowEngine, WorkflowEvent, DocType
+        from workflows.core.engine import WorkflowEngine, WorkflowEvent, DocType
 
         # Create a mock document in 'extracted' state (typical after classification)
         doc = {

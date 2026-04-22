@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import sys
 sys.path.insert(0, '/app/backend')
 
-from services.workflow_engine import (
+from workflows.core.engine import (
     WorkflowEngine,
     WorkflowStatus,
     WorkflowEvent,

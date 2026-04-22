@@ -756,7 +756,7 @@ def build_smart_pi_lines(
             "unit_price": total_amount,
         }]
 
-    from services.line_reconciliation import (
+    from workflows.ap_invoice.rules.line_reconciliation import (
         reconcile_line_amounts,
         format_reconcile_suffix,
     )

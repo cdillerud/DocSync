@@ -13,7 +13,7 @@ amounts to Business Central:
      sum to the invoice's extracted total
 """
 
-from services.line_reconciliation import (
+from workflows.ap_invoice.rules.line_reconciliation import (
     reconcile_line_amounts,
     format_reconcile_suffix,
 )

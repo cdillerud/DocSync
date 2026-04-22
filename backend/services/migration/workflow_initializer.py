@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
-from ..workflow_engine import (
+from workflows.core.engine import (
     WorkflowStatus, WorkflowEvent, DocType, WorkflowEngine, WorkflowHistoryEntry
 )
 from .sources import LegacyDocumentMetadata

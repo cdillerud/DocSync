@@ -82,7 +82,7 @@ class DryRunPreviewRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _get_workflow_enums():
-    from services.workflow_engine import (
+    from workflows.core.engine import (
         DocType,
         SourceSystem,
         CaptureChannel,
@@ -732,7 +732,7 @@ async def intake_document(
         if vendor_name:
             # Orchestration Extraction (v2.5.2) — imports direct from service
             # module; no more `from server import ...` late-resolution.
-            from services.vendor_profile_helpers import update_vendor_profile_incremental
+            from workflows.ap_invoice.rules.vendor_profile import update_vendor_profile_incremental
             await update_vendor_profile_incremental(db, doc_id, vendor_name, update_data, final_status)
     except Exception as e:
         logger.error("[VendorProfile] Error updating profile for doc %s: %s", doc_id, str(e))

@@ -125,7 +125,7 @@ async def record_unified_feedback(
     # sparklines on /intake/learning light up as AP reviewers work the
     # queue. Never blocks the primary ingest.
     try:
-        from services.learning_core.events_service import record_event
+        from workflows.core.learning_core.events_service import record_event
         vendor_no = scope_value or res.get("vendor_no") or ""
         await record_event(
             domain="ap_posting",

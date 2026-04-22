@@ -11,7 +11,7 @@ Bridges the Customer Inventory Ledger with the SO preflight and creation flow:
 
 import logging
 from typing import Optional
-from services.inventory_ledger_service import (
+from workflows.inventory.ledger.service import (
     derive_balances, create_movement, list_movements,
     create_incoming, get_customer,
     CUSTOMERS_COLL, MOVEMENTS_COLL, INCOMING_COLL,

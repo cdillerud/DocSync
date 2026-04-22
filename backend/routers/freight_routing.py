@@ -214,7 +214,7 @@ async def verify_business_rules(
     Shows how each document would be classified by the freight business rules engine.
     Use this after deployment to confirm rules are working correctly.
     """
-    from services.freight_business_rules import classify_freight_document
+    from workflows.freight.item_charges import classify_freight_document
     db = get_db()
 
     query = {"is_duplicate": {"$ne": True}}

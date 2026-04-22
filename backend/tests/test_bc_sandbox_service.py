@@ -59,7 +59,7 @@ from services.bc_sandbox_service import (
     MOCK_SALES_INVOICES,
 )
 
-from services.workflow_engine import (
+from workflows.core.engine import (
     WorkflowEvent,
     BCValidationHistoryEntry,
 )

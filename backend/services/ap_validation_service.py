@@ -327,7 +327,7 @@ class APValidationService:
 
                 # Additional in-hub duplicate check (vendor + invoice + order)
                 try:
-                    from services.freight_business_rules import get_duplicate_check_fields, LTL_CARRIERS_HIGH_DUP_RISK
+                    from workflows.freight.item_charges import get_duplicate_check_fields, LTL_CARRIERS_HIGH_DUP_RISK
                     dup_strategy = get_duplicate_check_fields(result.matched_vendor_no)
                     if dup_strategy.get("ltl_high_risk") and total_amount:
                         # For LTL carriers, also check by vendor + amount (within $5)

@@ -71,7 +71,7 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_intake_health_aggregates_four_states():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     db.order_line_patterns.docs.append({
         "customer_no": "C-10250",
@@ -89,7 +89,7 @@ async def test_intake_health_aggregates_four_states():
 
 @pytest.mark.asyncio
 async def test_ap_health_maps_confidence_tiers():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     db.posting_pattern_analysis.docs.extend([
         {"vendor_no": "V-A", "posting_template": {"confidence": "high"}, "invoices_analyzed": 10},
@@ -114,7 +114,7 @@ async def test_ap_health_maps_confidence_tiers():
 
 @pytest.mark.asyncio
 async def test_combined_health_aggregates_both_domains():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     db.order_line_patterns.docs.append({
         "customer_no": "C-1",
@@ -133,7 +133,7 @@ async def test_combined_health_aggregates_both_domains():
 
 @pytest.mark.asyncio
 async def test_run_hygiene_all_retires_ap_none_tier_and_scans_intake():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     db.posting_pattern_analysis.docs.append({
         "vendor_no": "V-RETIRE", "status": "analyzed",
@@ -162,7 +162,7 @@ async def test_run_hygiene_all_retires_ap_none_tier_and_scans_intake():
 
 @pytest.mark.asyncio
 async def test_unknown_domain_returns_error_shape():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     r = await ph.get_health("alien", db=db)
     assert "error" in r
@@ -170,7 +170,7 @@ async def test_unknown_domain_returns_error_shape():
 
 @pytest.mark.asyncio
 async def test_hygiene_records_audit_run():
-    from services.learning_core import pattern_health_service as ph
+    from workflows.core.learning_core import pattern_health_service as ph
     db = FakeDb()
     await ph.run_hygiene("all", db=db)
     assert len(db["pattern_hygiene_runs"].docs) == 1

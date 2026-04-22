@@ -48,7 +48,7 @@ class TestClassifyDocumentTypeMailboxCategory:
     
     def test_mailbox_ap_returns_ap_invoice(self):
         """When mailbox_category=AP, classify_document_type returns doc_type='AP_INVOICE'"""
-        from services.workflow_engine import DocumentClassifier, DocType
+        from workflows.core.engine import DocumentClassifier, DocType
         
         # Test the mailbox category classification
         result = DocumentClassifier.classify_from_mailbox_category("AP")
@@ -57,7 +57,7 @@ class TestClassifyDocumentTypeMailboxCategory:
     
     def test_mailbox_sales_returns_sales_invoice(self):
         """When mailbox_category=SALES, returns SALES_INVOICE"""
-        from services.workflow_engine import DocumentClassifier, DocType
+        from workflows.core.engine import DocumentClassifier, DocType
         
         result = DocumentClassifier.classify_from_mailbox_category("SALES")
         assert result == DocType.SALES_INVOICE, f"Expected SALES_INVOICE but got {result}"
@@ -65,7 +65,7 @@ class TestClassifyDocumentTypeMailboxCategory:
     
     def test_mailbox_purchase_returns_purchase_order(self):
         """When mailbox_category=PURCHASE, returns PURCHASE_ORDER"""
-        from services.workflow_engine import DocumentClassifier, DocType
+        from workflows.core.engine import DocumentClassifier, DocType
         
         result = DocumentClassifier.classify_from_mailbox_category("PURCHASE")
         assert result == DocType.PURCHASE_ORDER, f"Expected PURCHASE_ORDER but got {result}"
@@ -73,7 +73,7 @@ class TestClassifyDocumentTypeMailboxCategory:
     
     def test_mailbox_unknown_returns_other(self):
         """When mailbox_category is unknown, returns OTHER"""
-        from services.workflow_engine import DocumentClassifier, DocType
+        from workflows.core.engine import DocumentClassifier, DocType
         
         result = DocumentClassifier.classify_from_mailbox_category("UNKNOWN")
         assert result == DocType.OTHER, f"Expected OTHER but got {result}"

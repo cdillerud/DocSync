@@ -251,8 +251,8 @@ export default function UnifiedQueuePage() {
         try {
           const [batchRes, exRes, poRes, archRes, readyRes] = await Promise.all([
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
-            api.get('/readiness/exception-queue?limit=0'),
-            api.get('/readiness/po-pending?limit=0'),
+            api.get('/readiness/exception-queue?limit=1'),
+            api.get('/readiness/po-pending?limit=1'),
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status_filter=Archived'),
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=ReadyForPost'),
           ]);

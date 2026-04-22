@@ -32,7 +32,7 @@ export default function SalesInventoryHubPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API}/api/sales-dashboard/triage-queue?limit=0`);
+        const res = await fetch(`${API}/api/sales-dashboard/triage-queue?limit=1`);
         const data = await res.json();
         setTriageCount(data.total || 0);
       } catch { /* ignore */ }

@@ -962,8 +962,11 @@ async def post_document_to_bc(
 
 
 @ap_review_router.get("/documents/{doc_id}/bc-status")
-async def get_bc_posting_status(doc_id: str):
-    """Get the BC posting status for a document."""
+async def get_bc_posting_status(
+    doc_id: str,
+    _user: dict = Depends(get_current_user),
+):
+    """Get the BC posting status for a document. JWT-protected (hygiene patch 2026-04-22)."""
     db = get_db()
     
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})

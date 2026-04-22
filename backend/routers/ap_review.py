@@ -661,13 +661,61 @@ async def post_document_to_bc(
     from services.bc_post_claim import (
         claim_for_bc_post, release_claim, ClaimRejectionReason,
     )
+    from services.bc_posting_attempts import (
+        build_attempt, new_correlation_id, next_attempt_n,
+    )
+    from services.workflow_engine import WorkflowEngine, WorkflowEvent
+
+    # A4: drive the workflow engine through ON_BC_POSTING_STARTED BEFORE the
+    # claim. Fetches the doc, advances the engine, and then folds the new
+    # workflow_status + workflow_history into the claim's atomic $set so
+    # the engine state and the claim land in a single Mongo operation.
+    pre_claim_doc = await db.hub_documents.find_one({"id": doc_id})
+    if not pre_claim_doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    actor = f"user:{_user.get('email', 'unknown')}" if isinstance(_user, dict) else "user:unknown"
+    mutated_doc, history_entry, engine_ok = WorkflowEngine.advance_workflow(
+        pre_claim_doc,
+        event=WorkflowEvent.ON_BC_POSTING_STARTED.value,
+        context={"reason": "Post to BC initiated", "metadata": {"source": "manual_post_to_bc"}},
+        actor=actor,
+    )
+    if not engine_ok:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Workflow engine refused ON_BC_POSTING_STARTED from status "
+                f"'{pre_claim_doc.get('workflow_status')}'. Expected APPROVED "
+                f"or READY_FOR_APPROVAL."
+            ),
+        )
+
     claim = await claim_for_bc_post(
         db,
         doc_id=doc_id,
         target_state="posting",
         worker_id=f"ap_review.post_to_bc-{os.getpid()}",
+        extra_set={
+            # A4: keep engine state in lockstep with the claim.
+            "workflow_status": mutated_doc["workflow_status"],
+            "workflow_status_updated_utc": mutated_doc["workflow_status_updated_utc"],
+            "workflow_history": mutated_doc.get("workflow_history", []),
+        },
     )
     if not claim.claimed:
+        # Engine already advanced but claim was rejected — roll the engine
+        # state back so we don't strand the doc in BC_POSTING_IN_PROGRESS
+        # without an actual in-flight post. Revert via direct write (no
+        # engine rollback event — the transition never actually happened
+        # from the doc's perspective).
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "workflow_status": pre_claim_doc.get("workflow_status"),
+                "workflow_status_updated_utc": pre_claim_doc.get("workflow_status_updated_utc"),
+            }},
+        )
         if claim.reason == ClaimRejectionReason.NOT_FOUND:
             raise HTTPException(status_code=404, detail="Document not found")
         if claim.reason == ClaimRejectionReason.ALREADY_TERMINAL:
@@ -687,6 +735,13 @@ async def post_document_to_bc(
                 f"complete or retry after the claim TTL expires."
             ),
         )
+
+    # A1: posting-attempts history bookkeeping. Each call to this endpoint is
+    # one logical post — allocate an attempt_n + correlation_id and we'll
+    # build the attempt dict at the release_claim() boundary.
+    attempt_n = await next_attempt_n(db, doc_id)
+    correlation_id = new_correlation_id()
+    started_utc = datetime.now(timezone.utc).isoformat()
 
     try:
         # Call BC service to create purchase invoice
@@ -738,7 +793,30 @@ async def post_document_to_bc(
                 link_writeback_status = "skipped"
                 link_writeback_error = "No SharePoint URL available"
             
-            # Success — release claim into terminal "posted" state atomically.
+            # Success — release claim into terminal "posted" state atomically,
+            # and append the successful attempt to bc_posting_attempts in the
+            # same $push so the audit entry can never drift from the state.
+            finished_utc = datetime.now(timezone.utc).isoformat()
+            attempt = build_attempt(
+                attempt_n=attempt_n,
+                status="posted",
+                actor=actor,
+                source="manual_post_to_bc",
+                correlation_id=correlation_id,
+                started_utc=started_utc,
+                finished_utc=finished_utc,
+                bc_record_no=bc_document_number,
+                bc_document_id=bc_document_id,
+            )
+            # A4: advance the engine from BC_POSTING_IN_PROGRESS to BC_POSTED.
+            posted_doc = dict(mutated_doc)
+            posted_doc, posted_history, _ok = WorkflowEngine.advance_workflow(
+                posted_doc,
+                event=WorkflowEvent.ON_BC_POSTED.value,
+                context={"metadata": {"bc_record_no": bc_document_number,
+                                      "bc_document_id": bc_document_id}},
+                actor=actor,
+            )
             await release_claim(
                 db,
                 doc_id=doc_id,
@@ -751,9 +829,12 @@ async def post_document_to_bc(
                     "bc_link_writeback_error": link_writeback_error,
                     "review_status": "posted",
                     "status": "Posted",
-                    "workflow_status": "posted",
-                    "posted_to_bc_utc": datetime.now(timezone.utc).isoformat(),
+                    "workflow_status": posted_doc["workflow_status"],
+                    "workflow_status_updated_utc": posted_doc["workflow_status_updated_utc"],
+                    "workflow_history": posted_doc.get("workflow_history", []),
+                    "posted_to_bc_utc": finished_utc,
                 },
+                attempt=attempt,
             )
 
             updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -770,8 +851,40 @@ async def post_document_to_bc(
             )
         else:
             # Failure — release claim into "failed" state so the doc is
-            # retry-eligible but no longer actively held.
+            # retry-eligible but no longer actively held. Append the failed
+            # attempt atomically; the partial-post case flags it.
             error_msg = result.get("error") or result.get("details") or "Unknown error"
+            is_partial = bool(result.get("partial_post")) or result.get("error") == "partial_post"
+            attempt_status = "partial" if is_partial else "failed"
+            partial_lines = None
+            if is_partial:
+                partial_lines = {
+                    "added": result.get("linesAdded", 0),
+                    "total": result.get("linesTotal", 0),
+                }
+            attempt = build_attempt(
+                attempt_n=attempt_n,
+                status=attempt_status,
+                actor=actor,
+                source="manual_post_to_bc",
+                correlation_id=correlation_id,
+                started_utc=started_utc,
+                finished_utc=datetime.now(timezone.utc).isoformat(),
+                error=error_msg,
+                retry_reason="bc_rejection",
+                bc_response_snippet=str(result)[:2000],
+                partial_lines=partial_lines,
+            )
+            # A4: drive engine ON_BC_PARTIAL_POSTED vs ON_BC_POST_FAILED.
+            terminal_doc = dict(mutated_doc)
+            terminal_event = (
+                WorkflowEvent.ON_BC_PARTIAL_POSTED.value if is_partial
+                else WorkflowEvent.ON_BC_POST_FAILED.value
+            )
+            terminal_doc, _hist, _ok = WorkflowEngine.advance_workflow(
+                terminal_doc, event=terminal_event,
+                context={"metadata": {"error": error_msg}}, actor=actor,
+            )
             await release_claim(
                 db,
                 doc_id=doc_id,
@@ -779,7 +892,11 @@ async def post_document_to_bc(
                 extra_set={
                     "bc_posting_error": error_msg,
                     "review_status": "ready_for_post",  # Keep ready for retry
+                    "workflow_status": terminal_doc["workflow_status"],
+                    "workflow_status_updated_utc": terminal_doc["workflow_status_updated_utc"],
+                    "workflow_history": terminal_doc.get("workflow_history", []),
                 },
+                attempt=attempt,
             )
 
             return PostToBCResponse(
@@ -797,6 +914,26 @@ async def post_document_to_bc(
         logger.error("Post to BC failed for doc %s: %s", doc_id, error_msg)
 
         try:
+            attempt = build_attempt(
+                attempt_n=attempt_n,
+                status="failed",
+                actor=actor,
+                source="manual_post_to_bc",
+                correlation_id=correlation_id,
+                started_utc=started_utc,
+                finished_utc=datetime.now(timezone.utc).isoformat(),
+                error=error_msg,
+                retry_reason="exception",
+            )
+            # A4: drive engine via ON_BC_POST_FAILED so workflow_status rolls
+            # back to APPROVED (retry-eligible).
+            terminal_doc = dict(mutated_doc)
+            terminal_doc, _hist, _ok = WorkflowEngine.advance_workflow(
+                terminal_doc,
+                event=WorkflowEvent.ON_BC_POST_FAILED.value,
+                context={"metadata": {"error": error_msg, "source": "exception"}},
+                actor=actor,
+            )
             await release_claim(
                 db,
                 doc_id=doc_id,
@@ -804,7 +941,11 @@ async def post_document_to_bc(
                 extra_set={
                     "bc_posting_error": error_msg,
                     "review_status": "ready_for_post",
+                    "workflow_status": terminal_doc["workflow_status"],
+                    "workflow_status_updated_utc": terminal_doc["workflow_status_updated_utc"],
+                    "workflow_history": terminal_doc.get("workflow_history", []),
                 },
+                attempt=attempt,
             )
         except Exception as release_err:
             logger.error(
@@ -836,7 +977,10 @@ async def get_bc_posting_status(doc_id: str):
         "bc_document_id": doc.get("bc_document_id"),
         "bc_document_number": doc.get("bc_document_number"),
         "bc_posting_error": doc.get("bc_posting_error"),
-        "posted_to_bc_utc": doc.get("posted_to_bc_utc")
+        "posted_to_bc_utc": doc.get("posted_to_bc_utc"),
+        # A1: full append-only attempt history. Newest entry is last in
+        # the array (Mongo $push semantics); frontend reverses for display.
+        "bc_posting_attempts": doc.get("bc_posting_attempts", []),
     }
 
 

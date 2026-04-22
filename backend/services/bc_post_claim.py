@@ -238,14 +238,21 @@ async def release_claim(
     doc_id: str,
     final_state: str,
     extra_set: Optional[Dict[str, Any]] = None,
+    attempt: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Finalize a claimed document after the BC call completes.
 
     Clears ``bc_posting_claimed_*`` fields and writes the terminal state
     (``posted`` / ``created`` / ``auto_post_failed`` / ...). Idempotent
     — safe to call in both success and failure paths.
+
+    If ``attempt`` is provided (a dict built via
+    ``services.bc_posting_attempts.build_attempt``), it is atomically
+    ``$push``ed onto ``hub_documents.bc_posting_attempts`` alongside the
+    terminal-state write — so the final outcome and its audit entry land
+    in one operation and can never drift apart.
     """
-    update = {
+    update: Dict[str, Any] = {
         "$set": {
             "bc_posting_status": final_state,
             "bc_posting_claimed_at": None,
@@ -254,8 +261,10 @@ async def release_claim(
             **(extra_set or {}),
         }
     }
+    if attempt is not None:
+        update["$push"] = {"bc_posting_attempts": attempt}
     await db.hub_documents.update_one({"id": doc_id}, update)
     logger.info(
-        "[BCPostClaim] Claim RELEASED doc=%s final_state=%s",
-        doc_id, final_state,
+        "[BCPostClaim] Claim RELEASED doc=%s final_state=%s attempt=%s",
+        doc_id, final_state, bool(attempt),
     )

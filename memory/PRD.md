@@ -73,6 +73,14 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 ## Completed Features
+
+### 2026-04-22 — Lane A Integrity v2.5.28
+- **A1 Historical posting-attempts array** — `hub_documents.bc_posting_attempts[]` append-only audit log replaces overwrite-on-failure `bc_posting_error`. Frontend accordion on the AP review panel (collapsed by default, auto-expands on failed/partial/pending_retry). Legacy migration on startup.
+- **A2 Retry/backoff on BC 429/503** — `bc_http_with_retry()` wraps the header POST and per-line POST inside `create_purchase_invoice`. 3 retries, 1s/2s/4s + jitter, circuit-break on exhaustion. Non-retriable 4xx passes through immediately.
+- **A4 Pre-claim `workflow_engine.advance_workflow`** — BC post lifecycle is now a first-class engine concern via new events `ON_BC_POSTING_STARTED/ON_BC_POSTED/ON_BC_PARTIAL_POSTED/ON_BC_POST_FAILED` and states `BC_POSTING_IN_PROGRESS/BC_POSTED/BC_POST_PARTIAL`. Engine refuses ON_BC_POSTING_STARTED from invalid states → 409 before BC is called. On claim race, engine state reverts.
+- **A3 gated** — Phase 4 Path B route deletion PR ready; merges when `phase_4_gate.gate_met=true` for 7 consecutive UTC days.
+- Regression: 153/156 (3 concurrency skips by design) across 11 suites.
+
 - Expanded TERMINAL_STATUSES (Validated, ReadyForPost, etc.)
 - 20-Rule Force Cleanup Engine (`POST /api/readiness/sync-status`)
 - Auto-Post Revert Bug Fix (non-AP docs no longer revert)

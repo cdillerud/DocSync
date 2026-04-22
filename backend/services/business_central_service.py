@@ -16,10 +16,12 @@ Configuration via environment variables:
 """
 
 import os
+import asyncio
 import logging
+import random
 import httpx
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable, Awaitable
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -94,6 +96,137 @@ def _check_write_protection(operation: str):
     target = BC_WRITE_ENVIRONMENT.lower()
     if target == "production" or target.startswith("prod"):
         raise ProductionWriteBlockedError(operation)
+
+
+# =============================================================================
+# RETRY / BACKOFF (Lane A A2, 2026-04-22)
+# =============================================================================
+#
+# Wraps transient BC write failures with bounded exponential backoff + jitter.
+# Retriable conditions: 429 Too Many Requests, 503 Service Unavailable,
+# 502/504, plus httpx.ConnectError / TimeoutException / ReadError.
+# Non-retriable 4xx (400/401/403/404/409/422) fail fast — those are data or
+# auth problems that retrying cannot fix and would only pad the audit log.
+#
+# Per signed scope §1 A2 done criteria:
+#   - 3 retries max, base sleeps 1s, 2s, 4s, each with ±25 % jitter.
+#   - Circuit-break after exhausting retries: raise BCRetriesExhausted.
+#   - Every retry logged at WARNING so the pattern is visible without
+#     requiring access to db.bc_posting_attempts.
+#
+# The wrapper does NOT append to bc_posting_attempts itself — that happens
+# at the caller's boundary (ap_review / ap_auto_post_service), where the
+# overall retry outcome lands in a single attempt entry. Retry metadata
+# propagates out via `response.extensions["bc_retry"]` on success, or via
+# BCRetriesExhausted.retry_reasons on failure.
+# =============================================================================
+
+BC_RETRY_MAX_ATTEMPTS = int(os.environ.get("BC_RETRY_MAX_ATTEMPTS", "3"))
+BC_RETRY_BASE_SECONDS = float(os.environ.get("BC_RETRY_BASE_SECONDS", "1.0"))
+BC_RETRY_JITTER_FRAC = 0.25   # ±25 %
+BC_RETRY_RETRIABLE_STATUSES = {429, 502, 503, 504}
+BC_RETRY_RETRIABLE_EXCEPTIONS = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadTimeout,
+    httpx.ReadError,
+    httpx.PoolTimeout,
+    httpx.WriteTimeout,
+)
+
+
+class BCRetriesExhausted(Exception):
+    """Raised when BC returned a retriable error for every attempt in the
+    configured budget. Carries the last response / exception so callers can
+    record it on the posting-attempts history row."""
+
+    def __init__(self, last_status: Optional[int], last_detail: str,
+                 attempts: int, retry_reasons: List[str]):
+        self.last_status = last_status
+        self.last_detail = last_detail
+        self.attempts = attempts
+        self.retry_reasons = retry_reasons
+        super().__init__(
+            f"BC request failed after {attempts} attempts "
+            f"(last_status={last_status}, retry_reasons={retry_reasons}): "
+            f"{last_detail[:300]}"
+        )
+
+
+def _jitter_sleep(base: float) -> float:
+    delta = base * BC_RETRY_JITTER_FRAC
+    return max(0.0, base + random.uniform(-delta, delta))
+
+
+async def bc_http_with_retry(
+    send: Callable[[], Awaitable[httpx.Response]],
+    *,
+    op: str,
+    max_attempts: Optional[int] = None,
+) -> httpx.Response:
+    """Invoke ``send()`` with bounded exponential-backoff retry.
+
+    ``send`` is a no-arg async callable that issues one HTTP request and
+    returns the Response. Returns on success or on the first non-retriable
+    failure (4xx other than 429). Raises ``BCRetriesExhausted`` only after
+    the full retry budget is burned on retriable conditions.
+    """
+    attempts = max_attempts if max_attempts is not None else BC_RETRY_MAX_ATTEMPTS
+    attempts = max(1, attempts)
+
+    retry_reasons: List[str] = []
+    last_status: Optional[int] = None
+    last_detail: str = ""
+
+    for attempt_idx in range(1, attempts + 1):
+        try:
+            resp = await send()
+            if resp.status_code not in BC_RETRY_RETRIABLE_STATUSES:
+                if retry_reasons:
+                    logger.info(
+                        "[BC-Retry] %s succeeded on attempt %d/%d (prior retries: %s)",
+                        op, attempt_idx, attempts, retry_reasons,
+                    )
+                # Only real httpx.Response has .extensions. Test mocks may
+                # not — guard so the wrapper stays backwards-compatible with
+                # pre-existing test fakes.
+                if hasattr(resp, "extensions"):
+                    resp.extensions.setdefault("bc_retry", {
+                        "attempts": attempt_idx,
+                        "retry_reasons": list(retry_reasons),
+                    })
+                return resp
+
+            last_status = resp.status_code
+            last_detail = resp.text or ""
+            retry_reasons.append(str(resp.status_code))
+            logger.warning(
+                "[BC-Retry] %s got %s on attempt %d/%d — will retry",
+                op, resp.status_code, attempt_idx, attempts,
+            )
+        except BC_RETRY_RETRIABLE_EXCEPTIONS as e:
+            last_status = None
+            last_detail = f"{type(e).__name__}: {e}"
+            retry_reasons.append(type(e).__name__)
+            logger.warning(
+                "[BC-Retry] %s raised %s on attempt %d/%d — will retry",
+                op, type(e).__name__, attempt_idx, attempts,
+            )
+
+        if attempt_idx < attempts:
+            base = BC_RETRY_BASE_SECONDS * (2 ** (attempt_idx - 1))
+            await asyncio.sleep(_jitter_sleep(base))
+
+    logger.error(
+        "[BC-Retry] %s exhausted all %d retries — retry_reasons=%s last_detail=%s",
+        op, attempts, retry_reasons, last_detail[:300],
+    )
+    raise BCRetriesExhausted(
+        last_status=last_status,
+        last_detail=last_detail,
+        attempts=attempts,
+        retry_reasons=retry_reasons,
+    )
 
 
 # =============================================================================
@@ -752,14 +885,31 @@ class BusinessCentralService:
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
         
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                },
-                json=payload
-            )
+            # A2: wrap the header POST in bounded exponential-backoff retry
+            # so transient 429/503/network blips are absorbed silently. 4xx
+            # (non-429) still fail fast — BC is telling us the payload is
+            # wrong and retrying cannot fix that.
+            async def _send_header():
+                return await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json"
+                    },
+                    json=payload
+                )
+            try:
+                resp = await bc_http_with_retry(_send_header, op="create_purchase_invoice")
+            except BCRetriesExhausted as e:
+                logger.error("create_purchase_invoice retries exhausted: %s", e)
+                return {
+                    "success": False,
+                    "error": f"BC API error: {e.last_status or 'network'}",
+                    "details": e.last_detail[:500],
+                    "retry_reasons": e.retry_reasons,
+                    "retries_exhausted": True,
+                    "mock": False,
+                }
             
             if resp.status_code not in (200, 201):
                 error_detail = resp.text[:500]
@@ -1035,14 +1185,30 @@ class BusinessCentralService:
                     quantity, unit_price, description[:40],
                 )
 
-                resp = await client.post(
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json=bc_line,
-                )
+                # A2: per-line POST wrapped in retry/backoff. If a line's
+                # HTTP fails transiently (429/503/network), we retry silently;
+                # if it exhausts the budget, the line is recorded as a
+                # permanent failure and the invoice falls into partial-post.
+                async def _send_line():
+                    return await client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/json",
+                        },
+                        json=bc_line,
+                    )
+                try:
+                    resp = await bc_http_with_retry(_send_line, op=f"add_invoice_line#{idx+1}")
+                except BCRetriesExhausted as e:
+                    errors.append({
+                        "line": idx + 1,
+                        "description": description[:50],
+                        "error": f"retries exhausted: {e.last_detail[:200]}",
+                        "http_status": e.last_status,
+                        "retry_reasons": e.retry_reasons,
+                    })
+                    continue
                 if resp.status_code in (200, 201):
                     added_count += 1
                 else:

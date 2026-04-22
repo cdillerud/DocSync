@@ -12,6 +12,7 @@ import {
   SelectValue 
 } from './ui/select';
 import { toast } from 'sonner';
+import PostingAttemptsHistory from './PostingAttemptsHistory';
 import { 
   Save, Send, Search, Building2, FileText, 
   Package, DollarSign, Calendar, Hash, Loader2,
@@ -605,6 +606,10 @@ export function APReviewPanel({ document, onUpdate }) {
             <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">{document.bc_posting_error}</p>
           </div>
         )}
+
+        {/* A1: Posting attempts history accordion (collapsed by default,
+            auto-expands on failure / partial / pending_retry). */}
+        <PostingAttemptsHistory document={document} />
         
         {/* BC Document Info (if posted) */}
         {isPosted && document?.bc_document_id && (

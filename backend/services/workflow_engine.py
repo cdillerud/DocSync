@@ -158,6 +158,15 @@ class WorkflowStatus(str, Enum):
     EXPORTED = "exported"
     ARCHIVED = "archived"
     
+    # BC posting stage (A4 — Lane A, 2026-04-22)
+    # Explicit workflow states for the Business Central post lifecycle so
+    # the engine knows when a doc is in-flight, posted, partially posted,
+    # or has failed. Before A4, "posting" lived only on ``bc_posting_status``
+    # and the engine was blind to it.
+    BC_POSTING_IN_PROGRESS = "bc_posting_in_progress"
+    BC_POSTED = "bc_posted"
+    BC_POST_PARTIAL = "bc_post_partial"
+    
     # Error states
     FAILED = "failed"
 
@@ -246,6 +255,15 @@ class WorkflowEvent(str, Enum):
     ON_ERROR = "on_error"
     ON_RETRY = "on_retry"
 
+    # BC Posting lifecycle (A4 — Lane A, 2026-04-22)
+    # Drive the document through the BC post lifecycle *through the engine*
+    # so workflow_status reflects reality — previously these transitions
+    # were invisible to the engine (posting lived only on bc_posting_status).
+    ON_BC_POSTING_STARTED = "on_bc_posting_started"
+    ON_BC_POSTED = "on_bc_posted"
+    ON_BC_PARTIAL_POSTED = "on_bc_partial_posted"
+    ON_BC_POST_FAILED = "on_bc_post_failed"
+
 
 # =============================================================================
 # WORKFLOW DEFINITIONS BY DOCUMENT TYPE
@@ -296,6 +314,10 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
             WorkflowEvent.ON_APPROVAL_STARTED.value: WorkflowStatus.APPROVAL_IN_PROGRESS.value,
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
             WorkflowEvent.ON_REJECTED.value: WorkflowStatus.REJECTED.value,
+            # A4: READY_FOR_APPROVAL is also a legitimate starting state for
+            # a post-to-bc click in the current UI (reviewers post from the
+            # review screen without a separate approval step in the pilot).
+            WorkflowEvent.ON_BC_POSTING_STARTED.value: WorkflowStatus.BC_POSTING_IN_PROGRESS.value,
         },
         WorkflowStatus.APPROVAL_IN_PROGRESS.value: {
             WorkflowEvent.ON_APPROVED.value: WorkflowStatus.APPROVED.value,
@@ -303,6 +325,25 @@ WORKFLOW_DEFINITIONS: Dict[str, Dict[Optional[str], Dict[str, str]]] = {
         },
         WorkflowStatus.APPROVED.value: {
             WorkflowEvent.ON_EXPORTED.value: WorkflowStatus.EXPORTED.value,
+            # A4: APPROVED docs enter the BC post lifecycle via this event.
+            WorkflowEvent.ON_BC_POSTING_STARTED.value: WorkflowStatus.BC_POSTING_IN_PROGRESS.value,
+        },
+        WorkflowStatus.BC_POSTING_IN_PROGRESS.value: {
+            WorkflowEvent.ON_BC_POSTED.value: WorkflowStatus.BC_POSTED.value,
+            WorkflowEvent.ON_BC_PARTIAL_POSTED.value: WorkflowStatus.BC_POST_PARTIAL.value,
+            # On hard failure the doc falls back to APPROVED so the reviewer
+            # can retry; the posting-attempts history retains the failure.
+            WorkflowEvent.ON_BC_POST_FAILED.value: WorkflowStatus.APPROVED.value,
+        },
+        WorkflowStatus.BC_POSTED.value: {
+            WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
+        },
+        WorkflowStatus.BC_POST_PARTIAL.value: {
+            # Partial is an exception state — reviewer intervenes. Retry
+            # returns to APPROVED so the post cycle can re-run with
+            # corrected data.
+            WorkflowEvent.ON_RETRY.value: WorkflowStatus.APPROVED.value,
+            WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,
         },
         WorkflowStatus.EXPORTED.value: {
             WorkflowEvent.ON_ARCHIVED.value: WorkflowStatus.ARCHIVED.value,

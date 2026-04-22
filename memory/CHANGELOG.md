@@ -1,6 +1,52 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-04-22] v2.5.28 — Lane A Integrity (A1 + A2 + A4 shipped; A3 ready-to-merge)
+
+**Scope:** Three of four Lane A integrity items land. A3 (Phase 4 Path B route deletion) is externally gated on the 7-UTC-day drain clock per signed scope §1; the PR is ready and will merge when the clock matures. Ship order honored the dependency chain.
+
+### A1 — Historical posting-attempts array (shipped)
+- **New service** `services/bc_posting_attempts.py`: `build_attempt()`, `next_attempt_n()`, `attempts_push_fragment()`, `record_standalone_attempt()`, `migrate_legacy_bc_posting_error()`.
+- **`services/bc_post_claim.py::release_claim`** accepts an optional `attempt=` arg that atomically `$push`es an entry alongside the terminal-state `$set`, so state and audit can never drift.
+- **`routers/ap_review.py::post_document_to_bc`** wired on all three release paths (success, BC failure, exception) — every post leaves one attempt entry.
+- **`services/ap_auto_post_service.py::attempt_ap_auto_post`** wired on all four paths (success, pending_retry, permanent failure, transient failure) — partial posts land with `status="partial"` not a flat `failed`.
+- **`GET /api/ap-review/documents/{doc_id}/bc-status`** response now carries the full `bc_posting_attempts[]` history.
+- **Startup migration** idempotently synthesizes legacy entries for any doc with `bc_posting_error` set but no `bc_posting_attempts` array.
+- **Frontend** new `PostingAttemptsHistory.jsx` component: collapsed by default, auto-expands on `bc_posting_status ∈ {failed, partial, pending_retry}` per signed UX spec; timestamp, actor, truncated error with expand-for-full, gate_id when blocked pre-submission, newest-first.
+- **Tests** `tests/test_posting_attempts_history.py` — 12/12 green (shape invariants, error truncation, next_attempt_n, append-only semantics, release_claim integration, legacy migration idempotency, auto-post success/partial paths).
+
+### A2 — Retry/backoff on BC 429/503 (shipped)
+- **`services/business_central_service.py`** new `bc_http_with_retry(send, op, max_attempts)` helper + `BCRetriesExhausted` exception.
+- Retries 429 / 502 / 503 / 504 plus `httpx.ConnectError / ConnectTimeout / ReadTimeout / ReadError / PoolTimeout / WriteTimeout`. Non-retriable 4xx passes through immediately.
+- 3 attempts max, base 1 s / 2 s / 4 s backoff, ±25 % jitter. Env-tunable via `BC_RETRY_MAX_ATTEMPTS` / `BC_RETRY_BASE_SECONDS`.
+- Wrapped the header POST in `create_purchase_invoice` and per-line POST in `_add_invoice_lines`. On exhaustion, `create_purchase_invoice` returns `{success: False, retries_exhausted: True, retry_reasons: [...]}` so the caller writes a single honest attempt entry.
+- **Tests** `tests/test_bc_retry_backoff.py` — 9/9 green (immediate 2xx return, 4xx passthrough, 429→200 recovery, exhaustion at 3×503, exception retriability, `max_attempts=1` disables retry, end-to-end `create_purchase_invoice` retries_exhausted shape, jitter band sanity).
+
+### A4 — Pre-claim `workflow_engine.advance_workflow` (shipped)
+- **New workflow events** `ON_BC_POSTING_STARTED`, `ON_BC_POSTED`, `ON_BC_PARTIAL_POSTED`, `ON_BC_POST_FAILED` in `services/workflow_engine.py`.
+- **New workflow states** `BC_POSTING_IN_PROGRESS`, `BC_POSTED`, `BC_POST_PARTIAL`.
+- **Transitions added** to the `AP_INVOICE` workflow:
+  - `APPROVED` or `READY_FOR_APPROVAL` + `ON_BC_POSTING_STARTED` → `BC_POSTING_IN_PROGRESS`
+  - `BC_POSTING_IN_PROGRESS` + `ON_BC_POSTED` → `BC_POSTED`
+  - `BC_POSTING_IN_PROGRESS` + `ON_BC_PARTIAL_POSTED` → `BC_POST_PARTIAL`
+  - `BC_POSTING_IN_PROGRESS` + `ON_BC_POST_FAILED` → `APPROVED` (retry-eligible)
+  - `BC_POSTED` / `BC_POST_PARTIAL` / `EXPORTED` + `ON_ARCHIVED` → `ARCHIVED`
+  - `BC_POST_PARTIAL` + `ON_RETRY` → `APPROVED`
+- **`routers/ap_review.py::post_document_to_bc`** now fetches doc → advances engine via `ON_BC_POSTING_STARTED` → folds new `workflow_status`/`workflow_history` into the claim's atomic `$set`. On claim rejection (race), the engine state is reverted so no doc is stranded in `BC_POSTING_IN_PROGRESS` without an in-flight post. Post-result paths advance the engine via the appropriate terminal event, folded into `release_claim`'s `extra_set` alongside the attempt entry.
+- **Tests** `tests/test_bc_posting_engine_lifecycle.py` — 10/10 green (event/state enum presence, valid-state transitions, invalid-state rejection, happy/partial/hard-failure lifecycles, no-jump-back invariant, history recording with actor+metadata).
+
+### A3 — Phase 4 Path B route deletion (ready; gated)
+Per signed scope §1 clock semantics, A3 merges when `phase_4_gate.gate_met=true` for 7 consecutive UTC days AND regression green. Clock starts from the v2.5.28 deploy. See `/app/memory/PATH_B_REMOVAL_PLAN.md` for the exact deletions. A3 PR prepped as a single atomic commit that can be executed by Chad when the drain matures.
+
+### Regression
+Full suite: **153 passed, 3 skipped** across 11 test files. No regressions. One existing `test_bc_line_routing.py` fake-response class made the retry wrapper trip on `.extensions` — guarded with `hasattr` so pre-existing tests stay unaware of the new metadata surface.
+
+### Deploy note (remote VM)
+`cd /opt/gpi-hub && git pull && docker compose build --no-cache && docker compose up -d`. Startup log should show one-time legacy migration for existing docs with `bc_posting_error` set.
+
+
+
+
 ## [2026-04-22] v2.5.27 — Phase 4 Gate Projection + 422 Blind-Spot Disclosure
 
 **Scope:** Three user-directed follow-ups on top of v2.5.26:

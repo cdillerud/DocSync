@@ -264,6 +264,21 @@ async def startup():
     except Exception as e:
         logger.warning("Classification feedback init failed: %s", e)
 
+    # A1 (Lane A): one-time migration of legacy bc_posting_error strings into
+    # append-only bc_posting_attempts[] history. Idempotent — safe on every
+    # startup; does nothing after the first run converts the backlog.
+    try:
+        from services.bc_posting_attempts import migrate_legacy_bc_posting_error
+        from deps import get_db
+        stats = await migrate_legacy_bc_posting_error(get_db())
+        if stats["migrated"]:
+            logger.info(
+                "[bc_posting_attempts] legacy migration on startup: scanned=%d migrated=%d",
+                stats["scanned"], stats["migrated"],
+            )
+    except Exception as e:
+        logger.warning("bc_posting_attempts legacy migration failed: %s", e)
+
     logger.info("main.py startup complete")
 
 

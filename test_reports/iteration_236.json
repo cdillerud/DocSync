@@ -1,0 +1,50 @@
+{
+  "summary": "v2.5.28 Lane A integrity sprint VERIFIED. Full regression of 11 Lane A + dependency suites: 153 passed, 3 skipped — exactly matches main agent's expected count. A1 (posting-attempts history), A2 (BC retry/backoff), A4 (pre-claim workflow_engine.advance_workflow) all wired and green. A3 (Path B route deletion) confirmed NOT shipped — 6 deprecated routes still present in /openapi.json with deprecated=true and Phase 4 gate live (gate_met=true, total_hits_in_window=0). Frontend smoke: PostingAttemptsHistory imported into APReviewPanel.js with all 7 required data-testid values declared; could not open against a live AP doc because preview env Accounting tab is empty (no seeded AP invoices) — data limitation only, no JS errors from the new component.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/ap-review/documents/{id}/bc-status", "issue": "Endpoint has NO admin/JWT auth dependency (returns 404 'Document not found' identically with or without Authorization header). Review_request states 'Admin JWT required' but the route definition (ap_review.py L964-984) attaches no auth. Note: this is consistent with sibling status reads in the same router and is NOT part of the signed Lane A scope memo — flagging as observation only."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Inbox page bootstrap", "issue": "4 pre-existing 422s on GET /api/readiness/exception-queue?limit=0 and /api/readiness/po-pending?limit=0 — frontend sends limit=0 but Query validator requires ge=1. Not a Lane A regression; this is the same 422 observability blind spot already disclosed in PATH_B_REMOVAL_PLAN.md §2c.", "affected_selectors": []},
+      {"flow": "Sales order review render", "issue": "Pre-existing React hydration warning: <span> cannot be a child of <tbody> inside CreateBCSalesOrderPanel/EditableLineTable (line 838 / EditableLine line 891). Outside Lane A scope.", "affected_selectors": ["[data-testid='bc-so-line']"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_posting_attempts_history.py",
+    "/app/backend/tests/test_bc_retry_backoff.py",
+    "/app/backend/tests/test_bc_posting_engine_lifecycle.py",
+    "/app/test_reports/pytest/iter236_lane_a.xml"
+  ],
+  "verification_checklist": {
+    "lane_a_full_regression": "PASS — 153 passed, 3 skipped in 3.01s across test_posting_attempts_history(12) + test_bc_retry_backoff(9) + test_bc_posting_engine_lifecycle(10) + test_auth_enforcement + test_bc_post_claim(skipped 3) + test_bc_line_routing + test_pi_preflight_reconcile + test_vendor_profile_fallbacks + test_ap_path_consolidation + test_partial_post_detection + test_deprecation_metrics. Exactly matches main agent's expected count.",
+    "A1_history_contract": "PASS — services/bc_posting_attempts.py exposes build_attempt + migrate_legacy_bc_posting_error. ap_review.post_document_to_bc imports from services.bc_posting_attempts (L664) and folds attempts into release_claim's $push semantics. ap_auto_post_service references bc_posting_attempts on all 4 write paths.",
+    "A1_endpoint_exposure": "PASS — GET /api/ap-review/documents/{doc_id}/bc-status response now contains 'bc_posting_attempts' key (ap_review.py L983).",
+    "A2_retry_backoff": "PASS — services/business_central_service.py: bc_http_with_retry signature (send, *, op, max_attempts=None) matches spec. BC_RETRY_MAX_ATTEMPTS configurable via env (default 3). Retriable statuses {429,502,503,504} + httpx.ConnectError/Timeout family. _jitter_sleep applies ±25% jitter on 1s/2s/4s base. Header POST and per-line POST both wrapped. 9 unit tests green.",
+    "A4_engine_contract": "PASS — workflow_engine.py declares 4 new events (ON_BC_POSTING_STARTED L262, ON_BC_POSTED L263, ON_BC_PARTIAL_POSTED L264, ON_BC_POST_FAILED L265) and 3 new states (BC_POSTING_IN_PROGRESS L166, BC_POSTED L167, BC_POST_PARTIAL L168) on WorkflowStatus enum. Transitions L320-341 wire APPROVED/READY_FOR_APPROVAL → BC_POSTING_IN_PROGRESS and the 3 terminal events. 10 lifecycle tests green.",
+    "A3_not_shipped": "PASS — /openapi.json still exposes all 6 Path B AP-mutation routes with deprecated=true: POST /api/workflows/ap_invoice/{doc_id}/{set-vendor,update-fields,override-bc-validation,start-approval,approve,reject}.",
+    "phase_4_gate_live": "PASS — GET /api/admin/deprecation-metrics → phase_4_gate.gate_met=true, window_days=7, total_hits_in_window=0, ap_mutation_routes_monitored=6, observability_limitations=3-item list. Confirms ready-to-merge state.",
+    "frontend_pah_wiring": "PASS — components/PostingAttemptsHistory.jsx exports default fn taking {document}, declares data-testid='posting-attempts-history', 'posting-attempts-toggle', 'posting-attempts-list'. APReviewPanel.js L15 imports and L612 mounts <PostingAttemptsHistory document={document} />. No console errors mentioning PostingAttemptsHistory observed across 3 nav passes.",
+    "frontend_smoke_caveat": "PARTIAL — Could not open the component against a real AP invoice in the preview env: All tab is empty, Accounting tab is empty. Processed tab only contained Sales_Order docs which route to SalesOrderReviewPage (not APReviewPanel). Backend unit suite covers the rendering data shape exhaustively (12 cases); JS-side mounting is statically verified. This is a seed-data limitation, not a code defect."
+  },
+  "critical_code_review_comments": [
+    "A1 contract is clean: bc_posting_attempts is append-only via Mongo $push in release_claim's extra_set — array can never shrink, satisfying the financial-integrity invariant called out in agent_to_agent_context_note.",
+    "A2 retry layer correctly returns response.extensions['bc_retry']={attempts, retry_reasons} on success — observability hooks are in place for downstream attempt-history mapping. Per-line wrap inside _add_invoice_lines correctly defers BCRetriesExhausted into errors[] so the partial-post contract (Work Item B) holds: bc_posting_status NEVER becomes 'posted' on partial.",
+    "A4 transitions correctly REJECT ON_APPROVAL_STARTED from BC_POSTING_IN_PROGRESS — verified in test_bc_posting_engine_lifecycle.py — preventing orphaning of in-flight posts.",
+    "MINOR (non-blocking): GET /api/ap-review/documents/{id}/bc-status has no admin/JWT dependency. Review request docstring expects auth; signed scope memo is silent. Recommend adding require_admin Depends() in a future patch for consistency with other admin reads, but NOT blocking Lane A close.",
+    "MINOR (pre-existing, non-Lane-A): Hub Inbox emits 4 client-side 422s on /api/readiness/exception-queue?limit=0 and /api/readiness/po-pending?limit=0 — frontend should send limit>=1. This is the very 422 blind-spot the scope memo §2c documents; consider fixing the caller to make the metric truly noise-free.",
+    "MINOR (pre-existing, non-Lane-A): React hydration warning '<span> cannot be a child of <tbody>' in CreateBCSalesOrderPanel/EditableLineTable. SSR-style hydration risk; harmless under CRA but worth cleaning up."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (153/153 passed, 3 skipped expected)", "frontend": "smoke pass — component import + testid declaration verified; live render gated by missing AP seed data"},
+  "test_credentials": "hub-admin@gamerpackaging.com / ChangeMeOnFirstDeploy-K8p2q (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. All new tests use in-test mocks per mocked_api spec; no DB writes leaked. Could not perform live frontend AP-doc render because preview env has no AP invoices in the Accounting tab — recommend main agent seed one synthetic AP doc (with a populated bc_posting_attempts array) for end-to-end PAH visual smoke in next release.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Lane A is closed. Key invariants to keep watching: (1) bc_posting_attempts must never shrink — any test that observes a smaller array post-mutation is a data-loss bug; (2) bc_posting_status must never be 'posted' when create_purchase_invoice returns partial (Work Item B); (3) A3 (Path B deletion) is still externally gated — when Chad confirms 7-day drain, flip test_ap_path_consolidation::test_path_b_still_present to test_path_b_removed. To smoke PAH in UI next time, seed one AP invoice doc into hub_documents with review_status='ready_for_approval', bc_posting_status='failed' or 'partial', and a 1-3 entry bc_posting_attempts array — then open it via Accounting tab → doc-row-{id} click.",
+  "rca of the issue": "N/A — no Lane A bug found. The two flagged frontend issues (422s on readiness endpoints, hydration warning in CreateBCSalesOrderPanel) are pre-existing and outside Lane A scope; the bc-status auth observation is a discrepancy between review-request wording and the signed scope memo (memo wins; not a bug)."
+}

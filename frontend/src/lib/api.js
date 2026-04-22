@@ -306,6 +306,11 @@ export const postToBC = (docId, data = null) =>
 export const getBCPostingStatus = (docId) => 
   api.get(`/ap-review/documents/${encId(docId)}/bc-status`);
 
+// A1 (Lane A) alias: same endpoint, returns the bc_posting_attempts[] history
+// alongside the fast-access status fields. Kept as an alias (no duplication)
+// so the component can import the clearer name.
+export const getBcStatus = getBCPostingStatus;
+
 // Extract invoice data using AI
 export const extractInvoiceData = (docId) => 
   api.post(`/ap-review/documents/${encId(docId)}/extract-invoice-data`);

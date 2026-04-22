@@ -74,6 +74,13 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-22 — Reviewer UI Polish: Ownership Evidence Panel v2.5.33
+- **New component** `frontend/src/components/OwnershipEvidencePanel.jsx` — structured renderer for `readiness.cow_items[]`, `readiness.cow_so_items[]`, and `readiness.consigned_items[]`. Three guarded sections, each shown only when its array is non-empty. Zero visual impact on docs without ownership evidence.
+- **Integration** — inserted into `pages/DocumentDetailPage.js` inside the existing Readiness card, after Warnings. Reads the payload that `GET /api/documents/{doc_id}` already returns — **zero backend changes, zero new fetches, zero new endpoints**.
+- **Per-row actions** — "Update registry" deep-links to `/config?tab={cp-items|consigned-items}&filter_item=<item_no>`; "Correct line" scrolls+highlights the extracted-data card via anchor `#doc-line-items` (guarded, no-ops cleanly when the card doesn't render).
+- **Deep-link behavior in admin tabs** — `CpItemRegistryPanel.jsx` and `ConsignedItemRegistryPanel.jsx` now read `filter_item` from `useSearchParams`, pre-fill a new `item_no` text filter input, set the status filter to `all` on deep-link, and highlight the matched row with a primary ring. **Does NOT auto-open the create modal per signed amendment** — navigation only.
+- **Verification** — 0 lint issues across 4 touched frontend files; backend Lane B regression 317P/35F/14E unchanged; COW+consignment 55/55 unchanged; OpenAPI path set byte-identical (862); screenshot smoke confirmed panel renders, deep-link navigation works with prefilled filter + highlighted row.
+
 ### 2026-04-22 — Lane C Step 2: Vendor Consignment v2.5.32
 - **`consigned_item_registry` collection** — separate from `cp_item_registry`. Schema: `item_no` (unique), `vendor_no`, `physical_location`, `state ∈ {consigned_in, consumed, returned}`, `linked_receipt_ids[]`, `linked_consumption_ids[]`, `linked_return_ids[]` (all append-only), audit fields. Vendor-only consignor per signed Q2.
 - **State machine** — exactly two legal transitions: `consigned_in → consumed` and `consigned_in → returned`. Terminal states; no reopen path. Transition requires `CONSIGNMENT_STATE_ACTOR_EMAIL` (env, default `items@gamerpackaging.com`) + mandatory `evidence_id` appended to the relevant link array.

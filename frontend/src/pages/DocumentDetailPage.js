@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
+import OwnershipEvidencePanel from '../components/OwnershipEvidencePanel';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import SplitPreviewPanel from '../components/SplitPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
@@ -106,7 +107,7 @@ function ExtractedDataCard({ doc }) {
   if (Object.keys(fields).length === 0 && lineItems.length === 0) return null;
   
   return (
-    <Card data-testid="extracted-data-card">
+    <Card id="doc-line-items" data-testid="extracted-data-card">
       <CardHeader className="pb-2">
         <div className="flex items-center gap-2">
           <FileSearch className="w-5 h-5 text-primary" />
@@ -262,6 +263,9 @@ function ReadinessPanel({ readiness, docStatus }) {
             ))}
           </div>
         )}
+
+        {/* Structured ownership evidence (COW PO, COW SO, Consignment) */}
+        <OwnershipEvidencePanel readiness={readiness} />
 
         {/* Reviewer actions */}
         {readiness.required_reviewer_actions?.length > 0 && (

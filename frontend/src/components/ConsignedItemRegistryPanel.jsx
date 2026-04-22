@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -31,10 +32,13 @@ const STATE_VARIANT = {
 };
 
 export default function ConsignedItemRegistryPanel() {
+  const [searchParams] = useSearchParams();
+  const deepLinkItem = (searchParams.get('filter_item') || '').trim().toUpperCase();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [vendorFilter, setVendorFilter] = useState('');
-  const [stateFilter, setStateFilter] = useState('consigned_in');
+  const [itemFilter, setItemFilter] = useState(deepLinkItem);
+  const [stateFilter, setStateFilter] = useState(deepLinkItem ? 'all' : 'consigned_in');
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
   const [transitioning, setTransitioning] = useState(null); // item_no
@@ -56,7 +60,12 @@ export default function ConsignedItemRegistryPanel() {
       const res = await fetch(`${API}/api/consigned-items?${params}`, { headers });
       if (res.ok) {
         const data = await res.json();
-        setItems(data.items || []);
+        let arr = data.items || [];
+        if (itemFilter.trim()) {
+          const needle = itemFilter.trim().toUpperCase();
+          arr = arr.filter((it) => (it.item_no || '').includes(needle));
+        }
+        setItems(arr);
       } else {
         setBanner({ kind: 'err', text: `Load failed (${res.status})` });
       }
@@ -64,7 +73,7 @@ export default function ConsignedItemRegistryPanel() {
       setBanner({ kind: 'err', text: `Load failed: ${e.message}` });
     }
     setLoading(false);
-  }, [vendorFilter, stateFilter]);  // eslint-disable-line react-hooks/exhaustive-deps
+  }, [vendorFilter, stateFilter, itemFilter]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { fetchItems(); }, [fetchItems]);
 
@@ -173,13 +182,23 @@ export default function ConsignedItemRegistryPanel() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[220px]">
+            <div className="relative flex-1 min-w-[200px]">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
                 data-testid="consigned-items-filter-vendor"
                 placeholder="Filter by vendor_no"
                 value={vendorFilter}
                 onChange={(e) => setVendorFilter(e.target.value)}
+                className="pl-8"
+              />
+            </div>
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                data-testid="consigned-items-filter-item"
+                placeholder="Filter by item_no"
+                value={itemFilter}
+                onChange={(e) => setItemFilter(e.target.value)}
                 className="pl-8"
               />
             </div>
@@ -231,7 +250,11 @@ export default function ConsignedItemRegistryPanel() {
                   <tr
                     key={it.item_no}
                     data-testid={`consigned-items-row-${it.item_no}`}
-                    className="border-t border-border"
+                    className={`border-t border-border ${
+                      deepLinkItem && it.item_no === deepLinkItem
+                        ? 'bg-primary/10 ring-1 ring-primary/40'
+                        : ''
+                    }`}
                   >
                     <td className="px-3 py-2 font-mono text-xs">{it.item_no}</td>
                     <td className="px-3 py-2">{it.vendor_no}</td>

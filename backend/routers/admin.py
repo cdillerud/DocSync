@@ -4,7 +4,7 @@ import uuid
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Depends
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from deps import get_db
 from services.auth_deps import require_admin
 
@@ -43,8 +43,6 @@ async def deprecation_metrics(
       body parsing. Not implemented in v2.5.27 per user directive
       ("finish drain + Phase 4 first, then decide").
     """
-    from datetime import datetime, timezone, timedelta
-
     db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 

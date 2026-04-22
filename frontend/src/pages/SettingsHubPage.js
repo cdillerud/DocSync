@@ -9,6 +9,7 @@ import StableVendorsPage from './StableVendorsPage';
 import FeedbackLoopHealthPage from './FeedbackLoopHealthPage';
 import ReprocessComparisonPage from './ReprocessComparisonPage';
 import RepOverridesPanel from '../components/RepOverridesPanel';
+import CpItemRegistryPanel from '../components/CpItemRegistryPanel';
 
 const TABS = [
   { key: 'general', label: 'General' },
@@ -18,6 +19,7 @@ const TABS = [
   { key: 'vendors', label: 'Vendor Intelligence' },
   { key: 'stable-vendors', label: 'Stable Vendors' },
   { key: 'rep-overrides', label: 'Rep Overrides' },
+  { key: 'cp-items', label: 'CP Items' },
   { key: 'feedback-loop', label: 'Feedback Loop' },
   { key: 'reprocess', label: 'Before/After' },
 ];
@@ -53,6 +55,7 @@ export default function SettingsHubPage() {
       {activeTab === 'vendors' && <VendorIntelligencePage />}
       {activeTab === 'stable-vendors' && <StableVendorsPage />}
       {activeTab === 'rep-overrides' && <RepOverridesPanel />}
+      {activeTab === 'cp-items' && <CpItemRegistryPanel />}
       {activeTab === 'feedback-loop' && <FeedbackLoopHealthPage />}
       {activeTab === 'reprocess' && <ReprocessComparisonPage />}
     </div>

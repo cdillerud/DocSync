@@ -59,6 +59,17 @@ COW_RETIREMENT_ACTOR_EMAIL = os.environ.get(
 
 # Blocking-reason code appended to readiness.blocking_reasons.
 BLOCKER_CODE = "cow_item_on_po"
+BLOCKER_CODE_SO_BASE = "cow_so_uses_base_item"
+BLOCKER_CODE_SO_WRONG_CUSTOMER = "cow_so_wrong_customer"
+
+# Doc types that trigger the SO-side COW gates.
+SALES_DOC_TYPES = frozenset({
+    "sales_invoice",
+    "sales_order",
+    "so_confirmation",
+    "ds_sales_order",
+    "wh_sales_order",
+})
 
 # Ownership classifier output type.
 OwnershipState = Literal[
@@ -438,6 +449,163 @@ def apply_cow_blocker_to_readiness(
     )
     readiness["explanations"] = explanations
     readiness["cow_items"] = evidence
+    return readiness
+
+
+def _is_sales_doc(doc: Dict[str, Any]) -> bool:
+    """Detect a sales-side doc via document_type/doc_type/suggested_job_type."""
+    fields = (
+        doc.get("document_type"),
+        doc.get("doc_type"),
+        doc.get("suggested_job_type"),
+    )
+    for f in fields:
+        if f and str(f).strip().lower().replace(" ", "_") in SALES_DOC_TYPES:
+            return True
+    return False
+
+
+def _doc_customer_no(doc: Dict[str, Any]) -> str:
+    """Extract the customer_no from a sales document. Tolerant of several shapes."""
+    return str(
+        doc.get("bc_customer_number")
+        or doc.get("customer_no")
+        or doc.get("customer_canonical")
+        or (doc.get("extracted_fields") or {}).get("customer_no")
+        or (doc.get("extracted_fields") or {}).get("bc_customer_number")
+        or ""
+    ).strip()
+
+
+async def check_cow_so_uses_base_item(
+    db, doc: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    """Step 1 follow-up — enforce signed §4b SO-side rule.
+
+    Returns a list of per-line evidence dicts. Each dict carries a
+    ``blocker_code`` of either ``BLOCKER_CODE_SO_BASE`` (base-item
+    correction) or ``BLOCKER_CODE_SO_WRONG_CUSTOMER`` (ownership-integrity
+    mismatch). Empty list = no blocker.
+
+    Rules:
+      * customer_owned_active + registry.customer_no == doc.customer_no
+          → cow_so_uses_base_item  (recommend base_item_no)
+      * customer_owned_active + registry.customer_no != doc.customer_no
+          → cow_so_wrong_customer  (record both customers)
+      * unknown_cp_pattern
+          → cow_so_uses_base_item  (no recommended_base_item_no)
+      * customer_owned_retired / gamer → allow
+    """
+    if not _is_sales_doc(doc):
+        return []
+
+    doc_customer = _doc_customer_no(doc)
+    evidence: List[Dict[str, Any]] = []
+
+    for line in _iter_doc_lines(doc):
+        item_no = (line.get("item_no") or "").strip()
+        if not item_no:
+            continue
+        ownership = await classify_item_ownership(db, item_no)
+
+        if ownership in ("gamer", "customer_owned_retired"):
+            continue
+
+        if ownership == "unknown_cp_pattern":
+            evidence.append({
+                "blocker_code": BLOCKER_CODE_SO_BASE,
+                "item_no": item_no,
+                "ownership": ownership,
+                "doc_customer_no": doc_customer or None,
+                "registered_customer_no": None,
+                "recommended_base_item_no": None,
+                "reason": "unknown_cp_pattern_on_sales_doc",
+            })
+            continue
+
+        # customer_owned_active path — may be base-item issue OR wrong-customer
+        row = await get_cp_item(db, item_no) or {}
+        registered_customer = str(row.get("customer_no") or "").strip()
+        base_item_no = row.get("base_item_no")
+
+        if (
+            doc_customer
+            and registered_customer
+            and doc_customer != registered_customer
+        ):
+            evidence.append({
+                "blocker_code": BLOCKER_CODE_SO_WRONG_CUSTOMER,
+                "item_no": item_no,
+                "ownership": ownership,
+                "doc_customer_no": doc_customer,
+                "registered_customer_no": registered_customer,
+                "recommended_base_item_no": base_item_no,
+                "reason": "cp_item_wrong_customer",
+            })
+        else:
+            evidence.append({
+                "blocker_code": BLOCKER_CODE_SO_BASE,
+                "item_no": item_no,
+                "ownership": ownership,
+                "doc_customer_no": doc_customer or None,
+                "registered_customer_no": registered_customer or None,
+                "recommended_base_item_no": base_item_no,
+                "reason": "cp_item_on_sales_doc",
+            })
+
+    return evidence
+
+
+def apply_cow_so_blocker_to_readiness(
+    readiness: Dict[str, Any], evidence: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """Fold SO-side COW evidence into readiness.
+
+    * Appends distinct blocker codes for base-item vs wrong-customer cases
+    * Writes one or two explanation strings (one per code actually present)
+    * Persists the structured evidence under ``readiness.cow_so_items``
+      (separate field from ``cow_items`` to avoid mixing PO-side and
+      SO-side audit trails)
+    * Pure: mutates and returns the passed-in dict.
+    """
+    if not evidence:
+        return readiness
+
+    codes_present = {e["blocker_code"] for e in evidence}
+    blockers = list(readiness.get("blocking_reasons") or [])
+    for code in codes_present:
+        if code not in blockers:
+            blockers.append(code)
+    readiness["blocking_reasons"] = blockers
+
+    explanations = list(readiness.get("explanations") or [])
+
+    base_hits = [e for e in evidence if e["blocker_code"] == BLOCKER_CODE_SO_BASE]
+    if base_hits:
+        item_list = ", ".join(sorted({e["item_no"] for e in base_hits}))
+        explanations.append(
+            f"COW HARD BLOCK (SO): customer-owned item(s) [{item_list}] cannot "
+            f"be billed on a sales document. Correct the line(s) to the base "
+            f"item (recommended_base_item_no in cow_so_items) or retire the CP "
+            f"item if the customer has consumed the ware."
+        )
+
+    wrong_cust_hits = [
+        e for e in evidence if e["blocker_code"] == BLOCKER_CODE_SO_WRONG_CUSTOMER
+    ]
+    if wrong_cust_hits:
+        details = sorted({
+            f"{e['item_no']} (registered to {e['registered_customer_no']}, "
+            f"billed to {e['doc_customer_no']})"
+            for e in wrong_cust_hits
+        })
+        explanations.append(
+            "COW HARD BLOCK (SO ownership): sales document bills CP item(s) "
+            "registered to a different customer: " + "; ".join(details) + "."
+        )
+
+    readiness["explanations"] = explanations
+    readiness["cow_so_items"] = evidence
     return readiness
 
 

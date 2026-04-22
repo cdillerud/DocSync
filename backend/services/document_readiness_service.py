@@ -624,6 +624,8 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
         from workflows.inventory.ownership import (
             check_cow_item_on_po,
             apply_cow_blocker_to_readiness,
+            check_cow_so_uses_base_item,
+            apply_cow_so_blocker_to_readiness,
         )
         cow_evidence = await check_cow_item_on_po(db, doc)
         if cow_evidence:
@@ -646,6 +648,32 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
                 ]
                 new_blocking = readiness["blocking_reasons"]
                 readiness.pop("cow_items", None)
+
+        # === COW SO-side gates (Lane C Step 1 follow-up) ===
+        # Two distinct blocker codes per signed amendment:
+        #   cow_so_uses_base_item — active CP on SO, bill the base item
+        #   cow_so_wrong_customer — CP registered to a different customer
+        cow_so_evidence = await check_cow_so_uses_base_item(db, doc)
+        if cow_so_evidence:
+            apply_cow_so_blocker_to_readiness(readiness, cow_so_evidence)
+            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                readiness["status"] = STATUS_NEEDS_REVIEW
+                readiness["recommended_action"] = ACTION_REVIEW
+            new_blocking = readiness["blocking_reasons"]
+            codes = sorted({e["blocker_code"] for e in cow_so_evidence})
+            logger.info(
+                "[Readiness:COW-SO] doc=%s — hard block, codes=%s, %d line(s)",
+                doc_id[:8], codes, len(cow_so_evidence),
+            )
+        else:
+            # Idempotent unblock for both SO-side codes
+            for _so_code in ("cow_so_uses_base_item", "cow_so_wrong_customer"):
+                if _so_code in new_blocking:
+                    readiness["blocking_reasons"] = [
+                        b for b in new_blocking if b != _so_code
+                    ]
+                    new_blocking = readiness["blocking_reasons"]
+            readiness.pop("cow_so_items", None)
     except Exception as cow_err:
         logger.warning("[Readiness:COW] skipped for %s: %s", doc_id[:8], cow_err)
 

@@ -74,6 +74,16 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-22 — Lane C Step 1 Follow-up: COW SO-side gate + admin UI v2.5.31
+- **SO-side hard block** — new `check_cow_so_uses_base_item` in `workflows/inventory/ownership.py`; fires for `SALES_INVOICE`, `SALES_ORDER`, `SO_CONFIRMATION`, `DS_SALES_ORDER`, `WH_SALES_ORDER`. Wired into `services/document_readiness_service.py::evaluate_and_persist` alongside the Step 1 PO block. Same canonical path, same explicit-reeval semantics, no new schedulers.
+- **Two distinct blocker codes (per amendment):**
+  - `cow_so_uses_base_item` — active registered CP or unknown CP-pattern item billed on a sales doc; evidence carries `recommended_base_item_no` for the base-item correction.
+  - `cow_so_wrong_customer` — CP registered to customer A but billed on a doc for customer B; evidence carries `registered_customer_no` + `doc_customer_no`.
+- **SO-side evidence lives in `readiness.cow_so_items[]`** (additive field, distinct from PO-side `readiness.cow_items[]`). Retired CP items still allow sales docs (registry retirement = customer consent to re-use as regular SKU).
+- **Admin UI** — new tab `CP Items` in `SettingsHubPage.js`, component `components/CpItemRegistryPanel.jsx`. List + customer_no filter + status filter + refresh + create/upsert modal + per-row retire button with actor-email prompt. All elements have `data-testid` attributes. No charts, no bulk tools, no CSV — intentionally restrained per Amendment 3.
+- **Zero new HTTP endpoints** — the 4 Step 1 endpoints cover the UI entirely.
+- **Tests**: `tests/test_cow_step1.py` grew to **28/28 green** (+11 SO-side scenarios S1–S9 plus 2 apply-helper tests). Full Lane B-adjacent regression stays at 317P/35F/14E — diff empty. OpenAPI stays at 859 paths.
+
 ### 2026-04-22 — Lane C Step 1: Customer-Owned Ware v2.5.30
 - **CP-item registry** — new MongoDB collection `cp_item_registry` with unique `item_no` index + `{customer_no, status}` compound index. Signed §4b schema: item_no, customer_no, base_item_no, canonical_location, linked_invoice_ids[] (append-only), status (active|retired), audit fields. Never programmatically retired — only `items@gamerpackaging.com` (env-configurable via `COW_RETIREMENT_ACTOR_EMAIL`) can flip status.
 - **Ownership module** (`workflows/inventory/ownership.py`) — single source of truth for item ownership classification (`classify_item_ownership` returns `gamer | customer_owned_active | customer_owned_retired | unknown_cp_pattern`), CRUD helpers, CP-pattern regex `.*-CP[A-Z0-9]+$`, and the hard-block check `check_cow_item_on_po(doc)`.

@@ -331,3 +331,223 @@ def test_is_cp_item_pattern_matches_signed_spec():
     assert not ownership.is_cp_item_pattern("WIDGET-cpa1")  # lowercase not matched per spec
     assert not ownership.is_cp_item_pattern("")
     assert not ownership.is_cp_item_pattern("-CP")   # no trailing alnum
+
+
+# ── Step 1 follow-up — SO-side gates (S1–S9) ────────────────────────────────
+
+def _sales_doc(lines, doc_id="doc-so-1", customer_no="C-1001",
+               document_type="SALES_INVOICE"):
+    return {
+        "id": doc_id,
+        "document_type": document_type,
+        "bc_customer_number": customer_no,
+        "extracted_fields": {"line_items": lines},
+    }
+
+
+# ── S1: active CP + matching customer → cow_so_uses_base_item ───────────────
+
+@pytest.mark.asyncio
+async def test_S1_active_cp_on_sales_doc_uses_base_item(db):
+    await _seed_active_cp_item(db, item_no="WIDGET-CPA1", customer_no="C-1001")
+    doc = _sales_doc(
+        [{"item_no": "WIDGET-CPA1", "quantity": 3}],
+        customer_no="C-1001",
+    )
+    evidence = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert len(evidence) == 1
+    row = evidence[0]
+    assert row["blocker_code"] == ownership.BLOCKER_CODE_SO_BASE
+    assert row["ownership"] == "customer_owned_active"
+    assert row["recommended_base_item_no"] == "WIDGET"
+    assert row["doc_customer_no"] == "C-1001"
+    assert row["registered_customer_no"] == "C-1001"
+
+
+# ── S2: unknown CP pattern on sales doc → base-item code (no base) ──────────
+
+@pytest.mark.asyncio
+async def test_S2_unknown_cp_pattern_on_sales_doc(db):
+    doc = _sales_doc(
+        [{"item_no": "SOMETHING-CPQ9", "quantity": 1}],
+        customer_no="C-2002",
+    )
+    evidence = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert len(evidence) == 1
+    row = evidence[0]
+    assert row["blocker_code"] == ownership.BLOCKER_CODE_SO_BASE
+    assert row["ownership"] == "unknown_cp_pattern"
+    assert row["recommended_base_item_no"] is None
+    assert row["reason"] == "unknown_cp_pattern_on_sales_doc"
+
+
+# ── S3: retired CP on sales doc → no blocker ────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_S3_retired_cp_on_sales_doc_allowed(db, retirement_actor):
+    await _seed_active_cp_item(db, item_no="OLD-CPA7", customer_no="C-3003")
+    await ownership.retire_cp_item(db, "OLD-CPA7", actor=retirement_actor)
+    doc = _sales_doc(
+        [{"item_no": "OLD-CPA7", "quantity": 5}],
+        customer_no="C-3003",
+    )
+    evidence = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert evidence == []
+
+
+# ── S4: sales doc with only regular SKUs → no blocker ───────────────────────
+
+@pytest.mark.asyncio
+async def test_S4_regular_sales_doc_no_blocker(db):
+    doc = _sales_doc(
+        [{"item_no": "REGULAR-SKU", "quantity": 1}],
+        customer_no="C-4004",
+    )
+    evidence = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert evidence == []
+
+
+# ── S5: DS_SALES_ORDER and WH_SALES_ORDER variants trigger the gate ─────────
+
+@pytest.mark.asyncio
+async def test_S5_other_sales_doc_types_trigger_gate(db):
+    await _seed_active_cp_item(db, item_no="WIDGET-CPA1", customer_no="C-5005")
+    for dt in ("DS_SALES_ORDER", "WH_SALES_ORDER", "Sales_Order", "so_confirmation"):
+        doc = _sales_doc(
+            [{"item_no": "WIDGET-CPA1", "quantity": 1}],
+            customer_no="C-5005",
+            document_type=dt,
+        )
+        ev = await ownership.check_cow_so_uses_base_item(db, doc)
+        assert len(ev) == 1, f"doc_type {dt} should trigger"
+        assert ev[0]["blocker_code"] == ownership.BLOCKER_CODE_SO_BASE
+
+
+# ── S6: PO doc does NOT trigger SO gate (only PO gate) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_S6_po_doc_does_not_trigger_so_gate(db):
+    await _seed_active_cp_item(db, item_no="WIDGET-CPA1", customer_no="C-6006")
+    po_doc = _po_doc([{"item_no": "WIDGET-CPA1", "quantity": 1}])
+    so_evidence = await ownership.check_cow_so_uses_base_item(db, po_doc)
+    assert so_evidence == []
+    # And the PO gate DOES block it (sanity-check the two are disjoint)
+    po_evidence = await ownership.check_cow_item_on_po(db, po_doc)
+    assert len(po_evidence) == 1
+
+
+# ── S7: wrong-customer case → distinct blocker code ─────────────────────────
+
+@pytest.mark.asyncio
+async def test_S7_wrong_customer_uses_distinct_code(db):
+    # Registered to C-X; sales doc bills C-Y
+    await _seed_active_cp_item(db, item_no="WIDGET-CPA1", customer_no="C-X")
+    doc = _sales_doc(
+        [{"item_no": "WIDGET-CPA1", "quantity": 2}],
+        customer_no="C-Y",
+    )
+    evidence = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert len(evidence) == 1
+    row = evidence[0]
+    assert row["blocker_code"] == ownership.BLOCKER_CODE_SO_WRONG_CUSTOMER
+    assert row["reason"] == "cp_item_wrong_customer"
+    assert row["registered_customer_no"] == "C-X"
+    assert row["doc_customer_no"] == "C-Y"
+    # Base item still surfaced for convenience even in wrong-customer case
+    assert row["recommended_base_item_no"] == "WIDGET"
+
+    # And the readiness dict gets the distinct code (not the base-item code)
+    readiness = {"blocking_reasons": [], "explanations": []}
+    ownership.apply_cow_so_blocker_to_readiness(readiness, evidence)
+    assert "cow_so_wrong_customer" in readiness["blocking_reasons"]
+    assert "cow_so_uses_base_item" not in readiness["blocking_reasons"]
+
+
+# ── S8: explicit canonical re-eval flips SO evidence on/off ─────────────────
+
+@pytest.mark.asyncio
+async def test_S8_explicit_reeval_flips_so_evidence(db, retirement_actor):
+    # Use an item name that does NOT match the CP fallback regex so
+    # "unregistered" is a clean baseline. (WIDGET-CPA1 would match the
+    # pattern and trigger the unknown_cp_pattern path pre-registration.)
+    item_no = "SPECIAL-BILL-X"
+    doc = _sales_doc(
+        [{"item_no": item_no, "quantity": 3}],
+        customer_no="C-1001",
+    )
+    # Before registering: no blocker
+    ev_before = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert ev_before == []
+
+    # Register CP item → re-check shows blocker
+    await _seed_active_cp_item(db, item_no=item_no, customer_no="C-1001")
+    ev_after_register = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert len(ev_after_register) == 1
+    assert ev_after_register[0]["blocker_code"] == ownership.BLOCKER_CODE_SO_BASE
+
+    # Retire → re-check shows no blocker
+    await ownership.retire_cp_item(db, item_no, actor=retirement_actor)
+    ev_after_retire = await ownership.check_cow_so_uses_base_item(db, doc)
+    assert ev_after_retire == []
+
+
+# ── S9: SO evidence lives under cow_so_items (not cow_items) ────────────────
+
+def test_S9_so_evidence_in_distinct_field():
+    readiness = {}
+    evidence = [{
+        "blocker_code": ownership.BLOCKER_CODE_SO_BASE,
+        "item_no": "WIDGET-CPA1",
+        "ownership": "customer_owned_active",
+        "doc_customer_no": "C-1001",
+        "registered_customer_no": "C-1001",
+        "recommended_base_item_no": "WIDGET",
+        "reason": "cp_item_on_sales_doc",
+    }]
+    out = ownership.apply_cow_so_blocker_to_readiness(readiness, evidence)
+    assert "cow_so_items" in out
+    assert "cow_items" not in out          # distinct from PO-side field
+    assert out["cow_so_items"] == evidence
+    assert "cow_so_uses_base_item" in out["blocking_reasons"]
+
+
+def test_so_apply_empty_evidence_is_noop():
+    readiness = {"blocking_reasons": ["existing"], "explanations": ["x"]}
+    out = ownership.apply_cow_so_blocker_to_readiness(readiness, [])
+    assert out["blocking_reasons"] == ["existing"]
+    assert out["explanations"] == ["x"]
+    assert "cow_so_items" not in out
+
+
+def test_so_apply_writes_both_codes_when_mixed():
+    """Mixed evidence (one base-item issue + one wrong-customer issue) writes both codes."""
+    readiness = {}
+    evidence = [
+        {
+            "blocker_code": ownership.BLOCKER_CODE_SO_BASE,
+            "item_no": "A-CPA1",
+            "ownership": "customer_owned_active",
+            "doc_customer_no": "C-1",
+            "registered_customer_no": "C-1",
+            "recommended_base_item_no": "A",
+            "reason": "cp_item_on_sales_doc",
+        },
+        {
+            "blocker_code": ownership.BLOCKER_CODE_SO_WRONG_CUSTOMER,
+            "item_no": "B-CPA2",
+            "ownership": "customer_owned_active",
+            "doc_customer_no": "C-1",
+            "registered_customer_no": "C-2",
+            "recommended_base_item_no": "B",
+            "reason": "cp_item_wrong_customer",
+        },
+    ]
+    out = ownership.apply_cow_so_blocker_to_readiness(readiness, evidence)
+    assert set(out["blocking_reasons"]) == {
+        "cow_so_uses_base_item", "cow_so_wrong_customer"
+    }
+    # Two explanations — one per code category
+    assert len(out["explanations"]) == 2
+    assert any("base item" in e for e in out["explanations"])
+    assert any("different customer" in e for e in out["explanations"])
+

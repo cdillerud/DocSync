@@ -72,6 +72,18 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
+
+### 2026-04-23 — Lane C Step 6: Drop Ship formalization (extraction seam)
+- **New package** `workflows/sales/subtypes/drop_ship/` with three gate classes as authoritative-equivalent scaffolding for the Drop Ship archetype. Adapter-driven over the canonical gate framework. No classifier (defers to live `services.document_intel_helpers._classify_so_subtype`). Trigger axis is `doc.so_subtype == "DS_Sales_Order"`.
+- **Severity ledger (parity with live `so_rules_engine._check_drop_ship_rules`):**
+  - `drop_ship_po_missing` → **block** (SO-008 parity)
+  - `drop_ship_po_cost_unverified` → **warn** (SO-009 parity)
+  - `drop_ship_inventory_line_not_marked` → **warn** (ancillary parity)
+- **Convergence mechanic**: extraction seam — chosen over move/wrap to keep live consumers (`server.py:2776`, `routers/inside_sales_pilot.py:785`) undisturbed. `services/so_rules_engine.py` bytes unchanged. No auto-registration; callers opt in via `register_drop_ship_gates(registry)`.
+- **Runtime behavior**: zero change. No new routes (`/openapi.json` paths = 864, unchanged). No readiness pipeline, router, frontend, or DB schema touches.
+- **Tests**: `tests/test_drop_ship_order.py` 24/24 green (SO-008/009/ancillary parity, opt-in registration, archetype-scoped, idempotent double-register, unwired guardrail asserting no external imports of the package and `so_rules_engine._check_drop_ship_rules` still owns live DS logic). Full prior-step regression 242/242 unchanged.
+
+
 ## Completed Features
 
 ### 2026-04-22 — Blocker-Code Rendering Tidy v2.5.34

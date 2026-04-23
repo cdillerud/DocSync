@@ -17,7 +17,7 @@ import os
 # Use environment URL for testing
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://sales-doc-pilot.preview.emergentagent.com"
+    BASE_URL = "https://eod-controller-seq.preview.emergentagent.com"
 
 # Test vendor known from iteration_32.json
 TEST_VENDOR = "Cargo Modules LLC"

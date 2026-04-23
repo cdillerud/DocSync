@@ -10,7 +10,7 @@ sys.path.insert(0, '/app/backend')
 
 
 # Test configuration
-API_BASE_URL = "https://sales-doc-pilot.preview.emergentagent.com"
+API_BASE_URL = "https://eod-controller-seq.preview.emergentagent.com"
 
 
 @pytest.fixture

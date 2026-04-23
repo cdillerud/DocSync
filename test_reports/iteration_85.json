@@ -63,7 +63,7 @@
   },
   "test_credentials": {
     "web_ui": "admin / admin",
-    "api_url": "https://sales-doc-pilot.preview.emergentagent.com"
+    "api_url": "https://eod-controller-seq.preview.emergentagent.com"
   },
   "seed_data_used": {
     "existing_so": "SO-TEST-DROP-001 (drop-ship SO with documents linked)",

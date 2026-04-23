@@ -115,6 +115,7 @@ from routers.learning_core import router as learning_core_router
 from routers.workflow_observer import router as workflow_observer_router
 from routers.cp_item_registry import router as cp_item_registry_router
 from routers.consigned_item_registry import router as consigned_item_registry_router
+from routers.admin_eod import router as admin_eod_router
 
 # ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
@@ -198,6 +199,7 @@ app.include_router(learning_core_router, prefix="/api")
 app.include_router(workflow_observer_router, prefix="/api")
 app.include_router(cp_item_registry_router, prefix="/api")
 app.include_router(consigned_item_registry_router, prefix="/api")
+app.include_router(admin_eod_router, prefix="/api")
 
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)

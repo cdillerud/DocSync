@@ -248,6 +248,7 @@ class TestUnwiredGuardrail:
         allowed_prefixes = (
             backend_root / "workflows" / "batch",
             backend_root / "tests" / "test_exception_queues_taxonomy.py",
+            backend_root / "tests" / "test_eod_controller.py",
         )
 
         needles = (

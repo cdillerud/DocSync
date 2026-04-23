@@ -169,8 +169,11 @@ class TestUnwiredGuardrail:
             backend_root / "workflows" / "inventory" / "lineage.py",
             backend_root / "workflows" / "inventory" / "__init__.py",
             backend_root / "workflows" / "sales" / "subtypes" / "produce_and_hold",
+            backend_root / "workflows" / "sales" / "subtypes" / "assembly_order",
             backend_root / "tests" / "test_inventory_lineage.py",
             backend_root / "tests" / "test_produce_and_hold.py",
+            backend_root / "tests" / "test_assembly_lineage.py",
+            backend_root / "tests" / "test_assembly_order.py",
         )
         needles = (
             "workflows.inventory.lineage",

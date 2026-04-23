@@ -73,6 +73,17 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Phase 3 Step 1: Shadow-handler deletion from `server.py`
+- **Deleted Block A** (4 Pydantic model shadows): `SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverrideRequest`, `ApprovalActionRequest` — canonical copies remain in `services/workflow_handlers.py:34–58`.
+- **Deleted Block B** (15 handler function shadows + 3 section headers + stale "Moved to" comment): `set_vendor_for_document`, `update_document_fields`, `override_bc_validation`, `start_approval`, `approve_document`, `reject_document`, `mark_ready_for_review`, `mark_reviewed`, `start_approval_generic`, `approve_generic`, `reject_generic`, `complete_triage`, `link_credit_to_invoice`, `tag_quality_doc`, `export_document` — canonical copies remain in `services/workflow_handlers.py`.
+- **Single file touched**: `server.py`. Zero edits to `services/workflow_handlers.py`, routers, frontend, or DB schema.
+- **`server.py`: 8,903 → 7,889 lines (−1,014, −11.4%)**.
+- **Runtime behavior**: zero change. OpenAPI path count = 858 (unchanged); Path A `/api/ap-review/documents/{doc_id}/*` all functional; generic workflow mutation routes (`/api/workflows/{doc_id}/*`) all functional; Path B (`/api/workflows/ap_invoice/{doc_id}/*`) still 404 from Phase 4 removal.
+- **Regression**: Lane C + workflow-extraction aggregate **379/379 passed**. Only remaining failure is the pre-existing stale `TestRouteCountStable::test_count` (expects 427, actual 901 — same as Phase 4 baseline, not introduced by this work).
+- **Phase 3 sequence established**: Step 1 (shadow deletion, ✅ done) → Step 2 (AP compute-function extraction into `policies/ap_invoice.py`, next signed step).
+
+
+
 ### 2026-04-23 — Phase 4 Path B Removal (Lane A completion)
 - **Production gate met**: prod VM returned `gate_met: true`, `total_hits_in_window: 0` across all six AP mutation Path B templates, empty `offending_callers[]`, zero hits in the full 14-day lookback.
 - **Removed**: six deprecated `/api/workflows/ap_invoice/{doc_id}/{action}` routes (set-vendor, update-fields, override-bc-validation, start-approval, approve, reject) from `routers/workflows.py`. Path A under `/api/ap-review/documents/{doc_id}/{action}` becomes the sole authority.

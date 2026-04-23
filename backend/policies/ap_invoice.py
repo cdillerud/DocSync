@@ -8,8 +8,10 @@ Compute-lane logic (``compute_ap_normalized_fields``, ``compute_ap_validation``,
 ``compute_ap_status``, ``compute_draft_candidate_flag``, vendor resolution) is
 authoritative in ``services.ap_computation``, ``services.document_intel_helpers``,
 and ``services.vendor_resolution_service``. No migration from ``server.py``
-compute-lane is required. Auto-post orchestration and AP queue helpers remain
-candidates for later signed Phase 3 steps.
+compute-lane is required. AP queue/count query endpoints are live in
+``routers/workflows.py`` (Phase 3 Step 2B removed 10 dead shadow defs from
+``server.py``). Auto-post orchestration remains a candidate for later signed
+Phase 3 steps.
 """
 
 from typing import Any, Dict, Optional

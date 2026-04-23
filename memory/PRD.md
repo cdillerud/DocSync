@@ -188,6 +188,27 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 2B: AP queue/count shadow-def deletion
+- **Audit correction before signing**: original user directive named Step 2B as "AP queue/count helpers **migration** into `policies/ap_invoice.py`". Reality was 10 already-undecorated, zero-caller dead shadow `async def`s in `server.py` — same shape as Step 1 shadows, not a migration candidate. Live canonical copies already run from `routers/workflows.py` (Domain 8). `policies/ap_invoice.py` is a `PolicyModule` class pattern, not a routes/queries container. User signed revised scope as **pure shadow deletion**.
+- **Deletions from `server.py`** (10 shadow `async def`s + 2 bracketing `# Moved to routers/workflows.py (Domain 8)` comments + 1 orphaned `# ==================== GENERIC WORKFLOW QUEUE API ====================` header + 1 orphaned `# ==================== WORKFLOW METRICS ====================` header + trailing-blank runs):
+  1. `get_ap_workflow_status_counts`
+  2. `get_vendor_pending_queue`
+  3. `get_bc_validation_pending_queue`
+  4. `get_bc_validation_failed_queue`
+  5. `get_data_correction_pending_queue`
+  6. `get_ready_for_approval_queue`
+  7. `get_workflow_queue`
+  8. `get_status_counts_by_doc_type`
+  9. `get_workflow_metrics_by_doc_type`
+  10. `get_ap_workflow_metrics`
+- **`policies/ap_invoice.py`** minimal factual docstring amendment: names `routers/workflows.py` as the live queue/count surface; left policy class contract untouched.
+- **Out of scope per signed fence** (preserved): `routers/workflows.py` (live routes), `routers/pilot.py::get_ap_workflow_metrics` (separate live route under `/pilot` prefix), 3 unrelated `list_workflows`/`get_workflow`/`retry_workflow` shadows at `server.py:1197-1225` (their own removal needs a separate signed declaration), auto-post orchestration, intake branches, `_build_vendor_resolution`, frontend, DB schema.
+- **Parity probe**: new `tests/test_ap_queue_shadow_deletion_parity.py` — **36/36 passed**. 3 classes: OpenAPI route-registration presence (all 10 live routes still registered + path-count floor sanity), source-inspection confirming 10 symbols absent from `server.py`, guardrails asserting live copies in `routers/workflows.py`, unrelated pilot route preserved, `APInvoicePolicy` class contract byte-stable.
+- **`server.py`: 7,854 → 7,437 lines (−417 net, −5.3%)**. Phase 3 cumulative: **8,903 → 7,437 = −1,466 lines (−16.5%)** across Steps 1 + 2R + 2B.
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged — shadows had no decorators). Live smoke: `GET /api/workflows/ap_invoice/status-counts`, `/vendor-pending`, `/generic/queue`, `/ap_invoice/metrics` all return HTTP 200.
+- **Targeted regression**: zero delta — exact same 20 pre-existing failures before/after (`TestPathBDeprecationHeaders` stale after Phase 4 Path B removal, `TestAuthEndpoints` using rejected `admin/admin` creds, `TestRouteCountStable::test_count` stale magic number, `test_reprocess_uses_direct_import` pre-existing). Lane C aggregate **174/174 passed** unchanged.
+
+
 ### 2026-04-22 — Blocker-Code Rendering Tidy v2.5.34
 - **New shared util** `frontend/src/lib/blockerLabels.js` — `BLOCKER_LABELS` map + `labelForBlocker(code)` function. Covers all 8 Lane C COW/consignment codes + 6 common pre-Lane-C codes. Unknown codes gracefully fall through to the existing snake→Title Case behavior — zero risk of "???".
 - **6 call sites swapped** across 3 files: `DashboardPage.js` (failure-reasons chart label + top-blockers + top-warnings), `DocumentDetailPage.js` (plain blocking_reasons + warning_reasons lists below the ownership evidence panel), `AutomationMetricsCard.js` (blocking + warning lines).

@@ -276,6 +276,7 @@ class TestUnwiredGuardrail:
         backend_root = Path(__file__).resolve().parent.parent  # /app/backend
         allowed_prefixes = (
             backend_root / "workflows" / "freight" / "shipment_methods",
+            backend_root / "workflows" / "sales" / "subtypes" / "warehouse_order",
             backend_root / "tests" / "test_shipment_method_registry.py",
         )
 

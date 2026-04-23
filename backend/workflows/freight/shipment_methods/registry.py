@@ -7,13 +7,16 @@ no behavioral wiring. Lookups are pure.
 
 This module is intentionally UNWIRED. Do not import from:
   - backend/server.py
-  - any other workflows/ module
+  - any other workflows/ module (exception: the warehouse_order archetype
+    package, which became the first canonical consumer in Lane C Step 5)
   - services/*
   - routers/*
 
-Convergence into live freight logic (currently in
-workflows/freight/item_charges.py::SHIPMENT_METHODS) is scheduled for
-Lane C Step 5 (Warehouse Order) as a separate atomic PR.
+Convergence into live freight logic is complete: the prior dormant
+shipment-method dict and accessor in
+``workflows/freight/item_charges.py`` were deleted in Step 5 after
+grep-verifying zero external callers. This module is now the sole
+source of shipment-method truth in the backend.
 """
 
 from dataclasses import dataclass

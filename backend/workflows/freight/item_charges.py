@@ -215,46 +215,6 @@ def classify_location_code(location_code: str) -> Dict[str, Any]:
 
 
 # =============================================================================
-# SHIPMENT METHOD CODES
-# =============================================================================
-# PPDADD = freight on separate line with cost AND sell price
-# PPD = freight cost built into item sell price, FREIGHT line with cost only
-# Delivered = vendor-arranged, no freight line, no freight bill expected
-
-SHIPMENT_METHODS = {
-    "PPDADD": {
-        "description": "Freight on separate line with cost and sell price",
-        "has_freight_line": True,
-        "freight_has_sell_price": True,
-        "expects_freight_invoice": True,
-    },
-    "PPD": {
-        "description": "Freight cost in item sell price, FREIGHT line with cost only",
-        "has_freight_line": True,
-        "freight_has_sell_price": False,
-        "expects_freight_invoice": True,
-    },
-    "DELIVERED": {
-        "description": "Vendor-arranged freight, no freight line expected",
-        "has_freight_line": False,
-        "freight_has_sell_price": False,
-        "expects_freight_invoice": False,
-    },
-}
-
-
-def get_shipment_method_rules(method_code: str) -> Dict[str, Any]:
-    """Get freight handling rules for a shipment method code."""
-    code = (method_code or "").strip().upper()
-    return SHIPMENT_METHODS.get(code, {
-        "description": f"Unknown shipment method: {code}",
-        "has_freight_line": None,
-        "freight_has_sell_price": None,
-        "expects_freight_invoice": None,
-    })
-
-
-# =============================================================================
 # FREIGHT ITEM CODES
 # =============================================================================
 # Outbound: FREIGHT, DETENTION (must match codes on SO)

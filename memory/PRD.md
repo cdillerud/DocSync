@@ -73,6 +73,23 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Lane C Step 7 (narrowed): Customer Storage + Reroute
+- **Scope split** — Reselling COW **deferred** out of Step 7 and will be re-declared separately; this step lands only Customer Storage and Reroute as signal-driven, unwired-foundation gate surfaces.
+- **New package** `workflows/sales/subtypes/customer_storage/` — two gates, signal-driven (no classifier, no registry, no writes):
+  - `customer_storage_without_storage_agreement` → **warn**
+  - `customer_storage_ship_out_missing_release` → **block**
+  - Signals read: `extracted_fields.is_customer_storage`, `extracted_fields.storage_agreement_id`, `extracted_fields.storage_release_id`, line-level `from_customer_storage=true` + `quantity>0` for ship-out detection.
+- **New package** `workflows/sales/subtypes/reroute/` — two gates, `location_code=="001"`-driven (no classifier):
+  - `reroute_location_without_original_so` → **warn** (mirrors freight-side `rerouted_missing_so` warning at sales-archetype layer)
+  - `reroute_requires_drop_ship_linkage` → **warn** (non-duplicative with live SO-008 — orthogonal trigger axes: keyword-detection vs location_code)
+  - Freight-side authority (`workflows/freight/item_charges.LOCATION_REROUTED`, `services/freight_gl_routing_service`, `services/bc_reference_cache_service.find_so_for_rerouted_po`) **untouched**.
+- **Runtime behavior**: zero. Opt-in `register_*_gates` only; no auto-registration; `/openapi.json` paths = 864 (unchanged); `services/so_rules_engine.py` / `workflows/freight/item_charges.py` / `workflows/inventory/ownership.py` bytes on disk unchanged.
+- **Tests**: `tests/test_customer_storage.py` 15/15 + `tests/test_reroute.py` 19/19 = 34/34 green. Prior-step regression (Steps 1–6 + EOD + shipment-method + taxonomy + Lane C registries) 266/266 green. Aggregate Lane-C suite: **300/300** passed in 1.18s.
+- **Non-duplication proof for Reroute**: pytest `TestNonDuplicationWithLiveSo008` asserts the live `so_rules_engine._check_drop_ship_rules` uses keyword detection while the new reroute gates use location-code detection; both can flag the same doc without conflict.
+- **Deferred**: Reselling COW (separate declaration), Step 9 warn→block upgrade, DS env-flag shadow mode.
+
+
+
 ### 2026-04-23 — Lane C Step 6: Drop Ship formalization (extraction seam)
 - **New package** `workflows/sales/subtypes/drop_ship/` with three gate classes as authoritative-equivalent scaffolding for the Drop Ship archetype. Adapter-driven over the canonical gate framework. No classifier (defers to live `services.document_intel_helpers._classify_so_subtype`). Trigger axis is `doc.so_subtype == "DS_Sales_Order"`.
 - **Severity ledger (parity with live `so_rules_engine._check_drop_ship_rules`):**

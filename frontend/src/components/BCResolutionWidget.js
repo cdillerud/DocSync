@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { Link2, Truck, FileText, RefreshCw, Package, Users, AlertTriangle } from 'lucide-react';
 import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
+import { labelForBlocker } from '../lib/blockerLabels';
 
 const COLORS = {
   po: '#3b82f6',
@@ -175,7 +176,7 @@ function BCResolutionWidget() {
                   <div key={reason} className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground flex items-center gap-1">
                       <AlertTriangle className="w-3 h-3" />
-                      {reason.replace(/_/g, ' ')}
+                      {labelForBlocker(reason)}
                     </span>
                     <Badge variant="outline" className="text-[10px] h-5">{count}</Badge>
                   </div>

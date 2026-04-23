@@ -33,16 +33,37 @@ const CONSIGNMENT_STATE_LABEL = {
   returned: 'Returned',
 };
 
-function scrollToLines(e) {
-  e.preventDefault();
-  const el = document.getElementById('doc-line-items');
-  if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    el.classList.add('ring-2', 'ring-primary', 'rounded-md');
+function scrollToLineForItem(itemNo) {
+  return (e) => {
+    e.preventDefault();
+    const rows = itemNo
+      ? document.querySelectorAll(`[data-item-no="${CSS.escape(String(itemNo))}"]`)
+      : [];
+    if (rows.length === 0) {
+      // Fallback: no matching row (e.g., line_items lack item_no). Preserve
+      // the legacy container-level scroll + ring so non-targetable lines
+      // remain reachable.
+      const el = document.getElementById('doc-line-items');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        el.classList.add('ring-2', 'ring-primary', 'rounded-md');
+        setTimeout(() => {
+          el.classList.remove('ring-2', 'ring-primary', 'rounded-md');
+        }, 1800);
+      }
+      return;
+    }
+    // Primary path: scroll the first match into view (block: 'center' for
+    // visibility); ring ALL matches simultaneously so duplicate item_no
+    // rows are never hidden from the reviewer.
+    rows[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    rows.forEach((r) => r.classList.add('ring-2', 'ring-primary', 'rounded-md'));
     setTimeout(() => {
-      el.classList.remove('ring-2', 'ring-primary', 'rounded-md');
+      rows.forEach((r) =>
+        r.classList.remove('ring-2', 'ring-primary', 'rounded-md'),
+      );
     }, 1800);
-  }
+  };
 }
 
 function ActionCell({ registryTab, itemNo, testidBase }) {
@@ -60,7 +81,7 @@ function ActionCell({ registryTab, itemNo, testidBase }) {
         size="sm"
         variant="ghost"
         className="h-7 px-2 text-xs"
-        onClick={scrollToLines}
+        onClick={scrollToLineForItem(itemNo)}
         data-testid={`${testidBase}-correct-line-${itemNo}`}
       >
         <ArrowDown className="h-3 w-3 mr-1" />

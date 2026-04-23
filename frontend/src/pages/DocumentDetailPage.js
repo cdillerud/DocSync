@@ -126,16 +126,27 @@ function ExtractedDataCard({ doc }) {
           <div className="border-t border-border pt-3 mt-2" data-testid="extracted-line-items">
             <p className="text-xs font-medium mb-2 text-muted-foreground">Line Items ({lineItems.length})</p>
             <div className="space-y-2">
-              {lineItems.map((item, idx) => (
-                <div key={idx} className="bg-muted/50 rounded p-2 text-xs space-y-1">
-                  {item.description && <div className="font-medium">{item.description}</div>}
-                  <div className="flex gap-4 text-muted-foreground">
-                    {item.quantity != null && <span>Qty: {item.quantity}</span>}
-                    {(item.unit_price != null || item.amount != null) && <span>Price: ${item.unit_price ?? item.amount}</span>}
-                    {item.total != null && <span className="font-semibold text-foreground">Total: ${item.total}</span>}
+              {lineItems.map((item, idx) => {
+                const itemNo = (item.item_no || item.item_number || item.sku || '')
+                  .toString()
+                  .trim();
+                return (
+                  <div
+                    key={idx}
+                    id={itemNo ? `line-item-${itemNo}-${idx}` : `line-item-idx-${idx}`}
+                    data-item-no={itemNo || undefined}
+                    data-testid={itemNo ? `line-item-row-${itemNo}` : `line-item-row-idx-${idx}`}
+                    className="bg-muted/50 rounded p-2 text-xs space-y-1"
+                  >
+                    {item.description && <div className="font-medium">{item.description}</div>}
+                    <div className="flex gap-4 text-muted-foreground">
+                      {item.quantity != null && <span>Qty: {item.quantity}</span>}
+                      {(item.unit_price != null || item.amount != null) && <span>Price: ${item.unit_price ?? item.amount}</span>}
+                      {item.total != null && <span className="font-semibold text-foreground">Total: ${item.total}</span>}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

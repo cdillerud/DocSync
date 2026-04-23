@@ -229,7 +229,19 @@ export default function CpItemRegistryPanel() {
                 )}
                 {!loading && items.length === 0 && (
                   <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground" data-testid="cp-items-empty">
-                    No CP items match the current filters.
+                    {deepLinkItem ? (
+                      <div className="space-y-1" data-testid="cp-items-empty-deeplink">
+                        <p>
+                          Item <span className="font-mono text-foreground">{deepLinkItem}</span> is not in the CP registry.
+                        </p>
+                        <p className="text-xs">
+                          It may need to be added, or the reference on the source document may be incorrect.
+                          Clear the filter above to browse the full registry.
+                        </p>
+                      </div>
+                    ) : (
+                      "No CP items match the current filters."
+                    )}
                   </td></tr>
                 )}
                 {!loading && items.map((it) => (

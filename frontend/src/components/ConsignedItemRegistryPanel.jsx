@@ -243,7 +243,19 @@ export default function ConsignedItemRegistryPanel() {
                 )}
                 {!loading && items.length === 0 && (
                   <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground" data-testid="consigned-items-empty">
-                    No consigned items match the current filters.
+                    {deepLinkItem ? (
+                      <div className="space-y-1" data-testid="consigned-items-empty-deeplink">
+                        <p>
+                          Item <span className="font-mono text-foreground">{deepLinkItem}</span> is not in the consigned-item registry.
+                        </p>
+                        <p className="text-xs">
+                          It may need to be added, or the reference on the source document may be incorrect.
+                          Clear the filter above to browse the full registry.
+                        </p>
+                      </div>
+                    ) : (
+                      "No consigned items match the current filters."
+                    )}
                   </td></tr>
                 )}
                 {!loading && items.map((it) => (

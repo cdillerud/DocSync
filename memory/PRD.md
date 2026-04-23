@@ -73,6 +73,20 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Phase 3 Step 2R: AP compute-wrapper cleanup
+- **Audit correction before signing**: original Phase 3 audit claimed ~220L of AP compute business logic in `server.py:1478-1700`. Reality: 5 one-line compatibility shims totaling ~45L; the real logic was already extracted into `services/ap_computation.py` and `services/document_intel_helpers.py` by a prior step. Scope revised to wrapper-cleanup only.
+- **Micro-amendment before coding**: `_build_vendor_resolution` discovered to contain a real try/except fallback (not a pure shim) — intentionally excluded to preserve behavior. Deletion scope narrowed to 5 pure `compute_*` wrappers.
+- **Deletions from `server.py`** (5 wrapper functions): `compute_ap_normalized_fields`, `compute_ap_validation`, `compute_ap_status`, `compute_canonical_fields` (legacy alias, zero callers), `compute_draft_candidate_flag`.
+- **Direct-import block added** at `server.py` near line 1699: clearly labeled `DIRECT CANONICAL IMPORTS: AP compute functions`. Names preserved, so all 6 call sites (3078, 3150, 3889, 3916, 4760, 5506) resolve to the authoritative service symbols with zero call-site rename.
+- **`policies/ap_invoice.py` docstring** corrected (factual, minimal): stale "migration from server.py:3333-3634" sentence replaced with a statement naming `services.ap_computation`, `services.document_intel_helpers`, and `services.vendor_resolution_service` as the authoritative compute-lane sources.
+- **`_build_vendor_resolution` preserved** per signed narrowing — future step can migrate the fallback into the service or formalize it otherwise.
+- **Parity probe**: new `tests/test_ap_wrapper_cleanup_parity.py` — 8/8 passed. Three classes: byte-identical output probe, source-inspection confirming deletions, guardrail asserting `_build_vendor_resolution` and its fallback are preserved.
+- **`server.py`: 7,889 → 7,854 lines (−35 net)**. Phase 3 cumulative reduction: 8,903 → 7,854 = −1,049 lines (−11.8%) across Steps 1 + 2R.
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged). Path A auth-gated routes unaffected. Canonical service logic untouched.
+- **Targeted regression**: 409 passed. Known unrelated baseline failures (`TestRouteCountStable::test_count` stale magic number; `test_reprocess_uses_direct_import` asserts on a file 2R did not touch) unchanged.
+
+
+
 ### 2026-04-23 — Phase 3 Step 1: Shadow-handler deletion from `server.py`
 - **Deleted Block A** (4 Pydantic model shadows): `SetVendorRequest`, `UpdateFieldsRequest`, `BCValidationOverrideRequest`, `ApprovalActionRequest` — canonical copies remain in `services/workflow_handlers.py:34–58`.
 - **Deleted Block B** (15 handler function shadows + 3 section headers + stale "Moved to" comment): `set_vendor_for_document`, `update_document_fields`, `override_bc_validation`, `start_approval`, `approve_document`, `reject_document`, `mark_ready_for_review`, `mark_reviewed`, `start_approval_generic`, `approve_generic`, `reject_generic`, `complete_triage`, `link_credit_to_invoice`, `tag_quality_doc`, `export_document` — canonical copies remain in `services/workflow_handlers.py`.

@@ -2,10 +2,14 @@
 AP Invoice policy — handles vendor invoices through the full AP workflow.
 
 For now this policy is a thin wrapper reporting the validation + readiness
-state as decided by the shared validation service. The full vendor-match
-enforcement, draft PI preview, line-distribution, and auto-post logic
-currently lives in `server.py` (lines 3333-3634) and will be migrated here
-in the follow-up pass.
+state as decided by the shared validation service.
+
+Compute-lane logic (``compute_ap_normalized_fields``, ``compute_ap_validation``,
+``compute_ap_status``, ``compute_draft_candidate_flag``, vendor resolution) is
+authoritative in ``services.ap_computation``, ``services.document_intel_helpers``,
+and ``services.vendor_resolution_service``. No migration from ``server.py``
+compute-lane is required. Auto-post orchestration and AP queue helpers remain
+candidates for later signed Phase 3 steps.
 """
 
 from typing import Any, Dict, Optional

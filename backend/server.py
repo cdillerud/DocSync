@@ -1475,11 +1475,6 @@ def normalize_extracted_fields(fields: dict) -> dict:
     return _impl(fields)
 
 
-def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
-    """Compatibility wrapper — delegates to document_intel_helpers."""
-    from services.document_intel_helpers import compute_ap_normalized_fields as _impl
-    return _impl(extracted_fields)
-
 async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     """COMPATIBILITY WRAPPER — authoritative source: services.vendor_matching"""
     from services.vendor_matching import lookup_vendor_alias as _impl
@@ -1646,49 +1641,6 @@ async def check_duplicate_document(vendor_normalized: str, vendor_canonical: str
     return {"possible_duplicate": False, "duplicate_of_document_id": None}
 
 
-def compute_ap_validation(
-    document_type: str,
-    vendor_normalized: str,
-    invoice_number_clean: str,
-    amount_float: float,
-    po_number_clean: str,
-    ai_confidence: float,
-    possible_duplicate: bool = False,
-) -> dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
-    from services.ap_computation import compute_ap_validation as _impl
-    return _impl(document_type, vendor_normalized, invoice_number_clean, amount_float, po_number_clean, ai_confidence, possible_duplicate)
-
-
-def compute_ap_status(
-    document_type: str,
-    ai_confidence: float,
-    validation_errors: list,
-    draft_candidate: bool,
-    current_status: str,
-) -> str:
-    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
-    from services.ap_computation import compute_ap_status as _impl
-    return _impl({"vendor_canonical": None}, {"validation_errors": validation_errors, "draft_candidate": draft_candidate}, {})
-
-
-# Legacy wrapper for backward compatibility
-def compute_canonical_fields(extracted_fields: dict) -> dict:
-    """Legacy wrapper - calls compute_ap_normalized_fields"""
-    return compute_ap_normalized_fields(extracted_fields)
-
-
-def compute_draft_candidate_flag(
-    document_type: str,
-    extracted_fields: dict,
-    canonical_fields: dict,
-    ai_confidence: float,
-) -> dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.ap_computation"""
-    from services.ap_computation import compute_draft_candidate_flag as _impl
-    return _impl(document_type, extracted_fields, canonical_fields, ai_confidence)
-
-
 # ---------------------------------------------------------------------------
 # COMPATIBILITY WRAPPERS: vendor name helpers
 # Authoritative source: services.vendor_name_helpers
@@ -1696,6 +1648,19 @@ def compute_draft_candidate_flag(
 # lookup_vendor_alias, etc.) still calls these functions directly.
 # ---------------------------------------------------------------------------
 from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_score
+
+# ---------------------------------------------------------------------------
+# DIRECT CANONICAL IMPORTS: AP compute functions
+# Phase 3 Step 2R (2026-04-23): the `compute_ap_*` shim wrappers that lived
+# in this file were deleted in favor of direct imports of the authoritative
+# implementations. Call sites below use these names unchanged.
+# ---------------------------------------------------------------------------
+from services.ap_computation import (
+    compute_ap_validation,
+    compute_ap_status,
+    compute_draft_candidate_flag,
+)
+from services.document_intel_helpers import compute_ap_normalized_fields
 
 # ---------------------------------------------------------------------------
 # COMPATIBILITY WRAPPER: match_vendor_in_bc

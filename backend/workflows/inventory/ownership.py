@@ -477,6 +477,38 @@ def _doc_customer_no(doc: Dict[str, Any]) -> str:
     ).strip()
 
 
+# ── Reselling COW — evidence refinement (Lane C Step 7b) ────────────────────
+#
+# Documentary-only: reads purported resale-authorization signals from the
+# document and surfaces them on ``cow_so_wrong_customer`` evidence rows so
+# reviewers can see the authorization context while the HARD BLOCK stands
+# firm. Does NOT downgrade severity, does NOT add an authorization store,
+# does NOT touch the ownership truth surface.
+_RESALE_SIGNAL_KEYS = (
+    "resale_authorization_id",
+    "resale_authorized_by",
+    "resale_authorization_date",
+)
+
+
+def _extract_resale_context(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Return a small documentary dict of resale-authorization signals,
+    or ``None`` when no signal is present on the document.
+
+    Signals are read exclusively from ``doc.extracted_fields``. No other
+    store, no normalization, no inference — strictly what the document
+    itself claims.
+    """
+    ef = doc.get("extracted_fields") or {}
+    ctx: Dict[str, Any] = {}
+    for key in _RESALE_SIGNAL_KEYS:
+        v = ef.get(key)
+        if v is None or (isinstance(v, str) and not v.strip()):
+            continue
+        ctx[key] = v.strip() if isinstance(v, str) else v
+    return ctx or None
+
+
 async def check_cow_so_uses_base_item(
     db, doc: Dict[str, Any]
 ) -> List[Dict[str, Any]]:
@@ -533,7 +565,7 @@ async def check_cow_so_uses_base_item(
             and registered_customer
             and doc_customer != registered_customer
         ):
-            evidence.append({
+            wrong_customer_entry: Dict[str, Any] = {
                 "blocker_code": BLOCKER_CODE_SO_WRONG_CUSTOMER,
                 "item_no": item_no,
                 "ownership": ownership,
@@ -541,7 +573,15 @@ async def check_cow_so_uses_base_item(
                 "registered_customer_no": registered_customer,
                 "recommended_base_item_no": base_item_no,
                 "reason": "cp_item_wrong_customer",
-            })
+            }
+            # Reselling COW — documentary evidence refinement (Step 7b).
+            # Attach resale_context ONLY on wrong-customer rows, ONLY when
+            # the document carries at least one resale-authorization signal.
+            # Severity of cow_so_wrong_customer stays at block.
+            resale_context = _extract_resale_context(doc)
+            if resale_context:
+                wrong_customer_entry["resale_context"] = resale_context
+            evidence.append(wrong_customer_entry)
         else:
             evidence.append({
                 "blocker_code": BLOCKER_CODE_SO_BASE,

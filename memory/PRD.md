@@ -73,6 +73,24 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Lane C Step 7b: Reselling COW — Evidence enrichment (Option 1)
+- **Chose Option 1** after semantic re-declaration: Reselling COW is a **cross-cutting ownership refinement**, not a new sales archetype. No `reselling_cow/` package was created. Single COW truth surface (`cp_item_registry` + `classify_item_ownership` + `get_cp_item`) preserved.
+- **Single file touched**: `workflows/inventory/ownership.py` — additive ~35 lines:
+  - `_RESALE_SIGNAL_KEYS` tuple locks the three-field surface: `resale_authorization_id`, `resale_authorized_by`, `resale_authorization_date`.
+  - `_extract_resale_context(doc)` reads those three signals exclusively from `doc.extracted_fields`; returns `None` when all absent/empty; trims string values.
+  - `check_cow_so_uses_base_item` extended to attach `resale_context` **only** on `cow_so_wrong_customer` evidence rows and **only** when `_extract_resale_context` returns non-empty.
+- **Enforcement unchanged**: `BLOCKER_CODE_SO_WRONG_CUSTOMER` still appends to `readiness.blocking_reasons`; no severity downgrade. Authorization presence is documentary only.
+- **Scope strictly**: no new package, no new collection, no new HTTP route, no new ownership accessor, no frontend touches, no readiness-pipeline changes.
+- **Tests**: `tests/test_cow_reselling_evidence.py` — **12/12 passed**.
+  - Attachment: full-signal / partial-signal / empty-string rejection / whitespace-trimming.
+  - Scoping: resale_context attaches ONLY to wrong-customer rows (not same-customer base-item code, not unknown_cp_pattern code, not when no signals present).
+  - Enforcement invariants: block code still appended; authorization presence never downgrades the block.
+  - Single-truth-surface: static source-inspection asserts `_extract_resale_context` reads only `extracted_fields` and never touches `cp_item_registry`/`classify_item_ownership`/`get_cp_item`; module carries no drift symbols (`classify_resale_ownership`, `get_resale_item`, `resale_item_registry`).
+- **Regression**: Step-1 COW 28/28 unchanged, Step-2 consignment 27/27 unchanged, full Lane C aggregate **312/312 passed** in 1.22s. `/openapi.json` paths = 864 (unchanged).
+- **Future step (unsigned)**: if the business later decides authorizations should downgrade the block to warn, that layer builds on this evidence foundation rather than requiring a rework.
+
+
+
 ### 2026-04-23 — Lane C Step 7 (narrowed): Customer Storage + Reroute
 - **Scope split** — Reselling COW **deferred** out of Step 7 and will be re-declared separately; this step lands only Customer Storage and Reroute as signal-driven, unwired-foundation gate surfaces.
 - **New package** `workflows/sales/subtypes/customer_storage/` — two gates, signal-driven (no classifier, no registry, no writes):

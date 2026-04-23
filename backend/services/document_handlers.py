@@ -1567,7 +1567,6 @@ async def intake_document_from_bytes(
         _update_ap_workflow_status,
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
-        check_duplicate_document,
         db,
         emit_document_received,
         evaluate_auto_clear,
@@ -1576,7 +1575,6 @@ async def intake_document_from_bytes(
         get_event_service,
         get_pilot_capture_channel,
         get_pilot_metadata,
-        lookup_vendor_alias,
         upload_to_sharepoint_with_routing,
         AutoClearDecision,
         CaptureChannel,
@@ -1595,6 +1593,8 @@ async def intake_document_from_bytes(
     from services.document_intel_helpers import classify_document_with_ai, make_automation_decision
     from services.classification_helpers import classify_document_type
     from services.sharepoint_service import create_sharing_link
+    # Phase 3 Step 4c.3: direct authoritative imports for Tier-3 shim helpers
+    from services.vendor_matching import lookup_vendor_alias, check_duplicate_document
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

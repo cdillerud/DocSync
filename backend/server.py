@@ -431,8 +431,9 @@ async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_na
 # ==================== DOCUMENT ENDPOINTS ====================
 
 # Upload storage path
-UPLOAD_DIR = ROOT_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+# Phase 3 Step 4d.2a: UPLOAD_DIR authoritative home migrated to backend/paths.py.
+# Retained here as a re-export for external importers (``from server import UPLOAD_DIR``).
+from paths import UPLOAD_DIR
 
 # Document routes moved to routers/documents.py — REMOVED (Domain 7)
 # Simple routes (list, get, update, delete, events, timeline, derived-state, refresh-state,

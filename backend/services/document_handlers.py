@@ -1576,7 +1576,6 @@ async def intake_document_from_bytes(
         get_pilot_capture_channel,
         get_pilot_metadata,
         upload_to_sharepoint_with_routing,
-        UPLOAD_DIR,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
@@ -1594,6 +1593,8 @@ async def intake_document_from_bytes(
     from services.auto_clear_service import AutoClearDecision
     from services.pilot_config import PILOT_MODE_ENABLED
     from models.document_types import DEFAULT_JOB_TYPES
+    # Phase 3 Step 4d.2a: direct authoritative import for UPLOAD_DIR
+    from paths import UPLOAD_DIR
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

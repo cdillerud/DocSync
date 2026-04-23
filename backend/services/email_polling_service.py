@@ -498,8 +498,8 @@ async def poll_mailbox_for_attachments():
 
                         try:
                             # Lazy import to avoid circular dependency
-                            from server import _internal_intake_document
-                            intake_result = await _internal_intake_document(
+                            from services.document_handlers import intake_document_from_bytes
+                            intake_result = await intake_document_from_bytes(
                                 file_content=content_bytes, filename=filename,
                                 content_type=content_type, source="email_poll",
                                 email_id=msg_id, subject=subject, sender=sender,
@@ -864,8 +864,8 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             continue
 
                         # Lazy import to avoid circular dependency
-                        from server import _internal_intake_document
-                        result = await _internal_intake_document(
+                        from services.document_handlers import intake_document_from_bytes
+                        result = await intake_document_from_bytes(
                             file_content=content_bytes, filename=filename,
                             source="email", sender=sender, subject=subject,
                             email_id=internet_msg_id, content_type=content_type,

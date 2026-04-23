@@ -188,6 +188,28 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 4a: `_internal_intake_document` caller rewire (seam-only)
+- **Scope split upfront (Step 4 → 4a + 4b)**: audit found `_internal_intake_document` (760-line function at `server.py:2861–3621`) references 8 `server.py`-module-scope helpers (`_attempt_llm_vendor_ranking`, `_build_vendor_resolution`, `_derive_workflow_status`, `_emit_intake_events`, `_update_ap_workflow_status`, `_update_standard_workflow_status`, `_update_vendor_profile_incremental`, `make_automation_decision`) plus module globals. Moving the body alongside 6 caller rewires is a real blast-radius step. User signed the split — Step 4a rewires callers to a thin seam; Step 4b later does the body move.
+- **Canonical destination**: new public thin-seam wrapper `services.document_handlers.intake_document_from_bytes(**kwargs)`. Byte-identical signature to `server._internal_intake_document`. Pure forwarder — lazy-imports the target and dispatches kwargs verbatim. NO preprocessing, NO normalization, NO logging, NO metrics, NO branching (signed guardrail).
+- **Caller inventory — all 6 rewired**:
+  1. `routers/sales_pipeline_demo.py:287–297` (demo ingestion, `source="demo_pipeline"`).
+  2. `routers/pilot.py:918` (pilot mailbox, `source="email"`). Note: this caller previously had a **latent NameError** — no import statement existed for `_internal_intake_document`; the rewire adds an explicit `from services.document_handlers import …` so the call path is now correctly bound.
+  3. `services/email_polling_service.py:501–502` (AP email polling, `source="email_poll"`).
+  4. `services/email_polling_service.py:867–868` (Sales email polling, `source="email"`).
+  5. `services/inside_sales_pilot_service.py:387–389` (`source="inside_sales_pilot"`).
+  6. `services/batch_po_splitter.py:162+232` (child ingestion, propagates parent `source`).
+- **Explicitly untouched** (in-file self-reference, Step 4b scope): `server.py::intake_document` (HTTP route at line ~3670) still calls `_internal_intake_document` in-file.
+- **Parity probe**: new `tests/test_intake_caller_rewire_parity.py` — **22/22 passed**. 5 classes:
+  - **Class A — Wrapper identity**: parameter list + defaults byte-identical to `_internal_intake_document`; kwargs forward unchanged across explicit and default-using invocations.
+  - **Class B — Per-caller source-code verification**: each of the 6 caller files imports the new seam, no longer contains `from server import _internal_intake_document`, and the `await intake_document_from_bytes(` call count matches per-file expectation.
+  - **Class C — Per-ingest-mode kwarg preservation**: 6 parametrized modes (`demo_pipeline`, `pilot_email`, `ap_email_poll`, `sales_email_poll`, `inside_sales_pilot`, `batch_po_splitter_child`) — each caller's kwarg bundle arrives at the underlying function byte-identical.
+  - **Class D — Live OpenAPI surface**: path count remains **858** on `localhost:8001`; `/api/documents/intake` still registered.
+  - **Class E — Guardrails**: `_internal_intake_document` signature byte-stable; `server.py` does NOT import the wrapper (would create circular risk); wrapper source contains no forbidden content (no logger calls, no DB ops, no metrics, no source-branching); wrapper body ≤ 25 code lines.
+- **`server.py`: 7,402 lines (unchanged — pure topology change)**. Phase 3 cumulative: still **8,903 → 7,402 = −1,501 lines (−16.9%)** through Steps 1 + 2R + 2B + 3 + 4a. The value of Step 4a is decoupling the 6 external callers from `from server import …` so Step 4b can move the body without coordinating caller updates.
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged). All 6 ingestion paths continue to dispatch to the identical function via the wrapper.
+- **Targeted regression**: **278 passed, 1 pre-existing failure** (`test_post_to_bc_returns_404_for_missing_doc` — identical pre-vs-post stash; same failure as after Step 3). Zero regressions introduced.
+
+
 ### 2026-04-23 — Phase 3 Step 3: AP auto-post branch extraction
 - **Scope split upfront**: original user direction named "Step 3/4 — AP auto-post orchestration and intake-branch migration". Blast-radius audit showed meaningful asymmetry: intake branch is ~30 lines with 2 in-file call sites, while `_internal_intake_document` external-caller migration touches 6+ callers across 4 external modules. User signed the split — this declaration covered Step 3 only; Step 4 deferred to a separate declaration.
 - **Canonical destination**: new helper `services.ap_auto_post_service.finalize_ap_decision` (co-located with `attempt_ap_auto_post` — single module owning the full AP auto-post lifecycle). Explicitly NOT `policies/ap_invoice.py` — that module is a `PolicyModule` evaluator pattern, not a home for effectful DB-writing orchestration.

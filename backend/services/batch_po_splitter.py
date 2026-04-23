@@ -159,7 +159,7 @@ async def split_and_ingest_batch(
         dict with split results: {status, children_count, children: [...]}
     """
     import asyncio
-    from server import _internal_intake_document
+    from services.document_handlers import intake_document_from_bytes
 
     now = datetime.now(timezone.utc).isoformat()
     reader = PdfReader(io.BytesIO(file_content))
@@ -229,7 +229,7 @@ async def split_and_ingest_batch(
             page_range = f"{min(pages)}-{max(pages)}" if len(pages) > 1 else str(pages[0])
             child_subject = f"{subject} [Pages {page_range}/{total_pages}]" if subject else f"Split from {parent_filename} [Pages {page_range}/{total_pages}]"
 
-            result = await _internal_intake_document(
+            result = await intake_document_from_bytes(
                 file_content=child_bytes,
                 filename=child_filename,
                 content_type="application/pdf",

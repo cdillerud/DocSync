@@ -284,8 +284,8 @@ async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
         # Remove any existing doc with same hash to allow re-demos
         await db.hub_documents.delete_many({"sha256_hash": file_hash})
 
-        from server import _internal_intake_document
-        result = await _internal_intake_document(
+        from services.document_handlers import intake_document_from_bytes
+        result = await intake_document_from_bytes(
             file_content=pdf_bytes,
             filename=filename,
             content_type="application/pdf",

@@ -1524,3 +1524,48 @@ async def preview_post_to_bc(doc_id: str, request: DryRunPreviewRequest = None):
         preview_result["errors"].append(str(e))
 
     return preview_result
+
+
+
+# =============================================================================
+# Phase 3 Step 4a — raw-bytes intake seam
+# =============================================================================
+# Thin seam wrapper exposing ``server._internal_intake_document`` under a stable,
+# forward-compatible import path. External callers (sales_pipeline_demo, pilot,
+# email_polling_service, inside_sales_pilot_service, batch_po_splitter) import
+# this function instead of reaching into ``server.py`` directly. Step 4b will
+# move the 760-line function body here and drop the lazy ``from server import``
+# without requiring any caller-side change.
+#
+# GUARDRAIL (signed Step 4a): this wrapper MUST remain a pure forwarder.
+# No preprocessing, no normalization, no logging changes, no metrics, no
+# behavior branching. It is a topology change only.
+# =============================================================================
+async def intake_document_from_bytes(
+    file_content: bytes,
+    filename: str,
+    content_type: str,
+    source: str = "email_poll",
+    sender: Optional[str] = None,
+    subject: Optional[str] = None,
+    email_id: Optional[str] = None,
+    mailbox_category: Optional[str] = None,
+) -> dict:
+    """Raw-bytes document intake — canonical import path.
+
+    Phase 3 Step 4a: thin pass-through to
+    ``server._internal_intake_document``. Byte-identical signature and
+    return shape. Step 4b will replace this body with the authoritative
+    implementation moved from ``server.py``.
+    """
+    from server import _internal_intake_document
+    return await _internal_intake_document(
+        file_content=file_content,
+        filename=filename,
+        content_type=content_type,
+        source=source,
+        sender=sender,
+        subject=subject,
+        email_id=email_id,
+        mailbox_category=mailbox_category,
+    )

@@ -185,11 +185,11 @@ class TestReferencedNamesResolvable:
     def test_lazy_import_block_covers_module_globals(self):
         """Module-scope server.py globals used by the body must be lazy-imported."""
         lazy = self._lazy_import_names()
-        required_globals = {
-            "db", "UPLOAD_DIR", "PILOT_MODE_ENABLED", "DEFAULT_JOB_TYPES",
-            "DocType", "SourceSystem", "CaptureChannel", "WorkflowStatus",
-            "WorkflowEvent", "AutoClearDecision",
-        }
+        # Post-Step 4d.1: the 8 enum/constant symbols migrated to their
+        # authoritative modules. Only `db` and `UPLOAD_DIR` remain
+        # server-exclusive globals requiring lazy import until Step 4d.2
+        # carves them into a dedicated module.
+        required_globals = {"db", "UPLOAD_DIR"}
         missing = required_globals - lazy
         assert not missing, f"Lazy-import block missing globals: {missing}"
 

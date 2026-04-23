@@ -6609,7 +6609,7 @@ async def start_approval_generic(
     if doc_type == DocType.AP_INVOICE.value:
         raise HTTPException(
             status_code=400, 
-            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/start-approval"
+            detail="AP_INVOICE documents should use /api/ap-review/documents/{doc_id}/start-approval"
         )
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
@@ -6667,7 +6667,7 @@ async def approve_generic(
     if doc_type == DocType.AP_INVOICE.value:
         raise HTTPException(
             status_code=400, 
-            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/approve"
+            detail="AP_INVOICE documents should use /api/ap-review/documents/{doc_id}/approve"
         )
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(
@@ -6725,7 +6725,7 @@ async def reject_generic(
     if doc_type == DocType.AP_INVOICE.value:
         raise HTTPException(
             status_code=400, 
-            detail="AP_INVOICE documents should use /api/workflows/ap_invoice/{doc_id}/reject"
+            detail="AP_INVOICE documents should use /api/ap-review/documents/{doc_id}/reject"
         )
     
     updated_doc, history_entry, success = WorkflowEngine.advance_workflow(

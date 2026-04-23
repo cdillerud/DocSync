@@ -16,58 +16,6 @@ import os
 API_BASE = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 
-class TestAPInvoiceRouteAvailability:
-    """All 6 AP Invoice mutation routes reachable at original paths."""
-
-    def test_set_vendor_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/set-vendor — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/set-vendor",
-            json={"vendor_id": "V001"},
-        )
-        assert resp.status_code == 404
-
-    def test_update_fields_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/update-fields — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/update-fields",
-            json={},
-        )
-        assert resp.status_code == 404
-
-    def test_override_bc_validation_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/override-bc-validation — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/override-bc-validation",
-            json={"override_reason": "test", "override_user": "admin"},
-        )
-        assert resp.status_code == 404
-
-    def test_start_approval_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/start-approval — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/start-approval",
-            json={},
-        )
-        assert resp.status_code == 404
-
-    def test_approve_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/approve — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/approve",
-            json={},
-        )
-        assert resp.status_code == 404
-
-    def test_reject_accepts_post(self):
-        """POST /api/workflows/ap_invoice/{id}/reject — 404 for missing doc."""
-        resp = requests.post(
-            f"{API_BASE}/api/workflows/ap_invoice/NONEXISTENT/reject",
-            json={"reason": "test rejection"},
-        )
-        assert resp.status_code == 404
-
-
 class TestGenericWorkflowRouteAvailability:
     """All 9 generic workflow mutation routes reachable at original paths."""
 

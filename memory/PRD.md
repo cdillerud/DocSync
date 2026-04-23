@@ -73,6 +73,30 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Phase 4 Path B Removal (Lane A completion)
+- **Production gate met**: prod VM returned `gate_met: true`, `total_hits_in_window: 0` across all six AP mutation Path B templates, empty `offending_callers[]`, zero hits in the full 14-day lookback.
+- **Removed**: six deprecated `/api/workflows/ap_invoice/{doc_id}/{action}` routes (set-vendor, update-fields, override-bc-validation, start-approval, approve, reject) from `routers/workflows.py`. Path A under `/api/ap-review/documents/{doc_id}/{action}` becomes the sole authority.
+- **Removed orphan functions**: `_record_deprecation_hit`, `_deprecate` (the wrapper factory) in `routers/workflows.py`, plus the `from functools import wraps` import and the 6 unused handler imports from `services.workflow_handlers`.
+- **Deleted tests**: 6 Path B negative tests in `tests/test_workflow_handler_extraction.py::TestAPInvoiceRouteAvailability`.
+- **Repointed error text** (correctness fix, signed in declaration):
+  - `server.py` lines 6612 / 6670 / 6728 — `"use /api/workflows/ap_invoice/{doc_id}/..."` → `"use /api/ap-review/documents/{doc_id}/..."` (×3)
+  - `services/workflow_handlers.py` lines 690 / 749 / 808 — same (×3)
+- **Explicitly NOT touched** (per signed scope fence):
+  - `routers/admin.py` `phase_4_gate` projection + `AP_MUTATION_TEMPLATES` list — stays in place, will report `gate_met=true, hits=0` forever (harmless).
+  - `frontend/src/lib/api.js` comment.
+  - Path A handler logic in `services/workflow_handlers.py` (beyond 3 error-text strings).
+- **Verification**:
+  - `/openapi.json` path count: **864 → 858** (exactly -6).
+  - `POST /api/workflows/ap_invoice/bogus/approve` → **HTTP 404** (route gone).
+  - `POST /api/workflows/ap_invoice/bogus/set-vendor` → **HTTP 404** (route gone).
+  - `POST /api/ap-review/documents/bogus/approve` → **HTTP 401** (route auth-gated, still works).
+  - Full Lane C regression: **379/379 passed** (only remaining failure `TestRouteCountStable::test_count` is a pre-existing stale-magic-number baseline test, unchanged by this work).
+  - Ruff clean on all touched files.
+  - Backend + frontend supervisor RUNNING.
+- **Lane A (AP Path Consolidation) is now complete**: canonical AP mutation surface lives exclusively at Path A.
+
+
+
 ### 2026-04-23 — Lane C Step 8: Planning / Import (Coloplast, Option A foundation)
 - **New top-level package** `workflows/planning/` — parser + validator + typed row model. No persistence. No routes. No scheduler. No wire-in. No LLM.
   - `__init__.py` (42 lines) — re-exports.

@@ -73,6 +73,24 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - `is_duplicate: {"$ne": True}` must be included in ALL inbox-related queries (documents list, inbox-stats, inbox-metrics) to match the actual inbox view. The documents endpoint enforces this at line 180.
 
 
+### 2026-04-23 — Lane C Step 8: Planning / Import (Coloplast, Option A foundation)
+- **New top-level package** `workflows/planning/` — parser + validator + typed row model. No persistence. No routes. No scheduler. No wire-in. No LLM.
+  - `__init__.py` (42 lines) — re-exports.
+  - `module.py` (10 lines) — scope doc.
+  - `types.py` (90 lines) — frozen dataclasses: `PlanningRow`, `PlanningRowError`, `PlanningSheet`, `PlanningParseResult`; `PlanningRowSeverity` literal.
+  - `coloplast.py` (297 lines) — `parse_coloplast_sheet(sheet)` deterministic parser. Recognizes canonical column aliases (Item/SKU/Part No; UOM/UM/Unit; Description), weekly period headers (`W15`, `Week 15`, `2026-W15`) via ISO calendar, numeric/named monthly headers (`2026-04`, `04/2026`, `Apr 2026`, `April 2026`). Emits structured `PlanningRowError` on ambiguity — never invents intent. Skips blank rows and footer totals (`total`, `grand total`, `sum`, `totals`).
+  - `validate.py` (135 lines) — `validate_planning_rows(rows, customer_no=None, today=None, horizon_weeks=26, backlog_weeks=1)`. Row-level policy: item_no non-empty, customer_no present & matching expected, qty finite & non-negative, period within ±26-week horizon. Warn-level for horizon violations; error-level for integrity violations. Pure — never mutates rows.
+- **Tests**: `tests/test_planning_coloplast_parser.py` — **33/33 passed** (canonical shape, 12 column-alias parametrizations, structural errors, row skipping, determinism, separation-from-inventory-staging, separation-from-sales-workflow, unwired + LLM-free guardrails). `tests/test_planning_validator.py` — **16/16 passed** (happy path, required fields, qty discipline incl. NaN/inf, horizon bounds, error structure, row-non-mutation).
+- **Separation proof**:
+  - Static scan asserts `workflows/planning/` contains no references to `STAGING_COLL`, `inv_import_staging`, `inv_xls_learned_mappings`, or `workflows.inventory.planning.staging`.
+  - Static scan asserts no references to `so_rules_engine`, `document_readiness_service`, `hub_documents`, `workflow_engine`, `business_central_service`, or `evaluate_and_persist`.
+  - Static scan asserts no LLM references (`emergentintegrations`, `LlmChat`, `openai`, `anthropic`, `gemini`, `EMERGENT_LLM_KEY`).
+- **Runtime**: zero. `/openapi.json` = 864 paths (unchanged). `workflows/inventory/planning/staging.py` (26,499 bytes) and `services/sales_intake_learning_service.py` (38,117 bytes) untouched.
+- **Aggregate Lane C suite**: **361/361 passed** in 1.30s.
+- **Deferred for later signed steps**: staging collection (`planning_import_staging`), router, SO-generation consumer (forecast → SO drafts / blanket-PO drawdowns), scheduler, BC writes, non-Coloplast customer formats.
+
+
+
 ### 2026-04-23 — Lane C Step 7b: Reselling COW — Evidence enrichment (Option 1)
 - **Chose Option 1** after semantic re-declaration: Reselling COW is a **cross-cutting ownership refinement**, not a new sales archetype. No `reselling_cow/` package was created. Single COW truth surface (`cp_item_registry` + `classify_item_ownership` + `get_cp_item`) preserved.
 - **Single file touched**: `workflows/inventory/ownership.py` — additive ~35 lines:

@@ -1567,7 +1567,6 @@ async def intake_document_from_bytes(
         _update_ap_workflow_status,
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
-        db,
         emit_document_received,
         evaluate_auto_clear,
         get_auto_clear_update,
@@ -1595,6 +1594,8 @@ async def intake_document_from_bytes(
     from models.document_types import DEFAULT_JOB_TYPES
     # Phase 3 Step 4d.2a: direct authoritative import for UPLOAD_DIR
     from paths import UPLOAD_DIR
+    # Phase 3 Step 4d.2b: direct authoritative import for `db`
+    from database import db
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

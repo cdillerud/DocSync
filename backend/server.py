@@ -173,9 +173,11 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Phase 3 Step 4d.2b: `db` and `client` authoritative home migrated to
+# backend/database.py. Retained here as re-exports for compatibility
+# (external importers via ``from server import db`` and in-module
+# shutdown hooks referencing ``client.close()``).
+from database import db, client
 
 # Config
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'

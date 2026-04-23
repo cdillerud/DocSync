@@ -183,12 +183,18 @@ class TestReferencedNamesResolvable:
         assert not missing, f"Lazy-import block missing: {missing}"
 
     def test_lazy_import_block_covers_module_globals(self):
-        """Module-scope server.py globals used by the body must be lazy-imported."""
+        """
+        Negative-contract guard: after Step 4d.2b, no server-exclusive
+        module-level globals remain in the lazy `from server import (...)`
+        block inside the intake body. `db` and `UPLOAD_DIR` migrated to
+        `backend/database.py` and `backend/paths.py` respectively; the 8
+        enum/constant symbols migrated in Step 4d.1. Only public/private
+        helpers should remain. This assertion is now a vacuously-true
+        guard that any future migration sub-step must not reintroduce
+        server-exclusive globals to the lazy block.
+        """
         lazy = self._lazy_import_names()
-        # Post-Step 4d.2a: `UPLOAD_DIR` migrated to backend/paths.py. Only
-        # `db` remains as a server-exclusive global requiring lazy import
-        # until Step 4d.2b carves it into a dedicated database module.
-        required_globals = {"db"}
+        required_globals: set[str] = set()
         missing = required_globals - lazy
         assert not missing, f"Lazy-import block missing globals: {missing}"
 

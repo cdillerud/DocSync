@@ -649,7 +649,7 @@ _analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 
 
 def get_db():
-    from server import db
+    from database import db
     return db
 
 

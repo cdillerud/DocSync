@@ -1,0 +1,209 @@
+{
+  "intake_needs_review": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "NeedsReview"
+        }
+      }
+    }
+  ],
+  "intake_posted": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "Posted"
+        }
+      }
+    }
+  ],
+  "intake_ready": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "ReadyForPost"
+        }
+      }
+    }
+  ],
+  "reprocess_needs_review": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "NeedsReview"
+        }
+      }
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "system.reprocessed",
+        "payload": {
+          "trigger": "manual_reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "automation.decision.completed",
+        "payload": {
+          "decision": "NeedsReview",
+          "reason": "AP strict auto-post reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    }
+  ],
+  "reprocess_posted": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "Posted"
+        }
+      }
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "system.reprocessed",
+        "payload": {
+          "trigger": "manual_reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "automation.decision.completed",
+        "payload": {
+          "decision": "Posted",
+          "reason": "AP strict auto-post reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    }
+  ],
+  "reprocess_ready": [
+    {
+      "collection": "hub_documents",
+      "filter": {
+        "id": "doc-golden"
+      },
+      "op": "update_one",
+      "update": {
+        "$set": {
+          "status": "ReadyForPost"
+        }
+      }
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "system.reprocessed",
+        "payload": {
+          "trigger": "manual_reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    },
+    {
+      "collection": "workflow_events",
+      "doc": {
+        "document_id": "doc-golden",
+        "event_type": "automation.decision.completed",
+        "payload": {
+          "decision": "ReadyForPost",
+          "reason": "AP strict auto-post reprocess"
+        },
+        "source_service": "ap_auto_post_service"
+      },
+      "keys_present": [
+        "document_id",
+        "event_id",
+        "event_type",
+        "payload",
+        "source_service",
+        "timestamp"
+      ],
+      "op": "insert_one"
+    }
+  ]
+}

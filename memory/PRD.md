@@ -188,6 +188,32 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 3: AP auto-post branch extraction
+- **Scope split upfront**: original user direction named "Step 3/4 — AP auto-post orchestration and intake-branch migration". Blast-radius audit showed meaningful asymmetry: intake branch is ~30 lines with 2 in-file call sites, while `_internal_intake_document` external-caller migration touches 6+ callers across 4 external modules. User signed the split — this declaration covered Step 3 only; Step 4 deferred to a separate declaration.
+- **Canonical destination**: new helper `services.ap_auto_post_service.finalize_ap_decision` (co-located with `attempt_ap_auto_post` — single module owning the full AP auto-post lifecycle). Explicitly NOT `policies/ap_invoice.py` — that module is a `PolicyModule` evaluator pattern, not a home for effectful DB-writing orchestration.
+- **Helper signature** (narrowly behavior-preserving per signed guardrail — no retry, no metrics, no shadow-mode, no policy semantics added):
+  ```python
+  async def finalize_ap_decision(
+      doc_id, db, *, source,
+      emit_reprocess_events=False,
+      on_exception_fallback_status=None,
+  ) -> {"status", "posted", "reason", "bc_record_no", "events_emitted"}
+  ```
+- **Server.py rewires** (2 call sites — total):
+  1. `server.py::_internal_intake_document` lines 3346–3373 (~28 lines) → `finalize_ap_decision(doc_id, db, source="auto")`. Outer `try/except` preserved for intake-parity "swallow" semantics.
+  2. `server.py::_reprocess_document_inner` lines 4698–4722 (~25 lines) → `finalize_ap_decision(doc_id, db, source="reprocess", emit_reprocess_events=True, on_exception_fallback_status="NeedsReview")`. Plus removed the previously-inlined 35-line reprocess-events-emission + derived-state-refresh block at lines 4732–4758 (now absorbed by helper when `emit_reprocess_events=True`).
+- **Preserved inline by declared scope**: `bc_vendor_number` pre-update in reprocess branch (depends on `validation_results` not passed through helper), the "[REPROCESS] Auto-clear SKIPPED" log line (belongs to auto-clear skip semantics, not finalize semantics).
+- **Parity probe**: new `tests/test_ap_finalize_decision_parity.py` — **20/20 passed**. 4 classes:
+  - **Class A — Pure-result parity**: recreates the inline intake decision tree, asserts helper return values match across 5 canonical `attempt_ap_auto_post` response shapes + 2 exception paths (intake swallow / reprocess fallback-to-NeedsReview).
+  - **Class B — DB-mutation golden-file parity**: in-memory `_DbDouble` captures the exact sequence of `update_one` / `insert_one` calls the helper makes across 6 scenarios (intake × {posted,ready,needs_review} + reprocess × {posted,ready,needs_review}); asserts against golden fixture `tests/fixtures/ap_finalize_golden.json` (scope-filtered to the 3 direct mutations the helper is responsible for — status flip + 2 workflow_events; derived-state side-effects filtered out as DerivedStateService's own contract).
+  - **Class C — Source-inspection guardrail**: `server.py` has exactly 2 `finalize_ap_decision` call sites and 0 remaining `attempt_ap_auto_post(` calls; `services/ap_auto_post_service.py` defines exactly 1 `finalize_ap_decision`; helper signature exactly matches the declared contract.
+  - **Class D — Live-surface smoke**: `/api/documents/intake` + `/api/documents/{id}/reprocess` routes still registered on live `localhost:8001` backend; OpenAPI path count remains **858** (unchanged).
+- **`server.py`: 7,437 → 7,402 lines (−35 net, −0.5%)**. Phase 3 cumulative: **8,903 → 7,402 = −1,501 lines (−16.9%)** across Steps 1 + 2R + 2B + 3. `services/ap_auto_post_service.py`: 807 → 939 lines (+132, helper + docstrings).
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged — no route surface touched). Intake and reprocess pipelines continue to produce identical status flips, identical workflow_events emission, identical derived-state refresh.
+- **Existing test update**: `tests/test_ap_auto_post_service.py::TestCodePathVerification::test_server_imports_ap_auto_post_service` updated to assert the new post-Step-3 import pattern (`finalize_ap_decision`) instead of the removed direct `attempt_ap_auto_post` import. The authoritative module is still exercised — the helper calls `attempt_ap_auto_post` internally.
+- **Targeted regression**: **256 passed, 1 pre-existing failure** (`test_post_to_bc_returns_404_for_missing_doc` — fails identically pre-stash and post-stash, unrelated auth/live-backend issue). Lane C aggregate 174/174 green.
+
+
 ### 2026-04-23 — Phase 3 Step 2B: AP queue/count shadow-def deletion
 - **Audit correction before signing**: original user directive named Step 2B as "AP queue/count helpers **migration** into `policies/ap_invoice.py`". Reality was 10 already-undecorated, zero-caller dead shadow `async def`s in `server.py` — same shape as Step 1 shadows, not a migration candidate. Live canonical copies already run from `routers/workflows.py` (Domain 8). `policies/ap_invoice.py` is a `PolicyModule` class pattern, not a routes/queries container. User signed revised scope as **pure shadow deletion**.
 - **Deletions from `server.py`** (10 shadow `async def`s + 2 bracketing `# Moved to routers/workflows.py (Domain 8)` comments + 1 orphaned `# ==================== GENERIC WORKFLOW QUEUE API ====================` header + 1 orphaned `# ==================== WORKFLOW METRICS ====================` header + trailing-blank runs):

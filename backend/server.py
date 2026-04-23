@@ -3354,21 +3354,12 @@ async def _internal_intake_document(
             ap_validation
         )
         
-        # STRICT AP AUTO-POST: Binary decision — auto-post or NeedsReview
+        # STRICT AP AUTO-POST: Binary decision — auto-post or NeedsReview.
+        # Phase 3 Step 3: decision/status-flip lives in ap_auto_post_service.finalize_ap_decision.
         try:
-            from services.ap_auto_post_service import attempt_ap_auto_post
-            ap_result = await attempt_ap_auto_post(doc_id, db, source="auto")
-            if ap_result.get("posted"):
-                final_status = "Posted"
-                logger.info("[AP Auto-Post] Document %s auto-posted to BC: %s", doc_id, ap_result.get("bc_record_no"))
-            elif ap_result.get("status") == "ReadyForPost":
-                final_status = "ReadyForPost"
-                logger.info("[AP Auto-Post] Document %s ready but BC writes disabled", doc_id)
-            else:
-                final_status = "NeedsReview"
-                logger.info("[AP Auto-Post] Document %s → NeedsReview: %s", doc_id, ap_result.get("reason"))
-            # Update final status in document
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": final_status}})
+            from services.ap_auto_post_service import finalize_ap_decision
+            _ap_finalize = await finalize_ap_decision(doc_id, db, source="auto")
+            final_status = _ap_finalize["status"]
         except Exception as e:
             logger.error("[AP Auto-Post] Exception for %s: %s", doc_id, str(e))
     else:
@@ -4697,25 +4688,24 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     
     if is_ap_reprocess:
         # AP INVOICES: Run strict auto-post service (binary: auto-post or NeedsReview)
+        # Phase 3 Step 3: decision/status-flip + reprocess-event emission + derived-state
+        # refresh live in ap_auto_post_service.finalize_ap_decision.
         try:
-            # Update bc_vendor_number from validation results before auto-post
+            # Update bc_vendor_number from validation results before auto-post.
+            # Explicitly out of Step 3 scope — stays inline because it depends on
+            # validation_results which is not passed through the helper.
             vendor_from_val = (validation_results.get("bc_record_info") or {}).get("number")
             if vendor_from_val:
                 await db.hub_documents.update_one({"id": doc_id}, {"$set": {"bc_vendor_number": vendor_from_val}})
-            
-            from services.ap_auto_post_service import attempt_ap_auto_post
-            ap_result = await attempt_ap_auto_post(doc_id, db, source="reprocess")
-            if ap_result.get("posted"):
-                new_status = "Posted"
-                logger.info("[REPROCESS] AP Auto-Post: %s posted to BC: %s", doc_id[:8], ap_result.get("bc_record_no"))
-            elif ap_result.get("status") == "ReadyForPost":
-                new_status = "ReadyForPost"
-                logger.info("[REPROCESS] AP Auto-Post: %s ready but BC writes disabled", doc_id[:8])
-            else:
-                new_status = "NeedsReview"
-                logger.info("[REPROCESS] AP Auto-Post: %s → NeedsReview: %s", doc_id[:8], ap_result.get("reason"))
-            
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"status": new_status}})
+
+            from services.ap_auto_post_service import finalize_ap_decision
+            _ap_finalize = await finalize_ap_decision(
+                doc_id, db,
+                source="reprocess",
+                emit_reprocess_events=True,
+                on_exception_fallback_status="NeedsReview",
+            )
+            new_status = _ap_finalize["status"]
         except Exception as ap_err:
             logger.error("[REPROCESS] AP Auto-Post error for %s: %s", doc_id[:8], str(ap_err))
             new_status = "NeedsReview"
@@ -4739,33 +4729,8 @@ async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
     # SKIP for AP invoices — they use the strict ap_auto_post_service above
     if is_ap_reprocess:
         logger.info("[REPROCESS] Auto-clear SKIPPED for AP_Invoice %s — using strict auto-post", doc_id[:8])
-        # Emit reprocess event for AP invoices
-        from datetime import timedelta as td
-        reprocess_ts = datetime.now(timezone.utc)
-        await db.workflow_events.insert_one({
-            "event_id": str(uuid.uuid4()),
-            "document_id": doc_id,
-            "event_type": "system.reprocessed",
-            "timestamp": reprocess_ts.isoformat(),
-            "source_service": "ap_auto_post_service",
-            "payload": {"trigger": "manual_reprocess"},
-        })
-        await db.workflow_events.insert_one({
-            "event_id": str(uuid.uuid4()),
-            "document_id": doc_id,
-            "event_type": "automation.decision.completed",
-            "timestamp": (reprocess_ts + td(milliseconds=100)).isoformat(),
-            "source_service": "ap_auto_post_service",
-            "payload": {"decision": new_status, "reason": "AP strict auto-post reprocess"},
-        })
-        try:
-            from services.derived_state_service import get_derived_state_service, DerivedStateService
-            dss = get_derived_state_service()
-            if not dss:
-                dss = DerivedStateService(db)
-            await dss.update_document_derived_state(doc_id)
-        except Exception as dss_err:
-            logger.warning("[REPROCESS] Derived state error: %s", str(dss_err))
+        # Reprocess workflow_events (system.reprocessed + automation.decision.completed)
+        # and derived-state refresh were emitted by finalize_ap_decision(..., emit_reprocess_events=True).
     else:
         try:
             doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})

@@ -805,3 +805,135 @@ async def process_auto_draft_queue(db, limit: int = 50) -> Dict:
     logger.info("[Auto-Draft Queue] Processed %d: drafted=%d, skipped=%d, errors=%d",
                 results["processed"], results["drafted"], results["skipped"], results["errors"])
     return results
+
+
+# =============================================================================
+# Phase 3 Step 3 — AP auto-post decision finalize wrapper
+# =============================================================================
+# Behavior-preserving extraction of the AP auto-post decision branch previously
+# inlined in ``server.py::_internal_intake_document`` (source="auto") and
+# ``server.py::_reprocess_document_inner`` (source="reprocess"). This helper is
+# NARROWLY SCOPED — it does three things and nothing more:
+#   1) Calls ``attempt_ap_auto_post(doc_id, db, source=source)``.
+#   2) Computes the resulting status flip (Posted / ReadyForPost / NeedsReview)
+#      and writes ``hub_documents.status``.
+#   3) Optionally emits the two reprocess ``workflow_events`` records
+#      (``system.reprocessed`` + ``automation.decision.completed``) and
+#      refreshes derived state — ONLY when ``emit_reprocess_events=True``.
+# It does NOT add retry semantics, metrics logic, shadow-mode branching, or
+# new policy decisions (per Step 3 signed guardrail).
+# =============================================================================
+async def finalize_ap_decision(
+    doc_id: str,
+    db,
+    *,
+    source: str,
+    emit_reprocess_events: bool = False,
+    on_exception_fallback_status: Optional[str] = None,
+) -> Dict[str, object]:
+    """Phase 3 Step 3: single-surface AP finalize wrapper.
+
+    Args:
+        doc_id: hub_documents.id of the AP invoice being finalized.
+        db: Motor database handle (caller-scoped).
+        source: propagated to ``attempt_ap_auto_post`` ("auto" | "reprocess" |
+            "approve" | "reevaluation_auto_act" — only "auto" and "reprocess"
+            are wired in Step 3).
+        emit_reprocess_events: when True, emits the two reprocess
+            workflow_events and refreshes derived state (reprocess-branch
+            behavior). When False, emits nothing extra (intake-branch
+            behavior).
+        on_exception_fallback_status: behavior on exception from
+            ``attempt_ap_auto_post`` — ``None`` swallows (intake parity);
+            any string is written to ``hub_documents.status`` (reprocess
+            parity passes ``"NeedsReview"``).
+
+    Returns:
+        dict with keys::
+
+            {
+              "status":        "Posted" | "ReadyForPost" | "NeedsReview",
+              "posted":        bool,
+              "reason":        Optional[str],
+              "bc_record_no":  Optional[str],
+              "events_emitted": int,  # 0 (intake) or 2 (reprocess)
+            }
+    """
+    status = "NeedsReview"
+    posted = False
+    reason: Optional[str] = None
+    bc_record_no: Optional[str] = None
+    events_emitted = 0
+
+    try:
+        ap_result = await attempt_ap_auto_post(doc_id, db, source=source)
+        if ap_result.get("posted"):
+            status = "Posted"
+            posted = True
+            bc_record_no = ap_result.get("bc_record_no")
+            logger.info(
+                "[AP Auto-Post:finalize] doc=%s source=%s → Posted bc=%s",
+                doc_id, source, bc_record_no,
+            )
+        elif ap_result.get("status") == "ReadyForPost":
+            status = "ReadyForPost"
+            logger.info(
+                "[AP Auto-Post:finalize] doc=%s source=%s → ReadyForPost (BC writes disabled)",
+                doc_id, source,
+            )
+        else:
+            status = "NeedsReview"
+            reason = ap_result.get("reason")
+            logger.info(
+                "[AP Auto-Post:finalize] doc=%s source=%s → NeedsReview: %s",
+                doc_id, source, reason,
+            )
+        await db.hub_documents.update_one(
+            {"id": doc_id}, {"$set": {"status": status}}
+        )
+    except Exception as e:
+        logger.error(
+            "[AP Auto-Post:finalize] exception doc=%s source=%s: %s",
+            doc_id, source, str(e),
+        )
+        if on_exception_fallback_status is not None:
+            status = on_exception_fallback_status
+            await db.hub_documents.update_one(
+                {"id": doc_id}, {"$set": {"status": status}}
+            )
+
+    if emit_reprocess_events:
+        reprocess_ts = datetime.now(timezone.utc)
+        await db.workflow_events.insert_one({
+            "event_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "event_type": "system.reprocessed",
+            "timestamp": reprocess_ts.isoformat(),
+            "source_service": "ap_auto_post_service",
+            "payload": {"trigger": "manual_reprocess"},
+        })
+        await db.workflow_events.insert_one({
+            "event_id": str(uuid.uuid4()),
+            "document_id": doc_id,
+            "event_type": "automation.decision.completed",
+            "timestamp": (reprocess_ts + timedelta(milliseconds=100)).isoformat(),
+            "source_service": "ap_auto_post_service",
+            "payload": {"decision": status, "reason": "AP strict auto-post reprocess"},
+        })
+        events_emitted = 2
+        try:
+            from services.derived_state_service import get_derived_state_service, DerivedStateService
+            dss = get_derived_state_service()
+            if not dss:
+                dss = DerivedStateService(db)
+            await dss.update_document_derived_state(doc_id)
+        except Exception as dss_err:
+            logger.warning("[AP Auto-Post:finalize] derived-state error doc=%s: %s", doc_id, str(dss_err))
+
+    return {
+        "status": status,
+        "posted": posted,
+        "reason": reason,
+        "bc_record_no": bc_record_no,
+        "events_emitted": events_emitted,
+    }

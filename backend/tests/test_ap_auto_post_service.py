@@ -294,13 +294,20 @@ class TestCodePathVerification:
     """Verify code paths are correctly wired"""
     
     def test_server_imports_ap_auto_post_service(self):
-        """Verify server.py imports ap_auto_post_service"""
+        """Verify server.py imports from ap_auto_post_service.
+
+        Phase 3 Step 3 (2026-04-23): the intake + reprocess AP decision branches
+        were migrated from calling ``attempt_ap_auto_post`` directly to calling
+        the new ``finalize_ap_decision`` wrapper. The wrapper itself still
+        invokes ``attempt_ap_auto_post`` internally, so the authoritative
+        ``ap_auto_post_service`` module is still exercised on the AP path.
+        """
         with open('/app/backend/server.py', 'r') as f:
             content = f.read()
-        
-        assert 'from services.ap_auto_post_service import attempt_ap_auto_post' in content, \
-            "server.py should import attempt_ap_auto_post from ap_auto_post_service"
-        print("PASS: server.py imports ap_auto_post_service.attempt_ap_auto_post")
+
+        assert 'from services.ap_auto_post_service import finalize_ap_decision' in content, \
+            "server.py should import finalize_ap_decision from ap_auto_post_service (Phase 3 Step 3)"
+        print("PASS: server.py imports ap_auto_post_service.finalize_ap_decision")
     
     def test_server_skips_auto_clear_for_ap_invoice(self):
         """Verify server.py skips auto-clear for AP_Invoice"""

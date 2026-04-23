@@ -301,20 +301,39 @@ class TestSourceInspectionGuardrail:
         return inspect.getsource(server_module)
 
     def test_finalize_ap_decision_called_exactly_twice(self, server_source: str):
-        # Once in _internal_intake_document, once in _reprocess_document_inner.
-        assert server_source.count("await finalize_ap_decision(") == 2, (
-            "Expected exactly 2 finalize_ap_decision call sites in server.py "
-            "(intake + reprocess). Got a different count — Step 3 scope drifted."
+        # Step 3 landed 2 call sites in server.py: intake + reprocess.
+        # Step 4b (2026-04-23) moved the intake body to
+        # services/document_handlers.py, so 1 site is now in server.py
+        # (the reprocess branch) and 1 site is in document_handlers.py
+        # (the moved intake body). Total across both files must stay 2.
+        server_count = server_source.count("await finalize_ap_decision(")
+        from services import document_handlers
+        dh_src = inspect.getsource(document_handlers)
+        dh_count = dh_src.count("await finalize_ap_decision(")
+        total = server_count + dh_count
+        assert total == 2, (
+            f"Expected exactly 2 finalize_ap_decision call sites total across "
+            f"server.py + document_handlers.py (server={server_count}, "
+            f"document_handlers={dh_count}, total={total}). Step 3/4b scope drifted."
+        )
+        assert server_count == 1, (
+            f"Expected 1 call in server.py (reprocess branch), got {server_count}"
+        )
+        assert dh_count == 1, (
+            f"Expected 1 call in document_handlers.py (moved intake body), got {dh_count}"
         )
 
     def test_server_no_longer_calls_attempt_ap_auto_post_in_branches(self, server_source: str):
-        # The two migrated branches must no longer import attempt_ap_auto_post.
-        # Global count: zero, because these were the only two sites in server.py.
+        # Step 3 removed the 2 direct attempt_ap_auto_post call sites from
+        # server.py's intake + reprocess branches. Step 4b moved the intake
+        # body to document_handlers.py, so server.py now contains zero
+        # attempt_ap_auto_post call sites. The moved intake body in
+        # document_handlers.py routes through finalize_ap_decision, which
+        # dispatches to attempt_ap_auto_post internally — that's preserved.
         call_count = server_source.count("attempt_ap_auto_post(")
         assert call_count == 0, (
             f"server.py still references attempt_ap_auto_post ({call_count}x) "
-            "— Step 3 should have removed all such references from the two "
-            "migrated branches."
+            "— Step 3/4b should have removed all such references."
         )
 
     def test_finalize_ap_decision_defined_once_in_service(self):

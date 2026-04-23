@@ -188,6 +188,35 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 4b: `_internal_intake_document` body move
+- **Sequence strictly followed**: (1) baseline captured via AST → `tests/fixtures/intake_body_move_baseline.json` (746 body lines, 34,231 chars, sha256 `ce7a32bd…`); (2) stability verified across 3 consecutive runs (byte-identical md5); (3) body moved whole; (4) parity suite added; (5) regression verified — zero delta.
+- **Canonical destination**: the 760-line body moved verbatim from `server.py::_internal_intake_document` into the Step-4a seam `services/document_handlers.py::intake_document_from_bytes`. The Step-4a wrapper body was replaced with the moved implementation. Signature unchanged. The 6 external callers rewired in Step 4a **require zero further changes** — they already called the new seam.
+- **server.py deletion**: `_internal_intake_document` deleted entirely. Zero remaining callers after Step 4a. One-line factual marker comment left at the deletion site (`# _internal_intake_document moved to services/document_handlers.py::intake_document_from_bytes (Phase 3 Step 4b, 2026-04-23)`).
+- **Helper-cascade strategy — CONSERVATIVE lazy-import** (signed guardrail: no helper substitution in this pass):
+  - Single `from server import (…)` block prepended to the moved body lazy-importing **33 names** covering:
+    - 7 `server.py`-exclusive helpers: `_attempt_llm_vendor_ranking`, `_build_vendor_resolution`, `_derive_workflow_status`, `_emit_intake_events`, `_update_ap_workflow_status`, `_update_standard_workflow_status`, `_update_vendor_profile_incremental`.
+    - 12 cross-cutting helpers: `check_duplicate_document`, `classify_document_type`, `classify_document_with_ai`, `compute_ap_normalized_fields`, `compute_ap_validation`, `create_sharing_link`, `emit_document_received`, `evaluate_auto_clear`, `get_auto_clear_update`, `get_auto_resolve_service`, `get_event_service`, `lookup_vendor_alias`, `make_automation_decision`, `upload_to_sharepoint_with_routing`, `get_pilot_capture_channel`, `get_pilot_metadata`.
+    - `db` (Motor handle) — lazy-imported so the moved body uses the **same** DB handle as server.py (preserves multi-worker reference).
+    - Module globals: `UPLOAD_DIR`, `PILOT_MODE_ENABLED`, `DEFAULT_JOB_TYPES`.
+    - Enums: `DocType`, `SourceSystem`, `CaptureChannel`, `WorkflowStatus`, `WorkflowEvent`, `AutoClearDecision`.
+  - Rationale: preserves byte-identical server.py dispatch for every helper. Some of these helpers have authoritative service-module homes (e.g., `classify_document_with_ai` in `services.document_intel_helpers`) that `document_handlers.py` already imports at module-top for the sibling `intake_document(UploadFile...)` handler. Substituting them here would be a **behavioral change**, not a body move — deferred to a future "Step 4c" with per-helper parity proof.
+- **Parity probes**:
+  - `tests/capture_intake_body_baseline.py` — AST-based pre-move baseline capture; stability-verified.
+  - `tests/test_intake_body_move_parity.py` — **21/21 passed**. 4 classes:
+    - **Class A — Body source byte-identity**: moved body (excluding lazy-import block and docstring) is SHA-256-identical to the pre-move baseline (`ce7a32bd53f5d77cb4b1c1f5c392c441f1e30fe3aa2a944e8d362d8b8b4c1308`). 746 lines, 34,231 chars.
+    - **Class B — Baseline referenced-names resolvability**: all 164 pre-move body-referenced names resolvable post-move via lazy-import block, module-top of `document_handlers.py`, or Python builtins. Lazy-import block explicitly covers all 7 server.py-exclusive helpers + 10 required module globals.
+    - **Class C — Live surface + caller-import smoke**: `/openapi.json` path count = **858**; all 6 Step-4a caller modules import cleanly (no NameError); wrapper resolves as coroutine with declared signature.
+    - **Class D — Source-inspection guardrails**: `server.py` no longer defines the function; move-marker comment present; `server.py` shrank into the expected 6620–6660 band (actual: 6642); wrapper body ≥ 500 code lines (actual: well above); single contiguous lazy-import block at body top; no module-top backward import.
+  - **Stale-test updates required** (stale = pre-4b source-text assertions that no longer match):
+    - `tests/test_intake_caller_rewire_parity.py` — rewritten from 22 → 11 assertions. "Thin wrapper" assertions obsolete since the wrapper IS now the body; "all 6 callers use the seam" + "no backward import" + "OpenAPI stable" assertions retained.
+    - `tests/test_ap_finalize_decision_parity.py::test_finalize_ap_decision_called_exactly_twice` — now checks the total of 2 call sites is split 1-in-server (reprocess branch) + 1-in-document_handlers (moved intake body).
+    - `tests/test_ap_auto_post_service.py::test_server_skips_auto_clear_for_ap_invoice` — source-text assertion moved to `document_handlers.py` for the intake-branch skip logic; reprocess-branch skip remains in `server.py`.
+- **`server.py`: 7,402 → 6,642 lines (−760 net, −10.3%)**. Phase 3 cumulative: **8,903 → 6,642 = −2,261 lines (−25.4%)** across Steps 1 + 2R + 2B + 3 + 4a + 4b. `services/document_handlers.py`: 1,572 → 2,344 lines (+772, the moved body).
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged). All 6 ingestion paths dispatch to the same implementation, just via a new import path.
+- **Rollback posture** (per signed declaration): atomic 2-file change (`server.py` + `services/document_handlers.py`). Pre-move baseline fixture committed before the body move so `git revert` is byte-stable. Single-commit rollback expectation held.
+- **Targeted regression**: **291 passed, 1 pre-existing failure** (`test_post_to_bc_returns_404_for_missing_doc` — identical pre-vs-post stash, unchanged from pre-Step-3 baseline). Zero regressions introduced.
+
+
 ### 2026-04-23 — Phase 3 Step 4a: `_internal_intake_document` caller rewire (seam-only)
 - **Scope split upfront (Step 4 → 4a + 4b)**: audit found `_internal_intake_document` (760-line function at `server.py:2861–3621`) references 8 `server.py`-module-scope helpers (`_attempt_llm_vendor_ranking`, `_build_vendor_resolution`, `_derive_workflow_status`, `_emit_intake_events`, `_update_ap_workflow_status`, `_update_standard_workflow_status`, `_update_vendor_profile_incremental`, `make_automation_decision`) plus module globals. Moving the body alongside 6 caller rewires is a real blast-radius step. User signed the split — Step 4a rewires callers to a thin seam; Step 4b later does the body move.
 - **Canonical destination**: new public thin-seam wrapper `services.document_handlers.intake_document_from_bytes(**kwargs)`. Byte-identical signature to `server._internal_intake_document`. Pure forwarder — lazy-imports the target and dispatches kwargs verbatim. NO preprocessing, NO normalization, NO logging, NO metrics, NO branching (signed guardrail).

@@ -310,16 +310,30 @@ class TestCodePathVerification:
         print("PASS: server.py imports ap_auto_post_service.finalize_ap_decision")
     
     def test_server_skips_auto_clear_for_ap_invoice(self):
-        """Verify server.py skips auto-clear for AP_Invoice"""
+        """Verify the AP_Invoice auto-clear skip logic is still present.
+
+        Phase 3 Step 4b (2026-04-23): the skip logic lived inside
+        ``_internal_intake_document`` which moved to
+        ``services/document_handlers.py::intake_document_from_bytes``. The
+        source-text assertions now look in document_handlers.py; a separate
+        reprocess-branch skip remains in server.py.
+        """
+        with open('/app/backend/services/document_handlers.py', 'r') as f:
+            dh_content = f.read()
         with open('/app/backend/server.py', 'r') as f:
-            content = f.read()
-        
-        # Check for the skip logic
-        assert 'is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice")' in content, \
-            "server.py should check for AP_Invoice type"
-        assert 'SKIPPED for AP_Invoice' in content, \
-            "server.py should log skip message for AP_Invoice"
-        print("PASS: server.py skips auto-clear for AP_Invoice documents")
+            srv_content = f.read()
+
+        # Intake-branch skip logic (moved to document_handlers.py)
+        assert 'is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice")' in dh_content, \
+            "document_handlers.py (moved intake body) should check for AP_Invoice type"
+        assert 'SKIPPED for AP_Invoice' in dh_content, \
+            "document_handlers.py (moved intake body) should log skip for AP_Invoice"
+
+        # Reprocess-branch skip logic (still in server.py)
+        assert '[REPROCESS] Auto-clear SKIPPED for AP_Invoice' in srv_content, \
+            "server.py reprocess branch should still log skip for AP_Invoice"
+
+        print("PASS: AP_Invoice auto-clear skip logic present in both intake (dh) and reprocess (server) paths")
     
     def test_ap_review_router_calls_ap_auto_post_service(self):
         """Verify ap_review.py mark-ready calls ap_auto_post_service"""

@@ -1576,15 +1576,7 @@ async def intake_document_from_bytes(
         get_pilot_capture_channel,
         get_pilot_metadata,
         upload_to_sharepoint_with_routing,
-        AutoClearDecision,
-        CaptureChannel,
-        DEFAULT_JOB_TYPES,
-        DocType,
-        PILOT_MODE_ENABLED,
-        SourceSystem,
         UPLOAD_DIR,
-        WorkflowEvent,
-        WorkflowStatus,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
@@ -1595,6 +1587,13 @@ async def intake_document_from_bytes(
     from services.sharepoint_service import create_sharing_link
     # Phase 3 Step 4c.3: direct authoritative imports for Tier-3 shim helpers
     from services.vendor_matching import lookup_vendor_alias, check_duplicate_document
+    # Phase 3 Step 4d.1: direct authoritative imports for enums/constants
+    from workflows.core.engine import (
+        CaptureChannel, DocType, SourceSystem, WorkflowEvent, WorkflowStatus,
+    )
+    from services.auto_clear_service import AutoClearDecision
+    from services.pilot_config import PILOT_MODE_ENABLED
+    from models.document_types import DEFAULT_JOB_TYPES
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

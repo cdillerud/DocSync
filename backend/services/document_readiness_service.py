@@ -616,77 +616,55 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
     new_signals = readiness.get("signals") or {}
     new_blocking = readiness.get("blocking_reasons") or []
 
-    # === COW HARD BLOCK (Lane C Step 1): Customer-Owned Ware on PO ===
-    # Invokes workflows.inventory.ownership.check_cow_item_on_po, which
-    # enforces signed §4b: CP items may not flow via PO. Runs on every
-    # evaluate_and_persist call — this IS the canonical re-evaluation path.
+    # === UNIFIED GATE EVALUATION (Lane C Step 2.75) ===
+    # Single registry call replaces the previously-separate COW / consignment
+    # try-blocks. Gates are registered at import time by workflows.core.gates.
+    # The adapter maps GateResult → existing readiness fields so the payload
+    # shape is byte-identical to pre-Step-2.75 (no new readiness.gate_results
+    # field per signed dropoff).
     try:
+        from workflows.core.gate_framework import registry as gate_registry, GateContext
+        import workflows.core.gates  # noqa: F401  — import-time side effect: registers gates
         from workflows.inventory.ownership import (
-            check_cow_item_on_po,
             apply_cow_blocker_to_readiness,
-            check_cow_so_uses_base_item,
             apply_cow_so_blocker_to_readiness,
-        )
-        cow_evidence = await check_cow_item_on_po(db, doc)
-        if cow_evidence:
-            apply_cow_blocker_to_readiness(readiness, cow_evidence)
-            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
-                readiness["status"] = STATUS_NEEDS_REVIEW
-                readiness["recommended_action"] = ACTION_REVIEW
-            new_blocking = readiness["blocking_reasons"]
-            logger.info(
-                "[Readiness:COW] doc=%s — hard block, %d CP line(s) flagged",
-                doc_id[:8], len(cow_evidence),
-            )
-        else:
-            # Idempotent unblock: if doc was previously blocked and the registry
-            # entry has since been retired, the prior cow_item_on_po reason is
-            # purged on this re-eval. No auto-trigger — caller drove us here.
-            if "cow_item_on_po" in new_blocking:
-                readiness["blocking_reasons"] = [
-                    b for b in new_blocking if b != "cow_item_on_po"
-                ]
-                new_blocking = readiness["blocking_reasons"]
-                readiness.pop("cow_items", None)
-
-        # === COW SO-side gates (Lane C Step 1 follow-up) ===
-        # Two distinct blocker codes per signed amendment:
-        #   cow_so_uses_base_item — active CP on SO, bill the base item
-        #   cow_so_wrong_customer — CP registered to a different customer
-        cow_so_evidence = await check_cow_so_uses_base_item(db, doc)
-        if cow_so_evidence:
-            apply_cow_so_blocker_to_readiness(readiness, cow_so_evidence)
-            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
-                readiness["status"] = STATUS_NEEDS_REVIEW
-                readiness["recommended_action"] = ACTION_REVIEW
-            new_blocking = readiness["blocking_reasons"]
-            codes = sorted({e["blocker_code"] for e in cow_so_evidence})
-            logger.info(
-                "[Readiness:COW-SO] doc=%s — hard block, codes=%s, %d line(s)",
-                doc_id[:8], codes, len(cow_so_evidence),
-            )
-        else:
-            # Idempotent unblock for both SO-side codes
-            for _so_code in ("cow_so_uses_base_item", "cow_so_wrong_customer"):
-                if _so_code in new_blocking:
-                    readiness["blocking_reasons"] = [
-                        b for b in new_blocking if b != _so_code
-                    ]
-                    new_blocking = readiness["blocking_reasons"]
-            readiness.pop("cow_so_items", None)
-    except Exception as cow_err:
-        logger.warning("[Readiness:COW] skipped for %s: %s", doc_id[:8], cow_err)
-
-    # === CONSIGNMENT HARD BLOCK (Lane C Step 2) ===
-    # All 5 rules (R1–R5) are hard blocks per signed declaration. Same
-    # canonical readiness path. No auto-transitions; registry state is only
-    # mutated via the admin endpoint.
-    try:
-        from workflows.inventory.ownership import (
-            check_consignment_rules,
             apply_consignment_blocker_to_readiness,
         )
-        cons_evidence = await check_consignment_rules(db, doc)
+
+        gate_results = await gate_registry.evaluate_all(GateContext(db=db, doc=doc))
+
+        # Adapter: route each gate's evidence back into the existing readiness
+        # fields. Same mutations the retired try-blocks performed.
+        _gate_results_by_id = {r.gate_id: r for r in gate_results}
+
+        # 1. COW PO gate
+        cow_po = _gate_results_by_id.get("cow_item_on_po")
+        cow_po_rows = (cow_po.evidence or {}).get("rows", []) if cow_po else []
+        if cow_po_rows:
+            apply_cow_blocker_to_readiness(readiness, cow_po_rows)
+        else:
+            if "cow_item_on_po" in (readiness.get("blocking_reasons") or []):
+                readiness["blocking_reasons"] = [
+                    b for b in readiness["blocking_reasons"] if b != "cow_item_on_po"
+                ]
+                readiness.pop("cow_items", None)
+
+        # 2. COW Sales gate
+        cow_so = _gate_results_by_id.get("cow_sales_order")
+        cow_so_rows = (cow_so.evidence or {}).get("rows", []) if cow_so else []
+        if cow_so_rows:
+            apply_cow_so_blocker_to_readiness(readiness, cow_so_rows)
+        else:
+            for _so_code in ("cow_so_uses_base_item", "cow_so_wrong_customer"):
+                if _so_code in (readiness.get("blocking_reasons") or []):
+                    readiness["blocking_reasons"] = [
+                        b for b in readiness["blocking_reasons"] if b != _so_code
+                    ]
+            readiness.pop("cow_so_items", None) if not cow_so_rows else None
+
+        # 3. Consignment gate
+        cons = _gate_results_by_id.get("consignment_rules")
+        cons_rows = (cons.evidence or {}).get("rows", []) if cons else []
         _cons_all_codes = (
             "consigned_item_on_ap_invoice",
             "consigned_item_wrong_state_on_ap",
@@ -694,31 +672,44 @@ async def evaluate_and_persist(doc_id: str) -> Dict[str, Any]:
             "consigned_item_post_lifecycle_on_so",
             "consigned_item_wrong_location_on_adj",
         )
-        if cons_evidence:
-            apply_consignment_blocker_to_readiness(readiness, cons_evidence)
-            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
-                readiness["status"] = STATUS_NEEDS_REVIEW
-                readiness["recommended_action"] = ACTION_REVIEW
-            new_blocking = readiness["blocking_reasons"]
-            codes = sorted({e["blocker_code"] for e in cons_evidence})
-            logger.info(
-                "[Readiness:Consignment] doc=%s — hard block, codes=%s, %d line(s)",
-                doc_id[:8], codes, len(cons_evidence),
-            )
+        if cons_rows:
+            apply_consignment_blocker_to_readiness(readiness, cons_rows)
         else:
-            # Idempotent clear of any prior consignment blockers on re-eval
             cleared = False
             for _code in _cons_all_codes:
-                if _code in new_blocking:
+                if _code in (readiness.get("blocking_reasons") or []):
                     readiness["blocking_reasons"] = [
-                        b for b in new_blocking if b != _code
+                        b for b in readiness["blocking_reasons"] if b != _code
                     ]
-                    new_blocking = readiness["blocking_reasons"]
                     cleared = True
             if cleared:
                 readiness.pop("consigned_items", None)
-    except Exception as cons_err:
-        logger.warning("[Readiness:Consignment] skipped for %s: %s", doc_id[:8], cons_err)
+
+        # 4. Master-data-completeness gate (warn-only)
+        md_gate = _gate_results_by_id.get("master_data_completeness")
+        if md_gate and not md_gate.passed:
+            warnings = list(readiness.get("warning_reasons") or [])
+            if "master_data_incomplete" not in warnings:
+                warnings.append("master_data_incomplete")
+            readiness["warning_reasons"] = warnings
+            readiness["master_data_gaps"] = list(md_gate.evidence.get("missing") or [])
+        else:
+            # Idempotent clear on re-eval
+            if "master_data_incomplete" in (readiness.get("warning_reasons") or []):
+                readiness["warning_reasons"] = [
+                    w for w in readiness["warning_reasons"] if w != "master_data_incomplete"
+                ]
+            readiness.pop("master_data_gaps", None)
+
+        # Unified status downgrade (same trigger as pre-2.75 blocks)
+        if any(not r.passed and r.severity == "block" for r in gate_results):
+            if readiness["status"] in (STATUS_READY_AUTO_DRAFT, STATUS_READY_AUTO_LINK):
+                readiness["status"] = STATUS_NEEDS_REVIEW
+                readiness["recommended_action"] = ACTION_REVIEW
+
+        new_blocking = readiness.get("blocking_reasons") or []
+    except Exception as gate_err:
+        logger.warning("[Readiness:Gates] skipped for %s: %s", doc_id[:8], gate_err)
 
     # === VENDOR BYPASS: Route to manual review if vendor flagged ===
     if doc.get("_vendor_bypass_active"):

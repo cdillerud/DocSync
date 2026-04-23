@@ -28,6 +28,9 @@ export const BLOCKER_LABELS = {
   missing_required_fields: "Missing required fields",
   classification_low_confidence: "Classification low confidence",
   extraction_failed: "Extraction failed",
+
+  // Lane C Step 2.75 — warn-severity master-data gate
+  master_data_incomplete: "Master data incomplete",
 };
 
 export function labelForBlocker(code) {

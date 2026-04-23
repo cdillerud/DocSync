@@ -1570,8 +1570,6 @@ async def intake_document_from_bytes(
         check_duplicate_document,
         classify_document_type,
         classify_document_with_ai,
-        compute_ap_normalized_fields,
-        compute_ap_validation,
         create_sharing_link,
         db,
         emit_document_received,
@@ -1594,6 +1592,9 @@ async def intake_document_from_bytes(
         WorkflowEvent,
         WorkflowStatus,
     )
+    # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
+    from services.document_intel_helpers import compute_ap_normalized_fields
+    from services.ap_computation import compute_ap_validation
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

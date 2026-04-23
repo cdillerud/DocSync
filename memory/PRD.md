@@ -188,6 +188,27 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 4c.1: re-exported helpers substitution
+- **Narrow tier-split per user direction**: user declined the one-pass all-8-helper plan and split Step 4c into 3 tiers. This is tier 1 — the 2 safest helpers (pure re-exports where `server.py` does not define the function; it only re-imports from the authoritative service module). Tiers 2 (4 thin-shim helpers) and 3 (2 COMPATIBILITY WRAPPER helpers) are separately signed future steps.
+- **Substitutions landed**:
+  - `compute_ap_normalized_fields`: `from server import …` → `from services.document_intel_helpers import compute_ap_normalized_fields`.
+  - `compute_ap_validation`: `from server import …` → `from services.ap_computation import compute_ap_validation`.
+- **Single change site**: lazy-import block inside `services/document_handlers.py::intake_document_from_bytes` (the Step-4b moved body). Two names removed from the `from server import (…)` block; two new authoritative-home imports added with a short factual comment `# Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers`.
+- **Zero other files touched**: `server.py` re-exports at lines 1659 (`compute_ap_validation`) and 1663 (`compute_ap_normalized_fields`) preserved unchanged for any other callers still using `from server import X` pattern.
+- **Object-identity parity proof (STRONGEST possible)**: `from server import X is services.<home>.X` passes for both helpers. CPython guarantees behavioral equivalence at the memory-address level.
+- **Parity probe**: new `tests/test_helper_substitution_4c1_parity.py` — **12/12 passed**. Five classes:
+  - **Class A** Object identity: `srv_X is svc_X` for both helpers (the strongest proof).
+  - **Class B** Pure-call parity: `compute_ap_normalized_fields` called with canonical AP-invoice payload across both paths produces identical output; `compute_ap_validation` called with canonical 6-positional-args + `possible_duplicate` kwarg across both paths produces identical output.
+  - **Class C** Source-inspection guardrail: both helpers removed from `from server` block; authoritative-home imports present; Step 4c.1 comment present; `server.py` re-exports preserved.
+  - **Class D** Moved body byte-identity held: Step 4b baseline sha256 `ce7a32bd…` still matches — Step 4c.1 did not drift the body.
+  - **Class E** Live surface smoke: OpenAPI = 858 paths; wrapper signature unchanged.
+- **Stale-test update**: `tests/test_intake_body_move_parity.py::test_every_baseline_name_is_resolvable` (from Step 4b) updated to consider names imported from ANY module at the function-body top, not just `from server`. Required because Step 4c.1 moved 2 names from `from server` into `from services.*`, and the Step 4b test's `_lazy_import_names` helper only inspected `from server` imports. Added a new `_all_function_body_import_names` helper and repointed the resolvability test at it.
+- **`server.py`: 6,642 lines (unchanged)**. `services/document_handlers.py`: 2,344 → 2,345 lines (+1 net: 2 new imports + 1 comment line, offset by the 2 removed lazy-import entries).
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged). The function objects bound inside the moved body are literally identical across the old and new import paths — proven by `is` check.
+- **Rollback posture (per signed declaration)**: single-line-per-helper reversibility. Atomic single-commit merge. If either Class A test fails pre-merge, rollback is one-line diff per affected helper. Class A's `is` check gates pre-merge so effective rollback probability is ~0.
+- **Targeted regression**: **303 passed, 1 pre-existing failure** (`test_post_to_bc_returns_404_for_missing_doc` — same pre-Step-3 baseline). Zero regressions introduced.
+
+
 ### 2026-04-23 — Phase 3 Step 4b: `_internal_intake_document` body move
 - **Sequence strictly followed**: (1) baseline captured via AST → `tests/fixtures/intake_body_move_baseline.json` (746 body lines, 34,231 chars, sha256 `ce7a32bd…`); (2) stability verified across 3 consecutive runs (byte-identical md5); (3) body moved whole; (4) parity suite added; (5) regression verified — zero delta.
 - **Canonical destination**: the 760-line body moved verbatim from `server.py::_internal_intake_document` into the Step-4a seam `services/document_handlers.py::intake_document_from_bytes`. The Step-4a wrapper body was replaced with the moved implementation. Signature unchanged. The 6 external callers rewired in Step 4a **require zero further changes** — they already called the new seam.

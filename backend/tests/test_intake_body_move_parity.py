@@ -132,7 +132,7 @@ class TestReferencedNamesResolvable:
         return dh_src
 
     def _lazy_import_names(self) -> set:
-        """Parse the lazy-import block at the top of intake_document_from_bytes body."""
+        """Parse the `from server` lazy-import block at top of body."""
         dh_src = (BACKEND_DIR / "services" / "document_handlers.py").read_text()
         tree = ast.parse(dh_src)
         names = set()
@@ -142,6 +142,25 @@ class TestReferencedNamesResolvable:
                     if isinstance(n, ast.ImportFrom) and n.module == "server":
                         for alias in n.names:
                             names.add(alias.asname or alias.name)
+                break
+        return names
+
+    def _all_function_body_import_names(self) -> set:
+        """All names imported at the top of the function body, regardless of
+        source module. Accounts for Step 4c.1+ per-helper substitutions where
+        names move from `from server` to `from services.<home>`."""
+        dh_src = (BACKEND_DIR / "services" / "document_handlers.py").read_text()
+        tree = ast.parse(dh_src)
+        names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "intake_document_from_bytes":
+                for n in node.body:
+                    if isinstance(n, ast.ImportFrom):
+                        for alias in n.names:
+                            names.add(alias.asname or alias.name)
+                    elif isinstance(n, ast.Import):
+                        for alias in n.names:
+                            names.add(alias.asname or alias.name.split(".")[0])
                 break
         return names
 
@@ -176,9 +195,11 @@ class TestReferencedNamesResolvable:
 
     def test_every_baseline_name_is_resolvable(self, baseline_names):
         """Each pre-move body-referenced name is resolvable post-move via
-        (a) lazy-import block, (b) document_handlers module top, or (c) builtin."""
+        (a) the function's body-top imports (any source module, includes
+        Step 4c.1+ per-helper authoritative substitutions),
+        (b) document_handlers module top, or (c) builtin."""
         import builtins
-        lazy = self._lazy_import_names()
+        lazy = self._all_function_body_import_names()
         dh_src = (BACKEND_DIR / "services" / "document_handlers.py").read_text()
         dh_tree = ast.parse(dh_src)
         module_top_names = set()

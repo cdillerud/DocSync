@@ -188,6 +188,33 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 
 ## Completed Features
 
+### 2026-04-23 — Phase 3 Step 4c.2: thin-shim helpers substitution
+- **Pre-sign empirical audit gate executed** (per user direction before signing). All 4 Tier-2 helpers classified **THIN_SHIM** with `resolves_to_svc: True`:
+  - `classify_document_with_ai` (4-line body, local `_impl` alias of `services.document_intel_helpers.classify_document_with_ai`).
+  - `make_automation_decision` (8-line body, local `_impl` alias of `services.document_intel_helpers.make_automation_decision`).
+  - `classify_document_type` (10-line body, local `_impl` alias of `services.classification_helpers.classify_document_type`).
+  - `create_sharing_link` (3-line body, local `_impl` alias of `services.sharepoint_service.create_sharing_link`).
+  - None failed the gate → tier stayed intact, no further split needed.
+- **Committed audit artifact**: `tests/audit_shim_substitution.py` — reusable classifier (IDENTITY / THIN_SHIM / DRIFTED verdicts via AST introspection + runtime `is` check). CLI contract (`python tests/audit_shim_substitution.py {tier}`) exits 0 iff every helper passes; exits 1 if any DRIFTED. Designed to be rerun pre-sign for future tiers (4c.3 and beyond).
+- **Substitutions landed** inside `services/document_handlers.py::intake_document_from_bytes` lazy-import block:
+  - `from services.document_intel_helpers import classify_document_with_ai, make_automation_decision`
+  - `from services.classification_helpers import classify_document_type`
+  - `from services.sharepoint_service import create_sharing_link`
+  - Removed the 4 corresponding names from the `from server import (...)` block.
+  - Short factual comment added: `# Phase 3 Step 4c.2: direct authoritative imports for thin-shim helpers`.
+- **Zero other files touched.** `server.py` shims preserved unchanged (they have external callers beyond `_internal_intake_document` — per-shim signed step required to delete each).
+- **Parity probe**: new `tests/test_helper_substitution_4c2_parity.py` — **26 passed, 2 skipped by design** (behavioral-call signature-mismatch skips for `make_automation_decision` and `classify_document_type` — not failures). 6 classes:
+  - **Class A** Pre-sign audit re-run at test time: the committed classifier re-proves IDENTITY/THIN_SHIM with `resolves_to_svc=True` for each of the 4 Tier-2 helpers. If any fails, the whole suite fails.
+  - **Class B** Behavioral call parity per helper: signature-introspected calls across both import paths; identical outputs or graceful skip on signature mismatch; exception-class parity for I/O-bound helpers.
+  - **Class C** Source-inspection guardrail: each helper absent from `from server` block inside the function body; present in the correct `from services.<home>` import; both Step 4c.1 and Step 4c.2 comments present; `server.py` shims preserved.
+  - **Class D** Moved-body byte-identity held: Step 4b baseline sha256 `ce7a32bd…` still matches.
+  - **Class E** Live surface smoke: `/openapi.json` = 858; wrapper coroutine with correct signature.
+  - **Class F** Audit-script self-proof: CLI invocation `python tests/audit_shim_substitution.py 2` exits 0 with "Failing (0):" in stdout. Environment passes `PYTHONPATH=backend/` to resolve `import server`.
+- **`server.py`: 6,642 lines (unchanged)**. `services/document_handlers.py`: 2,345 → 2,346 lines (+1 net: 4 new imports + 1 comment minus 4 removed lazy-import entries ≈ +1).
+- **Runtime behavior**: zero change. `/openapi.json` = 858 paths (unchanged). The function objects bound inside the moved body are the canonical service-module functions, skipping the one-level `return [await] _impl(...)` tail call on each invocation.
+- **Combined targeted regression**: **329 passed, 2 skipped (by design), 1 pre-existing failure** (`test_post_to_bc_returns_404_for_missing_doc` — same pre-Step-3 baseline). Zero regressions introduced.
+
+
 ### 2026-04-23 — Phase 3 Step 4c.1: re-exported helpers substitution
 - **Narrow tier-split per user direction**: user declined the one-pass all-8-helper plan and split Step 4c into 3 tiers. This is tier 1 — the 2 safest helpers (pure re-exports where `server.py` does not define the function; it only re-imports from the authoritative service module). Tiers 2 (4 thin-shim helpers) and 3 (2 COMPATIBILITY WRAPPER helpers) are separately signed future steps.
 - **Substitutions landed**:

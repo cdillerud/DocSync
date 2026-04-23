@@ -1568,9 +1568,6 @@ async def intake_document_from_bytes(
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
         check_duplicate_document,
-        classify_document_type,
-        classify_document_with_ai,
-        create_sharing_link,
         db,
         emit_document_received,
         evaluate_auto_clear,
@@ -1580,7 +1577,6 @@ async def intake_document_from_bytes(
         get_pilot_capture_channel,
         get_pilot_metadata,
         lookup_vendor_alias,
-        make_automation_decision,
         upload_to_sharepoint_with_routing,
         AutoClearDecision,
         CaptureChannel,
@@ -1595,6 +1591,10 @@ async def intake_document_from_bytes(
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
     from services.ap_computation import compute_ap_validation
+    # Phase 3 Step 4c.2: direct authoritative imports for thin-shim helpers
+    from services.document_intel_helpers import classify_document_with_ai, make_automation_decision
+    from services.classification_helpers import classify_document_type
+    from services.sharepoint_service import create_sharing_link
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

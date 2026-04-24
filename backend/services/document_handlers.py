@@ -1567,7 +1567,6 @@ async def intake_document_from_bytes(
         _update_ap_workflow_status,
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
-        upload_to_sharepoint_with_routing,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
@@ -1597,6 +1596,8 @@ async def intake_document_from_bytes(
     from services.pilot_config import get_pilot_capture_channel, get_pilot_metadata
     # Phase 3 Step 4d.3d: direct authoritative import for auto_resolution_service helper
     from services.auto_resolution_service import get_auto_resolve_service
+    # Phase 3 Step 4d.3e: direct authoritative import for sharepoint_service helper (THIN_SHIM migration)
+    from services.sharepoint_service import upload_to_sharepoint_with_routing
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

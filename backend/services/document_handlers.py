@@ -1567,9 +1567,7 @@ async def intake_document_from_bytes(
         _update_ap_workflow_status,
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
-        emit_document_received,
         get_auto_resolve_service,
-        get_event_service,
         get_pilot_capture_channel,
         get_pilot_metadata,
         upload_to_sharepoint_with_routing,
@@ -1596,6 +1594,8 @@ async def intake_document_from_bytes(
     from database import db
     # Phase 3 Step 4d.3a: direct authoritative imports for auto_clear_service helpers
     from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update
+    # Phase 3 Step 4d.3b: direct authoritative imports for event_service helpers
+    from services.event_service import emit_document_received, get_event_service
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

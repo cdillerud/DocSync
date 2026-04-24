@@ -1562,7 +1562,6 @@ async def intake_document_from_bytes(
     from server import (
         _attempt_llm_vendor_ranking,
         _build_vendor_resolution,
-        _derive_workflow_status,
         _emit_intake_events,
         _update_ap_workflow_status,
         _update_standard_workflow_status,
@@ -1598,6 +1597,9 @@ async def intake_document_from_bytes(
     from services.auto_resolution_service import get_auto_resolve_service
     # Phase 3 Step 4d.3e: direct authoritative import for sharepoint_service helper (THIN_SHIM migration)
     from services.sharepoint_service import upload_to_sharepoint_with_routing
+    # Phase 3 Step 4d.4a: direct authoritative import for classification_helpers.derive_workflow_status
+    # (alias preserves `_derive_workflow_status` call-site byte parity)
+    from services.classification_helpers import derive_workflow_status as _derive_workflow_status
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

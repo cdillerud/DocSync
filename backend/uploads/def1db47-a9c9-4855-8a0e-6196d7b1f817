@@ -1,0 +1,88 @@
+%PDF-1.3
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 1
+/Kids [ 4 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Contents 5 0 R
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font 6 0 R
+/ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>>
+/Rotate 0
+/Trans <<
+>>
+/Type /Page
+/Parent 2 0 R
+>>
+endobj
+5 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ]
+/Length 355
+>>
+stream
+Garo<;+ne\'SYH=.h:cqMQOElP.J@f=(*5R\C,Tg,$&A,BtN8@aGR%(&.%6VoA+I?J[n/IY$5:>ipMXg*9@Dr_uf$VZ?"oH%T6V?`VcO\KTHV!E-dGC.a'ci.uHI$7eqc/jqm"'bTd/h4or%DG8>n[fU=l#9:>fmM>pA!M=oL[7e]&hK@P8RHIV4>j5mU'3e`eREqW$pQ2FGD$4EJ,`V4$:.X>QAo;^G,B"2f@W1o)&3n'T]CDg6GU5<Fk>uPP"A,EEGM@af?PuFO(gY`ui``9rF`'r=?bkIXe[-t513R,p!D4C!fktHu*[Ki/,LNNT6ofd2ag-)h!BSI4fF=S5e)4NXjp]9"FR83~>
+endstream
+endobj
+6 0 obj
+<<
+/F1 7 0 R
+/F2 8 0 R
+>>
+endobj
+7 0 obj
+<<
+/BaseFont /Helvetica
+/Encoding /WinAnsiEncoding
+/Name /F1
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+8 0 obj
+<<
+/BaseFont /Helvetica-Bold
+/Encoding /WinAnsiEncoding
+/Name /F2
+/Subtype /Type1
+/Type /Font
+>>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000113 00000 n 
+0000000162 00000 n 
+0000000351 00000 n 
+0000000797 00000 n 
+0000000838 00000 n 
+0000000945 00000 n 
+trailer
+<<
+/Size 9
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+1057
+%%EOF

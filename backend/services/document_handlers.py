@@ -1565,7 +1565,6 @@ async def intake_document_from_bytes(
         _emit_intake_events,
         _update_ap_workflow_status,
         _update_standard_workflow_status,
-        _update_vendor_profile_incremental,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
@@ -1600,6 +1599,12 @@ async def intake_document_from_bytes(
     # Phase 3 Step 4d.4a: direct authoritative import for classification_helpers.derive_workflow_status
     # (alias preserves `_derive_workflow_status` call-site byte parity)
     from services.classification_helpers import derive_workflow_status as _derive_workflow_status
+    # Phase 3 Step 4d.4b: direct authoritative import for
+    # workflows.ap_invoice.rules.vendor_profile.update_vendor_profile_incremental
+    # (alias preserves `_update_vendor_profile_incremental` call-site byte parity)
+    from workflows.ap_invoice.rules.vendor_profile import (
+        update_vendor_profile_incremental as _update_vendor_profile_incremental,
+    )
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

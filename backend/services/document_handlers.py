@@ -1568,8 +1568,6 @@ async def intake_document_from_bytes(
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
         emit_document_received,
-        evaluate_auto_clear,
-        get_auto_clear_update,
         get_auto_resolve_service,
         get_event_service,
         get_pilot_capture_channel,
@@ -1596,6 +1594,8 @@ async def intake_document_from_bytes(
     from paths import UPLOAD_DIR
     # Phase 3 Step 4d.2b: direct authoritative import for `db`
     from database import db
+    # Phase 3 Step 4d.3a: direct authoritative imports for auto_clear_service helpers
+    from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

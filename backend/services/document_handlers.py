@@ -1568,8 +1568,6 @@ async def intake_document_from_bytes(
         _update_standard_workflow_status,
         _update_vendor_profile_incremental,
         get_auto_resolve_service,
-        get_pilot_capture_channel,
-        get_pilot_metadata,
         upload_to_sharepoint_with_routing,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
@@ -1596,6 +1594,8 @@ async def intake_document_from_bytes(
     from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update
     # Phase 3 Step 4d.3b: direct authoritative imports for event_service helpers
     from services.event_service import emit_document_received, get_event_service
+    # Phase 3 Step 4d.3c: direct authoritative imports for pilot_config helpers
+    from services.pilot_config import get_pilot_capture_channel, get_pilot_metadata
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

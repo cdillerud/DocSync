@@ -1562,7 +1562,6 @@ async def intake_document_from_bytes(
     from server import (
         _attempt_llm_vendor_ranking,
         _build_vendor_resolution,
-        _update_standard_workflow_status,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
     from services.document_intel_helpers import compute_ap_normalized_fields
@@ -1612,6 +1611,12 @@ async def intake_document_from_bytes(
     # (alias preserves `_update_ap_workflow_status` call-site byte parity)
     from workflows.ap_invoice.rules.workflow_status import (
         update_ap_workflow_status as _update_ap_workflow_status,
+    )
+    # Phase 3 Step 4d.7: direct authoritative import for
+    # workflows.document_capture.rules.workflow_status.update_standard_workflow_status
+    # (alias preserves `_update_standard_workflow_status` call-site byte parity)
+    from workflows.document_capture.rules.workflow_status import (
+        update_standard_workflow_status as _update_standard_workflow_status,
     )
 
     computed_hash = hashlib.sha256(file_content).hexdigest()

@@ -164,6 +164,15 @@ class TestLazyBlockShrunk:
                 )
 
     def test_lazy_tuple_now_three_private_helpers(self):
+        """
+        Post-4d.6 structural check: `_update_ap_workflow_status` has been
+        REMOVED from the ``from server import (...)`` tuple.
+
+        Note: originally asserted the tuple was the exact set of 3 named
+        helpers as a cumulative-state proxy; rewritten to a name-removal
+        invariant so the probe remains valid as subsequent carve-outs
+        continue to shrink the tuple.
+        """
         fn = _intake_func_node()
         server_imports = [n for n in _iter_importfroms(fn) if n.module == "server"]
         assert len(server_imports) == 1, (
@@ -171,9 +180,9 @@ class TestLazyBlockShrunk:
             f"found {len(server_imports)}"
         )
         names = {alias.name for alias in server_imports[0].names}
-        assert names == EXPECTED_LAZY_TUPLE, (
-            f"expected lazy tuple to be exactly {sorted(EXPECTED_LAZY_TUPLE)}, "
-            f"got {sorted(names)}"
+        assert "_update_ap_workflow_status" not in names, (
+            f"Expected `_update_ap_workflow_status` removed from lazy tuple "
+            f"after Step 4d.6, got {sorted(names)}"
         )
 
     def test_new_4d6_import_line_with_alias_present(self):

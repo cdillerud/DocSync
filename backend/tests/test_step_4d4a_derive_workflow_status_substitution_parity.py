@@ -222,8 +222,12 @@ class TestLazyBlockShrunk:
 
     def test_lazy_tuple_now_six_private_helpers(self):
         """
-        Post-4d.4a structural check: lazy tuple has exactly 6
-        underscore-prefixed names (was 7 before 4d.4a).
+        Post-4d.4a structural check: `_derive_workflow_status` has been
+        REMOVED from the ``from server import (...)`` tuple.
+
+        Note: originally this asserted ``len == 6`` as a cumulative-count
+        proxy; rewritten to a name-removal invariant so the probe remains
+        valid as subsequent carve-outs continue to shrink the tuple.
         """
         intake = _intake_func_node()
         listed = {
@@ -237,9 +241,9 @@ class TestLazyBlockShrunk:
         assert not public_leaked, (
             f"Public helpers leaked back into lazy tuple: {public_leaked}"
         )
-        assert len(private_only) == 6, (
-            f"Expected exactly 6 server-private helpers in lazy tuple, "
-            f"got {len(private_only)}: {sorted(private_only)}"
+        assert "_derive_workflow_status" not in private_only, (
+            f"Expected `_derive_workflow_status` removed from lazy tuple after "
+            f"Step 4d.4a, got {sorted(private_only)}"
         )
 
 

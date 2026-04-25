@@ -1,0 +1,27 @@
+
+INVOICE
+
+From: Test Vendor Corp, Inc.
+123 Vendor Street
+Chicago, IL 60601
+
+Bill To: Gamer Packaging
+456 Customer Ave
+Los Angeles, CA 90001
+
+Invoice Number: INV-TEST-2026-001
+Invoice Date: January 15, 2026
+Due Date: February 15, 2026
+
+PO Number: PO-TEST-5678
+
+Description                    Qty    Unit Price    Amount
+---------------------------------------------------------
+Packaging Materials            100    $25.00        $2,500.00
+Shipping Supplies              50     $15.00        $750.00
+---------------------------------------------------------
+                              Subtotal:             $3,250.00
+                              Tax (8%):             $260.00
+                              TOTAL:                $3,510.00
+
+Payment Terms: Net 30

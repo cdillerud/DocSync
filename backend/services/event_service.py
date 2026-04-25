@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Literal
 from enum import Enum
 
+# Phase 3 Step 4d.5: required import for the migrated `emit_intake_events`
+# orchestrator (moved verbatim from server._emit_intake_events).
+from services.derived_state_service import get_derived_state_service
+
 logger = logging.getLogger(__name__)
 
 
@@ -1015,3 +1019,79 @@ async def initialize_event_indexes(db):
     )
     
     logger.info("Created indexes for workflow_events collection")
+
+async def emit_intake_events(
+    doc_id: str, 
+    correlation_id: str,
+    classification: dict,
+    validation_results: dict,
+    sp_result: dict,
+    decision: str,
+    auto_clear_result: dict
+):
+    """
+    Emit events for the intake pipeline.
+    This is called after the main intake processing to record events.
+    """
+    event_service = get_event_service()
+    if not event_service:
+        return
+    
+    # Classification event
+    await emit_classification_completed(
+        event_service, doc_id,
+        classification.get("suggested_job_type", "Unknown"),
+        classification.get("confidence", 0.0),
+        classification.get("classification_method", "ai"),
+        classification.get("model"),
+        correlation_id
+    )
+    
+    # Vendor match event
+    matched_vendor = validation_results.get("matched_vendor_no")
+    await emit_vendor_match(
+        event_service, doc_id,
+        matched=bool(matched_vendor),
+        vendor_name=validation_results.get("matched_vendor_name"),
+        vendor_no=matched_vendor,
+        match_method=validation_results.get("match_method", "none"),
+        match_score=validation_results.get("match_score", 0.0),
+        correlation_id=correlation_id
+    )
+    
+    # BC validation event
+    await emit_bc_validation(
+        event_service, doc_id,
+        passed=validation_results.get("all_passed", False),
+        checks=validation_results.get("checks", []),
+        warnings=validation_results.get("warnings"),
+        correlation_id=correlation_id
+    )
+    
+    # SharePoint upload event
+    if sp_result:
+        await emit_sharepoint_upload(
+            event_service, doc_id,
+            success=True,
+            folder_path=sp_result.get("folder_path", ""),
+            drive_id=sp_result.get("drive_id"),
+            item_id=sp_result.get("item_id"),
+            share_link=sp_result.get("share_link"),
+            correlation_id=correlation_id
+        )
+    
+    # Automation decision event
+    auto_cleared = auto_clear_result and auto_clear_result.get("cleared", False)
+    await emit_automation_decision(
+        event_service, doc_id,
+        decision=decision,
+        reason=auto_clear_result.get("reason") if auto_clear_result else "",
+        auto_clear=auto_cleared,
+        auto_post=False,
+        correlation_id=correlation_id
+    )
+    
+    # Update derived state
+    derived_state_service = get_derived_state_service()
+    if derived_state_service:
+        await derived_state_service.update_document_derived_state(doc_id)

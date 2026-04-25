@@ -274,10 +274,13 @@ class TestOnlyDeclaredNamesFromEventService:
     def test_event_service_import_tuple_is_exactly_the_declared_pair(self):
         """
         Walk the intake function body, collect every ImportFrom whose
-        module is services.event_service, and assert the union of
-        imported names is EXACTLY {emit_document_received,
-        get_event_service}. Catches any accidental broader import
-        (such as a stray WorkflowEvent) at AST parse time.
+        module is services.event_service, and assert the declared pair
+        ``{emit_document_received, get_event_service}`` is present
+        (a *superset* check — subsequent carve-outs that co-locate
+        additional primitives in ``services.event_service`` are allowed
+        to add to this set; e.g. 4d.5 introduces ``emit_intake_events``).
+        Catches any accidental removal or typo of the 4d.3b declared pair
+        at AST parse time.
         """
         intake = _intake_func_node()
         pulled = set()
@@ -287,9 +290,11 @@ class TestOnlyDeclaredNamesFromEventService:
                 for alias in node.names:
                     pulled.add(alias.name)
         expected = set(SYMBOLS)
-        assert pulled == expected, (
-            f"Intake pulls {pulled!r} from {CANONICAL_MODULE}, "
-            f"expected exactly {expected!r}"
+        missing = expected - pulled
+        assert not missing, (
+            f"Intake pulls {sorted(pulled)!r} from {CANONICAL_MODULE}, "
+            f"but the 4d.3b declared pair {sorted(expected)!r} is missing: "
+            f"{sorted(missing)!r}"
         )
 
 

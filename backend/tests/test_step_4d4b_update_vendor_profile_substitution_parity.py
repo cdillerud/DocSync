@@ -213,7 +213,13 @@ class TestLazyBlockShrunk:
         ) in src, "4d.4b direct-import line (with alias) missing"
 
     def test_lazy_tuple_now_five_private_helpers(self):
-        """Post-4d.4b: lazy tuple has exactly 5 underscore-prefixed names."""
+        """Post-4d.4b: `_update_vendor_profile_incremental` has been REMOVED
+        from the ``from server import (...)`` tuple.
+
+        Note: originally asserted ``len == 5`` as a cumulative-count proxy;
+        rewritten to a name-removal invariant so the probe remains valid as
+        subsequent carve-outs continue to shrink the tuple.
+        """
         intake = _intake_func_node()
         listed = {
             alias.name
@@ -226,9 +232,9 @@ class TestLazyBlockShrunk:
         assert not public_leaked, (
             f"Public helpers leaked back into lazy tuple: {public_leaked}"
         )
-        assert len(private_only) == 5, (
-            f"Expected exactly 5 server-private helpers in lazy tuple, "
-            f"got {len(private_only)}: {sorted(private_only)}"
+        assert "_update_vendor_profile_incremental" not in private_only, (
+            f"Expected `_update_vendor_profile_incremental` removed from lazy "
+            f"tuple after Step 4d.4b, got {sorted(private_only)}"
         )
 
 

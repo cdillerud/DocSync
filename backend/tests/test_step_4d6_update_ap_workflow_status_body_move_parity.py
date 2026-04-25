@@ -1,39 +1,46 @@
 """
-Phase 3 Step 4d.5 — `_emit_intake_events` Body-Move Parity Suite
+Phase 3 Step 4d.6 — `_update_ap_workflow_status` Body-Move Parity Suite
 
-First TRUE body-bearing Class 3 carve-out (not a thin-shim substitution).
+Second TRUE body-bearing Class 3 carve-out (mirrors 4d.5 shape).
 
 Pattern (per signed declaration):
-1. Capture golden source of server._emit_intake_events BEFORE the move.
-2. Move the body VERBATIM into services.event_service as
-   ``emit_intake_events`` (public name, underscore prefix dropped to
-   match the 6 sibling ``emit_*`` primitives already resident there).
-3. Leave a 4-line delegating shim at server.py:2712 so
-   ``from server import _emit_intake_events`` continues to resolve.
-4. Rewire ``services.document_handlers.intake_document_from_bytes``
-   lazy-import cascade with alias preservation:
-   ``from services.event_service import emit_intake_events
-    as _emit_intake_events``.
+1. Capture golden source of server._update_ap_workflow_status BEFORE the
+   move (5,062 chars).
+2. Move the body VERBATIM into a NEW module
+   ``workflows.ap_invoice.rules.workflow_status`` as
+   ``update_ap_workflow_status`` (public name; underscore prefix dropped
+   to match the 4d.4b precedent at
+   ``workflows.ap_invoice.rules.vendor_profile.update_vendor_profile_incremental``).
+3. Leave a 4-statement delegating shim at server.py:2253 so
+   ``from server import _update_ap_workflow_status`` continues to resolve.
+4. Rewire ``services.document_handlers.intake_document_from_bytes`` lazy
+   import cascade with alias preservation:
+   ``from workflows.ap_invoice.rules.workflow_status import
+      update_ap_workflow_status as _update_ap_workflow_status``.
 
 ``_build_vendor_resolution`` is explicitly out of scope.
+``_update_standard_workflow_status``, ``_attempt_llm_vendor_ranking`` are
+also out of scope.
 
-13 probes:
+14 probes:
 1. AST-level import source.
 2. AST-level alias preservation.
-3. Lazy ``from server`` tuple shrunk to 4 entries.
+3. Lazy ``from server`` tuple — name-removal invariant (`_update_ap_workflow_status`
+   removed; expected residents are exactly the 3 remaining body-bearing helpers).
 4. server.py shim is async def.
 5. server.py shim body structural invariant (1 ImportFrom + 1 Return).
 6. server.py shim retained at module surface.
 7. Positional-forwarding parity (param names/order match canonical).
-8. Authoritative function exists (async callable in event_service).
-9. Authoritative body byte-identical modulo the def rename
+8. Authoritative function exists (async callable in canonical module).
+9. Authoritative body byte-identical modulo def rename
    (golden SHA-256 captured pre-move).
 10. Call-site byte parity in intake_document_from_bytes.
-11. Sibling-landscape acknowledgment — the 6 prior ``emit_*`` primitives
-    in services.event_service are untouched (module-level callable
-    identity preserved; names unchanged).
-12. Live surface — backend reachable & /openapi.json path count ==858.
-13. Audit script still reports 8 passing.
+11. Sibling-landscape acknowledgment — the 4d.4b sibling
+    ``workflows.ap_invoice.rules.vendor_profile`` is unchanged.
+12. New-module hygiene — exactly one public callable; module-level imports
+    match the declared minimal prelude (no surprise imports).
+13. Live surface — backend reachable & /openapi.json path count ==858.
+14. Audit script still reports 8 passing.
 """
 from __future__ import annotations
 
@@ -57,25 +64,37 @@ BASE_URL = os.environ.get(
     "REACT_APP_BACKEND_URL", "http://localhost:8001"
 ).rstrip("/")
 
-AUTHORITATIVE_NAME = "emit_intake_events"
-BOUND_NAME = "_emit_intake_events"
-CANONICAL_MODULE = "services.event_service"
+AUTHORITATIVE_NAME = "update_ap_workflow_status"
+BOUND_NAME = "_update_ap_workflow_status"
+CANONICAL_MODULE = "workflows.ap_invoice.rules.workflow_status"
 
-# Golden source of server._emit_intake_events captured immediately
-# before the 4d.5 body move.
-EMIT_INTAKE_EVENTS_PRE_4D5_SHA256 = (
-    "b99fd1d49fa7d72195d4e369419aa22c918c515a4c91edc1213ece526e063e2a"
+# Golden source of server._update_ap_workflow_status captured immediately
+# before the 4d.6 body move.
+UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_SHA256 = (
+    "11e29d0dd3eba631171ccc42afac7573595bd52d4c3f0383e93e48e82fe41a37"
 )
-EMIT_INTAKE_EVENTS_PRE_4D5_LEN = 2510
+UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_LEN = 5062
 
-SIBLING_EMITS = (
-    "emit_document_received",
-    "emit_classification_completed",
-    "emit_vendor_match",
-    "emit_bc_validation",
-    "emit_sharepoint_upload",
-    "emit_automation_decision",
-)
+# The 3 body-bearing helpers expected to remain in the lazy `from server`
+# tuple after 4d.6 lands. (`_emit_intake_events`,
+# `_derive_workflow_status`, `_update_vendor_profile_incremental` already
+# migrated in 4d.5 / 4d.4a / 4d.4b respectively; `_update_ap_workflow_status`
+# is migrated by this step.)
+EXPECTED_LAZY_TUPLE = {
+    "_attempt_llm_vendor_ranking",
+    "_build_vendor_resolution",
+    "_update_standard_workflow_status",
+}
+
+# Declared minimal prelude (per signed Step 4d.6 declaration §3.B).
+# AST-level import-from / import nodes the new module is allowed to carry.
+ALLOWED_PRELUDE_IMPORT_FROMS = {
+    ("typing", frozenset({"Dict"})),
+    ("datetime", frozenset({"datetime", "timezone"})),
+    ("database", frozenset({"db"})),
+    ("workflows.core.engine", frozenset({"WorkflowEngine", "WorkflowEvent"})),
+}
+ALLOWED_PRELUDE_PLAIN_IMPORTS = {"logging"}
 
 
 def _intake_func_node():
@@ -102,14 +121,11 @@ class TestASTImportSource:
         matches = [
             n for n in _iter_importfroms(fn)
             if n.module == CANONICAL_MODULE
-            and any(
-                (alias.name == AUTHORITATIVE_NAME)
-                for alias in n.names
-            )
+            and any(alias.name == AUTHORITATIVE_NAME for alias in n.names)
         ]
         assert matches, (
-            f"{INTAKE_FUNC_NAME} does not import "
-            f"{AUTHORITATIVE_NAME} from {CANONICAL_MODULE}"
+            f"{INTAKE_FUNC_NAME} does not import {AUTHORITATIVE_NAME} "
+            f"from {CANONICAL_MODULE}"
         )
 
 
@@ -135,7 +151,7 @@ class TestAliasPreservation:
 
 
 # ---------------------------------------------------------------------------
-# 3. Lazy `from server` tuple shrunk to 4 entries
+# 3. Lazy `from server` tuple — name-removal invariant
 # ---------------------------------------------------------------------------
 class TestLazyBlockShrunk:
     def test_lazy_server_tuple_no_longer_lists_bound_name(self):
@@ -147,18 +163,7 @@ class TestLazyBlockShrunk:
                     f"{BOUND_NAME} still imported from server: {sorted(names)}"
                 )
 
-    def test_lazy_tuple_now_four_private_helpers(self):
-        """
-        Post-4d.5 structural check: `_emit_intake_events` has been REMOVED
-        from the ``from server import (...)`` tuple.
-
-        Note: originally asserted the tuple was the exact set
-        ``{_attempt_llm_vendor_ranking, _build_vendor_resolution,
-        _update_ap_workflow_status, _update_standard_workflow_status}`` as a
-        cumulative-state proxy; rewritten to a name-removal invariant so the
-        probe remains valid as subsequent carve-outs continue to shrink the
-        tuple.
-        """
+    def test_lazy_tuple_now_three_private_helpers(self):
         fn = _intake_func_node()
         server_imports = [n for n in _iter_importfroms(fn) if n.module == "server"]
         assert len(server_imports) == 1, (
@@ -166,19 +171,20 @@ class TestLazyBlockShrunk:
             f"found {len(server_imports)}"
         )
         names = {alias.name for alias in server_imports[0].names}
-        assert "_emit_intake_events" not in names, (
-            f"Expected `_emit_intake_events` removed from lazy tuple after "
-            f"Step 4d.5, got {sorted(names)}"
+        assert names == EXPECTED_LAZY_TUPLE, (
+            f"expected lazy tuple to be exactly {sorted(EXPECTED_LAZY_TUPLE)}, "
+            f"got {sorted(names)}"
         )
 
-    def test_new_4d5_import_line_with_alias_present(self):
+    def test_new_4d6_import_line_with_alias_present(self):
         handlers_src = Path(
             BACKEND_ROOT / "services" / "document_handlers.py"
         ).read_text()
         assert (
-            "from services.event_service import "
-            "emit_intake_events as _emit_intake_events"
-        ) in handlers_src, "Step 4d.5 alias-import line missing"
+            "from workflows.ap_invoice.rules.workflow_status import (\n"
+            "        update_ap_workflow_status as _update_ap_workflow_status,\n"
+            "    )"
+        ) in handlers_src, "Step 4d.6 alias-import block missing"
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +206,6 @@ class TestServerShimStructurallyIntact:
 
     def test_server_shim_body_exactly_one_importfrom_and_one_return(self):
         node = _server_shim_node()
-        # Docstring (Expr/Constant) is allowed; the executable statements
-        # must be exactly 1 ImportFrom + 1 Return.
         executable = [
             s for s in node.body
             if not (
@@ -230,14 +234,12 @@ class TestServerShimRetained:
 class TestSignatureForwardingParity:
     def test_shim_params_match_canonical(self):
         import server
-        from services import event_service
+        from workflows.ap_invoice.rules import workflow_status as wf_mod
         shim_params = list(
             inspect.signature(getattr(server, BOUND_NAME)).parameters
         )
         canonical_params = list(
-            inspect.signature(
-                getattr(event_service, AUTHORITATIVE_NAME)
-            ).parameters
+            inspect.signature(getattr(wf_mod, AUTHORITATIVE_NAME)).parameters
         )
         assert shim_params == canonical_params, (
             f"server.{BOUND_NAME} params {shim_params} != "
@@ -250,13 +252,16 @@ class TestSignatureForwardingParity:
 # ---------------------------------------------------------------------------
 class TestAuthoritativeExists:
     def test_authoritative_is_async_callable(self):
-        from services import event_service
-        fn = getattr(event_service, AUTHORITATIVE_NAME, None)
+        from workflows.ap_invoice.rules import workflow_status as wf_mod
+        fn = getattr(wf_mod, AUTHORITATIVE_NAME, None)
         assert fn is not None, (
-            f"{CANONICAL_MODULE}.{AUTHORITATIVE_NAME} missing after 4d.5 move"
+            f"{CANONICAL_MODULE}.{AUTHORITATIVE_NAME} missing after 4d.6 move"
         )
         assert inspect.iscoroutinefunction(fn), (
             f"{CANONICAL_MODULE}.{AUTHORITATIVE_NAME} is not async"
+        )
+        assert fn.__module__ == CANONICAL_MODULE, (
+            f"{AUTHORITATIVE_NAME}.__module__ drift: {fn.__module__}"
         )
 
 
@@ -264,24 +269,22 @@ class TestAuthoritativeExists:
 # 9. Authoritative body byte-identical modulo the def rename
 # ---------------------------------------------------------------------------
 class TestAuthoritativeBodyByteIdentical:
-    def test_emit_intake_events_source_matches_golden_modulo_def_rename(self):
-        from services import event_service
-        new_src = inspect.getsource(
-            getattr(event_service, AUTHORITATIVE_NAME)
-        )
+    def test_update_ap_workflow_status_source_matches_golden(self):
+        from workflows.ap_invoice.rules import workflow_status as wf_mod
+        new_src = inspect.getsource(getattr(wf_mod, AUTHORITATIVE_NAME))
         reverted = new_src.replace(
             f"async def {AUTHORITATIVE_NAME}(",
             f"async def {BOUND_NAME}(",
             1,
         )
-        assert len(reverted) == EMIT_INTAKE_EVENTS_PRE_4D5_LEN, (
+        assert len(reverted) == UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_LEN, (
             f"length drift after move: got {len(reverted)}, "
-            f"expected {EMIT_INTAKE_EVENTS_PRE_4D5_LEN}"
+            f"expected {UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_LEN}"
         )
         sha = hashlib.sha256(reverted.encode()).hexdigest()
-        assert sha == EMIT_INTAKE_EVENTS_PRE_4D5_SHA256, (
+        assert sha == UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_SHA256, (
             f"SHA-256 drift after move: got {sha}, "
-            f"expected {EMIT_INTAKE_EVENTS_PRE_4D5_SHA256}"
+            f"expected {UPDATE_AP_WORKFLOW_STATUS_PRE_4D6_SHA256}"
         )
 
 
@@ -293,60 +296,80 @@ class TestCallSiteByteParity:
         handlers_src = Path(
             BACKEND_ROOT / "services" / "document_handlers.py"
         ).read_text()
-        assert "await _emit_intake_events(" in handlers_src, (
+        assert "await _update_ap_workflow_status(" in handlers_src, (
             "intake call-site byte parity lost"
         )
-        # Exact canonical argument spelling (byte-identical to pre-4d.5).
-        assert (
-            "await _emit_intake_events(\n"
-            "            doc_id, correlation_id, classification, validation_results,\n"
-            "            sp_result, decision, auto_clear_result\n"
-            "        )"
-        ) in handlers_src, "intake call-site arg-shape drift"
 
 
 # ---------------------------------------------------------------------------
-# 11. Sibling-landscape acknowledgment
+# 11. Sibling-landscape acknowledgment — 4d.4b sibling unchanged
 # ---------------------------------------------------------------------------
 class TestSiblingLandscapeAcknowledgment:
-    def test_six_prior_emit_siblings_unchanged(self):
-        from services import event_service
-        for name in SIBLING_EMITS:
-            fn = getattr(event_service, name, None)
-            assert fn is not None, (
-                f"sibling {CANONICAL_MODULE}.{name} missing after 4d.5 move"
-            )
-            assert inspect.iscoroutinefunction(fn), (
-                f"sibling {CANONICAL_MODULE}.{name} no longer async"
-            )
-            # Module-level residency: defined in event_service, not aliased
-            # from elsewhere.
-            assert fn.__module__ == CANONICAL_MODULE, (
-                f"sibling {name} module drift: {fn.__module__}"
-            )
-
-    def test_event_service_now_has_seven_emit_callables(self):
-        from services import event_service
-        emit_callables = [
-            name for name in dir(event_service)
-            if name.startswith("emit_")
-            and inspect.iscoroutinefunction(
-                getattr(event_service, name, None)
-            )
-            and getattr(
-                getattr(event_service, name), "__module__", ""
-            ) == CANONICAL_MODULE
+    def test_vendor_profile_sibling_module_unchanged(self):
+        from workflows.ap_invoice.rules import vendor_profile
+        # Public callables resident in this sibling module: must remain
+        # exactly one — `update_vendor_profile_incremental`.
+        public_callables = [
+            name for name in dir(vendor_profile)
+            if not name.startswith("_")
+            and callable(getattr(vendor_profile, name, None))
+            and getattr(getattr(vendor_profile, name), "__module__", "")
+                == "workflows.ap_invoice.rules.vendor_profile"
         ]
-        assert len(emit_callables) == 7, (
-            f"expected 7 emit_* coroutines in event_service "
-            f"(6 prior + emit_intake_events), got {len(emit_callables)}: "
-            f"{sorted(emit_callables)}"
+        assert public_callables == ["update_vendor_profile_incremental"], (
+            f"4d.4b sibling drift: {public_callables}"
         )
-        assert AUTHORITATIVE_NAME in emit_callables
 
 
 # ---------------------------------------------------------------------------
-# 12+13. Live surface & audit script
+# 12. New-module hygiene
+# ---------------------------------------------------------------------------
+class TestNewModuleHygiene:
+    def test_new_module_exposes_exactly_one_public_callable(self):
+        from workflows.ap_invoice.rules import workflow_status as wf_mod
+        public_callables = [
+            name for name in dir(wf_mod)
+            if not name.startswith("_")
+            and callable(getattr(wf_mod, name, None))
+            and getattr(getattr(wf_mod, name), "__module__", "")
+                == CANONICAL_MODULE
+        ]
+        assert public_callables == [AUTHORITATIVE_NAME], (
+            f"new module exposes unexpected publics: {public_callables}"
+        )
+
+    def test_new_module_imports_match_declared_prelude(self):
+        path = (
+            BACKEND_ROOT / "workflows" / "ap_invoice" / "rules"
+            / "workflow_status.py"
+        )
+        tree = ast.parse(path.read_text())
+        module_level = [
+            node for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ]
+        observed_froms = {
+            (n.module, frozenset(a.name for a in n.names))
+            for n in module_level if isinstance(n, ast.ImportFrom)
+        }
+        observed_plain = {
+            a.name for n in module_level
+            if isinstance(n, ast.Import) for a in n.names
+        }
+        assert observed_froms == ALLOWED_PRELUDE_IMPORT_FROMS, (
+            f"prelude `from` imports drift:\n"
+            f"  observed: {sorted(observed_froms)}\n"
+            f"  declared: {sorted(ALLOWED_PRELUDE_IMPORT_FROMS)}"
+        )
+        assert observed_plain == ALLOWED_PRELUDE_PLAIN_IMPORTS, (
+            f"prelude plain imports drift:\n"
+            f"  observed: {sorted(observed_plain)}\n"
+            f"  declared: {sorted(ALLOWED_PRELUDE_PLAIN_IMPORTS)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 13+14. Live surface & audit script
 # ---------------------------------------------------------------------------
 class TestLiveSurfaceAndAudit:
     def test_backend_reachable(self):

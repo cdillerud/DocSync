@@ -1562,7 +1562,6 @@ async def intake_document_from_bytes(
     from server import (
         _attempt_llm_vendor_ranking,
         _build_vendor_resolution,
-        _update_ap_workflow_status,
         _update_standard_workflow_status,
     )
     # Phase 3 Step 4c.1: direct authoritative imports for re-exported helpers
@@ -1608,6 +1607,12 @@ async def intake_document_from_bytes(
     # services.event_service.emit_intake_events (first body-bearing Class 3
     # carve-out; alias preserves `_emit_intake_events` call-site byte parity)
     from services.event_service import emit_intake_events as _emit_intake_events
+    # Phase 3 Step 4d.6: direct authoritative import for
+    # workflows.ap_invoice.rules.workflow_status.update_ap_workflow_status
+    # (alias preserves `_update_ap_workflow_status` call-site byte parity)
+    from workflows.ap_invoice.rules.workflow_status import (
+        update_ap_workflow_status as _update_ap_workflow_status,
+    )
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 

@@ -17,18 +17,24 @@ from typing import Dict
 from database import db
 from workflows.core.engine import DocType, WorkflowEngine, WorkflowEvent
 from services.square9_workflow import Square9Stage, validate_location_code
-from services.auto_post_service import attempt_auto_create_sales_order
+from services.auto_post_service import (
+    attempt_auto_create_sales_order,
+    AUTO_CREATE_SALES_ORDER_ENABLED,
+)
 from services.business_central_service import get_bc_service
 
-# Phase 3 Step 4d.7 — temporary reverse-arrow imports.
-# `_run_pilot_enrichment` is a server-private helper not yet migrated;
-# `AUTO_CREATE_SALES_ORDER_ENABLED` is a server-level config flag that
-# belongs in a dedicated config module (separate future step). Both are
-# referenced as bare names in the verbatim-preserved body. Importing
-# them here at module level keeps the body byte-identical without
-# modifying it. These two import lines are explicitly tracked and
-# removed in the follow-up steps that own those symbols.
-from server import _run_pilot_enrichment, AUTO_CREATE_SALES_ORDER_ENABLED
+# Phase 3 Step 4d.8 — reverse-arrow cleanup.
+# Sub-task A retired ``AUTO_CREATE_SALES_ORDER_ENABLED`` (now imported
+# from its canonical home ``services.auto_post_service`` together with
+# ``attempt_auto_create_sales_order`` above). Sub-task B retired
+# ``_run_pilot_enrichment`` by co-migrating it (and its only callee
+# ``_maybe_stage_inventory_xls``) to the sibling
+# ``workflows.document_capture.rules.pilot_enrichment`` module. The
+# alias preserves ``_run_pilot_enrichment`` as the bare-name binding at
+# the call site below — body byte-identity unchanged from 4d.7.
+from workflows.document_capture.rules.pilot_enrichment import (
+    run_pilot_enrichment as _run_pilot_enrichment,
+)
 
 logger = logging.getLogger(__name__)
 

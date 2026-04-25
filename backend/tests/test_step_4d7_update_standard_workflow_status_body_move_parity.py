@@ -65,6 +65,15 @@ EXPECTED_LAZY_TUPLE = {
 }
 
 # Declared minimal prelude (per signed Step 4d.7 declaration §3.B).
+# Note: 4d.7 originally pinned the prelude `from` imports at an EXACT set
+# including a ``("server", frozenset({"_run_pilot_enrichment",
+# "AUTO_CREATE_SALES_ORDER_ENABLED"}))`` reverse-arrow entry. Step 4d.8
+# legitimately retires that reverse-arrow and rewires the same two names
+# to canonical homes. The 4d.7 invariant is therefore rewritten to its
+# semantically-correct shape: every ALLOWED_PRELUDE_IMPORT_FROMS entry
+# established at 4d.7 must still be present (super-set check), and the
+# specific reverse-arrow that 4d.7 introduced must be GONE — the latter
+# being precisely the architectural goal 4d.8 was created to deliver.
 ALLOWED_PRELUDE_IMPORT_FROMS = {
     ("datetime", frozenset({"datetime", "timezone"})),
     ("typing", frozenset({"Dict"})),
@@ -73,16 +82,17 @@ ALLOWED_PRELUDE_IMPORT_FROMS = {
         frozenset({"DocType", "WorkflowEngine", "WorkflowEvent"})),
     ("services.square9_workflow",
         frozenset({"Square9Stage", "validate_location_code"})),
-    ("services.auto_post_service",
-        frozenset({"attempt_auto_create_sales_order"})),
     ("services.business_central_service", frozenset({"get_bc_service"})),
-    # Temporary reverse-arrow imports — explicitly approved by signed declaration.
-    ("server",
-        frozenset({"_run_pilot_enrichment", "AUTO_CREATE_SALES_ORDER_ENABLED"})),
 }
+# Names from `services.auto_post_service` that 4d.7 required to be pulled
+# in at module level. 4d.8 may legitimately add `AUTO_CREATE_SALES_ORDER_ENABLED`
+# to this same import line (sub-task A re-homing); probe checks subset.
+AUTO_POST_SERVICE_REQUIRED_NAMES = frozenset({"attempt_auto_create_sales_order"})
 ALLOWED_PRELUDE_PLAIN_IMPORTS = {"asyncio", "logging", "uuid"}
 
-# The exact two reverse-arrow names approved by the declaration.
+# The exact two reverse-arrow names 4d.7 introduced. By 4d.8, these must
+# NO LONGER be reachable via a `from server import ...` line in the
+# canonical module — that is the architectural milestone 4d.8 closes.
 DECLARED_REVERSE_ARROW_NAMES = frozenset({
     "_run_pilot_enrichment",
     "AUTO_CREATE_SALES_ORDER_ENABLED",
@@ -422,6 +432,14 @@ class TestNewModuleHygiene:
         )
 
     def test_new_module_imports_match_declared_prelude(self):
+        """
+        Post-4d.8: prelude `from` imports must be a SUPERSET of the 4d.7
+        baseline ``ALLOWED_PRELUDE_IMPORT_FROMS``, and the
+        ``services.auto_post_service`` line must include
+        ``attempt_auto_create_sales_order`` (4d.7 requirement). 4d.8 is
+        permitted to add ``AUTO_CREATE_SALES_ORDER_ENABLED`` to that
+        same line and to add a brand-new ``pilot_enrichment`` import.
+        """
         path = (
             BACKEND_ROOT / "workflows" / "document_capture" / "rules"
             / "workflow_status.py"
@@ -438,10 +456,22 @@ class TestNewModuleHygiene:
             a.name for n in module_level
             if isinstance(n, ast.Import) for a in n.names
         }
-        assert observed_froms == ALLOWED_PRELUDE_IMPORT_FROMS, (
-            f"prelude `from` imports drift:\n"
-            f"  observed: {sorted(observed_froms)}\n"
-            f"  declared: {sorted(ALLOWED_PRELUDE_IMPORT_FROMS)}"
+        missing_4d7 = ALLOWED_PRELUDE_IMPORT_FROMS - observed_froms
+        assert not missing_4d7, (
+            f"4d.7-required prelude `from` imports are missing:\n"
+            f"  missing: {sorted(missing_4d7)}\n"
+            f"  observed: {sorted(observed_froms)}"
+        )
+        ap_imports = [
+            names for mod, names in observed_froms
+            if mod == "services.auto_post_service"
+        ]
+        assert ap_imports, "no `from services.auto_post_service import ...` line"
+        assert all(
+            AUTO_POST_SERVICE_REQUIRED_NAMES.issubset(s) for s in ap_imports
+        ), (
+            f"`services.auto_post_service` import must include "
+            f"{sorted(AUTO_POST_SERVICE_REQUIRED_NAMES)}; got {ap_imports}"
         )
         assert observed_plain == ALLOWED_PRELUDE_PLAIN_IMPORTS, (
             f"prelude plain imports drift:\n"
@@ -450,9 +480,14 @@ class TestNewModuleHygiene:
         )
 
     def test_reverse_arrow_imports_are_exactly_two_declared_names(self):
-        """Probe #6 in the post-implementation report contract: confirms
-        the reverse-arrow `from server import ...` is exactly the two
-        declared names and nothing more."""
+        """
+        Probe #6 in the 4d.7 post-implementation report contract.
+
+        Post-4d.8: rewritten to assert the architectural milestone 4d.8
+        delivers — the two reverse-arrow names introduced by 4d.7 are
+        no longer reachable via any ``from server import ...`` line in
+        the canonical module.
+        """
         path = (
             BACKEND_ROOT / "workflows" / "document_capture" / "rules"
             / "workflow_status.py"
@@ -462,15 +497,12 @@ class TestNewModuleHygiene:
             n for n in tree.body
             if isinstance(n, ast.ImportFrom) and n.module == "server"
         ]
-        assert len(server_imports) == 1, (
-            f"expected exactly one `from server import (...)` in new module, "
-            f"got {len(server_imports)}"
-        )
-        names = frozenset(a.name for a in server_imports[0].names)
-        assert names == DECLARED_REVERSE_ARROW_NAMES, (
-            f"reverse-arrow drift:\n"
-            f"  observed: {sorted(names)}\n"
-            f"  declared: {sorted(DECLARED_REVERSE_ARROW_NAMES)}"
+        assert server_imports == [], (
+            f"`from server import ...` lines must be retired by 4d.8; "
+            f"found {len(server_imports)}: "
+            f"{[[a.name for a in n.names] for n in server_imports]}\n"
+            f"(originally introduced reverse-arrow names: "
+            f"{sorted(DECLARED_REVERSE_ARROW_NAMES)})"
         )
 
 

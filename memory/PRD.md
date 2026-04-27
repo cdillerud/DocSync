@@ -45,6 +45,18 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
 - Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
+### 2026-04-23 — Phase 1 P1.H — Backend Entra ID token validation (deps-only, dormant)
+- **New canonical module** `backend/services/entra_auth.py` is the sole authority for Entra-issued token validation. Exports: `Actor` dataclass, `JWKSCache` (TTL=900s, kid-miss refresh, stale-on-network-fail), `validate_entra_token()`, `get_current_actor` FastAPI dep, `require_role(*roles)` factory, `require_app_only()` factory, `get_current_user_hybrid` migration facade.
+- **Algorithm**: RS256 only; alg=none/HS256 hard-rejected (downgrade-attack guard). Audience exact-match + issuer match + `tid` claim guard + 30s clock leeway. Required claims: `exp`, `iss`, `aud`. Actor identity via `oid` (fallback `sub`). User-delegated tokens carry `scp`; app-only (service principal) tokens carry `roles` only and surface `Actor.is_app_only=True`.
+- **Hybrid facade** (`get_current_user_hybrid`) runs Entra-first then falls back to legacy `services.auth_deps.get_current_user` while `LEGACY_AUTH_ENABLED=true`. `routers/auth.py` and the `/api/auth/login`/`logout`/`me` legacy surface are **byte-identically untouched** in P1.H.
+- **Env additions** (additive, no protected-var deletions): `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_API_AUDIENCE`, `ENTRA_AUTHORITY`, `ENTRA_JWKS_URL`, `ENTRA_AUTH_ENABLED=false` (default OFF — module is dormant in dev/prod until P1.K lands), `LEGACY_AUTH_ENABLED=true`.
+- **Test surface**: `backend/tests/test_entra_auth.py` — **30/30 passed** in 3.05s. Six classes: A) JWKS cache (TTL/kid-miss/stale-fallback/unknown-kid), B) Happy-path (user + app-only), C) Negative (wrong aud/iss/tid, expired, future-nbf, bad sig, missing kid, alg=none rejected, empty token, 30s leeway), D) Role guard (require_role), E) App-only guard (require_app_only), F) Hybrid facade (Entra-on/legacy-on/both-off paths). All offline — self-signed RSA keypair via `tests/fixtures/entra_test_keys.py` + `ENTRA_JWKS_OVERRIDE` test seam; **zero traffic to login.microsoftonline.com**.
+- **Runtime impact**: zero. `/openapi.json` paths = **858** (unchanged). Backend supervisor RUNNING. With `ENTRA_AUTH_ENABLED=false`, the new module loads but never fires.
+- **Playbook amendment**: pinned `@azure/msal-react` to `^3.1.0` (was v2.0.0) for React 19 compatibility — applied in P1.K.
+- **Next**: P1.K (MSAL.js frontend) to establish a token-minting story before flipping `ENTRA_AUTH_ENABLED=true`. Then P1.C consumes the deps to enforce RBAC on the 407 mutating endpoints per `RBAC_MATRIX.md`.
+
+
+
 ### 2026-04-23 — Phase 0 P0.1 Refinement Pass (4 two-tier router files)
 - **Documentation only — no code changes, no Phase 1 implementation.**
 - Refined per-endpoint role assignment in `/app/memory/RBAC_MATRIX.md` for the 4 ambiguous two-tier router files identified during Phase 0 review: `routers/auth.py` (3 endpoints), `routers/dashboard.py` (11), `routers/governance.py` (1), `routers/sales_dashboard.py` (15). 30 endpoints total.

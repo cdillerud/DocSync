@@ -45,6 +45,18 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
 - Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
+### 2026-04-23 — Phase 0 P0.1 Refinement Pass (4 two-tier router files)
+- **Documentation only — no code changes, no Phase 1 implementation.**
+- Refined per-endpoint role assignment in `/app/memory/RBAC_MATRIX.md` for the 4 ambiguous two-tier router files identified during Phase 0 review: `routers/auth.py` (3 endpoints), `routers/dashboard.py` (11), `routers/governance.py` (1), `routers/sales_dashboard.py` (15). 30 endpoints total.
+- Approved taxonomy applied: `admin` / `approver` / `reviewer` / `viewer` / `service` (background only). Two pseudo-buckets used where applicable: `public` (login bootstrap only) and `authenticated` (token required, no role gate — for `/auth/me` and `/auth/logout`).
+- Endpoint count by role: `public` 1, `authenticated` 2, `viewer` 18, `reviewer` 3, `approver` 2, `admin` 4, `service` 0 (no routes in these 4 files require service-role today).
+- Two prior file-level matrix entries corrected by source-of-truth audit: `dashboard.py` ("mutations: reviewer" → **zero mutations** in current code) and `governance.py` ("mutations=admin" → **zero mutations** — module docstring is explicit "READ-ONLY"; mutating governance work lives in other routers).
+- File-level table cross-linked: 4 files now show "resolved P0.1 ↓" pointing at the per-endpoint refinement section below.
+- **P1.H remains BLOCKED on user-supplied Entra credentials**: Tenant ID, API Client ID, API Scope URI, and optionally SPA Client ID. P1.K (MSAL.js) and P1.C (RBAC enforcement on the 407 mutating endpoints) are downstream of P1.H.
+- Phase 3 monolith refactoring remains paused; frozen helpers untouched.
+
+
+
 ### 2026-04-21 — AP Path Consolidation v2.5.25 (Phases 2 + 3)
 - Single canonical AP mutation surface: **`POST /api/ap-review/documents/{doc_id}/{action}`** for `set-vendor`, `update-fields`, `override-bc-validation`, `start-approval`, `approve`, `reject`.
 - All Path A mutation routes JWT-gated via `Depends(get_current_user)`; all delegate to `services/workflow_handlers.py` so every transition drives through `WorkflowEngine.advance_workflow`.

@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { entraAuthEnabled } from '../lib/entraAuth';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
+import EntraSignInButton from '../components/EntraSignInButton';
 import { toast } from 'sonner';
 import { LogIn, Eye, EyeOff } from 'lucide-react';
 
@@ -12,6 +14,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [entraLoading, setEntraLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const { login, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -24,6 +27,8 @@ export default function LoginPage() {
 
   if (isAuthenticated) return null;
 
+  const entraEnabled = entraAuthEnabled();
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -35,6 +40,21 @@ export default function LoginPage() {
       toast.error(err.response?.data?.detail || 'Login failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleEntraClick = async () => {
+    setEntraLoading(true);
+    try {
+      // login() will route to MSAL because entraAuthEnabled() is true; the
+      // username/password args are ignored on that branch.
+      await login('', '');
+      toast.success('Welcome to GPI Document Hub');
+      navigate('/');
+    } catch (err) {
+      toast.error(err.message || 'Microsoft sign-in failed');
+    } finally {
+      setEntraLoading(false);
     }
   };
 
@@ -60,7 +80,20 @@ export default function LoginPage() {
             <CardDescription>Enter your credentials to access the hub</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4" data-testid="login-form">
+            {entraEnabled && (
+              <div className="mb-4 space-y-3" data-testid="entra-signin-section">
+                <EntraSignInButton onClick={handleEntraClick} loading={entraLoading} disabled={loading} />
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-border" />
+                  </div>
+                  <div className="relative flex justify-center text-xs">
+                    <span className="bg-card px-2 text-muted-foreground">or use legacy credentials</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="space-y-4" data-testid="entra-fallback-form">
               <div className="space-y-2">
                 <Label htmlFor="username">Email</Label>
                 <Input

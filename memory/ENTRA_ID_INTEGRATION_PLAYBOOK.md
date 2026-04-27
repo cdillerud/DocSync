@@ -14,8 +14,8 @@
 - `requests` (already present) for JWKS fetch.
 
 **Frontend (React CRA):**
-- `@azure/msal-browser@^4.4.0` — core MSAL.
-- `@azure/msal-react@^3.1.0` — React bindings (`MsalProvider`, hooks). **Amended 2026-04-23 from v2.0.0 to v3.1.0+ for React 19 compatibility (P1.H signed correction).**
+- `@azure/msal-browser@^5.8.0` — core MSAL.
+- `@azure/msal-react@^5.3.1` — React bindings (`MsalProvider`, hooks). **Amended 2026-04-23 from v2.0.0 → v3.1.0+ → ^5.3.1 (P1.K install-time correction; v5 explicitly peers React 19.2.1+).**
 
 Install via `pip install … && pip freeze` and `yarn add` per Emergent platform protocol.
 

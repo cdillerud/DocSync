@@ -45,6 +45,23 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
 - Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
+### 2026-04-23 — Phase 1 P1.K — MSAL frontend auth (dormant; flag-gated)
+- **Packages added** (yarn): `@azure/msal-browser@5.8.0` + `@azure/msal-react@5.3.1` (v5 explicitly supports React 19.2.1+; pin upgraded from the v2/v3 noted in earlier playbook drafts after registry check).
+- **New files (3)**: `frontend/src/lib/msalConfig.js` (PublicClientApplication singleton; sessionStorage cache; redirectUri = `window.location.origin`), `frontend/src/lib/entraAuth.js` (`acquireEntraToken` silent → interactive popup fallback, `entraLogin`, `entraLogout`, `getActiveEntraAccount`, `accountToLegacyUser`, `entraAuthEnabled` re-export), `frontend/src/components/EntraSignInButton.jsx` (Microsoft sign-in button styled to match the existing legacy submit button; `data-testid="entra-signin-btn"`).
+- **Modified files (4)**: `frontend/src/index.js` wraps `<App/>` with `<MsalProvider>`; `frontend/src/lib/api.js` request interceptor now async — Entra-first when flag on, falls back to legacy `localStorage.gpi_token` on miss/failure; `frontend/src/context/AuthContext.js` `login`/`logout` branch on flag (Entra path persists `accountToLegacyUser(account)` to `gpi_user` so all downstream consumers keep working byte-identically); `frontend/src/pages/LoginPage.js` renders the Entra button + divider above the legacy form when flag on.
+- **Frontend `.env` additions** (additive only): `REACT_APP_ENTRA_AUTH_ENABLED=false` (default OFF — dormant on merge), `REACT_APP_ENTRA_TENANT_ID`, `REACT_APP_ENTRA_CLIENT_ID`, `REACT_APP_ENTRA_API_SCOPE`. No protected vars touched.
+- **Auth flow when flag ON**: click "Sign in with Microsoft" → `loginPopup` → MSAL session cache → axios interceptor pulls a fresh access token per request via `acquireTokenSilent` (fallback `acquireTokenPopup` on `InteractionRequiredAuthError`). Backend hybrid facade (`get_current_user_hybrid` from P1.H) accepts the Entra Bearer token; legacy bcrypt path stays live behind `LEGACY_AUTH_ENABLED=true` for the migration window.
+- **Smoke test (Playwright)**:
+  - Flag OFF: `entra_btn=False, legacy_form=True, legacy_email_input=True` ✅ — UI byte-identical to pre-P1.K.
+  - Flag ON: `entra_btn=True, entra_section=True, legacy_form=True, legacy_email_input=True` ✅ — both sign-in surfaces render; legacy fallback retained.
+- **Backend regression**: P1.H suite re-run **30/30 passed** in 4.45s. `/openapi.json` paths = 858 (unchanged). No backend files touched.
+- **Lint**: 0 issues across all 7 touched/new frontend files.
+- **Default posture committed**: `REACT_APP_ENTRA_AUTH_ENABLED=false` + `ENTRA_AUTH_ENABLED=false`. Cutover requires flipping both flags + completing the Entra app registration's SPA redirect URI configuration.
+- **Out of scope** (per signed declaration): `/api/auth/whoami` debug endpoint, RBAC enforcement (P1.C), actor context propagation (P1.J), `governance_audit_log` (P1.A), legacy auth removal, scope-typo cleanup, multi-tenant federation, MFA tier.
+- **Next**: cutover smoke against the live Entra tenant on the production VM, then P1.C (RBAC enforcement on the 30 already-classified mutating endpoints + remaining P0.1 sub-passes).
+
+
+
 ### 2026-04-23 — Phase 1 P1.H — Backend Entra ID token validation (deps-only, dormant)
 - **New canonical module** `backend/services/entra_auth.py` is the sole authority for Entra-issued token validation. Exports: `Actor` dataclass, `JWKSCache` (TTL=900s, kid-miss refresh, stale-on-network-fail), `validate_entra_token()`, `get_current_actor` FastAPI dep, `require_role(*roles)` factory, `require_app_only()` factory, `get_current_user_hybrid` migration facade.
 - **Algorithm**: RS256 only; alg=none/HS256 hard-rejected (downgrade-attack guard). Audience exact-match + issuer match + `tid` claim guard + 30s clock leeway. Required claims: `exp`, `iss`, `aud`. Actor identity via `oid` (fallback `sub`). User-delegated tokens carry `scp`; app-only (service principal) tokens carry `roles` only and surface `Actor.is_app_only=True`.

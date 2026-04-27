@@ -1,10 +1,24 @@
 import axios from 'axios';
+import { acquireEntraToken, entraAuthEnabled } from './entraAuth';
 
 const API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api`;
 
 const api = axios.create({ baseURL: API_BASE });
 
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
+  // Entra-first when the flag is on: try a silent token. On any failure or
+  // when no Entra session exists, fall back to the legacy localStorage token.
+  if (entraAuthEnabled()) {
+    try {
+      const entraToken = await acquireEntraToken();
+      if (entraToken) {
+        config.headers.Authorization = `Bearer ${entraToken}`;
+        return config;
+      }
+    } catch {
+      /* fall through to legacy token */
+    }
+  }
   const token = localStorage.getItem('gpi_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

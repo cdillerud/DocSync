@@ -226,3 +226,27 @@ def test_shape_signature_differs_when_status_differs():
     a = runner._shape_signature(422, {"detail": "x"})
     b = runner._shape_signature(500, {"detail": "x"})
     assert a != b
+
+
+# ---------- credential plausibility guard (Phase 1 check #6) ----------
+
+
+import re  # noqa: E402
+
+GUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+@pytest.mark.parametrize("value,looks_real", [
+    ("c7b2de14-71d9-4c49-a0b9-2bec103a6fdc", True),     # real GUID
+    ("6ac62e44-8968-4ad9-b781-434507a5c83a", True),     # real GUID
+    ("doc-workflow-test", False),                       # placeholder string
+    ("order-ledger-1", False),                          # placeholder string
+    ("test", False),                                    # placeholder
+    ("", False),                                        # empty
+    ("not-a-guid-at-all", False),                       # garbage
+])
+def test_guid_pattern_recognizes_real_vs_placeholder(value, looks_real):
+    assert bool(GUID_RE.match(value)) is looks_real

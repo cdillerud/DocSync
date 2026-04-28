@@ -195,6 +195,34 @@ async def phase_preflight() -> bool:
         "body": "OK" if not env_issues else "; ".join(env_issues),
     })
 
+    # 6. BC credential plausibility (NEW guard — detect placeholder/test tenant IDs)
+    # Real Azure tenant + client IDs are GUIDs. Anything else is almost
+    # certainly a placeholder and will fail OAuth with AADSTS900023.
+    import re
+    GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+    PLACEHOLDER_HINTS = ("test", "example", "placeholder", "demo", "doc-workflow", "order-ledger", "your-")
+    cred_issues = []
+    for k in ("BC_TENANT_ID", "BC_CLIENT_ID"):
+        v = (os.environ.get(k) or "").strip()
+        if not v:
+            cred_issues.append(f"{k} missing")
+            continue
+        if not GUID_RE.match(v):
+            hint = next((h for h in PLACEHOLDER_HINTS if h in v.lower()), None)
+            if hint:
+                cred_issues.append(f"{k}={v!r} contains placeholder hint {hint!r} — not a real GUID")
+            else:
+                cred_issues.append(f"{k}={v!r} is not a GUID — likely a placeholder")
+    checks.append({
+        "name": "6. BC credential plausibility (real GUIDs?)",
+        "ok": not cred_issues,
+        "status": None,
+        "body": "OK — credentials look like real Azure GUIDs"
+                if not cred_issues
+                else "PLACEHOLDER DETECTED: " + "; ".join(cred_issues)
+                     + ". This environment cannot reach BC; run Tier 1 on the production VM instead.",
+    })
+
     for c in checks:
         marker = "✅" if c["ok"] else "❌"
         print(f"  {marker} {c['name']:60s} status={c['status']}  body={c['body']}")

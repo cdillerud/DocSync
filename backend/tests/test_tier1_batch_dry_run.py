@@ -250,3 +250,26 @@ GUID_RE = re.compile(
 ])
 def test_guid_pattern_recognizes_real_vs_placeholder(value, looks_real):
     assert bool(GUID_RE.match(value)) is looks_real
+
+
+# ---------- vendor-mismatch heuristic (Phase 3 risk detection) ----------
+
+
+@pytest.mark.parametrize("extracted,canonical,expect_match", [
+    # exact case-insensitive equality
+    ("Mexus Inc.", "MEXUS, INC", True),
+    # substring containment (BC vendor code vs full name)
+    ("TUMALO CREEK Transportation", "TUMALOC", True),
+    ("Massilly North America", "MASSILL", True),
+    # token overlap
+    ("LSI Distribution", "Lone Star Integrated Distribution, LLC", True),
+    ("Progressive Logistics", "Progressive Logistics", True),
+    # real mismatches that should flag
+    ("Mid America Logistics Group, LLC", "Brown Warehouse Company", False),
+    ("SC Warehouses, LLC", "YANDELL", False),
+    # empty inputs return True (insufficient signal — don't flag)
+    ("", "Brown Warehouse", True),
+    ("Mid America", "", True),
+])
+def test_vendor_match_likely_heuristic(extracted, canonical, expect_match):
+    assert runner._vendor_match_likely(extracted, canonical) is expect_match

@@ -486,6 +486,43 @@ async def _vendor_resolve(db, candidate: Candidate) -> tuple[str, str]:
     return ("", f"no alias or profile match for {name!r}")
 
 
+_VENDOR_STOPWORDS = {
+    "llc", "inc", "corp", "corporation", "company", "co", "ltd", "limited",
+    "the", "and", "of", "for", "group", "holdings",
+}
+
+
+def _vendor_tokens(s: str) -> set:
+    """Normalize a vendor name to a set of meaningful tokens (≥4 chars, not stopwords)."""
+    import re
+    s = re.sub(r"[^\w\s]", " ", (s or "").lower())
+    return {t for t in s.split() if len(t) >= 4 and t not in _VENDOR_STOPWORDS}
+
+
+def _vendor_match_likely(extracted_name: str, canonical_name: str) -> bool:
+    """Heuristic: do these two strings likely refer to the same vendor?
+
+    Substring-tolerant so BC vendor codes (TUMALOC) match human names (TUMALO CREEK).
+    Returns True when at least one significant token from one side is a substring
+    of any token on the other side. Returns True when either side has no
+    meaningful tokens (we don't have enough signal to flag).
+    """
+    if not extracted_name or not canonical_name:
+        return True
+    # Trivial case-insensitive equality
+    if extracted_name.strip().lower() == canonical_name.strip().lower():
+        return True
+    a = _vendor_tokens(extracted_name)
+    b = _vendor_tokens(canonical_name)
+    if not a or not b:
+        return True
+    for ta in a:
+        for tb in b:
+            if ta in tb or tb in ta:
+                return True
+    return False
+
+
 async def phase_dry_run(candidates: List[Candidate]) -> List[Candidate]:
     print("=" * 72)
     print(f"[{_utc_iso()}] PHASE 3 — DRY-RUN NORMALIZATION")
@@ -501,6 +538,15 @@ async def phase_dry_run(candidates: List[Candidate]) -> List[Candidate]:
             c.risks.append(f"vendor will be resolved at post via {v_method}")
         elif not v_no:
             c.risks.append(f"NO VENDOR — cannot post until resolved ({v_method})")
+
+        # vendor mismatch check (heuristic): extracted PDF name vs resolved canonical
+        if c.vendor_no and c.vendor_name and not _vendor_match_likely(c.vendor_name, c.vendor_no):
+            # Insert at front so it's never bumped off by the top-2 cap
+            c.risks.insert(
+                0,
+                f"VENDOR MISMATCH: extracted '{c.vendor_name}' vs resolved '{c.vendor_no}' "
+                f"— posting will attribute to wrong BC vendor"
+            )
 
         # dup check
         dup_status, dup_detail = await _dup_check(db, c)

@@ -1,0 +1,172 @@
+{
+  "sweep": {
+    "generated_at": "2026-04-28T22:16:35.743723+00:00",
+    "scope": "AP_Invoice (signed: 1a)",
+    "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a)",
+    "totals": {
+      "ap_invoice_docs_scanned": 165,
+      "matches": 1,
+      "mismatches": 38,
+      "skipped_no_extracted_vendor": 0,
+      "skipped_no_canonical_code": 126,
+      "already_posted_to_bc": 0
+    },
+    "distinct_mismatch_pairs": 4,
+    "top_pairs": [
+      {
+        "extracted_vendor": "NonExistent Vendor XYZ Corp",
+        "canonical_vendor": "Ardagh - RB",
+        "canonical_vendor_code": "ARDAGHM",
+        "affected_doc_count": 19,
+        "sample_doc_ids": [
+          "b50564b8-9058-433d-bcb6-5b0f105bacb1",
+          "4a500d76-4864-4e9c-98dd-ee1c64d936a0",
+          "0160e45c-19e2-44a3-a656-7048f19e9b77",
+          "78532208-8466-4e93-967e-748d0c947e81",
+          "e5866bdb-0985-426f-8de6-fe6842a63a26"
+        ],
+        "implicated_rule": {
+          "kind": "alias",
+          "alias_id": "8851566e-48c3-4085-a858-35013f9c6bdf",
+          "alias_string": "NonExistent Vendor XYZ Corp",
+          "normalized_alias": "nonexistent vendor xyz",
+          "vendor_no": "ARDAGHM",
+          "vendor_name": "Ardagh - FT",
+          "source": "auto_gap_closer",
+          "correction_count": 0,
+          "learned_at": "2026-04-23T01:18:04.606381+00:00"
+        },
+        "recommended_remediation": "alias_retire"
+      },
+      {
+        "extracted_vendor": "Test Vendor Selection Corp",
+        "canonical_vendor": "Ardagh - RB",
+        "canonical_vendor_code": "ARDAGHM",
+        "affected_doc_count": 17,
+        "sample_doc_ids": [
+          "67dc3827-ce17-484b-ba8b-866fe8eed29d",
+          "c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18",
+          "dfc707d6-af0c-415c-a175-047498aaf347",
+          "293578b2-a44e-406b-8b57-21d26bb4cb35",
+          "e1ff165d-8b02-41cd-92d4-0880ec56fc37"
+        ],
+        "implicated_rule": {
+          "kind": "alias",
+          "alias_id": "c4166eb7-e913-40a8-a351-c8b3e982a928",
+          "alias_string": "Test Vendor Selection Corp",
+          "normalized_alias": "test vendor selection",
+          "vendor_no": "ARDAGHM",
+          "vendor_name": "Ardagh - FT",
+          "source": "auto_gap_closer",
+          "correction_count": 0,
+          "learned_at": "2026-04-23T01:19:48.407049+00:00"
+        },
+        "recommended_remediation": "alias_retire"
+      },
+      {
+        "extracted_vendor": "NonExistent Vendor XYZ Corp",
+        "canonical_vendor": "Ardagh - FT",
+        "canonical_vendor_code": "Ardagh - FT",
+        "affected_doc_count": 1,
+        "sample_doc_ids": [
+          "b2593ffe-13a0-4557-938b-8d5f0a4969e6"
+        ],
+        "implicated_rule": null,
+        "recommended_remediation": "doc_re_resolve"
+      },
+      {
+        "extracted_vendor": "Test Vendor Selection Corp",
+        "canonical_vendor": "Ardagh - FT",
+        "canonical_vendor_code": "Ardagh - FT",
+        "affected_doc_count": 1,
+        "sample_doc_ids": [
+          "b41d162a-d064-44ac-b70d-0ab3cc1f38a2"
+        ],
+        "implicated_rule": null,
+        "recommended_remediation": "doc_re_resolve"
+      }
+    ],
+    "all_mismatch_doc_ids": [
+      "b2593ffe-13a0-4557-938b-8d5f0a4969e6",
+      "b41d162a-d064-44ac-b70d-0ab3cc1f38a2",
+      "b50564b8-9058-433d-bcb6-5b0f105bacb1",
+      "4a500d76-4864-4e9c-98dd-ee1c64d936a0",
+      "0160e45c-19e2-44a3-a656-7048f19e9b77",
+      "78532208-8466-4e93-967e-748d0c947e81",
+      "e5866bdb-0985-426f-8de6-fe6842a63a26",
+      "90a2c14b-49ef-466a-9578-95553f2db43e",
+      "5c8552eb-2ee1-4e4b-86ab-97c9f469554b",
+      "1cb56906-ccd4-40bb-866e-843d9167d7a7",
+      "cd84cd13-b8ac-4456-93e6-3714b60d8c67",
+      "56bf958e-7385-4408-8a58-8a8767e7cac8",
+      "edfd67f7-606e-491f-996d-a87c3f7d96df",
+      "2583a64c-be3f-4696-b49a-b6ec0ab1f2e2",
+      "d23ec90f-2d9e-4495-a81a-09e5f7960ea8",
+      "ddcca2ac-84b2-4724-8bb5-88ffbabc03fa",
+      "dcf11b19-f724-48c9-89dd-b7d351335ad3",
+      "45c2775b-9941-4f87-b4d0-463e8cddad09",
+      "3a05b7c3-b5b8-4052-b612-c3aef8afb045",
+      "9e9c4cd4-9a92-4d07-abac-c4c29c11f68a",
+      "204cf420-6668-4468-855b-c78be98b2ea6",
+      "67dc3827-ce17-484b-ba8b-866fe8eed29d",
+      "c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18",
+      "dfc707d6-af0c-415c-a175-047498aaf347",
+      "293578b2-a44e-406b-8b57-21d26bb4cb35",
+      "e1ff165d-8b02-41cd-92d4-0880ec56fc37",
+      "d6f91ff9-6489-4b05-8bb7-453398f0b2c6",
+      "fdcff056-6614-47bf-8928-45abbc8a9984",
+      "31003ec1-0404-4662-8510-bbcd68ce9512",
+      "7054310d-2e5e-4898-9958-7b5b1ee51c5d",
+      "2ba86ca0-c227-4c66-b1b1-55ddfd95dd46",
+      "4e20d316-04a2-4395-807a-473ca55cd9c9",
+      "b1f5c4ec-fbe1-4f11-a4b7-c0126bd664a5",
+      "c97d3258-c796-4731-b0fd-913cb81472bb",
+      "a100f28c-0157-43d4-8411-93940591760c",
+      "7299bdea-f26c-4333-a4ae-bba1eab7eff6",
+      "4a18f145-57aa-41fc-a0cd-3aa9aa0ae0da",
+      "51a11210-c8cd-4123-9274-7eae362e0e70"
+    ]
+  },
+  "batch2_impact": {
+    "candidates_total": 7,
+    "at_risk": [],
+    "safe": [
+      {
+        "doc_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+        "extracted_vendor": "ANCHOR GLASS CONTAINER CORP",
+        "vendor_no": "ANCH"
+      },
+      {
+        "doc_id": "4f2f127e-4e17-403a-9f3f-50035279a67e",
+        "extracted_vendor": "Unknown Vendor ABC",
+        "vendor_no": null
+      },
+      {
+        "doc_id": "0ef00f27-2863-4de7-91bf-ca7aee33737f",
+        "extracted_vendor": "Test Vendor Corp, Inc.",
+        "vendor_no": null
+      },
+      {
+        "doc_id": "72b58d21-db4f-4771-b294-0d471f0af257",
+        "extracted_vendor": "Test Vendor Corp, Inc.",
+        "vendor_no": null
+      },
+      {
+        "doc_id": "8a7f4745-13ba-4935-9c88-8400fb8fb052",
+        "extracted_vendor": "Test Vendor Corp, Inc.",
+        "vendor_no": null
+      },
+      {
+        "doc_id": "9f529ffd-225f-4de5-9dbe-37af86b69db9",
+        "extracted_vendor": "Test Vendor Corp, Inc.",
+        "vendor_no": null
+      },
+      {
+        "doc_id": "18ff282a-8993-433e-9a78-03ae60e0c161",
+        "extracted_vendor": "Test Vendor Corp, Inc.",
+        "vendor_no": null
+      }
+    ],
+    "recommendation": "no_action \u2014 none of the current Batch-2 candidates appear in the mismatch set. Investigate why dry-run flagged a defect (perhaps a different doc cohort)."
+  }
+}

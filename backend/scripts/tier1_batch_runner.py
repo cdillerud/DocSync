@@ -305,8 +305,84 @@ async def phase_select() -> List[Candidate]:
     cands = await _select_candidates(db)
     print(f"  Selected {len(cands)} candidates.\n")
     if not cands:
-        print("  ⚠️  No candidates matched. Tier 1 cannot proceed without docs to post.")
+        print("  ⚠️  No candidates matched. Running diagnostic to surface why.\n")
+        # Show what AP-ish data actually looks like on this DB
+        ap_like = await db.hub_documents.count_documents({
+            "$or": [
+                {"document_type": {"$regex": "^AP", "$options": "i"}},
+                {"doc_type": {"$regex": "^AP", "$options": "i"}},
+            ]
+        })
+        print(f"  AP-ish docs (document_type|doc_type starts with 'AP'): {ap_like}")
+
+        for fld in ("document_type", "doc_type", "status", "workflow_status"):
+            print(f"\n  distinct {fld}:")
+            pipe = [
+                {"$match": {"$or": [
+                    {"document_type": {"$regex": "^AP", "$options": "i"}},
+                    {"doc_type": {"$regex": "^AP", "$options": "i"}},
+                ]}},
+                {"$group": {"_id": f"${fld}", "n": {"$sum": 1}}},
+                {"$sort": {"n": -1}},
+                {"$limit": 10},
+            ]
+            async for r in db.hub_documents.aggregate(pipe):
+                print(f"    {str(r['_id']):40s} {r['n']}")
+
+        already_posted = await db.hub_documents.count_documents({
+            "$or": [
+                {"document_type": {"$regex": "^AP", "$options": "i"}},
+                {"doc_type": {"$regex": "^AP", "$options": "i"}},
+            ],
+            "bc_purchase_invoice": {"$exists": True},
+        })
+        print(f"\n  AP-ish docs already posted (bc_purchase_invoice exists): {already_posted}")
+
+        # Check filter components individually so we know which one is too strict
+        base = {"$or": [
+            {"document_type": {"$regex": "^AP", "$options": "i"}},
+            {"doc_type": {"$regex": "^AP", "$options": "i"}},
+        ]}
+        c_status = await db.hub_documents.count_documents({**base, "status": {"$in": ["NeedsReview", "ReadyForPost", "Completed"]}})
+        c_vendor = await db.hub_documents.count_documents({**base, "$and": [{"$or": [
+            {"vendor_canonical": {"$nin": [None, ""]}},
+            {"validation_results.bc_record_info.number": {"$nin": [None, ""]}},
+            {"extracted_fields.vendor": {"$nin": [None, ""]}},
+            {"normalized_fields.vendor": {"$nin": [None, ""]}},
+        ]}]})
+        c_inv = await db.hub_documents.count_documents({**base, "$or": [
+            {"extracted_fields.invoice_number": {"$nin": [None, ""]}},
+            {"normalized_fields.invoice_number": {"$nin": [None, ""]}},
+        ]})
+        c_total = await db.hub_documents.count_documents({**base, "$or": [
+            {"extracted_fields.total": {"$nin": [None, 0, "0", ""]}},
+            {"normalized_fields.total": {"$nin": [None, 0, "0", ""]}},
+        ]})
+        print("\n  Per-criterion candidate counts (AP-ish base):")
+        print(f"    status in {{NeedsReview, ReadyForPost, Completed}}: {c_status}")
+        print(f"    has vendor signal:                                   {c_vendor}")
+        print(f"    has invoice_number:                                  {c_inv}")
+        print(f"    has non-zero total:                                  {c_total}")
+
+        # Sample one AP-ish doc to see field layout
+        sample = await db.hub_documents.find_one({"$or": [
+            {"document_type": {"$regex": "^AP", "$options": "i"}},
+            {"doc_type": {"$regex": "^AP", "$options": "i"}},
+        ]}, {"_id": 0, "id": 1, "document_type": 1, "doc_type": 1, "status": 1, "workflow_status": 1,
+              "extracted_fields": 1, "normalized_fields": 1, "vendor_canonical": 1,
+              "bc_purchase_invoice": 1})
+        if sample:
+            print("\n  Sample AP-ish doc shape (first match):")
+            for k in ("id", "document_type", "doc_type", "status", "workflow_status", "vendor_canonical", "bc_purchase_invoice"):
+                print(f"    {k}: {sample.get(k)}")
+            ef = sample.get("extracted_fields") or {}
+            print(f"    extracted_fields keys: {sorted(ef.keys())[:15]}")
+            for fk in ("vendor", "invoice_number", "total", "invoice_date"):
+                print(f"      extracted_fields.{fk}: {ef.get(fk)}")
+
+        print("\n  → Bring this output back to me. I'll widen the candidate query to match your actual data shape.")
         return cands
+
     print(f"  {'#':<3} {'doc_id':<38} {'vendor':<28} {'inv #':<14} {'total':<12} {'lines':<5} {'status':<14}")
     print("  " + "-" * 117)
     for i, c in enumerate(cands, 1):

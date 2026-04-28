@@ -44,7 +44,7 @@ import json
 import os
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -61,7 +61,7 @@ except Exception:
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Import the LIVE heuristic — single source of truth (signed guardrail).
-from scripts.tier1_batch_runner import _vendor_match_likely  # noqa: E402
+from scripts.tier1_batch_runner import _vendor_match_likely, _vendor_tokens  # noqa: E402
 
 
 REPORT_MD = Path("/app/memory/VENDOR_MISMATCH_SWEEP.md")
@@ -79,6 +79,11 @@ def _norm(s: Optional[str]) -> str:
         return ""
     s = re.sub(r"[^\w\s]", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
+
+
+def _has_meaningful_tokens(s: str) -> bool:
+    """True iff `s` produces at least one token the heuristic considers signal-bearing."""
+    return bool(_vendor_tokens(s or ""))
 
 
 def _db():
@@ -220,8 +225,15 @@ async def sweep() -> Dict[str, Any]:
     matches = 0
     mismatches = 0
     already_posted = 0
+    # Per-axis counters (a doc can fail one or both)
+    name_axis_fail = 0  # extracted vs canonical_name (BC displayName / profile name)
+    code_axis_fail = 0  # extracted vs vendor_canonical (the code that will post)
+    both_axes_fail = 0
+    code_unresolved = 0  # vendor_canonical has no meaningful tokens (e.g., "112522")
 
     pair_buckets: Dict[Tuple[str, str, str], List[str]] = defaultdict(list)
+    pair_axes: Dict[Tuple[str, str, str], Counter] = defaultdict(Counter)
+    pair_code_unresolved: Dict[Tuple[str, str, str], int] = defaultdict(int)
 
     async for d in cursor:
         total += 1
@@ -244,20 +256,58 @@ async def sweep() -> Dict[str, Any]:
         if d.get("bc_purchase_invoice"):
             already_posted += 1
 
-        if _vendor_match_likely(extracted, canonical_name):
+        # Two-axis comparison — a doc is mismatched if EITHER axis fails.
+        name_ok = _vendor_match_likely(extracted, canonical_name)
+        code_ok = _vendor_match_likely(extracted, code)
+        # Track when the code itself is too thin to compare against (e.g., bare numbers)
+        code_thin = not _has_meaningful_tokens(code)
+
+        if name_ok and code_ok:
             matches += 1
             continue
 
         mismatches += 1
+        if not name_ok:
+            name_axis_fail += 1
+        if not code_ok:
+            code_axis_fail += 1
+        if not name_ok and not code_ok:
+            both_axes_fail += 1
+        if code_thin:
+            code_unresolved += 1
+
         key = (extracted, canonical_name, code)
         pair_buckets[key].append(d["id"])
+        if not name_ok:
+            pair_axes[key]["name"] += 1
+        if not code_ok:
+            pair_axes[key]["code"] += 1
+        if code_thin:
+            pair_code_unresolved[key] += 1
 
-    # Build top-N pair report
+    # Build top-N pair report — also classify each pair
     pairs = sorted(pair_buckets.items(), key=lambda kv: len(kv[1]), reverse=True)
     top_pairs: List[Dict[str, Any]] = []
-    for (extracted, canonical_name, code), doc_ids in pairs[:TOP_N_PAIRS]:
+    class_counts: Counter = Counter()  # mismatch-class breakdown across ALL pairs
+    doc_id_to_class: Dict[str, str] = {}  # FULL coverage, not just top-5 samples
+
+    for (extracted, canonical_name, code), doc_ids in pairs:
         rule_type, rule = await _trace_implicated_rule(db, extracted, code)
         rec = _recommend_remediation(rule_type, rule)
+        axes = pair_axes[(extracted, canonical_name, code)]
+        code_thin_count = pair_code_unresolved[(extracted, canonical_name, code)]
+        if code_thin_count == len(doc_ids):
+            mismatch_class = "unresolved_or_ambiguous"
+        elif rule_type == "alias":
+            mismatch_class = "alias_driven"
+        elif rule_type == "profile":
+            mismatch_class = "profile_driven"
+        else:
+            mismatch_class = "doc_prestamp_or_fallback"
+        class_counts[mismatch_class] += len(doc_ids)
+        for did in doc_ids:
+            doc_id_to_class[did] = mismatch_class
+
         # Strip rule down to the fields we care about for the report
         rule_summary: Optional[Dict[str, Any]] = None
         if rule:
@@ -287,15 +337,21 @@ async def sweep() -> Dict[str, Any]:
             "canonical_vendor_code": code,
             "affected_doc_count": len(doc_ids),
             "sample_doc_ids": doc_ids[:SAMPLE_IDS_PER_PAIR],
+            "axis_fail": dict(axes),  # which axis caught it (and how many)
+            "code_unresolved_count": code_thin_count,
+            "mismatch_class": mismatch_class,
             "implicated_rule": rule_summary,
             "recommended_remediation": rec,
         })
 
     return {
-        "generated_at": _utc_iso()
-,
+        "generated_at": _utc_iso(),
         "scope": "AP_Invoice (signed: 1a)",
-        "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a)",
+        "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a, two-axis)",
+        "axes": {
+            "name_axis": "extracted vendor name vs BC displayName / profile / alias name",
+            "code_axis": "extracted vendor name vs vendor_canonical (the value that actually posts)",
+        },
         "totals": {
             "ap_invoice_docs_scanned": total,
             "matches": matches,
@@ -303,10 +359,17 @@ async def sweep() -> Dict[str, Any]:
             "skipped_no_extracted_vendor": no_extracted,
             "skipped_no_canonical_code": no_canonical,
             "already_posted_to_bc": already_posted,
+            "name_axis_failures": name_axis_fail,
+            "code_axis_failures": code_axis_fail,
+            "both_axes_failures": both_axes_fail,
+            "code_unresolved_or_thin": code_unresolved,
         },
+        "mismatch_class_breakdown": dict(class_counts),
         "distinct_mismatch_pairs": len(pair_buckets),
-        "top_pairs": top_pairs,
+        "top_pairs": top_pairs[:TOP_N_PAIRS],
+        "all_pairs": top_pairs,  # full list for downstream tooling
         "all_mismatch_doc_ids": [doc_id for ids in pair_buckets.values() for doc_id in ids],
+        "doc_id_to_class": doc_id_to_class,  # FULL per-doc class lookup
     }
 
 
@@ -320,6 +383,8 @@ async def _batch2_impact(report: Dict[str, Any]) -> Dict[str, Any]:
     from scripts.tier1_batch_runner import _select_candidates  # local import — avoids
     db = _db()
     cands = await _select_candidates(db)
+    # Full per-doc class lookup (covers all mismatched docs, not just top-5 samples)
+    doc_class: Dict[str, str] = dict(report.get("doc_id_to_class") or {})
     mismatch_ids = set(report["all_mismatch_doc_ids"])
 
     at_risk: List[Dict[str, Any]] = []
@@ -331,23 +396,35 @@ async def _batch2_impact(report: Dict[str, Any]) -> Dict[str, Any]:
             "vendor_no": c.vendor_no,
         }
         if c.doc_id in mismatch_ids:
+            entry["mismatch_class"] = doc_class.get(c.doc_id, "unknown_class")
             at_risk.append(entry)
         else:
             safe.append(entry)
+
+    # Per-class action mapping for at-risk candidates
+    action_by_class = {
+        "alias_driven": "stays_excluded — alias rule must be retired/edited first",
+        "profile_driven": "stays_excluded — profile must be corrected first",
+        "doc_prestamp_or_fallback": "blocked_pending_root_cause — fallback/extraction bug; do not post",
+        "unresolved_or_ambiguous": "stays_excluded — vendor_canonical is non-meaningful (e.g., bare numbers)",
+        "unknown_class": "stays_excluded — out of top-N pair sample; class undetermined",
+    }
+    for e in at_risk:
+        e["action"] = action_by_class.get(e["mismatch_class"], "stays_excluded")
 
     if at_risk and len(at_risk) == len(cands):
         recommendation = "stay_excluded — every Batch-2 candidate is mismatched; do not post any."
     elif at_risk:
         recommendation = (
-            "re_resolve_and_reconsider — exclude the mismatched candidates with "
-            f"--exclude-ids; the {len(safe)} clean candidates can proceed once Batch-2 "
-            "remediation policy is signed."
+            f"re_resolve_and_reconsider — {len(at_risk)} candidate(s) MUST be excluded "
+            f"(see per-class action below); the {len(safe)} clean candidate(s) MAY proceed "
+            "only after the doc_prestamp_or_fallback root-cause investigation completes "
+            "(otherwise the same defect could re-stamp them silently)."
         )
     else:
         recommendation = (
             "no_action — none of the current Batch-2 candidates appear in the "
-            "mismatch set. Investigate why dry-run flagged a defect (perhaps a "
-            "different doc cohort)."
+            "mismatch set."
         )
 
     return {
@@ -378,12 +455,30 @@ def _render_md(report: Dict[str, Any], batch2: Dict[str, Any]) -> str:
     lines.append("| metric | count |")
     lines.append("|---|---|")
     lines.append(f"| AP_Invoice docs scanned | {t['ap_invoice_docs_scanned']} |")
-    lines.append(f"| matches (vendor name aligns with canonical) | {t['matches']} |")
-    lines.append(f"| **mismatches** | **{t['mismatches']}** |")
+    lines.append(f"| matches (both axes pass) | {t['matches']} |")
+    lines.append(f"| **mismatches (either axis fails)** | **{t['mismatches']}** |")
+    lines.append(f"| ↳ name-axis failures (extracted vs displayName/profile) | {t['name_axis_failures']} |")
+    lines.append(f"| ↳ code-axis failures (extracted vs `vendor_canonical`) | {t['code_axis_failures']} |")
+    lines.append(f"| ↳ both axes failed | {t['both_axes_failures']} |")
+    lines.append(f"| ↳ `vendor_canonical` lacks meaningful tokens (e.g. bare numbers) | {t['code_unresolved_or_thin']} |")
     lines.append(f"| skipped — no extracted vendor name | {t['skipped_no_extracted_vendor']} |")
     lines.append(f"| skipped — no `vendor_canonical` code | {t['skipped_no_canonical_code']} |")
     lines.append(f"| already posted to BC | {t['already_posted_to_bc']} |")
     lines.append(f"| distinct mismatch (extracted → canonical) pairs | {report['distinct_mismatch_pairs']} |")
+    lines.append("")
+    lines.append("## Mismatch class breakdown (doc counts)")
+    lines.append("")
+    lines.append("| class | docs | meaning |")
+    lines.append("|---|---|---|")
+    cb = report.get("mismatch_class_breakdown") or {}
+    classes_meta = [
+        ("alias_driven", "Traceable to a `vendor_aliases` row — alias_retire / alias_edit"),
+        ("profile_driven", "Traceable to a `vendor_invoice_profiles` row — profile_correction"),
+        ("doc_prestamp_or_fallback", "Not traceable to alias/profile — extraction-time pre-stamp or fallback bug"),
+        ("unresolved_or_ambiguous", "`vendor_canonical` is non-meaningful (bare digits, empty tokens) — manual review"),
+    ]
+    for cls, desc in classes_meta:
+        lines.append(f"| `{cls}` | {cb.get(cls, 0)} | {desc} |")
     lines.append("")
 
     if not report["top_pairs"]:
@@ -396,7 +491,10 @@ def _render_md(report: Dict[str, Any], batch2: Dict[str, Any]) -> str:
         for i, p in enumerate(report["top_pairs"], 1):
             lines.append(f"### {i}. `{p['extracted_vendor']}` → `{p['canonical_vendor']}` (`{p['canonical_vendor_code']}`)")
             lines.append("")
-            lines.append(f"- Affected docs: **{p['affected_doc_count']}**")
+            lines.append(f"- Affected docs: **{p['affected_doc_count']}**  ·  "
+                         f"class: **`{p['mismatch_class']}`**  ·  "
+                         f"axis fail: `{p.get('axis_fail') or {}}`"
+                         + (f"  ·  code-thin: `{p['code_unresolved_count']}`" if p.get('code_unresolved_count') else ""))
             lines.append(f"- Sample doc IDs: {', '.join(f'`{did}`' for did in p['sample_doc_ids'])}")
             rule = p["implicated_rule"]
             if rule is None:
@@ -435,10 +533,13 @@ def _render_md(report: Dict[str, Any], batch2: Dict[str, Any]) -> str:
     if batch2["at_risk"]:
         lines.append("### At-risk candidates")
         lines.append("")
-        lines.append("| doc_id | extracted vendor | resolved vendor_no |")
-        lines.append("|---|---|---|")
+        lines.append("| doc_id | extracted vendor | resolved vendor_no | mismatch class | action |")
+        lines.append("|---|---|---|---|---|")
         for c in batch2["at_risk"]:
-            lines.append(f"| `{c['doc_id']}` | {c['extracted_vendor']} | `{c['vendor_no']}` |")
+            lines.append(
+                f"| `{c['doc_id']}` | {c['extracted_vendor']} | `{c['vendor_no']}` | "
+                f"`{c.get('mismatch_class','-')}` | {c.get('action','-')} |"
+            )
         lines.append("")
     if batch2["safe"]:
         lines.append("### Safe candidates")

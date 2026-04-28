@@ -1,8 +1,8 @@
 # Vendor-Mismatch Sweep
 
-- Generated: `2026-04-28T22:16:35.743723+00:00`
+- Generated: `2026-04-28T23:38:12.738165+00:00`
 - Scope: AP_Invoice (signed: 1a)
-- Heuristic: live tier1_batch_runner._vendor_match_likely (signed: 2a)
+- Heuristic: live tier1_batch_runner._vendor_match_likely (signed: 2a, two-axis)
 - Mode: **read-only**, no Mongo writes, no BC calls.
 
 ## Totals
@@ -10,18 +10,31 @@
 | metric | count |
 |---|---|
 | AP_Invoice docs scanned | 165 |
-| matches (vendor name aligns with canonical) | 1 |
-| **mismatches** | **38** |
+| matches (both axes pass) | 1 |
+| **mismatches (either axis fails)** | **38** |
+| ↳ name-axis failures (extracted vs displayName/profile) | 38 |
+| ↳ code-axis failures (extracted vs `vendor_canonical`) | 38 |
+| ↳ both axes failed | 38 |
+| ↳ `vendor_canonical` lacks meaningful tokens (e.g. bare numbers) | 0 |
 | skipped — no extracted vendor name | 0 |
 | skipped — no `vendor_canonical` code | 126 |
 | already posted to BC | 0 |
 | distinct mismatch (extracted → canonical) pairs | 4 |
 
+## Mismatch class breakdown (doc counts)
+
+| class | docs | meaning |
+|---|---|---|
+| `alias_driven` | 36 | Traceable to a `vendor_aliases` row — alias_retire / alias_edit |
+| `profile_driven` | 0 | Traceable to a `vendor_invoice_profiles` row — profile_correction |
+| `doc_prestamp_or_fallback` | 2 | Not traceable to alias/profile — extraction-time pre-stamp or fallback bug |
+| `unresolved_or_ambiguous` | 0 | `vendor_canonical` is non-meaningful (bare digits, empty tokens) — manual review |
+
 ## Top 4 mismatch pairs
 
-### 1. `NonExistent Vendor XYZ Corp` → `Ardagh - RB` (`ARDAGHM`)
+### 1. `NonExistent Vendor XYZ Corp` → `Ardagh - ST` (`ARDAGHM`)
 
-- Affected docs: **19**
+- Affected docs: **19**  ·  class: **`alias_driven`**  ·  axis fail: `{'name': 19, 'code': 19}`
 - Sample doc IDs: `b50564b8-9058-433d-bcb6-5b0f105bacb1`, `4a500d76-4864-4e9c-98dd-ee1c64d936a0`, `0160e45c-19e2-44a3-a656-7048f19e9b77`, `78532208-8466-4e93-967e-748d0c947e81`, `e5866bdb-0985-426f-8de6-fe6842a63a26`
 - Implicated rule (alias):
   - `alias_id`: `8851566e-48c3-4085-a858-35013f9c6bdf`
@@ -31,9 +44,9 @@
   - `learned_at`: `2026-04-23T01:18:04.606381+00:00`
 - **Recommended remediation: `alias_retire`**
 
-### 2. `Test Vendor Selection Corp` → `Ardagh - RB` (`ARDAGHM`)
+### 2. `Test Vendor Selection Corp` → `Ardagh - ST` (`ARDAGHM`)
 
-- Affected docs: **17**
+- Affected docs: **17**  ·  class: **`alias_driven`**  ·  axis fail: `{'name': 17, 'code': 17}`
 - Sample doc IDs: `67dc3827-ce17-484b-ba8b-866fe8eed29d`, `c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18`, `dfc707d6-af0c-415c-a175-047498aaf347`, `293578b2-a44e-406b-8b57-21d26bb4cb35`, `e1ff165d-8b02-41cd-92d4-0880ec56fc37`
 - Implicated rule (alias):
   - `alias_id`: `c4166eb7-e913-40a8-a351-c8b3e982a928`
@@ -45,14 +58,14 @@
 
 ### 3. `NonExistent Vendor XYZ Corp` → `Ardagh - FT` (`Ardagh - FT`)
 
-- Affected docs: **1**
+- Affected docs: **1**  ·  class: **`doc_prestamp_or_fallback`**  ·  axis fail: `{'name': 1, 'code': 1}`
 - Sample doc IDs: `b2593ffe-13a0-4557-938b-8d5f0a4969e6`
 - Implicated rule: **not traceable** via aliases or profiles (may be a doc-level pre-stamp or extraction-time mapping)
 - **Recommended remediation: `doc_re_resolve`**
 
 ### 4. `Test Vendor Selection Corp` → `Ardagh - FT` (`Ardagh - FT`)
 
-- Affected docs: **1**
+- Affected docs: **1**  ·  class: **`doc_prestamp_or_fallback`**  ·  axis fail: `{'name': 1, 'code': 1}`
 - Sample doc IDs: `b41d162a-d064-44ac-b70d-0ab3cc1f38a2`
 - Implicated rule: **not traceable** via aliases or profiles (may be a doc-level pre-stamp or extraction-time mapping)
 - **Recommended remediation: `doc_re_resolve`**
@@ -83,4 +96,4 @@
 | `9f529ffd-225f-4de5-9dbe-37af86b69db9` | Test Vendor Corp, Inc. | `None` |
 | `18ff282a-8993-433e-9a78-03ae60e0c161` | Test Vendor Corp, Inc. | `None` |
 
-**Recommendation:** no_action — none of the current Batch-2 candidates appear in the mismatch set. Investigate why dry-run flagged a defect (perhaps a different doc cohort).
+**Recommendation:** no_action — none of the current Batch-2 candidates appear in the mismatch set.

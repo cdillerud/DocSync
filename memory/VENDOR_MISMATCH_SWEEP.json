@@ -1,21 +1,33 @@
 {
   "sweep": {
-    "generated_at": "2026-04-28T22:16:35.743723+00:00",
+    "generated_at": "2026-04-28T23:38:12.738165+00:00",
     "scope": "AP_Invoice (signed: 1a)",
-    "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a)",
+    "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a, two-axis)",
+    "axes": {
+      "name_axis": "extracted vendor name vs BC displayName / profile / alias name",
+      "code_axis": "extracted vendor name vs vendor_canonical (the value that actually posts)"
+    },
     "totals": {
       "ap_invoice_docs_scanned": 165,
       "matches": 1,
       "mismatches": 38,
       "skipped_no_extracted_vendor": 0,
       "skipped_no_canonical_code": 126,
-      "already_posted_to_bc": 0
+      "already_posted_to_bc": 0,
+      "name_axis_failures": 38,
+      "code_axis_failures": 38,
+      "both_axes_failures": 38,
+      "code_unresolved_or_thin": 0
+    },
+    "mismatch_class_breakdown": {
+      "alias_driven": 36,
+      "doc_prestamp_or_fallback": 2
     },
     "distinct_mismatch_pairs": 4,
     "top_pairs": [
       {
         "extracted_vendor": "NonExistent Vendor XYZ Corp",
-        "canonical_vendor": "Ardagh - RB",
+        "canonical_vendor": "Ardagh - ST",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 19,
         "sample_doc_ids": [
@@ -25,6 +37,12 @@
           "78532208-8466-4e93-967e-748d0c947e81",
           "e5866bdb-0985-426f-8de6-fe6842a63a26"
         ],
+        "axis_fail": {
+          "name": 19,
+          "code": 19
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "alias_driven",
         "implicated_rule": {
           "kind": "alias",
           "alias_id": "8851566e-48c3-4085-a858-35013f9c6bdf",
@@ -40,7 +58,7 @@
       },
       {
         "extracted_vendor": "Test Vendor Selection Corp",
-        "canonical_vendor": "Ardagh - RB",
+        "canonical_vendor": "Ardagh - ST",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 17,
         "sample_doc_ids": [
@@ -50,6 +68,12 @@
           "293578b2-a44e-406b-8b57-21d26bb4cb35",
           "e1ff165d-8b02-41cd-92d4-0880ec56fc37"
         ],
+        "axis_fail": {
+          "name": 17,
+          "code": 17
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "alias_driven",
         "implicated_rule": {
           "kind": "alias",
           "alias_id": "c4166eb7-e913-40a8-a351-c8b3e982a928",
@@ -71,6 +95,12 @@
         "sample_doc_ids": [
           "b2593ffe-13a0-4557-938b-8d5f0a4969e6"
         ],
+        "axis_fail": {
+          "name": 1,
+          "code": 1
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "doc_prestamp_or_fallback",
         "implicated_rule": null,
         "recommended_remediation": "doc_re_resolve"
       },
@@ -82,6 +112,110 @@
         "sample_doc_ids": [
           "b41d162a-d064-44ac-b70d-0ab3cc1f38a2"
         ],
+        "axis_fail": {
+          "name": 1,
+          "code": 1
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "doc_prestamp_or_fallback",
+        "implicated_rule": null,
+        "recommended_remediation": "doc_re_resolve"
+      }
+    ],
+    "all_pairs": [
+      {
+        "extracted_vendor": "NonExistent Vendor XYZ Corp",
+        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor_code": "ARDAGHM",
+        "affected_doc_count": 19,
+        "sample_doc_ids": [
+          "b50564b8-9058-433d-bcb6-5b0f105bacb1",
+          "4a500d76-4864-4e9c-98dd-ee1c64d936a0",
+          "0160e45c-19e2-44a3-a656-7048f19e9b77",
+          "78532208-8466-4e93-967e-748d0c947e81",
+          "e5866bdb-0985-426f-8de6-fe6842a63a26"
+        ],
+        "axis_fail": {
+          "name": 19,
+          "code": 19
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "alias_driven",
+        "implicated_rule": {
+          "kind": "alias",
+          "alias_id": "8851566e-48c3-4085-a858-35013f9c6bdf",
+          "alias_string": "NonExistent Vendor XYZ Corp",
+          "normalized_alias": "nonexistent vendor xyz",
+          "vendor_no": "ARDAGHM",
+          "vendor_name": "Ardagh - FT",
+          "source": "auto_gap_closer",
+          "correction_count": 0,
+          "learned_at": "2026-04-23T01:18:04.606381+00:00"
+        },
+        "recommended_remediation": "alias_retire"
+      },
+      {
+        "extracted_vendor": "Test Vendor Selection Corp",
+        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor_code": "ARDAGHM",
+        "affected_doc_count": 17,
+        "sample_doc_ids": [
+          "67dc3827-ce17-484b-ba8b-866fe8eed29d",
+          "c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18",
+          "dfc707d6-af0c-415c-a175-047498aaf347",
+          "293578b2-a44e-406b-8b57-21d26bb4cb35",
+          "e1ff165d-8b02-41cd-92d4-0880ec56fc37"
+        ],
+        "axis_fail": {
+          "name": 17,
+          "code": 17
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "alias_driven",
+        "implicated_rule": {
+          "kind": "alias",
+          "alias_id": "c4166eb7-e913-40a8-a351-c8b3e982a928",
+          "alias_string": "Test Vendor Selection Corp",
+          "normalized_alias": "test vendor selection",
+          "vendor_no": "ARDAGHM",
+          "vendor_name": "Ardagh - FT",
+          "source": "auto_gap_closer",
+          "correction_count": 0,
+          "learned_at": "2026-04-23T01:19:48.407049+00:00"
+        },
+        "recommended_remediation": "alias_retire"
+      },
+      {
+        "extracted_vendor": "NonExistent Vendor XYZ Corp",
+        "canonical_vendor": "Ardagh - FT",
+        "canonical_vendor_code": "Ardagh - FT",
+        "affected_doc_count": 1,
+        "sample_doc_ids": [
+          "b2593ffe-13a0-4557-938b-8d5f0a4969e6"
+        ],
+        "axis_fail": {
+          "name": 1,
+          "code": 1
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "doc_prestamp_or_fallback",
+        "implicated_rule": null,
+        "recommended_remediation": "doc_re_resolve"
+      },
+      {
+        "extracted_vendor": "Test Vendor Selection Corp",
+        "canonical_vendor": "Ardagh - FT",
+        "canonical_vendor_code": "Ardagh - FT",
+        "affected_doc_count": 1,
+        "sample_doc_ids": [
+          "b41d162a-d064-44ac-b70d-0ab3cc1f38a2"
+        ],
+        "axis_fail": {
+          "name": 1,
+          "code": 1
+        },
+        "code_unresolved_count": 0,
+        "mismatch_class": "doc_prestamp_or_fallback",
         "implicated_rule": null,
         "recommended_remediation": "doc_re_resolve"
       }
@@ -125,7 +259,47 @@
       "7299bdea-f26c-4333-a4ae-bba1eab7eff6",
       "4a18f145-57aa-41fc-a0cd-3aa9aa0ae0da",
       "51a11210-c8cd-4123-9274-7eae362e0e70"
-    ]
+    ],
+    "doc_id_to_class": {
+      "b50564b8-9058-433d-bcb6-5b0f105bacb1": "alias_driven",
+      "4a500d76-4864-4e9c-98dd-ee1c64d936a0": "alias_driven",
+      "0160e45c-19e2-44a3-a656-7048f19e9b77": "alias_driven",
+      "78532208-8466-4e93-967e-748d0c947e81": "alias_driven",
+      "e5866bdb-0985-426f-8de6-fe6842a63a26": "alias_driven",
+      "90a2c14b-49ef-466a-9578-95553f2db43e": "alias_driven",
+      "5c8552eb-2ee1-4e4b-86ab-97c9f469554b": "alias_driven",
+      "1cb56906-ccd4-40bb-866e-843d9167d7a7": "alias_driven",
+      "cd84cd13-b8ac-4456-93e6-3714b60d8c67": "alias_driven",
+      "56bf958e-7385-4408-8a58-8a8767e7cac8": "alias_driven",
+      "edfd67f7-606e-491f-996d-a87c3f7d96df": "alias_driven",
+      "2583a64c-be3f-4696-b49a-b6ec0ab1f2e2": "alias_driven",
+      "d23ec90f-2d9e-4495-a81a-09e5f7960ea8": "alias_driven",
+      "ddcca2ac-84b2-4724-8bb5-88ffbabc03fa": "alias_driven",
+      "dcf11b19-f724-48c9-89dd-b7d351335ad3": "alias_driven",
+      "45c2775b-9941-4f87-b4d0-463e8cddad09": "alias_driven",
+      "3a05b7c3-b5b8-4052-b612-c3aef8afb045": "alias_driven",
+      "9e9c4cd4-9a92-4d07-abac-c4c29c11f68a": "alias_driven",
+      "204cf420-6668-4468-855b-c78be98b2ea6": "alias_driven",
+      "67dc3827-ce17-484b-ba8b-866fe8eed29d": "alias_driven",
+      "c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18": "alias_driven",
+      "dfc707d6-af0c-415c-a175-047498aaf347": "alias_driven",
+      "293578b2-a44e-406b-8b57-21d26bb4cb35": "alias_driven",
+      "e1ff165d-8b02-41cd-92d4-0880ec56fc37": "alias_driven",
+      "d6f91ff9-6489-4b05-8bb7-453398f0b2c6": "alias_driven",
+      "fdcff056-6614-47bf-8928-45abbc8a9984": "alias_driven",
+      "31003ec1-0404-4662-8510-bbcd68ce9512": "alias_driven",
+      "7054310d-2e5e-4898-9958-7b5b1ee51c5d": "alias_driven",
+      "2ba86ca0-c227-4c66-b1b1-55ddfd95dd46": "alias_driven",
+      "4e20d316-04a2-4395-807a-473ca55cd9c9": "alias_driven",
+      "b1f5c4ec-fbe1-4f11-a4b7-c0126bd664a5": "alias_driven",
+      "c97d3258-c796-4731-b0fd-913cb81472bb": "alias_driven",
+      "a100f28c-0157-43d4-8411-93940591760c": "alias_driven",
+      "7299bdea-f26c-4333-a4ae-bba1eab7eff6": "alias_driven",
+      "4a18f145-57aa-41fc-a0cd-3aa9aa0ae0da": "alias_driven",
+      "51a11210-c8cd-4123-9274-7eae362e0e70": "alias_driven",
+      "b2593ffe-13a0-4557-938b-8d5f0a4969e6": "doc_prestamp_or_fallback",
+      "b41d162a-d064-44ac-b70d-0ab3cc1f38a2": "doc_prestamp_or_fallback"
+    }
   },
   "batch2_impact": {
     "candidates_total": 7,
@@ -167,6 +341,6 @@
         "vendor_no": null
       }
     ],
-    "recommendation": "no_action \u2014 none of the current Batch-2 candidates appear in the mismatch set. Investigate why dry-run flagged a defect (perhaps a different doc cohort)."
+    "recommendation": "no_action \u2014 none of the current Batch-2 candidates appear in the mismatch set."
   }
 }

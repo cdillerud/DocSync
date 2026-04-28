@@ -239,35 +239,78 @@ async def phase_preflight() -> bool:
 async def _select_candidates(db, limit: int = BATCH_LIMIT) -> List[Candidate]:
     """Pull up to `limit` AP_Invoice docs ordered by posting-readiness.
 
-    Selection is read-only and deliberately tolerant: we accept docs without a
-    pre-stamped vendor_no because _resolve_vendor_no() will retry at post-time.
+    Tier 1 selection priority (highest first):
+      1. status=ReadyForPost  ← gold tier (already approved for posting)
+      2. status in {Validated, ValidationPassed, NeedsReview}
+      3. status=Completed but workflow_status in {approved, ready_for_post}
+
+    Selection is read-only and deliberately tolerant: docs without a pre-stamped
+    vendor_no are accepted because the dry-run does vendor re-resolution against
+    aliases + invoice profiles. Field name is `amount` on the live VM dataset
+    (preview env used `total`), so we read both with `amount` first.
     """
-    # Pass 1: docs with the strongest signals first.
-    pipe_strong = [
-        {"$match": {
-            "document_type": "AP_Invoice",
-            "status": {"$in": ["NeedsReview", "ReadyForPost", "Completed"]},
-            "$or": [
-                {"vendor_canonical": {"$nin": [None, ""]}},
-                {"validation_results.bc_record_info.number": {"$nin": [None, ""]}},
-                {"extracted_fields.vendor": {"$nin": [None, ""]}},
-                {"normalized_fields.vendor": {"$nin": [None, ""]}},
-            ],
-            "bc_purchase_invoice": {"$exists": False},  # not already posted
-        }},
-        {"$addFields": {
-            "_inv_no": {"$ifNull": ["$extracted_fields.invoice_number", "$normalized_fields.invoice_number"]},
-            "_total": {"$ifNull": ["$extracted_fields.total", "$normalized_fields.total"]},
-            "_lines": {"$size": {"$ifNull": ["$extracted_fields.line_items", []]}},
-        }},
-        {"$match": {
-            "_inv_no": {"$nin": [None, ""]},
-            "_total": {"$nin": [None, 0, "0", ""]},
-        }},
-        {"$sort": {"created_utc": -1}},
-        {"$limit": limit},
+    base_match = {
+        "document_type": "AP_Invoice",
+        "$or": [
+            {"vendor_canonical": {"$nin": [None, ""]}},
+            {"validation_results.bc_record_info.number": {"$nin": [None, ""]}},
+            {"extracted_fields.vendor": {"$nin": [None, ""]}},
+            {"normalized_fields.vendor": {"$nin": [None, ""]}},
+        ],
+        # Not already posted to BC
+        "$and": [{"$or": [
+            {"bc_purchase_invoice": {"$exists": False}},
+            {"bc_purchase_invoice": None},
+            {"bc_purchase_invoice": ""},
+        ]}],
+    }
+    add_fields = {
+        "_inv_no": {"$ifNull": [
+            "$extracted_fields.invoice_number",
+            "$normalized_fields.invoice_number",
+        ]},
+        "_total": {"$ifNull": [
+            "$extracted_fields.amount",
+            "$extracted_fields.total",
+            "$normalized_fields.amount",
+            "$normalized_fields.total",
+        ]},
+        "_lines": {"$size": {"$ifNull": ["$extracted_fields.line_items", []]}},
+    }
+    have_data_match = {
+        "_inv_no": {"$nin": [None, ""]},
+        "_total": {"$nin": [None, 0, "0", ""]},
+    }
+
+    # Ordered status tiers; query each until we hit `limit`.
+    tiers = [
+        ("ReadyForPost (gold)", {"status": "ReadyForPost"}),
+        ("Validated/ValidationPassed/NeedsReview",
+         {"status": {"$in": ["Validated", "ValidationPassed", "NeedsReview"]}}),
+        ("Completed + workflow approved/ready_for_post",
+         {"status": "Completed", "workflow_status": {"$in": ["approved", "ready_for_post"]}}),
     ]
-    docs = [d async for d in db.hub_documents.aggregate(pipe_strong)]
+
+    seen_ids: set = set()
+    docs: List[Dict[str, Any]] = []
+    for label, status_filter in tiers:
+        if len(docs) >= limit:
+            break
+        pipe = [
+            {"$match": {**base_match, **status_filter}},
+            {"$addFields": add_fields},
+            {"$match": have_data_match},
+            {"$sort": {"created_utc": -1}},
+            {"$limit": limit - len(docs)},
+        ]
+        async for d in db.hub_documents.aggregate(pipe):
+            if d["id"] in seen_ids:
+                continue
+            seen_ids.add(d["id"])
+            d["_tier"] = label
+            docs.append(d)
+            if len(docs) >= limit:
+                break
 
     candidates: List[Candidate] = []
     for d in docs:
@@ -282,13 +325,19 @@ async def _select_candidates(db, limit: int = BATCH_LIMIT) -> List[Candidate]:
             or d.get("vendor_no")
             or ""
         )
+        total_value = (
+            ef.get("amount")
+            or ef.get("total")
+            or nf.get("amount")
+            or nf.get("total")
+        )
         candidates.append(Candidate(
             doc_id=d["id"],
             vendor_name=ef.get("vendor") or nf.get("vendor") or bc_info.get("displayName") or "",
             vendor_no=vendor_no or None,
             invoice_number=ef.get("invoice_number") or nf.get("invoice_number") or "",
             invoice_date=ef.get("invoice_date") or nf.get("invoice_date") or "",
-            total_amount=ef.get("total") or nf.get("total"),
+            total_amount=total_value,
             line_count=len(line_items) if isinstance(line_items, list) else 0,
             status=d.get("status", ""),
             workflow_status=d.get("workflow_status", ""),
@@ -383,11 +432,12 @@ async def phase_select() -> List[Candidate]:
         print("\n  → Bring this output back to me. I'll widen the candidate query to match your actual data shape.")
         return cands
 
-    print(f"  {'#':<3} {'doc_id':<38} {'vendor':<28} {'inv #':<14} {'total':<12} {'lines':<5} {'status':<14}")
-    print("  " + "-" * 117)
+    print(f"  {'#':<3} {'tier':<32} {'doc_id':<38} {'vendor':<28} {'inv #':<14} {'total':<12} {'lines':<5}")
+    print("  " + "-" * 137)
     for i, c in enumerate(cands, 1):
-        print(f"  {i:<3} {c.doc_id:<38} {_short(c.vendor_name, 26):<28} {_short(c.invoice_number, 12):<14} "
-              f"{str(c.total_amount):<12} {c.line_count:<5} {_short(c.status, 12):<14}")
+        tier = c.workflow_status or c.status
+        print(f"  {i:<3} {_short(tier, 30):<32} {c.doc_id:<38} {_short(c.vendor_name, 26):<28} {_short(c.invoice_number, 12):<14} "
+              f"{str(c.total_amount):<12} {c.line_count:<5}")
     return cands
 
 

@@ -45,6 +45,24 @@ Build and continuously refine the Sales/AP Modules and Document Inbox with AI au
 - **v2.5.1**: Learning Core U2 — shared TF-IDF fingerprint service for both customer (intake) and vendor (AP); unified `scope_fingerprints` collection
 - Read-only wrt BC. 42/42 pytest + testing agent iter 210/211/212/213/214 all 100% green. Giovanni data kept pristine.
 
+### 2026-04-28 — P1.K hotfix: lazy MSAL init (insecure-origin white-screen regression)
+- **Bug introduced by P1.K**: `frontend/src/lib/msalConfig.js` constructed `new PublicClientApplication(msalConfig)` at module load. On insecure origins (e.g. `http://4.204.41.190:8080` — public IP over plain HTTP), `window.crypto.subtle` is unavailable, MSAL's `BrowserCrypto` constructor threw `crypto_nonexistent`, and the entire React tree crashed before mount → **white screen**, even with `REACT_APP_ENTRA_AUTH_ENABLED=false`. Reported via VM cutover smoke; reproduced and confirmed.
+- **Fix scope** (3 files; no new files; no backend touch):
+  - `lib/msalConfig.js`: removed eager `msalInstance` export. Added `getMsalInstance()` that lazily constructs the singleton **only when** `flagOn() && window.isSecureContext === true`. Construction errors are caught and downgrade to legacy auth instead of crashing. `entraAuthEnabled()` now also gates on `isSecureContext` so insecure origins always take the legacy path even if the flag is on.
+  - `lib/entraAuth.js`: every helper (`acquireEntraToken`, `entraLogin`, `entraLogout`, `getActiveEntraAccount`) reads through `getMsalInstance()` and short-circuits to `null` / no-op when the singleton is null. No behavior change on HTTPS.
+  - `index.js`: `<MsalProvider>` is rendered only when `getMsalInstance()` returns non-null; otherwise `<App/>` mounts directly. Pre-P1.K behavior fully restored on insecure origins.
+- **Verification**:
+  - HTTPS preview, flag OFF: legacy form renders; no Entra UI. ✅
+  - HTTPS preview, flag ON: Entra button + legacy fallback both render; no errors. ✅
+  - HTTPS preview with `isSecureContext` simulated to `false` and flag ON (mimics VM HTTP origin): page renders legacy form; **zero pageerrors**; no white screen. ✅ (regression fix verified via Playwright `add_init_script` overriding `window.isSecureContext`).
+  - Backend P1.H suite: **30/30 passed** in 5.04s — zero regression.
+  - `/openapi.json` paths = **858** (unchanged).
+- **Lint**: 0 issues across 3 touched frontend files.
+- **Posture committed**: `REACT_APP_ENTRA_AUTH_ENABLED=false` default. Cutover on the VM still requires HTTPS origin to actually exercise Entra; the hotfix only ensures the page doesn't white-screen when MSAL can't initialize.
+- **Operator action**: pull, `docker compose build --no-cache frontend`, `docker compose up -d`. The legacy login on `http://4.204.41.190:8080` should now work again. To exercise Entra, move the frontend behind an HTTPS origin and register that origin as the SPA redirect URI in the Entra app registration.
+
+
+
 ### 2026-04-23 — Phase 1 P1.K — MSAL frontend auth (dormant; flag-gated)
 - **Packages added** (yarn): `@azure/msal-browser@5.8.0` + `@azure/msal-react@5.3.1` (v5 explicitly supports React 19.2.1+; pin upgraded from the v2/v3 noted in earlier playbook drafts after registry check).
 - **New files (3)**: `frontend/src/lib/msalConfig.js` (PublicClientApplication singleton; sessionStorage cache; redirectUri = `window.location.origin`), `frontend/src/lib/entraAuth.js` (`acquireEntraToken` silent → interactive popup fallback, `entraLogin`, `entraLogout`, `getActiveEntraAccount`, `accountToLegacyUser`, `entraAuthEnabled` re-export), `frontend/src/components/EntraSignInButton.jsx` (Microsoft sign-in button styled to match the existing legacy submit button; `data-testid="entra-signin-btn"`).

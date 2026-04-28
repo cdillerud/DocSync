@@ -1,56 +1,57 @@
 /**
  * P1.K — Entra ID auth helpers (token acquisition, login, logout).
  *
- * All helpers are no-ops when REACT_APP_ENTRA_AUTH_ENABLED !== 'true'.
- * Token acquisition: silent first, interactive popup fallback on
- * InteractionRequiredAuthError.
+ * All helpers short-circuit to a no-op when MSAL is not initialized (either
+ * because REACT_APP_ENTRA_AUTH_ENABLED is false OR the origin is insecure).
  */
 import { InteractionRequiredAuthError } from '@azure/msal-browser';
-import { msalInstance, loginRequest, entraAuthEnabled } from './msalConfig';
+import { getMsalInstance, loginRequest, entraAuthEnabled } from './msalConfig';
 
 export { entraAuthEnabled };
 
 let _initPromise = null;
 
 /** MSAL v5 requires explicit initialize() before any other call. */
-const ensureInitialized = () => {
+const ensureInitialized = (instance) => {
   if (!_initPromise) {
-    _initPromise = msalInstance.initialize();
+    _initPromise = instance.initialize();
   }
   return _initPromise;
 };
 
 export const getActiveEntraAccount = () => {
-  if (!entraAuthEnabled()) return null;
-  const active = msalInstance.getActiveAccount();
+  const instance = getMsalInstance();
+  if (!instance) return null;
+  const active = instance.getActiveAccount();
   if (active) return active;
-  const accounts = msalInstance.getAllAccounts();
+  const accounts = instance.getAllAccounts();
   if (accounts.length === 0) return null;
-  msalInstance.setActiveAccount(accounts[0]);
+  instance.setActiveAccount(accounts[0]);
   return accounts[0];
 };
 
 /**
  * Acquire a fresh access token for the configured API scope.
- * Returns null if Entra is disabled or no account is signed in.
- * Throws on hard interaction failures (caller should fall back to legacy auth).
+ * Returns null if Entra is disabled, the origin is insecure, or no account
+ * is signed in. Throws on hard interaction failures.
  */
 export const acquireEntraToken = async () => {
-  if (!entraAuthEnabled()) return null;
-  await ensureInitialized();
+  const instance = getMsalInstance();
+  if (!instance) return null;
+  await ensureInitialized(instance);
 
   const account = getActiveEntraAccount();
   if (!account) return null;
 
   try {
-    const response = await msalInstance.acquireTokenSilent({
+    const response = await instance.acquireTokenSilent({
       ...loginRequest,
       account,
     });
     return response.accessToken;
   } catch (err) {
     if (err instanceof InteractionRequiredAuthError) {
-      const response = await msalInstance.acquireTokenPopup({
+      const response = await instance.acquireTokenPopup({
         ...loginRequest,
         account,
       });
@@ -62,15 +63,16 @@ export const acquireEntraToken = async () => {
 
 /**
  * Trigger interactive login via popup. Returns the parsed account
- * with idTokenClaims, or null if Entra is disabled.
+ * with idTokenClaims, or null if Entra is disabled / insecure context.
  */
 export const entraLogin = async () => {
-  if (!entraAuthEnabled()) return null;
-  await ensureInitialized();
+  const instance = getMsalInstance();
+  if (!instance) return null;
+  await ensureInitialized(instance);
 
-  const result = await msalInstance.loginPopup(loginRequest);
+  const result = await instance.loginPopup(loginRequest);
   if (result?.account) {
-    msalInstance.setActiveAccount(result.account);
+    instance.setActiveAccount(result.account);
   }
   return result?.account || null;
 };
@@ -81,11 +83,12 @@ export const entraLogin = async () => {
  */
 export const entraLogout = async () => {
   try {
-    if (entraAuthEnabled()) {
-      await ensureInitialized();
+    const instance = getMsalInstance();
+    if (instance) {
+      await ensureInitialized(instance);
       const account = getActiveEntraAccount();
       if (account) {
-        await msalInstance.logoutPopup({ account });
+        await instance.logoutPopup({ account });
       }
     }
   } finally {

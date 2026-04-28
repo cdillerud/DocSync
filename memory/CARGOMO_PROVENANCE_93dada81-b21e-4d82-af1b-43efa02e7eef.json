@@ -1,0 +1,1542 @@
+{
+  "A": {
+    "found": true,
+    "id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+    "document_type": "AP_Invoice",
+    "doc_type": "AP_INVOICE",
+    "status": "ReadyForPost",
+    "workflow_status": "ready_for_post",
+    "extracted_vendor": "ANCHOR GLASS CONTAINER CORP",
+    "vendor_canonical": "ANCH",
+    "vendor_no": null,
+    "bc_record_info": {},
+    "bc_purchase_invoice": null,
+    "source": "manual_auto_split",
+    "source_email": null,
+    "source_path": null,
+    "capture_channel": "SHADOW_PILOT_UPLOAD",
+    "created_utc": "2026-04-01T19:25:46.042384+00:00",
+    "intake_at": null,
+    "updated_utc": "2026-04-28T14:48:34.890337+00:00",
+    "all_top_level_keys": [
+      "ai_confidence",
+      "amount_float",
+      "amount_raw",
+      "ap_validation_result",
+      "auto_clear_decision",
+      "auto_clear_details",
+      "auto_clear_reason",
+      "auto_cleared",
+      "auto_post_attempted",
+      "auto_post_error",
+      "auto_post_success",
+      "automation_confidence",
+      "automation_decision",
+      "automation_rule_applied",
+      "automation_rule_applied_at",
+      "automation_rule_name",
+      "automation_state",
+      "batch_group_num",
+      "batch_page_num",
+      "batch_pages",
+      "batch_parent_id",
+      "batch_source_filename",
+      "batch_split_mode",
+      "batch_total_pages",
+      "bc_company_id",
+      "bc_document_no",
+      "bc_posting_status",
+      "bc_record_id",
+      "bc_record_type",
+      "bc_vendor_number",
+      "canonical_fields",
+      "capture_channel",
+      "category",
+      "classification_method",
+      "confidence_penalty_applied",
+      "content_type",
+      "created_utc",
+      "customer_candidates",
+      "decision_explanation",
+      "derived_automation_state",
+      "derived_state_updated_utc",
+      "derived_workflow_state",
+      "doc_type",
+      "document_type",
+      "draft_candidate",
+      "due_date_iso",
+      "due_date_raw",
+      "duplicate_of_document_id",
+      "effective_confidence",
+      "email_id",
+      "email_received_utc",
+      "email_sender",
+      "email_subject",
+      "escalation_tracked",
+      "extracted_fields",
+      "file_content_b64",
+      "file_name",
+      "file_size",
+      "force_cleanup_at",
+      "force_cleanup_rule",
+      "freight_gl_classification",
+      "gap_closer_last_run",
+      "id",
+      "intake_insights",
+      "invoice_date",
+      "invoice_date_raw",
+      "invoice_number_clean",
+      "invoice_number_raw",
+      "last_error",
+      "line_items",
+      "mailbox_category",
+      "manual_override",
+      "manual_override_at",
+      "manual_override_by",
+      "manual_po_override",
+      "match_method",
+      "match_score",
+      "needs_review",
+      "normalized_fields",
+      "pilot_date",
+      "pilot_phase",
+      "po_candidates",
+      "po_number_clean",
+      "po_number_raw",
+      "po_resolution",
+      "possible_duplicate",
+      "readiness",
+      "ready_post_exhausted",
+      "ready_post_last_error",
+      "ready_post_retry_count",
+      "reference_candidates",
+      "reference_intelligence",
+      "reference_intelligence_best_score",
+      "reference_intelligence_hash",
+      "reference_intelligence_last_run",
+      "reference_intelligence_outcome",
+      "reference_intelligence_status",
+      "reference_intelligence_version",
+      "reference_match_outcome",
+      "reprocessed_utc",
+      "revalidated_from",
+      "revalidated_utc",
+      "review_priority",
+      "review_queue",
+      "routing_reasons",
+      "routing_score",
+      "routing_status",
+      "routing_timestamp",
+      "sha256_hash",
+      "sharepoint_drive_id",
+      "sharepoint_item_id",
+      "sharepoint_share_link_url",
+      "sharepoint_web_url",
+      "source",
+      "source_system",
+      "spiro_context",
+      "square9_stage",
+      "stable_vendor_routing",
+      "state_reason",
+      "status",
+      "status_synced_at",
+      "suggested_job_type",
+      "transaction_action",
+      "updated_utc",
+      "validation_errors",
+      "validation_last_run",
+      "validation_passed",
+      "validation_results",
+      "validation_state",
+      "validation_summary",
+      "validation_version",
+      "validation_warnings",
+      "vendor_candidates",
+      "vendor_canonical",
+      "vendor_match_method",
+      "vendor_normalized",
+      "vendor_raw",
+      "vendor_resolution",
+      "warnings",
+      "workflow_history",
+      "workflow_queue",
+      "workflow_state",
+      "workflow_status",
+      "workflow_status_updated_utc"
+    ]
+  },
+  "B": {
+    "applicable": true,
+    "canonical_code": "ANCH",
+    "canonical_name": "",
+    "extracted_vendor": "ANCHOR GLASS CONTAINER CORP",
+    "findings": {
+      "paths_referencing_canonical_code": [
+        "extracted_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "validation_results.normalized_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "po_resolution.vendor_name = 'ANCHOR GLASS CONTAINER CORP'",
+        "bc_vendor_number = 'ANCH'",
+        "canonical_fields.vendor_raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "canonical_fields.vendor_normalized = 'anchor glass container corp'",
+        "normalized_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "spiro_context.matched_companies[0].name = 'Anchor Glass Container Corp'",
+        "spiro_context.best_company_match.name = 'Anchor Glass Container Corp'",
+        "validation_errors[0] = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "vendor_canonical = 'ANCH'",
+        "vendor_normalized = 'anchor glass container corp'",
+        "vendor_raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "vendor_resolution.raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "vendor_resolution.normalized = 'anchor glass container'",
+        "vendor_resolution.matched_vendor_name = 'Anchor Glass - Shakopee Plant'",
+        "vendor_resolution.matched_vendor_no = 'ANCH'",
+        "decision_explanation.supporting_evidence[0] = 'Vendor resolved via alias_match \u2192 ANCH'",
+        "reference_candidates[0].classification_reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.reference_candidates[0].classification_reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.matching_diagnostics.vendor_name = 'ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.matching_diagnostics.candidates[0].reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "ap_validation_result.checks[0].details = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "ap_validation_result.blocking_issues[0] = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "stable_vendor_routing.checks[0].detail = \"Vendor 'ANCHOR GLASS CONTAINER CORP' system=False effective=unstable\""
+      ],
+      "paths_referencing_canonical_name": [],
+      "paths_referencing_extracted_vendor": [
+        "extracted_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "validation_results.normalized_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "po_resolution.vendor_name = 'ANCHOR GLASS CONTAINER CORP'",
+        "canonical_fields.vendor_raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "canonical_fields.vendor_normalized = 'anchor glass container corp'",
+        "normalized_fields.vendor = 'ANCHOR GLASS CONTAINER CORP'",
+        "spiro_context.matched_companies[0].name = 'Anchor Glass Container Corp'",
+        "spiro_context.best_company_match.name = 'Anchor Glass Container Corp'",
+        "validation_errors[0] = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "vendor_normalized = 'anchor glass container corp'",
+        "vendor_raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "vendor_resolution.raw = 'ANCHOR GLASS CONTAINER CORP'",
+        "reference_candidates[0].classification_reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.reference_candidates[0].classification_reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.matching_diagnostics.vendor_name = 'ANCHOR GLASS CONTAINER CORP'",
+        "reference_intelligence.matching_diagnostics.candidates[0].reasoning = 'Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP'",
+        "ap_validation_result.checks[0].details = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "ap_validation_result.blocking_issues[0] = \"Vendor not resolved: 'ANCHOR GLASS CONTAINER CORP' not found in BC\"",
+        "stable_vendor_routing.checks[0].detail = \"Vendor 'ANCHOR GLASS CONTAINER CORP' system=False effective=unstable\""
+      ]
+    },
+    "history_shaped_fields": {
+      "workflow_history": [
+        {
+          "timestamp": "2026-04-01T19:25:46.042384+00:00",
+          "from_status": null,
+          "to_status": "captured",
+          "event": "on_capture",
+          "actor": "system",
+          "reason": "Document captured from manual_auto_split",
+          "metadata": {
+            "source": "manual_auto_split",
+            "sender": ""
+          }
+        }
+      ]
+    }
+  },
+  "C": {
+    "aliases_pointing_at_canonical_code": [
+      {
+        "alias_id": "6f1ff976-c569-4984-8966-5a1fe30d46de",
+        "alias_string": "Anchor Glass - Shakopee Plant",
+        "alias": "ANCHOR GLASS - SHAKOPEE PLANT",
+        "normalized_alias": "anchor glass - shakopee plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 2069,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "623873b3-daae-4fe8-a3b1-37749ecc182f",
+        "alias_string": "Anchor Glass Container Corp",
+        "alias": "ANCHOR GLASS CONTAINER CORP",
+        "normalized_alias": "anchor glass container corp",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1381,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00",
+        "last_used_at": "2026-04-12T21:30:49.612878+00:00",
+        "usage_count": 2
+      },
+      {
+        "alias_id": "34ba1e2d-80cf-4886-bd4d-7754376ddb65",
+        "alias_string": "Anchor Glass - Henryetta Plant",
+        "alias": "ANCHOR GLASS - HENRYETTA PLANT",
+        "normalized_alias": "anchor glass - henryetta plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1013,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "c8bc16bc-986e-452f-a868-033e908d5f76",
+        "alias_string": "Anchor Glass - B&B Packaging 123",
+        "alias": "ANCHOR GLASS - B&B PACKAGING 123",
+        "normalized_alias": "anchor glass - b&b packaging 123",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 482,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "50582a7a-0a7e-4855-b531-bbfeb4b8ac2c",
+        "alias_string": "Anchor Glass - Elmira Plant",
+        "alias": "ANCHOR GLASS - ELMIRA PLANT",
+        "normalized_alias": "anchor glass - elmira plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 230,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "b96b6b49-7773-4f0d-ba8b-09015c80dbcc",
+        "alias_string": "Anchor Glass - Miller Warehouse #2 104",
+        "alias": "ANCHOR GLASS - MILLER WAREHOUSE #2 104",
+        "normalized_alias": "anchor glass - miller warehouse #2 104",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 196,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "6eb8b8c5-4d5a-42f2-9adb-5dfe653468ed",
+        "alias_string": "Anchor Glass - Logistics Warehouse 137",
+        "alias": "ANCHOR GLASS - LOGISTICS WAREHOUSE 137",
+        "normalized_alias": "anchor glass - logistics warehouse 137",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 171,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "aa1724db-a217-4a4d-a552-dc396f4bbf78",
+        "alias_string": "Anchor Glass - Indiana Plant",
+        "alias": "ANCHOR GLASS - INDIANA PLANT",
+        "normalized_alias": "anchor glass - indiana plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 128,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "b9587832-d5b0-4e2e-9e17-ce6fc00324c4",
+        "alias_string": "Anchor Glass - Hodges Okmulgee 127",
+        "alias": "ANCHOR GLASS - HODGES OKMULGEE 127",
+        "normalized_alias": "anchor glass - hodges okmulgee 127",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 108,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "d86fea5e-e795-4aa8-9450-cd6bb844ec61",
+        "alias_string": "Anchor Glass - Logistics Warehouse #135",
+        "alias": "ANCHOR GLASS - LOGISTICS WAREHOUSE #135",
+        "normalized_alias": "anchor glass - logistics warehouse #135",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 82,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "18ce8d0c-9f12-45e7-9482-cad93d55a9e7",
+        "alias_string": "Anchor Glass - Warner Robins Plant",
+        "alias": "ANCHOR GLASS - WARNER ROBINS PLANT",
+        "normalized_alias": "anchor glass - warner robins plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 61,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "f9f25922-2d01-4359-8234-3918fe31461b",
+        "alias_string": "Anchor Glass - Okmulgee",
+        "alias": "ANCHOR GLASS - OKMULGEE",
+        "normalized_alias": "anchor glass - okmulgee",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 50,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "3238cfab-99ee-4cd5-b7a7-e72398fb9669",
+        "alias_string": "Anchor Glass - Vista 107",
+        "alias": "ANCHOR GLASS - VISTA 107",
+        "normalized_alias": "anchor glass - vista 107",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 35,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "7fc80f90-2670-4276-9116-247dc345115e",
+        "alias_string": "Anchor Glass - Lawrenceburg Plant",
+        "alias": "ANCHOR GLASS - LAWRENCEBURG PLANT",
+        "normalized_alias": "anchor glass - lawrenceburg plant",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 33,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "fb155e8e-9d51-40fa-a09e-090ada10a122",
+        "alias_string": "Anchor Glass - Glass & More",
+        "alias": "ANCHOR GLASS - GLASS & MORE",
+        "normalized_alias": "anchor glass - glass & more",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 31,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "3c89cfac-12f0-4d7c-81e5-206ae98ac5e6",
+        "alias_string": "Anchor Glass - Logistics Warehouse 135",
+        "alias": "ANCHOR GLASS - LOGISTICS WAREHOUSE 135",
+        "normalized_alias": "anchor glass - logistics warehouse 135",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 30,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "9e96934f-19a8-40b9-9a9b-01913c376501",
+        "alias_string": "Anchor Glass - Fort Smith",
+        "alias": "ANCHOR GLASS - FORT SMITH",
+        "normalized_alias": "anchor glass - fort smith",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 23,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "59ede53d-c459-42b8-8ad3-d5a6e24d762c",
+        "alias_string": "Anchor Glass - Murphy Warehouse 163",
+        "alias": "ANCHOR GLASS - MURPHY WAREHOUSE 163",
+        "normalized_alias": "anchor glass - murphy warehouse 163",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 21,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "01193b16-8118-43b3-9d4f-8179a9b6c7cc",
+        "alias_string": "Anchor Glass - Vista 194",
+        "alias": "ANCHOR GLASS - VISTA 194",
+        "normalized_alias": "anchor glass - vista 194",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 18,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "d04c632b-271b-47a0-bb1c-c034e7ced117",
+        "alias_string": "Anchor Glass - H&O Distribution 124",
+        "alias": "ANCHOR GLASS - H&O DISTRIBUTION 124",
+        "normalized_alias": "anchor glass - h&o distribution 124",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 15,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "54a6ec59-406c-4eea-866e-d2f73ae5b343",
+        "alias_string": "H & O Distribution ",
+        "alias": "H & O DISTRIBUTION",
+        "normalized_alias": "h & o distribution",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 13,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "8a841588-dc4c-43e0-acf5-d7978381f036",
+        "alias_string": "Anchor Glass - Elmira",
+        "alias": "ANCHOR GLASS - ELMIRA",
+        "normalized_alias": "anchor glass - elmira",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 13,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "f5a09d5c-94ed-4bac-8166-b9ea0653db83",
+        "alias_string": "Anchor Glass - Glass & More 224",
+        "alias": "ANCHOR GLASS - GLASS & MORE 224",
+        "normalized_alias": "anchor glass - glass & more 224",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 13,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "d70da2f7-d4ed-4a47-852f-f71aceccea21",
+        "alias_string": "Anchor Glass - Tulsa",
+        "alias": "ANCHOR GLASS - TULSA",
+        "normalized_alias": "anchor glass - tulsa",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 12,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "7ed74214-2b69-49d3-bf43-fe295782ab29",
+        "alias_string": "Anchor Glass - Miller Tulsa 158",
+        "alias": "ANCHOR GLASS - MILLER TULSA 158",
+        "normalized_alias": "anchor glass - miller tulsa 158",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 10,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "ed385a25-ab60-4a32-8c06-8c80819884d1",
+        "alias_string": "Anchor Glass - Hodges Tulsa 155",
+        "alias": "ANCHOR GLASS - HODGES TULSA 155",
+        "normalized_alias": "anchor glass - hodges tulsa 155",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 9,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "376d6ea0-f4ad-48ce-b9bb-e973aeeb8b32",
+        "alias_string": "Anchor Glass - Logistics Warehouse #2 135",
+        "alias": "ANCHOR GLASS - LOGISTICS WAREHOUSE #2 135",
+        "normalized_alias": "anchor glass - logistics warehouse #2 135",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 8,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "2074bfcd-db44-488b-be1f-de4979c377a9",
+        "alias_string": "Anchor Glass - H&O Distribution 159",
+        "alias": "ANCHOR GLASS - H&O DISTRIBUTION 159",
+        "normalized_alias": "anchor glass - h&o distribution 159",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 8,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "72336a2e-d5f1-4ddd-ba62-5e5c704154ba",
+        "alias_string": "CPDS - 106",
+        "alias": "CPDS - 106",
+        "normalized_alias": "cpds - 106",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 7,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "bf107181-64ea-4160-a95f-763b549d023c",
+        "alias_string": "Anchor Glass - Re-Sort Solutions #111",
+        "alias": "ANCHOR GLASS - RE-SORT SOLUTIONS #111",
+        "normalized_alias": "anchor glass - re-sort solutions #111",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 6,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "2da797da-6471-471c-aacf-77c210851fd6",
+        "alias_string": "Anchor Glass - DIY Group Inc",
+        "alias": "ANCHOR GLASS - DIY GROUP INC",
+        "normalized_alias": "anchor glass - diy group inc",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 4,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "635c9d65-7010-4251-ac7a-580b68c3f47a",
+        "alias_string": "S&S Packaging - 131",
+        "alias": "S&S PACKAGING - 131",
+        "normalized_alias": "s&s packaging - 131",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 3,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "7c7a13ba-0823-41ed-90c4-921d68c0a6e9",
+        "alias_string": "Anchor Glass - Gateway Warehouse 102",
+        "alias": "ANCHOR GLASS - GATEWAY WAREHOUSE 102",
+        "normalized_alias": "anchor glass - gateway warehouse 102",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 2,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "80507abc-b77e-4351-9ecb-201de3c55d5d",
+        "alias_string": "Anchor Glass - Hodges Tulsa 198",
+        "alias": "ANCHOR GLASS - HODGES TULSA 198",
+        "normalized_alias": "anchor glass - hodges tulsa 198",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "c130147c-bc5f-4166-aa61-abfcbbffb7e5",
+        "alias_string": "Anchor Glass -Allentown",
+        "alias": "ANCHOR GLASS -ALLENTOWN",
+        "normalized_alias": "anchor glass -allentown",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "7936cf71-5a23-46be-a0eb-0a2e9f9fddfd",
+        "alias_string": "Anchor Glass - Van Buren 135",
+        "alias": "ANCHOR GLASS - VAN BUREN 135",
+        "normalized_alias": "anchor glass - van buren 135",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "529e21f7-f951-4248-8dc7-d27dec26aa73",
+        "alias_string": "Anchor Glass - Logistics Warehouse 112",
+        "alias": "ANCHOR GLASS - LOGISTICS WAREHOUSE 112",
+        "normalized_alias": "anchor glass - logistics warehouse 112",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "91a61c77-9b4c-4d4f-b859-edc718d054ab",
+        "alias_string": "Universal Warehouse C/O Anchor Glass Container Corp",
+        "alias": "UNIVERSAL WAREHOUSE C/O ANCHOR GLASS CONTAINER CORP",
+        "normalized_alias": "universal warehouse c/o anchor glass container corp",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      },
+      {
+        "alias_id": "946e7b85-a8ec-4595-a0e7-8781044b4e99",
+        "alias_string": "Anchor Glass - Resolve Packaging",
+        "alias": "ANCHOR GLASS - RESOLVE PACKAGING",
+        "normalized_alias": "anchor glass - resolve packaging",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00"
+      }
+    ],
+    "aliases_matching_extracted_name": [
+      {
+        "alias_id": "623873b3-daae-4fe8-a3b1-37749ecc182f",
+        "alias_string": "Anchor Glass Container Corp",
+        "alias": "ANCHOR GLASS CONTAINER CORP",
+        "normalized_alias": "anchor glass container corp",
+        "canonical_vendor_id": "ANCH",
+        "vendor_no": "ANCH",
+        "vendor_name": "Anchor Glass - Shakopee Plant",
+        "source": "bc_cache_seed",
+        "bc_doc_count": 1381,
+        "learned_at": "2026-04-01T17:39:38.496479+00:00",
+        "created_at": "2026-04-01T17:39:38.496479+00:00",
+        "last_used_at": "2026-04-12T21:30:49.612878+00:00",
+        "usage_count": 2
+      }
+    ]
+  },
+  "D": {
+    "applicable": true,
+    "profile": {
+      "vendor_no": "ANCH",
+      "vendor_name": "Anchor Glass - Re-Sort Solutions #111",
+      "vendor_name_variants": [
+        "Anchor Glass - Re-Sort Solutions #111",
+        "Anchor Glass - Shakopee Plant",
+        "Anchor Glass - Indiana Plant",
+        "Anchor Glass - Hodges Tulsa 155",
+        "Anchor Glass - Hodges Tulsa 198",
+        "Anchor Glass - Tulsa",
+        "Anchor Glass - Logistics Warehouse 137",
+        "Anchor Glass - Resolve Packaging",
+        "S&S Packaging - 131",
+        "Anchor Glass - Logistics Warehouse #2 135",
+        "Anchor Glass - Vista 107",
+        "Anchor Glass - Miller Warehouse #2 104",
+        "Anchor Glass -Allentown",
+        "Anchor Glass - H&O Distribution 159",
+        "Anchor Glass - H&O Distribution 124",
+        "Anchor Glass - Lawrenceburg Plant",
+        "Anchor Glass - Logistics Warehouse 135",
+        "Anchor Glass - Glass & More 224",
+        "Anchor Glass - Elmira",
+        "Anchor Glass - B&B Packaging 123",
+        "Anchor Glass - Vista 194",
+        "Anchor Glass Container Corp",
+        "Anchor Glass - Logistics Warehouse #135",
+        "Anchor Glass - Hodges Okmulgee 127",
+        "Anchor Glass - DIY Group Inc",
+        "Anchor Glass - Glass & More",
+        "Anchor Glass - Henryetta Plant",
+        "Anchor Glass - Fort Smith",
+        "Anchor Glass - Murphy Warehouse 163",
+        "Anchor Glass - Logistics Warehouse 112",
+        "Anchor Glass - Gateway Warehouse 102",
+        "Universal Warehouse C/O Anchor Glass Container Corp",
+        "Anchor Glass - Van Buren 135",
+        "Anchor Glass - Warner Robins Plant",
+        "Anchor Glass - Miller Tulsa 158",
+        "H & O Distribution ",
+        "Anchor Glass - Okmulgee",
+        "Anchor Glass - Elmira Plant",
+        "CPDS - 106"
+      ],
+      "source": "bc_cache_seed",
+      "bc_invoice_count": 6200,
+      "amount_stats": {
+        "count": 6176,
+        "mean": 13037.24,
+        "median": 12903.01,
+        "stddev": 7381.74,
+        "min": 50,
+        "max": 499516.86,
+        "p25": 11838.83,
+        "p75": 14073.88
+      },
+      "po_expected": true,
+      "external_ref_rate": 1.0,
+      "order_number_rate": 0.0,
+      "po_patterns": {
+        "has_patterns": true,
+        "total_refs": 6200,
+        "numeric_only_pct": 0.988,
+        "has_dash_pct": 0.001,
+        "has_alpha_pct": 0.009,
+        "avg_length": 7.1,
+        "common_prefixes": [
+          {
+            "prefix": "47",
+            "count": 2120
+          },
+          {
+            "prefix": "46",
+            "count": 2013
+          },
+          {
+            "prefix": "48",
+            "count": 1449
+          }
+        ]
+      },
+      "posting_frequency": {
+        "frequency": "daily",
+        "total_postings": 6200,
+        "span_days": 2957,
+        "avg_per_month": 62.9,
+        "first_posting": "2018-02-05",
+        "last_posting": "2026-03-12"
+      },
+      "payment_status_breakdown": {
+        "Paid": 6171,
+        "Canceled": 1,
+        "Open": 28
+      },
+      "last_updated": "2026-04-28T23:38:38.131396+00:00",
+      "seeded_at": "2026-04-28T23:38:38.131396+00:00"
+    }
+  },
+  "E": {
+    "applicable": true,
+    "matches": [],
+    "match_count": 0
+  },
+  "F": {
+    "applicable": true,
+    "events": [],
+    "event_count": 0
+  },
+  "G": {
+    "collections_scanned": [
+      "bc_cache_metadata",
+      "vendor_maturity_scores",
+      "classification_corrections",
+      "entity_resolutions",
+      "bc_item_mapping_history",
+      "vendor_matches",
+      "vendor_match_rejections",
+      "so_learning_apply_audit",
+      "sharepoint_vendor_mappings",
+      "feedback_events",
+      "intake_learning_events",
+      "ds_vendor_shipment_logs",
+      "vendor_extraction_successes",
+      "learning_events",
+      "ap_learning_suggestions",
+      "stable_vendor_config",
+      "customer_posting_profiles",
+      "sales_learning_jobs",
+      "vendor_type_patterns",
+      "self_correction_audits",
+      "workflow_events",
+      "learning_digests",
+      "hub_events",
+      "posting_learning_events",
+      "validation_gap_log",
+      "learning_metrics",
+      "customer_aliases",
+      "hub_bc_vendors",
+      "vendor_realtime_intelligence",
+      "reference_label_corrections",
+      "so_learning_suggestions",
+      "sender_vendor_map",
+      "vendor_extraction_profiles",
+      "intake_item_aliases",
+      "learning_drift_alerts",
+      "vendor_intelligence_profiles",
+      "stable_vendor_override_history"
+    ],
+    "hits": {
+      "vendor_maturity_scores": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "composite_score": 96,
+            "computed_at": "2026-04-28T23:43:07.284118+00:00",
+            "dimensions": {
+              "volume": {
+                "score": 90,
+                "weight": 0.15,
+                "detail": "194 documents processed"
+              },
+              "accuracy": {
+                "score": 97,
+                "weight": 0.3,
+                "detail": "189/194 successful"
+              },
+              "consistency": {
+                "score": 100,
+                "weight": 0.15,
+                "detail": "0 corrections (0% rate)"
+              },
+              "recency": {
+                "score": 80,
+                "weight": 0.1,
+                "detail": "Last activity: 2026-04-25"
+              },
+              "field_coverage": {
+                "score": 100,
+                "weight": 0.15,
+                "detail": "5 reliable fields"
+              },
+              "error_rate": {
+                "score": 100,
+                "weight": 0.15,
+                "detail": "0 failures (0% rate)"
+              }
+            },
+            "has_posting_template": false,
+            "maturity_level": "mastered",
+            "template_confidence": "none",
+            "total_documents": 194,
+            "vendor_name": "ANCH"
+          }
+        ]
+      },
+      "classification_corrections": {
+        "rows": [
+          {
+            "doc_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "vendor_id": "ANCH",
+            "correction_type": "readiness_policy_held",
+            "original_type": "True",
+            "corrected_type": "False",
+            "source": "readiness_self_correction",
+            "confirmed_at": "2026-04-08T02:38:31.027877+00:00",
+            "applied": true,
+            "file_name": "multi-vendor-batch_doc2.pdf",
+            "text_snippet": "ANCHOR GLASS CONTAINER CORP | AG-8842 | 2026-01-18 | 9500.00 | unknown",
+            "vendor_canonical": "ANCH",
+            "vendor_no": "ANCH"
+          }
+        ]
+      },
+      "vendor_extraction_successes": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "confirmed_field_names": [
+              "vendor",
+              "invoice_number",
+              "invoice_date",
+              "amount",
+              "freight_direction"
+            ],
+            "doc_type": "AP_Invoice",
+            "last_success_at": "2026-04-25T18:46:03.146113+00:00",
+            "last_successful_fields": [
+              "vendor",
+              "invoice_number",
+              "invoice_date",
+              "amount",
+              "freight_direction"
+            ],
+            "success_count": 189
+          }
+        ]
+      },
+      "workflow_events": {
+        "rows": [
+          {
+            "event_id": "d12dc39d-b629-47cd-be8e-f5aa8cc54b1a",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "document.received",
+            "status": "completed",
+            "source_service": "manual_auto_split",
+            "correlation_id": "ce32acbc-d1d6-4d28-b1df-d0e18e1a1b9b",
+            "timestamp": "2026-04-01T19:25:46.043168+00:00",
+            "actor": null,
+            "payload": {
+              "source": "manual_auto_split",
+              "file_name": "multi-vendor-batch_doc2.pdf",
+              "content_type": "application/pdf",
+              "file_size": 1318
+            }
+          },
+          {
+            "event_id": "75619ae2-c6ae-4b2f-983b-155c3bc5b992",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "system.reprocessed",
+            "timestamp": "2026-04-01T19:26:14.867316+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "trigger": "auto"
+            }
+          },
+          {
+            "event_id": "bcac2cb1-f933-47de-8ef1-ae031940b818",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.decision.completed",
+            "timestamp": "2026-04-01T19:26:14.967316+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "decision": "NeedsReview",
+              "auto_post": false,
+              "reason": "BC post error: 502: BC API error: Client error '400 Bad Request' for url 'https://login.microsoftonline.com/doc-workflow-test/oauth2/v2.0/token'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+              "source": "auto"
+            }
+          },
+          {
+            "event_id": "cd7fc8c7-a944-499c-84a4-f378c4eff6e8",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "classification.completed",
+            "status": "completed",
+            "source_service": "ai_classifier",
+            "correlation_id": "ce32acbc-d1d6-4d28-b1df-d0e18e1a1b9b",
+            "timestamp": "2026-04-01T19:26:14.874241+00:00",
+            "actor": null,
+            "payload": {
+              "doc_type": "AP_Invoice",
+              "confidence": 0.98,
+              "method": "ai",
+              "model": "gemini-3-pro-preview"
+            }
+          },
+          {
+            "event_id": "b08f4119-0fa7-45e9-a242-db99e266425a",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "vendor.match.failed",
+            "status": "warning",
+            "source_service": "unified_vendor_matcher",
+            "correlation_id": "ce32acbc-d1d6-4d28-b1df-d0e18e1a1b9b",
+            "timestamp": "2026-04-01T19:26:14.874682+00:00",
+            "actor": null,
+            "payload": {
+              "vendor_raw": null,
+              "reason": "No match found"
+            }
+          },
+          {
+            "event_id": "249d8542-4cbc-413c-957e-ebb43d82a89d",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "bc.validation.failed",
+            "status": "failed",
+            "source_service": "bc_sandbox_service",
+            "correlation_id": "ce32acbc-d1d6-4d28-b1df-d0e18e1a1b9b",
+            "timestamp": "2026-04-01T19:26:14.875131+00:00",
+            "actor": null,
+            "payload": {
+              "failed_checks": [
+                "bc_connection"
+              ],
+              "checks_passed": 0,
+              "checks_total": 1,
+              "errors": [
+                "Could not obtain BC token"
+              ]
+            }
+          },
+          {
+            "event_id": "599fbd71-c86b-49a0-99ab-8deda4014fe3",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.decision.completed",
+            "status": "completed",
+            "source_service": "auto_clear_service",
+            "correlation_id": "ce32acbc-d1d6-4d28-b1df-d0e18e1a1b9b",
+            "timestamp": "2026-04-01T19:26:14.875634+00:00",
+            "actor": null,
+            "payload": {
+              "decision": "needs_review",
+              "reason": "AP invoices use strict auto-post service",
+              "auto_clear": false,
+              "auto_post": false
+            }
+          },
+          {
+            "event_id": "38a71c68-93d0-4eb9-bf41-fa5abb23e841",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "reference.resolve.started",
+            "status": "completed",
+            "source_service": "auto_resolution",
+            "correlation_id": "e6455167-bacc-4825-a861-e20ff3bae9dd",
+            "timestamp": "2026-04-01T19:26:14.879407+00:00",
+            "actor": null,
+            "payload": {
+              "retry_count": 0,
+              "worker_id": 3
+            }
+          },
+          {
+            "event_id": "ecb1bed5-697e-48df-8700-834362a56f79",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "reference.extraction.completed",
+            "status": "completed",
+            "source_service": "reference_intelligence",
+            "correlation_id": "db5746cb-de54-48ea-b77b-75d4e0da3def",
+            "timestamp": "2026-04-01T19:26:14.881241+00:00",
+            "actor": null,
+            "payload": {
+              "candidate_count": 1,
+              "candidates": [
+                {
+                  "reference_value_raw": "AG-8842",
+                  "reference_value_normalized": "AG8842",
+                  "detected_label": "INVOICE",
+                  "source_text": "Extracted field: invoice_number",
+                  "confidence": 0.9,
+                  "page_number": 1,
+                  "predicted_domain": "purchase",
+                  "predicted_entity_types": [
+                    "posted_purchase_invoice"
+                  ],
+                  "classification_reasoning": "Invoice reference, document type: AP_Invoice; Vendor context: ANCHOR GLASS CONTAINER CORP",
+                  "semantic_type": "invoice_number"
+                }
+              ]
+            }
+          },
+          {
+            "event_id": "60b0b484-41eb-4f71-ac38-d6ae0c3055f3",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "reference.resolve.completed",
+            "status": "warning",
+            "source_service": "reference_intelligence",
+            "correlation_id": "c80ee041-d4dc-4cd4-bd0e-e7d522dcb08f",
+            "timestamp": "2026-04-01T19:26:24.370800+00:00",
+            "actor": null,
+            "payload": {
+              "match_outcome": "no_match",
+              "best_match_type": null,
+              "best_match_score": null,
+              "candidate_count": 1,
+              "bc_queries": 0,
+              "processing_time_ms": 9489,
+              "strategy": "AP_Invoice"
+            }
+          },
+          {
+            "event_id": "0528ccbb-708a-461d-9fc1-4e8a0ab82a18",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "freight.gl.classified",
+            "status": "completed",
+            "source_service": "freight_gl_routing",
+            "correlation_id": "962e681c-c884-4ff7-93af-a8e1a8eb8f3b",
+            "timestamp": "2026-04-01T19:26:24.380915+00:00",
+            "actor": null,
+            "payload": {
+              "is_freight": false,
+              "direction": null,
+              "gl_number": null,
+              "confidence": 0.0
+            }
+          },
+          {
+            "event_id": "e9cb6902-66f0-4c9d-ac37-6d86e97098ce",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "validation.started",
+            "status": "completed",
+            "source_service": "auto_resolution",
+            "correlation_id": "a3e2c8c4-867f-45a2-8528-b622f7d55ed4",
+            "timestamp": "2026-04-01T19:26:24.382698+00:00",
+            "actor": null,
+            "payload": {
+              "document_type": "AP_Invoice",
+              "validation_version": "2.0.0"
+            }
+          },
+          {
+            "event_id": "126e6443-cb41-4895-99c9-a773a6de2a2b",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "validation.completed",
+            "status": "completed",
+            "source_service": "auto_resolution",
+            "correlation_id": "a67b317c-6d46-45c3-8560-b374f08e0c19",
+            "timestamp": "2026-04-01T19:26:24.384076+00:00",
+            "actor": null,
+            "payload": {
+              "document_type": "AP_Invoice",
+              "validation_state": "fail",
+              "all_passed": false,
+              "blocking_issues_count": 1,
+              "warnings_count": 2,
+              "vendor_resolved": false,
+              "invoice_number_present": true,
+              "invoice_date_present": true,
+              "total_amount_present": true,
+              "is_duplicate": false
+            }
+          },
+          {
+            "event_id": "3b27e1b2-ea28-4ff4-abbd-6348526e5ab7",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.rule.triggered",
+            "status": "completed",
+            "source_service": "automation_rules",
+            "correlation_id": "77210bda-8527-4dc9-b585-8ef68fe0a938",
+            "timestamp": "2026-04-01T19:26:24.386407+00:00",
+            "actor": null,
+            "payload": {
+              "rule_id": "d02dd03a",
+              "rule_name": "AP Invoice Auto-Route",
+              "matched_conditions": {
+                "document_type": "AP_Invoice"
+              },
+              "actions": {
+                "route_to_queue": "accounting_review",
+                "assign_review_priority": "normal"
+              },
+              "vendor_no": ""
+            }
+          },
+          {
+            "event_id": "43d5090e-150f-4e71-9bfe-e79ea0de2a40",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "system.reprocessed",
+            "timestamp": "2026-04-01T19:56:56.992465+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "trigger": "reprocess"
+            }
+          },
+          {
+            "event_id": "916374e5-d6e7-4129-a273-c5cff6317070",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.decision.completed",
+            "timestamp": "2026-04-01T19:56:57.092465+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "decision": "NeedsReview",
+              "auto_post": false,
+              "reason": "BC post error: 502: BC API error: Client error '400 Bad Request' for url 'https://login.microsoftonline.com/doc-workflow-test/oauth2/v2.0/token'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+              "source": "reprocess"
+            }
+          },
+          {
+            "event_id": "8429a1f7-6fc9-4792-b7f2-30be0bf0a163",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "system.reprocessed",
+            "timestamp": "2026-04-01T19:57:41.122361+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "trigger": "reprocess"
+            }
+          },
+          {
+            "event_id": "448e024d-fc9c-4e4d-ba27-624b2c04903e",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.decision.completed",
+            "timestamp": "2026-04-01T19:57:41.222361+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "decision": "NeedsReview",
+              "auto_post": false,
+              "reason": "BC post error: 502: BC API error: Client error '400 Bad Request' for url 'https://login.microsoftonline.com/doc-workflow-test/oauth2/v2.0/token'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+              "source": "reprocess"
+            }
+          },
+          {
+            "event_id": "994aee41-3a3a-465f-a613-02b96d7998e0",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "system.reprocessed",
+            "timestamp": "2026-04-02T00:12:48.384844+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "trigger": "reprocess"
+            }
+          },
+          {
+            "event_id": "04ec5a24-d953-4c1a-a0b4-1b3cd5048a52",
+            "document_id": "93dada81-b21e-4d82-af1b-43efa02e7eef",
+            "event_type": "automation.decision.completed",
+            "timestamp": "2026-04-02T00:12:48.484844+00:00",
+            "source_service": "ap_auto_post_service",
+            "payload": {
+              "decision": "NeedsReview",
+              "auto_post": false,
+              "reason": "BC post error: 502: BC API error: Client error '400 Bad Request' for url 'https://login.microsoftonline.com/doc-workflow-test/oauth2/v2.0/token'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/400",
+              "source": "reprocess"
+            }
+          }
+        ]
+      },
+      "vendor_realtime_intelligence": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "by_type": {
+              "AP_Invoice": {
+                "total": 194,
+                "success": 189
+              }
+            },
+            "last_document_at": "2026-04-25T18:46:03.142558+00:00",
+            "last_outcome": "auto_filed",
+            "review_count": 5,
+            "total_confidence_sum": 192.0600000000003,
+            "total_documents": 194,
+            "vendor_name": "ANCH",
+            "auto_validation_rate": 0.9742,
+            "avg_confidence": 0.99,
+            "confidence_to_validation_gap": 0.0158,
+            "correction_rate": 0.0,
+            "rates_updated_at": "2026-04-25T18:46:03.143392+00:00",
+            "gap_analysis": {
+              "bc_connection": 5
+            },
+            "gap_last_seen": {
+              "bc_connection": "2026-04-04T19:15:15.298301+00:00"
+            },
+            "success_count": 189
+          }
+        ]
+      },
+      "sender_vendor_map": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "sender_domain": "anchorglass.com",
+            "vendor_canonical": "Anchor Glass - Shakopee Plant",
+            "vendor_name": "Anchor Glass - Shakopee Plant",
+            "vendor_no": "ANCH",
+            "domain_confidence": 3,
+            "source": "spiro_domain_seed",
+            "created_at": "2026-04-01T17:40:06.656906+00:00",
+            "updated_at": "2026-04-01T17:40:06.656906+00:00"
+          }
+        ]
+      },
+      "vendor_extraction_profiles": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "amount_stats": {
+              "count": 6176,
+              "mean": 13037.24,
+              "median": 12903.01,
+              "stddev": 7381.74,
+              "min": 50,
+              "max": 499516.86,
+              "p25": 11838.83,
+              "p75": 14073.88
+            },
+            "confidence_adjustments": {
+              "bc_data_rich": 0.02
+            },
+            "created_at": "2026-04-02T20:02:47.901237+00:00",
+            "document_type_bias": "purchase_invoice",
+            "enabled": true,
+            "last_updated": "2026-04-02T20:02:47.901237+00:00",
+            "learning_source": [
+              "bc_cache_seed"
+            ],
+            "po_expected": true,
+            "reference_label_bias": {},
+            "reference_priority_order": [
+              "purchase_order",
+              "posted_purchase_invoice",
+              "sales_order"
+            ],
+            "source_automation_rate": 0,
+            "source_correction_count": 0,
+            "source_invoice_count": 6200,
+            "source_match_rate": 1.0,
+            "vendor_name": "Anchor Glass - Okmulgee"
+          }
+        ]
+      },
+      "vendor_intelligence_profiles": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCHOR GLASS CONTAINER CORP",
+            "document_types_seen": [
+              "AP_Invoice"
+            ],
+            "typical_reference_domain": "unknown",
+            "reference_confidence_score": 0,
+            "invoice_count": 1,
+            "freight_invoice_count": 0,
+            "shipping_document_count": 0,
+            "po_reference_count": 0,
+            "po_reference_frequency": 0.0,
+            "shipment_reference_count": 0,
+            "shipment_reference_frequency": 0.0,
+            "bol_count": 0,
+            "bol_presence_rate": 0.0,
+            "invoice_reference_count": 1,
+            "typical_bc_match_types": [],
+            "bc_match_type_counts": {},
+            "resolution_success_count": 0,
+            "reference_resolution_success_rate": 0.0,
+            "automation_success_count": 1,
+            "automation_success_rate": 1.0,
+            "validation_pass_count": 0,
+            "validation_pass_rate": 0.0,
+            "avg_match_score": 0,
+            "match_outcome_counts": {
+              "no_match": 1
+            },
+            "domain_counts": {
+              "unknown": 1
+            },
+            "stable_vendor_flag": false,
+            "first_document_seen": "2026-04-25T18:46:06.385481+00:00",
+            "last_document_seen": "2026-04-25T18:46:06.385481+00:00",
+            "created_at": "2026-04-25T18:46:06.385481+00:00",
+            "updated_at": "2026-04-25T18:46:06.385481+00:00"
+          }
+        ]
+      },
+      "stable_vendor_override_history": {
+        "by_canonical_code_only": true,
+        "rows": [
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCH",
+            "action": "override_applied",
+            "old_status": "unstable",
+            "new_status": "watch",
+            "override_status": "force_watch",
+            "reason": "Testing override via pytest",
+            "note": "Automated test - will be cleared",
+            "actor": "pytest_admin",
+            "timestamp": "2026-04-23T17:29:57.220342+00:00",
+            "expires_at": null
+          },
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCH",
+            "action": "override_applied",
+            "old_status": "watch",
+            "new_status": "unstable",
+            "override_status": "force_unstable",
+            "reason": "Test before clear",
+            "note": "",
+            "actor": "pytest",
+            "timestamp": "2026-04-23T17:29:57.672887+00:00",
+            "expires_at": null
+          },
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCH",
+            "action": "override_cleared",
+            "old_status": "unstable",
+            "new_status": "unstable",
+            "override_status": "none",
+            "reason": "Clearing test override",
+            "note": "",
+            "actor": "pytest_admin",
+            "timestamp": "2026-04-23T17:29:57.790985+00:00"
+          },
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCH",
+            "action": "override_applied",
+            "old_status": "unstable",
+            "new_status": "stable",
+            "override_status": "force_stable",
+            "reason": "Test history",
+            "note": "",
+            "actor": "pytest_history_test",
+            "timestamp": "2026-04-23T17:29:58.162147+00:00",
+            "expires_at": null
+          },
+          {
+            "vendor_no": "ANCH",
+            "vendor_name": "ANCH",
+            "action": "override_cleared",
+            "old_status": "stable",
+            "new_status": "unstable",
+            "override_status": "none",
+            "reason": "Cleanup",
+            "note": "",
+            "actor": "pytest",
+            "timestamp": "2026-04-23T17:29:58.373827+00:00"
+          }
+        ]
+      }
+    }
+  },
+  "H": {
+    "ranked_hypotheses": [
+      "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)",
+      "COLLECTION \u2014 `vendor_maturity_scores` carries history rows for this doc/code",
+      "COLLECTION \u2014 `classification_corrections` carries history rows for this doc/code",
+      "COLLECTION \u2014 `vendor_extraction_successes` carries history rows for this doc/code",
+      "COLLECTION \u2014 `workflow_events` carries history rows for this doc/code",
+      "COLLECTION \u2014 `vendor_realtime_intelligence` carries history rows for this doc/code",
+      "COLLECTION \u2014 `sender_vendor_map` carries history rows for this doc/code",
+      "COLLECTION \u2014 `vendor_extraction_profiles` carries history rows for this doc/code",
+      "COLLECTION \u2014 `vendor_intelligence_profiles` carries history rows for this doc/code",
+      "COLLECTION \u2014 `stable_vendor_override_history` carries history rows for this doc/code"
+    ],
+    "primary": "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)"
+  }
+}

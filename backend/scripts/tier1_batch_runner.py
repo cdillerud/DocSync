@@ -117,6 +117,7 @@ async def phase_preflight() -> bool:
 
     checks: List[Dict[str, Any]] = []
 
+    sandbox_config: Dict[str, Any] = {}
     async with httpx.AsyncClient(timeout=10) as client:
         # 1. Basic backend health
         try:
@@ -131,17 +132,17 @@ async def phase_preflight() -> bool:
         try:
             r = await client.get(f"{LOCAL_API}/api/bc-sandbox/status")
             j = r.json() if r.status_code == 200 else {}
-            cfg = (j.get("config") or {}) if isinstance(j, dict) else {}
+            sandbox_config = (j.get("config") or {}) if isinstance(j, dict) else {}
             ok = (
                 r.status_code == 200
-                and str(cfg.get("write_environment", "")).startswith("Sandbox")
-                and cfg.get("block_production_writes") is True
+                and str(sandbox_config.get("write_environment", "")).startswith("Sandbox")
+                and sandbox_config.get("block_production_writes") is True
             )
             checks.append({
                 "name": "2. BC sandbox status (write→Sandbox, block_prod=true)",
                 "ok": ok,
                 "status": r.status_code,
-                "body": f"write_env={cfg.get('write_environment')}, block_prod={cfg.get('block_production_writes')}, "
+                "body": f"write_env={sandbox_config.get('write_environment')}, block_prod={sandbox_config.get('block_production_writes')}, "
                         f"pilot_mode={j.get('pilot_mode')}, read_only={j.get('read_only')}",
             })
         except Exception as e:
@@ -175,49 +176,46 @@ async def phase_preflight() -> bool:
         except Exception as e:
             checks.append({"name": "4. AP metrics dashboard", "ok": False, "status": None, "body": f"ERR {e}"})
 
-    # 5. Env consistency
-    expected_env = {
-        "BC_WRITE_ENVIRONMENT": ("startswith", "Sandbox"),
-        "BC_BLOCK_PRODUCTION_WRITES": ("equals", "true"),
-        "BC_WRITE_ENABLED": ("equals", "true"),
-    }
-    env_issues = []
-    for k, (op, want) in expected_env.items():
-        got = (os.environ.get(k) or "").strip()
-        if op == "startswith" and not got.startswith(want):
-            env_issues.append(f"{k}={got!r} (expected to start with {want!r})")
-        elif op == "equals" and got.lower() != want.lower():
-            env_issues.append(f"{k}={got!r} (expected {want!r})")
+    # 5. Resolved-config sanity (read from /api/bc-sandbox/status response — uses the
+    #    same fallback chain the production code uses, so no drift across env-var
+    #    naming conventions: BC_WRITE_ENVIRONMENT → BC_SANDBOX_ENVIRONMENT → BC_ENVIRONMENT, etc.)
+    write_env = str(sandbox_config.get("write_environment") or "")
+    block_prod = sandbox_config.get("block_production_writes")
+    config_issues = []
+    if not write_env.lower().startswith("sandbox"):
+        config_issues.append(f"resolved write_environment={write_env!r} does not start with 'Sandbox'")
+    if block_prod is not True:
+        config_issues.append(f"resolved block_production_writes={block_prod!r}, expected True")
     checks.append({
-        "name": "5. Env consistency (write target, prod-block, writes-enabled)",
-        "ok": not env_issues,
+        "name": "5. Resolved BC config (write→Sandbox, block_prod=True)",
+        "ok": not config_issues,
         "status": None,
-        "body": "OK" if not env_issues else "; ".join(env_issues),
+        "body": "OK" if not config_issues else "; ".join(config_issues),
     })
 
-    # 6. BC credential plausibility (NEW guard — detect placeholder/test tenant IDs)
-    # Real Azure tenant + client IDs are GUIDs. Anything else is almost
-    # certainly a placeholder and will fail OAuth with AADSTS900023.
+    # 6. BC credential plausibility (read from /api/bc-sandbox/status — the resolved
+    #    runtime values, not raw env vars, so naming differences across envs don't
+    #    cause false negatives.)
     import re
     GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
     PLACEHOLDER_HINTS = ("test", "example", "placeholder", "demo", "doc-workflow", "order-ledger", "your-")
     cred_issues = []
-    for k in ("BC_TENANT_ID", "BC_CLIENT_ID"):
-        v = (os.environ.get(k) or "").strip()
+    for label, key in (("client_id", "client_id"), ("tenant_id", "tenant_id")):
+        v = str(sandbox_config.get(key) or "").strip()
         if not v:
-            cred_issues.append(f"{k} missing")
+            cred_issues.append(f"resolved {label} is missing from /api/bc-sandbox/status")
             continue
         if not GUID_RE.match(v):
             hint = next((h for h in PLACEHOLDER_HINTS if h in v.lower()), None)
             if hint:
-                cred_issues.append(f"{k}={v!r} contains placeholder hint {hint!r} — not a real GUID")
+                cred_issues.append(f"resolved {label}={v!r} contains placeholder hint {hint!r} — not a real GUID")
             else:
-                cred_issues.append(f"{k}={v!r} is not a GUID — likely a placeholder")
+                cred_issues.append(f"resolved {label}={v!r} is not a GUID — likely a placeholder")
     checks.append({
-        "name": "6. BC credential plausibility (real GUIDs?)",
+        "name": "6. BC credential plausibility (real GUIDs in resolved config?)",
         "ok": not cred_issues,
         "status": None,
-        "body": "OK — credentials look like real Azure GUIDs"
+        "body": "OK — resolved client_id and tenant_id look like real Azure GUIDs"
                 if not cred_issues
                 else "PLACEHOLDER DETECTED: " + "; ".join(cred_issues)
                      + ". This environment cannot reach BC; run Tier 1 on the production VM instead.",

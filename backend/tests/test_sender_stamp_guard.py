@@ -381,3 +381,79 @@ class TestClassESweepContract:
             ("Acme Corp", "Acme Corp"),
         ]:
             assert tier1_fn(a, b) == helpers_fn(a, b)
+
+
+
+# ---------------------------------------------------------------------------
+# Class F — Legacy-path adoption smoke (Phase B)
+#
+# Static-source assertions that protect against future regressions where a
+# maintainer drops the guard kwargs from a call site. No new behavioral
+# coverage — Class C already proves the function works; Class F just proves
+# every call site passes the right kwargs.
+# ---------------------------------------------------------------------------
+
+
+def _find_call_blocks(source: str, fn_name: str) -> list[str]:
+    """Return each occurrence of `fn_name(...)` together with up to 300 chars
+    of following text — enough to capture the call's keyword arguments
+    across multi-line formatting."""
+    blocks: list[str] = []
+    idx = 0
+    needle = fn_name + "("
+    while True:
+        i = source.find(needle, idx)
+        if i == -1:
+            break
+        blocks.append(source[i:i + 300])
+        idx = i + len(needle)
+    return blocks
+
+
+class TestClassFLegacyPathAdoption:
+    def test_f1_vendor_reprocess_passes_guard_kwargs(self):
+        import inspect
+        import routers.vendor_reprocess as mod
+        src = inspect.getsource(mod)
+        blocks = _find_call_blocks(src, "lookup_vendor_by_sender")
+        # at least one call to the function exists in this module
+        assert len(blocks) >= 1, "lookup_vendor_by_sender call missing from vendor_reprocess.py"
+        # at least one of those calls passes BOTH guard kwargs
+        passes_both = any(
+            "extracted_vendor=" in b and "document_id=" in b
+            for b in blocks
+        )
+        assert passes_both, (
+            "vendor_reprocess.py: at least one lookup_vendor_by_sender call must "
+            "pass both `extracted_vendor=` and `document_id=` kwargs"
+        )
+
+    def test_f2_document_handlers_passes_guard_kwargs(self):
+        import inspect
+        import services.document_handlers as mod
+        src = inspect.getsource(mod)
+        blocks = _find_call_blocks(src, "lookup_vendor_by_sender")
+        assert len(blocks) >= 1, "lookup_vendor_by_sender call missing from document_handlers.py"
+        passes_both = any(
+            "extracted_vendor=" in b and "document_id=" in b
+            for b in blocks
+        )
+        assert passes_both, (
+            "document_handlers.py: at least one lookup_vendor_by_sender call must "
+            "pass both `extracted_vendor=` and `document_id=` kwargs"
+        )
+
+    def test_f3_server_passes_guard_kwargs(self):
+        import inspect
+        import server as mod
+        src = inspect.getsource(mod)
+        blocks = _find_call_blocks(src, "lookup_vendor_by_sender")
+        assert len(blocks) >= 1, "lookup_vendor_by_sender call missing from server.py"
+        passes_both = any(
+            "extracted_vendor=" in b and "document_id=" in b
+            for b in blocks
+        )
+        assert passes_both, (
+            "server.py: at least one lookup_vendor_by_sender call must "
+            "pass both `extracted_vendor=` and `document_id=` kwargs"
+        )

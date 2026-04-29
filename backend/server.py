@@ -3845,7 +3845,11 @@ async def process_incoming_email(email_id: str, mailbox_address: str):
             # Step 7a: Check sender email → vendor mapping (learned from previous docs)
             if sender_email:
                 from services.vendor_matching import lookup_vendor_by_sender
-                sender_result = await lookup_vendor_by_sender(sender_email)
+                sender_result = await lookup_vendor_by_sender(
+                    sender_email,
+                    extracted_vendor=normalized_fields.get("vendor_raw"),
+                    document_id=doc_id,
+                )
                 if sender_result.get("vendor_canonical"):
                     vendor_alias_result = sender_result
             

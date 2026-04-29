@@ -61,7 +61,12 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
     sender_email = doc.get("email_sender") or ""
     match_result = {"vendor_canonical": None, "vendor_match_method": "none"}
     if sender_email:
-        match_result = await lookup_vendor_by_sender(sender_email)
+        extracted_vendor_for_guard = (doc.get("extracted_fields") or {}).get("vendor")
+        match_result = await lookup_vendor_by_sender(
+            sender_email,
+            extracted_vendor=extracted_vendor_for_guard,
+            document_id=doc.get("id"),
+        )
 
     # Fall back to text-based vendor matching
     if not match_result.get("vendor_canonical"):

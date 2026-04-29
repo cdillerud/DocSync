@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
+import { Textarea } from '../components/ui/textarea';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '../components/ui/table';
@@ -29,6 +30,7 @@ import {
   createManualAgreementLink,
   getAgreementAudit,
   getContractsHealth,
+  contractsBCSearch,
 } from '../lib/api';
 
 // =============================================================================
@@ -216,19 +218,64 @@ function AnalyticsTab() {
                 <div className="text-2xl font-semibold text-rose-500">{telemetry.human_overrides}</div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground">Override rate</div>
+                <div className="text-xs text-muted-foreground">Combined override rate</div>
                 <div className="text-2xl font-semibold">
                   {telemetry.override_rate != null ? pct(telemetry.override_rate) : '—'}
                 </div>
               </div>
             </div>
-            {telemetry.by_threshold_band && (
-              <div className="mt-4 text-xs text-muted-foreground">
-                Band distribution: auto-confirm {telemetry.by_threshold_band.auto_confirm} ·
-                propose {telemetry.by_threshold_band.propose} ·
-                below propose {telemetry.by_threshold_band.below_propose}
+
+            {/* Phase 3.1 — separated band-level override rates */}
+            <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm border-t pt-4">
+              <div data-testid="telemetry-auto-confirm-band">
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground">
+                      Auto-confirm band override rate
+                    </div>
+                    <div className="text-3xl font-semibold">
+                      {pct(telemetry.auto_confirm_override_rate)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-muted-foreground">
+                      {telemetry.by_band_overrides?.auto_confirm ?? 0} rejected of
+                      {' '}{telemetry.by_threshold_band?.auto_confirm ?? 0}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Higher than ~5% suggests the auto-confirm threshold is too low.
+                </p>
               </div>
-            )}
+              <div data-testid="telemetry-propose-band">
+                <div className="flex items-baseline justify-between">
+                  <div>
+                    <div className="text-xs text-muted-foreground">
+                      Propose band override rate
+                    </div>
+                    <div className="text-3xl font-semibold">
+                      {pct(telemetry.propose_override_rate)}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-muted-foreground">
+                      {telemetry.by_band_overrides?.propose ?? 0} rejected of
+                      {' '}{telemetry.by_threshold_band?.propose ?? 0}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Higher rejection here is expected — propose links are reviewed by humans.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 text-xs text-muted-foreground">
+              Band distribution: auto-confirm {telemetry.by_threshold_band?.auto_confirm ?? 0} ·
+              propose {telemetry.by_threshold_band?.propose ?? 0} ·
+              below propose {telemetry.by_threshold_band?.below_propose ?? 0}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -381,6 +428,7 @@ function AgreementDetailDialog({ agreementId, onClose }) {
   const [audit, setAudit] = useState([]);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(true);
+  const [rejectDialog, setRejectDialog] = useState(null); // { linkId }
 
   const refresh = async () => {
     setBusy(true);
@@ -401,14 +449,6 @@ function AgreementDetailDialog({ agreementId, onClose }) {
     try {
       await confirmAgreementLink(agreementId, linkId);
       toast.success('Link confirmed');
-      refresh();
-    } catch (e) { toast.error(e?.response?.data?.detail || e.message); }
-  };
-  const handleRejectLink = async (linkId) => {
-    const notes = window.prompt('Reason for rejection (optional)?') ?? null;
-    try {
-      await rejectAgreementLink(agreementId, linkId, { notes });
-      toast.success('Link rejected');
       refresh();
     } catch (e) { toast.error(e?.response?.data?.detail || e.message); }
   };
@@ -493,7 +533,7 @@ function AgreementDetailDialog({ agreementId, onClose }) {
                               Confirm
                             </Button>
                             <Button size="sm" variant="destructive"
-                                    onClick={() => handleRejectLink(l.id)}
+                                    onClick={() => setRejectDialog({ linkId: l.id })}
                                     data-testid={`reject-link-${l.id}`}>
                               Reject
                             </Button>
@@ -607,6 +647,71 @@ function AgreementDetailDialog({ agreementId, onClose }) {
           </Button>
         </DialogFooter>
       </DialogContent>
+      {rejectDialog && (
+        <NoteDialog
+          title="Reject BC link"
+          description="Why are you rejecting this link? (Optional, written to audit trail.)"
+          confirmLabel="Reject link"
+          confirmVariant="destructive"
+          testIdPrefix="reject-link-dialog"
+          onCancel={() => setRejectDialog(null)}
+          onSubmit={async (note) => {
+            try {
+              await rejectAgreementLink(agreementId, rejectDialog.linkId, { notes: note || null });
+              toast.success('Link rejected');
+              setRejectDialog(null);
+              refresh();
+            } catch (e) {
+              toast.error(e?.response?.data?.detail || e.message);
+            }
+          }}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+// Reusable dialog for capturing an optional note. Replaces window.prompt().
+function NoteDialog({
+  title, description, confirmLabel, confirmVariant = 'default',
+  testIdPrefix, onCancel, onSubmit,
+}) {
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const handle = async () => {
+    setSubmitting(true);
+    try { await onSubmit(note.trim()); }
+    finally { setSubmitting(false); }
+  };
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onCancel(); }}>
+      <DialogContent className="max-w-md" data-testid={`${testIdPrefix}-dialog`}>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
+        {description && (
+          <p className="text-sm text-muted-foreground" data-testid={`${testIdPrefix}-description`}>
+            {description}
+          </p>
+        )}
+        <Textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          rows={4}
+          placeholder="Optional note…"
+          data-testid={`${testIdPrefix}-textarea`}
+        />
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={submitting}
+                  data-testid={`${testIdPrefix}-cancel`}>
+            Cancel
+          </Button>
+          <Button variant={confirmVariant} onClick={handle} disabled={submitting}
+                  data-testid={`${testIdPrefix}-submit`}>
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
     </Dialog>
   );
 }
@@ -711,6 +816,8 @@ function ExceptionsTab() {
   const [statusFilter, setStatusFilter] = useState('open');
   const [codeFilter, setCodeFilter] = useState('');
   const [loading, setLoading] = useState(true);
+  const [resolveDialog, setResolveDialog] = useState(null); // { id }
+  const [mapDialog, setMapDialog] = useState(null); // { exception }
 
   const refresh = async () => {
     setLoading(true);
@@ -727,13 +834,9 @@ function ExceptionsTab() {
   };
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [statusFilter, codeFilter]);
 
-  const resolve = async (id) => {
-    const note = window.prompt('Resolution note (optional)?') ?? null;
-    try {
-      await resolveAgreementException(id, { note });
-      toast.success('Exception resolved');
-      refresh();
-    } catch (e) { toast.error(e?.response?.data?.detail || e.message); }
+  const exceptionToDefaultLinkType = (ex) => {
+    if (ex?.code === 'item_unmatched') return 'item';
+    return 'customer'; // most party_unmatched cases
   };
 
   return (
@@ -808,10 +911,20 @@ function ExceptionsTab() {
                   </TableCell>
                   <TableCell>
                     {e.status === 'open' && (
-                      <Button size="sm" variant="default" onClick={() => resolve(e.id)}
-                              data-testid={`resolve-exception-${e.id}`}>
-                        Resolve
-                      </Button>
+                      <div className="flex gap-2">
+                        {(e.code === 'party_unmatched' || e.code === 'item_unmatched') && (
+                          <Button size="sm" variant="default"
+                                  onClick={() => setMapDialog({ exception: e })}
+                                  data-testid={`map-exception-${e.id}`}>
+                            Map
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline"
+                                onClick={() => setResolveDialog({ id: e.id })}
+                                data-testid={`resolve-exception-${e.id}`}>
+                          Resolve
+                        </Button>
+                      </div>
                     )}
                   </TableCell>
                 </TableRow>
@@ -820,7 +933,225 @@ function ExceptionsTab() {
           </Table>
         </CardContent>
       </Card>
+
+      {resolveDialog && (
+        <NoteDialog
+          title="Resolve exception"
+          description="Add a note explaining how this exception was handled. Written to audit trail."
+          confirmLabel="Mark resolved"
+          testIdPrefix="resolve-exception-dialog"
+          onCancel={() => setResolveDialog(null)}
+          onSubmit={async (note) => {
+            try {
+              await resolveAgreementException(resolveDialog.id, { note: note || null });
+              toast.success('Exception resolved');
+              setResolveDialog(null);
+              refresh();
+            } catch (err) {
+              toast.error(err?.response?.data?.detail || err.message);
+            }
+          }}
+        />
+      )}
+
+      {mapDialog && (
+        <ExceptionMappingDialog
+          exception={mapDialog.exception}
+          defaultLinkType={exceptionToDefaultLinkType(mapDialog.exception)}
+          onCancel={() => setMapDialog(null)}
+          onMapped={() => { setMapDialog(null); refresh(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// Inline workflow: search BC → confirm a link → resolve exception in one shot.
+function ExceptionMappingDialog({ exception, defaultLinkType, onCancel, onMapped }) {
+  const [linkType, setLinkType] = useState(defaultLinkType);
+  const [query, setQuery] = useState(
+    exception?.details?.party_org
+    || exception?.details?.party_name
+    || exception?.details?.item_label
+    || ''
+  );
+  const [results, setResults] = useState([]);
+  const [hint, setHint] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [bcNo, setBcNo] = useState('');
+  const [bcName, setBcName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [resolveAfter, setResolveAfter] = useState(true);
+
+  const linkTypeMeta = useMemo(() => ({
+    customer: { entity: 'customers' },
+    vendor: { entity: 'vendors' },
+    item: { entity: 'items' },
+  }[linkType] || { entity: linkType }), [linkType]);
+
+  const runSearch = async () => {
+    if (!query.trim()) return;
+    setSearching(true);
+    setHint(null);
+    try {
+      const r = await contractsBCSearch({ q: query.trim(), link_type: linkType, limit: 10 });
+      setResults(r.data?.matches || []);
+      setHint(r.data?.hint || null);
+    } catch (e) {
+      toast.error('BC search failed: ' + (e?.response?.data?.detail || e.message));
+    } finally { setSearching(false); }
+  };
+
+  // Auto-search on open + when link_type changes.
+  useEffect(() => { runSearch(); /* eslint-disable-next-line */ }, [linkType]);
+
+  const pickResult = (m) => {
+    setBcNo(m.bc_no);
+    setBcName(m.bc_name);
+  };
+
+  const submit = async () => {
+    if (!bcNo.trim()) {
+      toast.error('Pick a BC entity (or enter a BC number) before saving.');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await createManualAgreementLink(exception.agreement_id, {
+        link_type: linkType,
+        bc_entity: linkTypeMeta.entity,
+        bc_no: bcNo.trim(),
+        bc_name_snapshot: bcName.trim() || null,
+        notes: `mapped from exception ${exception.id} (${exception.code})`,
+      });
+      if (resolveAfter) {
+        await resolveAgreementException(exception.id, {
+          note: `mapped to ${linkType}=${bcNo.trim()}`,
+        });
+      }
+      toast.success(
+        resolveAfter
+          ? 'Link created and exception resolved'
+          : 'Link created (exception left open)'
+      );
+      onMapped();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || e.message);
+    } finally { setSubmitting(false); }
+  };
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onCancel(); }}>
+      <DialogContent className="max-w-2xl" data-testid="exception-mapping-dialog">
+        <DialogHeader>
+          <DialogTitle>Map exception → BC entity</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="text-xs text-muted-foreground">
+            Exception <span className="font-mono">{exception.id}</span> ·
+            code <span className="font-mono">{exception.code}</span> ·
+            agreement <span className="font-mono">{exception.agreement_id}</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="map-link-type">Link type</Label>
+              <select
+                id="map-link-type"
+                className="w-full bg-background border rounded px-2 py-2 text-sm"
+                value={linkType}
+                onChange={(e) => { setLinkType(e.target.value); setBcNo(''); setBcName(''); }}
+                data-testid="exception-mapping-link-type"
+              >
+                {['customer','vendor','item'].map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="map-search">Search BC</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="map-search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
+                  placeholder="Name or BC number…"
+                  data-testid="exception-mapping-query"
+                />
+                <Button size="sm" variant="secondary" onClick={runSearch}
+                        disabled={searching}
+                        data-testid="exception-mapping-search-btn">
+                  {searching ? '…' : 'Search'}
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {hint && (
+            <div className="text-xs p-2 rounded bg-amber-950/40 border border-amber-700"
+                 data-testid="exception-mapping-hint">
+              {hint}
+            </div>
+          )}
+
+          <div className="border rounded max-h-48 overflow-y-auto"
+               data-testid="exception-mapping-results">
+            {results.length === 0 && !searching && (
+              <div className="text-xs text-muted-foreground p-3">
+                No candidates yet. Adjust the search or enter a BC number directly below.
+              </div>
+            )}
+            {results.map((m) => (
+              <button
+                key={m.bc_no + m.source}
+                type="button"
+                onClick={() => pickResult(m)}
+                className={`w-full text-left p-2 hover:bg-zinc-800/60 border-b last:border-b-0
+                            ${bcNo === m.bc_no ? 'bg-zinc-800/80' : ''}`}
+                data-testid={`exception-mapping-pick-${m.bc_no}`}
+              >
+                <div className="text-sm font-medium">{m.bc_name || '(no name)'}</div>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-mono">{m.bc_no}</span> · {m.source}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="map-bc-no">BC No.</Label>
+              <Input id="map-bc-no" value={bcNo}
+                     onChange={(e) => setBcNo(e.target.value)}
+                     data-testid="exception-mapping-bcno" />
+            </div>
+            <div>
+              <Label htmlFor="map-bc-name">Name (snapshot)</Label>
+              <Input id="map-bc-name" value={bcName}
+                     onChange={(e) => setBcName(e.target.value)}
+                     data-testid="exception-mapping-bcname" />
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={resolveAfter}
+                   onChange={(e) => setResolveAfter(e.target.checked)}
+                   data-testid="exception-mapping-resolve-after" />
+            Mark exception as resolved after creating the link
+          </label>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel} disabled={submitting}
+                  data-testid="exception-mapping-cancel">
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={submitting || !bcNo.trim()}
+                  data-testid="exception-mapping-submit">
+            {submitting ? 'Saving…' : 'Map & Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

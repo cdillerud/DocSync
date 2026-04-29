@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import (
@@ -545,12 +546,13 @@ async def contracts_threshold_telemetry(
 ):
     """Read-only precision@threshold over the last N days using audit rows.
 
-    Counts:
-      * total auto-confirmed system links emitted (action=proposed_link or
-        confirmed_link with actor=system)
-      * how many were later rejected by a human (action=rejected_link with
-        actor != system) for the same link_id
-      * "override rate" = rejected / system_emitted (lower is better)
+    Reports:
+      * total system-emitted links (action proposed_link / confirmed_link with actor=system)
+      * how many of those were later rejected by a human
+      * **separate** override rates for each band:
+          - auto_confirm_override_rate = rejected ÷ system-emitted with confidence >= auto_confirm
+          - propose_override_rate      = rejected ÷ system-emitted with confidence in [propose, auto_confirm)
+      * a combined `override_rate` retained for back-compat
     """
     from datetime import datetime, timedelta, timezone
     from services.contracts.bc_agreement_matcher import (
@@ -585,18 +587,19 @@ async def contracts_threshold_telemetry(
             "system_emitted": 0,
             "human_overrides": 0,
             "override_rate": 0.0,
-            "by_threshold_band": {},
+            "by_threshold_band": {
+                "auto_confirm": 0, "propose": 0, "below_propose": 0,
+            },
+            "by_band_overrides": {
+                "auto_confirm": 0, "propose": 0, "below_propose": 0,
+            },
+            "auto_confirm_override_rate": 0.0,
+            "propose_override_rate": 0.0,
         }
-
-    # Human overrides for those link ids
-    human_overrides = await audit.count_documents({
-        "action": "rejected_link",
-        "actor": {"$ne": "system"},
-        "link_id": {"$in": system_emitted_ids},
-    })
 
     # Slice by confidence band (live state from links table)
     bands = {"auto_confirm": 0, "propose": 0, "below_propose": 0}
+    band_by_id: Dict[str, str] = {}
     cursor = links.find(
         {"id": {"$in": system_emitted_ids}},
         {"_id": 0, "id": 1, "confidence": 1, "status": 1},
@@ -605,10 +608,29 @@ async def contracts_threshold_telemetry(
         c = float(row.get("confidence") or 0)
         if c >= auto:
             bands["auto_confirm"] += 1
+            band_by_id[row["id"]] = "auto_confirm"
         elif c >= propose:
             bands["propose"] += 1
+            band_by_id[row["id"]] = "propose"
         else:
             bands["below_propose"] += 1
+            band_by_id[row["id"]] = "below_propose"
+
+    # Human overrides — fetch each rejected_link audit and bucket by band
+    overrides_by_band = {"auto_confirm": 0, "propose": 0, "below_propose": 0}
+    human_overrides = 0
+    cursor = audit.find(
+        {
+            "action": "rejected_link",
+            "actor": {"$ne": "system"},
+            "link_id": {"$in": system_emitted_ids},
+        },
+        {"_id": 0, "link_id": 1},
+    )
+    async for row in cursor:
+        human_overrides += 1
+        band = band_by_id.get(row["link_id"], "below_propose")
+        overrides_by_band[band] = overrides_by_band.get(band, 0) + 1
 
     def _pct(num: int, denom: int) -> float:
         return round(num / denom, 4) if denom else 0.0
@@ -621,7 +643,96 @@ async def contracts_threshold_telemetry(
         "human_overrides": human_overrides,
         "override_rate": _pct(human_overrides, len(system_emitted_ids)),
         "by_threshold_band": bands,
+        "by_band_overrides": overrides_by_band,
+        "auto_confirm_override_rate": _pct(
+            overrides_by_band["auto_confirm"], bands["auto_confirm"],
+        ),
+        "propose_override_rate": _pct(
+            overrides_by_band["propose"], bands["propose"],
+        ),
     }
+
+
+# ---------------------------------------------------------------------------
+# BC search (scoped to Contract Intelligence) — Phase 3.1
+# ---------------------------------------------------------------------------
+
+@router.get("/contracts/bc-search")
+async def contracts_bc_search(
+    q: str = Query(..., min_length=1, max_length=128),
+    link_type: str = Query(..., pattern="^(customer|vendor|item)$"),
+    limit: int = Query(10, ge=1, le=50),
+    _user: dict = Depends(get_current_user),
+):
+    """Search the existing BC reference cache for candidates to attach as a
+    Contract Intelligence link. Read-only: no BC writes, no cache mutation.
+
+    Behavior:
+      * `customer` → searches `bc_reference_cache` by `bc_customer_name` regex
+        (case-insensitive) AND by exact `bc_customer_no`. Dedupes by customer no.
+      * `vendor`   → same against `bc_vendor_name` / `bc_vendor_no`.
+      * `item`     → the BC reference cache does NOT index items by display
+        name in this codebase; returns an empty result with a `hint` field so
+        the UI can prompt the operator to enter the BC item no manually.
+        (Item search is on the Phase 4 backlog if/when item indexing lands.)
+
+    Returns:
+        { "link_type", "query", "matches": [ {bc_no, bc_name, source} ], "hint"? }
+    """
+    db = get_db()
+    coll = db["bc_reference_cache"]
+    raw = q.strip()
+    if not raw:
+        return {"link_type": link_type, "query": q, "matches": []}
+
+    # Escape regex special chars to keep this purely a substring search.
+    escaped = re.escape(raw)
+    name_field = {
+        "customer": "bc_customer_name",
+        "vendor": "bc_vendor_name",
+    }.get(link_type)
+
+    if link_type == "item":
+        return {
+            "link_type": "item",
+            "query": q,
+            "matches": [],
+            "hint": (
+                "BC reference cache does not index items by display name. "
+                "Enter the BC item number directly via the manual link form."
+            ),
+        }
+
+    no_field = {
+        "customer": "bc_customer_no",
+        "vendor": "bc_vendor_no",
+    }[link_type]
+
+    query = {
+        "$or": [
+            {name_field: {"$regex": escaped, "$options": "i"}},
+            {no_field: raw},
+        ],
+        no_field: {"$nin": [None, ""]},  # require entity number
+    }
+
+    cursor = coll.find(query, {"_id": 0, no_field: 1, name_field: 1, "bc_entity_type": 1}).limit(limit * 4)
+    seen: set[str] = set()
+    matches: List[Dict[str, Any]] = []
+    async for row in cursor:
+        bc_no = row.get(no_field)
+        if not bc_no or bc_no in seen:
+            continue
+        seen.add(bc_no)
+        matches.append({
+            "bc_no": bc_no,
+            "bc_name": row.get(name_field) or "",
+            "source": row.get("bc_entity_type") or link_type,
+        })
+        if len(matches) >= limit:
+            break
+
+    return {"link_type": link_type, "query": q, "matches": matches}
 
 
 @router.get("/contracts/audit/{agreement_id}")

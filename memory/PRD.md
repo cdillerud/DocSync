@@ -1537,3 +1537,147 @@ defaults — already wired into .env):**
    ```
 3. Frontend nav entry "Contracts" appears automatically — no extra step.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 3.1** (Hardening Pass)
+
+**Status:** ✅ Phase 3.1 landed. 120/120 backend tests green
+(9 new + 111 carried forward). 10/10 Playwright e2e tests pass against the
+live preview environment (2 fixture-gated tests skip gracefully when no
+seeded exceptions exist — by design). Lint clean across all 5 touched files.
+**Sign-off authority:** user signed exact 4-item scope (no scope creep):
+prompt() replacement, banded telemetry, exception → manual-mapping inline
+workflow, lightweight Playwright e2e.
+
+**Backend changes (additive only):**
+- `routers/contracts.py` —
+  * **Tighter threshold telemetry**: `GET /contracts/threshold-telemetry`
+    now returns separated `auto_confirm_override_rate` and
+    `propose_override_rate` plus `by_band_overrides` breakdown. Combined
+    `override_rate` retained for back-compat. Empty state preserves all keys
+    so the UI shape is stable.
+  * **New endpoint** `GET /contracts/bc-search?q=…&link_type=customer|vendor|item`
+    — read-only, scoped to the existing `bc_reference_cache` collection.
+    Customer/vendor: substring match on name regex (special chars escaped) +
+    exact match on bc_no. Item: returns empty matches + `hint` field
+    (the BC reference cache doesn't index items by display name in this
+    codebase). Auth-gated. Dedupes results by bc_no.
+  * Switched `regex=` → `pattern=` on the `link_type` Query param to silence
+    Pydantic deprecation warning.
+- `tests/test_contracts_phase3_1.py` (NEW) — 9 tests:
+  * Banded telemetry separates auto-confirm rejection from propose rejection
+    with the right denominators.
+  * Empty-state preserves shape.
+  * BC search for customer by name + by exact no.
+  * Vendor search isolated from customer (no cross-contamination).
+  * Item link_type returns hint + empty matches.
+  * Invalid link_type → 422.
+  * Regex-special characters escaped (no 500 / no ReDoS).
+  * Auth required (401 without token).
+
+**Frontend changes (additive — only `ContractIntelligencePage.jsx` and
+`lib/api.js` touched, no Layout / App / unrelated files mutated this round):**
+- `lib/api.js` — 1 new helper `contractsBCSearch({q, link_type, limit})`.
+- `pages/ContractIntelligencePage.jsx` —
+  * Removed both `window.prompt()` calls. Replaced with a reusable
+    `<NoteDialog>` modal (Textarea + Cancel/Confirm) used for:
+      - Reject link note (in agreement-detail dialog)
+      - Resolve exception note (in Exceptions tab)
+  * **Exception → inline mapping** (Exceptions tab):
+      - "Map" button on every open `party_unmatched` / `item_unmatched` row.
+      - `<ExceptionMappingDialog>` opens with link_type selector pre-set
+        from the exception code, BC search box pre-filled with the party
+        org/name or item label from `details`.
+      - Auto-search on open + on link_type change.
+      - Result list (clickable cards) populates BC No. + Name fields.
+      - Optional manual override of BC No. text (for items, where search
+        returns empty + a hint).
+      - "Mark exception as resolved after creating the link" checkbox
+        (default: ON). When ON: 1 click does manual_link → resolve_exception
+        → 2 audit rows (`confirmed_link` + `exception_resolved`).
+      - Toast feedback, never silently fails.
+  * **Banded telemetry rendered** in the Analytics tab — two new cards
+    showing `auto_confirm_override_rate` (with guidance "higher than ~5%
+    suggests the auto-confirm threshold is too low") and
+    `propose_override_rate` (with guidance "higher rejection here is
+    expected — propose links are reviewed by humans"). Combined override
+    rate kept above the divider as the headline number.
+  * Every new interactive element carries `data-testid` for e2e:
+      - `resolve-exception-dialog-{textarea,submit,cancel}`
+      - `reject-link-dialog-{textarea,submit,cancel}`
+      - `exception-mapping-{dialog,link-type,query,search-btn,results,
+        bcno,bcname,resolve-after,submit,cancel,hint,pick-{bc_no}}`
+      - `map-exception-{exception_id}` (per-row button)
+      - `telemetry-{auto-confirm,propose}-band`
+
+**E2E test coverage (NEW):**
+- `tests/e2e/__init__.py`
+- `tests/e2e/test_contracts_page_e2e.py` — 12 Playwright sync tests via
+  `/opt/plugins-venv/bin/python`:
+  * Page renders with H1 "Contract Intelligence".
+  * All 5 tabs visible (parametrized).
+  * Tab switching works for Exceptions, Analytics (incl. all 4 top-level
+    cards verified), Expirations (days input visible), BC Links (all 4
+    status cards visible).
+  * Resolve-exception dialog opens + textarea visible (skipped gracefully
+    if no open exceptions seeded).
+  * Exception-mapping dialog opens with link-type selector + search button
+    (skipped gracefully if no party/item-unmatched exceptions seeded).
+  * Tests are read-only — every mutation is followed by Cancel; no
+    persisted writes against the live DB.
+- Run command:
+  ```
+  /opt/plugins-venv/bin/python -m pytest tests/e2e/test_contracts_page_e2e.py -q
+  ```
+- Live verification on preview: **10 passed, 2 skipped in 5.11s**.
+
+**Tests run:**
+```
+backend: 120/120 passed (9 new Phase 3.1 + 111 carried forward)
+e2e:     10/10 passed, 2 skipped (fixture-gated, by design)
+```
+Frontend hot-reload picked up changes; webpack compiled with only pre-existing
+react-hooks/exhaustive-deps warnings (intentional — refresh callbacks are
+referentially unstable; eslint-disable-next-line comments retained).
+
+**Assumptions made (calling them out):**
+1. **BC search relies on the existing `bc_reference_cache` collection**.
+   Customer/vendor names there come from cached BC documents (POs, SOs,
+   invoices). Coverage equals BC's "active" entities — customers/vendors
+   that have never had a transaction recorded won't appear. This matches
+   the user's "use existing reference cache/API patterns" directive.
+2. **Items aren't searchable yet** — the cache doesn't index items by
+   display name. The UI surfaces a hint asking the operator to enter the
+   BC item number directly. This is documented in the response payload
+   (`hint` field) and on the Mapping dialog. Item indexing → Phase 4
+   backlog if/when needed.
+3. **Mapping dialog auto-resolves the exception by default** — toggle is
+   visible and on by default. If the user unchecks it, the link is created
+   but the exception stays open (useful when partial fix only).
+4. **`window.prompt()` cleanup verified by grep** — the only remaining
+   reference is a code comment on the NoteDialog component documenting
+   what it replaces. No live calls remain.
+
+**What requires your review before live DocuSign work:**
+1. Run a few real DocuSign envelopes through the webhook (after setting
+   `DOCUSIGN_HMAC_SECRET` in production) so the BC search + mapping flows
+   can be exercised end-to-end with seeded exceptions.
+2. Confirm the banded override-rate guidance copy ("higher than ~5%…",
+   "higher here is expected…") matches your operational view, or give me
+   tighter numbers / language.
+3. Approve moving to **Phase 4** (DocuSign SDK install + live envelope
+   fetch) — still gated by `DOCUSIGN_LIVE_CALLS_ENABLED=true` until you
+   sign.
+
+**Out-of-scope (Phase 3.1 deliberately omits, per signed guardrails):**
+- No DocuSign SDK install yet.
+- No live envelope fetch yet.
+- No Agreement → Document Hub cross-link yet.
+- No BC writes, no AP / posting / email-poller / vendor-alias touch.
+
+**Carry-over status (still parked, untouched):**
+- P1: LLM throttling / Gemini RESOURCE_EXHAUSTED — UNCHANGED.
+- P2: SMC / SC / CITICARGO Batch 2 — UNCHANGED.
+- P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
+- P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
+

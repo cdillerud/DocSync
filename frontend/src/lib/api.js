@@ -474,6 +474,7 @@ export const rejectAgreementLink = (agreementId, linkId, data) => api.post(`/con
 export const listAgreementExceptions = (params) => api.get('/contracts/exceptions', { params });
 export const resolveAgreementException = (id, data) => api.post(`/contracts/exceptions/${encId(id)}/resolve`, data || {});
 export const getAgreementAudit = (id, limit = 200) => api.get(`/contracts/audit/${encId(id)}`, { params: { limit } });
+export const contractsBCSearch = (params) => api.get('/contracts/bc-search', { params });
 
 
 

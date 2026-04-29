@@ -2,7 +2,11 @@
 
 - Author/agent: Emergent fork agent
 - Generated: 2026-04-29 (UTC)
-- Status: DRAFT — awaiting user signature before any code lands.
+- Status: **AMENDED — awaiting final signature before any code lands.**
+- Amendment 2026-04-29: `vendor.sender_disagreed` events now thread an
+  optional `document_id` from the caller (signed `n4q8rm`). Affects
+  §3.2 signature, §3.2 `_emit_sender_disagreed`, §3.3 call-site, §6
+  schema, §8 tests C6/C7 and D1.
 - Parent: `memory/SENDER_STAMPING_REMEDIATION_PLAN.md` §1–§5 (signed).
 - §6 self-heal, §7 cleanup, alias retire, profile correction, `sender_vendor_map`
   edits, Batch-2 resumption: ALL OUT OF SCOPE for this declaration.
@@ -107,6 +111,7 @@ async def lookup_vendor_by_sender(
     extracted_vendor: str | None = None,
     *,
     strict: bool = True,
+    document_id: str | None = None,
 ) -> dict:
     """
     Look up vendor by sender email address.
@@ -119,6 +124,11 @@ async def lookup_vendor_by_sender(
       emitted to `workflow_events` and the function returns
       `{"vendor_canonical": None, "vendor_match_method": "sender_disagreed",
         "sender_hint": {...}}`.
+
+      `document_id` is optional. When supplied by the caller, it is included
+      in the disagreement telemetry payload so operators can correlate
+      directly to the affected `hub_documents.id`. When None, telemetry
+      omits the field (legacy back-compat).
 
       When `extracted_vendor` is None or `strict=False`, behavior is
       byte-identical to the pre-guard implementation (back-compat).
@@ -160,6 +170,7 @@ async def lookup_vendor_by_sender(
                 sender_name=sender_name,
                 extracted_vendor=extracted_vendor,
                 matched_kind=matched_kind,
+                document_id=document_id,
             )
             return {
                 "vendor_canonical": None,
@@ -193,25 +204,37 @@ async def lookup_vendor_by_sender(
 
 async def _emit_sender_disagreed(
     db, *, sender_email, sender_canonical, sender_name, extracted_vendor, matched_kind,
+    document_id=None,
 ):
-    """Best-effort telemetry; never raises into the caller."""
+    """Best-effort telemetry; never raises into the caller.
+
+    `document_id` is included in the payload when supplied by the caller; the
+    field is intentionally absent from the payload (rather than null) when the
+    caller doesn't have it, to keep the schema compact for legacy paths.
+    """
     try:
-        await db.workflow_events.insert_one({
+        payload = {
+            "sender_email": sender_email,
+            "sender_canonical": sender_canonical,
+            "sender_name": sender_name,
+            "extracted_vendor": extracted_vendor,
+            "matched_kind": matched_kind,
+            "guard_version": "v1",
+        }
+        if document_id:
+            payload["document_id"] = document_id
+        event = {
             "event_id": str(uuid.uuid4()),
             "event_type": "vendor.sender_disagreed",
             "status": "warning",
             "source_service": "vendor_matching.lookup_vendor_by_sender",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "actor": None,
-            "payload": {
-                "sender_email": sender_email,
-                "sender_canonical": sender_canonical,
-                "sender_name": sender_name,
-                "extracted_vendor": extracted_vendor,
-                "matched_kind": matched_kind,
-                "guard_version": "v1",
-            },
-        })
+            "payload": payload,
+        }
+        if document_id:
+            event["document_id"] = document_id  # also at top level for query consistency with other workflow_events rows
+        await db.workflow_events.insert_one(event)
     except Exception as e:
         logger.warning("[vendor.sender_disagreed] telemetry write failed: %s", e)
 ```
@@ -233,6 +256,7 @@ try:
         sender_result = await lookup_vendor_by_sender(
             sender_email,
             extracted_vendor=normalized_fields.get("vendor_raw"),  # NEW
+            document_id=doc_id,                                    # NEW (amendment)
         )
         if sender_result.get("vendor_canonical"):
             vendor_alias_result = sender_result
@@ -317,21 +341,31 @@ One new `workflow_events` row per disagreement. Schema:
   "source_service": "vendor_matching.lookup_vendor_by_sender",
   "timestamp": "<iso8601 utc>",
   "actor": null,
+  "document_id": "<uuid, OPTIONAL — present when caller passes it>",
   "payload": {
     "sender_email": "kbowman@malg.us",
     "sender_canonical": "Brown Warehouse Company",
     "sender_name": "Brown Warehouse Company",
     "extracted_vendor": "Mid America Logistics Group, LLC",
     "matched_kind": "sender_email",
-    "guard_version": "v1"
+    "guard_version": "v1",
+    "document_id": "<uuid, OPTIONAL — mirrors top-level when present>"
   }
 }
 ```
 
-No `document_id` is recorded here because `lookup_vendor_by_sender` is
-called before the doc identity is in scope of the helper. Operators
-correlate via `sender_email` + `timestamp`. (If you want `document_id`
-threaded through, that's a one-arg amendment — say so before sign.)
+**Amendment (signed 2026-04-29):** `document_id` is now threaded through from
+the caller and recorded both at the top level (matching existing
+`workflow_events` schema convention) and inside the payload (for self-
+contained payload analysis). The field is **absent** (not null) when the
+caller doesn't supply it — keeps the schema compact and lets queries use
+`{document_id: {$exists: true}}` to find correlatable rows.
+
+`services/document_handlers.py:2026` — the only call site landing in this
+declaration — DOES have `doc_id` in scope and passes it. Future caller
+sites that adopt the guard SHOULD pass `document_id=` whenever the doc
+identity is known at call time. Callers without doc context (none today)
+remain back-compat: payload omits the field, event still emits.
 
 `vendor.canonical_self_healed` is **not** emitted by this declaration —
 it belongs to §6.1.
@@ -372,9 +406,11 @@ The test file is part of this declaration's scope. Contract:
 - C3 disagreement also writes one `workflow_events` row with `event_type=vendor.sender_disagreed`
 - C4 telemetry write failure does NOT raise into caller (best-effort)
 - C5 no mapping found → returns `{"vendor_canonical": None, "vendor_match_method": "none"}` (unchanged)
+- C6 disagreement WITH `document_id=<uuid>` → `workflow_events` row carries `document_id` at top-level AND inside `payload.document_id` (amendment)
+- C7 disagreement WITHOUT `document_id` → `workflow_events` row OMITS the field (not null) at both top level and in payload (amendment)
 
 ### Class D — Integration: `intake_document_from_bytes` smoke
-- D1 fixture document with `email_sender = kbowman@malg.us` and extracted `vendor_raw = "Mid America Logistics Group, LLC"` — after intake, doc has `vendor_canonical != "Brown Warehouse Company"` AND a `workflow_events.vendor.sender_disagreed` row exists.
+- D1 fixture document with `email_sender = kbowman@malg.us` and extracted `vendor_raw = "Mid America Logistics Group, LLC"` — after intake, doc has `vendor_canonical != "Brown Warehouse Company"` AND a `workflow_events.vendor.sender_disagreed` row exists with `document_id` matching the fixture's `doc_id`.
 - D2 same fixture with `SENDER_STAMP_GUARD_ENABLED=false` — doc has `vendor_canonical = "Brown Warehouse Company"` (today's behavior preserved).
 - D3 fixture where sender mapping agrees with extracted vendor — doc has `vendor_canonical = mapping.vendor_canonical`, NO disagreement event row.
 

@@ -15,11 +15,18 @@ Architecture:
       stub. This keeps the matcher pure and trivially unit-testable.
     * Output is a tuple ``(links, exceptions)`` of unsaved Pydantic models.
       The orchestrator persists them and emits matching audit rows.
+
+Thresholds (Phase 3):
+    * Defaults are 0.95 auto-confirm / 0.80 propose.
+    * Override per-environment via env vars:
+        CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD
+        CONTRACT_MATCH_PROPOSE_THRESHOLD
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, Tuple
@@ -39,11 +46,34 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Thresholds (tunable, not stored in DB so we can iterate freely)
+# Thresholds — env-overridable, fail-soft on bad values
 # ---------------------------------------------------------------------------
 
-AUTO_CONFIRM_THRESHOLD: float = 0.95
-MIN_PROPOSE_THRESHOLD: float = 0.80
+_DEFAULT_AUTO_CONFIRM = 0.95
+_DEFAULT_PROPOSE = 0.80
+
+
+def _env_threshold(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        logger.warning("invalid %s=%r, falling back to %s", name, raw, default)
+        return default
+    if not (0.0 <= v <= 1.0):
+        logger.warning("%s=%s out of [0,1], falling back to %s", name, v, default)
+        return default
+    return v
+
+
+AUTO_CONFIRM_THRESHOLD: float = _env_threshold(
+    "CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD", _DEFAULT_AUTO_CONFIRM,
+)
+MIN_PROPOSE_THRESHOLD: float = _env_threshold(
+    "CONTRACT_MATCH_PROPOSE_THRESHOLD", _DEFAULT_PROPOSE,
+)
 EXCEPTION_THRESHOLD: float = MIN_PROPOSE_THRESHOLD
 
 

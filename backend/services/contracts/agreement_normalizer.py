@@ -15,6 +15,7 @@ Why pure / why a single entry point?
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -423,7 +424,36 @@ def _normalize_form_data_terms(
     return out
 
 
-_PRICING_LINE_RE = re.compile(r"^line[_\-]?(\d+)[_\-]?(.+)$", re.IGNORECASE)
+_PRICING_LINE_RE_DEFAULT = r"^line[_\-]?(\d+)[_\-]?(.+)$"
+
+
+def _get_pricing_line_re() -> "re.Pattern[str]":
+    """Return the compiled pricing-tab regex, env-overridable.
+
+    Set ``CONTRACT_PRICING_TAB_REGEX`` to override the default
+    ``line_N_<attr>`` convention. The regex MUST capture two groups:
+    group 1 = line number (integer-castable), group 2 = attribute name.
+    """
+    raw = os.environ.get("CONTRACT_PRICING_TAB_REGEX", "").strip()
+    pattern = raw or _PRICING_LINE_RE_DEFAULT
+    try:
+        compiled = re.compile(pattern, re.IGNORECASE)
+    except re.error as exc:
+        logger.warning(
+            "Invalid CONTRACT_PRICING_TAB_REGEX=%r (%s); using default.",
+            pattern, exc,
+        )
+        compiled = re.compile(_PRICING_LINE_RE_DEFAULT, re.IGNORECASE)
+    if compiled.groups < 2:
+        logger.warning(
+            "CONTRACT_PRICING_TAB_REGEX must have >= 2 capture groups; "
+            "using default."
+        )
+        compiled = re.compile(_PRICING_LINE_RE_DEFAULT, re.IGNORECASE)
+    return compiled
+
+
+_PRICING_LINE_RE = _get_pricing_line_re()
 
 
 def _normalize_pricing(

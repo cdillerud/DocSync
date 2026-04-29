@@ -457,6 +457,24 @@ export const getAutomationConfidence = (docId) => api.get(`/documents/${encId(do
 export const getReviewAssist = (docId) => api.post(`/documents/${encId(docId)}/review-assist`);
 export const acceptSuggestion = (docId, data) => api.post(`/documents/${encId(docId)}/accept-suggestion`, data);
 
+// =============================================================================
+// CONTRACT INTELLIGENCE APIs (Phase 3)
+// =============================================================================
+
+export const getContractsHealth = () => api.get('/contracts/health');
+export const getContractSummary = () => api.get('/contracts/summary');
+export const getContractExpiring = (params) => api.get('/contracts/expiring', { params });
+export const getContractCoverage = () => api.get('/contracts/coverage');
+export const getContractThresholdTelemetry = (params) => api.get('/contracts/threshold-telemetry', { params });
+export const listAgreements = (params) => api.get('/contracts/agreements', { params });
+export const getAgreementDetail = (id) => api.get(`/contracts/agreements/${encId(id)}`);
+export const createManualAgreementLink = (id, data) => api.post(`/contracts/agreements/${encId(id)}/links`, data);
+export const confirmAgreementLink = (agreementId, linkId) => api.post(`/contracts/agreements/${encId(agreementId)}/links/${encId(linkId)}/confirm`);
+export const rejectAgreementLink = (agreementId, linkId, data) => api.post(`/contracts/agreements/${encId(agreementId)}/links/${encId(linkId)}/reject`, data || {});
+export const listAgreementExceptions = (params) => api.get('/contracts/exceptions', { params });
+export const resolveAgreementException = (id, data) => api.post(`/contracts/exceptions/${encId(id)}/resolve`, data || {});
+export const getAgreementAudit = (id, limit = 200) => api.get(`/contracts/audit/${encId(id)}`, { params: { limit } });
+
 
 
 

@@ -1409,3 +1409,131 @@ curl). Lint (`ruff`) clean on all 6 new files + the 1 mutated file.
 - P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
 - P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 3** (UI + Analytics + Env-Driven Tunables)
+
+**Status:** ✅ Phase 3 landed. 111/111 backend tests green. Frontend smoke-tested
+on the preview environment — `/contracts` renders all 5 tabs (Agreements,
+Exceptions, BC Links, Expirations, Analytics) with the existing shadcn dark
+theme, nav entry visible. No regression on backend baseline.
+**Sign-off authority:** user signed exact scope + 4 assumption decisions:
+- Pricing tab convention parameterized via `CONTRACT_PRICING_TAB_REGEX` env
+  (default `^line[_\-]?(\d+)[_\-]?(.+)$` retained).
+- Webhook URL `/api/docusign/webhook` confirmed.
+- Match thresholds moved to env vars
+  (`CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD=0.95`,
+   `CONTRACT_MATCH_PROPOSE_THRESHOLD=0.80`).
+- Vendor-side party misses still suppressed in exception queue, but volume
+  surfaced in `/contracts/health` + Analytics dashboard.
+
+**Backend files mutated (additive only on behavior, no breaking changes):**
+- `services/contracts/bc_agreement_matcher.py` — thresholds now read from env
+  (`CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD`, `CONTRACT_MATCH_PROPOSE_THRESHOLD`)
+  with safe fallback on bad/missing values; defaults unchanged (0.95 / 0.80).
+- `services/contracts/agreement_normalizer.py` — pricing tab regex now read
+  from env (`CONTRACT_PRICING_TAB_REGEX`), with fail-soft fallback when the
+  regex is invalid or has fewer than 2 capture groups.
+- `routers/contracts.py` — added 5 analytics endpoints + extended `/health`
+  with vendor-link telemetry:
+    * `GET /api/contracts/health` (now includes `vendor_link_telemetry`)
+    * `GET /api/contracts/summary` — agreements/exceptions/links/events counts
+    * `GET /api/contracts/expiring?within_days=N` — upcoming expirations
+      (excludes voided/declined/expired)
+    * `GET /api/contracts/coverage` — customer/vendor/item coverage ratios +
+      pricing-line match ratios
+    * `GET /api/contracts/threshold-telemetry?days=N` — system-emitted vs.
+      human-overridden link counts, override rate, band distribution
+    * `GET /api/contracts/audit/{agreement_id}` — newest-first audit trail
+  All read-only, all auth-gated.
+- `backend/.env` — additive only: `CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD=0.95`,
+  `CONTRACT_MATCH_PROPOSE_THRESHOLD=0.80`, `CONTRACT_PRICING_TAB_REGEX=`
+  (blank means default).
+
+**Backend files added:**
+- `tests/test_contracts_phase3.py` — 14 tests covering env-driven thresholds
+  (override + invalid fallback), parameterized pricing convention (default,
+  custom alt naming, invalid regex fallback), summary endpoint, expiring
+  endpoint (excludes voided), coverage ratios, threshold telemetry counts,
+  audit trail, vendor telemetry on /health.
+
+**Frontend files added:**
+- `frontend/src/pages/ContractIntelligencePage.jsx` — new top-level
+  `/contracts` page. 5 tabs:
+    * **Agreements** — paginated table with status filter; row click opens
+      detail dialog with parties, pricing, terms, BC links (with
+      Confirm/Reject inline actions), exceptions, audit timeline, and a
+      "+ Manual link" dialog with link_type / bc_no / bc_name / notes.
+    * **Exceptions** — filterable list (status + code) with inline Resolve.
+    * **BC Links** — overview cards by status + by type (read-only summary).
+    * **Expirations** — agreements expiring within N days (configurable).
+    * **Analytics** — top-level counts, BC coverage card, **Auto-Confirm
+      Threshold Telemetry** panel (precision@threshold from audit log;
+      override rate; band distribution), **Vendor-side activity** card
+      (suppressed-exception telemetry per signed guardrail).
+  All shadcn UI, all dark-theme parity, every interactive element has
+  `data-testid`. Manual link / confirm / reject / resolve toasted via sonner.
+
+**Frontend files mutated (3, all minimal):**
+- `frontend/src/lib/api.js` — added 13 new API helpers under
+  "CONTRACT INTELLIGENCE APIs (Phase 3)" comment block. Nothing else touched.
+- `frontend/src/App.js` — 1 import line + 1 route line. No restructuring.
+- `frontend/src/components/Layout.js` — added `FileSignature` import +
+  1 nav item entry. Nothing else changed.
+
+**Tests run:**
+```
+cd /app/backend && python -m pytest \
+  tests/test_contracts_models.py \
+  tests/test_docusign_client_scaffold.py \
+  tests/test_contracts_normalizer.py \
+  tests/test_contracts_matcher.py \
+  tests/test_contracts_orchestrator.py \
+  tests/test_contracts_endpoints.py \
+  tests/test_contracts_phase3.py -q
+→ 111 passed
+```
+Frontend smoke: live preview at `/contracts` → page renders, 5 tabs visible,
+nav entry highlighted, empty-state shown, no console errors.
+
+**Assumptions made (calling them out for the record):**
+1. **Threshold-telemetry algorithm.** "Override rate" = count of audit rows
+   with `action=rejected_link` AND `actor != system` for any link previously
+   emitted by the system. This conflates "rejected after auto-confirm" with
+   "rejected after propose"; the band breakdown helps separate. If you want
+   stricter precision (e.g., only auto-confirmed rejected = override), say
+   the word and I'll add a stricter computation.
+2. **Vendor telemetry on `/health` is unauth.** Same posture as before for
+   the diagnostic endpoint. Counts are non-sensitive (no names, no payloads).
+3. **Manual link confirm/reject prompts.** Used `window.prompt()` for the
+   reason/note string for speed — fine for an internal admin UI. A proper
+   inline form (Textarea in Dialog) is a 10-minute polish if you want it.
+4. **No frontend tests.** Per system prompt's testing rules, single-component
+   smoke is sufficient for this size of change; backend tests cover the
+   contract surface. If you want Playwright coverage, I can add it.
+
+**Out-of-scope (Phase 3 deliberately omits, per signed guardrails):**
+- No DocuSign SDK install, no live envelope fetch (still Phase 2.x territory).
+- No Agreement → Document Hub cross-link panel (parked for post-Phase-3 review).
+- No BC writes, no DocuSign writes, no AP pipeline / email poller / vendor
+  alias / posting changes. Confirmed via diff inspection.
+
+**Carry-over status (still parked, untouched):**
+- P1: LLM throttling / Gemini RESOURCE_EXHAUSTED — UNCHANGED.
+- P2: SMC / SC / CITICARGO Batch 2 — UNCHANGED.
+- P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
+- P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
+
+**Operator activation steps for the new tunables (no rebuild needed for
+defaults — already wired into .env):**
+1. To re-tune match thresholds without a code change:
+   ```
+   docker compose exec backend env CONTRACT_MATCH_AUTO_CONFIRM_THRESHOLD=0.93 ...
+   ```
+   (or set in docker-compose.yml env block, restart the backend container).
+2. To use a custom DocuSign tab naming convention:
+   ```
+   CONTRACT_PRICING_TAB_REGEX=^lineitem[_\\-]?(\d+)[_\\-]?(.+)$
+   ```
+3. Frontend nav entry "Contracts" appears automatically — no extra step.
+

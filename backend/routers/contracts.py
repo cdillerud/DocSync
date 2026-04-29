@@ -362,8 +362,277 @@ async def resolve_exception_endpoint(
 @router.get("/contracts/health")
 async def contracts_health():
     client = get_docusign_client()
+    db = get_db()
+    # Surface vendor-side miss volume without flooding the exception queue
+    # (vendor-side party misses are intentionally not emitted as exceptions).
+    audit = db[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
+    proposed_vendor = await audit.count_documents({
+        "action": "proposed_link",
+        "after.link_type": "vendor",
+    })
+    confirmed_vendor = await audit.count_documents({
+        "action": "confirmed_link",
+        "after.link_type": "vendor",
+    })
     return {
         "module": "contract_intelligence",
-        "phase": 2,
+        "phase": 3,
         "docusign": client.status(),
+        "vendor_link_telemetry": {
+            "proposed_vendor_links_total": proposed_vendor,
+            "confirmed_vendor_links_total": confirmed_vendor,
+        },
     }
+
+
+# ---------------------------------------------------------------------------
+# Analytics endpoints (Phase 3) — read-only, advisory, no BC writes
+# ---------------------------------------------------------------------------
+
+@router.get("/contracts/summary")
+async def contracts_summary(_user: dict = Depends(get_current_user)):
+    """High-level counts for dashboard cards.
+
+    Returns:
+        {
+          "agreements": { "total": N, "by_status": {...} },
+          "exceptions": { "open": N, "by_code": {...} },
+          "links":      { "total": N, "by_status": {...}, "by_type": {...} },
+          "events":     { "total": N, "unprocessed": N },
+        }
+    """
+    db = get_db()
+
+    async def _group(coll, key: str, match: Optional[Dict[str, Any]] = None):
+        pipeline: List[Dict[str, Any]] = []
+        if match:
+            pipeline.append({"$match": match})
+        pipeline.append({"$group": {"_id": f"${key}", "count": {"$sum": 1}}})
+        out: Dict[str, int] = {}
+        async for row in coll.aggregate(pipeline):
+            out[str(row["_id"]) if row["_id"] is not None else "null"] = row["count"]
+        return out
+
+    agr = db[CONTRACTS_COLLECTIONS["agreements"]]
+    ex = db[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
+    lk = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    ev = db[CONTRACTS_COLLECTIONS["agreement_events"]]
+
+    return {
+        "agreements": {
+            "total": await agr.count_documents({}),
+            "by_status": await _group(agr, "status"),
+            "with_unmatched_exceptions": await agr.count_documents(
+                {"has_unmatched_exceptions": True}
+            ),
+        },
+        "exceptions": {
+            "open": await ex.count_documents({"status": "open"}),
+            "resolved": await ex.count_documents({"status": "resolved"}),
+            "by_code": await _group(ex, "code", {"status": "open"}),
+            "by_severity": await _group(ex, "severity", {"status": "open"}),
+        },
+        "links": {
+            "total": await lk.count_documents({}),
+            "by_status": await _group(lk, "status"),
+            "by_type": await _group(lk, "link_type"),
+        },
+        "events": {
+            "total": await ev.count_documents({}),
+            "unprocessed": await ev.count_documents({"processed": False}),
+        },
+    }
+
+
+@router.get("/contracts/expiring")
+async def contracts_expiring(
+    within_days: int = Query(60, ge=1, le=365),
+    limit: int = Query(100, ge=1, le=500),
+    _user: dict = Depends(get_current_user),
+):
+    """Agreements with `expires_at` within the next N days, soonest-first."""
+    from datetime import datetime, timedelta, timezone
+    db = get_db()
+    now = datetime.now(timezone.utc)
+    horizon = now + timedelta(days=within_days)
+    coll = db[CONTRACTS_COLLECTIONS["agreements"]]
+    q = {
+        "expires_at": {
+            "$ne": None,
+            "$gte": now.isoformat(),
+            "$lte": horizon.isoformat(),
+        },
+        "status": {"$nin": ["voided", "declined", "expired"]},
+    }
+    items = await coll.find(q, {"_id": 0}).sort("expires_at", 1).limit(limit).to_list(length=limit)
+    total = await coll.count_documents(q)
+    return {
+        "as_of": now.isoformat(),
+        "within_days": within_days,
+        "total": total,
+        "items": items,
+    }
+
+
+@router.get("/contracts/coverage")
+async def contracts_coverage(_user: dict = Depends(get_current_user)):
+    """Aggregate coverage: how many agreements have at least one customer
+    link, vendor link, item link; how many pricing rows are matched/unmatched.
+    """
+    db = get_db()
+    agr_coll = db[CONTRACTS_COLLECTIONS["agreements"]]
+    lk_coll = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    pr_coll = db[CONTRACTS_COLLECTIONS["agreement_pricing"]]
+
+    total_agreements = await agr_coll.count_documents({})
+
+    async def _agreements_with_link(link_type: str) -> int:
+        ids = set()
+        cursor = lk_coll.find(
+            {"link_type": link_type, "status": {"$in": ["confirmed", "auto_confirmed", "proposed"]}},
+            {"_id": 0, "agreement_id": 1},
+        )
+        async for row in cursor:
+            ids.add(row["agreement_id"])
+        return len(ids)
+
+    customer_covered = await _agreements_with_link("customer")
+    vendor_covered = await _agreements_with_link("vendor")
+    item_covered = await _agreements_with_link("item")
+
+    pricing_total = await pr_coll.count_documents({})
+    pricing_matched = await pr_coll.count_documents({"matched_bc_item_no": {"$ne": None}})
+
+    # Item link rows give an alternative read of pricing match: each item link
+    # is anchored to a pricing row via pricing_id.
+    pricing_with_item_link = await lk_coll.count_documents(
+        {"link_type": "item", "pricing_id": {"$ne": None}},
+    )
+
+    def _pct(num: int, denom: int) -> float:
+        return round(num / denom, 4) if denom else 0.0
+
+    return {
+        "agreements_total": total_agreements,
+        "customer_coverage": {
+            "covered": customer_covered,
+            "uncovered": max(0, total_agreements - customer_covered),
+            "ratio": _pct(customer_covered, total_agreements),
+        },
+        "vendor_coverage": {
+            "covered": vendor_covered,
+            "uncovered": max(0, total_agreements - vendor_covered),
+            "ratio": _pct(vendor_covered, total_agreements),
+        },
+        "item_coverage": {
+            "agreements_with_item_links": item_covered,
+            "agreements_total": total_agreements,
+            "ratio": _pct(item_covered, total_agreements),
+        },
+        "pricing_lines": {
+            "total": pricing_total,
+            "matched": pricing_matched,
+            "with_item_link": pricing_with_item_link,
+            "match_ratio": _pct(pricing_matched, pricing_total),
+        },
+    }
+
+
+@router.get("/contracts/threshold-telemetry")
+async def contracts_threshold_telemetry(
+    days: int = Query(30, ge=1, le=365),
+    _user: dict = Depends(get_current_user),
+):
+    """Read-only precision@threshold over the last N days using audit rows.
+
+    Counts:
+      * total auto-confirmed system links emitted (action=proposed_link or
+        confirmed_link with actor=system)
+      * how many were later rejected by a human (action=rejected_link with
+        actor != system) for the same link_id
+      * "override rate" = rejected / system_emitted (lower is better)
+    """
+    from datetime import datetime, timedelta, timezone
+    from services.contracts.bc_agreement_matcher import (
+        AUTO_CONFIRM_THRESHOLD as auto,
+        MIN_PROPOSE_THRESHOLD as propose,
+    )
+    db = get_db()
+    audit = db[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
+    links = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    # System-emitted links since `since`
+    system_emitted_ids: List[str] = []
+    cursor = audit.find(
+        {
+            "actor": "system",
+            "action": {"$in": ["proposed_link", "confirmed_link"]},
+            "at": {"$gte": since},
+            "link_id": {"$ne": None},
+        },
+        {"_id": 0, "link_id": 1},
+    )
+    async for row in cursor:
+        system_emitted_ids.append(row["link_id"])
+    system_emitted_ids = list(set(system_emitted_ids))
+
+    if not system_emitted_ids:
+        return {
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "window_days": days,
+            "thresholds": {"auto_confirm": auto, "propose": propose},
+            "system_emitted": 0,
+            "human_overrides": 0,
+            "override_rate": 0.0,
+            "by_threshold_band": {},
+        }
+
+    # Human overrides for those link ids
+    human_overrides = await audit.count_documents({
+        "action": "rejected_link",
+        "actor": {"$ne": "system"},
+        "link_id": {"$in": system_emitted_ids},
+    })
+
+    # Slice by confidence band (live state from links table)
+    bands = {"auto_confirm": 0, "propose": 0, "below_propose": 0}
+    cursor = links.find(
+        {"id": {"$in": system_emitted_ids}},
+        {"_id": 0, "id": 1, "confidence": 1, "status": 1},
+    )
+    async for row in cursor:
+        c = float(row.get("confidence") or 0)
+        if c >= auto:
+            bands["auto_confirm"] += 1
+        elif c >= propose:
+            bands["propose"] += 1
+        else:
+            bands["below_propose"] += 1
+
+    def _pct(num: int, denom: int) -> float:
+        return round(num / denom, 4) if denom else 0.0
+
+    return {
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "window_days": days,
+        "thresholds": {"auto_confirm": auto, "propose": propose},
+        "system_emitted": len(system_emitted_ids),
+        "human_overrides": human_overrides,
+        "override_rate": _pct(human_overrides, len(system_emitted_ids)),
+        "by_threshold_band": bands,
+    }
+
+
+@router.get("/contracts/audit/{agreement_id}")
+async def contracts_audit_for_agreement(
+    agreement_id: str,
+    limit: int = Query(200, ge=1, le=500),
+    _user: dict = Depends(get_current_user),
+):
+    """Audit trail for a single agreement, newest-first."""
+    db = get_db()
+    items = await db[CONTRACTS_COLLECTIONS["agreement_match_audit"]].find(
+        {"agreement_id": agreement_id}, {"_id": 0},
+    ).sort("at", -1).limit(limit).to_list(length=limit)
+    return {"agreement_id": agreement_id, "total": len(items), "items": items}

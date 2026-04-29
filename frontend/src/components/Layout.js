@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge, Network
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge, Network, FileSignature
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -33,6 +33,7 @@ const navItems = [
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },
   { to: '/learning/ops', icon: Gauge, label: 'Learning Ops' },
   { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
+  { to: '/contracts', icon: FileSignature, label: 'Contracts' },
   { to: '/insights', icon: TrendingUp, label: 'Insights' },
   { to: '/roadmap', icon: Map, label: 'Roadmap' },
   { to: '/config', icon: Settings, label: 'Settings' },

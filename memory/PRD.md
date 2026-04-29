@@ -1777,3 +1777,108 @@ production access + DocuSign admin rights.
 - P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
 - P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 3.2 cont.** (Golden-Fixture Pipeline Pre-built)
+
+**Status:** ⏸️ Pipeline ready. **Awaiting one real (sanitized) DocuSign payload
+from the user.** Once dropped into `backend/tests/fixtures/docusign/`, the
+auto-discovery harness produces 7 regression assertions per fixture without
+any further code change.
+
+**What I shipped this round (3 files, all read-only / additive):**
+- `backend/scripts/contracts_redact_payload.py` — deterministic redaction
+  helper. Walks any DocuSign Connect SIM payload and:
+  * Replaces `email`, `name`, `userName`, `companyName` with stable
+    placeholders **only inside person blocks** (dict has both an `email`
+    field AND a name-ish field). This was the key insight after the
+    initial v1 wrongly redacted document names + custom-field names + tab
+    names. Fixed in this round before commit; verified end-to-end.
+  * Replaces `accountId` / `userId` with stable placeholders.
+  * Drops `documentBase64` / `pdfBytes` / signing tokens entirely.
+  * Preserves: tab/term naming convention, dates, status enums, line
+    structure — everything regression-testing actually needs.
+  * Optional `--extra-paths data.envelopeSummary.subject` to scrub
+    additional dotted JSON paths per fixture.
+  * Prints a redaction-audit summary to stderr (key, before, after) so the
+    operator can review the diff before committing.
+
+- `backend/tests/test_contracts_golden_fixtures.py` — auto-discovering
+  parametrized harness. Default checks per fixture:
+    1. Normalizer accepts payload (no ValueError).
+    2. `provider_envelope_id` resolved and non-empty.
+    3. `status` mapped to a known value (NOT `unknown`).
+    4. At least one party (sender or signer).
+    5. Warnings JSON-serializable (round-trip safe).
+    6. All persisted rows JSON-serializable via `model_dump(mode="json")`.
+    7. Per-fixture pinned expectations (skipped unless
+       `_FIXTURE_EXPECTATIONS[<filename_stem>]` defines `min_parties` /
+       `min_terms` / `min_pricing_lines` / `expected_status` / `min_documents`).
+  Plus 3 harness sanity tests (dir exists, README present, no non-JSON
+  files picked up).
+
+- `backend/tests/fixtures/docusign/README.md` — redaction contract
+  + step-by-step "how to add a fixture" recipe + table of preserve-vs-redact
+  fields. Documents the convention before any fixture lands so you have a
+  one-page reference next to your validation pass.
+
+**Files materialized for plumbing (empty markers):**
+- `backend/tests/fixtures/__init__.py`
+- `backend/tests/fixtures/docusign/__init__.py`
+- `backend/tests/fixtures/docusign/.gitkeep`
+
+**Tests:** 123/123 passed + 7 fixture-gated skips (gracefully empty
+parametrize when no `*.json` fixtures exist; auto-populates the moment
+one lands). Lint clean on both new scripts + the harness. No production
+code mutated.
+
+**End-to-end pipeline verified locally:**
+1. Synthetic SIM payload → redactor → produces correct placeholders for
+   sender/signers and preserves `customFields[*].name`, `formData[*].name`,
+   and `envelopeDocuments[*].name` exactly.
+2. Redacted file dropped into `fixtures/docusign/` → harness automatically
+   parametrized 7 cases against it, all green.
+3. Synthetic fixture removed (per user spec — "first committed fixture
+   should be real, not synthetic"). Harness back to graceful-empty state.
+
+**Why I bailed on writing speculative regression assertions:**
+The whole value of the golden-fixture pattern is that it pins down what
+DocuSign **actually** emits for the user's templates. Pre-writing
+fixture-specific expectations against a fictional payload would defeat
+that. The harness is structurally complete; the pinning happens once you
+share a sanitized real payload and we agree on the right thresholds
+(min_parties, min_terms, etc.) for that template.
+
+**What I'm waiting on from you:**
+1. **Step 0 (preview-safe, today)**: capture any DocuSign Connect message
+   JSON into a file on the VM, then:
+   ```
+   docker compose exec backend python -m scripts.contracts_redact_payload \
+       /tmp/connect_raw.json \
+       --extra-paths data.envelopeSummary.subject \
+       --extra-paths data.envelopeSummary.emailSubject \
+       > /tmp/connect_redacted.json
+   ```
+   Review the stderr audit summary; spot-check the output JSON.
+2. Run the dry-run normalizer against the redacted file — confirm
+   `Pricing` / `Terms` / `Parties` populate as expected.
+3. Paste the dry-run output here. If anything looks off (especially
+   `Pricing (0)` when lines were expected), we adjust the
+   `CONTRACT_PRICING_TAB_REGEX` env var — no code change.
+4. Once dry-run is clean, commit the redacted file as
+   `backend/tests/fixtures/docusign/<descriptor>__<status>.json`.
+5. Then proceed with Steps 1-6 in `PHASE_3_2_VALIDATION_RUNBOOK.md`
+   (deploy → set HMAC secret → configure Connect → fire envelope → file
+   the 16-row checklist).
+
+**Out-of-scope (Phase 3.2 boundary still strictly held):**
+- No DocuSign SDK install. No live envelope fetch. No Agreement → Doc Hub
+  cross-link. No suggested-threshold widget. No code changes to existing
+  routes / services. No AP / posting / email-poller / vendor-alias touch.
+
+**Carry-over status (still parked, untouched):**
+- P1: LLM throttling — UNCHANGED.
+- P2: SMC / SC / CITICARGO Batch 2 — UNCHANGED.
+- P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
+- P2: Phase 4 Path B Removal — UNCHANGED.
+

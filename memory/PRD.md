@@ -1681,3 +1681,99 @@ referentially unstable; eslint-disable-next-line comments retained).
 - P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
 - P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 3.2** (Real Webhook Validation — Tooling Shipped)
+
+**Status:** ⏸️ Tooling delivered. **Awaiting user-driven live validation pass.**
+This phase is fundamentally human-driven — agent cannot SSH into the
+production VM, configure DocuSign Connect, or fire real envelopes from the
+user's DocuSign account. To make the round-trip cheap, agent shipped:
+1. A dry-run normalizer probe (paste a captured Connect payload → see
+   exactly what the parser would extract, no DB writes).
+2. A read-only post-event inspector (dumps full agreement state for one
+   envelope after it lands, including events / parties / terms / pricing
+   / docs / links / exceptions / audit trail).
+3. A step-by-step runbook covering Steps 0-6 (pre-flight dry-run → deploy
+   → set HMAC secret → configure Connect → fire test envelope → verify →
+   file findings).
+
+**Files added (3, all read-only, all inside the Contract Intelligence boundary):**
+- `backend/scripts/contracts_dryrun_normalizer.py` — pure CPU probe. Reads a
+  payload file (or `-` for stdin), runs `normalize_envelope`, prints the
+  resolved Agreement / Parties / Terms / Pricing / Documents + warnings.
+  No DB connection, no network. Verified locally with a synthetic SIM
+  payload — reports the right party_count, term sources, pricing line.
+- `backend/scripts/contracts_validation_probe.py` — read-only Mongo
+  inspector with three modes:
+    * `--envelope-id <id>` — full state for one envelope
+      (events ➜ agreement ➜ children ➜ links ➜ exceptions ➜ audit)
+    * `--latest` — most recent event + the agreement it produced
+    * `--recent-events N` — last N events regardless of envelope
+  Verified import + CLI help + empty-state behavior in preview.
+- `memory/PHASE_3_2_VALIDATION_RUNBOOK.md` — 6-step playbook for the user:
+    * Step 0: Dry-run normalizer against a captured Connect payload BEFORE
+      production. **Critical step** — catches pricing-tab-convention
+      mismatches and field-shape gaps without firing real events.
+    * Step 1: Deploy on the VM (`git pull && docker compose build --no-cache
+      backend && docker compose up -d`).
+    * Step 2: Set `DOCUSIGN_HMAC_SECRET`. Verify `webhook_ready=true` via
+      `/api/contracts/health`.
+    * Step 3: Configure DocuSign Connect (JSON SIM, recommended events,
+      include Custom Fields + Form Data, install HMAC key).
+    * Step 4: Fire a real / sandbox envelope.
+    * Step 5: 16-row validation checklist covering raw payload landing,
+      idempotent replay, agreement upsert, sender/parties/terms/pricing/
+      documents persistence, BC matching, audit completeness, UI surfacing,
+      inline mapping, reject flow.
+    * Step 6: Findings report template (envelope used, checklist results,
+      payload-assumption adjustments needed, UI findings, recommended
+      Phase 4 scope).
+  Includes a quick-reference one-liners section: `--latest`, `--envelope-id`,
+  `--recent-events 20`, dry-run command, health probe, unsigned-event
+  rejection check, **AND** a fully-formed openssl-signed `curl` recipe to
+  smoke-test the webhook against your real HMAC secret + a replay variant
+  to confirm idempotency over HTTP.
+
+**No production code mutated.** `routers/contracts.py`, models, services,
+.env — none touched this round. The 3 new files are scripts + a markdown
+runbook, all inside the Contract Intelligence boundary.
+
+**Tests:** 120/120 backend regression unchanged (no behavior changes).
+Lint clean on both new scripts.
+
+**Why this approach (assumption I'm flagging):**
+- Phase 3.2 is operational, not code work. The fastest path to a real
+  validation pass is *not* "agent tries to predict failure modes" but
+  "user fires one envelope and we look at the dump". Both scripts make
+  that cheap. The dry-run script in particular catches the highest-risk
+  finding (pricing-tab convention mismatch) without a single production
+  HTTP call.
+
+**Activation steps for the user (the playbook is the spec):**
+Read `/app/memory/PHASE_3_2_VALIDATION_RUNBOOK.md` end-to-end. Steps 0
+(preview-side dry-run with a captured payload) and the smoke-test curl
+in Quick Reference can be done on the preview VM today. Steps 1-5 require
+production access + DocuSign admin rights.
+
+**What I'm waiting for from the user before any further code change:**
+1. Step 0 dry-run output (parties / terms / pricing all populate as
+   expected? Any `Pricing (0)` when lines were expected?).
+2. Step 4-5 inspector output for one real envelope (paste the
+   `--envelope-id <id>` dump) + the filled-in 16-row checklist.
+3. Recommended Phase 4 scope based on findings.
+
+**Out-of-scope (Phase 3.2 deliberately omits, per signed guardrails):**
+- No DocuSign SDK install.
+- No live envelope fetch.
+- No Agreement → Document Hub cross-link.
+- No suggested-threshold widget.
+- No code changes to existing routes/services.
+- No AP / posting / email-poller / vendor-alias / unrelated touch.
+
+**Carry-over status (still parked, untouched):**
+- P1: LLM throttling / Gemini RESOURCE_EXHAUSTED — UNCHANGED.
+- P2: SMC / SC / CITICARGO Batch 2 — UNCHANGED.
+- P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
+- P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
+

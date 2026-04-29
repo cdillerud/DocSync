@@ -201,6 +201,12 @@ app.include_router(cp_item_registry_router, prefix="/api")
 app.include_router(consigned_item_registry_router, prefix="/api")
 app.include_router(admin_eod_router, prefix="/api")
 
+# ==================== CONTRACT INTELLIGENCE (Phase 2) ====================
+# Read-only / advisory module. Webhook endpoint is unauthenticated but
+# HMAC-validated; all other endpoints require JWT auth. No BC writes.
+from routers.contracts import router as contracts_router  # noqa: E402
+app.include_router(contracts_router, prefix="/api")
+
 # ==================== SALES MODULE ====================
 app.include_router(sales_router)
 

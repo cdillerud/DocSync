@@ -1264,3 +1264,148 @@ existing test regression. Lint clean (`ruff`) on all 7 new files.
 - ▶️ Phase 3 (after Phase 2 sign-off): `/contracts` UI tabs, analytics
   endpoints, manual mapping UI.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 2** (Webhooks + Normalizer + Matcher + Manual Mapping)
+
+**Status:** ✅ Phase 2 landed locally, lint clean, 97/97 Phase-1+Phase-2 tests green,
+backend boots cleanly with the new router mounted, no regression on unrelated tests.
+Awaiting user review checkpoint before Phase 3 (UI + analytics).
+**Sign-off authority:** user signed exact scope + guardrails (no BC writes, no
+DocuSign writes, no live calls without explicit env flag, no unrelated refactors).
+
+**Files added (Phase 2, additive only):**
+- `backend/services/contracts/agreement_normalizer.py` — pure function
+  `normalize_envelope(payload, event_id=None) → NormalizedAgreement`. Parses
+  DocuSign Connect SIM payloads (or polled envelope dicts). Maps envelope
+  status, signer/CC/sender recipients, custom fields → terms, `formData` tabs
+  → terms + pricing (line-bucket convention `line_N_<attr>`), `envelopeDocuments`
+  → documents. Defensive: missing fields become warnings, never raise.
+- `backend/services/contracts/bc_agreement_matcher.py` — read-only/advisory
+  matcher with injectable `BCLookupRepository` Protocol. Confidence-scored
+  (auto-confirm ≥ 0.95, propose ≥ 0.80, exception below). Customers + Vendors
+  + Items per signed scope. `InMemoryBCRepository` provided for tests.
+- `backend/services/contracts/contract_intelligence_service.py` — orchestrator.
+  `record_event()` performs idempotent insert into `agreement_events` (catches
+  `DuplicateKeyError`, returns `duplicate=True`). `process_event()` runs
+  normalize → upsert agreement+children → match → persist links/exceptions →
+  emit audit rows → mark event processed. **Critical replay semantic:
+  manually-confirmed/-rejected links survive replays untouched; only
+  auto-generated `linked_by='system'` rows in {proposed, auto_confirmed} get
+  refreshed.** Manual `manual_link()`, `confirm_link()`, `reject_link()`,
+  `resolve_exception()` write paths each emit an `agreement_match_audit` row.
+- `backend/routers/contracts.py` — FastAPI router. Endpoints:
+  - `POST /api/docusign/webhook` (unauthenticated; HMAC-validated;
+    503 if not configured, 401 invalid sig, 400 malformed JSON, 200 ack).
+  - `GET /api/contracts/agreements` (auth, paginated, filters status / has_unmatched).
+  - `GET /api/contracts/agreements/{id}` (auth; returns agreement + parties +
+    terms + pricing + documents + links + exceptions).
+  - `POST /api/contracts/agreements/{id}/links` (auth; manual confirmed link).
+  - `POST /api/contracts/agreements/{id}/links/{link_id}/{confirm|reject}` (auth).
+  - `GET /api/contracts/exceptions` (auth, filters status/code/agreement_id).
+  - `POST /api/contracts/exceptions/{id}/resolve` (auth).
+  - `GET /api/contracts/health` (no auth; diagnostic surface — secret-free).
+- `backend/tests/test_contracts_normalizer.py` — fixture-driven, covers happy
+  path + 8 edge cases (unknown status, missing envelope id, direct envelope
+  summary, invalid email drop, voided status, empty recipients, pricing
+  warnings, microsecond truncation).
+- `backend/tests/test_contracts_matcher.py` — covers high-confidence
+  auto-confirm, partial-match propose-vs-exception, no-candidates customer
+  exception, dedupe of same-company multi-signer, witness-role skip,
+  item match + miss + missing-label-warn, threshold contract.
+- `backend/tests/test_contracts_orchestrator.py` — uses `mongomock-motor`
+  with the production unique indexes pre-created. Covers: new event insert,
+  duplicate event ack-without-double-write, full pipeline persistence
+  (agreement + parties + terms + pricing + documents + links + audit),
+  replay no-op idempotency, normalizer-failure event marking, manual link
+  audit row, confirm/reject flow, exception resolution audit, **manual
+  link survives replay** (the critical replay semantic test).
+- `backend/tests/test_contracts_endpoints.py` — FastAPI `TestClient` against
+  a tiny app that mounts only the contracts router with mongomock + auth
+  override. Covers: webhook 503 when unconfigured, 401 missing/tampered
+  signature, 400 malformed JSON, 200 + duplicate=False on first delivery,
+  200 + duplicate=True on replay (and event row count == 1), GET health,
+  GET agreements (empty + 404), full manual flow (create → reject + new
+  proposed → confirm), resolve_exception (+ 404 on missing), auth gating
+  on all read endpoints (401 without bearer).
+
+**Files mutated (1, minimal as promised):**
+- `backend/main.py` — single block added: 2-line import + `app.include_router(
+  contracts_router, prefix="/api")`. No other line changed. Reported here
+  per signed guardrail.
+
+**Tests run locally:**
+```
+cd /app/backend && python -m pytest \
+  tests/test_contracts_models.py \
+  tests/test_docusign_client_scaffold.py \
+  tests/test_contracts_normalizer.py \
+  tests/test_contracts_matcher.py \
+  tests/test_contracts_orchestrator.py \
+  tests/test_contracts_endpoints.py -q
+→ 97 passed
+```
+Backend `/api/health` still 200; `/api/contracts/health` returns the
+diagnostic surface (currently `webhook_ready=false` until you populate
+`DOCUSIGN_HMAC_SECRET`); webhook returns 503 when unconfigured (proven via
+curl). Lint (`ruff`) clean on all 6 new files + the 1 mutated file.
+
+**Assumptions made (calling them out explicitly for your review):**
+1. **Pricing tab convention.** The normalizer expects pricing tabs named
+   `line_N_<attr>` (where attr ∈ {item, qty, price, uom, total, description,
+   ...}). If your DocuSign templates use a different naming scheme, no
+   pricing rows will be emitted and a per-line `pricing_missing_item`
+   warning will appear. **Tell me your real tab convention and I'll
+   parameterize this in Phase 2.x.**
+2. **Webhook event id derivation.** DocuSign's modern Connect SIM provides
+   `eventId`; older configurations don't. When absent we synthesize a stable
+   key from `(event, envelopeId, generatedDateTime)`. The synthesized key
+   is still unique-indexed and idempotent.
+3. **Vendor exceptions are noisy by default.** A signer who isn't a vendor
+   would emit an exception row for every envelope, so vendor-side party
+   misses do NOT generate exceptions (only customer-side do). Vendor
+   matches still emit `proposed` links when the score is high enough.
+4. **Match thresholds (0.80 propose, 0.95 auto-confirm).** Tunable in code
+   today; if you want them in env vars, say the word.
+5. **Replay semantics for system-emitted rows.** On reprocessing, all
+   `linked_by='system'` rows in {proposed, auto_confirmed} are wiped and
+   re-emitted; manually-confirmed/-rejected rows AND user-resolved
+   exceptions are preserved. Verified by `test_replay_does_not_clobber_manual_link`.
+6. **Webhook is unauthenticated by design.** DocuSign cannot present a
+   bearer token. HMAC-SHA256 is the sole auth gate; we refuse with 503
+   if no secret is configured (no silent acceptance of unsigned events).
+
+**Operator action required to actually receive events:**
+1. Set `DOCUSIGN_HMAC_SECRET` (and optionally `DOCUSIGN_HMAC_SECRET_2`
+   for rotation) in `backend/.env` on the production VM.
+2. Rebuild + restart: `cd /opt/gpi-hub && git pull && docker compose build
+   --no-cache backend && docker compose up -d`.
+3. In DocuSign Admin → Connect, point a JSON SIM webhook at
+   `https://<vm-public-host>/api/docusign/webhook` with the same HMAC
+   secret. Events checked: `envelope-sent`, `envelope-completed`,
+   `envelope-declined`, `envelope-voided` (recommended starter set).
+4. Verify with `curl -s https://<host>/api/contracts/health` —
+   `docusign.webhook_ready` should flip to `true`.
+
+**Out-of-scope (Phase 2 deliberately omits — Phase 3 territory):**
+- No `/contracts` UI page, no analytics endpoints (`/contracts/summary`,
+  `/contracts/expiring`, etc.).
+- No live DocuSign API calls (no envelope fetch / list / download).
+  `get_access_token()` still raises `DocuSignLiveCallsDisabled`.
+- No `docusign-esign` SDK install yet.
+- No Agreement → Document Hub cross-link panel (parked per your direction).
+
+**What requires your review before Phase 3:**
+1. Decide on the pricing-tab convention (assumption #1 above).
+2. Confirm webhook URL path (`/api/docusign/webhook`) is acceptable for
+   your DocuSign Connect configuration, or specify an alternative.
+3. Confirm match thresholds (0.80 / 0.95) — push to env if you want
+   per-environment tuning.
+4. Approve Phase 3 kickoff (UI + analytics + manual-mapping screens).
+
+**Carry-over status (still parked, untouched as instructed):**
+- P1: LLM throttling / Gemini RESOURCE_EXHAUSTED — UNCHANGED.
+- P2: SMC / SC / CITICARGO Batch 2 — UNCHANGED.
+- P2: Contaminated `vendor_aliases` cleanup — UNCHANGED.
+- P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
+

@@ -1,6 +1,6 @@
 {
   "sweep": {
-    "generated_at": "2026-04-28T23:38:12.738165+00:00",
+    "generated_at": "2026-04-29T01:06:55.588239+00:00",
     "scope": "AP_Invoice (signed: 1a)",
     "heuristic": "live tier1_batch_runner._vendor_match_likely (signed: 2a, two-axis)",
     "axes": {
@@ -27,7 +27,7 @@
     "top_pairs": [
       {
         "extracted_vendor": "NonExistent Vendor XYZ Corp",
-        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor": "Ardagh - SP",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 19,
         "sample_doc_ids": [
@@ -58,7 +58,7 @@
       },
       {
         "extracted_vendor": "Test Vendor Selection Corp",
-        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor": "Ardagh - SP",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 17,
         "sample_doc_ids": [
@@ -125,7 +125,7 @@
     "all_pairs": [
       {
         "extracted_vendor": "NonExistent Vendor XYZ Corp",
-        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor": "Ardagh - SP",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 19,
         "sample_doc_ids": [
@@ -156,7 +156,7 @@
       },
       {
         "extracted_vendor": "Test Vendor Selection Corp",
-        "canonical_vendor": "Ardagh - ST",
+        "canonical_vendor": "Ardagh - SP",
         "canonical_vendor_code": "ARDAGHM",
         "affected_doc_count": 17,
         "sample_doc_ids": [

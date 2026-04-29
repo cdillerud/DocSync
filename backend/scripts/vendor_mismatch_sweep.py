@@ -61,7 +61,8 @@ except Exception:
 from motor.motor_asyncio import AsyncIOMotorClient
 
 # Import the LIVE heuristic — single source of truth (signed guardrail).
-from scripts.tier1_batch_runner import _vendor_match_likely, _vendor_tokens  # noqa: E402
+from services.vendor_name_helpers import vendor_match_likely as _vendor_match_likely
+from services.vendor_name_helpers import _vendor_tokens  # noqa: E402
 
 
 REPORT_MD = Path("/app/memory/VENDOR_MISMATCH_SWEEP.md")

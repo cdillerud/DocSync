@@ -486,41 +486,11 @@ async def _vendor_resolve(db, candidate: Candidate) -> tuple[str, str]:
     return ("", f"no alias or profile match for {name!r}")
 
 
-_VENDOR_STOPWORDS = {
-    "llc", "inc", "corp", "corporation", "company", "co", "ltd", "limited",
-    "the", "and", "of", "for", "group", "holdings",
-}
-
-
-def _vendor_tokens(s: str) -> set:
-    """Normalize a vendor name to a set of meaningful tokens (≥4 chars, not stopwords)."""
-    import re
-    s = re.sub(r"[^\w\s]", " ", (s or "").lower())
-    return {t for t in s.split() if len(t) >= 4 and t not in _VENDOR_STOPWORDS}
-
-
-def _vendor_match_likely(extracted_name: str, canonical_name: str) -> bool:
-    """Heuristic: do these two strings likely refer to the same vendor?
-
-    Substring-tolerant so BC vendor codes (TUMALOC) match human names (TUMALO CREEK).
-    Returns True when at least one significant token from one side is a substring
-    of any token on the other side. Returns True when either side has no
-    meaningful tokens (we don't have enough signal to flag).
-    """
-    if not extracted_name or not canonical_name:
-        return True
-    # Trivial case-insensitive equality
-    if extracted_name.strip().lower() == canonical_name.strip().lower():
-        return True
-    a = _vendor_tokens(extracted_name)
-    b = _vendor_tokens(canonical_name)
-    if not a or not b:
-        return True
-    for ta in a:
-        for tb in b:
-            if ta in tb or tb in ta:
-                return True
-    return False
+from services.vendor_name_helpers import (
+    _VENDOR_STOPWORDS,  # noqa: F401  re-exported for back-compat
+    _vendor_tokens,     # noqa: F401  re-exported for back-compat
+    vendor_match_likely as _vendor_match_likely,  # noqa: F401  back-compat alias
+)
 
 
 async def phase_dry_run(candidates: List[Candidate]) -> List[Candidate]:

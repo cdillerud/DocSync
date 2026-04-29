@@ -14,7 +14,9 @@ Dependencies:
 """
 
 import logging
+import os
 import re
+import uuid
 from datetime import datetime, timezone
 
 import httpx
@@ -50,24 +52,94 @@ def _server_config():
 # Vendor alias / DB matching
 # ---------------------------------------------------------------------------
 
-async def lookup_vendor_by_sender(sender_email: str) -> dict:
+async def lookup_vendor_by_sender(
+    sender_email: str,
+    extracted_vendor: str | None = None,
+    *,
+    strict: bool = True,
+    document_id: str | None = None,
+) -> dict:
     """
     Look up vendor by sender email address.
     Uses the sender_vendor_map collection populated by the learning loop.
-    Returns dict with vendor_canonical, vendor_match_method, etc.
+
+    Guarded behavior (added 2026-04-29 — Sender-Stamp Guard v1):
+      When `extracted_vendor` is provided, `strict=True` (default), and the
+      env flag `SENDER_STAMP_GUARD_ENABLED` is "true" (default), the
+      function refuses to return a sender-derived canonical that disagrees
+      with `extracted_vendor` under `vendor_match_likely`. A telemetry row
+      is emitted to `workflow_events` (`vendor.sender_disagreed`) and the
+      function returns
+      `{"vendor_canonical": None, "vendor_match_method": "sender_disagreed",
+        "sender_hint": {...}}`.
+
+      `document_id` is optional. When supplied by the caller, it is included
+      in the disagreement telemetry payload so operators can correlate
+      directly to the affected `hub_documents.id`. When None, telemetry
+      omits the field (legacy back-compat).
+
+      When `extracted_vendor` is None or `strict=False`, behavior is
+      byte-identical to the pre-guard implementation (back-compat).
     """
     db = get_db()
     if not sender_email:
         return {"vendor_canonical": None, "vendor_match_method": "none"}
 
     email_lower = sender_email.strip().lower()
-    # Check exact email match
+
+    # Locate a mapping (exact email first, then domain). Track which kind
+    # matched so the guard / telemetry can record it.
+    matched_kind = None
     mapping = await db.sender_vendor_map.find_one(
         {"sender_email": email_lower},
         {"_id": 0}
     )
     if mapping and mapping.get("vendor_canonical"):
-        # Track usage
+        matched_kind = "sender_email"
+    else:
+        mapping = None
+        domain = email_lower.split("@")[-1] if "@" in email_lower else ""
+        if domain:
+            domain_mapping = await db.sender_vendor_map.find_one(
+                {"sender_domain": domain, "domain_confidence": {"$gte": 2}},
+                {"_id": 0}
+            )
+            if domain_mapping and domain_mapping.get("vendor_canonical"):
+                mapping = domain_mapping
+                matched_kind = "sender_domain"
+
+    if not mapping or not mapping.get("vendor_canonical"):
+        return {"vendor_canonical": None, "vendor_match_method": "none"}
+
+    # --- Sender-Stamp Guard v1 ---
+    guard_enabled = os.environ.get("SENDER_STAMP_GUARD_ENABLED", "true").lower() == "true"
+    if guard_enabled and strict and extracted_vendor:
+        from services.vendor_name_helpers import vendor_match_likely
+        sender_name = mapping.get("vendor_name") or mapping.get("vendor_canonical")
+        if not vendor_match_likely(extracted_vendor, sender_name):
+            await _emit_sender_disagreed(
+                db,
+                sender_email=email_lower,
+                sender_canonical=mapping.get("vendor_canonical"),
+                sender_name=sender_name,
+                extracted_vendor=extracted_vendor,
+                matched_kind=matched_kind,
+                document_id=document_id,
+            )
+            return {
+                "vendor_canonical": None,
+                "vendor_match_method": "sender_disagreed",
+                "sender_hint": {
+                    "sender_email": email_lower,
+                    "sender_canonical": mapping.get("vendor_canonical"),
+                    "sender_name": sender_name,
+                    "extracted_vendor": extracted_vendor,
+                    "matched_kind": matched_kind,
+                },
+            }
+
+    # --- Existing path: agreement (or legacy back-compat) ---
+    if matched_kind == "sender_email":
         try:
             await db.sender_vendor_map.update_one(
                 {"sender_email": email_lower},
@@ -76,29 +148,51 @@ async def lookup_vendor_by_sender(sender_email: str) -> dict:
             )
         except Exception:
             pass
-        return {
-            "vendor_canonical": mapping["vendor_canonical"],
-            "vendor_match_method": "sender_email",
-            "vendor_name": mapping.get("vendor_name", ""),
-            "vendor_no": mapping.get("vendor_no", ""),
+    return {
+        "vendor_canonical": mapping["vendor_canonical"],
+        "vendor_match_method": matched_kind,
+        "vendor_name": mapping.get("vendor_name", ""),
+        "vendor_no": mapping.get("vendor_no", ""),
+    }
+
+
+async def _emit_sender_disagreed(
+    db, *, sender_email, sender_canonical, sender_name, extracted_vendor,
+    matched_kind, document_id=None,
+):
+    """Best-effort telemetry; never raises into the caller.
+
+    `document_id` is included in the payload (and at top level, matching
+    existing workflow_events convention) when supplied; the field is
+    intentionally absent (rather than null) when the caller doesn't have
+    it, so queries can use `{document_id: {$exists: true}}` to find
+    correlatable rows.
+    """
+    try:
+        payload = {
+            "sender_email": sender_email,
+            "sender_canonical": sender_canonical,
+            "sender_name": sender_name,
+            "extracted_vendor": extracted_vendor,
+            "matched_kind": matched_kind,
+            "guard_version": "v1",
         }
-
-    # Check domain match (e.g., @tumalocreek.us → TUMALOC)
-    domain = email_lower.split("@")[-1] if "@" in email_lower else ""
-    if domain:
-        domain_mapping = await db.sender_vendor_map.find_one(
-            {"sender_domain": domain, "domain_confidence": {"$gte": 2}},
-            {"_id": 0}
-        )
-        if domain_mapping and domain_mapping.get("vendor_canonical"):
-            return {
-                "vendor_canonical": domain_mapping["vendor_canonical"],
-                "vendor_match_method": "sender_domain",
-                "vendor_name": domain_mapping.get("vendor_name", ""),
-                "vendor_no": domain_mapping.get("vendor_no", ""),
-            }
-
-    return {"vendor_canonical": None, "vendor_match_method": "none"}
+        if document_id:
+            payload["document_id"] = document_id
+        event = {
+            "event_id": str(uuid.uuid4()),
+            "event_type": "vendor.sender_disagreed",
+            "status": "warning",
+            "source_service": "vendor_matching.lookup_vendor_by_sender",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "actor": None,
+            "payload": payload,
+        }
+        if document_id:
+            event["document_id"] = document_id
+        await db.workflow_events.insert_one(event)
+    except Exception as e:
+        logger.warning("[vendor.sender_disagreed] telemetry write failed: %s", e)
 
 
 EXCLUDED_SENDER_DOMAINS = {"gamerpackaging.com"}

@@ -1,6 +1,6 @@
 # Vendor-Mismatch Sweep
 
-- Generated: `2026-04-28T23:38:12.738165+00:00`
+- Generated: `2026-04-29T01:06:55.588239+00:00`
 - Scope: AP_Invoice (signed: 1a)
 - Heuristic: live tier1_batch_runner._vendor_match_likely (signed: 2a, two-axis)
 - Mode: **read-only**, no Mongo writes, no BC calls.
@@ -32,7 +32,7 @@
 
 ## Top 4 mismatch pairs
 
-### 1. `NonExistent Vendor XYZ Corp` → `Ardagh - ST` (`ARDAGHM`)
+### 1. `NonExistent Vendor XYZ Corp` → `Ardagh - SP` (`ARDAGHM`)
 
 - Affected docs: **19**  ·  class: **`alias_driven`**  ·  axis fail: `{'name': 19, 'code': 19}`
 - Sample doc IDs: `b50564b8-9058-433d-bcb6-5b0f105bacb1`, `4a500d76-4864-4e9c-98dd-ee1c64d936a0`, `0160e45c-19e2-44a3-a656-7048f19e9b77`, `78532208-8466-4e93-967e-748d0c947e81`, `e5866bdb-0985-426f-8de6-fe6842a63a26`
@@ -44,7 +44,7 @@
   - `learned_at`: `2026-04-23T01:18:04.606381+00:00`
 - **Recommended remediation: `alias_retire`**
 
-### 2. `Test Vendor Selection Corp` → `Ardagh - ST` (`ARDAGHM`)
+### 2. `Test Vendor Selection Corp` → `Ardagh - SP` (`ARDAGHM`)
 
 - Affected docs: **17**  ·  class: **`alias_driven`**  ·  axis fail: `{'name': 17, 'code': 17}`
 - Sample doc IDs: `67dc3827-ce17-484b-ba8b-866fe8eed29d`, `c78c5e7b-7a1c-4dc1-ae56-41b0411c1c18`, `dfc707d6-af0c-415c-a175-047498aaf347`, `293578b2-a44e-406b-8b57-21d26bb4cb35`, `e1ff165d-8b02-41cd-92d4-0880ec56fc37`

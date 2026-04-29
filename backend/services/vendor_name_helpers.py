@@ -103,3 +103,52 @@ def calculate_fuzzy_score(name1: str, name2: str) -> float:
         score = max(score, orig_score)
 
     return score
+
+
+# ---------------------------------------------------------------------------
+# Vendor-name match heuristic (single source of truth)
+#
+# Imported by:
+#   - services/vendor_matching.py        (live sender-stamp guard)
+#   - scripts/tier1_batch_runner.py      (re-export for back-compat)
+#   - scripts/vendor_mismatch_sweep.py   (sweep)
+#
+# Substring-tolerant, fail-open on insufficient signal. See
+# memory/SENDER_STAMP_GUARD_IMPLEMENTATION_DECLARATION.md §3.1.
+# ---------------------------------------------------------------------------
+
+_VENDOR_STOPWORDS = {
+    "llc", "inc", "corp", "corporation", "company", "co", "ltd", "limited",
+    "the", "and", "of", "for", "group", "holdings",
+}
+
+
+def _vendor_tokens(s: str) -> set:
+    """Normalize a vendor name to a set of meaningful tokens
+    (≥4 chars, not stopwords)."""
+    s = re.sub(r"[^\w\s]", " ", (s or "").lower())
+    return {t for t in s.split() if len(t) >= 4 and t not in _VENDOR_STOPWORDS}
+
+
+def vendor_match_likely(a: str, b: str) -> bool:
+    """Heuristic: do these two strings likely refer to the same vendor?
+
+    Substring-tolerant so BC vendor codes (e.g. TUMALOC) match human names
+    (e.g. TUMALO CREEK). Returns True when at least one significant token
+    from one side is a substring of any token on the other side. Returns
+    True when either side has no meaningful tokens (insufficient signal
+    to flag as a mismatch — fail-open).
+    """
+    if not a or not b:
+        return True
+    if a.strip().lower() == b.strip().lower():
+        return True
+    ta = _vendor_tokens(a)
+    tb = _vendor_tokens(b)
+    if not ta or not tb:
+        return True
+    for x in ta:
+        for y in tb:
+            if x in y or y in x:
+                return True
+    return False

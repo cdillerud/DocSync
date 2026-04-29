@@ -1192,3 +1192,75 @@ Test reports: `test_reports/iteration_203.json` (25/25), `test_reports/iteration
   - Surface the custom-rules list in an admin UI panel (currently API-only).
   - Phase B/C orchestration extraction from `server.py`.
 
+
+
+### 2026-02 — Contract Intelligence Module: **Phase 1** (DB Models + DocuSign Scaffold)
+
+**Status:** ✅ Phase 1 landed — awaiting user review checkpoint before Phase 2.
+**Sign-off authority:** user signed-as-is on the 3-phase plan with these guardrails:
+sequential phases (no bundling), DocuSign Connect push only (3a), BC matching scope
+Customers + Vendors + Items but **read-only / advisory** (no BC writes), top-level
+`/contracts` route. Carry-over items (LLM throttling, SMC/SC/CITICARGO Batch 2,
+contaminated alias rows, Phase 4 Path B removal) explicitly out of scope.
+
+**Files added (Phase 1, additive only — no existing files mutated except `.env`):**
+- `backend/models/contracts.py` — 10 Pydantic v2 models + `CONTRACTS_COLLECTIONS`
+  registry + `CONTRACTS_INDEXES` declaration. Models: `Agreement`,
+  `AgreementParty`, `AgreementTerm`, `AgreementPricing`, `AgreementObligation`,
+  `AgreementDocument`, `AgreementBCLink`, `AgreementEvent`, `AgreementException`,
+  `AgreementMatchAudit`. All ids are UUID4 strings (no `_id`); all timestamps
+  timezone-aware UTC; status/role/kind fields constrained via `Literal` unions;
+  extras ignored on every model.
+- `backend/services/integrations/__init__.py` — package marker.
+- `backend/services/integrations/docusign_client.py` — env-driven scaffold.
+  Surface: `DocuSignSettings.from_env()`, `DocuSignClient.is_configured()`,
+  `is_webhook_ready()`, `status()`, `build_jwt_assertion()` (pure CPU),
+  `oauth_consent_url(redirect_uri)`, `validate_webhook_signature(body, sig)`,
+  `get_access_token()` (raises `DocuSignLiveCallsDisabled` in Phase 1).
+  Module fn `validate_connect_hmac(body, sig, secrets)` for HMAC-SHA256
+  with constant-time comparison and rotation support (multiple secrets).
+  **No live network calls; `docusign-esign` SDK intentionally NOT installed
+  in Phase 1.**
+- `backend/services/contracts/__init__.py` — placeholder for Phase 2
+  (`agreement_normalizer.py`, `bc_agreement_matcher.py` land here).
+- `backend/scripts/contracts_init_indexes.py` — one-shot, idempotent index
+  initializer for the 10 new collections. Run via
+  `docker compose exec backend python -m backend.scripts.contracts_init_indexes`
+  on the remote VM after pull.
+- `backend/tests/test_contracts_models.py` — 25 tests covering required
+  fields, enum constraints, confidence bounds, defaults, idempotency-key
+  shape `(provider, provider_event_id)`, registry/index sanity.
+- `backend/tests/test_docusign_client_scaffold.py` — 23 tests covering env
+  parsing, configured/unconfigured status, JWT claim shape (`iss`/`sub`/`aud`/
+  `iat`/`exp`/`scope`) verified with an ephemeral RSA keypair, TTL clamp at
+  3600s, OAuth consent URL shape, HMAC happy-path/tampering/rotation/missing
+  inputs, and the live-call guard (`get_access_token` raises even when the
+  flag is on, until Phase 2 lands).
+
+**Files mutated:**
+- `backend/.env` — additive only: `DOCUSIGN_INTEGRATION_KEY`, `DOCUSIGN_USER_ID`,
+  `DOCUSIGN_ACCOUNT_ID`, `DOCUSIGN_BASE_URI`, `DOCUSIGN_PRIVATE_KEY_PATH`,
+  `DOCUSIGN_OAUTH_HOST` (default `account-d.docusign.com`),
+  `DOCUSIGN_HMAC_SECRET`, `DOCUSIGN_HMAC_SECRET_2`,
+  `DOCUSIGN_LIVE_CALLS_ENABLED=false`. All blank by default — current behavior
+  is byte-identical to pre-Phase-1.
+
+**Tests:** 48/48 green (`tests/test_contracts_models.py` + `tests/test_docusign_client_scaffold.py`).
+Backend `/api/health` still 200; no router mounted, no `server.py` touched, no
+existing test regression. Lint clean (`ruff`) on all 7 new files.
+
+**Out-of-scope confirmations (Phase 1 deliberately omits these):**
+- No webhook receiver (`POST /api/docusign/webhook`) — that's Phase 2.
+- No agreement normalizer or BC matcher — that's Phase 2.
+- No `/contracts` UI / analytics endpoints — that's Phase 3.
+- No `docusign-esign` SDK install — deferred to Phase 2 when live calls land.
+- No mount in `server.py` — Phase 1 is dormant code.
+
+**Next steps:**
+- ⏸️ User review checkpoint (per signed sequencing rule).
+- ▶️ Phase 2 (after sign-off): webhook receiver with HMAC validation +
+  idempotency, agreement normalizer, BC matcher (read-only/advisory),
+  manual mapping endpoints, accompanying tests.
+- ▶️ Phase 3 (after Phase 2 sign-off): `/contracts` UI tabs, analytics
+  endpoints, manual mapping UI.
+

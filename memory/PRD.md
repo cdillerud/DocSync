@@ -1,5 +1,21 @@
 # GPI Document Hub — Product Requirements Document
 
+## Latest Phase Shipped — Phase 4C(c): PDF Body Extraction (2026-02)
+Deterministic regex-based extraction of contractual fields from legacy
+agreement PDFs that DocuSign templates / Navigator metadata cannot
+carry. Five field families: freight terms, MOQ (header + per-line),
+volume commitment, tooling amortization, payment-term cash discount,
+volume tier discount. Opt-in via admin-gated HTTP endpoint
+(`POST /api/contracts/agreements/{id}/pdf-extract`) and CLI
+(`scripts.contracts_extract_pdf`). Default dry-run; `commit=true`
+upserts idempotently into `agreement_terms` (source=`pdf_body`),
+`agreement_obligations` (kinds `volume_commitment`,
+`tooling_amortization`), and `agreement_pricing.min_quantity`. Same-key
+ambiguities surface as `pdf_extraction_ambiguous` low-severity
+exceptions. No DocuSign SDK install, no live envelope fetch, no BC
+writes, no Document Hub linking. **VM-verified 253 passed / 8 skipped /
+1 xfailed (Phase 4C(d) baseline of 192 preserved + 61 new).**
+
 ## Original Problem Statement
 Build and continuously refine the Sales/AP Modules and Document Inbox with AI autonomy and continuous learning. Goal: aggressively shrink the Inbox "Needs Review" queue by closing validation gaps (PO, Customer, Vendor, SO, Duplicate) so docs are auto-routed.
 

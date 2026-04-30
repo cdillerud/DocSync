@@ -1,6 +1,114 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-02-XX] Contract Intelligence Phase 4C(a) — Navigator Import Endpoint + UI Drop Zone
+
+**Scope:** Charlie can upload a Navigator AI Metadata Export directly
+through the Contract Intelligence page; no SCP, `docker cp`, or VM
+file handling required. Default is dry-run; commit is a deliberate
+second click. CLI and HTTP share one service so they cannot drift. No
+DocuSign SDK install, no live envelope fetch, no webhook activation,
+no BC writes, no PDF body extraction.
+
+### New shared service: `backend/services/contracts/navigator_import.py`
+
+- `parse_upload(data, filename, content_type, sheet)` — size-capped,
+  extension-validated bytes → row dicts. Raises `NavigatorImportError`
+  (subclass of `ValueError`) on every client-recoverable failure.
+- `dryrun_rows(rows, *, db, filename)` — async; computes `would_create`
+  vs. `would_update` against the live `agreements` collection.
+- `commit_rows(rows, *, db, filename)` — async; routes rows through
+  `ContractIntelligenceService.record_event` + `process_event`.
+  Idempotent (`navigator::{envelope_id}` event id; replays no-op).
+- Returns dataclass-backed `ImportSummary` with rollup counts and a
+  per-row report list.
+- Size cap: env var `CONTRACT_NAVIGATOR_IMPORT_MAX_BYTES` (default 5 MB,
+  hard ceiling 50 MB).
+
+### New endpoint: `POST /api/contracts/navigator/import`
+
+- Admin-gated via `services.auth_deps.require_admin` (403 otherwise).
+- Multipart `file`. Accepts `.xlsx`, `.xlsm`, `.csv`, `.json`.
+- Default `?commit=false` (dry-run); pass `?commit=true` to persist.
+- Optional `?sheet=<name>` for xlsx with multiple worksheets.
+- Returns the `ImportSummary` shape (full row-level diagnostics).
+- Oversize → 413; bad shape → 400.
+
+### CLI refactor: `backend/scripts/contracts_import_navigator.py`
+
+- Now a thin wrapper around the shared service. CLI args + output
+  unchanged.
+- Backwards-compat adapter exposes the legacy `load_rows`,
+  `dryrun_row`, `commit_row` helpers so prior tests pass without edits.
+- All 16 CLI tests still green.
+
+### UI: `frontend/src/pages/ContractIntelligencePage.jsx`
+
+- Added 6th tab "Import" (`data-testid="tab-navigator-import"`).
+- `NavigatorImportTab` component: drag-and-drop file zone, client-side
+  extension validation, "Run Dry-Run" → preview card → "Commit Import"
+  with confirm dialog summarizing would_create/would_update.
+- Per-row table shows envelope id, status, title, P/T/Pr/D counts, and
+  outcome (committed / skipped / error / would import). Rows with
+  ambiguity exceptions get a yellow `AMBIGUOUS` badge.
+- Lucide icons (no emoji), shadcn primitives, sonner toasts.
+- All interactive elements carry `data-testid` attributes for E2E.
+
+### Tests
+
+- New `tests/test_contracts_navigator_import_endpoint.py` — 11 tests:
+  auth gating, validation (extension/size/missing-file), dry-run
+  structured response, xlsx + csv parsing, no-write guarantee in
+  dry-run, commit persistence, idempotent replay, dry-run after commit
+  → `would_update`, mixed-row error reporting.
+- Full Contract Intelligence suite: **172 passed, 7 skipped, 1 xfailed**
+  (Phase 4B baseline: 161 passed).
+- Zero regressions in normalizer, Connect SIM path, matcher, golden
+  fixtures, orchestrator, phase3 / phase3.1, endpoints, models, CLI.
+
+### Documentation
+
+- `/app/memory/BRAGG_DOCUSIGN_VALIDATION_FINDINGS.md` §13 added with
+  endpoint contract, request/response shape, UI testid surface,
+  remaining items.
+
+### VM deployment
+
+```bash
+cd /opt/gpi-hub
+git pull
+docker compose build backend
+docker compose up -d backend
+# Verify (same 7-file subset as Phase 4B; new endpoint test requires
+# mongomock_motor which is intentionally not in the prod image):
+docker compose exec -w /app backend python -m pytest \
+    tests/test_contracts_bragg_fixture.py \
+    tests/test_contracts_navigator_normalizer.py \
+    tests/test_contracts_import_navigator_cli.py \
+    tests/test_contracts_matcher.py \
+    tests/test_contracts_normalizer.py \
+    tests/test_contracts_models.py \
+    tests/test_contracts_golden_fixtures.py -v
+```
+Expected: **114 passed, 7 skipped, 1 xfailed** — identical to Phase 4B
+on the VM (CLI suite refactor is regression-clean). The new HTTP
+endpoint suite (11 tests) lives at
+`tests/test_contracts_navigator_import_endpoint.py` and runs on any
+container that has `mongomock_motor` available.
+
+### Not yet shipped (out of Phase 4C(a) scope)
+
+- DocuSign SDK install / live envelope fetch / Connect webhook
+  activation.
+- Agreement ↔ Document Hub cross-link.
+- Suggested-threshold widget.
+- Template-side `payment_term_discount` split.
+- PDF body extraction (freight / MOQ / commitment / tooling /
+  1%-10 discount).
+
+
+
+
 ## [2026-02-XX] Contract Intelligence Phase 4B — Navigator import CLI + matcher ambiguity hardening
 
 **Scope:** One-shot Navigator import CLI (dry-run default, idempotent

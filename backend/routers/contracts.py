@@ -36,19 +36,28 @@ from fastapi import (
     BackgroundTasks,
     Body,
     Depends,
+    File,
     Header,
     HTTPException,
     Query,
     Request,
+    UploadFile,
     status,
 )
 from pydantic import BaseModel, Field
 
 from deps import get_db
 from models.contracts import CONTRACTS_COLLECTIONS
-from services.auth_deps import get_current_user
+from services.auth_deps import get_current_user, require_admin
 from services.contracts.contract_intelligence_service import (
     ContractIntelligenceService,
+)
+from services.contracts.navigator_import import (
+    NavigatorImportError,
+    commit_rows,
+    dryrun_rows,
+    max_upload_bytes,
+    parse_upload,
 )
 from services.integrations.docusign_client import get_docusign_client
 
@@ -747,3 +756,56 @@ async def contracts_audit_for_agreement(
         {"agreement_id": agreement_id}, {"_id": 0},
     ).sort("at", -1).limit(limit).to_list(length=limit)
     return {"agreement_id": agreement_id, "total": len(items), "items": items}
+
+
+
+# ---------------------------------------------------------------------------
+# Navigator import — Phase 4C(a)
+# ---------------------------------------------------------------------------
+
+@router.post("/contracts/navigator/import", tags=["Contract Intelligence"])
+async def import_navigator_export(
+    file: UploadFile = File(..., description="Navigator .xlsx / .csv / .json"),
+    commit: bool = Query(False, description="Persist rows. Default false (dry-run)."),
+    sheet: Optional[str] = Query(None, description="Worksheet name (xlsx only)."),
+    _user: dict = Depends(require_admin),
+):
+    """Admin-gated multipart upload of a DocuSign Navigator AI Metadata
+    Export. Default is dry-run; pass ``?commit=true`` to actually persist.
+
+    Both code paths share the exact same service used by the
+    ``contracts_import_navigator`` CLI — there is **one** import pipeline.
+    Idempotency is delegated to the orchestrator: the deterministic event
+    id ``navigator::{envelope_id}`` collapses replays at the
+    ``agreement_events`` unique-index layer; manual mappings survive.
+    """
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded.")
+
+    cap = max_upload_bytes()
+    # UploadFile streams from disk; pull into memory but reject anything
+    # over the byte cap to prevent OOM. SpooledTemporaryFile + size check
+    # post-read keeps the implementation tiny and predictable.
+    data = await file.read(cap + 1)
+    if len(data) > cap:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum size of {cap} bytes.",
+        )
+
+    try:
+        rows = parse_upload(
+            data=data,
+            filename=file.filename,
+            content_type=file.content_type,
+            sheet=sheet,
+        )
+    except NavigatorImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    db = get_db()
+    if commit:
+        summary = await commit_rows(rows, db=db, filename=file.filename)
+    else:
+        summary = await dryrun_rows(rows, db=db, filename=file.filename)
+    return summary.to_dict()

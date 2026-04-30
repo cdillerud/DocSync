@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import {
   FileSignature, AlertTriangle, Link2, CalendarClock, BarChart3, RefreshCw,
+  UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle,
 } from 'lucide-react';
 import {
   getContractSummary,
@@ -31,6 +32,7 @@ import {
   getAgreementAudit,
   getContractsHealth,
   contractsBCSearch,
+  importNavigatorExport,
 } from '../lib/api';
 
 // =============================================================================
@@ -1295,6 +1297,309 @@ function ExpirationsTab() {
   );
 }
 
+
+// =============================================================================
+// Tab: Import Navigator Export — Phase 4C(a)
+// =============================================================================
+
+function NavigatorImportTab() {
+  const [file, setFile] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [dryrunResult, setDryrunResult] = useState(null);
+  const [commitResult, setCommitResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const onPick = (f) => {
+    if (!f) return;
+    const ok = /\.(xlsx|xlsm|csv|json)$/i.test(f.name);
+    if (!ok) {
+      toast.error(`Unsupported file type: ${f.name}`);
+      return;
+    }
+    setFile(f);
+    setDryrunResult(null);
+    setCommitResult(null);
+    setError(null);
+  };
+
+  const reset = () => {
+    setFile(null);
+    setDryrunResult(null);
+    setCommitResult(null);
+    setError(null);
+  };
+
+  const runDryrun = async () => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    setCommitResult(null);
+    try {
+      const r = await importNavigatorExport(file, { commit: false });
+      setDryrunResult(r.data);
+      toast.success(`Dry-run complete: ${r.data.row_count} rows, ${r.data.error_count} errors`);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e.message;
+      setError(msg);
+      toast.error(`Dry-run failed: ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runCommit = async () => {
+    if (!file || !dryrunResult) return;
+    if (!window.confirm(
+      `Commit ${dryrunResult.row_count} row(s)?\n\n` +
+      `Would create: ${dryrunResult.would_create}\n` +
+      `Would update: ${dryrunResult.would_update}\n\n` +
+      `Manual mappings already in place will be preserved. ` +
+      `Duplicate envelope ids will be skipped.`,
+    )) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await importNavigatorExport(file, { commit: true });
+      setCommitResult(r.data);
+      toast.success(
+        `Imported: ${r.data.committed} committed, ${r.data.skipped} skipped, ` +
+        `${r.data.error_count} errors`
+      );
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e.message;
+      setError(msg);
+      toast.error(`Commit failed: ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer?.files?.[0];
+    if (f) onPick(f);
+  };
+
+  const renderSummary = (summary, label) => {
+    if (!summary) return null;
+    const isCommit = summary.mode === 'commit';
+    return (
+      <Card data-testid={`navigator-import-${label}-summary`}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            {isCommit ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      : <FileSpreadsheet className="h-4 w-4 text-blue-600" />}
+            {isCommit ? 'Commit summary' : 'Dry-run summary'} — {summary.filename}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><div className="text-muted-foreground">Rows</div>
+                 <div className="font-semibold text-lg" data-testid={`${label}-row-count`}>{summary.row_count}</div></div>
+            <div><div className="text-muted-foreground">Errors</div>
+                 <div className={`font-semibold text-lg ${summary.error_count ? 'text-red-600' : ''}`}
+                      data-testid={`${label}-error-count`}>{summary.error_count}</div></div>
+            <div><div className="text-muted-foreground">Agreements</div>
+                 <div className="font-semibold text-lg">{summary.agreements_detected}</div></div>
+            <div><div className="text-muted-foreground">Warnings</div>
+                 <div className="font-semibold text-lg">{summary.warning_count}</div></div>
+            <div><div className="text-muted-foreground">Parties</div>
+                 <div className="font-semibold">{summary.parties_detected}</div></div>
+            <div><div className="text-muted-foreground">Terms</div>
+                 <div className="font-semibold">{summary.terms_detected}</div></div>
+            <div><div className="text-muted-foreground">Pricing rows</div>
+                 <div className="font-semibold">{summary.pricing_detected}</div></div>
+            <div><div className="text-muted-foreground">Documents</div>
+                 <div className="font-semibold">{summary.documents_detected}</div></div>
+            {isCommit ? (
+              <>
+                <div><div className="text-muted-foreground">Committed</div>
+                     <div className="font-semibold text-emerald-600" data-testid="commit-committed-count">{summary.committed}</div></div>
+                <div><div className="text-muted-foreground">Skipped (dup)</div>
+                     <div className="font-semibold" data-testid="commit-skipped-count">{summary.skipped}</div></div>
+                <div><div className="text-muted-foreground">Ambiguity excs</div>
+                     <div className={`font-semibold ${summary.ambiguity_exceptions ? 'text-amber-600' : ''}`}
+                          data-testid="commit-ambiguity-count">{summary.ambiguity_exceptions}</div></div>
+                <div><div className="text-muted-foreground">Schema gaps</div>
+                     <div className="font-semibold">{summary.schema_gap_warnings}</div></div>
+              </>
+            ) : (
+              <>
+                <div><div className="text-muted-foreground">Would create</div>
+                     <div className="font-semibold text-emerald-600" data-testid="dryrun-would-create">{summary.would_create}</div></div>
+                <div><div className="text-muted-foreground">Would update</div>
+                     <div className="font-semibold" data-testid="dryrun-would-update">{summary.would_update}</div></div>
+                <div><div className="text-muted-foreground">Schema gaps</div>
+                     <div className="font-semibold">{summary.schema_gap_warnings}</div></div>
+                <div></div>
+              </>
+            )}
+          </div>
+
+          {summary.rows && summary.rows.length > 0 && (
+            <div className="border rounded-md max-h-72 overflow-auto"
+                 data-testid={`${label}-row-list`}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-12">#</TableHead>
+                    <TableHead>Envelope</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>P/T/Pr/D</TableHead>
+                    <TableHead>Outcome</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {summary.rows.map((row) => (
+                    <TableRow key={row.index} data-testid={`${label}-row-${row.index}`}>
+                      <TableCell className="font-mono text-xs">{row.index}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {row.error ? <span className="text-red-600">—</span>
+                                   : (row.envelope_id || '').slice(0, 12) + '…'}
+                      </TableCell>
+                      <TableCell>
+                        {row.status && <StatusBadge status={row.status} />}
+                      </TableCell>
+                      <TableCell className="text-sm max-w-xs truncate">
+                        {row.title || '—'}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {row.error ? '—' :
+                         `${row.party_count}/${row.term_count}/${row.pricing_count}/${row.document_count}`}
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {row.error ? (
+                          <span className="text-red-600 flex items-center gap-1">
+                            <XCircle className="h-3 w-3" /> {row.error}
+                          </span>
+                        ) : isCommit ? (
+                          row.duplicate ? <span className="text-zinc-500">skipped</span>
+                          : row.committed ? (
+                              <span className="text-emerald-600 flex items-center gap-1">
+                                <CheckCircle2 className="h-3 w-3" />
+                                committed
+                                {row.has_ambiguity_exception && (
+                                  <Badge variant="outline" className="ml-1 text-amber-600 border-amber-600">
+                                    AMBIGUOUS
+                                  </Badge>
+                                )}
+                              </span>
+                            ) : <span>—</span>
+                        ) : (
+                          <span className="text-blue-600">would import</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="space-y-4" data-testid="navigator-import-tab">
+      <div>
+        <h2 className="text-lg font-semibold">Import Navigator Export</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Upload a DocuSign Navigator AI Metadata Export (.xlsx, .csv, or .json).
+          Dry-run shows exactly what will land before any DB writes; review the
+          preview, then click <span className="font-semibold">Commit Import</span>.
+          Replays are idempotent — duplicate envelope ids are skipped automatically.
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="p-6">
+          <div
+            onDrop={onDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={() => setDragActive(false)}
+            className={`border-2 border-dashed rounded-md p-8 text-center transition-colors
+                       ${dragActive ? 'border-blue-500 bg-blue-50/50' : 'border-zinc-300'}
+                       ${file ? 'bg-emerald-50/30 border-emerald-400' : ''}`}
+            data-testid="navigator-import-dropzone"
+          >
+            <UploadCloud className="h-10 w-10 mx-auto text-zinc-400 mb-3" />
+            {file ? (
+              <div className="space-y-2">
+                <div className="font-medium" data-testid="navigator-import-filename">
+                  {file.name}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {(file.size / 1024).toFixed(1)} KB · {file.type || 'unknown type'}
+                </div>
+                <Button variant="ghost" size="sm" onClick={reset}
+                        data-testid="navigator-import-clear-btn">
+                  Choose different file
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="text-sm font-medium">
+                  Drop a Navigator export here, or
+                </div>
+                <Label htmlFor="navigator-file-input"
+                       className="text-sm text-blue-600 cursor-pointer underline">
+                  browse to upload
+                </Label>
+                <Input
+                  id="navigator-file-input"
+                  type="file"
+                  accept=".xlsx,.xlsm,.csv,.json"
+                  className="hidden"
+                  onChange={(e) => onPick(e.target.files?.[0])}
+                  data-testid="navigator-import-file-input"
+                />
+                <div className="text-xs text-muted-foreground mt-2">
+                  Accepted: .xlsx, .xlsm, .csv, .json
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2 mt-4">
+            <Button
+              onClick={runDryrun}
+              disabled={!file || busy}
+              data-testid="navigator-import-dryrun-btn"
+            >
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
+              {busy && !commitResult ? 'Running…' : 'Run Dry-Run'}
+            </Button>
+            <Button
+              onClick={runCommit}
+              disabled={!dryrunResult || busy || dryrunResult?.error_count === dryrunResult?.row_count}
+              variant="default"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              data-testid="navigator-import-commit-btn"
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              {busy && commitResult === null && dryrunResult ? 'Committing…' : 'Commit Import'}
+            </Button>
+            {error && (
+              <div className="flex items-center gap-1 text-sm text-red-600"
+                   data-testid="navigator-import-error">
+                <AlertCircle className="h-4 w-4" /> {error}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {dryrunResult && !commitResult && renderSummary(dryrunResult, 'dryrun')}
+      {commitResult && renderSummary(commitResult, 'commit')}
+    </div>
+  );
+}
+
+
 // =============================================================================
 // Page
 // =============================================================================
@@ -1317,7 +1622,7 @@ export default function ContractIntelligencePage() {
       </header>
 
       <Tabs defaultValue="agreements" className="w-full">
-        <TabsList className="grid w-full grid-cols-5" data-testid="contracts-tabs-list">
+        <TabsList className="grid w-full grid-cols-6" data-testid="contracts-tabs-list">
           <TabsTrigger value="agreements" data-testid="tab-agreements">
             <FileSignature className="h-4 w-4 mr-2" />Agreements
           </TabsTrigger>
@@ -1333,6 +1638,9 @@ export default function ContractIntelligencePage() {
           <TabsTrigger value="analytics" data-testid="tab-analytics">
             <BarChart3 className="h-4 w-4 mr-2" />Analytics
           </TabsTrigger>
+          <TabsTrigger value="navigator_import" data-testid="tab-navigator-import">
+            <UploadCloud className="h-4 w-4 mr-2" />Import
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="agreements" className="mt-6"><AgreementsTab /></TabsContent>
@@ -1340,6 +1648,7 @@ export default function ContractIntelligencePage() {
         <TabsContent value="bc_links" className="mt-6"><BCLinksTab /></TabsContent>
         <TabsContent value="expirations" className="mt-6"><ExpirationsTab /></TabsContent>
         <TabsContent value="analytics" className="mt-6"><AnalyticsTab /></TabsContent>
+        <TabsContent value="navigator_import" className="mt-6"><NavigatorImportTab /></TabsContent>
       </Tabs>
     </div>
   );

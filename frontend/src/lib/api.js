@@ -475,6 +475,17 @@ export const listAgreementExceptions = (params) => api.get('/contracts/exception
 export const resolveAgreementException = (id, data) => api.post(`/contracts/exceptions/${encId(id)}/resolve`, data || {});
 export const getAgreementAudit = (id, limit = 200) => api.get(`/contracts/audit/${encId(id)}`, { params: { limit } });
 export const contractsBCSearch = (params) => api.get('/contracts/bc-search', { params });
+export const importNavigatorExport = (file, { commit = false, sheet } = {}) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  const params = {};
+  if (commit) params.commit = 'true';
+  if (sheet) params.sheet = sheet;
+  return api.post('/contracts/navigator/import', fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    params,
+  });
+};
 
 
 

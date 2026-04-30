@@ -491,3 +491,131 @@ output (links + exceptions) changes shape in the ambiguity case.
   tooling amortization, 1%-10 discount). Still template-side or
   PDF-extraction-pass territory.
 
+---
+
+## 13. Phase 4C(a) — Navigator Import Endpoint + UI Drop Zone (✅ completed)
+
+Status: **HTTP endpoint + UI tab landed.** Charlie can now upload
+Navigator exports directly from the Contract Intelligence page; no SCP
+or `docker cp` round-trips required. CLI and HTTP share the exact same
+service (`services/contracts/navigator_import.py`) so they cannot drift.
+
+### 13a. HTTP endpoint
+
+`POST /api/contracts/navigator/import`
+
+- Admin-gated via `services.auth_deps.require_admin`. Non-admin → 403.
+- Multipart upload field `file`. Accepts `.xlsx`, `.xlsm`, `.csv`, `.json`.
+- Default mode is dry-run. `?commit=true` persists.
+- Optional `?sheet=<name>` selects a specific xlsx worksheet.
+- Size cap from `CONTRACT_NAVIGATOR_IMPORT_MAX_BYTES` (default 5 MB,
+  hard ceiling 50 MB). Oversize → 413.
+- Returns the structured `ImportSummary` shape:
+
+```json
+{
+  "mode": "dryrun" | "commit",
+  "filename": "...",
+  "row_count": N,
+  "error_count": N,
+  "warning_count": N,
+  "agreements_detected": N,
+  "parties_detected": N,
+  "terms_detected": N,
+  "pricing_detected": N,
+  "documents_detected": N,
+  "would_create": N,            // dry-run only
+  "would_update": N,            // dry-run only
+  "skipped": N,                 // commit only
+  "committed": N,               // commit only
+  "ambiguity_exceptions": N,    // commit only
+  "schema_gap_warnings": N,
+  "rows": [
+    {
+      "index": 1, "envelope_id": "...", "provider_agreement_id": "...",
+      "title": "...", "status": "completed",
+      "party_count": 2, "term_count": 17,
+      "pricing_count": 0, "document_count": 1,
+      "warning_count": 2, "warnings": [...],
+      "committed": true, "duplicate": false,
+      "agreement_id": "...", "link_count": 0,
+      "exception_count": 0, "has_ambiguity_exception": false,
+      "error": null
+    }
+  ]
+}
+```
+
+### 13b. Shared service
+
+`backend/services/contracts/navigator_import.py` — single source of
+truth used by both CLI and HTTP layers.
+
+- `parse_upload(data, filename, content_type, sheet)` — bytes → row dicts.
+  Validation order: size cap → extension → content-type → parse.
+- `dryrun_rows(rows, *, db=None, filename=None)` — async; computes
+  ``would_create`` vs. ``would_update`` against the live ``agreements``
+  collection when ``db`` is provided.
+- `commit_rows(rows, *, db, filename=None)` — async; routes every row
+  through ``ContractIntelligenceService.record_event`` +
+  ``process_event``. Idempotent via deterministic event id
+  ``navigator::{envelope_id}``.
+- All validation failures raise ``NavigatorImportError`` (subclass of
+  ``ValueError``).
+
+### 13c. UI
+
+`frontend/src/pages/ContractIntelligencePage.jsx` — added a 6th tab
+"Import" (`data-testid="tab-navigator-import"`) wrapping a
+`<NavigatorImportTab />` component:
+
+- File drop-zone (drag-and-drop or `browse to upload`).
+- Validates extension client-side before upload.
+- "Run Dry-Run" → calls endpoint with `commit=false`, renders summary
+  card with rollup tiles and a per-row table (envelope, status, title,
+  P/T/Pr/D counts, outcome).
+- "Commit Import" disabled until a dry-run succeeds and at least one
+  row is non-error. `confirm()` dialog summarizes
+  would_create/would_update before commit. Idempotent — duplicates show
+  as `skipped`.
+- Ambiguity exceptions are flagged with a yellow `AMBIGUOUS` badge on
+  the row outcome.
+- Toasts via `sonner` for both success and error paths.
+
+### 13d. CLI preserved
+
+`backend/scripts/contracts_import_navigator.py` is now a thin wrapper
+around the shared service. CLI commands remain unchanged:
+
+```bash
+docker compose exec -w /app backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx
+docker compose exec -w /app backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx --commit
+```
+
+CLI tests (`tests/test_contracts_import_navigator_cli.py`, 16 tests)
+still green — backwards-compat adapter layer exposes the legacy
+`load_rows`, `dryrun_row`, `commit_row` helpers that prior tests imported.
+
+### 13e. Tests
+
+- New `tests/test_contracts_navigator_import_endpoint.py` — 11 tests:
+  - Auth gating (non-admin → 403).
+  - Validation: missing file, unsupported extension, oversize.
+  - Dry-run: structured response shape, xlsx + csv, no DB writes.
+  - Commit: persists, idempotent replay, dry-run after commit reports
+    `would_update`.
+  - Mixed-row CSV (one good, one bad) — error count + per-row report.
+- Full Contract Intelligence suite: **172 passed, 7 skipped, 1 xfailed**
+  (was 161 passed pre-Phase-4C(a)).
+- Zero regressions in normalizer, Connect SIM path, golden fixtures,
+  matcher (incl. ambiguity hardening), orchestrator, phase3, phase3.1,
+  endpoints, models.
+
+### 13f. Remaining items before live DocuSign SDK / webhook activation
+
+Same as §12e — Phase 4C(a) does not touch SDK install, live envelope
+fetch, webhook activation, or PDF body extraction. Operators are now
+fully unblocked on the bulk-import side.
+

@@ -188,6 +188,17 @@ def normalize_envelope(
     if not isinstance(payload, dict):
         raise ValueError("normalizer expects a dict payload")
 
+    # Navigator AI Metadata Export ships a flat row with human-readable
+    # column names ("Envelope Id", "Agreement Type", ...). Detect that
+    # shape here and dispatch to the Navigator adapter so the caller has a
+    # single entry point. Kept lazy-imported to avoid a circular reference
+    # during module load.
+    if _looks_like_navigator_row(payload):
+        from services.contracts.navigator_normalizer import (
+            normalize_navigator_row,
+        )
+        return normalize_navigator_row(payload, event_id=event_id)
+
     envelope = _extract_envelope(payload)
 
     envelope_id = (
@@ -218,6 +229,10 @@ def normalize_envelope(
         provider_envelope_id=str(envelope_id),
         provider_account_id=payload.get("data", {}).get("accountId")
             or envelope.get("accountId"),
+        provider_agreement_id=_extract_provider_agreement_id(envelope),
+        alternate_envelope_ids=_extract_alternate_envelope_ids(
+            envelope, str(envelope_id),
+        ),
         status=status,
         title=envelope.get("subject") or envelope.get("emailSubject"),
         subject=envelope.get("subject"),
@@ -300,6 +315,128 @@ def _extract_envelope(payload: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(env, dict):
         return env
     return {}
+
+
+# Signature columns that reliably distinguish a DocuSign Navigator AI
+# Metadata Export row from a Connect SIM event. Presence of "Envelope Id"
+# (with a space) as a top-level key is the strongest single signal; we
+# additionally require one more Navigator-only column so we don't
+# accidentally misclassify a hand-built flat dict that happens to use
+# that exact key.
+_NAVIGATOR_ROW_SIGNATURE_KEYS = {
+    "Envelope Id",
+    "Agreement Type",
+    "Agreement Id",
+    "Parties",
+    "Customer Name",
+    "Effective Date",
+    "Expiration Date",
+    "Initial Term Length",
+}
+
+
+def _looks_like_navigator_row(payload: Dict[str, Any]) -> bool:
+    """Return True if ``payload`` is a flat Navigator xlsx-derived row.
+
+    Kept permissive: we only need two or more Navigator-shaped keys at the
+    top level and *no* Connect-SIM wrapper keys. Any ambiguity defers to
+    the Connect path.
+    """
+    if not isinstance(payload, dict):
+        return False
+    # Connect SIM wrappers always hold at least one of these; bail fast.
+    if "data" in payload or "envelopeSummary" in payload or "envelope" in payload:
+        return False
+    hits = sum(1 for k in _NAVIGATOR_ROW_SIGNATURE_KEYS if k in payload)
+    return hits >= 2
+
+
+def _extract_provider_agreement_id(envelope: Dict[str, Any]) -> Optional[str]:
+    """Pull the DocuSign Navigator Agreement UUID when a template surfaces it.
+
+    Preference order:
+      1. Top-level envelope summary keys (``providerAgreementId``,
+         ``agreementId``) — what the Navigator adapter injects.
+      2. A custom field named ``provider_agreement_id`` or
+         ``agreement_navigator_uuid``.
+    """
+    for key in ("providerAgreementId", "provider_agreement_id",
+                "agreementId", "navigatorAgreementId"):
+        v = envelope.get(key)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    cf = envelope.get("customFields") or {}
+    if isinstance(cf, dict):
+        for bucket in ("textCustomFields", "listCustomFields",
+                       "text_custom_fields", "list_custom_fields"):
+            for fld in cf.get(bucket) or []:
+                if not isinstance(fld, dict):
+                    continue
+                name = (fld.get("name") or "").strip().lower()
+                if name in ("provider_agreement_id",
+                            "agreement_navigator_uuid",
+                            "navigator_agreement_id"):
+                    val = fld.get("value")
+                    if isinstance(val, str) and val.strip():
+                        return val.strip()
+    return None
+
+
+def _extract_alternate_envelope_ids(
+    envelope: Dict[str, Any],
+    primary_envelope_id: str,
+) -> List[str]:
+    """Collect alternate DocuSign envelope ids when present.
+
+    DocuSign templates occasionally stamp a second envelope id into the
+    signed PDF trail. A template that wants that captured can emit it in
+    any of:
+      - ``envelopeSummary.alternateEnvelopeIds``: list[str]
+      - A comma / semicolon-separated custom field
+        ``alternate_envelope_id`` / ``alternate_envelope_ids``.
+    The primary id is never included in the output list.
+    """
+    collected: List[str] = []
+    raw = envelope.get("alternateEnvelopeIds") or envelope.get(
+        "alternate_envelope_ids"
+    )
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, str) and item.strip():
+                collected.append(item.strip())
+    elif isinstance(raw, str) and raw.strip():
+        collected.extend(_split_id_list(raw))
+
+    cf = envelope.get("customFields") or {}
+    if isinstance(cf, dict):
+        for bucket in ("textCustomFields", "listCustomFields",
+                       "text_custom_fields", "list_custom_fields"):
+            for fld in cf.get(bucket) or []:
+                if not isinstance(fld, dict):
+                    continue
+                name = (fld.get("name") or "").strip().lower()
+                if name in ("alternate_envelope_id",
+                            "alternate_envelope_ids"):
+                    val = fld.get("value")
+                    if isinstance(val, str) and val.strip():
+                        collected.extend(_split_id_list(val))
+
+    # De-dupe case-insensitively, drop the primary, preserve first-seen order.
+    seen: Dict[str, None] = {}
+    primary_lc = primary_envelope_id.lower() if primary_envelope_id else ""
+    out: List[str] = []
+    for item in collected:
+        key = item.lower()
+        if key == primary_lc or key in seen:
+            continue
+        seen[key] = None
+        out.append(item)
+    return out
+
+
+def _split_id_list(raw: str) -> List[str]:
+    parts = re.split(r"[;,\s]+", raw.strip())
+    return [p for p in (s.strip() for s in parts) if p]
 
 
 def _looks_like_email(value: Any) -> bool:
@@ -497,6 +634,7 @@ def _normalize_pricing(
         line_total = _money(b.get("total") or b.get("line_total") or b.get("amount"))
         uom = b.get("uom") or b.get("unit") or None
         currency = b.get("currency") or None
+        location = b.get("location") or b.get("ship_to") or b.get("shipto") or None
         confidence = 0.9 if (item_label and (unit_price is not None or qty is not None)) else 0.5
 
         out.append(AgreementPricing(
@@ -509,6 +647,7 @@ def _normalize_pricing(
             unit_price=unit_price,
             line_total=line_total,
             currency=str(currency).strip() if currency else None,
+            location=str(location).strip() if location else None,
             source="tab",
             confidence=confidence,
         ))

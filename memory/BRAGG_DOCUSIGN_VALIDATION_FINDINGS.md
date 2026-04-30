@@ -266,3 +266,91 @@ Based solely on what this packet revealed:
 - P2: Phase 4 Path B Removal (time-gated drain) — UNCHANGED.
 - P2: Agreement → Document Hub cross-link — UNCHANGED (deferred by you).
 - P2: Suggested-threshold widget — UNCHANGED (deferred by you).
+
+---
+
+## 11. Phase 4A — Payload Shape Reconciliation (✅ completed)
+
+Status: **Dual-path normalizer landed.** Both DocuSign Connect webhook
+JSON and Navigator AI Metadata Export rows now feed the same canonical
+`NormalizedAgreement` output.
+
+### 11a. What shipped
+
+**Schema additions** (all additive, non-breaking, no migrations required):
+
+| Field | Model | Purpose |
+|---|---|---|
+| `provider_agreement_id: Optional[str]` | `Agreement` | Navigator UUID (distinct from envelope id) |
+| `alternate_envelope_ids: List[str]` | `Agreement` | Secondary envelope ids DocuSign stamps into the signed PDF trail |
+| `location: Optional[str]` | `AgreementPricing` | Per-line ship-to (e.g. "Garden Grove, CA") |
+
+**New service**: `services/contracts/navigator_normalizer.py`
+
+- `build_connect_sim_payload(row)` — flat Navigator row → Connect-SIM-shape dict.
+- `normalize_navigator_row(row)` — one-shot Navigator → `NormalizedAgreement`.
+- Handles the 54-column Navigator schema, mapping 1:1 fields to custom-field
+  terms, concatenating `value + unit` pairs ("3" + "Years" → "3 Years"),
+  splitting the semicolon-delimited `Parties` column into signer rows, and
+  translating Navigator `Status="Active"` to canonical `status="completed"`.
+- Emits structured `warnings` (`source="navigator_adapter"`) for any
+  schema gap rather than silently dropping data.
+
+**Unified entry point**: `normalize_envelope(payload)` now detects a flat
+Navigator row (signature: `"Envelope Id"` + ≥1 Navigator-only column at
+top level, no Connect wrapper keys) and dispatches to the adapter. Callers
+can stop caring which shape they have.
+
+**Connect path enhancements** (lossless, additive):
+
+- Reads `envelopeSummary.alternateEnvelopeIds` into the new list field.
+- Reads `providerAgreementId` (envelope summary hint) or a
+  `provider_agreement_id` / `agreement_navigator_uuid` custom field.
+- Pricing tab extractor now captures `line_N_location` → `pricing.location`.
+
+### 11b. xfail inventory — post Phase 4A
+
+| # | Gap (Section 3 original) | Phase 4A outcome |
+|---|---|---|
+| 1 | Navigator xlsx row unreadable by `normalize_envelope` | **✅ RESOLVED** — dispatched to Navigator adapter |
+| 2 | Matcher collapses ambiguous BC candidates | ⏸ STILL XFAIL — out of Phase 4A scope (matcher hardening follow-up) |
+| 3 | `Agreement.provider_agreement_id` missing | **✅ RESOLVED** — field added; Navigator path populates it |
+| 4 | `Agreement.alternate_envelope_ids` missing | **✅ RESOLVED** — field added; Connect payload reads `alternateEnvelopeIds` |
+| 5 | `AgreementPricing.location` missing | **✅ RESOLVED** — field added; `line_N_location` tab captured |
+| 6 | `payment_term_discount` not split from `payment_term` | ⏸ STILL XFAIL — requires a DocuSign template change to expose the discount as its own custom field; Navigator truncates, normalizer only preserves what DocuSign sends |
+
+### 11c. Test results
+
+- `tests/test_contracts_bragg_fixture.py` — 23 passed, 2 xfailed
+  (previously 19 passed, 6 xfailed). Four xfails converted to passes
+  in-place with updated comments.
+- `tests/test_contracts_navigator_normalizer.py` — **new**, 22 tests
+  covering synthesis, end-to-end normalization, dispatch routing, and
+  edge cases.
+- Full Contract Intelligence suite: 144 passed, 7 skipped, 2 xfailed.
+- Remaining xfails (matcher ambiguity, template-side discount split) are
+  tracked as post-Phase-4A work; reasons on each marker explain why.
+
+### 11d. Live envelope vs historical import — which path does what?
+
+| Path | When used | Source | Primary strengths | Known gaps |
+|---|---|---|---|---|
+| **Connect JSON** | Live DocuSign envelope events | `POST /api/docusign/webhook` | Full fidelity (tabs, recipients w/ emails, timestamps), alternate envelope ids, per-line locations | Requires DocuSign template to surface any custom metadata the business wants captured |
+| **Navigator Export** | Historical backfill / bulk ingest of already-signed agreements | Batch upload of the AI Metadata xlsx (no UI yet — adapter only) | Wide column coverage (54 fields) for legacy agreements that never went through Connect | No signer emails, no per-line pricing, no discount carve-outs (Navigator-truncated `payment_term`), only one envelope id per row |
+
+### 11e. Remaining gaps before live DocuSign SDK / webhook activation
+
+- **Matcher ambiguity** (xfail 2) — two BC candidates at the same score
+  for the same legal entity. Still collapses to one. Scope: matcher
+  hardening pass (no schema change).
+- **Template-side fields** — `payment_term_discount`, `bc_customer_code`,
+  `primary_bc_code`, `renewal_notice_date`, MOQ / total commitment /
+  tooling. These are captured in §5's recommendation list; they need
+  template edits at DocuSign before Connect can carry them.
+- **Navigator bulk-import endpoint** — the adapter is plumbed, but there
+  is no HTTP endpoint yet to accept an uploaded xlsx / CSV. Scope for a
+  follow-up increment once an initial batch volume is agreed with
+  Charlie.
+- **DocuSign SDK install + live envelope fetch** — deferred to Phase 4B
+  or later. No blocker remains on the normalizer side.
+

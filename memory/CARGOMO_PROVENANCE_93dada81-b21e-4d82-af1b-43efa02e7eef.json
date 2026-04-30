@@ -1526,7 +1526,7 @@
   },
   "H": {
     "ranked_hypotheses": [
-      "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)",
+      "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=contract-intel-9)",
       "COLLECTION \u2014 `vendor_maturity_scores` carries history rows for this doc/code",
       "COLLECTION \u2014 `classification_corrections` carries history rows for this doc/code",
       "COLLECTION \u2014 `vendor_extraction_successes` carries history rows for this doc/code",
@@ -1537,6 +1537,6 @@
       "COLLECTION \u2014 `vendor_intelligence_profiles` carries history rows for this doc/code",
       "COLLECTION \u2014 `stable_vendor_override_history` carries history rows for this doc/code"
     ],
-    "primary": "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)"
+    "primary": "ALIAS \u2014 `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' \u2192 vendor_no 'ANCH' (alias_id=contract-intel-9)"
   }
 }

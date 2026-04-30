@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 
 class GPIDocumentHubTester:
-    def __init__(self, base_url="https://eod-controller-seq.preview.emergentagent.com"):
+    def __init__(self, base_url="https://contract-intel-9.preview.emergentagent.com"):
         self.base_url = base_url
         self.api = f"{base_url}/api"
         self.token = None

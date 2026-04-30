@@ -682,11 +682,11 @@ _No learning_events_v2 rows reference this doc_id._
 
 ## §H · Determination
 
-**Best guess:** ALIAS — `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' → vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)
+**Best guess:** ALIAS — `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' → vendor_no 'ANCH' (alias_id=contract-intel-9)
 
 **Ranked hypotheses (highest evidence first):**
 
-- ALIAS — `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' → vendor_no 'ANCH' (alias_id=623873b3-daae-4fe8-a3b1-37749ecc182f)
+- ALIAS — `vendor_aliases` row maps extracted name 'ANCHOR GLASS CONTAINER CORP' → vendor_no 'ANCH' (alias_id=contract-intel-9)
 - COLLECTION — `vendor_maturity_scores` carries history rows for this doc/code
 - COLLECTION — `classification_corrections` carries history rows for this doc/code
 - COLLECTION — `vendor_extraction_successes` carries history rows for this doc/code

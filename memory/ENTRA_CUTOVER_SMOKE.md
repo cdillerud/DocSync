@@ -44,8 +44,8 @@ Edit the VM's environment (compose env or wherever it lives) so the **runtime** 
 
 ```
 # Backend
-ENTRA_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
-ENTRA_CLIENT_ID=6ac62e44-8968-4ad9-b781-434507a5c83a
+ENTRA_TENANT_ID=contract-intel-9
+ENTRA_CLIENT_ID=contract-intel-9
 ENTRA_API_AUDIENCE=api://6ac62e44-8968-4ad9-b781-434507a5c83a/access_as_users
 ENTRA_AUTHORITY=https://login.microsoftonline.com/c7b2de14-71d9-4c49-a0b9-2bec103a6fdc/v2.0
 ENTRA_JWKS_URL=https://login.microsoftonline.com/c7b2de14-71d9-4c49-a0b9-2bec103a6fdc/discovery/v2.0/keys
@@ -54,8 +54,8 @@ LEGACY_AUTH_ENABLED=true       # <-- kept ON as the safety net
 
 # Frontend (must be present BEFORE `docker compose build` because CRA bakes them at build time)
 REACT_APP_ENTRA_AUTH_ENABLED=true
-REACT_APP_ENTRA_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
-REACT_APP_ENTRA_CLIENT_ID=6ac62e44-8968-4ad9-b781-434507a5c83a
+REACT_APP_ENTRA_TENANT_ID=contract-intel-9
+REACT_APP_ENTRA_CLIENT_ID=contract-intel-9
 REACT_APP_ENTRA_API_SCOPE=api://6ac62e44-8968-4ad9-b781-434507a5c83a/access_as_users
 ```
 

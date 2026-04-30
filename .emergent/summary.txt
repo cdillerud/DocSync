@@ -1,138 +1,165 @@
-<analysis>**original_problem_statement**: 
-Extend the existing GPI Hub application to maintain and refine the production system. Address user-reported production UI bugs, backend status inconsistencies, and complete the final phase of the governed learning pipeline. 
-
-PRODUCT REQUIREMENTS:
-1. Implement AP Invoice Vendor Advisory Phase 3 (impact review, drift controls, hotspot review).
-2. Build a Unified Governance Dashboard for ELT to monitor system health and drift risk.
-3. Fix UI/UX inconsistencies (e.g., Draft PI Preview amount duplication, Queued docs visibility).
-4. Stop background schedulers from incorrectly escalating non-AP documents.
-5. Provide admin UIs for reviewing overrides, learning suggestions, and daily traces.
+<analysis>**original_problem_statement**: Build a new Contract Intelligence module inside the existing GPI Hub application. Integrate DocuSign agreement data with Business Central (BC) customer, vendor, item, sales, and purchase data. Phase 1 is read-heavy and analytics-focused (no unsafe BC writes). Requires new backend data models, DocuSign integration service scaffold, webhook receiver, agreement normalization service, BC matching service, manual mapping React UI, analytics endpoints, and comprehensive audit logging. PRODUCT REQUIREMENTS: Do not disrupt existing GPI Hub modules. Follow existing shadcn UI styling.
 
 **User's preferred language**: English (INSTRUCT next agent to respond in English only)
 
-**what currently exists?** 
-A mature React + FastAPI + MongoDB Document Hub at v2.0.0. The system features a massive governed-learning pipeline for Sales Orders and AP Invoices, a Unified Governance Dashboard, advanced LLM abstraction (Emergent/Ollama), and a complex background orchestration engine. It successfully handles document intake, classification, extraction, validation, and auto-posting to Business Central.
+**what currently exists?**: A mature React + FastAPI + MongoDB Document Hub integrating with Business Central. The Contract Intelligence module has been built, tested, and shipped up through Phase 3.2B (Bragg Golden Fixture + Metadata Validation). A strict golden-fixture test pipeline is established. The agent identified a schema mismatch between the DocuSign Navigator Export and standard Connect webhook JSON payloads, documented these as 6  tests, created a findings report, and has just sent an  to the user requesting direction on how to proceed into Phase 4.
 
 **Last working item**: 
-    - Last item agent was working: Fixing a bug in  where the background PO retry scheduler was incorrectly parking and escalating already-cleared Shipping Documents (e.g., BOLs) because it didn't filter out non-AP document types. The agent added strict type/status guards and a startup cleanup script to automatically repair affected historical documents.
+    - Last item agent was working: Wrapping up Phase 3.2B by notifying the user of the Bragg validation findings (schema gaps) and formally requesting directions on Phase 4 scope via the  tool.
     - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y
-    - Which testing method agent to use? manual testing by curl/ bash logs
+    - Agent Testing Done: Y (19 passed, 6 xfailed for documented schema gaps in prior steps)
+    - Which testing method agent to use? NA (Waiting for user response)
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:  
-  None (All user-reported bugs in the current session were successfully resolved. Awaiting user verification on the final fix.)
+  Issue 1: 🔴 DocuSign Navigator Export vs. Connect JSON schema mismatch (P0)
+     - Attempted fixes: Documented the gaps via  in  and generated a findings report.
+     - Next debug checklist: Await user response on how to handle the mismatch between the 54-column flat Navigator export and the nested Connect JSON payload before writing live integration code (Phase 4).
+     - Why fix this issue and what will be achieved with the fix? Ensures the normalizer actually works with the real payloads DocuSign will send.
+     - Status: BLOCKED (Awaiting user review and decision on Phase 4 scope).
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 2: 🟠 Backend Capacity / LLM Throttling (P1)
+     - Attempted fixes: Parked the batch posting scripts to allow backend to recover (from previous sessions).
+     - Next debug checklist: The background email-polling service is hitting Gemini .
+     - Why fix this issue and what will be achieved with the fix? Restores stability to the email-polling service.
+     - Status: NOT STARTED
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 3: 🟡 SMC Worldwide, SC Warehouses, and CITICARGO Batch 2 Failures (P2)
+     - Attempted fixes: Parked as separate follow-up scopes.
+     - Next debug checklist: TBD based on future deep dives into these specific vendor profiles.
+     - Why fix this issue and what will be achieved with the fix? Improves extraction accuracy for these specific vendors.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 4: 🟡 Contaminated Learning Rows (Aliases, Profiles) (P2)
+     - Attempted fixes: None
+     - Next debug checklist: Clean up erroneous or polluted profile data.
+     - Why fix this issue and what will be achieved with the fix? Increases the precision of the matching system.
+     - Status: NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
+
+  Issue 5: 🟡 Phase 4 Path B Removal (Lane A - A3) (P2)
+     - Attempted fixes: Waiting on 7-day time gate ( in ).
+     - Next debug checklist: Check . If 7 consecutive UTC days with zero hits occurs, delete the 6 deprecated Path B AP mutation routes and 3 orphan functions.
+     - Why fix this issue and what will be achieved with the fix? Finalizes AP Path consolidation.
+     - Status: BLOCKED (Time-gated 7-day drain window).
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? backend
+     - Blocked on other issue: None
 
 **In progress Task List**: 
-  None
+None actively coding. The agent is blocked waiting for the human's response to the  tool regarding the Phase 4 scope and schema mismatch findings.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - P1: Teams Adaptive Card integration (webhook handler for Approve -> BC Sales Order).
+    - 🔴 P0: Phase 4: DocuSign SDK Live Integration / Webhook activation / Resolving the Navigator schema gap. (**DO NOT START UNTIL USER EXPLICITLY APPROVES**).
     
     Future Tasks:
-    - P2: Evergreen multi-PO container allocation spreadsheet integration.
-    - P2: BOL / Tracking No field storage in BC.
-    - P2: Low-volume vendor review routing (vendors with <5 docs skip auto-file).
-    - P3: Continue  extraction (refactoring - currently over 8,500 lines).
+    - 🟡 P2: Agreement → Document Hub cross-link (Parked until Phase 4 is done).
+    - 🟡 P2: Suggested-threshold widget for BC matching UI.
+    - 🟡 P2: Resolve Header-only PI Policy.
+    - 🟡 P3: HTTPS Migration / Real secure frontend origin.
 
 **Completed work in this session**
-- Built AP Invoice Advisory Phase 3 (Suggestion apply service, impact review, profile drift, and hotspot review services) (DONE)
-- Built Unified Governance Dashboard (Backend router + Frontend page) (DONE)
-- Fixed Draft PI Preview identical amounts bug (Corrected template value distribution logic in ) (DONE)
-- Updated application version to v2.0.0 and updated changelog (DONE)
-- Fixed Inbox UI hidden docs issue by adding a Ready to Post tab and making the Queued stat clickable (DONE)
-- Fixed PO Retry Scheduler bug escalating non-AP documents (Shipping Documents/BOLs) and added a startup cleanup to heal existing data (DONE)
+- Read Bragg validation findings and test fixture code to refresh context.
+- Sent  to user presenting the Phase 3.2B completion status and requesting explicit directions for Phase 4.
 
 **Earlier issues found/mentioned but not fixed**
-   - Issue 1:  is bloated (8,500+ lines).
-   - Debug checklist: Gradually break out routing, scheduling, and validation functions into dedicated modules.
-   - Why to solve this issue and what will be achieved with this? Maintainability and separation of concerns.
-   - Should Test frontend/backend/both after fix: backend
-   - Is recurring issue? Y
+   - Issue 1: Inconsistent field naming ( vs  inside ).
+     - Debug checklist: Standardize output shapes from the extraction pipeline.
+     - Why to solve this issue and what will be achieved with this: Consistency for downstream UI/Analytics.
+     - Should Test frontend/backend/both after fix: both
+     - Is recurring issue? N
+   - Issue 2: Schema corruption in  for Brown Warehouse.
+     - Debug checklist: Inspect and clean the specific MongoDB document for Brown Warehouse.
+     - Why to solve this issue and what will be achieved with this: Restores extraction capabilities for this vendor.
+     - Should Test frontend/backend/both after fix: backend
+     - Is recurring issue? N
+   - Issue 3: Unknown item deep-link UX in Registry Panels.
+     - Debug checklist: Add empty-state tailored messaging when deep-linked items are missing.
+     - Why to solve this issue and what will be achieved with this: Better user experience for missing referenced data.
+     - Should Test frontend/backend/both after fix: frontend
+     - Is recurring issue? N
+   - Issue 4: Document list/queue pages still show top blockers as string representations.
+     - Debug checklist: Update top blockers to render as structured components rather than strings.
+     - Why to solve this issue and what will be achieved with this: Consistency in blocker rendering.
+     - Should Test frontend/backend/both after fix: frontend
+     - Is recurring issue? N
 
 **Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: Deployment Context Ignored (Docker caching preventing user from seeing changes).
-  - Recurrence count: 8+
-  - Status: RESOLVED (But needs constant enforcement. ALWAYS remind user to run ).
+  - Issue recurrence in previous fork: Remote VM Testing Context
+  - Recurrence count: 10+
+  - Status: RESOLVED
+  - Note: The user strictly tests and executes code on a remote production VM. Do not execute synthetic API calls against the live DB yourself. You must provide  commands for them to run on their VM. 
 
 **Code Architecture**
 
 
 **Key Technical Concepts**
-- **Governed Learning Loop**: AI recommends profile changes based on feedback -> human approves -> profile mutates (No silent mutation).
-- **Background Orchestration**: Handled via  async loops (e.g., , ).
-- **Template Value Injection**: Distributes extracted totals proportionally across line items based on learned .
+- **Strict Pre-Coding Declarations**: The user enforces a rigorous flow. You MUST post a tight plan and wait for the user to explicitly say Sign as-is or Approved before writing code for a new Phase.
+- **Golden Fixtures**: A robust test harness () automatically discovers and tests  files in .
+- **Read-Only Scope**: The contract intelligence module currently only reads from BC; it does not write.
 
 **key DB schema**
-  - : Core document collection containing , , and  flags.
-  - : Learned behavioral profiles for customers.
+  - : Main document collection.
+  - New Contract Schemas: , , , , , , , , , .
 
 **changes in tech stack**
-  - No new tech stack added, but application version bumped to v2.0.0 to reflect massive architectural additions.
+  - Playwright ( python package) installed and configured for frontend E2E tests (from prior session).
 
 **All files of reference** 
--  (Fixed Draft PI proportional amount splitting bug)
--  (Updated to v2.0.0)
--  (Added Ready to Post tab)
--  (Fixed PO Retry scheduler, added startup cleanup)
--  (New endpoint for dashboard)
--  (New dashboard UI)
+-  (MUST READ: Contains the gaps identified between Navigator Export and Connect Schema).
+- 
+- 
 
 **Areas that need refactoring**: 
--  remains critically bloated and handles too many background loops and routing rules directly.
+-  monolith (Strictly told *not* to refactor unless explicitly approved by user).
 
 **key api endpoints**
+-  (Idempotent, HMAC secured)
 - 
 - 
 
 **Critical Info for New Agent** 
-- The system is heavily reliant on deriving complex statuses for documents. If the user posts a screenshot showing conflicting statuses (e.g., Ready to Post vs Manual Review), it's almost always a background scheduler ignoring a document's core classification or completion state.
-- Always trace document state issues through the frontend () -> API () -> DB flags (e.g., ).
-- Remind the user to deploy via docker after making backend/frontend code changes, as they are running this on a live external sandbox VM.
+- **Current State**: The agent verified Phase 3.2B completion and sent an  to the user detailing the findings and asking for approval/direction for Phase 4. 
+- **DO NOT START PHASE 4 YET**. Wait for the user's explicit response to the pending question.
+- **DocuSign Schema Mismatch**: Be aware that the AI Navigator Excel export shape is completely different from the DocuSign Connect Webhook JSON shape. This needs to be resolved with the user before integration coding.
 
 **documents and test reports created in this job** 
-- 
-- 
+- Checked  (created in previous iteration).
 
 **Last 10 User Messages and any pending HUMAN messages** 
-1. **User**: yes! (Approves building the Governance Dashboard) -> COMPLETED
-2. **User**: Provides Scope/Audience details for the Dashboard -> COMPLETED
-3. **User**: Uploads image of Draft PI Preview with what is this???? -> COMPLETED (Fixed duplicated line amounts)
-4. **User**: the identical amounts is what I saw -> COMPLETED
-5. **User**: Provides system monitor copy BTW, we havew NOTR been iteratring versions!!! -> COMPLETED (Updated to v2.0.0)
-6. **User**: Uploads image of Inbox where are these 230 queued files???? -> COMPLETED (Added Ready to Post tab)
-7. **User**: why are these in this status??? -> COMPLETED (Agent explained they are blocked by Auto-Post confidence gates)
-8. **User**: Uploads image of lowered confidence gates kicking in -> COMPLETED (Agent reviewed successful auto-posting)
-9. **User**: Uploads image of Shipping Doc Detail again with conflicting statuses... fix it -> COMPLETED (Agent fixed  PO retry loop and added cleanup).
-10. *(No pending human messages. Waiting for user to verify the  shipping doc fix.)*
+ - *Agent*: Fired  indicating Phase 3.2B is code-complete and requesting user direction on Phase 4 scope considering the Bragg validation findings.
+ - **PENDING HUMAN MESSAGE**: The first message you receive will be the user's response to the  tool regarding Phase 4 directions. Read it carefully and wait for them to approve a plan before writing any new Phase 4 code.
 
 **Project Health Check:**
-- Broken: None. 
-- Mocked: .
+- Broken: None (The 6 failing tests in  are intentionally marked as  to track known schema gaps).
+- Mocked: BC Sandbox.
 
 **3rd Party Integrations** 
   • Dynamics 365 BC — requires User API Key
   • Hosted LLM — uses Emergent LLM Key
-  • MS Graph (Email/SharePoint) — requires User API Key
-  • Ollama — Local LLM Provider configured via env
+  • MS Graph — requires User API Key
+  • DocuSign Connect — requires User Webhook HMAC Secret
 
 **Testing status**
-  - Testing agent used after significant changes: YES ( was used successfully for Governance endpoints)
+  - Testing agent used after significant changes: NO (User executes everything on remote VM).
   - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: 
-  - Known regressions: None
+  - Test files created: None in this specific iteration (but extensive suites exist like ).
+  - Known regressions: None. Baseline maintained perfectly.
 
 **Credentials to test flow:**
-- Refer to  (admin/admin).
+-  (DO NOT mutate real user records for testing).
 
 **What agent forgot to execute**
-- The agent addressed all immediate user-reported issues and requests. The upcoming Teams Adaptive Card integration (P1) is the next logical step from the backlog once the user verifies the current fix.
-
-**Debugging checklist for current issue**
-    Issue: Wait for User Verification on  Shipping Doc fix
-    
-    Backend files to check:
-    -  (Check  and  if user says issue persists)
-    
-    Action: If user says it is fixed, ask if they want to proceed with the P1 Teams Adaptive Card integration task.</analysis>
+- Nothing was overlooked; the agent correctly gathered context from the files, identified the stop point, and used the  tool to adhere to the strict Pre-Coding Declarations rule.</analysis>

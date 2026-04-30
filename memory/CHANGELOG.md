@@ -1,6 +1,80 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-02-XX] Contract Intelligence Phase 4A — Dual-path normalizer
+
+**Scope:** Payload Shape Reconciliation. DocuSign Connect webhook JSON
+and DocuSign Navigator AI Metadata Export rows now feed the same
+canonical `NormalizedAgreement` output through a single entry point.
+Read-only historical backfill + live webhook paths coexist. No DocuSign
+SDK install, no BC writes, no envelope fetch, no webhook activation
+changes, no UI, no route changes, no new endpoints.
+
+### Schema additions (additive, non-breaking)
+- `Agreement.provider_agreement_id: Optional[str]` — Navigator UUID
+  (distinct from envelope id).
+- `Agreement.alternate_envelope_ids: List[str]` — secondary envelope ids
+  stamped into signed PDF trails.
+- `AgreementPricing.location: Optional[str]` — per-line ship-to (e.g.
+  "Garden Grove, CA"); extracted from `line_N_location` tabs.
+
+### New service
+- `services/contracts/navigator_normalizer.py`:
+  - `build_connect_sim_payload(row)` — flat Navigator row → Connect-SIM dict.
+  - `normalize_navigator_row(row)` — one-shot Navigator → `NormalizedAgreement`.
+  - Handles 54-column Navigator schema, concatenates `value + unit` pairs,
+    splits `Parties` on `;`/`|`, maps Navigator `Status="Active"` → canonical
+    `"completed"`, emits `source="navigator_adapter"` warnings for any
+    schema gap rather than silently dropping data.
+
+### Unified entry point
+- `services/contracts/agreement_normalizer.normalize_envelope()` detects a
+  flat Navigator row (≥2 signature columns, no Connect wrapper keys) and
+  dispatches to the Navigator adapter. Connect SIM path unchanged.
+
+### Connect path enhancements (backfill)
+- Reads `envelopeSummary.alternateEnvelopeIds` into the new list field.
+- Reads `providerAgreementId` envelope-summary hint and
+  `provider_agreement_id` / `agreement_navigator_uuid` custom fields.
+- Pricing tab extractor now captures `line_N_location` into
+  `AgreementPricing.location`.
+
+### xfail conversions (Bragg fixture)
+- **Converted to passing** (Phase 4A fixed):
+  - `test_normalizer_can_read_raw_xlsx_row` (flat row dispatch).
+  - `test_navigator_uuid_is_first_class_field` (new Agreement field).
+  - `test_alternate_envelope_id_captured` (new Agreement field + fixture).
+  - `test_pricing_row_has_location_field` (new AgreementPricing field).
+- **Still xfail** (explicitly out of Phase 4A scope):
+  - `test_ambiguous_match_emits_both_plus_exception` — matcher hardening
+    (not schema; deferred to follow-up).
+  - `test_payment_term_discount_exposed_as_own_term` — requires DocuSign
+    template change; normalizer preserves whatever DocuSign sends.
+
+### Tests
+- New `tests/test_contracts_navigator_normalizer.py` — 22 tests covering
+  SIM synthesis, end-to-end normalization, unified-dispatch routing,
+  negative cases.
+- `tests/test_contracts_bragg_fixture.py` — 23 passed, 2 xfailed
+  (previously 19 passed, 6 xfailed).
+- Full Contract Intelligence suite: 144 passed, 7 skipped, 2 xfailed.
+- Zero regressions in Connect-path unit tests or golden-fixture suite.
+
+### Documentation
+- `/app/memory/BRAGG_DOCUSIGN_VALIDATION_FINDINGS.md` §11 appended with
+  Phase 4A outcomes, live-vs-import path matrix, remaining gaps before
+  live DocuSign SDK/webhook activation.
+
+### Not yet shipped
+- `POST /api/contracts/navigator/import` bulk upload endpoint — adapter
+  is plumbed but no HTTP wrapper. Out of scope per signed Phase 4A.
+- Matcher ambiguity fix — out of scope per signed Phase 4A.
+- DocuSign SDK / live webhook activation / PDF body fallback — out of
+  scope per signed Phase 4A.
+
+
+
+
 ## [2026-04-22] v2.5.28 — Lane A Integrity (A1 + A2 + A4 shipped; A3 ready-to-merge)
 
 **Scope:** Three of four Lane A integrity items land. A3 (Phase 4 Path B route deletion) is externally gated on the 7-UTC-day drain clock per signed scope §1; the PR is ready and will merge when the clock matures. Ship order honored the dependency chain.

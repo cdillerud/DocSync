@@ -130,6 +130,16 @@ class Agreement(_ContractBase):
     provider_envelope_id: str
     provider_account_id: Optional[str] = None
 
+    # Navigator AI Metadata Export carries a distinct Agreement UUID column
+    # (e.g. "0bebdb15-3f95-4d95-9ad1-6282da1587a5") separate from the
+    # envelope id. First-class so we never have to rebuild it from a term row.
+    provider_agreement_id: Optional[str] = None
+
+    # Some DocuSign packets carry more than one envelope id in the signed
+    # PDF trail (primary on the Navigator row, alternate(s) only visible in
+    # the signature block). Kept as a list to stay additive.
+    alternate_envelope_ids: List[str] = Field(default_factory=list)
+
     status: AgreementStatus = "unknown"
     title: Optional[str] = None
     subject: Optional[str] = None
@@ -245,6 +255,10 @@ class AgreementPricing(_ContractBase):
     unit_price: Optional[float] = None
     line_total: Optional[float] = None
     currency: Optional[str] = None
+
+    # Per-line ship-to / delivery location (e.g. "Garden Grove, CA" on the
+    # Bragg supply schedule). Free-text, advisory; no normalization today.
+    location: Optional[str] = None
 
     source: PricingSource = "inferred"
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)

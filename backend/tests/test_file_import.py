@@ -18,7 +18,7 @@ import io
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 
 if not BASE_URL:
-    BASE_URL = "https://eod-controller-seq.preview.emergentagent.com"
+    BASE_URL = "https://contract-intel-9.preview.emergentagent.com"
 
 
 # Test CSV data

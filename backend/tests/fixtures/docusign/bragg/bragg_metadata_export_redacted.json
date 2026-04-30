@@ -80,6 +80,9 @@
       "envelopeId": "3a85f196-5f70-830b-82c2-1bec243dab9e",
       "envelopeSummary": {
         "envelopeId": "3a85f196-5f70-830b-82c2-1bec243dab9e",
+        "alternateEnvelopeIds": [
+          "A535A3EE-7BBA-8E79-81DC-09A99ECC3D95"
+        ],
         "status": "completed",
         "subject": "Supply & Purchase Offer Agreement",
         "emailSubject": "Please sign your Bragg supply agreement",

@@ -163,25 +163,32 @@ class TestNormalizerAgainstConnectSynthesis:
 
 class TestNavigatorMetadataDirectConsumption:
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "SCHEMA GAP — Navigator AI Metadata Export is not a Connect SIM "
-            "payload. Current normalizer.normalize_envelope() does not know "
-            "how to read the flat row shape. Recommended fix: ship a "
-            "navigator_normalizer.py adapter in Phase 4.x. If this xfail ever "
-            "flips to pass, delete it and graduate the behavior."
-        ),
-    )
     def test_normalizer_can_read_raw_xlsx_row(self, metadata):
+        """Phase 4A: ``normalize_envelope`` now detects a Navigator-shaped
+        flat row and dispatches to ``navigator_normalizer.normalize_navigator_row``.
+        The ingest produces the same ``NormalizedAgreement`` shape as the
+        Connect path."""
         row = metadata["row"]
-        # This will raise ValueError (missing envelopeId) because the flat row
-        # has "Envelope Id" (with space) not "envelopeId" nested inside
-        # data.envelopeSummary. The normalizer's own discovery path does not
-        # look at top-level human-readable column names.
         result = normalize_envelope(row)
-        # If we ever get here, great — these are what we'd want to confirm:
+        # Envelope id preserved verbatim (case may vary on the SIM side
+        # but the adapter copies it through without casing changes).
         assert result.agreement.provider_envelope_id == row["Envelope Id"]
+        # Canonical Navigator UUID stored as a first-class field.
+        assert result.agreement.provider_agreement_id == row["Agreement Id"]
+        # Both party organizations surface as signer rows.
+        orgs = {p.organization for p in result.parties if p.organization}
+        assert "Bragg Live Food Products LLC" in orgs
+        assert "Gamer Packaging, Inc." in orgs
+        # Status maps from Navigator "Active" → canonical "completed".
+        assert result.agreement.status == "completed"
+        # Key metadata terms rendered as custom-field rows.
+        term_keys = {t.term_key for t in result.terms}
+        for required in (
+            "agreement_type", "agreement_id_number", "payment_term",
+            "governing_law", "initial_term_length", "renewal_type",
+            "renewal_term", "price_cap_increase_pct",
+        ):
+            assert required in term_keys, f"missing Navigator term: {required}"
 
 
 # =============================================================================
@@ -236,8 +243,8 @@ class TestBCMatchingAmbiguity:
         reason=(
             "AMBIGUITY GAP — the matcher should emit both candidates as "
             "proposed links AND open a high-severity party_unmatched exception "
-            "with details.ambiguous=true. Recommended fix scope: Phase 4.x "
-            "matcher hardening. Flip xfail to pass once implemented."
+            "with details.ambiguous=true. Not in scope for Phase 4A (payload "
+            "reconciliation). Tracked for a follow-up matcher-hardening pass."
         ),
     )
     async def test_ambiguous_match_emits_both_plus_exception(self):
@@ -268,54 +275,46 @@ class TestBCMatchingAmbiguity:
 
 class TestKnownSchemaGaps:
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "SCHEMA GAP — Agreement model has no `provider_agreement_id` "
-            "field to store the Navigator UUID (0bebdb15-...). Currently "
-            "stored as a term with key='agreement_id_number' instead. "
-            "Recommended: add dedicated Agreement.provider_agreement_id."
-        ),
-    )
-    def test_navigator_uuid_is_first_class_field(self, normalized, expected):
-        # Note: field doesn't exist today, so attribute access raises.
-        nav_uuid = normalized.agreement.provider_agreement_id  # type: ignore[attr-defined]
-        assert nav_uuid == expected["agreement"]["provider_agreement_id_navigator"]
+    def test_navigator_uuid_is_first_class_field(self, metadata, expected):
+        """Phase 4A: ``Agreement.provider_agreement_id`` now holds the
+        Navigator UUID. The Navigator-path ingest populates it directly
+        from the ``Agreement Id`` column."""
+        from services.contracts.navigator_normalizer import normalize_navigator_row
+        nav_result = normalize_navigator_row(
+            metadata, event_id="bragg-schema-gap-check",
+        )
+        assert (
+            nav_result.agreement.provider_agreement_id
+            == expected["agreement"]["provider_agreement_id_navigator"]
+        )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "SCHEMA GAP — Agreement model has no `alternate_envelope_ids` "
-            "list. Bragg PDF shows a second DocuSign envelope id in the "
-            "signed trail (A535A3EE-7BBA-8E79-81DC-09A99ECC3D95). "
-            "Recommended: add Agreement.alternate_envelope_ids: list[str]."
-        ),
-    )
     def test_alternate_envelope_id_captured(self, normalized, expected):
-        alts = normalized.agreement.alternate_envelope_ids  # type: ignore[attr-defined]
+        """Phase 4A: Agreement.alternate_envelope_ids now captures any
+        alternate id DocuSign stamps into the envelope summary (or surfaces
+        as an alternate_envelope_id custom field). The Bragg Connect-SIM
+        fixture was updated to carry the PDF-visible alt id."""
+        alts = normalized.agreement.alternate_envelope_ids
+        assert isinstance(alts, list)
         assert expected["agreement"]["alternate_envelope_ids"][0].lower() in [
             x.lower() for x in alts
         ]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "SCHEMA GAP — AgreementPricing has no `location` field. "
-            "Bragg supply schedule specifies per-line ship-to location "
-            "(Garden Grove, CA). Recommended: add AgreementPricing.location."
-        ),
-    )
     def test_pricing_row_has_location_field(self, normalized):
+        """Phase 4A: AgreementPricing now has a ``location`` field; the
+        pricing extractor picks up ``line_N_location`` tabs."""
         line = next(p for p in normalized.pricing if p.line_no == 1)
-        assert line.location == "Garden Grove, CA"  # type: ignore[attr-defined]
+        assert line.location == "Garden Grove, CA"
 
     @pytest.mark.xfail(
         strict=True,
         reason=(
-            "FIELD GAP — Navigator xlsx row does NOT carry the "
-            "1% 10 payment discount. Only the PDF body does. Recommended: "
-            "add explicit `payment_term_discount` custom-field to the "
-            "DocuSign template and expose separately from `payment_term`."
+            "FIELD GAP — Navigator xlsx row does NOT carry the 1% 10 payment "
+            "discount. Only the PDF body does. Phase 4A does not split "
+            "`payment_term` into discount + net on its own — the canonical "
+            "fix is a DocuSign template change that exposes an explicit "
+            "`payment_term_discount` custom field. Tracked for template "
+            "rollout; xfail kept so it flips automatically once the field "
+            "arrives on a live envelope."
         ),
     )
     def test_payment_term_discount_exposed_as_own_term(self, normalized):

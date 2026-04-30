@@ -17,7 +17,7 @@ Run (interpreter must have playwright):
     /opt/plugins-venv/bin/python -m pytest tests/e2e/test_contracts_page_e2e.py -q
 
 Env (overrides):
-    HUB_BASE_URL  — defaults to https://eod-controller-seq.preview.emergentagent.com
+    HUB_BASE_URL  — defaults to https://contract-intel-9.preview.emergentagent.com
     HUB_EMAIL     — defaults to hub-admin@gamerpackaging.com
     HUB_PASSWORD  — defaults to ChangeMeOnFirstDeploy-K8p2q
 """
@@ -34,7 +34,7 @@ from playwright.sync_api import Page, expect, sync_playwright  # noqa: E402
 
 BASE_URL = os.environ.get(
     "HUB_BASE_URL",
-    "https://eod-controller-seq.preview.emergentagent.com",
+    "https://contract-intel-9.preview.emergentagent.com",
 )
 EMAIL = os.environ.get("HUB_EMAIL", "hub-admin@gamerpackaging.com")
 PASSWORD = os.environ.get("HUB_PASSWORD", "ChangeMeOnFirstDeploy-K8p2q")

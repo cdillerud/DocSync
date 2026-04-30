@@ -45,6 +45,8 @@ TAB_TESTIDS = [
     "tab-bc-links",
     "tab-expirations",
     "tab-analytics",
+    "tab-navigator-import",
+    "tab-pdf-extract",
 ]
 
 
@@ -177,3 +179,60 @@ def test_exception_mapping_dialog_opens_if_fixture_present(browser_page: Page):
     )).to_be_visible()
     # Cancel without submitting
     browser_page.click('[data-testid="exception-mapping-cancel"]')
+
+
+# ---------------------------------------------------------------------------
+# 6. Phase 4C(c.1) — PDF Body Extraction tab
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_extract_tab_renders(browser_page: Page):
+    """Switching to the PDF Extract tab renders dropzone + agreement input."""
+    browser_page.click('[data-testid="tab-pdf-extract"]')
+    browser_page.wait_for_selector('[data-testid="pdf-extract-tab"]', timeout=5000)
+    expect(browser_page.locator('[data-testid="pdf-extract-dropzone"]')).to_be_visible()
+    expect(browser_page.locator('[data-testid="pdf-extract-agreement-input"]')).to_be_visible()
+    expect(browser_page.locator('[data-testid="pdf-extract-dryrun-btn"]')).to_be_visible()
+    expect(browser_page.locator('[data-testid="pdf-extract-commit-btn"]')).to_be_visible()
+
+
+def test_pdf_extract_buttons_disabled_until_inputs_present(browser_page: Page):
+    """Dry-run requires agreement_id + file. Commit requires a prior dry-run."""
+    browser_page.click('[data-testid="tab-pdf-extract"]')
+    browser_page.wait_for_selector('[data-testid="pdf-extract-tab"]', timeout=5000)
+    # Both buttons should be disabled with no agreement_id, no file, no dry-run.
+    expect(browser_page.locator('[data-testid="pdf-extract-dryrun-btn"]')).to_be_disabled()
+    expect(browser_page.locator('[data-testid="pdf-extract-commit-btn"]')).to_be_disabled()
+
+
+def test_pdf_extract_cancel_button_only_appears_after_input(browser_page: Page):
+    """The cancel/reset button should only render once a file or result exists."""
+    browser_page.click('[data-testid="tab-pdf-extract"]')
+    browser_page.wait_for_selector('[data-testid="pdf-extract-tab"]', timeout=5000)
+    # No file yet → no cancel button.
+    cancel = browser_page.locator('[data-testid="pdf-extract-cancel-btn"]')
+    assert cancel.count() == 0, (
+        "Cancel button rendered before any input was provided"
+    )
+
+
+def test_pdf_extract_commit_disabled_until_dryrun(browser_page: Page):
+    """Commit button stays disabled until a successful dry-run preview exists."""
+    browser_page.click('[data-testid="tab-pdf-extract"]')
+    browser_page.wait_for_selector('[data-testid="pdf-extract-tab"]', timeout=5000)
+    # Type an agreement id (not a real one — server will 404, but the
+    # client should still leave Commit disabled because no dry-run ran).
+    browser_page.fill(
+        '[data-testid="pdf-extract-agreement-input"]',
+        "00000000-0000-0000-0000-000000000000",
+    )
+    expect(browser_page.locator('[data-testid="pdf-extract-commit-btn"]')).to_be_disabled()
+
+
+def test_pdf_extract_existing_tabs_still_render(browser_page: Page):
+    """Adding the PDF Extract tab must not regress the other 6 tabs."""
+    for tab_id in (
+        "tab-agreements", "tab-exceptions", "tab-bc-links",
+        "tab-expirations", "tab-analytics", "tab-navigator-import",
+    ):
+        expect(browser_page.locator(f'[data-testid="{tab_id}"]')).to_be_visible()

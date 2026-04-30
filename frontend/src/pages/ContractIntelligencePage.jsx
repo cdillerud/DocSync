@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import {
   FileSignature, AlertTriangle, Link2, CalendarClock, BarChart3, RefreshCw,
   UploadCloud, FileSpreadsheet, CheckCircle2, XCircle, AlertCircle,
+  FileText,
 } from 'lucide-react';
 import {
   getContractSummary,
@@ -33,6 +34,7 @@ import {
   getContractsHealth,
   contractsBCSearch,
   importNavigatorExport,
+  pdfExtractAgreement,
 } from '../lib/api';
 
 // =============================================================================
@@ -1628,6 +1630,426 @@ function NavigatorImportTab() {
 
 
 // =============================================================================
+// Tab: PDF Body Extraction — Phase 4C(c.1)
+// Reuses POST /api/contracts/agreements/{id}/pdf-extract. Default dry-run;
+// commit only after the admin reviews the preview.
+// =============================================================================
+
+function PdfExtractTab() {
+  const [agreementId, setAgreementId] = useState('');
+  const [agreementSearch, setAgreementSearch] = useState([]);
+  const [agreementSearchBusy, setAgreementSearchBusy] = useState(false);
+  const [file, setFile] = useState(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [dryrunResult, setDryrunResult] = useState(null);
+  const [commitResult, setCommitResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Lightweight agreement picker: load up to 50 agreements once so the
+  // admin can pick by envelope/title rather than memorize a UUID.
+  useEffect(() => {
+    let live = true;
+    setAgreementSearchBusy(true);
+    listAgreements({ limit: 50 })
+      .then((r) => { if (live) setAgreementSearch(r.data?.items || r.data || []); })
+      .catch(() => { /* silent — admin can paste UUID manually */ })
+      .finally(() => { if (live) setAgreementSearchBusy(false); });
+    return () => { live = false; };
+  }, []);
+
+  const onPick = (f) => {
+    if (!f) return;
+    if (!/\.pdf$/i.test(f.name)) {
+      toast.error(`Only .pdf files are accepted: ${f.name}`);
+      return;
+    }
+    setFile(f);
+    setDryrunResult(null);
+    setCommitResult(null);
+    setError(null);
+  };
+
+  const reset = () => {
+    setFile(null);
+    setDryrunResult(null);
+    setCommitResult(null);
+    setError(null);
+  };
+
+  const fullReset = () => {
+    setAgreementId('');
+    reset();
+  };
+
+  const runDryrun = async () => {
+    if (!agreementId || !file) return;
+    setBusy(true);
+    setError(null);
+    setCommitResult(null);
+    try {
+      const r = await pdfExtractAgreement(agreementId, file, { commit: false });
+      setDryrunResult(r.data);
+      const fields = (r.data?.fields || []).length;
+      const lp = (r.data?.line_pricing || []).length;
+      const amb = (r.data?.ambiguities || []).length;
+      toast.success(`Dry-run complete: ${fields} field(s), ${lp} line MOQ overlay(s), ${amb} ambiguity(ies)`);
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e.message;
+      setError(msg);
+      toast.error(`Dry-run failed: ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runCommit = async () => {
+    if (!agreementId || !file || !dryrunResult) return;
+    const fields = (dryrunResult.fields || []).length;
+    const lp = (dryrunResult.line_pricing || []).length;
+    const amb = (dryrunResult.ambiguities || []).length;
+    if (!window.confirm(
+      `Commit ${fields} field(s) + ${lp} per-line MOQ overlay(s) for agreement ${agreementId}?\n\n` +
+      `${amb > 0 ? `${amb} ambiguous extraction(s) will create low-severity review exceptions.\n\n` : ''}` +
+      `Replays are idempotent. Higher-precedence Navigator/Connect data is preserved.`,
+    )) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await pdfExtractAgreement(agreementId, file, { commit: true });
+      setCommitResult(r.data);
+      const ws = r.data?.write_summary || {};
+      toast.success(
+        `Committed: ${ws.terms_written || 0} term(s), ${ws.obligations_written || 0} obligation(s), ` +
+        `${ws.pricing_overlays || 0} pricing overlay(s), ${ws.exceptions_written || 0} new exception(s)`
+      );
+    } catch (e) {
+      const msg = e?.response?.data?.detail || e.message;
+      setError(msg);
+      toast.error(`Commit failed: ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onDrop = (e) => {
+    e.preventDefault();
+    setDragActive(false);
+    const f = e.dataTransfer?.files?.[0];
+    if (f) onPick(f);
+  };
+
+  const renderFields = (preview, label) => {
+    if (!preview) return null;
+    const fields = preview.fields || [];
+    const linePricing = preview.line_pricing || [];
+    const ambiguities = preview.ambiguities || [];
+    const isCommit = preview.mode === 'commit';
+    const ws = preview.write_summary;
+
+    return (
+      <Card data-testid={`pdf-extract-${label}-summary`}>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            {isCommit ? <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      : <FileText className="h-4 w-4 text-blue-600" />}
+            {isCommit ? 'Commit summary' : 'Dry-run preview'}
+            {preview.filename && <span className="text-muted-foreground font-normal"> — {preview.filename}</span>}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div>
+              <div className="text-muted-foreground">Pages</div>
+              <div className="font-semibold text-lg" data-testid={`pdf-extract-${label}-pages`}>
+                {preview.page_count ?? 0}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Fields extracted</div>
+              <div className="font-semibold text-lg" data-testid={`pdf-extract-${label}-field-count`}>
+                {fields.length}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Per-line MOQs</div>
+              <div className="font-semibold text-lg" data-testid={`pdf-extract-${label}-line-count`}>
+                {linePricing.length}
+              </div>
+            </div>
+            <div>
+              <div className="text-muted-foreground">Ambiguities</div>
+              <div className={`font-semibold text-lg ${ambiguities.length ? 'text-amber-600' : ''}`}
+                   data-testid={`pdf-extract-${label}-amb-count`}>
+                {ambiguities.length}
+              </div>
+            </div>
+          </div>
+
+          {preview.error && (
+            <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-950/40 p-3 text-sm text-red-700"
+                 data-testid={`pdf-extract-${label}-error`}>
+              <div className="flex items-center gap-2 font-semibold">
+                <XCircle className="h-4 w-4" /> Extraction error
+              </div>
+              <div className="mt-1 font-mono text-xs">{preview.error}</div>
+            </div>
+          )}
+
+          {fields.length > 0 && (
+            <div className="border rounded-md overflow-auto max-h-80"
+                 data-testid={`pdf-extract-${label}-fields-table`}>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-24">Target</TableHead>
+                    <TableHead className="w-56">Key</TableHead>
+                    <TableHead>Value</TableHead>
+                    <TableHead className="w-20">Conf.</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {fields.map((f, i) => (
+                    <TableRow key={`${label}-f-${i}`}
+                              data-testid={`pdf-extract-${label}-field-${i}`}>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {f.target}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{f.key}</TableCell>
+                      <TableCell className="text-xs font-mono break-all max-w-md">
+                        {typeof f.value === 'string' ? f.value : JSON.stringify(f.value)}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {Number(f.confidence ?? 0).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {linePricing.length > 0 && (
+            <div className="border rounded-md overflow-auto max-h-60"
+                 data-testid={`pdf-extract-${label}-line-table`}>
+              <div className="px-3 py-2 text-xs font-semibold border-b bg-zinc-50 dark:bg-zinc-900">
+                Per-line MOQ overlays
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item label</TableHead>
+                    <TableHead>Min quantity</TableHead>
+                    <TableHead className="w-20">Conf.</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {linePricing.map((lp, i) => (
+                    <TableRow key={`${label}-lp-${i}`}>
+                      <TableCell className="font-mono text-xs">{lp.item_label}</TableCell>
+                      <TableCell className="font-mono text-xs">{lp.min_quantity}</TableCell>
+                      <TableCell className="text-xs font-mono">
+                        {Number(lp.confidence ?? 0).toFixed(2)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {ambiguities.length > 0 && (
+            <div className="border border-amber-300 rounded-md p-3 bg-amber-50 dark:bg-amber-950/40 text-sm"
+                 data-testid={`pdf-extract-${label}-ambiguities`}>
+              <div className="flex items-center gap-2 font-semibold text-amber-700">
+                <AlertCircle className="h-4 w-4" /> Ambiguous extractions detected
+              </div>
+              <div className="mt-1 text-xs text-amber-800">
+                {isCommit
+                  ? 'Low-severity review exceptions have been opened (or updated on replay).'
+                  : 'Committing will open low-severity review exceptions for these.'}
+              </div>
+              <ul className="mt-2 space-y-1 text-xs">
+                {ambiguities.map((a, i) => (
+                  <li key={`${label}-amb-${i}`} className="font-mono">
+                    <span className="font-semibold">{a.key}</span>: {a.candidates?.length || 0} candidate values
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {ws && (
+            <div className="rounded-md border bg-emerald-50/60 dark:bg-emerald-950/30 p-3 text-xs flex flex-wrap gap-x-6 gap-y-1"
+                 data-testid="pdf-extract-commit-write-summary">
+              <span><span className="text-muted-foreground">Terms written:</span>{' '}
+                    <span className="font-mono">{ws.terms_written ?? 0}</span></span>
+              <span><span className="text-muted-foreground">Obligations:</span>{' '}
+                    <span className="font-mono">{ws.obligations_written ?? 0}</span></span>
+              <span><span className="text-muted-foreground">Pricing overlays:</span>{' '}
+                    <span className="font-mono">{ws.pricing_overlays ?? 0}</span></span>
+              <span><span className="text-muted-foreground">New exceptions:</span>{' '}
+                    <span className="font-mono">{ws.exceptions_written ?? 0}</span></span>
+            </div>
+          )}
+
+          {!preview.error && fields.length === 0 && linePricing.length === 0 && (
+            <div className="text-sm text-muted-foreground italic"
+                 data-testid={`pdf-extract-${label}-empty`}>
+              No extractable fields found. The PDF parsed cleanly but did not
+              contain any of the five tracked field families.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="space-y-4" data-testid="pdf-extract-tab">
+      <div>
+        <h2 className="text-lg font-semibold">PDF Body Extraction</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          Upload a legacy agreement PDF to extract freight terms, MOQ
+          (header + per-line), volume commitments, tooling amortization,
+          payment-term cash discounts, and volume tier discounts. Default
+          is dry-run preview. Commit only after the preview looks correct.
+          Replays are idempotent — re-uploading the same PDF will not
+          duplicate rows, and structured Navigator/Connect data is
+          always preferred over PDF-extracted values.
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="p-6 space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="pdf-extract-agreement-input">Target agreement</Label>
+            <Input
+              id="pdf-extract-agreement-input"
+              placeholder="agreement.id (UUID4) — paste or pick from list below"
+              value={agreementId}
+              onChange={(e) => { setAgreementId(e.target.value); reset(); }}
+              data-testid="pdf-extract-agreement-input"
+            />
+            {agreementSearchBusy ? (
+              <div className="text-xs text-muted-foreground">Loading recent agreements…</div>
+            ) : agreementSearch.length > 0 ? (
+              <div className="border rounded-md max-h-40 overflow-auto"
+                   data-testid="pdf-extract-agreement-picker">
+                {agreementSearch.slice(0, 25).map((a) => (
+                  <button
+                    type="button"
+                    key={a.id}
+                    onClick={() => { setAgreementId(a.id); reset(); }}
+                    className={`w-full text-left px-3 py-2 text-xs border-b hover:bg-zinc-50 dark:hover:bg-zinc-900
+                                ${agreementId === a.id ? 'bg-blue-50 dark:bg-blue-950/40' : ''}`}
+                    data-testid={`pdf-extract-agreement-pick-${a.id}`}
+                  >
+                    <div className="font-mono text-[10px] text-muted-foreground">{a.id}</div>
+                    <div className="truncate">{a.subject || a.title || a.provider_envelope_id || '—'}</div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div
+            onDrop={onDrop}
+            onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
+            onDragLeave={() => setDragActive(false)}
+            className={`border-2 border-dashed rounded-md p-8 text-center transition-colors
+                       ${dragActive ? 'border-blue-500 bg-blue-50/50' : 'border-zinc-300'}
+                       ${file ? 'bg-emerald-50/30 border-emerald-400' : ''}`}
+            data-testid="pdf-extract-dropzone"
+          >
+            <UploadCloud className="h-10 w-10 mx-auto text-zinc-400 mb-3" />
+            {file ? (
+              <div className="space-y-2">
+                <div className="font-medium" data-testid="pdf-extract-filename">
+                  {file.name}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {(file.size / 1024).toFixed(1)} KB · {file.type || 'application/pdf'}
+                </div>
+                <Button variant="ghost" size="sm" onClick={reset}
+                        data-testid="pdf-extract-clear-btn">
+                  Choose different file
+                </Button>
+              </div>
+            ) : (
+              <>
+                <div className="text-sm font-medium">
+                  Drop a PDF here, or
+                </div>
+                <Label htmlFor="pdf-extract-file-input"
+                       className="text-sm text-blue-600 cursor-pointer underline">
+                  browse to upload
+                </Label>
+                <Input
+                  id="pdf-extract-file-input"
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  className="hidden"
+                  onChange={(e) => onPick(e.target.files?.[0])}
+                  data-testid="pdf-extract-file-input"
+                />
+                <div className="text-xs text-muted-foreground mt-2">
+                  Accepted: .pdf
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={runDryrun}
+              disabled={!agreementId || !file || busy}
+              data-testid="pdf-extract-dryrun-btn"
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              {busy && !commitResult ? 'Running…' : 'Run Dry-Run'}
+            </Button>
+            <Button
+              onClick={runCommit}
+              disabled={!dryrunResult || !!dryrunResult?.error || busy}
+              variant="default"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              data-testid="pdf-extract-commit-btn"
+            >
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              {busy && commitResult === null && dryrunResult ? 'Committing…' : 'Commit Extraction'}
+            </Button>
+            {(file || dryrunResult || commitResult) && (
+              <Button
+                onClick={fullReset}
+                variant="ghost"
+                disabled={busy}
+                data-testid="pdf-extract-cancel-btn"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Cancel / reset
+              </Button>
+            )}
+            {error && (
+              <div className="flex items-center gap-1 text-sm text-red-600"
+                   data-testid="pdf-extract-error">
+                <AlertCircle className="h-4 w-4" /> {error}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {dryrunResult && !commitResult && renderFields(dryrunResult, 'dryrun')}
+      {commitResult && renderFields(commitResult, 'commit')}
+    </div>
+  );
+}
+
+
+// =============================================================================
 // Page
 // =============================================================================
 
@@ -1649,7 +2071,7 @@ export default function ContractIntelligencePage() {
       </header>
 
       <Tabs defaultValue="agreements" className="w-full">
-        <TabsList className="grid w-full grid-cols-6" data-testid="contracts-tabs-list">
+        <TabsList className="grid w-full grid-cols-7" data-testid="contracts-tabs-list">
           <TabsTrigger value="agreements" data-testid="tab-agreements">
             <FileSignature className="h-4 w-4 mr-2" />Agreements
           </TabsTrigger>
@@ -1668,6 +2090,9 @@ export default function ContractIntelligencePage() {
           <TabsTrigger value="navigator_import" data-testid="tab-navigator-import">
             <UploadCloud className="h-4 w-4 mr-2" />Import
           </TabsTrigger>
+          <TabsTrigger value="pdf_extract" data-testid="tab-pdf-extract">
+            <FileText className="h-4 w-4 mr-2" />PDF Extract
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="agreements" className="mt-6"><AgreementsTab /></TabsContent>
@@ -1676,6 +2101,7 @@ export default function ContractIntelligencePage() {
         <TabsContent value="expirations" className="mt-6"><ExpirationsTab /></TabsContent>
         <TabsContent value="analytics" className="mt-6"><AnalyticsTab /></TabsContent>
         <TabsContent value="navigator_import" className="mt-6"><NavigatorImportTab /></TabsContent>
+        <TabsContent value="pdf_extract" className="mt-6"><PdfExtractTab /></TabsContent>
       </Tabs>
     </div>
   );

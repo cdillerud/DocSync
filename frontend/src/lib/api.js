@@ -487,6 +487,18 @@ export const importNavigatorExport = (file, { commit = false, sheet } = {}) => {
   });
 };
 
+// Phase 4C(c.1) — PDF Body Extraction (admin-gated, dry-run by default).
+export const pdfExtractAgreement = (agreementId, file, { commit = false } = {}) => {
+  const fd = new FormData();
+  fd.append('file', file);
+  const params = {};
+  if (commit) params.commit = 'true';
+  return api.post(`/contracts/agreements/${encId(agreementId)}/pdf-extract`, fd, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    params,
+  });
+};
+
 
 
 

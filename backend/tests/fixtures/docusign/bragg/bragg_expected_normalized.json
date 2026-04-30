@@ -1,0 +1,112 @@
+{
+  "__purpose__": "Ground-truth normalized output for the Bragg agreement — derived from BOTH the DocuSign Navigator metadata export AND the signed PDF. Tests compare the actual normalizer output against these expectations; gaps become XFAIL-ed or a documented schema finding.",
+  "__pdf_derived_fields__": [
+    "agreement_id_number (QUO-12507-F1F2D9-V2025 appears in the rendered agreement trail, not the metadata header)",
+    "freight_terms (DAP Garden Grove, CA — only in PDF body)",
+    "min_order_quantity (2,000,000 — only in PDF Section regarding POs)",
+    "total_commitment (42,053,832 — only in PDF body)",
+    "tooling_amortization_per_thousand (7.12 — only in PDF body)",
+    "annual_forecast_per_sku (5.78M, 4.471M — only in PDF body)",
+    "payment_term_discount (1% 10 — PDF says '1% 10 / Net 45 Days'; metadata truncates to '45 days')",
+    "alternate_envelope_id (A535A3EE-7BBA-8E79-81DC-09A99ECC3D95 — only in PDF signature trail)"
+  ],
+
+  "agreement": {
+    "provider_envelope_id": "3a85f196-5f70-830b-82c2-1bec243dab9e",
+    "provider_agreement_id_navigator": "0bebdb15-3f95-4d95-9ad1-6282da1587a5",
+    "agreement_id_number_internal": "QUO-12507-F1F2D9-V2025",
+    "alternate_envelope_ids": [
+      "A535A3EE-7BBA-8E79-81DC-09A99ECC3D95"
+    ],
+    "status": "completed",
+    "title": "Supply & Purchase Offer Agreement",
+    "sender_company": "Gamer Packaging, Inc.",
+    "customer_company": "Bragg Live Food Products LLC",
+    "completed_at": "2026-04-27T18:00:00Z",
+    "expires_at": "2028-05-31T00:00:00Z"
+  },
+
+  "parties_minimum_signals": [
+    {"role": "signer", "organization": "Bragg Live Food Products LLC",
+     "normalized_org": "bragg live food products llc"},
+    {"role": "signer", "organization": "Gamer Packaging, Inc.",
+     "normalized_org": "gamer packaging inc"},
+    {"role": "sender", "organization": "Gamer Packaging, Inc.",
+     "normalized_org": "gamer packaging inc"}
+  ],
+
+  "terms_minimum_signals": [
+    {"term_key": "agreement_type", "expected_value": "Supply / Distribution"},
+    {"term_key": "agreement_id_number", "expected_value": "QUO-12507-F1F2D9-V2025"},
+    {"term_key": "effective_date", "expected_value": "2025-06-01"},
+    {"term_key": "execution_date", "expected_value": "2026-04-27"},
+    {"term_key": "expiration_date", "expected_value": "2028-05-31"},
+    {"term_key": "initial_term_length", "expected_value": "3 Years"},
+    {"term_key": "payment_term", "expected_value_from_pdf": "1% 10 / Net 45 Days",
+     "expected_value_from_metadata": "45 days",
+     "note": "metadata-only view truncates the 1% 10 discount — PDF has the full term"},
+    {"term_key": "price_cap_increase_pct", "expected_value": "6"},
+    {"term_key": "governing_law", "expected_value": "California"},
+    {"term_key": "renewal_type", "expected_value": "Automatic Renewal"},
+    {"term_key": "renewal_term", "expected_value": "1 Year"},
+    {"term_key": "freight_terms", "expected_value": "DAP Garden Grove, CA",
+     "pdf_only": true},
+    {"term_key": "min_order_quantity", "expected_value": "2000000",
+     "pdf_only": true},
+    {"term_key": "total_commitment_products", "expected_value": "42053832",
+     "pdf_only": true,
+     "note": "SCHEMA GAP: this is a single hard number; current agreement_terms is string-typed so it works, but reporting will have to cast at query time."},
+    {"term_key": "tooling_amortization_per_thousand", "expected_value": "7.12",
+     "pdf_only": true}
+  ],
+
+  "pricing_minimum_signals": [
+    {
+      "line_no": 1,
+      "item_label": "PE-1013-110424-R004",
+      "description": "16oz Glass Vinegar Bottle (BACV16G)",
+      "quantity": 71060.0,
+      "unit_price": 217.72,
+      "uom": "M",
+      "location_note": "Garden Grove, CA (line_1_location tab — NOT a model field today)"
+    },
+    {
+      "line_no": 2,
+      "item_label": "PE-1013-110524-R003",
+      "description": "32oz Glass Vinegar Bottle (BACV32G)",
+      "quantity": 39060.0,
+      "unit_price": 335.39,
+      "uom": "M",
+      "location_note": "Garden Grove, CA"
+    }
+  ],
+
+  "documents_minimum_signals": [
+    {"provider_document_id": "1",
+     "name_prefix": "Bragg Supply Agreement"}
+  ],
+
+  "bc_matching_expectations": {
+    "scenario": "Bragg has potentially two BC customer codes (managed by Greg and Susan separately).",
+    "test_injection": [
+      {"bc_no": "C-BRAGG-E", "name": "Bragg Live Food Products LLC (East)"},
+      {"bc_no": "C-BRAGG-W", "name": "Bragg Live Food Products LLC (West)"}
+    ],
+    "expected_behaviour_current_code": {
+      "description": "The current matcher picks the single top-scoring candidate, emits one auto_confirmed or proposed link, and SILENTLY drops the other. No ambiguous-match signal is raised.",
+      "gap": "AMBIGUITY GAP — see findings report."
+    },
+    "expected_behaviour_after_gap_fix": {
+      "description": "When two or more candidates score within X of each other (e.g. both >= propose_threshold), the matcher should emit BOTH as proposed links AND open a `party_unmatched` exception with severity=high and details.ambiguous=true."
+    }
+  },
+
+  "known_gaps_at_phase_3_2b": [
+    "Navigator AI Metadata Export shape is not a Connect SIM payload — the current normalizer cannot read the xlsx/JSON row directly.",
+    "Agreement has TWO identifiers that belong on the schema: the Navigator UUID (Agreement Id) and the internal agreement number (QUO-...). Only envelope_id is modeled today.",
+    "Some fields live only in the PDF body, not the metadata (freight, MOQ, total_commitment, tooling, annual forecasts, 1% 10 discount). These require either (a) DocuSign template custom-field additions or (b) a PDF extraction pass.",
+    "Pricing rows contain a location per line; `AgreementPricing` has no `location` field.",
+    "Two envelope IDs appear in the PDF; only one fits on the schema today.",
+    "Matcher has no ambiguous-match signal — two equally-scoring BC candidates silently collapse to one."
+  ]
+}

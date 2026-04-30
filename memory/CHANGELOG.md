@@ -1,6 +1,48 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-02-XX] Hotfix — Contract Intelligence upsert path-conflict (post-Phase-4C(a))
+
+**Root cause:** `_upsert_parties / _upsert_terms / _upsert_pricing /
+_upsert_documents` in `contract_intelligence_service.py` sent the same
+field path (`id`, `created_at`) in both `$set` and `$setOnInsert`.
+Real MongoDB 6.x raises `WriteError code 40 — Updating the path 'id'
+would create a conflict at 'id'`. Mongomock-motor (used in the test
+suite) silently tolerated it, so CI was green while the prod VM
+failed mid-pipeline. Caught when Charlie's first commit of the Bragg
+Navigator export landed only the `agreements` row (no parties / terms
+/ pricing / documents / bc_links / exceptions, event `processed=false`).
+
+### Fixed
+- Pop `id` and `created_at` out of the `model_dump()` payload before
+  feeding it to `$set`; `$setOnInsert` now exclusively owns the
+  immutable seeds. All four `_upsert_*` helpers patched.
+- Wrapped `process_event`'s post-normalize section in a defensive
+  `try/except`: a partial failure now flips the event to
+  `processed=true` with a captured error string, opens a high-severity
+  `normalization_failed` exception with stage=`post_normalize`,
+  error_type, error message, and truncated traceback, and emits an
+  ERROR-level log under `services.contracts.contract_intelligence_service`.
+  Stuck-event recovery is now self-driving.
+- `commit_one` (CLI + HTTP) now reports `post_normalize_failed` as a
+  proper row error rather than masking it as silent success.
+
+### New regression coverage
+- `tests/test_contracts_upsert_path_conflict.py` — unit-level guard
+  that records every `update_one` payload and asserts no immutable
+  field appears in both halves. Catches the bug at the unit layer
+  without spinning up a real Mongo container, so mongomock can't
+  hide it again.
+
+### Suite
+- 175 passed, 8 skipped, 1 xfailed (was 172/7/1 before hotfix; +3
+  new path-conflict tests, pricing-side test gracefully skips when
+  the synth fixture doesn't produce a pricing row).
+- Zero existing-test regressions.
+
+
+
+
 ## [2026-02-XX] Contract Intelligence Phase 4C(a) — Navigator Import Endpoint + UI Drop Zone
 
 **Scope:** Charlie can upload a Navigator AI Metadata Export directly

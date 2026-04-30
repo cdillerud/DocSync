@@ -358,6 +358,10 @@ async def commit_one(svc, index: int, row: Dict[str, Any]) -> RowReport:
     elif processed.get("status") == "normalizer_failed":
         report.error = processed.get("error") or "normalizer_failed"
         return report
+    elif processed.get("status") == "post_normalize_failed":
+        report.error = processed.get("error") or "post_normalize_failed"
+        report.agreement_id = processed.get("agreement_id")
+        return report
     report.agreement_id = processed.get("agreement_id")
     report.link_count = processed.get("links", 0) or 0
     report.exception_count = processed.get("exceptions", 0) or 0

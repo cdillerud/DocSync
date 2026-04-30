@@ -139,18 +139,57 @@ class ContractIntelligenceService:
             return {"status": "normalizer_failed", "event_id": event_id, "error": str(exc)}
 
         agreement_id = await self._upsert_agreement(normalized, evt)
-        await self._upsert_parties(normalized)
-        await self._upsert_terms(normalized)
-        await self._upsert_pricing(normalized)
-        await self._upsert_documents(normalized)
+        try:
+            await self._upsert_parties(normalized)
+            await self._upsert_terms(normalized)
+            await self._upsert_pricing(normalized)
+            await self._upsert_documents(normalized)
 
-        match_result = await self.matcher.match(
-            agreement_id=agreement_id,
-            parties=normalized.parties,
-            pricing=normalized.pricing,
-        )
-        await self._persist_match_result(agreement_id, match_result)
-        await self._persist_warnings(agreement_id, normalized.warnings, event_id)
+            match_result = await self.matcher.match(
+                agreement_id=agreement_id,
+                parties=normalized.parties,
+                pricing=normalized.pricing,
+            )
+            await self._persist_match_result(agreement_id, match_result)
+            await self._persist_warnings(agreement_id, normalized.warnings, event_id)
+        except Exception as exc:  # noqa: BLE001 — defensive: never strand the event
+            import logging
+            import traceback
+            logging.getLogger(
+                "services.contracts.contract_intelligence_service"
+            ).exception(
+                "process_event partial failure: event_id=%s agreement_id=%s",
+                event_id, agreement_id,
+            )
+            await events.update_one(
+                {"id": event_id},
+                {"$set": {
+                    "processed": True,
+                    "processed_at": _utc_now(),
+                    "agreement_id": agreement_id,
+                    "error": (
+                        f"post_normalize_failed: {type(exc).__name__}: {exc}"
+                    )[:2000],
+                }},
+            )
+            await self._insert_exception(AgreementException(
+                agreement_id=agreement_id,
+                code="normalization_failed",
+                severity="high",
+                details={
+                    "stage": "post_normalize",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc()[:4000],
+                },
+                related_event_id=event_id,
+            ))
+            return {
+                "status": "post_normalize_failed",
+                "event_id": event_id,
+                "agreement_id": agreement_id,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
 
         await events.update_one(
             {"id": event_id},
@@ -224,6 +263,13 @@ class ContractIntelligenceService:
         for p in normalized.parties:
             doc = p.model_dump(mode="json")
             doc["updated_at"] = _utc_now().isoformat()
+            # MongoDB rejects an update where the same path appears in both
+            # ``$set`` and ``$setOnInsert``. Strip the immutable seed fields
+            # from the mutable ``$set`` payload.
+            insert_only = {
+                "id": doc.pop("id"),
+                "created_at": doc.pop("created_at"),
+            }
             # Stable key: (agreement_id, role, email, provider_recipient_id)
             filt = {
                 "agreement_id": p.agreement_id,
@@ -231,20 +277,24 @@ class ContractIntelligenceService:
                 "email": p.email,
                 "provider_recipient_id": p.provider_recipient_id,
             }
-            await coll.update_one(filt, {"$set": doc, "$setOnInsert": {
-                "id": doc["id"],
-                "created_at": doc["created_at"],
-            }}, upsert=True)
+            await coll.update_one(
+                filt,
+                {"$set": doc, "$setOnInsert": insert_only},
+                upsert=True,
+            )
 
     async def _upsert_terms(self, normalized: NormalizedAgreement) -> None:
         coll = self.db[CONTRACTS_COLLECTIONS["agreement_terms"]]
         for t in normalized.terms:
             doc = t.model_dump(mode="json")
+            insert_only = {"id": doc.pop("id")}
+            if "created_at" in doc:
+                insert_only["created_at"] = doc.pop("created_at")
             filt = {"agreement_id": t.agreement_id, "term_key": t.term_key,
                     "source": t.source}
             await coll.update_one(
                 filt,
-                {"$set": doc, "$setOnInsert": {"id": doc["id"]}},
+                {"$set": doc, "$setOnInsert": insert_only},
                 upsert=True,
             )
 
@@ -252,10 +302,14 @@ class ContractIntelligenceService:
         coll = self.db[CONTRACTS_COLLECTIONS["agreement_pricing"]]
         for p in normalized.pricing:
             doc = p.model_dump(mode="json")
+            insert_only = {
+                "id": doc.pop("id"),
+                "created_at": doc.pop("created_at"),
+            }
             filt = {"agreement_id": p.agreement_id, "line_no": p.line_no}
             await coll.update_one(
                 filt,
-                {"$set": doc, "$setOnInsert": {"id": doc["id"], "created_at": doc["created_at"]}},
+                {"$set": doc, "$setOnInsert": insert_only},
                 upsert=True,
             )
 
@@ -263,13 +317,17 @@ class ContractIntelligenceService:
         coll = self.db[CONTRACTS_COLLECTIONS["agreement_documents"]]
         for d in normalized.documents:
             doc = d.model_dump(mode="json")
+            insert_only = {
+                "id": doc.pop("id"),
+                "created_at": doc.pop("created_at"),
+            }
             filt = {
                 "agreement_id": d.agreement_id,
                 "provider_document_id": d.provider_document_id,
             }
             await coll.update_one(
                 filt,
-                {"$set": doc, "$setOnInsert": {"id": doc["id"], "created_at": doc["created_at"]}},
+                {"$set": doc, "$setOnInsert": insert_only},
                 upsert=True,
             )
 

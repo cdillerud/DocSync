@@ -809,3 +809,85 @@ async def import_navigator_export(
     else:
         summary = await dryrun_rows(rows, db=db, filename=file.filename)
     return summary.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# PDF body extraction — Phase 4C(c)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/contracts/agreements/{agreement_id}/pdf-extract",
+    tags=["Contract Intelligence"],
+)
+async def pdf_extract_agreement(
+    agreement_id: str,
+    file: UploadFile = File(..., description="Legacy agreement PDF"),
+    commit: bool = Query(
+        False,
+        description="Persist extracted fields. Default false (dry-run preview).",
+    ),
+    _user: dict = Depends(require_admin),
+):
+    """Admin-gated PDF body extraction for an existing agreement.
+
+    Default ``commit=false`` returns a preview only — no DB writes. With
+    ``commit=true``, extracted fields are upserted into agreement_terms,
+    agreement_obligations, and agreement_pricing using the orchestrator's
+    idempotent keys. Replays are safe.
+
+    Strict scope: this endpoint never touches the Navigator import
+    flow, the DocuSign webhook flow, BC, or hub_documents. PDF source
+    is the multipart upload from the caller.
+    """
+    from services.contracts.pdf_extraction import run_extraction
+
+    if not file or not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded.")
+
+    cap = max_upload_bytes()
+    data = await file.read(cap + 1)
+    if len(data) > cap:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds maximum size of {cap} bytes.",
+        )
+
+    fname = (file.filename or "").lower()
+    if not fname.endswith(".pdf"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only .pdf files are accepted by this endpoint.",
+        )
+
+    db = get_db()
+    agr = await db[CONTRACTS_COLLECTIONS["agreements"]].find_one(
+        {"id": agreement_id}, {"_id": 0, "id": 1},
+    )
+    if not agr:
+        raise HTTPException(
+            status_code=404,
+            detail=f"agreement {agreement_id!r} not found",
+        )
+
+    result = run_extraction(
+        agreement_id=agreement_id,
+        data=data,
+        filename=file.filename,
+    )
+
+    preview = result.to_dict()
+    preview["mode"] = "commit" if commit else "dryrun"
+
+    if not commit:
+        return preview
+
+    svc = ContractIntelligenceService(db)
+    actor = (_user or {}).get("email") or "system"
+    write_summary = await svc.ingest_pdf_extraction(
+        agreement_id=agreement_id,
+        result=result,
+        actor=actor,
+    )
+    preview["write_summary"] = write_summary
+    return preview

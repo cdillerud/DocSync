@@ -1,6 +1,94 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-02-XX] Contract Intelligence Phase 4C(c) — PDF Body Extraction for Legacy Agreements
+
+**Scope:** Pull contractual fields that DocuSign templates and Navigator
+metadata cannot carry — freight terms, MOQ (header + per-line), volume
+commitment, tooling amortization, payment-term cash discounts, and
+volume-tier discounts — directly from agreement PDF bodies. Fully
+deterministic regex; no LLM. Opt-in via a new admin-gated HTTP endpoint
+and CLI; Navigator import and DocuSign webhook flows remain untouched.
+
+### New
+- `services/contracts/pdf_text_extractor.py` — pypdf wrapper. Soft-fails
+  on encrypted / unreadable / image-only PDFs into `PDFExtractionError`.
+- `services/contracts/pdf_field_extractors.py` — five regex-only
+  extractors with consistent confidence scoring (0.55–0.95) plus an
+  aggregator that dedupes per-line MOQs from header MOQs.
+- `services/contracts/pdf_extraction.py` — orchestrator that turns PDF
+  bytes into an `ExtractionResult` preview and detects same-key
+  ambiguities for low-severity exception emission.
+- `routers/contracts.py` — `POST /api/contracts/agreements/{id}/pdf-extract?commit=false|true`.
+  Admin-gated multipart upload; default dry-run preview; `commit=true`
+  upserts via `ContractIntelligenceService.ingest_pdf_extraction`.
+- `scripts/contracts_extract_pdf.py` — CLI wrapping the same shared
+  service so the two ingest paths cannot drift.
+- `services/contracts/contract_intelligence_service.py` —
+  `ingest_pdf_extraction()`. Idempotent upserts keyed by
+  `(agreement_id, term_key, source="pdf_body")` for terms,
+  `(agreement_id, kind, description)` for obligations, and
+  `(agreement_id, item_label)` overlay for per-line MOQs. Ambiguity
+  exceptions are open-state-aware so replays update the same row
+  rather than fanning out duplicates.
+
+### Schema additions (additive, no migration)
+- `TermSource`, `PricingSource`: added `"pdf_body"`.
+- `ObligationKind`: added `"volume_commitment"`, `"tooling_amortization"`.
+- `ExceptionCode`: added `"pdf_extraction_ambiguous"`,
+  `"pdf_extraction_failed"`.
+- `AgreementPricing.min_quantity: Optional[float]` — per-line MOQ overlay.
+
+### Fixtures
+- `tests/fixtures/contracts/pdfs/_build_fixtures.py` —
+  deterministic synthetic-PDF builder (no real customer data).
+- Three committed synthetic PDFs:
+  - `bragg_supply_excerpt.pdf` (freight + header MOQ + per-line MOQs + 1%/10 net 30)
+  - `tooling_amortization_excerpt.pdf` (lump sum + amortized $/unit + volume commitment)
+  - `volume_commitment_with_tiers.pdf` (volume commitment + tier table + 2/15 net 45 + DAP)
+
+### Tests (+61 new, all passing)
+- `test_contracts_pdf_text_extractor.py` — happy path + error paths.
+- `test_contracts_pdf_field_extractors.py` — per-family unit tests
+  with positive + negative cases (incl. ambiguity dedup).
+- `test_contracts_pdf_extraction_orchestrator.py` — full bytes → preview
+  pipeline + ambiguity detection + idempotency.
+- `test_contracts_pdf_endpoint.py` — admin-gated HTTP + service-level
+  ingest, including replay idempotency and 404/400 guards.
+- Suite total: **253 passed, 8 skipped, 1 xfailed** (Phase 4C(d)
+  baseline of 192 preserved + 61 new).
+
+### Out of scope (explicitly not delivered)
+- DocuSign SDK install, live envelope fetch, Connect webhook activation.
+- Agreement ↔ Document Hub cross-link.
+- LLM augmentation.
+- BC writes, DocuSign writes.
+- Any change to Navigator import or AP / posting / poller / vendor /
+  classification flows.
+
+
+## [2026-02-XX] Contract Intelligence Phase 4C(c) housekeeping (immediate predecessor)
+
+**Scope:** Stabilize the test baseline before PDF extraction lands.
+
+### Fixed
+- `backend/requirements.txt` — added `mongomock-motor==0.0.36` and
+  `mongomock==4.3.0` so the production VM container's image bake
+  preserves the in-memory async MongoDB driver used across the
+  `test_contracts_*` suites.
+- `tests/test_contracts_endpoints.py`, `tests/test_contracts_phase3.py`
+  — replaced the `asyncio.get_event_loop().run_until_complete(...)`
+  pattern (which raises `RuntimeError` on Python 3.10+ once an earlier
+  test has closed the default loop) with a fresh-loop helper. Restores
+  22 tests to green on the production VM that had been failing at
+  fixture setup.
+
+### Suite
+- 192 passed, 8 skipped, 1 xfailed across the focused Phase 4C(d)
+  scope (was the same on /app dev container before; the housekeeping
+  closes the dev/prod parity gap).
+
+
 ## [2026-02-XX] Hotfix — Contract Intelligence upsert path-conflict (post-Phase-4C(a))
 
 **Root cause:** `_upsert_parties / _upsert_terms / _upsert_pricing /

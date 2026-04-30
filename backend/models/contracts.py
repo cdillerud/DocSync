@@ -56,13 +56,15 @@ PartySigningStatus = Literal[
     "declined", "completed", "auto_responded", "unknown",
 ]
 
-TermSource = Literal["custom_field", "tab", "form_data", "inferred", "manual"]
+TermSource = Literal["custom_field", "tab", "form_data", "inferred", "manual", "pdf_body"]
 
-PricingSource = Literal["tab", "custom_field", "form_data", "manual", "inferred"]
+PricingSource = Literal["tab", "custom_field", "form_data", "manual", "inferred", "pdf_body"]
 
 ObligationKind = Literal[
     "payment", "delivery", "reporting", "renewal",
-    "termination", "sla", "compliance", "other",
+    "termination", "sla", "compliance",
+    "volume_commitment", "tooling_amortization",
+    "other",
 ]
 
 ObligationStatus = Literal["open", "met", "overdue", "waived", "unknown"]
@@ -81,7 +83,9 @@ MatchMethod = Literal[
 ExceptionCode = Literal[
     "party_unmatched", "item_unmatched", "term_missing",
     "pricing_unparsable", "duplicate_envelope", "missing_envelope",
-    "hmac_invalid", "normalization_failed", "other",
+    "hmac_invalid", "normalization_failed",
+    "pdf_extraction_ambiguous", "pdf_extraction_failed",
+    "other",
 ]
 
 ExceptionSeverity = Literal["low", "medium", "high", "critical"]
@@ -255,6 +259,12 @@ class AgreementPricing(_ContractBase):
     unit_price: Optional[float] = None
     line_total: Optional[float] = None
     currency: Optional[str] = None
+
+    # Per-line minimum order quantity. Populated by Phase 4C(c) PDF body
+    # extraction when the agreement spells out item-level MOQs (e.g. the
+    # Bragg supply schedule). Header-level MOQ continues to live in
+    # agreement_terms[term_key="moq"].
+    min_quantity: Optional[float] = None
 
     # Per-line ship-to / delivery location (e.g. "Garden Grove, CA" on the
     # Bragg supply schedule). Free-text, advisory; no normalization today.

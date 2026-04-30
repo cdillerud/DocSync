@@ -576,6 +576,283 @@ class ContractIntelligenceService:
             ex.model_dump(mode="json")
         )
 
+    # --- Phase 4C(c): PDF body extraction ingestion ---------------------
+
+    async def ingest_pdf_extraction(
+        self,
+        *,
+        agreement_id: str,
+        result: Any,                  # services.contracts.pdf_extraction.ExtractionResult
+        actor: str = "system",
+    ) -> Dict[str, Any]:
+        """Persist a PDF extraction result to the standard collections.
+
+        Idempotent — re-running with the same ``ExtractionResult`` yields
+        the same on-disk state (each upsert is keyed by stable identity).
+
+        Source-of-truth contract:
+            * Terms with ``source="pdf_body"`` upsert keyed by
+              ``(agreement_id, term_key, source)`` so they coexist with
+              structured Connect / Navigator rows for the same key
+              without overwriting them.
+            * Obligations are keyed by ``(agreement_id, kind, raw_text)``
+              so the same description does not duplicate on replay.
+            * Pricing overlays for ``min_quantity`` MERGE onto the
+              existing line (matched by ``item_label``) without
+              clobbering price / quantity columns.
+            * Ambiguities open ``pdf_extraction_ambiguous`` exceptions
+              of severity "low" — the first replay updates the same
+              exception row instead of creating a duplicate.
+
+        Returns a write summary suitable for HTTP response or CLI print.
+        """
+        from models.contracts import (
+            AgreementObligation,
+            AgreementTerm,
+        )
+
+        if not agreement_id:
+            raise ValueError("agreement_id is required")
+        if result is None:
+            raise ValueError("ExtractionResult is required")
+
+        # Verify agreement exists; the endpoint also checks but the
+        # service guards independent callers (CLI).
+        agr = await self.db[CONTRACTS_COLLECTIONS["agreements"]].find_one(
+            {"id": agreement_id}, {"_id": 0, "id": 1},
+        )
+        if not agr:
+            raise LookupError(f"agreement {agreement_id!r} does not exist")
+
+        # If the extractor failed entirely, raise a high-severity
+        # exception and return early — nothing else to persist.
+        if getattr(result, "error", None):
+            await self._insert_exception(AgreementException(
+                agreement_id=agreement_id,
+                code="pdf_extraction_failed",
+                severity="medium",
+                details={
+                    "error": result.error,
+                    "filename": getattr(result, "filename", None),
+                    "bytes_size": getattr(result, "bytes_size", 0),
+                },
+            ))
+            return {
+                "agreement_id": agreement_id,
+                "terms_written": 0,
+                "obligations_written": 0,
+                "pricing_overlays": 0,
+                "exceptions_written": 1,
+                "error": result.error,
+            }
+
+        terms_written = 0
+        obligations_written = 0
+        pricing_overlays = 0
+
+        terms_coll = self.db[CONTRACTS_COLLECTIONS["agreement_terms"]]
+        oblig_coll = self.db[CONTRACTS_COLLECTIONS["agreement_obligations"]]
+        pricing_coll = self.db[CONTRACTS_COLLECTIONS["agreement_pricing"]]
+
+        for ef in result.fields:
+            if ef.target == "term":
+                term = AgreementTerm(
+                    agreement_id=agreement_id,
+                    term_key=ef.key,
+                    term_value=str(ef.value) if not isinstance(ef.value, str) else ef.value,
+                    raw_value=ef.raw_text,
+                    source="pdf_body",
+                    confidence=ef.confidence,
+                )
+                doc = term.model_dump(mode="json")
+                doc["term_value_struct"] = ef.value
+                insert_only = {
+                    "id": doc.pop("id"),
+                    "created_at": doc.pop("created_at"),
+                }
+                await terms_coll.update_one(
+                    {
+                        "agreement_id": agreement_id,
+                        "term_key": ef.key,
+                        "source": "pdf_body",
+                    },
+                    {"$set": doc, "$setOnInsert": insert_only},
+                    upsert=True,
+                )
+                terms_written += 1
+
+            elif ef.target == "obligation":
+                description = ef.raw_text[:500] if ef.raw_text else (
+                    f"{ef.key}: {ef.value}"
+                )
+                oblig = AgreementObligation(
+                    agreement_id=agreement_id,
+                    kind=ef.key,  # type: ignore[arg-type]
+                    description=description,
+                    confidence=ef.confidence,
+                )
+                doc = oblig.model_dump(mode="json")
+                doc["details"] = ef.value
+                doc["source"] = "pdf_body"
+                insert_only = {
+                    "id": doc.pop("id"),
+                    "created_at": doc.pop("created_at"),
+                }
+                await oblig_coll.update_one(
+                    {
+                        "agreement_id": agreement_id,
+                        "kind": ef.key,
+                        "description": description,
+                    },
+                    {"$set": doc, "$setOnInsert": insert_only},
+                    upsert=True,
+                )
+                obligations_written += 1
+
+            elif ef.target == "pricing":
+                # Pricing-target ExtractedFields are advisory overlays
+                # (e.g. derived tooling per-unit rate). They land as
+                # rows on the pricing collection with a synthetic line_no
+                # negative-numbered to avoid colliding with line items.
+                synthetic_line = -abs(hash(ef.key)) % 9999 - 1
+                doc = {
+                    "id": _new_id(),
+                    "agreement_id": agreement_id,
+                    "line_no": synthetic_line,
+                    "item_label": ef.key,
+                    "description": ef.raw_text,
+                    "source": "pdf_body",
+                    "confidence": ef.confidence,
+                    "min_quantity": None,
+                    "unit_price": (
+                        ef.value.get("rate_per_unit")
+                        if isinstance(ef.value, dict) else None
+                    ),
+                    "uom": (
+                        ef.value.get("unit")
+                        if isinstance(ef.value, dict) else None
+                    ),
+                    "created_at": _utc_now().isoformat(),
+                    "_pdf_extras": ef.value if isinstance(ef.value, dict) else None,
+                }
+                insert_only = {
+                    "id": doc.pop("id"),
+                    "created_at": doc.pop("created_at"),
+                }
+                await pricing_coll.update_one(
+                    {
+                        "agreement_id": agreement_id,
+                        "line_no": synthetic_line,
+                        "source": "pdf_body",
+                    },
+                    {"$set": doc, "$setOnInsert": insert_only},
+                    upsert=True,
+                )
+                pricing_overlays += 1
+
+        # Per-line MOQ overlays — merge onto matching item_label rows
+        # without clobbering structured fields.
+        for lp in result.line_pricing:
+            await pricing_coll.update_one(
+                {
+                    "agreement_id": agreement_id,
+                    "item_label": lp.item_label,
+                },
+                {"$set": {
+                    "min_quantity": lp.min_quantity,
+                    "_pdf_min_quantity_raw": lp.raw_text,
+                }},
+                upsert=False,
+            )
+            # If no row matched, drop a synthetic row tagged source=pdf_body.
+            existed = await pricing_coll.count_documents({
+                "agreement_id": agreement_id,
+                "item_label": lp.item_label,
+                "min_quantity": lp.min_quantity,
+            })
+            if not existed:
+                await pricing_coll.update_one(
+                    {
+                        "agreement_id": agreement_id,
+                        "item_label": lp.item_label,
+                        "source": "pdf_body",
+                    },
+                    {
+                        "$set": {
+                            "min_quantity": lp.min_quantity,
+                            "description": lp.raw_text,
+                            "confidence": lp.confidence,
+                            "source": "pdf_body",
+                        },
+                        "$setOnInsert": {
+                            "id": _new_id(),
+                            "agreement_id": agreement_id,
+                            "item_label": lp.item_label,
+                            "created_at": _utc_now().isoformat(),
+                            "line_no": None,
+                        },
+                    },
+                    upsert=True,
+                )
+            pricing_overlays += 1
+
+        # Ambiguity exceptions — low severity, replay-safe via the
+        # exception status filter.
+        exceptions_written = 0
+        ex_coll = self.db[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
+        for amb in result.ambiguities:
+            details = {
+                "term_key": amb.key,
+                "candidates": amb.candidates,
+                "filename": getattr(result, "filename", None),
+            }
+            existing = await ex_coll.find_one({
+                "agreement_id": agreement_id,
+                "code": "pdf_extraction_ambiguous",
+                "details.term_key": amb.key,
+                "status": "open",
+            }, {"_id": 0, "id": 1})
+            if existing:
+                await ex_coll.update_one(
+                    {"id": existing["id"]},
+                    {"$set": {"details": details}},
+                )
+            else:
+                ex = AgreementException(
+                    agreement_id=agreement_id,
+                    code="pdf_extraction_ambiguous",
+                    severity="low",
+                    details=details,
+                )
+                await ex_coll.insert_one(ex.model_dump(mode="json"))
+                exceptions_written += 1
+
+        await self._audit(
+            agreement_id=agreement_id,
+            action="agreement_normalized",
+            actor=actor,
+            after={
+                "stage": "pdf_body_extraction",
+                "filename": getattr(result, "filename", None),
+                "page_count": getattr(result, "page_count", 0),
+                "terms_written": terms_written,
+                "obligations_written": obligations_written,
+                "pricing_overlays": pricing_overlays,
+                "exceptions_written": exceptions_written,
+            },
+        )
+
+        return {
+            "agreement_id": agreement_id,
+            "terms_written": terms_written,
+            "obligations_written": obligations_written,
+            "pricing_overlays": pricing_overlays,
+            "exceptions_written": exceptions_written,
+            "ambiguities": len(result.ambiguities),
+            "filename": getattr(result, "filename", None),
+            "page_count": getattr(result, "page_count", 0),
+        }
+
 
 # ---------------------------------------------------------------------------
 # Module helpers

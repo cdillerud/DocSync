@@ -129,3 +129,6 @@ watchfiles==1.1.1
 websockets==15.0.1
 yarl==1.22.0
 zipp==3.23.0
+# Test-only: in-memory async MongoDB used by tests/test_contracts_*.py
+mongomock-motor==0.0.36
+mongomock==4.3.0

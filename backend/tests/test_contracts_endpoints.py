@@ -40,6 +40,20 @@ from services.integrations.docusign_client import (
 )
 
 
+def _run(coro):
+    """Run a coroutine in a fresh event loop.
+
+    Replaces ``asyncio.get_event_loop().run_until_complete(...)`` which
+    raises ``RuntimeError`` on Python 3.10+ once any earlier test has
+    closed the default loop.
+    """
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 # ---------------------------------------------------------------------------
 # Test app factory
 # ---------------------------------------------------------------------------
@@ -80,13 +94,16 @@ def app_and_db():
     database = client["contracts_test"]
 
     # Materialize indexes synchronously for the test session.
+    # Use a fresh event loop instead of asyncio.get_event_loop() — the
+    # latter raises RuntimeError on Python 3.10+ if a previous test in
+    # the run has already closed the default loop.
     async def _materialize():
         for coll_name, specs in CONTRACTS_INDEXES.items():
             coll = database[CONTRACTS_COLLECTIONS[coll_name]]
             for spec in specs:
                 kwargs = {k: v for k, v in spec.items() if k != "keys"}
                 await coll.create_index(spec["keys"], **kwargs)
-    asyncio.get_event_loop().run_until_complete(_materialize())
+    _run(_materialize())
 
     deps.set_db(database)
 
@@ -202,7 +219,7 @@ class TestWebhookSecurity:
             return await db[CONTRACTS_COLLECTIONS["agreement_events"]].find_one(
                 {"provider_event_id": "evt-1"}, {"_id": 0},
             )
-        evt = asyncio.get_event_loop().run_until_complete(_check())
+        evt = _run(_check())
         assert evt is not None
         assert evt["hmac_valid"] is True
 
@@ -227,7 +244,7 @@ class TestWebhookSecurity:
             return await db[CONTRACTS_COLLECTIONS["agreement_events"]].count_documents(
                 {"provider_event_id": "evt-replay"},
             )
-        n = asyncio.get_event_loop().run_until_complete(_count())
+        n = _run(_count())
         assert n == 1
 
 
@@ -285,7 +302,7 @@ class TestManualEndpoints:
                 "id": "agr-X", "provider": "docusign",
                 "provider_envelope_id": "env-X", "status": "sent",
             })
-        asyncio.get_event_loop().run_until_complete(_seed())
+        _run(_seed())
 
         # Create manual link
         r = c.post(
@@ -318,7 +335,7 @@ class TestManualEndpoints:
                 "confidence": 0.85, "status": "proposed",
                 "linked_by": "system",
             })
-        asyncio.get_event_loop().run_until_complete(_seed_proposed())
+        _run(_seed_proposed())
 
         r = c.post("/api/contracts/agreements/agr-X/links/link-prop/confirm")
         assert r.status_code == 200
@@ -335,7 +352,7 @@ class TestManualEndpoints:
                 "code": "party_unmatched", "severity": "medium",
                 "details": {}, "status": "open",
             })
-        asyncio.get_event_loop().run_until_complete(_seed())
+        _run(_seed())
 
         r = c.post("/api/contracts/exceptions/ex-99/resolve",
                    json={"note": "added to BC"})

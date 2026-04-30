@@ -53,6 +53,9 @@ def app_and_db():
     client = AsyncMongoMockClient()
     database = client["contracts_test_phase3"]
 
+    # Use a fresh event loop — asyncio.get_event_loop() raises on
+    # Python 3.10+ once the default loop has been closed by an earlier
+    # test in the run.
     async def _materialize():
         for coll_name, specs in CONTRACTS_INDEXES.items():
             coll = database[CONTRACTS_COLLECTIONS[coll_name]]
@@ -60,7 +63,11 @@ def app_and_db():
                 kwargs = {k: v for k, v in spec.items() if k != "keys"}
                 await coll.create_index(spec["keys"], **kwargs)
 
-    asyncio.get_event_loop().run_until_complete(_materialize())
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_materialize())
+    finally:
+        loop.close()
     deps.set_db(database)
 
     from routers.contracts import router as contracts_router

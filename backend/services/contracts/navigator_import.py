@@ -206,6 +206,10 @@ class RowReport:
     exception_count: int = 0
     has_ambiguity_exception: bool = False
 
+    # Phase 4C(d): per-row match preview (dry-run-only — empty in commit
+    # mode, since the matcher already wrote the canonical link rows).
+    match_preview: List[Dict[str, Any]] = field(default_factory=list)
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -232,6 +236,11 @@ class ImportSummary:
     committed: int = 0
     ambiguity_exceptions: int = 0
     schema_gap_warnings: int = 0
+
+    # Phase 4C(d): BC matcher diagnostics.
+    bc_repo_source: str = "empty"   # "reference_cache" | "empty"
+    bc_cache_counts: Dict[str, int] = field(default_factory=dict)
+    bc_cache_unavailable: bool = False
 
     rows: List[RowReport] = field(default_factory=list)
 
@@ -289,6 +298,95 @@ async def _envelope_exists(db, envelope_id: str) -> bool:
     return bool(found)
 
 
+async def _build_bc_repo(db: Any) -> Tuple[Any, str, Dict[str, int], bool]:
+    """Construct the BC repo to use for matching.
+
+    Returns ``(repo, source, cache_counts, unavailable)``. When ``db`` is
+    None or the cache probe fails, returns the in-memory empty repo so
+    behavior degrades to today's "no candidates → exception" flow.
+    """
+    if db is None:
+        from services.contracts.bc_agreement_matcher import InMemoryBCRepository
+        return InMemoryBCRepository(), "empty", {}, False
+    try:
+        from services.contracts.bc_repo_reference_cache import (
+            BCReferenceCacheRepository,
+        )
+        repo = BCReferenceCacheRepository(db)
+        counts = await repo.probe()
+        if repo.unavailable:
+            from services.contracts.bc_agreement_matcher import InMemoryBCRepository
+            return InMemoryBCRepository(), "empty", counts, True
+        if not any(counts.values()):
+            # Cache exists but cold — still use it (so future warm-up
+            # transparently improves matches), but report "empty" source
+            # so the UI can flag the cold-cache state.
+            return repo, "reference_cache_cold", counts, False
+        return repo, "reference_cache", counts, False
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("falling back to empty BC repo: %s", exc)
+        from services.contracts.bc_agreement_matcher import InMemoryBCRepository
+        return InMemoryBCRepository(), "empty", {}, True
+
+
+async def _preview_match_for_row(
+    repo: Any, normalized: Any, *, ambiguity_band: float = 0.02,
+    auto_confirm_threshold: float = 0.95, propose_threshold: float = 0.80,
+) -> List[Dict[str, Any]]:
+    """Run the matcher's lookup logic against the row's parties WITHOUT
+    persisting links, so dry-run can show what would happen at commit.
+
+    Returns a list of preview entries, one per party:
+      ``{party_org, party_role, link_type, candidate_count,
+         top_no, top_name, top_score, ambiguous, decision}``
+    where ``decision`` is one of ``auto_confirm | propose | manual_review``.
+    """
+    out: List[Dict[str, Any]] = []
+    for p in normalized.parties:
+        link_type = "vendor" if (p.role or "").lower() == "sender" else "customer"
+        if link_type == "customer":
+            cands = await repo.find_customer_candidates(
+                name=p.organization or p.name, email=p.email,
+            )
+        else:
+            cands = await repo.find_vendor_candidates(
+                name=p.organization or p.name, email=p.email,
+            )
+        entry: Dict[str, Any] = {
+            "party_org": p.organization,
+            "party_role": p.role,
+            "link_type": link_type,
+            "candidate_count": len(cands),
+            "top_no": None,
+            "top_name": None,
+            "top_score": 0.0,
+            "ambiguous": False,
+            "decision": "manual_review",
+        }
+        if cands:
+            top = cands[0]
+            entry["top_no"] = top.no
+            entry["top_name"] = top.name
+            entry["top_score"] = top.score
+            cluster = [
+                c for c in cands
+                if c.score >= propose_threshold
+                and (top.score - c.score) <= ambiguity_band
+                and c.no != top.no
+            ]
+            if cluster:
+                entry["ambiguous"] = True
+                entry["decision"] = "manual_review"
+            elif top.score >= auto_confirm_threshold:
+                entry["decision"] = "auto_confirm"
+            elif top.score >= propose_threshold:
+                entry["decision"] = "propose"
+            else:
+                entry["decision"] = "manual_review"
+        out.append(entry)
+    return out
+
+
 async def dryrun_rows(
     rows: List[Dict[str, Any]],
     *,
@@ -297,12 +395,19 @@ async def dryrun_rows(
 ) -> ImportSummary:
     """Synchronous-friendly dry-run.
 
-    If ``db`` is provided, would-be-created vs. would-be-updated counts
-    are computed by checking ``provider_envelope_id`` against the
-    ``agreements`` collection. With no db, every row is reported as
-    ``would_create`` (CLI fallback).
+    If ``db`` is provided:
+      * ``would_create`` / ``would_update`` is computed against the
+        ``agreements`` collection.
+      * Each row's ``match_preview`` is populated by running the BC
+        repo against that row's parties (no persistence).
     """
     summary = ImportSummary(mode="dryrun", filename=filename, row_count=len(rows))
+
+    repo, source, counts, unavailable = await _build_bc_repo(db)
+    summary.bc_repo_source = source
+    summary.bc_cache_counts = counts
+    summary.bc_cache_unavailable = unavailable
+
     for idx, raw_row in enumerate(rows, start=1):
         report = dryrun_one(idx, raw_row)
         summary.rows.append(report)
@@ -326,6 +431,15 @@ async def dryrun_rows(
                 summary.would_create += 1
         else:
             summary.would_create += 1
+        # Per-row match preview — re-normalize once for the matcher input.
+        try:
+            from services.contracts.navigator_normalizer import (
+                normalize_navigator_row,
+            )
+            normalized = normalize_navigator_row(raw_row)
+            report.match_preview = await _preview_match_for_row(repo, normalized)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("match preview failed for row %s: %s", idx, exc)
     return summary
 
 
@@ -395,13 +509,24 @@ async def commit_rows(
     Idempotency is delegated to ``ContractIntelligenceService.record_event``
     (unique index on ``(provider, provider_event_id)`` →
     ``navigator::{envelope_id}`` collapses replays).
+
+    Phase 4C(d): the orchestrator is constructed with a
+    :class:`BCReferenceCacheRepository` so the matcher can produce real
+    candidates / auto-confirms / ambiguity exceptions instead of always
+    returning empty.
     """
     from services.contracts.contract_intelligence_service import (
         ContractIntelligenceService,
     )
 
     summary = ImportSummary(mode="commit", filename=filename, row_count=len(rows))
-    svc = ContractIntelligenceService(db)
+
+    repo, source, counts, unavailable = await _build_bc_repo(db)
+    summary.bc_repo_source = source
+    summary.bc_cache_counts = counts
+    summary.bc_cache_unavailable = unavailable
+
+    svc = ContractIntelligenceService(db, repo=repo)
     for idx, raw_row in enumerate(rows, start=1):
         report = await commit_one(svc, idx, raw_row)
         summary.rows.append(report)

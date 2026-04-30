@@ -1438,6 +1438,33 @@ function NavigatorImportTab() {
             )}
           </div>
 
+          <div className="rounded-md border bg-zinc-50 dark:bg-zinc-900 p-3 text-xs flex flex-wrap gap-x-6 gap-y-1"
+               data-testid={`${label}-bc-repo-banner`}>
+            <span>
+              <span className="text-muted-foreground">BC repo:</span>{' '}
+              <span className={`font-mono ${summary.bc_repo_source === 'reference_cache' ? 'text-emerald-600'
+                                  : summary.bc_repo_source === 'reference_cache_cold' ? 'text-amber-600'
+                                  : 'text-zinc-500'}`}>
+                {summary.bc_repo_source || 'empty'}
+              </span>
+            </span>
+            {summary.bc_cache_counts && Object.keys(summary.bc_cache_counts).length > 0 && (
+              <>
+                <span><span className="text-muted-foreground">customers:</span>{' '}
+                      <span className="font-mono">{summary.bc_cache_counts.customers ?? 0}</span></span>
+                <span><span className="text-muted-foreground">vendors:</span>{' '}
+                      <span className="font-mono">{summary.bc_cache_counts.vendors ?? 0}</span></span>
+                <span><span className="text-muted-foreground">items:</span>{' '}
+                      <span className="font-mono">{summary.bc_cache_counts.items ?? 0}</span></span>
+              </>
+            )}
+            {summary.bc_cache_unavailable && (
+              <span className="text-amber-600 flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> cache unavailable — matching disabled
+              </span>
+            )}
+          </div>
+
           {summary.rows && summary.rows.length > 0 && (
             <div className="border rounded-md max-h-72 overflow-auto"
                  data-testid={`${label}-row-list`}>

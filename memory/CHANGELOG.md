@@ -1,6 +1,99 @@
 # GPI Document Hub - Changelog
 
 
+## [2026-02-XX] Contract Intelligence Phase 4B — Navigator import CLI + matcher ambiguity hardening
+
+**Scope:** One-shot Navigator import CLI (dry-run default, idempotent
+commit) plus matcher ambiguity detection. Converts 1 of the 2 remaining
+Phase 4A xfails. No DocuSign SDK, no HTTP upload endpoint, no webhook
+activation, no BC writes, no UI changes, no route changes, no new
+dependencies (openpyxl 3.1.5 + pandas 3.0.0 already in the container).
+
+### New CLI: `backend/scripts/contracts_import_navigator.py`
+
+- Accepts `.xlsx` (optional `--sheet`), `.csv`, `.json` (single row,
+  `{"row": ...}` wrapper, `{"rows": [...]}` wrapper, or top-level list).
+- **Dry-run is the default.** Writes require explicit `--commit`.
+- Per-row diagnostics: envelope id, status, title, Navigator UUID,
+  party / term / pricing / document / warning counts, inline warning
+  codes, commit outcome.
+- Commit path reuses `ContractIntelligenceService.record_event` +
+  `process_event` — the same orchestrator live Connect webhooks use.
+  Matcher + audit + exception pipeline all fire automatically.
+- **Idempotency:** deterministic event id `navigator::{envelope_id}`;
+  replays are a no-op at the `agreement_events` unique-index layer.
+  Manual mappings (`linked_by != "system"`, or `status in
+  {confirmed, rejected}`) survive reruns untouched per the existing
+  orchestrator replay rule.
+- `--limit N` for debugging. Exit codes: 0 clean, 2 unreadable file,
+  3 one-or-more row failures.
+
+Usage (VM):
+```bash
+# Dry-run:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx
+# Commit:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx --commit
+```
+
+### Matcher ambiguity hardening: `backend/services/contracts/bc_agreement_matcher.py`
+
+- New env-tunable `CONTRACT_MATCH_AMBIGUITY_BAND` (default `0.02`).
+- **Ambiguity detection:** when ≥2 candidates sit within the band of
+  the top score AND all clear the propose threshold, the matcher emits
+  every candidate as a `proposed` link (never auto-confirmed) and opens
+  one high-severity `party_unmatched` exception with
+  `details.ambiguous=True`, `details.candidate_bc_nos=[...]`,
+  `details.candidate_count`, `details.top_score`, `details.ambiguity_band`.
+- **Exact-BC-code short-circuit:** when the repository tags a single
+  candidate with `method="exact_no"` (i.e. a direct BC code hit from a
+  `bc_customer_code` / `bc_vendor_code` custom field), that candidate
+  wins outright. No ambiguity analysis runs.
+- No schema change. Only the emitted `(links, exceptions)` shape
+  differs in the ambiguity branch. Manual-mapping flows untouched.
+
+### xfail conversion
+
+- **Converted to passing** (Phase 4B fixed):
+  - `test_ambiguous_match_emits_both_plus_exception` — ambiguity now
+    surfaces both candidates + a structured exception.
+  - `test_current_matcher_silently_picks_one` replaced by a canonical
+    positive test `test_ambiguous_candidates_emit_proposed_plus_exception`.
+- **Still xfail** (external template gate):
+  - `test_payment_term_discount_exposed_as_own_term` — requires a
+    DocuSign template change to surface the discount as its own custom
+    field. Normalizer preserves whatever DocuSign sends.
+
+### Tests
+
+- New `tests/test_contracts_import_navigator_cli.py` — 16 tests
+  (loaders, dry-run, commit idempotency, row-error isolation, exit codes).
+- Updated `tests/test_contracts_bragg_fixture.py` — ambiguity section
+  rewritten; one xfail deleted, one xfail converted to pass.
+- Full Contract Intelligence suite: **161 passed, 7 skipped, 1 xfailed**
+  (previously 144 passed, 2 xfailed after Phase 4A).
+- Zero regressions in normalizer, orchestrator, endpoints, golden
+  fixtures, phase3, or phase3.1 suites.
+
+### Documentation
+
+- `/app/memory/BRAGG_DOCUSIGN_VALIDATION_FINDINGS.md` §12 added with CLI
+  usage, ambiguity behavior table, xfail inventory post-4B, and
+  remaining items before live DocuSign SDK / webhook activation.
+
+### Not yet shipped (explicitly out of Phase 4B scope)
+
+- `POST /api/contracts/navigator/import` HTTP upload endpoint. CLI is
+  the current operator interface.
+- DocuSign SDK install / live envelope fetch / webhook activation.
+- Agreement ↔ Document Hub cross-link. Suggested-threshold widget.
+  Template-side `payment_term_discount` split.
+
+
+
+
 ## [2026-02-XX] Contract Intelligence Phase 4A — Dual-path normalizer
 
 **Scope:** Payload Shape Reconciliation. DocuSign Connect webhook JSON

@@ -76,6 +76,17 @@ MIN_PROPOSE_THRESHOLD: float = _env_threshold(
 )
 EXCEPTION_THRESHOLD: float = MIN_PROPOSE_THRESHOLD
 
+# Ambiguity band: if two or more candidates sit within this many points of
+# the top score AND both clear the propose threshold, the matcher treats
+# them as ambiguous — no auto-confirm, all emitted as ``proposed`` links,
+# and a single high-severity ``party_unmatched`` exception is opened with
+# ``details.ambiguous=true``. Env-overridable so ops can widen/tighten
+# without a code change.
+_DEFAULT_AMBIGUITY_BAND = 0.02
+AMBIGUITY_BAND: float = _env_threshold(
+    "CONTRACT_MATCH_AMBIGUITY_BAND", _DEFAULT_AMBIGUITY_BAND,
+)
+
 
 # ---------------------------------------------------------------------------
 # Repository protocol — production adapter wraps the existing BC ref cache
@@ -127,10 +138,12 @@ class BCAgreementMatcher:
         *,
         auto_confirm_threshold: float = AUTO_CONFIRM_THRESHOLD,
         min_propose_threshold: float = MIN_PROPOSE_THRESHOLD,
+        ambiguity_band: float = AMBIGUITY_BAND,
     ) -> None:
         self.repo = repo
         self.auto_confirm_threshold = auto_confirm_threshold
         self.min_propose_threshold = min_propose_threshold
+        self.ambiguity_band = ambiguity_band
 
     # ----- Public entry point -------------------------------------------
 
@@ -248,6 +261,40 @@ class BCAgreementMatcher:
             ))
             return
 
+        # Exact BC code short-circuit: if the repository tags any candidate
+        # with ``method="exact_no"`` (i.e. a direct BC code hit — typically
+        # from a ``bc_customer_code`` / ``bc_vendor_code`` custom field),
+        # that candidate wins outright. No ambiguity analysis runs.
+        exact_no_hits = [
+            c for c in candidates
+            if c.method == "exact_no" and c.score >= self.min_propose_threshold
+        ]
+        if len(exact_no_hits) == 1:
+            top = exact_no_hits[0]
+        else:
+            # Ambiguity detection: any candidates sitting within
+            # ``ambiguity_band`` of the top score AND clearing the propose
+            # floor are treated as co-equal candidates. We never
+            # auto-confirm in that case — manual mapping is required.
+            ambiguous_cluster = [
+                c for c in candidates
+                if c.score >= self.min_propose_threshold
+                and (top.score - c.score) <= self.ambiguity_band
+                and c.no != top.no
+            ]
+            if ambiguous_cluster:
+                await self._emit_ambiguous_party_links(
+                    agreement_id=agreement_id,
+                    party=party,
+                    link_type=link_type,
+                    bc_entity=bc_entity,
+                    top=top,
+                    cluster=ambiguous_cluster,
+                    seen=seen,
+                    result=result,
+                )
+                return
+
         key = (link_type, top.no)
         if key in seen:
             # Same BC entity already linked once for this agreement
@@ -274,6 +321,72 @@ class BCAgreementMatcher:
                 f"matched_party_role={party.role}; "
                 f"candidates_considered={len(candidates)}"
             ),
+        ))
+
+    async def _emit_ambiguous_party_links(
+        self,
+        *,
+        agreement_id: str,
+        party: AgreementParty,
+        link_type: BCLinkType,
+        bc_entity: str,
+        top: BCCandidate,
+        cluster: List[BCCandidate],
+        seen: set[Tuple[str, str]],
+        result: MatchResult,
+    ) -> None:
+        """Emit every ambiguous candidate as ``proposed`` and open a single
+        high-severity ``party_unmatched`` exception describing the cluster.
+
+        Behavior contract:
+            * NEVER auto-confirms, even if some cluster members exceed
+              ``auto_confirm_threshold`` — ambiguity forces human review.
+            * ``details.ambiguous=True`` on the exception is the marker
+              downstream UIs and tests use to detect this path.
+            * The ``seen`` set is updated for every cluster member so a
+              repeat party on the same agreement does not re-emit the
+              same cluster.
+        """
+        # Full cluster = top + anything within the band.
+        full_cluster = [top, *cluster]
+        candidate_bc_nos: List[str] = []
+        for candidate in full_cluster:
+            key = (link_type, candidate.no)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidate_bc_nos.append(candidate.no)
+            result.links.append(AgreementBCLink(
+                agreement_id=agreement_id,
+                link_type=link_type,
+                bc_entity=bc_entity,
+                bc_no=candidate.no,
+                bc_name_snapshot=candidate.name,
+                match_method=candidate.method,
+                confidence=candidate.score,
+                status="proposed",  # ambiguity forces proposed, never auto-confirmed
+                party_id=party.id,
+                linked_by="system",
+                notes=(
+                    f"ambiguous_cluster_size={len(full_cluster)}; "
+                    f"party_role={party.role}"
+                ),
+            ))
+        result.exceptions.append(AgreementException(
+            agreement_id=agreement_id,
+            code="party_unmatched",
+            severity="high",
+            details={
+                "link_type": link_type,
+                "ambiguous": True,
+                "candidate_bc_nos": candidate_bc_nos,
+                "candidate_count": len(full_cluster),
+                "top_score": top.score,
+                "ambiguity_band": self.ambiguity_band,
+                "party_name": party.name,
+                "party_org": party.organization,
+            },
+            related_party_id=party.id,
         ))
 
     async def _emit_item_link(

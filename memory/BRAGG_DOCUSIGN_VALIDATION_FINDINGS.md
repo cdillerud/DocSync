@@ -354,3 +354,140 @@ can stop caring which shape they have.
 - **DocuSign SDK install + live envelope fetch** — deferred to Phase 4B
   or later. No blocker remains on the normalizer side.
 
+---
+
+## 12. Phase 4B — Navigator import CLI + matcher ambiguity hardening (✅ completed)
+
+Status: **CLI + matcher ambiguity landed.** One of the remaining two
+Phase 4A xfails converted. Only one xfail remains: a template-side field
+(`payment_term_discount`) that DocuSign itself must expose.
+
+### 12a. Navigator dry-run / commit CLI
+
+File: `backend/scripts/contracts_import_navigator.py`
+
+Runs under the existing container — no new dependencies (openpyxl 3.1.5
++ pandas 3.0.0 already installed).
+
+**Default is dry-run.** Nothing is written to MongoDB unless `--commit`
+is passed.
+
+Supported formats:
+- `.xlsx` (`--sheet NAME` optional; defaults to the active sheet)
+- `.csv`
+- `.json` (single naked row, `{"row": {...}}` wrapper, `{"rows": [...]}` wrapper, or a top-level list — compatible with the existing Bragg fixture)
+
+Per-row diagnostics printed for every row:
+- envelope id, status, title, Navigator UUID
+- party / term / pricing / document / warning counts
+- inline warning code + details (e.g. `party_missing_email`)
+- commit outcome (committed / duplicate / not committed)
+
+Commit path reuses `ContractIntelligenceService.record_event` +
+`process_event` — the same orchestrator that live Connect webhooks use —
+so import rows pass through matcher + audit + exception pipeline with
+zero duplication.
+
+**Idempotency guarantees:**
+- Event id is deterministic: `navigator::{envelope_id}` — replays are a
+  no-op at the `agreement_events` unique-index layer.
+- The `agreements` unique index on `provider_envelope_id` guards the
+  underlying row upsert if the envelope was already ingested via Connect.
+- Manual mappings survive: orchestrator's replay logic only rewrites
+  `linked_by="system"` links in `{proposed, auto_confirmed}` state.
+  Confirmed / rejected / manual-link rows are untouched.
+
+**Usage (VM):**
+
+```bash
+# Dry-run (default, no writes):
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx
+
+# Commit:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx --commit
+
+# First N rows only:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx --limit 5
+
+# Specific xlsx sheet:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator /tmp/navigator.xlsx --sheet "Agreements"
+
+# Dry-run against the Bragg fixture that ships with the repo:
+docker compose exec backend \
+    python -m scripts.contracts_import_navigator \
+    backend/tests/fixtures/docusign/bragg/bragg_metadata_export_redacted.json
+```
+
+Exit codes: `0` = clean, `1` = argparse error, `2` = file unreadable /
+unsupported, `3` = one or more rows failed normalization or commit.
+
+### 12b. Matcher ambiguity hardening
+
+File: `backend/services/contracts/bc_agreement_matcher.py`
+
+**Behavior (new, guarded by a tight default band):**
+
+| Scenario | Phase 4A behavior | Phase 4B behavior |
+|---|---|---|
+| Top candidate unique, above auto-confirm | `auto_confirmed` link | unchanged |
+| Top candidate unique, above propose threshold | `proposed` link | unchanged |
+| Top candidate below propose threshold | `party_unmatched` exception | unchanged |
+| **Two+ candidates within `ambiguity_band` of top, both ≥ propose** | **silently picked top, dropped rest** | **emits BOTH as `proposed`, opens one high-severity `party_unmatched` exception with `details.ambiguous=True`, `details.candidate_bc_nos=[...]`** |
+| Any candidate with `method="exact_no"` (BC code direct hit) | no short-circuit | **single exact-no candidate wins outright, skipping ambiguity analysis** |
+
+**Tunable:**
+- `CONTRACT_MATCH_AMBIGUITY_BAND` (default `0.02`).
+
+**No schema change**, no new field, no model migrations. Only emitted
+output (links + exceptions) changes shape in the ambiguity case.
+
+**Manual flow still works:**
+- Operator picks one of the two proposed links in the mapping UI →
+  `manual_link` / `confirm_link` marks it `confirmed` with `linked_by=<actor>`.
+- The other candidate can be explicitly rejected via `reject_link`.
+- Both outcomes trigger existing audit rows (`confirmed_link`,
+  `rejected_link`) and `resolve_exception` closes the ambiguity row.
+- Any replay (re-import, webhook resend) skips over manually-modified
+  rows per the existing "only refresh `linked_by="system"` and status in
+  `{proposed, auto_confirmed}`" rule (regression-covered by
+  `test_replay_does_not_clobber_manual_link`).
+
+### 12c. xfail inventory — post Phase 4B
+
+| # | Gap | Status |
+|---|---|---|
+| 1 | Navigator xlsx row unreadable | ✅ resolved in 4A |
+| 2 | Matcher silently collapses ambiguous BC candidates | **✅ RESOLVED in 4B** — emits both as proposed + ambiguity exception |
+| 3 | `Agreement.provider_agreement_id` missing | ✅ resolved in 4A |
+| 4 | `Agreement.alternate_envelope_ids` missing | ✅ resolved in 4A |
+| 5 | `AgreementPricing.location` missing | ✅ resolved in 4A |
+| 6 | `payment_term_discount` not split from `payment_term` | ⏸ STILL XFAIL — requires a DocuSign template change; xfail kept so it auto-flips once the field arrives on a live envelope |
+
+### 12d. Tests
+
+- New `tests/test_contracts_import_navigator_cli.py` — 16 tests
+  (loaders for xlsx / csv / json, dry-run happy + sad paths, exit codes,
+  commit-mode via a fake orchestrator, idempotent-replay behavior).
+- Rewrote `TestBCMatchingAmbiguity` in
+  `tests/test_contracts_bragg_fixture.py` — the "silently picks one"
+  documentation test is replaced by a canonical "emits both + ambiguity
+  exception" test; the xfail converted to passing.
+- Full Contract Intelligence suite: **161 passed, 7 skipped, 1 xfailed**.
+- Zero regressions in existing normalizer, matcher, orchestrator,
+  endpoints, golden-fixture, phase3, or phase3.1 suites.
+
+### 12e. What remains before live DocuSign SDK / webhook activation
+
+- DocuSign SDK install, live envelope fetch, and Connect webhook
+  activation. No blocker on the normalizer or matcher side.
+- A `POST /api/contracts/navigator/import` HTTP endpoint wrapping the
+  CLI. Deferred until Charlie confirms the volume/shape of the initial
+  batch — the CLI keeps operators unblocked in the interim.
+- Per-line PDF body extraction (freight terms, MOQ, total commitment,
+  tooling amortization, 1%-10 discount). Still template-side or
+  PDF-extraction-pass territory.
+

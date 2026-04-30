@@ -198,12 +198,13 @@ class TestNavigatorMetadataDirectConsumption:
 class TestBCMatchingAmbiguity:
 
     @pytest.mark.asyncio
-    async def test_current_matcher_silently_picks_one(self, expected):
-        """Documents CURRENT behavior: with two equally-scoring Bragg customer
-        candidates, the matcher emits exactly ONE customer link; the other
-        Bragg BC code is silently dropped. No ambiguous-match exception.
+    async def test_ambiguous_candidates_emit_proposed_plus_exception(self):
+        """Phase 4B: when two BC customers tie for the same legal entity
+        (e.g. Bragg East + Bragg West both "Bragg Live Food Products LLC"),
+        the matcher emits BOTH as ``proposed`` links and opens a single
+        high-severity ``party_unmatched`` exception with
+        ``details.ambiguous=True``. Auto-confirm is explicitly blocked.
         """
-        # Two BC candidates — both strong matches for "Bragg Live Food Products LLC"
         repo = InMemoryBCRepository(
             customers=[
                 {"no": "C-BRAGG-E", "name": "Bragg Live Food Products LLC"},
@@ -224,30 +225,25 @@ class TestBCMatchingAmbiguity:
         )
         customer_links = [link for link in result.links
                           if link.link_type == "customer"]
-        # Documented gap: exactly one link created.
-        assert len(customer_links) == 1, (
-            "current matcher collapses ambiguous candidates to a single link"
-        )
-        # And NO ambiguity-flagged exception is produced:
+        bc_nos = {link.bc_no for link in customer_links}
+        assert bc_nos == {"C-BRAGG-E", "C-BRAGG-W"}
+        # Ambiguity forces proposed, never auto_confirmed.
+        assert all(link.status == "proposed" for link in customer_links)
+        # Exactly one high-severity ambiguity exception.
         ambiguous_exc = [
             e for e in result.exceptions
             if e.details.get("ambiguous") is True
         ]
-        assert ambiguous_exc == [], (
-            "current matcher does NOT signal ambiguity — tracked as a gap"
-        )
+        assert len(ambiguous_exc) == 1
+        assert ambiguous_exc[0].severity == "high"
+        assert set(ambiguous_exc[0].details["candidate_bc_nos"]) == {
+            "C-BRAGG-E", "C-BRAGG-W",
+        }
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "AMBIGUITY GAP — the matcher should emit both candidates as "
-            "proposed links AND open a high-severity party_unmatched exception "
-            "with details.ambiguous=true. Not in scope for Phase 4A (payload "
-            "reconciliation). Tracked for a follow-up matcher-hardening pass."
-        ),
-    )
     async def test_ambiguous_match_emits_both_plus_exception(self):
+        """Alias of the canonical ambiguity test — preserves the name the
+        original xfail carried so prior runbook/docs keep resolving."""
         repo = InMemoryBCRepository(
             customers=[
                 {"no": "C-BRAGG-E", "name": "Bragg Live Food Products LLC"},

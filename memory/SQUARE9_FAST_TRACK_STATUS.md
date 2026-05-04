@@ -2,48 +2,52 @@
 
 - Generated: 2026-05-01 (UTC)
 - Mode: continuous-execution; updated as work lands.
-- Target: end of week 2026-05-08, Square9 can be turned off
-  with no user-visible regression.
+- Target: end of week 2026-05-08, Square9 turn-off with no
+  user-visible regression.
 
-## Done
+## Done — code changes shipped to /app
 
 | ID | Item | Evidence |
 |---|---|---|
-| G1 | `SearchPage.js` shipped (Square9 retrieval replacement). Filters: free-text, doc_type, vendor, customer, date range, BC #. Click-through to `DocumentDetailPage` and SharePoint. URL-deep-linkable (`/search?q=...&doc_type=...`). All `data-testid` set. | `frontend/src/pages/SearchPage.js`; route added in `App.js`; nav link "Search" added in `components/Layout.js`. ESLint clean. |
-| G1.smoke | Backend endpoint live: `GET /api/documents/search?q=invoice` returns 3 results with `match_fields` + `search_method=text_index` on the preview env. | `curl` validation from agent. |
-| Audit Δ | Confirmed `tier1_batch_runner.py` runner is unchanged (no AP regression risk from this work). Folder routing service already covers warehouse/shipping/international/dunnage/storage subfolders — no new build needed at intake. | `backend/services/folder_routing_service.py` unchanged. |
-| Cutover toggle | Confirmed `POST /api/square9/archive-stage-data` endpoint live and reversible via `restore-stage-data`. Friday cutover is one authorized API call. | `backend/routers/square9.py` unchanged. |
+| **G1** | `SearchPage.js` is the canonical retrieval surface. Default load shows recent docs (browse mode via `/api/documents`). Text search uses `/api/documents/search`. Filters: free-text, doc_type, status, vendor, customer, date range, BC #. Doc-type and status options are dynamic (with live counts) from `filter_options`. URL deep-linkable. Click-through to `DocumentDetailPage` and SharePoint. All `data-testid` set. | `frontend/src/pages/SearchPage.js`, route `/search` in `App.js`, "Search" nav link in `Layout.js`. ESLint clean. |
+| **G1.chips** | Square9-style drawer presets as one-click chips: AP Invoices, Purchase Orders, Sales, Warehouse / Shipping, Unclassified, Needs Review, Exceptions. Toggling re-runs the query. | Same file, `QUICK_FILTERS` constant + chip row above filter card. |
+| **G1.smoke** | Backend `GET /api/documents/search?q=invoice` and `GET /api/documents?limit=2&queue_view=false&include_cleared=true` both return well-shaped JSON on the live preview env (151 docs, types A/P/S/W/Other all present, `filter_options.types` populated with counts). | curl validation. Preview pod auth gate prevents Playwright snapshot of the rendered page; lint clean. Operator's prod VM build will render. |
+| Audit Δ | `tier1_batch_runner.py` not touched. `vendor_mismatch_sweep.py` not touched. `folder_routing_service.py` not touched. AP path fully preserved. Cutover toggle (`POST /api/square9/archive-stage-data`) confirmed wired. | grep + view confirmed. |
 
-## In flight
+## In flight — operator-side (config / answers)
 
-| ID | Item | Status |
+| ID | Item | What's needed |
 |---|---|---|
-| G2 | Sales mailbox polling enablement. Root cause is config: `SALES_EMAIL_POLLING_ENABLED='false'` and `SALES_EMAIL_POLLING_USER=''` are the defaults in `backend/server.py` (lines 198–199). Wiring is fully built. | Awaits operator-side prod-VM `.env` update (see §G2 operator block). No code change needed. |
+| **G2** | Sales mailbox polling. Root cause CONFIRMED via codebase: `SALES_EMAIL_POLLING_ENABLED` and `SALES_EMAIL_POLLING_USER` default to `false` / `''` in `backend/server.py:198–199`; worker short-circuits at `email_polling_service.py:583`. Wiring fully built. | Operator sets the two env vars in `backend/.env` on prod VM and restarts backend. Bare-line block: `/app/memory/SQUARE9_FAST_TRACK_OPERATOR_BLOCK_001.md` Step 3–4. |
+| **C1** | Square9 historical archive reach. | Operator one-line answer (Step 5 in operator block). |
+| **C2** | Warehouse / shipping mailbox path. | Codebase: warehouse/shipping flow through `hub-ap-intake@` and route via `folder_routing_service.py`. Likely **ALREADY-COVERED**. Operator confirms (Step 6). |
+| **C5** | Scanner / MFP inflow. | Operator one-line answer (Step 8). |
 
-## Remaining (planned)
+## Remaining (engineering — pending operator data)
 
-| ID | Item | Plan |
+| ID | Item | Conditional plan |
 |---|---|---|
-| C1 | Square9 historical archive reach. | Operator answer needed: "approximately how many docs live ONLY in Square9 not on hub/SharePoint, and is anyone retrieving them this week?" If meaningful + active → BUILD a thin "Open in Square9 archive" deep-link from SearchPage; otherwise DEFER-NOT-USER-VISIBLE. |
-| C2 | Warehouse / shipping mailbox path. | Codebase shows no separate warehouse/shipping mailbox; warehouse docs flow through `hub-ap-intake@` and route by `folder_routing_service.py`. Likely **ALREADY-COVERED**; await operator confirmation on whether warehouse/shipping users currently rely on a separate Square9 inbox. |
-| C3 | Drawer/folder browse for non-AP. | `DocTypeDashboardPage.js` already filters by doc_type dynamically. Likely **ALREADY-COVERED**; UI walkthrough by operator on prod VM will confirm. |
-| C4 | Manual page-range split UX. | `SplitPreviewPanel.js` already wired in `DocumentDetailPage.js`. Likely **ALREADY-COVERED**; operator confirms last-30d usage > 0 or = 0. |
-| C5 | Scanner / MFP inflow. | Operator confirmation only. If active, halt cutover for that path; if not, DEFER. |
+| Search→Square9 archive deep-link | If C1 reveals unmirrored Square9 archive with active retrieval need | Add a "Search Square9 archive" button on the empty-results state of SearchPage that opens the Square9 native search with the same query. Trivially small. **Not built yet — gated on C1 answer.** |
+| C3 nav surface | If `DocTypeDashboardPage` is not reachable but operator wants by-doc-type page | The new SearchPage chips already cover this; no extra page needed. **Confirmed: no work.** |
+| C4 split UX | If last-30d split events > 0 | `SplitPreviewPanel.js` already wired in `DocumentDetailPage`. Likely **ALREADY-COVERED**. **Confirmed: no work pending evidence.** |
 
-## Blocked
+## Hard blockers
 
-None as of this write.
+None.
 
-## Next operator step (single block)
+## Today's concrete progress (2026-05-01)
 
-See `/app/memory/SQUARE9_FAST_TRACK_OPERATOR_BLOCK_001.md` for
-the bare-line commands the operator runs to:
+- `SearchPage.js` v1 → v2 with dual-endpoint mode (search + browse), live filter options, and 7 quick-filter chips. ESLint clean.
+- `App.js` route + `Layout.js` nav link added.
+- Operator block written: `/app/memory/SQUARE9_FAST_TRACK_OPERATOR_BLOCK_001.md`.
+- Audit / plan / running-status docs in sync.
 
-1. Verify SearchPage live on prod VM after rebuild.
-2. Set the two G2 env vars in `backend/.env`, restart, prove
-   ingest.
-3. Run the C1/C2/C4/C5 evidence probes (read-only).
+## Can Square9 be turned off yet?
 
-Single message paste-back from the operator → I synthesize
-final disposition for each conditional gate and either ship
-the next missing piece or declare cutover-ready.
+**Not yet.** Code-side gaps are closed. Open items:
+
+1. **G2** (sales mailbox env vars) — must land on prod VM before cutover; otherwise sales users will notice. Config-only fix.
+2. **C1, C5** answers — needed to confirm no surprise dependency (active scanner / unmirrored archive). If both are clean, no further code is required.
+3. Operator must rebuild and deploy the latest hub commit so SearchPage is live.
+
+Once those three items resolve clean, this status flips to ready and `SQUARE9_READY_FOR_CUTOVER.md` becomes the active artifact.

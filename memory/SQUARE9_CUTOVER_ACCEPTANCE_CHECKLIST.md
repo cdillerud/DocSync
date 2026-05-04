@@ -41,16 +41,37 @@ Square9. Each must be demonstrably doable in Hub during the
 shadow window. The associated test script lives in
 `SQUARE9_USER_TEST_SCRIPTS.md`.
 
+### Authoritative SharePoint destination — Accounts Payable
+
+The production destination of record for AP work is, exactly:
+
+`/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`
+
+This is the path AP uses for daily invoice handling. It is not
+the parent `Accounts Payable` folder; it is the `Temp Folder`
+underneath it. Every AP-side claim in this checklist — landing,
+retrieval, "Square9 is replaceable for accounting" — is grounded
+in whether the hub is correctly using this exact destination.
+
 ### Accounting / AP
 
 - A1. Find a specific AP invoice by vendor name.
 - A2. Find a specific AP invoice by invoice number.
 - A3. Find all AP invoices for a vendor in a date range.
 - A4. Open an AP invoice and see line items + extracted fields.
-- A5. Open the SharePoint copy of an AP invoice from Hub.
+- A5. Open the SharePoint copy of an AP invoice from Hub. The
+      opened item must reside in the authoritative AP Temp Folder
+      destination above (not the parent AP folder).
 - A6. Reconcile a vendor statement: list invoices for vendor X
-      between two dates and confirm presence/absence.
+      between two dates and confirm presence/absence. Spot-check
+      that the same invoices are visible in the AP Temp Folder
+      destination.
 - A7. View posting status / BC document number on an AP invoice.
+- A8. Routing-correctness spot check: for AP-classified documents
+      ingested during the shadow window, confirm Hub's routed /
+      uploaded SharePoint copy lives under the authoritative AP
+      Temp Folder destination. Any AP doc landing outside that
+      path is treated as a routing miss for AP purposes.
 
 ### Warehouse / Shipping
 
@@ -118,8 +139,8 @@ example.
 
 Any one of the following blocks Friday cutover:
 
-- B1. ≥ 1 FAIL in workflows A1, A2, A4, A6, A7 (core AP daily
-      work).
+- B1. ≥ 1 FAIL in workflows A1, A2, A4, A6, A7, A8 (core AP daily
+      work, including AP destination correctness).
 - B2. ≥ 1 FAIL in workflows W1, W2, W4 (core warehouse daily
       work).
 - B3. ≥ 1 FAIL in workflows S1, S2, S4 (core sales daily work).
@@ -132,6 +153,11 @@ Any one of the following blocks Friday cutover:
       document type.
 - B8. AP posting path shows any regression vs Batch-3 baseline
       during the shadow window.
+- B9. AP-classified documents are not landing in the authoritative
+      AP Temp Folder destination
+      (`/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`)
+      during the shadow window. Wrong-folder landings for AP
+      documents are a blocker, not a minor.
 
 If a blocker is hit, cutover is postponed. Engineering remediates
 or scopes a workaround; a fresh shadow window is run.
@@ -183,6 +209,12 @@ must produce all of the following artifacts:
 - E5. **AP posting baseline check**: confirmation that the
       Batch-3 5/5 P1 posting result is unchanged during the
       shadow window — no AP posting regressions.
+- E5b. **AP destination correctness check**: a sampled list of
+      AP-classified documents ingested during the shadow window,
+      confirming each landed in the authoritative AP Temp Folder
+      destination
+      (`/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`).
+      Any AP doc in a different folder is itemized.
 - E6. **Operator narrative**: 1-paragraph summary per tester
       ("how the day felt"), capturing whether Square9 was
       missed, ignored, or actively wanted.

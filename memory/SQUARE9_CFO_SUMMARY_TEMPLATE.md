@@ -53,6 +53,10 @@ UAT window run in parallel with normal operations.
 - Sales-mailbox ingestion (G2) ran cleanly through the window:
   ______ (yes / no — cycles: ____, errors: ____).
 - AP posting baseline unchanged vs Batch-3: ______ (yes / no).
+- AP documents are landing in the authoritative AP Temp Folder
+  destination
+  (`/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`):
+  ______ (yes / no — sampled: ____, off-path: ____).
 - SharePoint links from Hub work for tested doc types: ______ (yes / no).
 
 **What remains open** (items deferred but not blocking):

@@ -1754,3 +1754,24 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### No code or feature changes
 - Real next step is unchanged: run the 1–2 day shadow / UAT window and collect evidence.
+
+## 2026-05-02 — Square9 Cutover: Authoritative AP SharePoint Destination Locked
+
+### Corrected
+- The authoritative production AP destination is the **Temp Folder** under Accounts Payable, not the parent Accounts Payable folder. Locked path:
+  `/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`
+
+### Updated artifacts
+- `SQUARE9_CUTOVER_ACCEPTANCE_CHECKLIST.md`
+  - §2 Accounting / AP: added "Authoritative SharePoint destination — Accounts Payable" anchor block; tightened A5 / A6; added A8 (routing-correctness spot check) requiring AP-classified docs to land at the locked Temp Folder path.
+  - §4 Blockers: added B9 (AP docs landing outside the Temp Folder destination = blocker, not minor); B1 expanded to include A8.
+  - §6 Evidence: added E5b (AP destination correctness sample list).
+- `SQUARE9_USER_TEST_SCRIPTS.md`
+  - Group A (Accounting / AP): added A11 task asking the tester to confirm an AP invoice opened from Hub lands under the locked Temp Folder path.
+- `SQUARE9_CFO_SUMMARY_TEMPLATE.md`
+  - "What was proven": added explicit yes/no with sampled / off-path counts for AP destination correctness against the locked path.
+- `SQUARE9_READY_FOR_CUTOVER.md`
+  - "What was validated": added the locked AP destination as the source of truth for AP routing and retrieval validation.
+
+### No code or feature changes
+- Real next step remains the 1–2 day shadow / UAT window.

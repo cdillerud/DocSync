@@ -49,6 +49,7 @@ Tester: ____________________   Date: ____________   Mailbox / role: ____________
 | A8 | Find an AP invoice you remember by approximate dollar amount only (no vendor, no invoice #). |   |   |   |   |
 | A9 | Use the "Exceptions" or "Needs Review" quick filter — does the population match what you'd expect to triage today? |   |   |   |   |
 | A10 | Share a Hub search result with a coworker via copy/paste of the URL — do they see the same view? |   |   |   |   |
+| A11 | Pick one AP invoice you processed today. Open its SharePoint copy from Hub and confirm the file path lands under: `/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`. Note any AP doc that lands somewhere else. |   |   |   |   |
 
 End-of-day narrative (1–3 sentences). Did your AP day feel
 normal? Did you actively miss Square9, ignore it, or want it?

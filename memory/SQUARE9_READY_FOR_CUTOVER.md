@@ -61,6 +61,14 @@
 
 ## What was validated
 
+- **Authoritative AP SharePoint destination (production)**:
+  `/sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder`.
+  AP routing-comparison and AP retrieval validation must be
+  grounded in this exact path (not the parent `Accounts Payable`
+  folder). Any claim that Square9 is replaceable for accounting
+  is contingent on AP documents landing here during the shadow
+  window — see `SQUARE9_CUTOVER_ACCEPTANCE_CHECKLIST.md` §4 (B9)
+  and §6 (E5b).
 - **Backend search endpoint**: live, returns results with
   `match_fields` and `search_method=text_index`.
 - **Backend list endpoint**: live, returns `filter_options.types`

@@ -1736,3 +1736,13 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### No code changes
 - No backend or frontend code shipped in this step. Closeout was strictly a readiness declaration based on operator-side verification of preconditions.
+
+## 2026-05-02 — Square9 Cutover Business-Proof Package
+
+### Added
+- `/app/memory/SQUARE9_CUTOVER_ACCEPTANCE_CHECKLIST.md` — non-negotiable proof standard for CFO sign-off (critical groups, critical workflows, pass/fail bar, blocker vs minor definitions, required shadow-period evidence, decision matrix, final readiness statement template).
+- `/app/memory/SQUARE9_USER_TEST_SCRIPTS.md` — task-based test scripts for AP, warehouse/shipping, sales/CS (and optional management) using real-world tasks, four-column response format (completed in hub? / needed Square9? / confusing-or-slower? / notes).
+- `/app/memory/SQUARE9_FALLBACK_LOG_TEMPLATE.md` — per-tester per-day fallback evidence log with explicit severity definitions (blocker / important / minor) and end-of-day summary.
+
+### No code or feature changes
+- This package is purely operational artifacts to drive a 1–2 day shadow / UAT window. No backend, frontend, or schema changes.

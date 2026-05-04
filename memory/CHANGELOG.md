@@ -1720,3 +1720,19 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 - Backend: 20/20 tests passed (100%)
 - Frontend: 12/12 UI tests passed (100%)
 - Test report: `/app/test_reports/iteration_123.json`
+
+## 2026-05-02 — Square9 Cutover Readiness Flipped to READY
+
+### Cleared
+- **G2 sales-email polling verified on prod VM.** `run_sales_email_poll()` returned `run_id ef19bb9b`, `messages_detected: 0`, no errors. Poller is connected and idle-correct against the configured sales mailbox.
+- **C1 = No.** Operator confirmed no Hub flow relies on Square9 as archive-of-record after cutover.
+- **C5 = No.** Operator confirmed no scanner / MFP path drops files into Square9 that Hub does not already ingest.
+- **UI smoke** deferred by operator as not materially relevant to the Square9 cutover decision; SearchPage v2 endpoints already validated server-side prior to deploy.
+
+### State change
+- `/app/memory/SQUARE9_READY_FOR_CUTOVER.md` flipped from **DRAFT** to **READY**.
+- Cutover authorized under §6 of `SQUARE9_CUTOVER_PLAN.md` pending the verbatim Friday clearance line for `POST /api/square9/archive-stage-data`.
+- Rollback path (`POST /api/square9/restore-stage-data`) remains in place as the safety hatch.
+
+### No code changes
+- No backend or frontend code shipped in this step. Closeout was strictly a readiness declaration based on operator-side verification of preconditions.

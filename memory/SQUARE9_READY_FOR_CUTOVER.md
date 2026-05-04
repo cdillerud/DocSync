@@ -1,16 +1,21 @@
-# Square9 Ready For Cutover — DRAFT (pending operator-side items)
+# Square9 Ready For Cutover — READY
 
 - Generated: 2026-05-01 (UTC)
-- State: **DRAFT — NOT YET READY**
-- Becomes active when:
-  1. Operator deploys the latest hub commit to prod VM
-     (SearchPage live).
-  2. Operator sets `SALES_EMAIL_POLLING_ENABLED=true` and
-     `SALES_EMAIL_POLLING_USER=<sales mailbox>` in
-     `backend/.env`, restarts backend, and confirms one
-     successful sales-poll cycle.
-  3. Operator answers C1 (archive reach) and C5 (scanner) with
-     `none / no` or with a documented fallback.
+- Flipped to READY: 2026-05-02 (UTC)
+- State: **READY — cutover authorized pending §3 Friday clearance line**
+- Preconditions cleared:
+  1. Latest hub commit deployed to prod VM (SearchPage live).
+  2. G2 sales-email polling activated and verified on prod VM.
+     Run `ef19bb9b`, `messages_detected: 0`, no errors. Poller
+     is connected and idle-correct.
+  3. Operator confirmed C1 = No (no Hub flow relies on Square9
+     as archive-of-record after cutover) and C5 = No (no
+     scanner / MFP path drops files into Square9 that Hub does
+     not already ingest).
+  4. UI smoke on SearchPage v2 deferred by operator as not
+     materially relevant to Square9 cutover decision; SearchPage
+     endpoints already validated server-side (see "What was
+     validated" below).
 
 ## What was built or changed
 
@@ -92,21 +97,18 @@
 
 ## What remains (operator-side; no engineering work pending)
 
-| Item | Owner | Action |
-|---|---|---|
-| Deploy latest hub commit | Operator | `docker compose build frontend && docker compose up -d frontend backend` on prod VM. |
-| Set G2 env vars + restart backend | Operator | Step 3–4 of `SQUARE9_FAST_TRACK_OPERATOR_BLOCK_001.md`. |
-| C1 / C5 one-line confirmations | Operator | Steps 5 and 8 of the operator block. |
+All preconditions are cleared. The only remaining action is the
+verbatim Friday clearance line authorizing C2 (the
+`archive-stage-data` invocation) per §3 / §6 of
+`SQUARE9_CUTOVER_PLAN.md`.
 
 ## Whether Square9 can now be turned off
 
-**Not yet.** Three preconditions above. Once those clear, this
-section flips to:
-
-> **Yes.** SearchPage live, sales mailbox ingesting, no scanner
-> dependency, no unmirrored archive with active retrieval need.
-> Cutover authorized under §6 of `SQUARE9_CUTOVER_PLAN.md` with
-> the verbatim Friday clearance line.
+**Yes.** SearchPage live, sales mailbox polling verified, no
+archive-of-record dependency on Square9 (C1=No), no scanner
+inflow into Square9 that bypasses Hub (C5=No). Cutover is
+authorized under §6 of `SQUARE9_CUTOVER_PLAN.md` once the
+operator issues the verbatim Friday clearance line.
 
 ## Exact cutover steps (when ready)
 
@@ -182,9 +184,7 @@ requires fresh §3 Friday-gate confirmation per the cutover plan.
 6. **No production BC writes are introduced by this work.** AP
    sandbox posting posture is unchanged from Batch-3 closeout.
 
-## Summary line (when this artifact goes live)
-
-To be filled in once the three operator preconditions clear:
+## Summary line
 
 > Square9 is replaceable. Hub serves search, browse, filter,
 > retrieval, and sandbox-posting flows for all relevant doc

@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge, Network, FileSignature
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge, Network, FileSignature, Search
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -21,6 +21,7 @@ const API = process.env.REACT_APP_BACKEND_URL;
 // Core navigation — daily workflows + key modules
 const navItems = [
   { to: '/', icon: Files, label: 'Inbox', exact: true },
+  { to: '/search', icon: Search, label: 'Search' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },

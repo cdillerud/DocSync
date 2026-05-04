@@ -33,6 +33,7 @@ import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import GovernanceDashboard from "@/pages/GovernanceDashboard";
 import RoadmapGanttPage from "@/pages/RoadmapGanttPage";
 import ContractIntelligencePage from "@/pages/ContractIntelligencePage";
+import SearchPage from "@/pages/SearchPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -48,6 +49,7 @@ function AppRoutes() {
         <Route index element={<DocumentsHubPage />} />
         <Route path="documents" element={<DocumentsHubPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
+        <Route path="search" element={<SearchPage />} />
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
         <Route path="inventory/imports" element={<InventoryImportsPage />} />

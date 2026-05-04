@@ -1746,3 +1746,11 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### No code or feature changes
 - This package is purely operational artifacts to drive a 1–2 day shadow / UAT window. No backend, frontend, or schema changes.
+
+## 2026-05-02 — Square9 CFO Summary Template
+
+### Added
+- `/app/memory/SQUARE9_CFO_SUMMARY_TEMPLATE.md` — one-page executive template the operator fills out after the shadow window. Sections: objective, shadow window dates, tester groups, overall result (Ready / Ready w/ minor exceptions / Not ready), critical workflows tested, pass/fail counts, fallback totals + severity breakdown, top 3 issues, what was proven, what remains open, CFO decision (approve / delay), sign-off, evidence-sources footer. No new gates introduced; this is the cover page for the existing acceptance / scripts / fallback packet.
+
+### No code or feature changes
+- Real next step is unchanged: run the 1–2 day shadow / UAT window and collect evidence.

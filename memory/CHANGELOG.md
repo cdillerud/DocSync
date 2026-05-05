@@ -1906,3 +1906,56 @@ Tail logs to see the new structured intake line:
 - Documents ingested from billing@gamerpackaging.com persist `mailbox_category="AP"` as source context.
 - Only docs with invoice-like evidence classify as `AP_INVOICE`. Non-invoice or mis-sent docs stay `doc_type=OTHER` with `mailbox_lane_needs_review=True` and a `mailbox_lane:AP:needs_review` classification_method, so they go to AP review rather than being silently mislabeled or dropped into Operations.
 - Operations-lane mailboxes (whdocuments@) continue to persist `mailbox_category="Operations"` with no auto-promotion.
+
+## 2026-05-02 — AP Routing: Square9 Temp Folder Staging Guard
+
+### Root cause (routing half)
+Even though `mailbox_category` was now propagating correctly, `services/folder_routing_service.determine_folder_path()` was still scattering AP_INVOICE auto-ingest documents into the detailed accounting structure (Canpack / Dropship / Warehouse / Vendor Credit Memos / Freight Issues / Miscellaneous) before accounting had reviewed them. The AP team works out of the `Accounts Payable/Temp Folder` (Square9 parity destination), so Hub auto-routing past that staging step is what made the prod-vs-test fuzzy comparison return near-zero overlap.
+
+### Fix
+- `backend/services/folder_routing_service.py`
+  - Added module-level constants: `AP_STAGING_FOLDER = "Accounts Payable/Temp Folder"`, `AP_LANE_REVIEW_FOLDER = "Accounts Payable/Temp Folder/_NeedsReview"`, plus `_AP_INVOICE_DOC_TYPES` and `_FORBIDDEN_AP_FOLDER_ROOTS`.
+  - Added helpers `_is_ap_lane_doc(doc)` and `_accounting_override_set(doc)` (true when `accounting_routing_override=True` OR `approved=True` OR `status="Approved"`).
+  - **PRIORITY 1 rule** at the top of `determine_folder_path`: if `mailbox_lane_needs_review=True` (set by classification_helpers), route AP/Sales/Purchase lane docs to `AP_LANE_REVIEW_FOLDER` instead of letting them leak to Operations folders.
+  - **PRIORITY 2 rule**: if doc is AP-lane and accounting has not opted in, route to `AP_STAGING_FOLDER`. The detailed accounting structure (Canpack / Dropship / Warehouse / Credit Memos / Freight Issues / Misc) only fires once accounting flips `accounting_routing_override=True` or `approved=True`.
+  - Routing details now include `mailbox_category`, `mailbox_lane_needs_review`, and `accounting_routing_override` for full audit-trail transparency.
+
+### What's preserved
+- Every existing detailed-routing rule (Canpack vendor → Dropship/Canpack, credit-memo keywords → Vendor Credit Memos, WH_ files → Warehouse, freight vendor → Freight Issues, MSC location → Miscellaneous, etc.) still works **once accounting has reviewed** the document. They are now opt-in via `accounting_routing_override=True` rather than fired at auto-ingest.
+- Non-AP doc types (Sales_Order, Shipping_Document, Inspection_Form, Credit_Memo without AP_INVOICE doc_type, etc.) keep their existing routing untouched.
+- LocationCode=MSC rule still fires for non-AP docs; AP-lane MSC docs stage first and only hit the MSC rule after override.
+
+### Tests
+- New: `backend/tests/test_ap_routing_square9_parity.py` — 16 routing tests covering AP staging defaults (Canpack, freight vendor, credit-memo keywords, warehouse hint, missing PO all stage to Temp Folder), forbidden-destination checks (no AP_INVOICE auto-routes into the seven Operations-style roots), mailbox_lane_needs_review routing for AP/Sales/Purchase, accounting-override path restoring detailed routing (Canpack, Vendor Credit Memos), and non-AP docs unchanged.
+- Updated: `backend/tests/test_s9_routing_fix.py` — `make_doc()` helper now seeds `accounting_routing_override=True` so the existing S9 detailed-routing assertions cover the post-override path; auto-ingest staging is now asserted by the new file.
+- Updated: `backend/tests/test_folder_routing_fix.py` — three WH_-prefix AP_Invoice fixtures now seed `accounting_routing_override=True` for the same reason.
+
+### Test results (local)
+- `pytest tests/test_ap_routing_square9_parity.py tests/test_mailbox_category_propagation.py tests/test_suggested_type_sync.py tests/test_email_polling_dedup.py tests/test_s9_routing_fix.py tests/test_folder_routing_fix.py tests/test_document_routing.py tests/test_bc_line_routing.py` → **all green**.
+- Wider sweep (`+ test_so_type_routing.py`) reports 152 pass / 3 fail; the three failures are env-dependent HTTP calls against a missing `REACT_APP_BACKEND_URL` and are unrelated to this diff.
+- Linter clean on all changed/new files.
+
+### New cutover-readiness probe
+- `backend/scripts/billing_intake_routing_probe.py` — read-only script that pulls recent billing@gamerpackaging.com ingests and prints counts by mailbox_category, doc_type, classification_method, and SharePoint folder root. Detects two **cutover-blocking findings** (billing→Operations leak; AP_INVOICE in forbidden folder roots without override) and warning-level findings (legacy `mailbox:AP` classification_method without `+evidence` suffix; missing classification_method; empty window).
+  - Exit codes: `0` clean, `1` warnings, `2` cutover-blockers.
+  - Operator one-liner:
+        docker compose exec -T backend python -m scripts.billing_intake_routing_probe --since-hours 24 --limit 200
+  - JSON variant: append `--json` for machine-readable output.
+
+### Prod verification command (single line)
+
+    docker compose exec -T backend python -u -c "import asyncio,os,json;from motor.motor_asyncio import AsyncIOMotorClient
+async def m():
+    db=AsyncIOMotorClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+    cur=db.hub_documents.find({'email_sender':{'\$regex':'billing@gamerpackaging.com','\$options':'i'}}).sort('created_utc',-1).limit(20)
+    rows=await cur.to_list(20)
+    out=[{'file_name':r.get('file_name'),'email_sender':r.get('email_sender'),'email_subject':r.get('email_subject'),'mailbox_category':r.get('mailbox_category'),'doc_type':r.get('doc_type'),'suggested_job_type':r.get('suggested_job_type'),'classification_method':r.get('classification_method'),'sharepoint_folder_path':r.get('sharepoint_folder_path'),'folder_routing_reason':r.get('folder_routing_reason'),'sharepoint_web_url':r.get('sharepoint_web_url')} for r in rows]
+    print(json.dumps(out,default=str,indent=2))
+asyncio.run(m())"
+
+### Acceptance criteria status
+- billing@ docs persist `mailbox_category="AP"`. Verified by classifier + propagation tests.
+- Clear invoices on AP lane classify as `AP_INVOICE` (`mailbox:AP+evidence`). Verified.
+- Mis-sent / non-invoice docs on AP lane stay `OTHER` with `mailbox_lane_needs_review=True` → AP review folder. Verified.
+- AP_INVOICE docs do not auto-scatter into Warehouse Reports / Dropship / Freight Issues / Vendor Credit Memos / Miscellaneous. Verified by 16 dedicated routing tests.
+- Cutover readiness: not declared yet. Run `billing_intake_routing_probe` after deploy + a poll cycle; expect exit code 0 and `Accounts Payable/Temp Folder` showing as the dominant SharePoint folder root for billing@ ingests. Then re-run the fuzzy comparator (`scripts.sharepoint_ap_compare --graph-pull`) for the prod-vs-test overlap evidence E5b. Only then is the app described as Square9 cutover-ready.

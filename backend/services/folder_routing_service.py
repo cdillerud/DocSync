@@ -188,6 +188,67 @@ DUNNAGE_INDICATORS = [
     "dunnage", "pallet", "return freight", "empty return"
 ]
 
+# =============================================================================
+# AP STAGING DESTINATIONS (Square9 parity)
+# =============================================================================
+# The locked production AP destination per cutover readiness lock-in:
+#   /sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder
+# In folder-routing terms (relative to the document library root) this is:
+#   Accounts Payable/Temp Folder
+# AP-lane intake stages here by default. The detailed accounting structure
+# (Dropship/Warehouse/Canpack/Credit Memos/Freight Issues/Misc/etc.) only
+# applies once accounting has reviewed the document and either approved it
+# or explicitly set accounting_routing_override=True.
+AP_STAGING_FOLDER = "Accounts Payable/Temp Folder"
+AP_LANE_REVIEW_FOLDER = "Accounts Payable/Temp Folder/_NeedsReview"
+
+# Doc-type strings that count as AP-lane invoices (uppercase from
+# DocType.AP_INVOICE.value, plus the suggested_job_type variants).
+_AP_INVOICE_DOC_TYPES = {"AP_INVOICE", "AP_Invoice", "AP Invoice"}
+
+# Operations-style folder roots that must NEVER receive an AP_INVOICE on the
+# auto-ingest path (only via explicit accounting override).
+_FORBIDDEN_AP_FOLDER_ROOTS = (
+    "Warehouse Reports",
+    "Dropship Not International Documents",
+    "Dropship International Documents",
+    "Warehouse Not International Documents",
+    "Warehouse International Documents",
+    "Freight Issues",
+    "Vendor Credit Memos",
+    "Miscellaneous Documents",
+)
+
+
+def _is_ap_lane_doc(doc: Dict[str, Any]) -> bool:
+    doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+    if doc_type in _AP_INVOICE_DOC_TYPES:
+        return True
+    if (doc.get("doc_type") or "") in _AP_INVOICE_DOC_TYPES:
+        return True
+    return False
+
+
+def _accounting_override_set(doc: Dict[str, Any]) -> bool:
+    """True when accounting has explicitly opted this document out of AP
+    staging and into the detailed accounting structure (Dropship/Warehouse/
+    Canpack/Credit Memos/etc.). Two signals are accepted:
+
+      - ``accounting_routing_override=True`` (explicit operator override
+        recorded by an accounting workflow / UI action), or
+      - ``approved=True`` / ``status="Approved"`` (legacy approval signal).
+
+    This is the only mechanism by which AP auto-ingest is allowed to bypass
+    the AP Temp Folder staging step.
+    """
+    if doc.get("accounting_routing_override") is True:
+        return True
+    if doc.get("approved") is True:
+        return True
+    if (doc.get("status") or "") == "Approved":
+        return True
+    return False
+
 
 # =============================================================================
 # FOLDER ROUTING LOGIC
@@ -244,7 +305,63 @@ def determine_folder_path(
         "freight_direction": freight_direction,
         "is_international": is_international,
         "location_code": location_code,
+        "mailbox_category": doc.get("mailbox_category"),
+        "mailbox_lane_needs_review": bool(doc.get("mailbox_lane_needs_review")),
+        "accounting_routing_override": _accounting_override_set(doc),
     }
+
+    # =========================================================================
+    # SQUARE9-PARITY STAGING RULES (run first; never bypassed without override)
+    # =========================================================================
+    #
+    # The AP team works out of the AP Temp Folder. To preserve Square9 →
+    # Hub parity for billing/AP intake, every AP-lane document defaults to
+    # `Accounts Payable/Temp Folder` and stays there until accounting
+    # explicitly opts it into the detailed accounting structure (Canpack /
+    # Dropship / Warehouse / Credit Memos / Freight Issues / Misc) by setting
+    # accounting_routing_override=True or approved=True.
+    #
+    # mailbox_lane_needs_review=True (set by classification_helpers when an
+    # AP-lane document cannot be definitively classified) sends the document
+    # into an AP-lane review subfolder rather than letting it leak into a
+    # generic Operations folder.
+
+    # PRIORITY 1: Mailbox-lane needs-review hint — keep on AP review desk.
+    if doc.get("mailbox_lane_needs_review"):
+        mc = (doc.get("mailbox_category") or "").upper()
+        if mc == "AP":
+            return (
+                AP_LANE_REVIEW_FOLDER,
+                "AP-lane document not definitively classified; staged for AP review",
+                routing_details,
+            )
+        # Sales / Purchase lanes also stay near their own review desks rather
+        # than scattering into Operations folders. Conservative default —
+        # we surface them through Misc-needs-approval which today is the AP
+        # team's catch-all queue. If a dedicated Sales/Purchase review folder
+        # is ever stood up, swap the constant.
+        if mc in ("SALES", "PURCHASE"):
+            return (
+                AP_LANE_REVIEW_FOLDER,
+                f"{mc} lane document not definitively classified; staged for review",
+                routing_details,
+            )
+
+    # PRIORITY 2: AP-lane invoice without explicit accounting override → AP
+    # Temp Folder staging. Square9 parity. The detailed accounting structure
+    # (Canpack/Dropship/Warehouse/Credit Memos/etc.) only applies once
+    # accounting flips accounting_routing_override=True or approved=True on
+    # the document.
+    if _is_ap_lane_doc(doc) and not _accounting_override_set(doc):
+        return (
+            AP_STAGING_FOLDER,
+            "AP-lane invoice staged to AP Temp Folder pending accounting review (Square9 parity)",
+            routing_details,
+        )
+
+    # =================================================================
+    # ROUTING RULES (in priority order per accounting document)
+    # =================================================================
 
     # RULE -1: LocationCode = MSC → Miscellaneous (matches S9 workflow)
     if location_code and location_code.upper() == "MSC":

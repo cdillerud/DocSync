@@ -20,6 +20,12 @@ def make_doc(doc_type="AP_Invoice", vendor="acme corp", po="PO12345",
         "extracted_fields": {"po_number": po, "order_number": po},
         "file_name": file_name,
         "is_international": is_international,
+        # Square9-parity guard: AP-lane invoices stage in AP Temp Folder by
+        # default. These S9-mirroring routing tests assert the *post-override*
+        # detailed structure (Dropship/Warehouse/Canpack/Credit Memos/etc.),
+        # so they explicitly opt into that path. The auto-ingest staging
+        # behavior is asserted by tests/test_ap_routing_square9_parity.py.
+        "accounting_routing_override": True,
     }
     if bc_po_resolved is not None:
         doc["bc_po_resolved"] = bc_po_resolved

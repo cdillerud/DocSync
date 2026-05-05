@@ -1,5 +1,24 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05 — Square9 Cutover Probe Schema Fix
+Patched `backend/scripts/ap_cutover_readiness_report.py` and
+`backend/scripts/billing_intake_routing_probe.py` to match the real
+`hub_documents` schema:
+- `created_utc` is stored as ISO-8601 string. Cutoff comparison switched
+  from `datetime` to ISO-string (BSON type-mismatch fix).
+- `billing@gamerpackaging.com` is a destination mailbox, not a sender.
+  Added `--ap-only` flag (default true) using
+  `mailbox_category == "AP"`. `--mailbox` retained as opt-in via
+  `--no-ap-only`.
+- No tests, routing logic, classification logic, or cutover code
+  touched.
+**Prod VM 30d-window verification:** READINESS_EXIT=0, BILLING_PROBE_EXIT=0,
+0 cutover-blocking findings, 344 AP-tagged docs, 0 in AP Temp Folder, 0
+leaks to Operations, 0 weak-fallback anomalies. Outstanding warnings
+are legacy `classification_method='mailbox:AP'` on historical docs and
+the 7-day AP-intake silence (operational, separate from routing
+correctness).
+
 ## Latest Phase Shipped — Phase 4C(c): PDF Body Extraction (2026-02)
 Deterministic regex-based extraction of contractual fields from legacy
 agreement PDFs that DocuSign templates / Navigator metadata cannot

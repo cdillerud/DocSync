@@ -438,14 +438,24 @@ def _graph_get(client: Any, url: str, token: str) -> Dict[str, Any]:
 
 def pull_listing_via_graph(token: str, host: str, site_path: str,
                            library: str, folder_path: str,
-                           label: str = "") -> List[Doc]:
-    """List children of `library/folder_path` on `host:site_path` via Graph.
+                           label: str = "", recursive: bool = True,
+                           max_depth: int = 25) -> List[Doc]:
+    """List files under `library/folder_path` on `host:site_path` via Graph.
 
-    Top-level files only (folder is a flat AP destination by convention).
-    Returns a List[Doc] in the same shape CSV mode produces.
+    Default is recursive (BFS) — the AP Temp Folder is nested in production
+    by vendor / year / etc. Pass recursive=False for the legacy flat-only
+    behavior. Returns a List[Doc] in the same shape CSV mode produces.
+
+    `parent_path` (relative to the root folder being listed) is recorded on
+    each Doc.raw for triage; it is not part of the comparison signals.
     """
     import httpx
+    from urllib.parse import quote
+
     out: List[Doc] = []
+    folders_visited = 0
+    files_seen = 0
+
     with httpx.Client(timeout=60.0) as c:
         # 1. Resolve site
         site = _graph_get(c, f"{GRAPH_BASE}/sites/{host}:{site_path}:", token)
@@ -471,28 +481,56 @@ def pull_listing_via_graph(token: str, host: str, site_path: str,
             )
         drive_id = drive["id"]
 
-        # 3. List folder children with paging
-        from urllib.parse import quote
+        # 3. Resolve the root folder item by path so subsequent enumeration is by item id
         safe_path = quote(folder_path.strip("/"), safe="/")
-        next_url: Optional[str] = (
-            f"{GRAPH_BASE}/drives/{drive_id}/root:/{safe_path}:/children"
-            f"?$top=999&$select=name,size,lastModifiedDateTime,webUrl,id,folder,file"
+        root_item = _graph_get(
+            c,
+            f"{GRAPH_BASE}/drives/{drive_id}/root:/{safe_path}?$select=id,name,folder",
+            token,
         )
-        while next_url:
-            page = _graph_get(c, next_url, token)
-            for item in page.get("value", []):
-                # files only — skip subfolders for an apples-to-apples flat AP folder compare
-                if "folder" in item:
-                    continue
-                row = {
-                    "name": item.get("name") or "",
-                    "size": str(item.get("size") or ""),
-                    "modified": item.get("lastModifiedDateTime") or "",
-                    "web_url": item.get("webUrl") or "",
-                    "id": item.get("id") or "",
-                }
-                out.append(Doc.from_row(row))
-            next_url = page.get("@odata.nextLink")
+        if "id" not in root_item:
+            raise SystemExit(f"Folder not resolvable: {folder_path!r} on {label}")
+        if "folder" not in root_item:
+            raise SystemExit(f"Path is not a folder: {folder_path!r} on {label}")
+        root_item_id = root_item["id"]
+
+        # 4. BFS enumeration. Each queued entry is (item_id, relative_path, depth).
+        queue: List[Tuple[str, str, int]] = [(root_item_id, "", 0)]
+        select_clause = "name,size,lastModifiedDateTime,webUrl,id,folder,file"
+
+        while queue:
+            folder_id, rel_path, depth = queue.pop(0)
+            folders_visited += 1
+            next_url: Optional[str] = (
+                f"{GRAPH_BASE}/drives/{drive_id}/items/{folder_id}/children"
+                f"?$top=999&$select={select_clause}"
+            )
+            while next_url:
+                page = _graph_get(c, next_url, token)
+                for item in page.get("value", []):
+                    item_name = item.get("name") or ""
+                    if "folder" in item:
+                        if recursive and depth + 1 <= max_depth:
+                            child_rel = (rel_path + "/" + item_name).strip("/") if rel_path else item_name
+                            queue.append((item["id"], child_rel, depth + 1))
+                        continue
+                    files_seen += 1
+                    row = {
+                        "name": item_name,
+                        "size": str(item.get("size") or ""),
+                        "modified": item.get("lastModifiedDateTime") or "",
+                        "web_url": item.get("webUrl") or "",
+                        "id": item.get("id") or "",
+                        "parent_path": rel_path,
+                    }
+                    out.append(Doc.from_row(row))
+                next_url = page.get("@odata.nextLink")
+
+    print(
+        f"  graph-pull[{label}]: visited {folders_visited} folder(s), "
+        f"{files_seen} file(s){' (flat)' if not recursive else ''}.",
+        file=sys.stderr,
+    )
     return out
 
 
@@ -528,8 +566,8 @@ def load_prior_strict(path: str) -> Dict[str, str]:
 
 def write_output(out_path: str, rows: List[Dict[str, Any]]) -> None:
     cols = [
-        "prod_name", "prod_size", "prod_modified", "prod_web_url",
-        "test_name", "test_size", "test_modified", "test_web_url",
+        "prod_name", "prod_parent_path", "prod_size", "prod_modified", "prod_web_url",
+        "test_name", "test_parent_path", "test_size", "test_modified", "test_web_url",
         "confidence", "norm_ratio", "inv_po_overlap", "vendor_overlap",
         "size_signal", "modified_day_distance", "previously_missed",
     ]
@@ -569,10 +607,12 @@ def run_with_docs(prod: List[Doc], test: List[Doc],
 
         rows.append({
             "prod_name": p.name,
+            "prod_parent_path": (p.raw.get("parent_path") or "").strip() if isinstance(p.raw, dict) else "",
             "prod_size": p.size if p.size is not None else "",
             "prod_modified": p.modified.isoformat() if p.modified else "",
             "prod_web_url": p.web_url,
             "test_name": match.name if match else "",
+            "test_parent_path": (match.raw.get("parent_path") or "").strip() if (match and isinstance(match.raw, dict)) else "",
             "test_size": match.size if match and match.size is not None else "",
             "test_modified": match.modified.isoformat() if match and match.modified else "",
             "test_web_url": match.web_url if match else "",
@@ -642,7 +682,8 @@ def run(prod_csv: str, test_csv: str, out_csv: str,
 
 def run_graph(prod_site_path: str, prod_library: str, prod_folder_path: str,
               test_site_path: str, test_library: str, test_folder_path: str,
-              out_csv: str, prior_strict_csv: Optional[str], top_n: int) -> int:
+              out_csv: str, prior_strict_csv: Optional[str], top_n: int,
+              recursive: bool, max_depth: int) -> int:
     """--graph-pull mode entry point (preferred)."""
     import os
     tenant = os.environ.get("TENANT_ID", "")
@@ -658,14 +699,28 @@ def run_graph(prod_site_path: str, prod_library: str, prod_folder_path: str,
 
     token = acquire_graph_token(tenant, client_id, client_secret)
     print(f"Graph token acquired. Host: {host}", file=sys.stderr)
-    print(f"Pulling prod: {host}{prod_site_path} :: {prod_library} :: {prod_folder_path}", file=sys.stderr)
-    prod = pull_listing_via_graph(token, host, prod_site_path, prod_library, prod_folder_path, label="prod")
-    print(f"Pulling test: {host}{test_site_path} :: {test_library} :: {test_folder_path}", file=sys.stderr)
-    test = pull_listing_via_graph(token, host, test_site_path, test_library, test_folder_path, label="test")
+    print(
+        f"Pulling prod (recursive={recursive}, max_depth={max_depth}): "
+        f"{host}{prod_site_path} :: {prod_library} :: {prod_folder_path}",
+        file=sys.stderr,
+    )
+    prod = pull_listing_via_graph(
+        token, host, prod_site_path, prod_library, prod_folder_path,
+        label="prod", recursive=recursive, max_depth=max_depth,
+    )
+    print(
+        f"Pulling test (recursive={recursive}, max_depth={max_depth}): "
+        f"{host}{test_site_path} :: {test_library} :: {test_folder_path}",
+        file=sys.stderr,
+    )
+    test = pull_listing_via_graph(
+        token, host, test_site_path, test_library, test_folder_path,
+        label="test", recursive=recursive, max_depth=max_depth,
+    )
 
     prior = load_prior_strict(prior_strict_csv) if prior_strict_csv else {}
     label = (f"graph-pull (prod={prod_site_path}/{prod_folder_path} | "
-             f"test={test_site_path}/{test_folder_path})")
+             f"test={test_site_path}/{test_folder_path} | recursive={recursive})")
     return run_with_docs(prod, test, out_csv, prior, top_n, source_label=label)
 
 
@@ -696,6 +751,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out-csv", default="sharepoint_ap_compare_out.csv", help="Output CSV path.")
     ap.add_argument("--prior-strict-csv", default=None, help="Optional prior strict-match CSV.")
     ap.add_argument("--top", type=int, default=25, help="Top-N previously-missed rows to print.")
+    ap.add_argument("--no-recursive", action="store_true",
+                    help="Graph-pull only: disable recursive folder walk (legacy flat behavior).")
+    ap.add_argument("--max-depth", type=int, default=25,
+                    help="Graph-pull only: max recursion depth (default: 25).")
     args = ap.parse_args(argv)
 
     if args.graph_pull:
@@ -713,6 +772,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             args.prod_site_path, args.prod_library, args.prod_folder_path,
             args.test_site_path, args.test_library, args.test_folder_path,
             args.out_csv, args.prior_strict_csv, args.top,
+            recursive=(not args.no_recursive), max_depth=args.max_depth,
         )
 
     if not (args.prod_csv and args.test_csv):

@@ -67,12 +67,19 @@ this mode only when Graph creds are unavailable.
 
 ## Operator runbook (run on prod VM, single SSH session)
 
-### Mode A — `--graph-pull` (preferred)
+### Mode A — `--graph-pull` (preferred, recursive by default)
+
+The script recursively walks subfolders by default. The prod AP
+Temp Folder is nested by vendor / year / sub-category, so flat
+top-level enumeration would only see one or two files at the
+root. Recursion is now the default for both legs (prod and
+test). Pass `--no-recursive` for the legacy flat behavior.
+`--max-depth` defaults to 25 and only affects graph-pull.
 
 Bare line. Replace the test site path and folder path with the
 real test-environment counterpart of the AP Temp Folder:
 
-    docker compose exec -T backend python -m scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "AP_Invoices" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
 
 Optional: pass `--prior-strict-csv prod_reports/sp_strict_match_prev.csv`
 to surface "previously missed" rows in the stdout summary.

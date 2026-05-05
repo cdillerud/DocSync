@@ -1828,3 +1828,21 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 ### Correct one-liner
 
     docker compose exec -T backend python -m scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
+
+## 2026-05-02 — Fuzzy Comparator: Recursive Graph Enumeration
+
+### Fixed
+- `--graph-pull` mode previously enumerated only the immediate children of the configured prod / test folder root. Prod's AP Temp Folder is nested (vendor / year / sub-category subfolders), so the operator's first run loaded only 1 prod doc and reported 0 matches across all buckets — a false negative driven by enumeration depth, not absent overlap.
+
+### Changed
+- `pull_listing_via_graph()` rewritten as a BFS over folder items by id (not by path), with per-folder pagination via `@odata.nextLink`. Files are emitted; subfolders are queued for further enumeration.
+- Recursion is now the **default** for both prod and test legs in `--graph-pull` mode. Added `--no-recursive` flag for the legacy flat behavior, and `--max-depth` (default 25) to cap traversal.
+- `parent_path` is now recorded per-Doc (relative to the listed root) and surfaced in the output CSV as `prod_parent_path` / `test_parent_path`. This makes triage of nested overlaps straightforward without changing the comparison signals.
+- stderr now logs per-leg "visited N folder(s), M file(s)" so the operator can immediately see whether enumeration reached real depth.
+
+### Preserved
+- CSV-mode behavior is unchanged. Output schema gained two columns (`prod_parent_path`, `test_parent_path`) which are empty for CSV-mode rows unless the input CSV has a `parent_path` column.
+
+### Validated
+- CSV-mode regression on the existing synthetic fixtures: still 3 exact_match + 1 likely_match (1 previously_missed). Linter clean.
+- Graph-pull recursion must be exercised on the prod VM. Operator one-liner unchanged in shape; just re-run.

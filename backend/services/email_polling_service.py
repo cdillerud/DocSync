@@ -804,6 +804,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
         "attachments_ingested": 0, "attachments_skipped_dup": 0,
         "attachments_skipped_inline": 0, "attachments_failed": 0,
         "errors": [], "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running", "graph_http_status": None,
     }
 
     logger.info("[MailboxPoll:%s] Starting poll for %s (category=%s)", run_id, mailbox_address, default_category)
@@ -813,175 +814,197 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
         token = await get_email_token()
         if not token:
             stats["errors"].append("Failed to get email token")
-            return stats
-
-        # Per-mailbox watermark — keeps us from re-examining the same 1h
-        # window every 60 seconds (root cause of the 10×/day dup bug).
-        watermark_key = f"mailbox_watermark:{mailbox_address}"
-        wm_doc = await db.hub_settings.find_one({"type": watermark_key}, {"_id": 0})
-        if wm_doc and wm_doc.get("last_received_datetime"):
-            try:
-                wm_dt = datetime.fromisoformat(
-                    wm_doc["last_received_datetime"].replace("Z", "+00:00")
-                )
-                lookback_time = (wm_dt - timedelta(minutes=5)).isoformat()
-            except Exception:
-                lookback_time = wm_doc["last_received_datetime"]
+            stats["status"] = "failed_token"
         else:
-            lookback_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            messages_resp = await client.get(
-                f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders/Inbox/messages",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "$filter": f"receivedDateTime ge {lookback_time}",
-                    "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments,bodyPreview",
-                    "$top": 25,
-                    "$orderby": "receivedDateTime asc",
-                },
-            )
-            if messages_resp.status_code != 200:
-                stats["errors"].append(f"Graph API error: {messages_resp.status_code}")
-                return stats
-
-            messages = messages_resp.json().get("value", [])
-            stats["messages_detected"] = len([m for m in messages if m.get("hasAttachments")])
-
-            for msg in messages:
-                if not msg.get("hasAttachments"):
-                    continue
-                msg_id = msg.get("id")
-                internet_msg_id = msg.get("internetMessageId", msg_id)
-                subject = msg.get("subject", "No Subject")
-                sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
-
-                att_resp = await client.get(
-                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments",
-                    headers={"Authorization": f"Bearer {token}"},
-                    params={"$select": "id,name,contentType,size,isInline"},
-                )
-                if att_resp.status_code != 200:
-                    continue
-
-                attachments = att_resp.json().get("value", [])
-                for att in attachments:
-                    att_id = att.get("id")
-                    filename = att.get("name", "unknown")
-                    content_type = att.get("contentType", "")
-                    is_inline = att.get("isInline", False)
-                    size_bytes = att.get("size", 0)
-
-                    if is_inline or content_type.startswith("image/") or size_bytes < 1000:
-                        stats["attachments_skipped_inline"] += 1
-                        continue
-
-                    try:
-                        att_content_resp = await client.get(
-                            f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments/{att_id}",
-                            headers={"Authorization": f"Bearer {token}"},
-                        )
-                        if att_content_resp.status_code != 200:
-                            stats["attachments_failed"] += 1
-                            continue
-
-                        content_b64 = att_content_resp.json().get("contentBytes", "")
-                        content_bytes = base64.b64decode(content_b64)
-                        content_hash = hashlib.sha256(content_bytes).hexdigest()
-
-                        # ── Unified dedup ─────────────────────────────
-                        # Hash-first: catches the same file from the same
-                        # message AND the same content forwarded twice.
-                        # Also matches rows written by the static AP
-                        # poller (cross-worker protection).
-                        if await check_duplicate_mail_intake(
-                            internet_msg_id, content_hash, filename=filename,
-                        ):
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=content_hash,
-                                filename=filename,
-                                status="SkippedDuplicate",
-                            )
-                            stats["attachments_skipped_dup"] += 1
-                            continue
-
-                        hash_dup = await db.hub_documents.find_one(
-                            {"sha256_hash": content_hash, "is_duplicate": {"$ne": True}},
-                            {"_id": 0, "id": 1},
-                        )
-                        if hash_dup:
-                            await record_mail_intake_log(
-                                message_id=msg_id,
-                                internet_message_id=internet_msg_id,
-                                attachment_id=att_id,
-                                attachment_hash=content_hash,
-                                filename=filename,
-                                status="SkippedDuplicate",
-                                sharepoint_doc_id=hash_dup["id"],
-                            )
-                            stats["attachments_skipped_dup"] += 1
-                            continue
-
-                        # Lazy import to avoid circular dependency
-                        from services.document_handlers import intake_document_from_bytes
-                        resolved_category = normalize_mailbox_category(default_category)
-                        logger.info(
-                            "[Intake:dynamic] mailbox_id=%s mailbox=%s configured_category=%s resolved_category=%s filename=%s",
-                            source_id, mailbox_address, default_category, resolved_category, filename,
-                        )
-                        result = await intake_document_from_bytes(
-                            file_content=content_bytes, filename=filename,
-                            source="email", sender=sender, subject=subject,
-                            email_id=internet_msg_id, content_type=content_type,
-                            mailbox_category=resolved_category,
-                        )
-
-                        doc_id = (
-                            result.get("document_id")
-                            or result.get("document", {}).get("id")
-                        )
-                        await record_mail_intake_log(
-                            message_id=msg_id,
-                            internet_message_id=internet_msg_id,
-                            attachment_id=att_id,
-                            attachment_hash=content_hash,
-                            filename=filename,
-                            status="Processed",
-                            sharepoint_doc_id=doc_id,
-                        )
-                        stats["attachments_ingested"] += 1
-
-                    except Exception as e:
-                        stats["attachments_failed"] += 1
-                        stats["errors"].append(f"Failed to process {filename}: {str(e)}")
-
-            # Advance per-mailbox watermark so we don't replay the same
-            # 1-hour window every minute.
-            if messages:
-                newest_received = max(m.get("receivedDateTime", "") for m in messages)
-                if newest_received:
-                    await db.hub_settings.update_one(
-                        {"type": watermark_key},
-                        {"$set": {
-                            "last_received_datetime": newest_received,
-                            "mailbox_address": mailbox_address,
-                            "updated_utc": datetime.now(timezone.utc).isoformat(),
-                        }},
-                        upsert=True,
+            # Per-mailbox watermark — keeps us from re-examining the same 1h
+            # window every 60 seconds (root cause of the 10×/day dup bug).
+            watermark_key = f"mailbox_watermark:{mailbox_address}"
+            wm_doc = await db.hub_settings.find_one({"type": watermark_key}, {"_id": 0})
+            if wm_doc and wm_doc.get("last_received_datetime"):
+                try:
+                    wm_dt = datetime.fromisoformat(
+                        wm_doc["last_received_datetime"].replace("Z", "+00:00")
                     )
+                    lookback_time = (wm_dt - timedelta(minutes=5)).isoformat()
+                except Exception:
+                    lookback_time = wm_doc["last_received_datetime"]
+            else:
+                lookback_time = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                messages_resp = await client.get(
+                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/mailFolders/Inbox/messages",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={
+                        "$filter": f"receivedDateTime ge {lookback_time}",
+                        "$select": "id,subject,from,receivedDateTime,internetMessageId,hasAttachments,bodyPreview",
+                        "$top": 25,
+                        "$orderby": "receivedDateTime asc",
+                    },
+                )
+                stats["graph_http_status"] = messages_resp.status_code
+                if messages_resp.status_code != 200:
+                    body_excerpt = (messages_resp.text or "")[:500]
+                    stats["errors"].append(
+                        f"Graph API error: HTTP {messages_resp.status_code} body={body_excerpt}"
+                    )
+                    stats["status"] = "failed_graph"
+                else:
+                    stats["status"] = "ok"
+                    messages = messages_resp.json().get("value", [])
+                    stats["messages_detected"] = len([m for m in messages if m.get("hasAttachments")])
+
+                    for msg in messages:
+                        if not msg.get("hasAttachments"):
+                            continue
+                        msg_id = msg.get("id")
+                        internet_msg_id = msg.get("internetMessageId", msg_id)
+                        subject = msg.get("subject", "No Subject")
+                        sender = msg.get("from", {}).get("emailAddress", {}).get("address", "unknown")
+
+                        att_resp = await client.get(
+                            f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments",
+                            headers={"Authorization": f"Bearer {token}"},
+                            params={"$select": "id,name,contentType,size,isInline"},
+                        )
+                        if att_resp.status_code != 200:
+                            continue
+
+                        attachments = att_resp.json().get("value", [])
+                        for att in attachments:
+                            att_id = att.get("id")
+                            filename = att.get("name", "unknown")
+                            content_type = att.get("contentType", "")
+                            is_inline = att.get("isInline", False)
+                            size_bytes = att.get("size", 0)
+
+                            if is_inline or content_type.startswith("image/") or size_bytes < 1000:
+                                stats["attachments_skipped_inline"] += 1
+                                continue
+
+                            try:
+                                att_content_resp = await client.get(
+                                    f"https://graph.microsoft.com/v1.0/users/{mailbox_address}/messages/{msg_id}/attachments/{att_id}",
+                                    headers={"Authorization": f"Bearer {token}"},
+                                )
+                                if att_content_resp.status_code != 200:
+                                    stats["attachments_failed"] += 1
+                                    continue
+
+                                content_b64 = att_content_resp.json().get("contentBytes", "")
+                                content_bytes = base64.b64decode(content_b64)
+                                content_hash = hashlib.sha256(content_bytes).hexdigest()
+
+                                # ── Unified dedup ─────────────────────────────
+                                # Hash-first: catches the same file from the same
+                                # message AND the same content forwarded twice.
+                                # Also matches rows written by the static AP
+                                # poller (cross-worker protection).
+                                if await check_duplicate_mail_intake(
+                                    internet_msg_id, content_hash, filename=filename,
+                                ):
+                                    await record_mail_intake_log(
+                                        message_id=msg_id,
+                                        internet_message_id=internet_msg_id,
+                                        attachment_id=att_id,
+                                        attachment_hash=content_hash,
+                                        filename=filename,
+                                        status="SkippedDuplicate",
+                                    )
+                                    stats["attachments_skipped_dup"] += 1
+                                    continue
+
+                                hash_dup = await db.hub_documents.find_one(
+                                    {"sha256_hash": content_hash, "is_duplicate": {"$ne": True}},
+                                    {"_id": 0, "id": 1},
+                                )
+                                if hash_dup:
+                                    await record_mail_intake_log(
+                                        message_id=msg_id,
+                                        internet_message_id=internet_msg_id,
+                                        attachment_id=att_id,
+                                        attachment_hash=content_hash,
+                                        filename=filename,
+                                        status="SkippedDuplicate",
+                                        sharepoint_doc_id=hash_dup["id"],
+                                    )
+                                    stats["attachments_skipped_dup"] += 1
+                                    continue
+
+                                # Lazy import to avoid circular dependency
+                                from services.document_handlers import intake_document_from_bytes
+                                resolved_category = normalize_mailbox_category(default_category)
+                                logger.info(
+                                    "[Intake:dynamic] mailbox_id=%s mailbox=%s configured_category=%s resolved_category=%s filename=%s",
+                                    source_id, mailbox_address, default_category, resolved_category, filename,
+                                )
+                                result = await intake_document_from_bytes(
+                                    file_content=content_bytes, filename=filename,
+                                    source="email", sender=sender, subject=subject,
+                                    email_id=internet_msg_id, content_type=content_type,
+                                    mailbox_category=resolved_category,
+                                )
+
+                                doc_id = (
+                                    result.get("document_id")
+                                    or result.get("document", {}).get("id")
+                                )
+                                await record_mail_intake_log(
+                                    message_id=msg_id,
+                                    internet_message_id=internet_msg_id,
+                                    attachment_id=att_id,
+                                    attachment_hash=content_hash,
+                                    filename=filename,
+                                    status="Processed",
+                                    sharepoint_doc_id=doc_id,
+                                )
+                                stats["attachments_ingested"] += 1
+
+                            except Exception as e:
+                                stats["attachments_failed"] += 1
+                                stats["errors"].append(f"Failed to process {filename}: {str(e)}")
+
+                    # Advance per-mailbox watermark so we don't replay the same
+                    # 1-hour window every minute.
+                    if messages:
+                        newest_received = max(m.get("receivedDateTime", "") for m in messages)
+                        if newest_received:
+                            await db.hub_settings.update_one(
+                                {"type": watermark_key},
+                                {"$set": {
+                                    "last_received_datetime": newest_received,
+                                    "mailbox_address": mailbox_address,
+                                    "updated_utc": datetime.now(timezone.utc).isoformat(),
+                                }},
+                                upsert=True,
+                            )
 
     except Exception as e:
         stats["errors"].append(f"Poll error: {str(e)}")
+        stats["status"] = "failed_exception"
         logger.error("[MailboxPoll:%s] Error: %s", run_id, str(e))
 
     stats["completed_at"] = datetime.now(timezone.utc).isoformat()
-    logger.info(
-        "[MailboxPoll:%s] Complete: ingested=%d, skipped_dup=%d, failed=%d",
-        run_id, stats["attachments_ingested"], stats["attachments_skipped_dup"], stats["attachments_failed"],
-    )
+
+    # Persist EVERY poll (success or failure) so silent swallow can't
+    # happen again. Cutover-readiness probes rely on this audit trail.
+    try:
+        await db.mail_poll_runs.insert_one({k: v for k, v in stats.items()})
+    except Exception as e:  # noqa: BLE001 — audit trail must not break poll loop
+        logger.error("[MailboxPoll:%s] Failed to persist run stats: %s", run_id, str(e))
+
+    if stats["status"] == "ok":
+        logger.info(
+            "[MailboxPoll:%s] Complete: mailbox=%s category=%s ingested=%d skipped_dup=%d failed=%d",
+            run_id, mailbox_address, default_category,
+            stats["attachments_ingested"], stats["attachments_skipped_dup"], stats["attachments_failed"],
+        )
+    else:
+        logger.error(
+            "[MailboxPoll:%s] FAILED: mailbox=%s category=%s status=%s graph_http=%s errors=%s",
+            run_id, mailbox_address, default_category, stats["status"],
+            stats["graph_http_status"], stats["errors"][:3],
+        )
     return stats
 
 

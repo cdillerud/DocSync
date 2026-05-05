@@ -1,7 +1,7 @@
 # Square9 Cutover — SharePoint AP Folder Fuzzy Comparison
 
 - Owner: Operations / Engineering.
-- Generated: 2026-05-02 (UTC).
+- Generated: 2026-05-02 (UTC); updated to add `--graph-pull` mode.
 - Companion to: `SQUARE9_CUTOVER_ACCEPTANCE_CHECKLIST.md` §6 (E5b).
 - Script: `backend/scripts/sharepoint_ap_compare.py`.
 
@@ -35,69 +35,83 @@ folder in their respective tenants. Test destination must be the
 test-environment counterpart of `Accounts Payable/Temp Folder`,
 not the parent `Accounts Payable`.
 
-## What the script does
+## Two execution modes
 
-For every prod doc, it picks the best test-side candidate and
-classifies the pair into exactly one bucket:
+### Preferred: `--graph-pull` (one command, no manual export)
 
-- exact_match     — normalized filenames identical.
-- likely_match    — same invoice/PO token + size or date match,
-                    OR vendor-token overlap >=2 + size equal,
-                    OR normalized fuzzy ratio >= 0.92.
-- possible_match  — invoice/PO token alone, OR vendor token + day
-                    distance <=7, OR fuzzy ratio >= 0.85.
-- no_match        — none of the above.
+The script pulls both folder listings live from SharePoint via
+Microsoft Graph using the same env vars the backend already uses
+for Graph API. No CSV export step. Read-only.
 
-Outputs a revised CSV with: prod row, best test row, confidence,
-score breakdown (norm_ratio, inv_po_overlap, vendor_overlap,
-size_signal, modified_day_distance), and a `previously_missed`
-flag if a prior strict-match output is supplied.
+Required env vars (already present on the prod VM):
 
-## Inputs
+- `TENANT_ID`
+- `GRAPH_CLIENT_ID`
+- `GRAPH_CLIENT_SECRET`
+- `SHAREPOINT_SITE_HOSTNAME` (defaults to `gamerpackaging.sharepoint.com`)
+- `DEMO_MODE=false` (the script refuses to run with `DEMO_MODE=true`)
 
-Two CSV listings, one per folder. Required columns:
-`name, size, modified`. Optional: `web_url, id, parent_path`.
+Required Graph permission on the app registration:
+**`Sites.Read.All` (Application)** with admin consent. Read-only;
+no write permissions needed.
 
-If you do not already have a "prior strict-match output", just
-omit the `--prior-strict-csv` argument; the script still runs,
-it just won't fill the `previously_missed` column.
+Defaults are anchored on the locked production AP destination, so
+typically only the test side needs to be specified.
+
+### Fallback: CSV mode
+
+Pre-export both folder listings to CSV (`name,size,modified`
+required; `web_url,id` optional) using whatever existing tooling
+you already have, then point the script at the two files. Use
+this mode only when Graph creds are unavailable.
 
 ## Operator runbook (run on prod VM, single SSH session)
 
-Step 1 — pull current listings into CSV. (Use whichever method
-your existing tooling already uses to dump SharePoint folder
-contents to CSV. The CSV must have `name,size,modified`.)
+### Mode A — `--graph-pull` (preferred)
 
-Save them, by convention, into:
+Bare line. Replace the test site path and folder path with the
+real test-environment counterpart of the AP Temp Folder:
 
-    prod_reports/sp_prod_ap_temp_listing.csv
-    prod_reports/sp_test_ap_temp_listing.csv
+    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
 
-Step 2 — (optional) keep your prior strict-match CSV at:
+Optional: pass `--prior-strict-csv prod_reports/sp_strict_match_prev.csv`
+to surface "previously missed" rows in the stdout summary.
 
-    prod_reports/sp_strict_match_prev.csv
+Optional overrides (only if your setup deviates from the locked
+production AP destination):
 
-with at least columns `name,status` where status is one of
-`match` / `no_match`.
+- `--prod-site-path "/sites/GamerAccounting"` (default)
+- `--prod-library "Shared Documents"` (default)
+- `--prod-folder-path "General/Accounting/Accounts Payable/Temp Folder"` (default)
+- `--test-library "Shared Documents"` (default)
 
-Step 3 — run the fuzzy comparator. Bare line:
+### Mode B — CSV fallback
+
+Bare line:
 
     docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare --prod-csv prod_reports/sp_prod_ap_temp_listing.csv --test-csv prod_reports/sp_test_ap_temp_listing.csv --prior-strict-csv prod_reports/sp_strict_match_prev.csv --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
 
-Step 4 — review stdout. The summary block prints counts per
-bucket and a top-N list of `likely_match` rows that were
-`previously_missed` by the strict matcher.
+CSVs must have `name,size,modified` columns at minimum.
 
-Step 5 — open `prod_reports/sp_ap_compare_fuzzy.csv` for the
-full row-by-row evidence. Sort by confidence to triage.
+## What you get
+
+Both modes produce identical artifacts:
+
+1. `prod_reports/sp_ap_compare_fuzzy.csv` — every prod row, with
+   the best test-side candidate, confidence bucket, and a score
+   breakdown (`norm_ratio`, `inv_po_overlap`, `vendor_overlap`,
+   `size_signal`, `modified_day_distance`, `previously_missed`).
+2. Stdout summary — counts per bucket and the top-N
+   `likely_match` rows that were `previously_missed` by the
+   strict matcher.
 
 ## How to read the result
 
 | Outcome | Meaning |
 |---|---|
-| Non-zero exact_match + likely_match counts | Real overlap exists. The earlier "0 matches" result was a matcher artifact. Proceed to evidence E5b on the acceptance checklist. |
-| Zero exact + likely + possible_match | Genuine red flag — prod and test really do not share documents. Investigate destination paths first (#1), file-renaming pipelines (#2), and ingestion subset (#3) before drawing conclusions about the matcher (#4). |
-| Many no_match in addition to matches | Expected — test typically lags prod on volume. Volume gap is not a blocker by itself; pair-level coverage of recently-ingested AP docs is what matters. |
+| Non-zero `exact_match` + `likely_match` counts | Real overlap exists. The earlier "0 matches" result was a matcher artifact. Proceed to evidence E5b on the acceptance checklist. |
+| Zero `exact + likely + possible_match` | Genuine red flag — prod and test really do not share documents. Investigate destination paths first (#1), file-renaming pipelines (#2), and ingestion subset (#3) before drawing conclusions about the matcher (#4). |
+| Many `no_match` in addition to matches | Expected — test typically lags prod on volume. Volume gap is not a blocker by itself; pair-level coverage of recently-ingested AP docs is what matters. |
 
 ## Tuning
 
@@ -111,6 +125,7 @@ the only places to edit in `sharepoint_ap_compare.py` are:
 - `score_pair()` — bucket cutoffs (ratio thresholds, size %
   bands, day-distance bands).
 
-No schema, API, or DB changes. The script is fully read-only and
-stdlib-only (no extra Python deps beyond what's already in the
-backend image).
+No schema, API, or DB changes. The script is read-only against
+SharePoint and MongoDB. `--graph-pull` mode adds a runtime
+dependency on `httpx`, which is already installed in the backend
+image.

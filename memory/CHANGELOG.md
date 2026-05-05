@@ -1797,3 +1797,25 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### No backend / frontend behavior changes
 - This is a read-only diagnostic; no API, schema, or service changes.
+
+## 2026-05-02 — SharePoint AP Fuzzy Comparator: --graph-pull Mode
+
+### Added
+- `--graph-pull` mode in `backend/scripts/sharepoint_ap_compare.py`. Pulls both prod and test folder listings live from Microsoft Graph (no CSV export step).
+  - Reuses existing backend env vars: `TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `SHAREPOINT_SITE_HOSTNAME`.
+  - Read-only — requires only `Sites.Read.All` (Application) with admin consent.
+  - Refuses to run when `DEMO_MODE=true`.
+  - Prod defaults anchored on the locked AP destination: `/sites/GamerAccounting` :: `Shared Documents` :: `General/Accounting/Accounts Payable/Temp Folder`. All four prod components are overridable.
+  - Test side requires explicit `--test-site-path` and `--test-folder-path`; library defaults to `Shared Documents`.
+  - Pages Graph results via `@odata.nextLink` (`$top=999`), files-only (subfolders skipped for an apples-to-apples flat AP compare).
+
+### Preserved
+- CSV mode (`--prod-csv` / `--test-csv`) is unchanged and remains as fallback. Same output shape; same stdout summary; same `previously_missed` semantics.
+
+### Validated
+- CSV-mode regression: synthetic fixtures still return 3 `exact_match` + 1 `likely_match` (1 previously_missed), unchanged from prior iteration. Linter clean.
+- `--graph-pull` argument plumbing validated: missing `--test-site-path` / `--test-folder-path` errors out with a directive message; mode mutual-exclusivity enforced; help output documents all flags and the locked AP destination defaults.
+- Live Graph fetch must be exercised on the prod VM (where real `TENANT_ID` / `GRAPH_CLIENT_*` and `DEMO_MODE=false` exist). The preview environment is `DEMO_MODE=true`, so the script correctly refuses there.
+
+### Operator next step
+- Run the bare-line `--graph-pull` invocation in the runbook with the actual test-environment site path and folder path. Output CSV and stdout summary are identical in shape to CSV mode, so the existing acceptance-checklist E5b evidence flow is unchanged.

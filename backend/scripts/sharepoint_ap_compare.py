@@ -9,8 +9,15 @@ filename comparison was returning 0 matches; that is almost certainly a
 matcher problem, not a real-world overlap problem. This script replaces
 the strict matcher with a multi-signal fuzzy scorer.
 
-Inputs (two CSV listings of the two folders)
---------------------------------------------
+Two execution modes
+-------------------
+1. CSV mode (fallback): pass two pre-exported CSV listings.
+2. --graph-pull mode (preferred): script pulls both folder listings live
+   from SharePoint via Microsoft Graph using existing tenant credentials,
+   removing the manual CSV-export step entirely.
+
+Inputs (CSV mode)
+-----------------
 Each CSV must have at minimum these columns (header row required):
     name, size, modified
 Optional columns (passed through if present):
@@ -20,6 +27,24 @@ Optional columns (passed through if present):
 `modified` — ISO-8601 timestamp; tolerant of `Z` and offset forms.
              Empty cells are treated as unknown (date proximity then
              contributes 0 to scoring).
+
+Inputs (--graph-pull mode)
+--------------------------
+Reuses the same env vars the backend already consumes for Graph API:
+    TENANT_ID
+    GRAPH_CLIENT_ID
+    GRAPH_CLIENT_SECRET
+    SHAREPOINT_SITE_HOSTNAME      (e.g. gamerpackaging.sharepoint.com)
+
+Defaults are anchored on the locked production AP destination:
+    site path:    /sites/GamerAccounting
+    library:      Shared Documents
+    folder path:  General/Accounting/Accounts Payable/Temp Folder
+
+Test destination must be passed explicitly:
+    --test-site-path        e.g. /sites/GPI-DocumentHub-Test
+    --test-folder-path      e.g. Accounts Payable/Temp Folder
+    --test-library          default: Shared Documents
 
 Optional input
 --------------
@@ -59,8 +84,17 @@ possible_match
 no_match
     Otherwise.
 
-Operator usage (bare lines, run on prod VM, no triple backticks)
-----------------------------------------------------------------
+Operator usage (preferred — single command, no manual export)
+-------------------------------------------------------------
+    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare \
+        --graph-pull \
+        --test-site-path "/sites/GPI-DocumentHub-Test" \
+        --test-folder-path "Accounts Payable/Temp Folder" \
+        --out-csv prod_reports/sp_ap_compare_fuzzy.csv \
+        --top 25
+
+Operator usage (CSV fallback — only when Graph creds are unavailable)
+--------------------------------------------------------------------
     docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare \
         --prod-csv prod_reports/sp_prod_ap_temp_listing.csv \
         --test-csv prod_reports/sp_test_ap_temp_listing.csv \
@@ -72,7 +106,8 @@ If --prior-strict-csv is omitted the "previously_missed" column is left
 empty and the "previously missed" surfacing is skipped.
 
 The script is read-only with respect to MongoDB and SharePoint. It only
-reads the two input CSVs and writes one output CSV plus stdout.
+reads from the two folder listings (CSV or Graph) and writes one output
+CSV plus stdout. No production writes.
 """
 
 from __future__ import annotations
@@ -351,6 +386,117 @@ def best_match(p: Doc, candidates: List[Doc]) -> Tuple[Optional[Doc], Score]:
 
 
 # ---------------------------------------------------------------------------
+# Graph-pull mode (live SharePoint listings)
+# ---------------------------------------------------------------------------
+
+GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+# Locked production AP destination (defaults for --graph-pull mode).
+PROD_DEFAULT_SITE_PATH = "/sites/GamerAccounting"
+PROD_DEFAULT_LIBRARY = "Shared Documents"
+PROD_DEFAULT_FOLDER_PATH = "General/Accounting/Accounts Payable/Temp Folder"
+
+
+def acquire_graph_token(tenant_id: str, client_id: str, client_secret: str) -> str:
+    """Client-credentials OAuth2 token for Microsoft Graph."""
+    import httpx  # local import keeps CSV-only operators dep-free at import time
+    if not (tenant_id and client_id and client_secret):
+        raise SystemExit(
+            "Graph creds missing. Set TENANT_ID, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET "
+            "in the environment (these are the same vars the backend already uses)."
+        )
+    with httpx.Client(timeout=30.0) as c:
+        resp = c.post(
+            f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+            data={
+                "grant_type": "client_credentials",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+            },
+        )
+        data = resp.json()
+        if "access_token" not in data:
+            err = data.get("error_description", data.get("error", "unknown"))
+            raise SystemExit(f"Graph token error: {err}")
+        return data["access_token"]
+
+
+def _graph_get(client: Any, url: str, token: str) -> Dict[str, Any]:
+    resp = client.get(url, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code in (401, 403):
+        raise SystemExit(
+            f"Graph permission denied (HTTP {resp.status_code}). "
+            f"App registration needs 'Sites.Read.All' (Application) with admin consent."
+        )
+    data = resp.json()
+    if resp.status_code >= 400 or "error" in data:
+        err = data.get("error", {})
+        raise SystemExit(f"Graph error (HTTP {resp.status_code}): {err.get('message', err.get('code', data))}")
+    return data
+
+
+def pull_listing_via_graph(token: str, host: str, site_path: str,
+                           library: str, folder_path: str,
+                           label: str = "") -> List[Doc]:
+    """List children of `library/folder_path` on `host:site_path` via Graph.
+
+    Top-level files only (folder is a flat AP destination by convention).
+    Returns a List[Doc] in the same shape CSV mode produces.
+    """
+    import httpx
+    out: List[Doc] = []
+    with httpx.Client(timeout=60.0) as c:
+        # 1. Resolve site
+        site = _graph_get(c, f"{GRAPH_BASE}/sites/{host}:{site_path}:", token)
+        if "id" not in site:
+            raise SystemExit(f"Site not resolvable: {host}{site_path} ({label})")
+        site_id = site["id"]
+
+        # 2. Resolve drive (document library) by name
+        drives = _graph_get(c, f"{GRAPH_BASE}/sites/{site_id}/drives", token).get("value", [])
+        drive = next((d for d in drives if d.get("name") == library), None)
+        if not drive:
+            drive = next((d for d in drives if (d.get("name") or "").lower() == library.lower()), None)
+        if not drive:
+            alt = {"documents": "shared documents", "shared documents": "documents"}.get(library.lower())
+            if alt:
+                drive = next((d for d in drives if (d.get("name") or "").lower() == alt), None)
+        if not drive:
+            drive = next((d for d in drives if d.get("driveType") == "documentLibrary"), None)
+        if not drive:
+            raise SystemExit(
+                f"Document library {library!r} not found ({label}). "
+                f"Available: {[d.get('name') for d in drives]}"
+            )
+        drive_id = drive["id"]
+
+        # 3. List folder children with paging
+        from urllib.parse import quote
+        safe_path = quote(folder_path.strip("/"), safe="/")
+        next_url: Optional[str] = (
+            f"{GRAPH_BASE}/drives/{drive_id}/root:/{safe_path}:/children"
+            f"?$top=999&$select=name,size,lastModifiedDateTime,webUrl,id,folder,file"
+        )
+        while next_url:
+            page = _graph_get(c, next_url, token)
+            for item in page.get("value", []):
+                # files only — skip subfolders for an apples-to-apples flat AP folder compare
+                if "folder" in item:
+                    continue
+                row = {
+                    "name": item.get("name") or "",
+                    "size": str(item.get("size") or ""),
+                    "modified": item.get("lastModifiedDateTime") or "",
+                    "web_url": item.get("webUrl") or "",
+                    "id": item.get("id") or "",
+                }
+                out.append(Doc.from_row(row))
+            next_url = page.get("@odata.nextLink")
+    return out
+
+
+# ---------------------------------------------------------------------------
 # CSV I/O
 # ---------------------------------------------------------------------------
 
@@ -398,13 +544,10 @@ def write_output(out_path: str, rows: List[Dict[str, Any]]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
-def run(prod_csv: str, test_csv: str, out_csv: str,
-        prior_strict_csv: Optional[str], top_n: int) -> int:
-    prod = load_listing(prod_csv)
-    test = load_listing(test_csv)
-    prior = load_prior_strict(prior_strict_csv) if prior_strict_csv else {}
-
-    print(f"Loaded {len(prod)} prod docs, {len(test)} test docs.", file=sys.stderr)
+def run_with_docs(prod: List[Doc], test: List[Doc],
+                  out_csv: str, prior: Dict[str, str], top_n: int,
+                  source_label: str = "csv") -> int:
+    print(f"Loaded {len(prod)} prod docs, {len(test)} test docs (source: {source_label}).", file=sys.stderr)
     if prior:
         print(f"Loaded {len(prior)} prior-strict rows for previously-missed flagging.", file=sys.stderr)
 
@@ -447,6 +590,7 @@ def run(prod_csv: str, test_csv: str, out_csv: str,
     # ---- stdout summary ----
     print()
     print("=== sharepoint_ap_compare summary ===")
+    print(f"  source:          {source_label}")
     print(f"  prod docs:       {len(prod)}")
     print(f"  test docs:       {len(test)}")
     print(f"  exact_match:     {counts['exact_match']}")
@@ -486,14 +630,96 @@ def run(prod_csv: str, test_csv: str, out_csv: str,
     return 0
 
 
+def run(prod_csv: str, test_csv: str, out_csv: str,
+        prior_strict_csv: Optional[str], top_n: int) -> int:
+    """CSV-mode entry point (kept for backward compat)."""
+    prod = load_listing(prod_csv)
+    test = load_listing(test_csv)
+    prior = load_prior_strict(prior_strict_csv) if prior_strict_csv else {}
+    return run_with_docs(prod, test, out_csv, prior, top_n,
+                         source_label=f"csv ({prod_csv} | {test_csv})")
+
+
+def run_graph(prod_site_path: str, prod_library: str, prod_folder_path: str,
+              test_site_path: str, test_library: str, test_folder_path: str,
+              out_csv: str, prior_strict_csv: Optional[str], top_n: int) -> int:
+    """--graph-pull mode entry point (preferred)."""
+    import os
+    tenant = os.environ.get("TENANT_ID", "")
+    client_id = os.environ.get("GRAPH_CLIENT_ID", "")
+    client_secret = os.environ.get("GRAPH_CLIENT_SECRET", "")
+    host = os.environ.get("SHAREPOINT_SITE_HOSTNAME", "gamerpackaging.sharepoint.com")
+
+    if os.environ.get("DEMO_MODE", "true").lower() == "true":
+        raise SystemExit(
+            "DEMO_MODE=true detected. Graph-pull requires a real tenant. "
+            "Run on the prod VM where DEMO_MODE=false."
+        )
+
+    token = acquire_graph_token(tenant, client_id, client_secret)
+    print(f"Graph token acquired. Host: {host}", file=sys.stderr)
+    print(f"Pulling prod: {host}{prod_site_path} :: {prod_library} :: {prod_folder_path}", file=sys.stderr)
+    prod = pull_listing_via_graph(token, host, prod_site_path, prod_library, prod_folder_path, label="prod")
+    print(f"Pulling test: {host}{test_site_path} :: {test_library} :: {test_folder_path}", file=sys.stderr)
+    test = pull_listing_via_graph(token, host, test_site_path, test_library, test_folder_path, label="test")
+
+    prior = load_prior_strict(prior_strict_csv) if prior_strict_csv else {}
+    label = (f"graph-pull (prod={prod_site_path}/{prod_folder_path} | "
+             f"test={test_site_path}/{test_folder_path})")
+    return run_with_docs(prod, test, out_csv, prior, top_n, source_label=label)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Fuzzy SharePoint AP folder comparison.")
-    ap.add_argument("--prod-csv", required=True, help="CSV listing of prod AP Temp Folder.")
-    ap.add_argument("--test-csv", required=True, help="CSV listing of test destination.")
+    # Mode selector
+    ap.add_argument("--graph-pull", action="store_true",
+                    help="Pull both folder listings live via Microsoft Graph API "
+                         "(preferred). Requires TENANT_ID, GRAPH_CLIENT_ID, "
+                         "GRAPH_CLIENT_SECRET, SHAREPOINT_SITE_HOSTNAME env vars.")
+    # CSV-mode args
+    ap.add_argument("--prod-csv", default=None, help="CSV listing of prod AP Temp Folder (CSV mode).")
+    ap.add_argument("--test-csv", default=None, help="CSV listing of test destination (CSV mode).")
+    # Graph-pull-mode args
+    ap.add_argument("--prod-site-path", default=PROD_DEFAULT_SITE_PATH,
+                    help=f"Prod SharePoint site path (default: {PROD_DEFAULT_SITE_PATH}).")
+    ap.add_argument("--prod-library", default=PROD_DEFAULT_LIBRARY,
+                    help=f"Prod document library name (default: {PROD_DEFAULT_LIBRARY!r}).")
+    ap.add_argument("--prod-folder-path", default=PROD_DEFAULT_FOLDER_PATH,
+                    help=f"Prod folder path inside library (default: {PROD_DEFAULT_FOLDER_PATH!r}).")
+    ap.add_argument("--test-site-path", default=None,
+                    help="Test SharePoint site path. REQUIRED with --graph-pull.")
+    ap.add_argument("--test-library", default=PROD_DEFAULT_LIBRARY,
+                    help=f"Test document library name (default: {PROD_DEFAULT_LIBRARY!r}).")
+    ap.add_argument("--test-folder-path", default=None,
+                    help="Test folder path inside library. REQUIRED with --graph-pull.")
+    # Common args
     ap.add_argument("--out-csv", default="sharepoint_ap_compare_out.csv", help="Output CSV path.")
     ap.add_argument("--prior-strict-csv", default=None, help="Optional prior strict-match CSV.")
     ap.add_argument("--top", type=int, default=25, help="Top-N previously-missed rows to print.")
     args = ap.parse_args(argv)
+
+    if args.graph_pull:
+        if args.prod_csv or args.test_csv:
+            raise SystemExit("--graph-pull is incompatible with --prod-csv / --test-csv. Pick one mode.")
+        if not args.test_site_path or not args.test_folder_path:
+            raise SystemExit(
+                "--graph-pull requires --test-site-path and --test-folder-path. "
+                "Prod defaults to the locked AP destination "
+                "(/sites/GamerAccounting :: Shared Documents :: "
+                "General/Accounting/Accounts Payable/Temp Folder); override with "
+                "--prod-site-path / --prod-library / --prod-folder-path if needed."
+            )
+        return run_graph(
+            args.prod_site_path, args.prod_library, args.prod_folder_path,
+            args.test_site_path, args.test_library, args.test_folder_path,
+            args.out_csv, args.prior_strict_csv, args.top,
+        )
+
+    if not (args.prod_csv and args.test_csv):
+        raise SystemExit(
+            "CSV mode requires --prod-csv and --test-csv. "
+            "Or pass --graph-pull (preferred) to skip the export step."
+        )
     return run(args.prod_csv, args.test_csv, args.out_csv, args.prior_strict_csv, args.top)
 
 

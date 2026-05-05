@@ -134,9 +134,9 @@ async def _fetch(mailbox: str, since_hours: int, limit: int) -> List[Dict[str, A
 
 
 def _derive_routing_status(r: Dict[str, Any]) -> str:
-    """Use the persisted routing_status when available; otherwise synthesize
-    from folder_path + reason + override flags so older rows are still
-    usable in the report."""
+    """Prefer persisted routing_status when available (post-fix intake);
+    otherwise synthesize from folder_path + reason + override flags so older
+    rows ingested before the persistence change are still reportable."""
     persisted = r.get("routing_status")
     if persisted:
         return str(persisted)

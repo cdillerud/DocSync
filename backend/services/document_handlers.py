@@ -557,6 +557,45 @@ async def intake_document(
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }
 
+    # ---------------------------------------------------------------
+    # Persist evidence-based AP routing decision (mission-aligned audit).
+    # See services.folder_routing_service.determine_ap_routing_decision.
+    # ---------------------------------------------------------------
+    try:
+        from services.folder_routing_service import determine_ap_routing_decision
+        _routing_input_doc = {
+            "document_type": suggested_type,
+            "doc_type": doc_type_value,
+            "suggested_job_type": suggested_type,
+            "mailbox_category": doc.get("mailbox_category"),
+            "mailbox_lane_needs_review": bool(classification_result.get("mailbox_lane_needs_review")),
+            "classification_method": classification_method,
+            "ai_confidence": confidence,
+            "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
+            "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+            "po_number_clean": normalized_fields.get("po_number_clean"),
+            "po_number_extracted": normalized_fields.get("po_number_clean") or extracted_fields.get("po_number"),
+            "invoice_number_clean": normalized_fields.get("invoice_number_clean"),
+            "amount_float": normalized_fields.get("amount_float"),
+            "validation_results": validation_results,
+            "possible_duplicate": duplicate_result.get("possible_duplicate", False),
+            "extracted_fields": extracted_fields,
+            "normalized_fields": normalized_fields,
+            "file_name": doc.get("file_name", ""),
+            "bc_po_resolved": validation_results.get("bc_po_resolved"),
+            "accounting_routing_override": False,
+            "approved": False,
+        }
+        _routing_decision = determine_ap_routing_decision(_routing_input_doc)
+        update_data["routing_status"] = _routing_decision["routing_status"]
+        update_data["routing_reason"] = _routing_decision["routing_reason"]
+        update_data["routing_details"] = _routing_decision["routing_details"]
+    except Exception as _re:
+        logger.warning("Routing decision persistence failed for %s: %s", doc_id, _re)
+        update_data["routing_status"] = "needs_review"
+        update_data["routing_reason"] = f"routing_decision_error: {_re}"
+        update_data["routing_details"] = {"error": str(_re)}
+
     if sp_result:
         update_data["sharepoint_drive_id"] = sp_result["drive_id"]
         update_data["sharepoint_item_id"] = sp_result["item_id"]
@@ -2060,6 +2099,51 @@ async def intake_document_from_bytes(
         "workflow_state": "Validated",
         "updated_utc": datetime.now(timezone.utc).isoformat()
     }
+
+    # ---------------------------------------------------------------
+    # Persist evidence-based AP routing decision (mission-aligned audit).
+    # See services.folder_routing_service.determine_ap_routing_decision.
+    # This is independent of the SharePoint upload's folder selection
+    # (sp_result.folder_path) — both are written so the persisted document
+    # carries the full structured decision regardless of upload outcome.
+    # ---------------------------------------------------------------
+    try:
+        from services.folder_routing_service import determine_ap_routing_decision
+        _existing_for_routing = await db.hub_documents.find_one(
+            {"id": doc_id}, {"_id": 0, "file_name": 1}
+        ) or {}
+        _routing_input_doc = {
+            "document_type": suggested_type,
+            "doc_type": doc_type_value,
+            "suggested_job_type": suggested_type,
+            "mailbox_category": mailbox_category,
+            "mailbox_lane_needs_review": bool(classification_result.get("mailbox_lane_needs_review")),
+            "classification_method": classification_method,
+            "ai_confidence": confidence,
+            "vendor_canonical": vendor_alias_result.get("vendor_canonical"),
+            "vendor_match_method": vendor_alias_result.get("vendor_match_method"),
+            "po_number_clean": normalized_fields.get("po_number_clean"),
+            "po_number_extracted": normalized_fields.get("po_number_clean") or extracted_fields.get("po_number"),
+            "invoice_number_clean": normalized_fields.get("invoice_number_clean"),
+            "amount_float": normalized_fields.get("amount_float"),
+            "validation_results": validation_results,
+            "possible_duplicate": duplicate_result.get("possible_duplicate", False),
+            "extracted_fields": extracted_fields,
+            "normalized_fields": normalized_fields,
+            "file_name": _existing_for_routing.get("file_name", ""),
+            "bc_po_resolved": validation_results.get("bc_po_resolved"),
+            "accounting_routing_override": False,
+            "approved": False,
+        }
+        _routing_decision = determine_ap_routing_decision(_routing_input_doc)
+        update_data["routing_status"] = _routing_decision["routing_status"]
+        update_data["routing_reason"] = _routing_decision["routing_reason"]
+        update_data["routing_details"] = _routing_decision["routing_details"]
+    except Exception as _re:
+        logger.warning("Routing decision persistence failed for %s: %s", doc_id, _re)
+        update_data["routing_status"] = "needs_review"
+        update_data["routing_reason"] = f"routing_decision_error: {_re}"
+        update_data["routing_details"] = {"error": str(_re)}
 
     if sp_result:
         update_data["sharepoint_drive_id"] = sp_result["drive_id"]

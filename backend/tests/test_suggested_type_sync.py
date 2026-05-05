@@ -44,38 +44,49 @@ class TestHealthEndpoint:
 
 
 class TestClassifyDocumentTypeMailboxCategory:
-    """Test classify_document_type returns AP_INVOICE for mailbox_category=AP"""
-    
-    def test_mailbox_ap_returns_ap_invoice(self):
-        """When mailbox_category=AP, classify_document_type returns doc_type='AP_INVOICE'"""
+    """Mailbox category is *source-lane context*, not absolute proof.
+    classify_from_mailbox_category requires evidence=True before it will
+    deterministically pick a doc type. See classification_helpers._has_lane_evidence
+    for what counts as evidence in the pipeline."""
+
+    def test_mailbox_ap_without_evidence_returns_other(self):
+        """AP-mailbox alone is not enough; without evidence we return OTHER
+        and let AI / review decide."""
         from workflows.core.engine import DocumentClassifier, DocType
-        
-        # Test the mailbox category classification
+
         result = DocumentClassifier.classify_from_mailbox_category("AP")
+        assert result == DocType.OTHER, f"Expected OTHER (no evidence) but got {result}"
+        print(f"PASS: classify_from_mailbox_category('AP') without evidence returns {result.value}")
+
+    def test_mailbox_ap_with_evidence_returns_ap_invoice(self):
+        """AP-mailbox + evidence=True still maps to AP_INVOICE."""
+        from workflows.core.engine import DocumentClassifier, DocType
+
+        result = DocumentClassifier.classify_from_mailbox_category("AP", evidence=True)
         assert result == DocType.AP_INVOICE, f"Expected AP_INVOICE but got {result}"
-        print(f"PASS: classify_from_mailbox_category('AP') returns {result.value}")
-    
-    def test_mailbox_sales_returns_sales_invoice(self):
-        """When mailbox_category=SALES, returns SALES_INVOICE"""
+        print(f"PASS: classify_from_mailbox_category('AP', evidence=True) returns {result.value}")
+
+    def test_mailbox_sales_with_evidence_returns_sales_invoice(self):
+        """SALES-mailbox + evidence=True maps to SALES_INVOICE."""
         from workflows.core.engine import DocumentClassifier, DocType
-        
-        result = DocumentClassifier.classify_from_mailbox_category("SALES")
+
+        result = DocumentClassifier.classify_from_mailbox_category("SALES", evidence=True)
         assert result == DocType.SALES_INVOICE, f"Expected SALES_INVOICE but got {result}"
-        print(f"PASS: classify_from_mailbox_category('SALES') returns {result.value}")
-    
-    def test_mailbox_purchase_returns_purchase_order(self):
-        """When mailbox_category=PURCHASE, returns PURCHASE_ORDER"""
+        print(f"PASS: classify_from_mailbox_category('SALES', evidence=True) returns {result.value}")
+
+    def test_mailbox_purchase_with_evidence_returns_purchase_order(self):
+        """PURCHASE-mailbox + evidence=True maps to PURCHASE_ORDER."""
         from workflows.core.engine import DocumentClassifier, DocType
-        
-        result = DocumentClassifier.classify_from_mailbox_category("PURCHASE")
+
+        result = DocumentClassifier.classify_from_mailbox_category("PURCHASE", evidence=True)
         assert result == DocType.PURCHASE_ORDER, f"Expected PURCHASE_ORDER but got {result}"
-        print(f"PASS: classify_from_mailbox_category('PURCHASE') returns {result.value}")
-    
+        print(f"PASS: classify_from_mailbox_category('PURCHASE', evidence=True) returns {result.value}")
+
     def test_mailbox_unknown_returns_other(self):
-        """When mailbox_category is unknown, returns OTHER"""
+        """Unknown mailbox category always returns OTHER."""
         from workflows.core.engine import DocumentClassifier, DocType
-        
-        result = DocumentClassifier.classify_from_mailbox_category("UNKNOWN")
+
+        result = DocumentClassifier.classify_from_mailbox_category("UNKNOWN", evidence=True)
         assert result == DocType.OTHER, f"Expected OTHER but got {result}"
         print(f"PASS: classify_from_mailbox_category('UNKNOWN') returns {result.value}")
 
@@ -109,16 +120,25 @@ class TestSuggestedTypeSyncLogic:
         print("PASS: Sync logic exists in _internal_intake_document")
     
     def test_sync_logic_in_intake_document_function(self):
-        """Verify sync logic exists in intake_document function (second intake)"""
+        """Verify sync logic exists in BOTH authoritative intake locations.
+        After Phase 3 Step 4b, the second intake was extracted from server.py
+        into services/document_handlers.intake_document_from_bytes, so the
+        sync pattern lives once per file."""
         with open('/app/backend/server.py', 'r') as f:
-            content = f.read()
-        
-        # Count occurrences of the sync logic - should appear twice (both intake functions)
+            server_content = f.read()
+        with open('/app/backend/services/document_handlers.py', 'r') as f:
+            handlers_content = f.read()
+
         sync_pattern = 'if suggested_type in ("Unknown", "Other", "Unknown_Document") and new_suggested != suggested_type:'
-        occurrences = content.count(sync_pattern)
-        assert occurrences >= 2, \
-            f"Sync logic should appear in both intake functions, found {occurrences} occurrences"
-        print(f"PASS: Sync logic appears {occurrences} times (in both intake functions)")
+        server_count = server_content.count(sync_pattern)
+        handlers_count = handlers_content.count(sync_pattern)
+        total = server_count + handlers_count
+        assert total >= 2, (
+            f"Sync logic should appear at least twice across server.py + "
+            f"services/document_handlers.py; found server={server_count}, "
+            f"handlers={handlers_count}"
+        )
+        print(f"PASS: Sync logic appears {total} times (server={server_count}, handlers={handlers_count})")
     
     def test_sync_only_when_ai_fails(self):
         """Verify sync only happens when suggested_type is Unknown/Other"""
@@ -168,13 +188,17 @@ class TestAutoClearSkipLogic:
     """Test auto-clear skip uses both suggested_type and doc_type_value"""
     
     def test_auto_clear_skip_checks_both_fields(self):
-        """Verify auto-clear skip checks both suggested_type and doc_type_value"""
+        """Verify auto-clear skip checks both suggested_type and doc_type_value.
+        Phase 3 Step 4b moved this check from server.py into
+        services/document_handlers.py, so we look in either authoritative
+        location."""
         with open('/app/backend/server.py', 'r') as f:
-            content = f.read()
-        
-        # The is_ap_invoice check should use both suggested_type and doc_type_value
-        assert 'is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice") or doc_type_value == "AP_INVOICE"' in content, \
-            "is_ap_invoice should check both suggested_type and doc_type_value"
+            server_content = f.read()
+        with open('/app/backend/services/document_handlers.py', 'r') as f:
+            handlers_content = f.read()
+        pattern = 'is_ap_invoice = suggested_type in ("AP_Invoice", "AP Invoice") or doc_type_value == "AP_INVOICE"'
+        assert pattern in server_content or pattern in handlers_content, \
+            "is_ap_invoice should check both suggested_type and doc_type_value (in server.py or services/document_handlers.py)"
         print("PASS: Auto-clear skip checks both suggested_type and doc_type_value")
     
     def test_auto_clear_skip_message(self):

@@ -60,6 +60,63 @@ _mailbox_last_poll_times = {}
 
 
 # =========================================================================
+# Mailbox category normalization
+# =========================================================================
+# Source-lane synonyms — keep mapping conservative. We only normalize known
+# aliases; anything else is passed through verbatim with a warning so the
+# operator can see whether mailbox_sources has a typo or a new lane that
+# downstream code does not yet handle. ``mailbox_category`` represents the
+# intake LANE the document arrived through; it is NOT a forced doc_type.
+_MAILBOX_CATEGORY_ALIASES = {
+    "BILLING": "AP",
+    "ACCOUNTS PAYABLE": "AP",
+    "ACCOUNTS_PAYABLE": "AP",
+    "AP_INTAKE": "AP",
+    "AP": "AP",
+    "AR": "Sales",
+    "ACCOUNTS RECEIVABLE": "Sales",
+    "ACCOUNTS_RECEIVABLE": "Sales",
+    "SALES": "Sales",
+    "PURCHASE": "Purchase",
+    "PURCHASING": "Purchase",
+    "PO": "Purchase",
+    "OPERATIONS": "Operations",
+    "OPS": "Operations",
+    "WAREHOUSE": "Operations",
+    "SHIPPING": "Operations",
+}
+
+_KNOWN_CATEGORIES = {"AP", "Sales", "Purchase", "Operations"}
+
+
+def normalize_mailbox_category(raw: Optional[str]) -> Optional[str]:
+    """Normalize a mailbox-source category value.
+
+    Maps known synonyms (Billing → AP, AR → Sales, etc.) so downstream code
+    sees a stable canonical lane name regardless of how the operator spelled
+    it in ``mailbox_sources``. Unknown values pass through unchanged but are
+    logged at WARNING level so misconfigurations surface immediately.
+    """
+    if raw is None:
+        return None
+    key = str(raw).strip()
+    if not key:
+        return None
+    canon = _MAILBOX_CATEGORY_ALIASES.get(key.upper())
+    if canon:
+        return canon
+    if key in _KNOWN_CATEGORIES:
+        return key
+    logger.warning(
+        "[MailboxCategory] Unknown mailbox category %r encountered; "
+        "passing through verbatim. Add an alias in normalize_mailbox_category "
+        "or fix the mailbox_sources record if this is a typo.",
+        raw,
+    )
+    return key
+
+
+# =========================================================================
 # Email Watcher Config
 # =========================================================================
 
@@ -499,11 +556,16 @@ async def poll_mailbox_for_attachments():
                         try:
                             # Lazy import to avoid circular dependency
                             from services.document_handlers import intake_document_from_bytes
+                            resolved_category = normalize_mailbox_category("AP")
+                            logger.info(
+                                "[Intake:legacy_ap] mailbox=%s configured_category=%s resolved_category=%s filename=%s",
+                                EMAIL_POLLING_USER, "AP", resolved_category, filename,
+                            )
                             intake_result = await intake_document_from_bytes(
                                 file_content=content_bytes, filename=filename,
                                 content_type=content_type, source="email_poll",
                                 email_id=msg_id, subject=subject, sender=sender,
-                                mailbox_category="AP",
+                                mailbox_category=resolved_category,
                             )
                             doc_id = intake_result.get("document", {}).get("id")
                             await record_mail_intake_log(
@@ -865,11 +927,16 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
 
                         # Lazy import to avoid circular dependency
                         from services.document_handlers import intake_document_from_bytes
+                        resolved_category = normalize_mailbox_category(default_category)
+                        logger.info(
+                            "[Intake:dynamic] mailbox_id=%s mailbox=%s configured_category=%s resolved_category=%s filename=%s",
+                            source_id, mailbox_address, default_category, resolved_category, filename,
+                        )
                         result = await intake_document_from_bytes(
                             file_content=content_bytes, filename=filename,
                             source="email", sender=sender, subject=subject,
                             email_id=internet_msg_id, content_type=content_type,
-                            mailbox_category=default_category,
+                            mailbox_category=resolved_category,
                         )
 
                         doc_id = (

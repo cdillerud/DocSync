@@ -1846,3 +1846,63 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 ### Validated
 - CSV-mode regression on the existing synthetic fixtures: still 3 exact_match + 1 likely_match (1 previously_missed). Linter clean.
 - Graph-pull recursion must be exercised on the prod VM. Operator one-liner unchanged in shape; just re-run.
+
+## 2026-05-02 — Mailbox-Category Propagation + Classification Safety
+
+### Root cause
+- `classify_from_mailbox_category("AP")` unconditionally returned `DocType.AP_INVOICE`. Combined with the deterministic-first pipeline in `classify_document_type()` (mailbox step ran BEFORE AI), every attachment to an AP-lane mailbox — including non-invoice docs sent to billing@ — was being force-classified as `AP_INVOICE`. The dynamic mailbox poller does propagate `mailbox_sources.category` correctly to `mailbox_category` on `hub_documents`; the bug was downstream in the classifier treating the lane tag as proof of doc type, not as source context.
+
+### Fix (surgical, no architectural rewrite)
+- `backend/workflows/core/engine.py` — `classify_from_mailbox_category(category, evidence: bool = False)`. Default behavior now returns `DocType.OTHER`. Lane-implied type only fires when the caller passes `evidence=True`, indicating extracted fields support the lane.
+- `backend/services/classification_helpers.py` —
+  - Added `_has_lane_evidence(mailbox_category, extracted_fields)` (AP needs invoice_number / vendor / amount / due_date / bill_to / invoice_date; Sales needs customer/invoice/SO/PO; Purchase needs PO/vendor/line_items; Operations: no auto-promote).
+  - Step 1c now passes `evidence=…` and uses classification_method `"mailbox:{cat}+evidence"` so audit trails distinguish evidence-backed lane classifications from the legacy unconditional path.
+  - Added a post-AI **AP-lane review fallback**: when nothing definitively classifies and `mailbox_category ∈ {AP, Sales, Purchase}`, the result carries `mailbox_lane_needs_review=True` and `classification_method="mailbox_lane:{cat}:needs_review"`. doc_type stays `OTHER` (no force-classification), but downstream routing/derive_workflow_status can hold the doc in the AP review lane instead of dropping it into Operations.
+- `backend/services/email_polling_service.py` —
+  - Added `normalize_mailbox_category()` with conservative alias map (`Billing → AP`, `Accounts Payable → AP`, `AR → Sales`, `Accounts Receivable → Sales`, `Purchasing/PO → Purchase`, `Warehouse/Shipping/Ops → Operations`). Unknown values pass through verbatim with a WARNING log so misconfigurations surface immediately.
+  - Both intake call sites (legacy `poll_mailbox_for_attachments` and dynamic `poll_mailbox_for_documents`) now log `mailbox_id`, `mailbox`, `configured_category`, `resolved_category`, `filename` immediately before `intake_document_from_bytes`. The legacy hardcoded `"AP"` is now routed through `normalize_mailbox_category()` for consistency.
+
+### What is **not** changed
+- AP posting path, SharePoint routing, AP auto-post service, vendor matching, BC validation, doc_handlers byte-parity (intake body unchanged).
+- Operations-lane documents (warehouse/shipping). Lane tag remains; nothing promotes them.
+- Existing AP_INVOICE intake when there IS invoice evidence — still classifies as AP_INVOICE via Step 1c (now with `+evidence` audit suffix).
+
+### Tests
+- New: `backend/tests/test_mailbox_category_propagation.py` — 18 tests covering normalize_mailbox_category alias map (Billing→AP, AR→Sales, Operations passthrough, blanks, unknown passthrough), `_has_lane_evidence` for AP/Sales/Purchase/Operations, classify_document_type integration (clear AP invoice → AP_INVOICE; non-invoice on billing → NOT auto-forced + mailbox_lane_needs_review=True; Operations doc → no promotion), and DocumentClassifier defaults.
+- Updated: `backend/tests/test_suggested_type_sync.py` — replaced legacy assertion that mailbox-AP unconditionally returns AP_INVOICE with the new evidence-gated behavior; refreshed two source-grep tests that pinned legacy server.py line ranges (sync logic and is_ap_invoice check) to look in both `server.py` and `services/document_handlers.py` after the Phase 3 Step 4b carve-out.
+
+### Test results (local)
+- `pytest backend/tests/test_mailbox_category_propagation.py` → 18/18 PASS.
+- `pytest backend/tests/test_suggested_type_sync.py backend/tests/test_email_polling_dedup.py backend/tests/test_mailbox_category_propagation.py` → 48/48 PASS.
+- Pre-existing failures unrelated to this fix (verified by re-running on stashed `main`): `test_intake_caller_rewire_parity::test_openapi_path_count_858` (route-count drift, 875 vs pinned 858); `test_helper_substitution_4c2_parity::test_post_4c2_body_sha256_matches_step_4b_baseline` (intake-body sha drift from prior unrelated commits); HTTP-based phase7 / classification_bootstrap tests that need a live backend URL.
+
+### Prod verification commands
+
+Confirm `mailbox_sources.category` for the three lanes:
+
+    docker compose exec -T backend python -m scripts.bootstrap_learning --noop 2>/dev/null; docker compose exec -T backend python -u -c "import asyncio,os,json;from motor.motor_asyncio import AsyncIOMotorClient
+async def m():
+    db=AsyncIOMotorClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+    rows=await db.mailbox_sources.find({},{'_id':0,'mailbox_id':1,'email_address':1,'category':1,'enabled':1}).to_list(50)
+    print(json.dumps(rows,default=str,indent=2))
+asyncio.run(m())"
+
+Confirm a fresh ingest from billing@ persists `mailbox_category="AP"` (after this fix is deployed and a poll cycle runs):
+
+    docker compose exec -T backend python -u -c "import asyncio,os,json;from motor.motor_asyncio import AsyncIOMotorClient
+async def m():
+    db=AsyncIOMotorClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]
+    cur=db.hub_documents.find({'email_sender':{'$exists':True},'mailbox_category':{'$exists':True}}).sort('created_utc',-1).limit(20)
+    rows=await cur.to_list(20)
+    out=[{'id':r.get('id'),'file_name':r.get('file_name'),'mailbox_category':r.get('mailbox_category'),'doc_type':r.get('doc_type'),'classification_method':r.get('classification_method')} for r in rows]
+    print(json.dumps(out,default=str,indent=2))
+asyncio.run(m())"
+
+Tail logs to see the new structured intake line:
+
+    docker compose logs -f backend --tail 200 | grep -E '\[Intake:(legacy_ap|dynamic)\]'
+
+### Expected outcome
+- Documents ingested from billing@gamerpackaging.com persist `mailbox_category="AP"` as source context.
+- Only docs with invoice-like evidence classify as `AP_INVOICE`. Non-invoice or mis-sent docs stay `doc_type=OTHER` with `mailbox_lane_needs_review=True` and a `mailbox_lane:AP:needs_review` classification_method, so they go to AP review rather than being silently mislabeled or dropped into Operations.
+- Operations-lane mailboxes (whdocuments@) continue to persist `mailbox_category="Operations"` with no auto-promotion.

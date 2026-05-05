@@ -64,15 +64,31 @@ async def classify_document_type(
                 result["classification_method"] = f"square9:{square9_workflow}"
                 logger.info("Deterministic classification: Square9 workflow %s -> %s", square9_workflow, doc_type.value)
 
-    # Step 1c: Check mailbox category
+    # Step 1c: Check mailbox category (source-lane context, requires evidence)
+    # Mailbox category is *intake context*, not absolute proof of doc type.
+    # We only let it deterministically classify when the extracted fields show
+    # invoice/order-like evidence consistent with the mailbox lane. Without
+    # evidence, we leave doc_type=OTHER and let AI run; if AI also says OTHER,
+    # the AP-lane fallback below will route the document to NeedsReview rather
+    # than letting it land in a non-AP folder.
     if result["doc_type"] == DocType.OTHER.value:
         mailbox_category = metadata.get("mailbox_category") or document.get("mailbox_category")
         if mailbox_category:
-            doc_type = DocumentClassifier.classify_from_mailbox_category(mailbox_category)
+            evidence = _has_lane_evidence(mailbox_category, extracted_fields)
+            doc_type = DocumentClassifier.classify_from_mailbox_category(mailbox_category, evidence=evidence)
             if doc_type != DocType.OTHER:
                 result["doc_type"] = doc_type.value
-                result["classification_method"] = f"mailbox:{mailbox_category}"
-                logger.info("Deterministic classification: Mailbox category %s -> %s", mailbox_category, doc_type.value)
+                result["classification_method"] = f"mailbox:{mailbox_category}+evidence"
+                logger.info(
+                    "Deterministic classification: Mailbox category %s + evidence -> %s",
+                    mailbox_category, doc_type.value,
+                )
+            else:
+                logger.info(
+                    "Mailbox category %s noted as source context only (no invoice-like evidence yet); "
+                    "deferring to AI / review",
+                    mailbox_category,
+                )
 
     # Step 1d: Check legacy suggested_job_type
     if result["doc_type"] == DocType.OTHER.value and suggested_type and suggested_type != "Unknown":
@@ -111,7 +127,67 @@ async def classify_document_type(
             result["ai_classification"] = {"error": str(e), "timestamp": datetime.now(timezone.utc).isoformat()}
 
     result["category"] = get_category_for_doc_type(result["doc_type"])
+
+    # AP-lane review fallback: if the document came in through an AP-style
+    # mailbox lane and nothing — neither deterministic rules nor AI — was able
+    # to definitively classify it, keep the document inside the AP review lane
+    # rather than letting it land in a generic Operations folder. doc_type
+    # stays OTHER (we are NOT forcing AP_INVOICE without evidence), but a hint
+    # is surfaced so downstream routing/derive_workflow_status can hold it for
+    # human review instead of mis-routing.
+    if result["doc_type"] == DocType.OTHER.value:
+        mailbox_category = (metadata.get("mailbox_category")
+                            or document.get("mailbox_category") or "")
+        if (mailbox_category or "").upper() in ("AP", "SALES", "PURCHASE"):
+            result["mailbox_lane_needs_review"] = True
+            result["classification_method"] = f"mailbox_lane:{mailbox_category}:needs_review"
+            logger.info(
+                "Document on %s mailbox lane could not be definitively classified; "
+                "flagging for AP-lane review instead of generic Operations routing",
+                mailbox_category,
+            )
+
     return result
+
+
+# ---------------------------------------------------------------------------
+# Lane-evidence helpers
+# ---------------------------------------------------------------------------
+
+def _has_lane_evidence(mailbox_category: str, extracted_fields: Dict) -> bool:
+    """Return True when extracted fields support the mailbox lane's doc type.
+
+    AP lane: needs at least one of invoice_number, amount/total/subtotal,
+    vendor, due_date, bill_to. Sales / Purchase lanes: needs invoice/PO
+    number or customer/vendor signal. The bar is intentionally low — this is
+    confirming "yes, this looks roughly like the kind of doc this mailbox
+    handles" rather than gold-standard validation. Hard validation is the
+    job of the dedicated AP/Sales/Purchase services downstream.
+    """
+    if not extracted_fields or not isinstance(extracted_fields, dict):
+        return False
+    cat = (mailbox_category or "").upper()
+    fields = {k: v for k, v in extracted_fields.items() if v not in (None, "", [], {})}
+    if not fields:
+        return False
+    if cat == "AP":
+        signals = (
+            "invoice_number", "vendor", "vendor_name", "vendor_raw",
+            "amount", "total", "subtotal", "amount_due",
+            "due_date", "bill_to", "invoice_date",
+        )
+        return any(k in fields for k in signals)
+    if cat == "SALES":
+        signals = (
+            "invoice_number", "customer", "customer_name", "customer_po",
+            "ship_to", "amount", "total", "so_number",
+        )
+        return any(k in fields for k in signals)
+    if cat == "PURCHASE":
+        signals = ("po_number", "vendor", "vendor_name", "vendor_raw",
+                   "ship_to", "line_items")
+        return any(k in fields for k in signals)
+    return False
 
 
 def get_category_for_doc_type(doc_type: str) -> str:

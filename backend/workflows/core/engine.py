@@ -950,8 +950,21 @@ class DocumentClassifier:
         return DocType.OTHER
     
     @staticmethod
-    def classify_from_mailbox_category(category: str) -> DocType:
-        """Classify based on mailbox category (AP, Sales, etc.)."""
+    def classify_from_mailbox_category(category: str, evidence: bool = False) -> DocType:
+        """Classify based on mailbox category (AP, Sales, etc.).
+
+        Mailbox category is **source-lane context**, not absolute proof of doc
+        type. By default this returns DocType.OTHER unless ``evidence=True`` is
+        passed by the caller, indicating that other extracted fields support
+        the mailbox-implied type (e.g. AP-lane attachment that has invoice-like
+        evidence such as an invoice number, vendor, or amount).
+
+        Callers that still want the legacy "force AP_INVOICE for AP mailbox"
+        behavior must opt in explicitly by passing ``evidence=True`` after
+        confirming the document looks like an invoice.
+        """
+        if not evidence:
+            return DocType.OTHER
         category_upper = (category or "").upper()
         if category_upper == "AP":
             return DocType.AP_INVOICE

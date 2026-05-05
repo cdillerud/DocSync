@@ -86,7 +86,7 @@ no_match
 
 Operator usage (preferred — single command, no manual export)
 -------------------------------------------------------------
-    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare \
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare \
         --graph-pull \
         --test-site-path "/sites/GPI-DocumentHub-Test" \
         --test-folder-path "Accounts Payable/Temp Folder" \
@@ -95,7 +95,7 @@ Operator usage (preferred — single command, no manual export)
 
 Operator usage (CSV fallback — only when Graph creds are unavailable)
 --------------------------------------------------------------------
-    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare \
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare \
         --prod-csv prod_reports/sp_prod_ap_temp_listing.csv \
         --test-csv prod_reports/sp_test_ap_temp_listing.csv \
         --prior-strict-csv prod_reports/sp_strict_match_prev.csv \

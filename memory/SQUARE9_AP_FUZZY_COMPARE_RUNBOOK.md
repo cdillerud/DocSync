@@ -72,7 +72,7 @@ this mode only when Graph creds are unavailable.
 Bare line. Replace the test site path and folder path with the
 real test-environment counterpart of the AP Temp Folder:
 
-    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
 
 Optional: pass `--prior-strict-csv prod_reports/sp_strict_match_prev.csv`
 to surface "previously missed" rows in the stdout summary.
@@ -89,7 +89,7 @@ production AP destination):
 
 Bare line:
 
-    docker compose exec -T backend python -m backend.scripts.sharepoint_ap_compare --prod-csv prod_reports/sp_prod_ap_temp_listing.csv --test-csv prod_reports/sp_test_ap_temp_listing.csv --prior-strict-csv prod_reports/sp_strict_match_prev.csv --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare --prod-csv prod_reports/sp_prod_ap_temp_listing.csv --test-csv prod_reports/sp_test_ap_temp_listing.csv --prior-strict-csv prod_reports/sp_strict_match_prev.csv --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25
 
 CSVs must have `name,size,modified` columns at minimum.
 

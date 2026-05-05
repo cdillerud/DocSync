@@ -1819,3 +1819,12 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### Operator next step
 - Run the bare-line `--graph-pull` invocation in the runbook with the actual test-environment site path and folder path. Output CSV and stdout summary are identical in shape to CSV mode, so the existing acceptance-checklist E5b evidence flow is unchanged.
+
+## 2026-05-02 — Fuzzy Comparator Invocation Path Corrected
+
+### Fixed
+- Operator runbook + script docstring referenced `python -m backend.scripts.sharepoint_ap_compare`. Container WORKDIR is `/app/backend`, so the existing repo convention (matches `scripts.contracts_import_navigator`, `scripts.contracts_dryrun_normalizer`, etc.) is `python -m scripts.sharepoint_ap_compare`. Updated `/app/memory/SQUARE9_AP_FUZZY_COMPARE_RUNBOOK.md` and the script's own docstring. No script logic change.
+
+### Correct one-liner
+
+    docker compose exec -T backend python -m scripts.sharepoint_ap_compare --graph-pull --test-site-path "/sites/GPI-DocumentHub-Test" --test-folder-path "Accounts Payable/Temp Folder" --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25

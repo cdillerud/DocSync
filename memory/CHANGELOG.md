@@ -1775,3 +1775,25 @@ Brokers (like Gamer Packaging) email inventory reports for their downstream cust
 
 ### No code or feature changes
 - Real next step remains the 1–2 day shadow / UAT window.
+
+## 2026-05-02 — SharePoint AP Folder Fuzzy Comparator
+
+### Added
+- `backend/scripts/sharepoint_ap_compare.py` — new, stdlib-only fuzzy comparator. Replaces strict filename matching with a multi-signal scorer:
+  - Aggressive filename normalization (diacritics, separators, common noise suffixes such as `DO NOT PAY` / `BOL` / `copy` / `Final` / `scan`).
+  - Invoice/PO/reference token extraction with digit-required capture and stop-word filtering.
+  - Vendor token overlap.
+  - File-size equality and ±1% / ±5% bands.
+  - Modified-date proximity in days.
+  - SequenceMatcher ratio backstop on the normalized filename.
+  - Bucketing: `exact_match` / `likely_match` / `possible_match` / `no_match`, with a `previously_missed` flag when a prior strict-match CSV is supplied.
+- `/app/memory/SQUARE9_AP_FUZZY_COMPARE_RUNBOOK.md` — operator runbook with bare-line invocation, input CSV schema, output interpretation, and tuning surface.
+
+### Validated locally (preview env)
+- Synthetic prod-vs-test fixtures with the four documented filename divergence patterns (`DO NOT PAY` suffix, separator swap, token reorder, `Final` suffix). Strict matcher would return 0; fuzzy comparator returns 3 `exact_match` + 1 `likely_match`, all flagged `previously_missed`. Linter clean.
+
+### Operator next step
+- Dump prod and test AP Temp Folder listings to CSV (`name,size,modified` required), then run the bare-line invocation in the runbook to produce `prod_reports/sp_ap_compare_fuzzy.csv` and the stdout summary. Feed result counts into acceptance checklist evidence E5b.
+
+### No backend / frontend behavior changes
+- This is a read-only diagnostic; no API, schema, or service changes.

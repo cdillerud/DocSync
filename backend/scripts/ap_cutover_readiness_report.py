@@ -94,24 +94,32 @@ def _override_set(doc: Dict[str, Any]) -> bool:
     )
 
 
-async def _fetch(mailbox: str, since_hours: int, limit: int) -> List[Dict[str, Any]]:
+async def _fetch(mailbox: Optional[str], since_hours: int, limit: int,
+                 ap_only: bool) -> List[Dict[str, Any]]:
     client = AsyncIOMotorClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
-    query = {
-        "$and": [
-            {"$or": [
-                {"email_sender": {"$regex": mailbox, "$options": "i"}},
-                {"sender": {"$regex": mailbox, "$options": "i"}},
-                {"intake_email_to": {"$regex": mailbox, "$options": "i"}},
-            ]},
-            {"$or": [
-                {"created_utc": {"$gte": cutoff}},
-                {"created_at": {"$gte": cutoff}},
-                {"intake_at": {"$gte": cutoff}},
-            ]},
-        ]
-    }
+    # `created_utc` is persisted as an ISO-8601 string in hub_documents.
+    # Compare string-against-string so MongoDB does a lexicographic match
+    # (ISO-8601 sorts correctly as ASCII). datetime objects against a
+    # string field always returns 0 due to BSON type-mismatch.
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    date_clause = {"$or": [
+        {"created_utc": {"$gte": cutoff_iso}},
+        {"created_at": {"$gte": cutoff_iso}},
+        {"intake_at": {"$gte": cutoff_iso}},
+    ]}
+    if ap_only:
+        # AP lane is identified by mailbox_category == "AP", which is set
+        # by email_polling_service when a doc lands in the billing@ inbox.
+        # billing@gamerpackaging.com is a destination, not a sender.
+        scope_clause: Dict[str, Any] = {"mailbox_category": "AP"}
+    else:
+        scope_clause = {"$or": [
+            {"email_sender": {"$regex": mailbox, "$options": "i"}},
+            {"sender": {"$regex": mailbox, "$options": "i"}},
+            {"intake_email_to": {"$regex": mailbox, "$options": "i"}},
+        ]}
+    query = {"$and": [scope_clause, date_clause]}
     projection = {
         "_id": 0,
         "id": 1, "file_name": 1, "email_sender": 1, "email_subject": 1,
@@ -339,8 +347,9 @@ def _print(report: Dict[str, Any], exit_code: int) -> None:
     print()
 
 
-async def _run(mailbox: str, since_hours: int, limit: int, as_json: bool) -> int:
-    rows = await _fetch(mailbox, since_hours, limit)
+async def _run(mailbox: Optional[str], since_hours: int, limit: int,
+               ap_only: bool, as_json: bool) -> int:
+    rows = await _fetch(mailbox, since_hours, limit, ap_only)
     report, code = _build_report(rows)
     if as_json:
         print(json.dumps(report, default=str, indent=2))
@@ -351,12 +360,20 @@ async def _run(mailbox: str, since_hours: int, limit: int, as_json: bool) -> int
 
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="AP cutover readiness report.")
-    ap.add_argument("--mailbox", default=DEFAULT_BILLING_MAILBOX)
+    ap.add_argument("--mailbox", default=None,
+                    help="Sender email regex (only used with --no-ap-only).")
     ap.add_argument("--since-hours", type=int, default=48)
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--ap-only", dest="ap_only", action="store_true", default=True,
+                    help="Filter on mailbox_category=='AP' (default, recommended).")
+    ap.add_argument("--no-ap-only", dest="ap_only", action="store_false",
+                    help="Disable AP-category scope; falls back to --mailbox sender regex.")
     args = ap.parse_args(argv)
-    return asyncio.run(_run(args.mailbox, args.since_hours, args.limit, args.json))
+    if not args.ap_only and not args.mailbox:
+        ap.error("--no-ap-only requires --mailbox EMAIL")
+    return asyncio.run(_run(args.mailbox, args.since_hours, args.limit,
+                            args.ap_only, args.json))
 
 
 if __name__ == "__main__":

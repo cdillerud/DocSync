@@ -20,12 +20,6 @@ def make_doc(doc_type="AP_Invoice", vendor="acme corp", po="PO12345",
         "extracted_fields": {"po_number": po, "order_number": po},
         "file_name": file_name,
         "is_international": is_international,
-        # Square9-parity guard: AP-lane invoices stage in AP Temp Folder by
-        # default. These S9-mirroring routing tests assert the *post-override*
-        # detailed structure (Dropship/Warehouse/Canpack/Credit Memos/etc.),
-        # so they explicitly opt into that path. The auto-ingest staging
-        # behavior is asserted by tests/test_ap_routing_square9_parity.py.
-        "accounting_routing_override": True,
     }
     if bc_po_resolved is not None:
         doc["bc_po_resolved"] = bc_po_resolved
@@ -36,10 +30,15 @@ class TestS9UnresolvedPORouting:
     """S9 workflow: PO not found in BC → Miscellaneous."""
 
     def test_ap_invoice_unresolved_po_goes_to_miscellaneous(self):
+        """AP invoice with PO not found in BC = weak/uncertain → AP Temp
+        Folder for review (was Misc/need-approval; new wrapper redirects
+        AP-lane weak fallbacks to Temp Folder so AP team reviews them)."""
         doc = make_doc(po="PO99999", bc_po_resolved=False)
         path, reason, _ = determine_folder_path(doc)
-        assert "Miscellaneous" in path
-        assert "need approval" in path
+        assert path == "Accounts Payable/Temp Folder", (
+            f"AP-lane unresolved-PO doc should redirect to AP Temp Folder, got: {path}"
+        )
+        assert "weak-fallback" in reason or "AP review" in reason
 
     def test_ap_invoice_resolved_po_goes_to_dropship(self):
         doc = make_doc(po="PO12345", bc_po_resolved=True)
@@ -67,10 +66,13 @@ class TestS9UnresolvedPORouting:
         assert "Miscellaneous" not in path
 
     def test_freight_vendor_unresolved_po_goes_to_miscellaneous(self):
-        """S9: PO check comes BEFORE freight vendor check."""
+        """Freight vendor + unresolved PO = weak (BC contradicts vendor
+        signal) → AP Temp Folder for review, not silently to Misc."""
         doc = make_doc(vendor="TUMALOC", po="GP111025-CREAMSODA", bc_po_resolved=False)
-        path, reason, _ = determine_folder_path(doc)
-        assert "Miscellaneous" in path
+        path, _, _ = determine_folder_path(doc)
+        assert path == "Accounts Payable/Temp Folder", (
+            f"AP-lane freight+unresolved-PO should redirect to AP Temp Folder, got: {path}"
+        )
 
     def test_freight_vendor_resolved_po_goes_to_freight(self):
         """Freight vendor with valid PO → Freight Issues."""
@@ -95,6 +97,9 @@ class TestShippingDocS9Routing:
     """S9 workflow also applies to shipping documents."""
 
     def test_shipping_doc_unresolved_po_goes_to_miscellaneous(self):
+        """Shipping_Document with unresolved PO is non-AP-lane → still
+        keeps the legacy Misc routing (only AP-lane docs are redirected
+        to Temp Folder by the weak-fallback wrapper)."""
         doc = make_doc(doc_type="Shipping_Document", po="158491", bc_po_resolved=False)
         path, _, _ = determine_folder_path(doc)
         assert "Miscellaneous" in path

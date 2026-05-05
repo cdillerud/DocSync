@@ -1,27 +1,31 @@
 """
-Routing regression test for AP-lane Square9 parity.
+Routing regression test — Hub auto-classification + auto-routing parity.
 
 Locks in the corrected behavior in services.folder_routing_service:
 
-1. AP-lane invoices (doc_type AP_INVOICE / AP_Invoice / AP Invoice) without
-   accounting_routing_override / approved=True default to the AP Temp Folder
-   (Square9 parity destination).
-2. AP-lane invoices NEVER auto-route into Operations-style folders
-   (Warehouse Reports, Dropship*, Warehouse*, Freight Issues, Vendor Credit
-   Memos, Miscellaneous) on the auto-ingest path.
-3. Documents flagged mailbox_lane_needs_review=True on the AP lane go to
-   the AP review subfolder, not Misc / Operations.
-4. accounting_routing_override=True (or approved=True) restores the
-   detailed accounting structure (e.g. Canpack vendor → Dropship/Canpack).
-5. Non-AP documents (Sales_Order, Shipping_Document, Credit_Memo with no
-   AP doc type) keep their existing routing.
+1. High-confidence AP invoices auto-route to their final accounting folder
+   without manual accounting approval (Canpack vendor → Dropship/Canpack;
+   credit-memo description → Vendor Credit Memos; WH_ pattern → Warehouse;
+   freight vendor → Freight Issues; resolved BC PO → Dropship/Warehouse;
+   etc.). No accounting_routing_override needed.
+
+2. Weak-fallback AP-lane routings (rule chain ends in "Default routing for
+   ..." or `Misc Invoices - need approval`) are redirected to the AP Temp
+   Folder for review, so AP-lane docs never sit unstructured in Misc.
+
+3. Documents flagged mailbox_lane_needs_review=True (set by classification
+   for non-invoice docs sent to billing@) go to the AP review subfolder,
+   not the generic Operations folders.
+
+4. Non-AP documents (Sales_Order, Shipping_Document, Inventory_Report,
+   etc.) keep their existing routing — the weak-fallback wrapper only
+   applies to AP-lane docs.
 """
 
 from services.folder_routing_service import (
     determine_folder_path,
     AP_STAGING_FOLDER,
     AP_LANE_REVIEW_FOLDER,
-    _FORBIDDEN_AP_FOLDER_ROOTS,
 )
 
 
@@ -30,118 +34,140 @@ def _route(doc, **kwargs):
 
 
 # ---------------------------------------------------------------------------
-# 1. AP-lane staging defaults
+# 1. High-confidence AP invoices auto-route to FINAL folder (no override)
 # ---------------------------------------------------------------------------
 
-class TestAPStagingDefault:
-    def test_ap_invoice_uppercase_doc_type_stages_to_temp_folder(self):
-        path, reason, _ = _route({
-            "doc_type": "AP_INVOICE",
-            "document_type": "AP_Invoice",
-            "suggested_job_type": "AP_Invoice",
-            "mailbox_category": "AP",
-        })
-        assert path == AP_STAGING_FOLDER
-        assert "AP Temp Folder" in reason
+class TestHighConfidenceAPAutoRoutes:
 
-    def test_ap_invoice_with_canpack_vendor_still_stages(self):
-        """Canpack rule used to fire first; staging guard now overrides
-        until accounting opts in via accounting_routing_override=True."""
-        path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
+    def test_canpack_vendor_routes_to_canpack_subfolder(self):
+        """Canpack rule is a strong vendor signal → Dropship/Canpack
+        directly. No accounting override. No staging."""
+        path, reason, _ = _route({
             "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
             "vendor_canonical": "Canpack USA",
             "mailbox_category": "AP",
             "extracted_fields": {"description": "Canpack delivery"},
         })
-        assert path == AP_STAGING_FOLDER, (
-            "AP-lane Canpack invoice must stage in AP Temp Folder by default; "
-            "Canpack-specific routing only after accounting override"
+        assert path.startswith("Dropship Not International Documents/Canpack"), (
+            f"Canpack AP invoice must auto-route to Dropship/Canpack; got {path}"
         )
+        assert path != AP_STAGING_FOLDER
 
-    def test_ap_invoice_with_freight_carrier_vendor_still_stages(self):
-        """Freight Issues used to fire when vendor matched UPS/FedEx/etc.
-        Now AP-lane invoices stage first regardless of vendor lookup."""
+    def test_credit_memo_description_routes_to_vendor_credit_memos(self):
+        """Description-keyword evidence is enough to land in Vendor Credit
+        Memos directly."""
         path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
             "document_type": "AP_Invoice",
-            "vendor_canonical": "UPS",
-            "mailbox_category": "AP",
-        })
-        assert path == AP_STAGING_FOLDER
-
-    def test_ap_invoice_with_credit_memo_keywords_still_stages(self):
-        path, _, _ = _route({
             "doc_type": "AP_INVOICE",
-            "document_type": "AP_Invoice",
-            "mailbox_category": "AP",
-            "extracted_fields": {"description": "Credit memo for return"},
-        })
-        assert path == AP_STAGING_FOLDER
-
-
-# ---------------------------------------------------------------------------
-# 2. Forbidden destinations on auto-ingest
-# ---------------------------------------------------------------------------
-
-class TestAPInvoiceForbiddenDestinations:
-    """No path returned for an auto-ingest AP_INVOICE may live under any of
-    the Operations-style folder roots."""
-
-    def _assert_not_forbidden(self, path):
-        assert not any(path.startswith(root) for root in _FORBIDDEN_AP_FOLDER_ROOTS), (
-            f"AP-lane auto-ingest must not land in {path!r}"
-        )
-
-    def test_ap_invoice_canpack_not_in_dropship(self):
-        path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
-            "document_type": "AP_Invoice",
-            "vendor_canonical": "Canpack USA",
-            "mailbox_category": "AP",
-        })
-        self._assert_not_forbidden(path)
-
-    def test_ap_invoice_freight_vendor_not_in_freight_issues(self):
-        path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
-            "document_type": "AP_Invoice",
-            "vendor_canonical": "FedEx Freight",
-            "mailbox_category": "AP",
-        })
-        self._assert_not_forbidden(path)
-
-    def test_ap_invoice_credit_memo_not_in_vendor_credit_memos(self):
-        path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
-            "document_type": "AP_Invoice",
+            "vendor_canonical": "Anchor Glass",
             "mailbox_category": "AP",
             "extracted_fields": {"description": "credit memo refund adjustment"},
         })
-        self._assert_not_forbidden(path)
+        assert path.startswith("Vendor Credit Memos"), (
+            f"Description-evidence credit memo must auto-route to Vendor "
+            f"Credit Memos; got {path}"
+        )
 
-    def test_ap_invoice_warehouse_order_not_in_warehouse_documents(self):
+    def test_wh_filename_pattern_routes_to_warehouse(self):
+        """WH_ filename + vendor + PO is high-confidence warehouse evidence
+        → Warehouse Not International, no override."""
         path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
+            "file_name": "WH_112320_Ball_PO88701_031192026.pdf",
             "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "BALL CORPORATION",
+            "mailbox_category": "AP",
+            "extracted_fields": {"order_number": "PO88701"},
+        })
+        assert "Warehouse" in path and "Not International" in path
+
+    def test_freight_vendor_with_resolved_po_routes_to_freight(self):
+        """Freight vendor + BC-resolved PO → Freight Issues, no override."""
+        path, _, _ = _route({
+            "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "FedEx Freight",
+            "mailbox_category": "AP",
+            "extracted_fields": {"po_number": "PO12345", "order_number": "PO12345"},
+            "bc_po_resolved": True,
+        })
+        assert "Freight" in path
+
+    def test_resolved_po_routes_to_dropship(self):
+        """AP invoice with BC-resolved PO and no other special signal →
+        Dropship Not International, no override."""
+        path, _, _ = _route({
+            "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
             "vendor_canonical": "Some Vendor",
             "mailbox_category": "AP",
-            "is_warehouse_order": True,
-            "po_number_extracted": "PO-12345",
+            "extracted_fields": {"po_number": "PO12345", "order_number": "PO12345"},
+            "bc_po_resolved": True,
         })
-        self._assert_not_forbidden(path)
+        assert "Dropship Not International Documents" in path
 
-    def test_ap_invoice_unknown_po_does_not_drop_to_misc(self):
-        """Previously: PO not in BC → Misc/Misc Invoices - need approval.
-        Now: stays in AP staging regardless until accounting reviews."""
+    def test_msc_location_code_still_routes_to_misc(self):
+        """LocationCode=MSC is a strong, explicit operator signal → Misc
+        is the correct destination here even for AP-lane docs."""
         path, _, _ = _route({
-            "doc_type": "AP_INVOICE",
             "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "Some Vendor",
             "mailbox_category": "AP",
-            "po_number_extracted": "PO-MISSING",
+        }, location_code="MSC")
+        # MSC explicit operator signal → "Miscellaneous" is the documented
+        # final destination. The reason string starts with "LocationCode=MSC",
+        # not "Default routing for", so the weak-fallback wrapper does NOT
+        # redirect.
+        assert "Miscellaneous" in path
+
+
+# ---------------------------------------------------------------------------
+# 2. Weak-fallback AP-lane redirects to Temp Folder (NOT Misc)
+# ---------------------------------------------------------------------------
+
+class TestWeakFallbackRedirect:
+
+    def test_ap_invoice_no_signals_redirects_to_temp_folder(self):
+        """AP invoice with a contradicting/uncertain signal (BC says the
+        PO does not exist) → was Misc/need-approval; the wrapper redirects
+        to AP Temp Folder for review."""
+        path, reason, details = _route({
+            "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "RandomVendor",
+            "mailbox_category": "AP",
+            "extracted_fields": {"po_number": "PO-MISSING", "order_number": "PO-MISSING"},
             "bc_po_resolved": False,
         })
-        self._assert_not_forbidden(path)
+        assert path == AP_STAGING_FOLDER
+        assert "weak-fallback" in reason
+        assert "weak_fallback_redirect_from" in details
+
+    def test_ap_invoice_unresolved_po_redirects_to_temp_folder(self):
+        """bc_po_resolved=False is a contradicting signal → was Misc/need-
+        approval; redirects to Temp Folder for review."""
+        path, _, _ = _route({
+            "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "Some Vendor",
+            "mailbox_category": "AP",
+            "extracted_fields": {"po_number": "PO99999", "order_number": "PO99999"},
+            "bc_po_resolved": False,
+        })
+        assert path == AP_STAGING_FOLDER
+
+    def test_non_ap_doc_with_no_signals_keeps_misc_fallback(self):
+        """Non-AP-lane docs are NOT redirected by the wrapper. They keep
+        the legacy Default-routing/Misc behavior."""
+        path, _, _ = _route({
+            "document_type": "Unknown",
+            "vendor_canonical": "RandomVendor",
+            "extracted_fields": {},
+        })
+        assert "Miscellaneous" in path
+        assert path != AP_STAGING_FOLDER
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +175,8 @@ class TestAPInvoiceForbiddenDestinations:
 # ---------------------------------------------------------------------------
 
 class TestMailboxLaneNeedsReview:
-    def test_ap_lane_needs_review_goes_to_ap_review_folder(self):
+
+    def test_ap_lane_needs_review_goes_to_review_folder(self):
         path, reason, _ = _route({
             "document_type": "Other",
             "doc_type": "OTHER",
@@ -159,74 +186,69 @@ class TestMailboxLaneNeedsReview:
         assert path == AP_LANE_REVIEW_FOLDER
         assert "AP review" in reason or "AP-lane" in reason
 
-    def test_sales_lane_needs_review_does_not_drop_into_operations(self):
+    def test_sales_lane_needs_review_does_not_drop_into_misc(self):
         path, _, _ = _route({
             "document_type": "Other",
             "doc_type": "OTHER",
             "mailbox_category": "Sales",
             "mailbox_lane_needs_review": True,
         })
-        assert not any(path.startswith(root) for root in _FORBIDDEN_AP_FOLDER_ROOTS)
+        assert path == AP_LANE_REVIEW_FOLDER
 
-    def test_operations_lane_no_review_hint_routes_normally(self):
-        """Operations lane docs do not get AP-review treatment — they flow
-        through normal warehouse/shipping rules. (Sanity check: routing
-        does not raise and does not assert AP staging.)"""
+    def test_operations_lane_unchanged(self):
+        """Operations lane docs flow through normal warehouse/shipping
+        rules; the AP review fallback does NOT trigger for them."""
         path, _, _ = _route({
             "document_type": "Shipping_Document",
             "doc_type": "OTHER",
             "mailbox_category": "Operations",
             "vendor_canonical": "Some Carrier",
+            "extracted_fields": {"po_number": "PO99", "order_number": "PO99"},
         })
         assert path != AP_STAGING_FOLDER
         assert path != AP_LANE_REVIEW_FOLDER
 
 
 # ---------------------------------------------------------------------------
-# 4. Accounting override restores the detailed structure
+# 4. Accounting override force-bypasses the weak-fallback wrapper
 # ---------------------------------------------------------------------------
 
-class TestAccountingOverrideRestoresDetailedRouting:
-    def test_override_canpack_routes_to_dropship_canpack(self):
-        path, reason, _ = _route({
-            "document_type": "AP_Invoice",
-            "doc_type": "AP_INVOICE",
-            "vendor_canonical": "Canpack USA",
-            "mailbox_category": "AP",
-            "extracted_fields": {"description": "Canpack delivery"},
-            "accounting_routing_override": True,
-        })
-        assert path.startswith("Dropship Not International Documents/Canpack")
+class TestAccountingOverrideForceBypass:
+    """Override is now an opt-out from the weak-fallback wrapper for the
+    rare case where accounting wants an AP-lane doc to land in the legacy
+    Misc bucket regardless. Almost never used in practice."""
 
-    def test_approved_credit_memo_routes_to_vendor_credit_memos(self):
+    def test_override_keeps_misc_fallback(self):
         path, _, _ = _route({
             "document_type": "AP_Invoice",
             "doc_type": "AP_INVOICE",
-            "vendor_canonical": "Anchor",
+            "vendor_canonical": "RandomVendor",
             "mailbox_category": "AP",
-            "extracted_fields": {"description": "credit memo"},
+            "extracted_fields": {"po_number": "PO-MISSING", "order_number": "PO-MISSING"},
+            "bc_po_resolved": False,
+            "accounting_routing_override": True,
+        })
+        assert "Miscellaneous" in path
+        assert path != AP_STAGING_FOLDER
+
+    def test_approved_keeps_misc_fallback(self):
+        path, _, _ = _route({
+            "document_type": "AP_Invoice",
+            "doc_type": "AP_INVOICE",
+            "vendor_canonical": "RandomVendor",
+            "mailbox_category": "AP",
+            "extracted_fields": {"po_number": "PO-MISSING", "order_number": "PO-MISSING"},
+            "bc_po_resolved": False,
             "approved": True,
         })
-        assert path.startswith("Vendor Credit Memos")
+        assert "Miscellaneous" in path
 
 
 # ---------------------------------------------------------------------------
-# 5. Non-AP doc types keep their existing routing (no regression)
+# 5. Non-AP doc types unchanged
 # ---------------------------------------------------------------------------
 
 class TestNonAPRoutingUnchanged:
-    def test_sales_order_with_warehouse_order_routes_to_warehouse(self):
-        path, _, _ = _route({
-            "document_type": "Sales_Order",
-            "doc_type": "SALES_INVOICE",
-            "vendor_canonical": "Customer X",
-            "is_warehouse_order": True,
-            "po_number_extracted": "SO-99",
-            "mailbox_category": "Sales",
-        })
-        # Sales orders still flow through their own rule.
-        assert AP_STAGING_FOLDER not in path
-
     def test_inventory_report_routes_to_warehouse_reports(self):
         path, _, _ = _route({
             "document_type": "Inventory_Report",

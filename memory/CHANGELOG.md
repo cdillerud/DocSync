@@ -1959,3 +1959,46 @@ asyncio.run(m())"
 - Mis-sent / non-invoice docs on AP lane stay `OTHER` with `mailbox_lane_needs_review=True` → AP review folder. Verified.
 - AP_INVOICE docs do not auto-scatter into Warehouse Reports / Dropship / Freight Issues / Vendor Credit Memos / Miscellaneous. Verified by 16 dedicated routing tests.
 - Cutover readiness: not declared yet. Run `billing_intake_routing_probe` after deploy + a poll cycle; expect exit code 0 and `Accounts Payable/Temp Folder` showing as the dominant SharePoint folder root for billing@ ingests. Then re-run the fuzzy comparator (`scripts.sharepoint_ap_compare --graph-pull`) for the prod-vs-test overlap evidence E5b. Only then is the app described as Square9 cutover-ready.
+
+## 2026-05-02 — AP Routing Correction: Evidence-Based, Not Blanket Staging
+
+### What was wrong with the prior fix
+The prior change made every AP-lane invoice without `accounting_routing_override` route to `Accounts Payable/Temp Folder`, defeating the purpose of automation. Hub's job is to classify and route AP documents using vendor / PO / file-pattern / BC / extracted-field evidence. Temp Folder should be a **fallback**, not the default.
+
+### Corrected model
+- Remove the blanket "AP-lane → Temp Folder" rule. AP_INVOICE documents now flow through the existing deterministic rule chain (Canpack vendor, credit-memo keywords, WH_/AS_/ML_ filename patterns, freight vendor, resolved BC PO, etc.) and land in the **correct final accounting folder** with no override required.
+- Keep the mailbox-lane needs-review hint (PRIORITY 1): `mailbox_lane_needs_review=True` for AP/Sales/Purchase still routes to AP review folder. This catches non-invoice docs sent to billing@.
+- New thin **AP-lane weak-fallback wrapper** at the top-level `determine_folder_path`: after the rule chain runs, if the chosen destination is the bottom-of-chain `"Default routing for ..."` path or `Misc Invoices - need approval` (excluding strong-signal placements like `LocationCode=` or `DO NOT PAY status`), redirect AP-lane docs to AP Temp Folder for review. Detailed:
+  - `bc_po_resolved=False` AP invoice (BC contradicts the vendor signal) → Temp Folder.
+  - AP invoice that genuinely matches no rule → Temp Folder.
+  - High-confidence rule matches (Canpack, credit memo, WH_, freight vendor, resolved PO, MSC, DO NOT PAY) → final folder, unchanged.
+- `accounting_routing_override` / `approved=True` is now an **opt-out** of the wrapper for the rare case accounting wants the legacy Misc landing — almost never used in practice.
+
+### Files changed
+- `backend/services/folder_routing_service.py`
+  - Removed `_FORBIDDEN_AP_FOLDER_ROOTS` (unused under the new model — specific rule destinations are valid AP placements).
+  - Renamed the existing rule-chain function to `_determine_folder_path_core`. New top-level `determine_folder_path` calls core, then applies the weak-fallback wrapper. Rule chain itself is otherwise untouched.
+  - `_is_weak_fallback_routing(path, reason)` skips strong-signal reasons (`LocationCode=`, `Document marked Do Not Pay`).
+- `backend/tests/test_ap_routing_square9_parity.py` — rewritten around the new model: `TestHighConfidenceAPAutoRoutes` (Canpack/credit-memo/WH_/freight/resolved-PO/MSC each auto-route to final folder, no override), `TestWeakFallbackRedirect` (BC-unresolved AP → Temp Folder; non-AP docs unchanged), `TestMailboxLaneNeedsReview`, `TestAccountingOverrideForceBypass` (override keeps legacy Misc on bc_po_resolved=False), `TestNonAPRoutingUnchanged`.
+- `backend/tests/test_s9_routing_fix.py` — removed the `accounting_routing_override=True` default from `make_doc()` (no longer needed since detailed rules now run for AP_INVOICE without override). Updated the two AP_Invoice "weak-evidence" tests (`test_ap_invoice_unresolved_po_goes_to_miscellaneous`, `test_freight_vendor_unresolved_po_goes_to_miscellaneous`) to expect the correct new redirect destination (Temp Folder); shipping-doc tests are unchanged because non-AP docs are not redirected.
+- `backend/tests/test_folder_routing_fix.py` — removed `accounting_routing_override=True` from the three WH_ AP_Invoice fixtures.
+- `backend/scripts/billing_intake_routing_probe.py` — replaced the broad `_FORBIDDEN_AP_FOLDER_ROOTS` blocker with a tighter `_path_is_weak_fallback(path, reason)` check (un-redirected `Default routing for ...` or `Misc Invoices - need approval`). Added an informational warning when the AP_INVOICE → AP Temp Folder ratio exceeds 50% in the window (signal of low classification confidence or rule-coverage gap, not a blocker).
+
+### What's preserved
+- Mailbox-category propagation, normalization aliases (Billing → AP), and structured intake logging — unchanged.
+- AP-lane mis-sent docs review fallback — unchanged.
+- Detailed accounting rule chain (Canpack / credit memo / WH_ / freight / etc.) — unchanged.
+- AP posting path, byte-parity in `document_handlers.py` — unchanged.
+
+### Test results (local)
+- `pytest tests/test_ap_routing_square9_parity.py tests/test_s9_routing_fix.py tests/test_folder_routing_fix.py tests/test_mailbox_category_propagation.py tests/test_suggested_type_sync.py tests/test_email_polling_dedup.py tests/test_document_routing.py tests/test_bc_line_routing.py` → **127/127 PASS**.
+- `tests/test_sharepoint_routing.py` failures are HTTP tests against a missing `REACT_APP_BACKEND_URL` (environment, not code).
+- Linter clean on all changed/new files.
+
+### Acceptance criteria status
+- `mailbox_category` propagation from `mailbox_sources` to `hub_documents`: ✅
+- Clear AP invoices auto-route to final accounting folder (Canpack → Dropship/Canpack, credit memo → Vendor Credit Memos, WH_ → Warehouse, freight vendor → Freight, resolved PO → Dropship/Warehouse): ✅ — locked by 6 high-confidence routing tests.
+- Uncertain / contradictory AP-lane docs → AP Temp Folder for review (no random Operations folders): ✅ — locked by weak-fallback tests.
+- Non-invoice on billing lane → AP review folder via `mailbox_lane_needs_review`: ✅.
+- AP_INVOICE blocked from Operations folders unless valid AP rule routed it there: ✅ — only specific rule destinations are reachable; the bottom-of-chain weak-fallback path is intercepted.
+- Cutover not declared. Operator must re-run `billing_intake_routing_probe` and the fuzzy comparator (`scripts.sharepoint_ap_compare --graph-pull`) against the corrected pipeline before claiming Square9 parity.

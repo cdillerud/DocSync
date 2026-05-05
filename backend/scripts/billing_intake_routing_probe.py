@@ -12,10 +12,12 @@ the production pipeline is honoring the corrected behavior:
    "+evidence" (deterministic mailbox+evidence path).
 3. AP-lane docs without evidence carry mailbox_lane_needs_review=True with
    classification_method "mailbox_lane:AP:needs_review".
-4. doc_type="AP_INVOICE" docs are NOT auto-routed into Operations-style
-   destinations (Warehouse Reports / Dropship* / Warehouse* / Freight Issues
-   / Vendor Credit Memos / Miscellaneous) without an explicit accounting
-   override.
+4. AP_INVOICE docs are NOT sitting in un-redirected weak-fallback paths
+   (Default routing / Misc need-approval) — the routing wrapper in
+   services/folder_routing_service.py should redirect those to AP Temp
+   Folder. High-confidence AP invoices (Canpack / credit memo / WH_ /
+   freight vendor / resolved BC PO / etc.) auto-route to their final
+   accounting folder; Temp Folder is fallback-only.
 
 Read-only. No mutations. Returns non-zero on any cutover-blocking finding
 so it can be wired into a smoke-test gate.
@@ -34,9 +36,10 @@ Optional flags:
 Exit codes
 ----------
     0  no findings; AP/billing intake routing is clean for the window.
-    1  warnings only (e.g. small N, low evidence rate); operator should review.
+    1  warnings only (e.g. small N, high Temp Folder ratio, legacy classification
+       method); operator should review.
     2  cutover-blocker findings (billing→Operations leak, AP_INVOICE in
-       forbidden folders without override, etc.). Re-run after remediation.
+       un-redirected weak-fallback paths, etc.). Re-run after remediation.
 """
 
 from __future__ import annotations
@@ -55,26 +58,29 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 DEFAULT_BILLING_MAILBOX = "billing@gamerpackaging.com"
 
-# Mirrors services.folder_routing_service._FORBIDDEN_AP_FOLDER_ROOTS but kept
-# local so the probe doesn't require importing the whole backend service tree.
-FORBIDDEN_AP_FOLDER_ROOTS = (
-    "Warehouse Reports",
-    "Dropship Not International Documents",
-    "Dropship International Documents",
-    "Warehouse Not International Documents",
-    "Warehouse International Documents",
-    "Freight Issues",
-    "Vendor Credit Memos",
-    "Miscellaneous Documents",
-)
+# A "weak fallback" routing for an AP-lane document. With the routing-fix
+# wrapper in services/folder_routing_service.py, AP-lane docs whose rule
+# chain produced "Default routing for ..." or landed in "Misc Invoices -
+# need approval" are redirected to the AP Temp Folder. If the probe sees a
+# persisted hub_documents row whose folder/reason still indicates one of
+# these patterns for an AP_INVOICE, the wrapper isn't deployed (or the doc
+# carried an explicit accounting override that disabled it).
+_WEAK_FALLBACK_PATH_FRAGMENTS = ("Misc Invoices - need approval",)
+_WEAK_FALLBACK_REASON_PREFIXES = ("Default routing for",)
 
 AP_INVOICE_DOC_TYPES = {"AP_INVOICE", "AP_Invoice", "AP Invoice"}
 
 
-def _path_in_forbidden(path: str) -> bool:
-    if not path:
-        return False
-    return any(path.startswith(root) for root in FORBIDDEN_AP_FOLDER_ROOTS)
+def _path_is_weak_fallback(path: str, reason: str) -> bool:
+    if path and any(frag in path for frag in _WEAK_FALLBACK_PATH_FRAGMENTS):
+        # LocationCode=MSC explicitly maps to Misc/need-approval and is a
+        # legitimate placement; do not flag it.
+        if reason and reason.startswith("LocationCode="):
+            return False
+        return True
+    if reason and any(reason.startswith(p) for p in _WEAK_FALLBACK_REASON_PREFIXES):
+        return True
+    return False
 
 
 def _override_set(doc: Dict[str, Any]) -> bool:
@@ -137,17 +143,19 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
 
     # --- Cutover-blocking findings ---
     billing_to_operations: List[Dict[str, Any]] = []          # mailbox_category != "AP"
-    ap_invoice_in_forbidden: List[Dict[str, Any]] = []        # AP_INVOICE auto-routed wrong
+    ap_invoice_weak_fallback: List[Dict[str, Any]] = []       # AP_INVOICE in un-redirected weak-fallback path
     legacy_classification_method: List[Dict[str, Any]] = []   # "mailbox:AP" w/o "+evidence"
 
     # --- Warning-level findings ---
     no_classification_method: List[Dict[str, Any]] = []
+    ap_temp_folder_count = 0                                  # informational: % of AP docs needing review
 
     for r in rows:
         mc = r.get("mailbox_category") or ""
         dt = r.get("doc_type") or r.get("document_type") or ""
         cm = r.get("classification_method") or ""
         path = r.get("sharepoint_folder_path") or ""
+        reason = r.get("folder_routing_reason") or ""
         nr = bool(r.get("mailbox_lane_needs_review"))
 
         by_mailbox_category[mc or "<missing>"] += 1
@@ -168,14 +176,17 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
                 "sharepoint_folder_path": path,
             })
 
-        if dt in AP_INVOICE_DOC_TYPES and _path_in_forbidden(path) and not _override_set(r):
-            ap_invoice_in_forbidden.append({
-                "id": r.get("id"),
-                "file_name": r.get("file_name"),
-                "doc_type": dt,
-                "sharepoint_folder_path": path,
-                "folder_routing_reason": r.get("folder_routing_reason"),
-            })
+        if dt in AP_INVOICE_DOC_TYPES:
+            if path.startswith("Accounts Payable/Temp Folder"):
+                ap_temp_folder_count += 1
+            elif _path_is_weak_fallback(path, reason) and not _override_set(r):
+                ap_invoice_weak_fallback.append({
+                    "id": r.get("id"),
+                    "file_name": r.get("file_name"),
+                    "doc_type": dt,
+                    "sharepoint_folder_path": path,
+                    "folder_routing_reason": reason,
+                })
 
         if cm == "mailbox:AP":
             legacy_classification_method.append({
@@ -198,10 +209,11 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
             f"{len(billing_to_operations)} billing-mailbox doc(s) persisted with "
             f"mailbox_category != 'AP' (Square9 parity break)"
         )
-    if ap_invoice_in_forbidden:
+    if ap_invoice_weak_fallback:
         blockers.append(
-            f"{len(ap_invoice_in_forbidden)} AP_INVOICE doc(s) routed into "
-            f"Operations-style folder roots without an accounting override"
+            f"{len(ap_invoice_weak_fallback)} AP_INVOICE doc(s) sitting in a weak-"
+            f"fallback path (Default routing / Misc need-approval) without "
+            f"redirection — wrapper not active or override engaged"
         )
     if legacy_classification_method:
         warnings.append(
@@ -213,6 +225,20 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
         warnings.append(
             f"{len(no_classification_method)} doc(s) missing classification_method"
         )
+    # Informational: % of AP_INVOICE docs that ended up in Temp Folder. A
+    # very high percentage suggests either (a) classification confidence is
+    # low across the window, or (b) routing rules don't match the typical
+    # billing inflow. Not a blocker — high-confidence AP routing is the
+    # goal but Temp Folder fallback is correct for genuinely uncertain docs.
+    ap_count = sum(1 for r in rows
+                   if (r.get("doc_type") or r.get("document_type") or "") in AP_INVOICE_DOC_TYPES)
+    if ap_count and ap_temp_folder_count / ap_count > 0.5:
+        warnings.append(
+            f"{ap_temp_folder_count}/{ap_count} AP_INVOICE doc(s) staged in AP "
+            f"Temp Folder ({ap_temp_folder_count / ap_count:.0%}); high ratio "
+            f"suggests low-confidence classification or rule-coverage gap — "
+            f"investigate before declaring auto-routing parity"
+        )
     if total == 0:
         warnings.append("zero documents in window — sample size insufficient")
 
@@ -220,6 +246,8 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
         "window": {
             "mailbox": rows[0].get("email_sender") if rows else None,
             "total_docs": total,
+            "ap_invoice_count": ap_count,
+            "ap_temp_folder_count": ap_temp_folder_count,
         },
         "counts": {
             "by_mailbox_category": dict(by_mailbox_category),
@@ -232,7 +260,7 @@ def _classify_findings(rows: List[Dict[str, Any]]) -> Tuple[Dict[str, Any], int]
             "blockers": blockers,
             "warnings": warnings,
             "billing_to_operations": billing_to_operations[:25],
-            "ap_invoice_in_forbidden": ap_invoice_in_forbidden[:25],
+            "ap_invoice_weak_fallback": ap_invoice_weak_fallback[:25],
             "legacy_classification_method": legacy_classification_method[:25],
             "no_classification_method": no_classification_method[:25],
         },
@@ -272,7 +300,7 @@ def _print_report(report: Dict[str, Any], exit_code: int) -> None:
         for w in findings["warnings"]:
             print(f"    - {w}")
 
-    for key in ("billing_to_operations", "ap_invoice_in_forbidden",
+    for key in ("billing_to_operations", "ap_invoice_weak_fallback",
                 "legacy_classification_method"):
         items = findings.get(key) or []
         if not items:

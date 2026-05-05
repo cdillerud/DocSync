@@ -27,9 +27,6 @@ def test_wh_international_routes_to_warehouse():
         "document_type": "AP_Invoice",
         "vendor_canonical": "FEVISA INDUSTRIAL S.A. DE C.V.",
         "extracted_fields": {"order_number": "ML180102"},
-        # Detailed warehouse routing is post-accounting-review; auto-ingest
-        # AP_Invoice docs stage in the AP Temp Folder (Square9 parity).
-        "accounting_routing_override": True,
     }
     assert _is_warehouse_order(doc), "WH_ file should be detected as warehouse order"
     folder, reason, details = determine_folder_path(doc)
@@ -44,7 +41,6 @@ def test_wh_domestic_routes_to_warehouse():
         "document_type": "AP_Invoice",
         "vendor_canonical": "BALL CORPORATION",
         "extracted_fields": {"order_number": "PO88701"},
-        "accounting_routing_override": True,
     }
     assert _is_warehouse_order(doc), "WH_ file should be detected as warehouse order"
     folder, reason, details = determine_folder_path(doc)
@@ -59,7 +55,6 @@ def test_wh_domestic_gts_routes_to_warehouse():
         "document_type": "AP_Invoice",
         "vendor_canonical": "GT'S LIVING FOODS",
         "extracted_fields": {"order_number": "PO88702"},
-        "accounting_routing_override": True,
     }
     assert _is_warehouse_order(doc), "WH_ file should be detected as warehouse order"
     folder, reason, details = determine_folder_path(doc)

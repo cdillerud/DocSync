@@ -189,35 +189,28 @@ DUNNAGE_INDICATORS = [
 ]
 
 # =============================================================================
-# AP STAGING DESTINATIONS (Square9 parity)
+# AP STAGING / REVIEW DESTINATIONS (Square9 parity, fallback-only)
 # =============================================================================
 # The locked production AP destination per cutover readiness lock-in:
 #   /sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder
-# In folder-routing terms (relative to the document library root) this is:
-#   Accounts Payable/Temp Folder
-# AP-lane intake stages here by default. The detailed accounting structure
-# (Dropship/Warehouse/Canpack/Credit Memos/Freight Issues/Misc/etc.) only
-# applies once accounting has reviewed the document and either approved it
-# or explicitly set accounting_routing_override=True.
+# In folder-routing terms this is `Accounts Payable/Temp Folder`.
+#
+# Hub's job is to *automate* AP routing, not to dump every AP invoice into
+# the Temp Folder for accountants to manually re-route. Temp Folder is a
+# **fallback** destination used only when:
+#   (a) automation cannot determine a final folder with sufficient evidence
+#       (weak / ambiguous / contradictory signals), OR
+#   (b) the document was flagged `mailbox_lane_needs_review=True` by
+#       classification (e.g. non-invoice mistakenly sent to billing@).
+# High-confidence AP invoices route directly to their final accounting
+# folder (Canpack / Dropship / Warehouse / Vendor Credit Memos / Freight
+# / etc.) via the deterministic rule chain below — no override needed.
 AP_STAGING_FOLDER = "Accounts Payable/Temp Folder"
 AP_LANE_REVIEW_FOLDER = "Accounts Payable/Temp Folder/_NeedsReview"
 
 # Doc-type strings that count as AP-lane invoices (uppercase from
 # DocType.AP_INVOICE.value, plus the suggested_job_type variants).
 _AP_INVOICE_DOC_TYPES = {"AP_INVOICE", "AP_Invoice", "AP Invoice"}
-
-# Operations-style folder roots that must NEVER receive an AP_INVOICE on the
-# auto-ingest path (only via explicit accounting override).
-_FORBIDDEN_AP_FOLDER_ROOTS = (
-    "Warehouse Reports",
-    "Dropship Not International Documents",
-    "Dropship International Documents",
-    "Warehouse Not International Documents",
-    "Warehouse International Documents",
-    "Freight Issues",
-    "Vendor Credit Memos",
-    "Miscellaneous Documents",
-)
 
 
 def _is_ap_lane_doc(doc: Dict[str, Any]) -> bool:
@@ -230,16 +223,13 @@ def _is_ap_lane_doc(doc: Dict[str, Any]) -> bool:
 
 
 def _accounting_override_set(doc: Dict[str, Any]) -> bool:
-    """True when accounting has explicitly opted this document out of AP
-    staging and into the detailed accounting structure (Dropship/Warehouse/
-    Canpack/Credit Memos/etc.). Two signals are accepted:
-
-      - ``accounting_routing_override=True`` (explicit operator override
-        recorded by an accounting workflow / UI action), or
-      - ``approved=True`` / ``status="Approved"`` (legacy approval signal).
-
-    This is the only mechanism by which AP auto-ingest is allowed to bypass
-    the AP Temp Folder staging step.
+    """True when accounting has explicitly opted this document out of the
+    AP-lane weak-fallback guard (so the document keeps whatever destination
+    the rule chain produced, even if that destination is the generic Misc
+    bucket). Two signals are accepted: ``accounting_routing_override=True``
+    or ``approved=True`` / ``status="Approved"``. Almost never needed in
+    practice — the rule chain itself produces the correct final folder for
+    high-confidence AP invoices.
     """
     if doc.get("accounting_routing_override") is True:
         return True
@@ -250,11 +240,81 @@ def _accounting_override_set(doc: Dict[str, Any]) -> bool:
     return False
 
 
+def _is_weak_fallback_routing(path: str, reason: str) -> bool:
+    """A 'weak fallback' is when the rule chain produced a destination by
+    hitting the bottom-of-chain default ("Default routing for ...") or by
+    landing in Misc/need-approval through an uncertain / contradictory
+    signal (e.g. PO not found in BC). For AP-lane documents we redirect
+    these to the AP Temp Folder so the AP team can review them rather than
+    letting them sit unstructured in Misc.
+
+    Specific named rules with strong evidence (Canpack vendor → Dropship/
+    Canpack, credit-memo keywords → Vendor Credit Memos, file pattern →
+    Warehouse, freight vendor → Freight, LocationCode=MSC → Misc,
+    DO NOT PAY status → DO NOT PAY/<year>, etc.) are NOT considered weak
+    fallbacks because they are evidence-based routings to the correct
+    final destination.
+    """
+    r = reason or ""
+    p = path or ""
+    # Strong-signal reasons override the weak-fallback heuristic even when
+    # they happen to land in Misc/need-approval (LocationCode=MSC is the
+    # canonical case — accounting explicitly tags those for Misc).
+    strong_prefixes = (
+        "LocationCode=",
+        "Document marked Do Not Pay",
+    )
+    if any(r.startswith(prefix) for prefix in strong_prefixes):
+        return False
+    if r.startswith("Default routing for"):
+        return True
+    if "Misc Invoices - need approval" in p:
+        return True
+    return False
+
+
 # =============================================================================
 # FOLDER ROUTING LOGIC
 # =============================================================================
 
 def determine_folder_path(
+    doc: Dict[str, Any],
+    freight_direction: Optional[str] = None,
+    is_international: bool = False,
+    location_code: Optional[str] = None
+) -> Tuple[str, str, Dict[str, Any]]:
+    """Top-level routing entry point.
+
+    Runs the deterministic rule chain in :func:`_determine_folder_path_core`
+    and applies a thin **AP-lane weak-fallback guard** afterward: if the
+    chosen destination is a generic catch-all (the bottom-of-chain
+    ``"Default routing for ..."`` path or ``Miscellaneous/Misc Invoices -
+    need approval``) for an AP-lane document and accounting has not
+    explicitly overridden, redirect to the AP Temp Folder so the AP team
+    can review rather than letting the doc sit unstructured in Misc.
+
+    High-confidence AP invoices (Canpack vendor / credit memo / WH_ pattern
+    / freight vendor / resolved BC PO / etc.) auto-route to their final
+    folder via the rule chain — no override needed.
+    """
+    path, reason, details = _determine_folder_path_core(
+        doc, freight_direction=freight_direction,
+        is_international=is_international, location_code=location_code,
+    )
+    if _is_ap_lane_doc(doc) and not _accounting_override_set(doc):
+        if _is_weak_fallback_routing(path, reason):
+            details = dict(details)
+            details["weak_fallback_redirect_from"] = path
+            details["weak_fallback_redirect_reason"] = reason
+            return (
+                AP_STAGING_FOLDER,
+                f"AP-lane weak-fallback redirect (was: {reason}); staged for AP review",
+                details,
+            )
+    return path, reason, details
+
+
+def _determine_folder_path_core(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
     is_international: bool = False,
@@ -311,22 +371,18 @@ def determine_folder_path(
     }
 
     # =========================================================================
-    # SQUARE9-PARITY STAGING RULES (run first; never bypassed without override)
+    # SQUARE9-PARITY STAGING (mailbox-lane review only — fallback-only)
     # =========================================================================
     #
-    # The AP team works out of the AP Temp Folder. To preserve Square9 →
-    # Hub parity for billing/AP intake, every AP-lane document defaults to
-    # `Accounts Payable/Temp Folder` and stays there until accounting
-    # explicitly opts it into the detailed accounting structure (Canpack /
-    # Dropship / Warehouse / Credit Memos / Freight Issues / Misc) by setting
-    # accounting_routing_override=True or approved=True.
+    # Hub auto-classifies and auto-routes. Temp Folder is NOT the default
+    # destination for AP invoices; it is the safe fallback for documents
+    # that classification could not place with sufficient evidence
+    # (mailbox_lane_needs_review=True), and the wrapper below catches
+    # weak-fallback routing for AP-lane docs and redirects there too.
     #
-    # mailbox_lane_needs_review=True (set by classification_helpers when an
-    # AP-lane document cannot be definitively classified) sends the document
-    # into an AP-lane review subfolder rather than letting it leak into a
-    # generic Operations folder.
-
-    # PRIORITY 1: Mailbox-lane needs-review hint — keep on AP review desk.
+    # PRIORITY 1: mailbox-lane needs-review hint set by classification
+    # (e.g., non-invoice mistakenly sent to billing@) — keep on AP review
+    # desk rather than letting it leak into a generic Operations folder.
     if doc.get("mailbox_lane_needs_review"):
         mc = (doc.get("mailbox_category") or "").upper()
         if mc == "AP":
@@ -335,29 +391,12 @@ def determine_folder_path(
                 "AP-lane document not definitively classified; staged for AP review",
                 routing_details,
             )
-        # Sales / Purchase lanes also stay near their own review desks rather
-        # than scattering into Operations folders. Conservative default —
-        # we surface them through Misc-needs-approval which today is the AP
-        # team's catch-all queue. If a dedicated Sales/Purchase review folder
-        # is ever stood up, swap the constant.
         if mc in ("SALES", "PURCHASE"):
             return (
                 AP_LANE_REVIEW_FOLDER,
                 f"{mc} lane document not definitively classified; staged for review",
                 routing_details,
             )
-
-    # PRIORITY 2: AP-lane invoice without explicit accounting override → AP
-    # Temp Folder staging. Square9 parity. The detailed accounting structure
-    # (Canpack/Dropship/Warehouse/Credit Memos/etc.) only applies once
-    # accounting flips accounting_routing_override=True or approved=True on
-    # the document.
-    if _is_ap_lane_doc(doc) and not _accounting_override_set(doc):
-        return (
-            AP_STAGING_FOLDER,
-            "AP-lane invoice staged to AP Temp Folder pending accounting review (Square9 parity)",
-            routing_details,
-        )
 
     # =================================================================
     # ROUTING RULES (in priority order per accounting document)

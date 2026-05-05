@@ -2002,3 +2002,50 @@ The prior change made every AP-lane invoice without `accounting_routing_override
 - Non-invoice on billing lane → AP review folder via `mailbox_lane_needs_review`: ✅.
 - AP_INVOICE blocked from Operations folders unless valid AP rule routed it there: ✅ — only specific rule destinations are reachable; the bottom-of-chain weak-fallback path is intercepted.
 - Cutover not declared. Operator must re-run `billing_intake_routing_probe` and the fuzzy comparator (`scripts.sharepoint_ap_compare --graph-pull`) against the corrected pipeline before claiming Square9 parity.
+
+## 2026-05-02 — AP Routing: Structured Evidence-Based Decision Contract
+
+### Mission alignment
+Hub auto-classifies and auto-routes AP documents using evidence; Temp Folder is fallback-only. Prior commits established the wrapper guard; this commit adds the **structured decision contract** + **defense-in-depth scatter guard** + **cutover-readiness report**, so routing is auditable end-to-end.
+
+### Files changed
+- `backend/services/folder_routing_service.py`
+  - New `determine_ap_routing_decision(doc, ...)` returning `{folder_path, routing_status, routing_reason, routing_details}`. `routing_status` enum: `auto_routed` / `needs_review` / `exception` / `manual_override`. `routing_details` carries mailbox_category, doc_type, suggested_job_type, classification_method, ai_confidence, vendor_canonical, vendor_match_method, po_number_clean, invoice_number_clean, amount_float, validation_results, possible_duplicate, manual_override_applied, evidence_signals_used, scatter_guard_blocked_destination (when applicable).
+  - Defense-in-depth **scatter guard**: AP-lane doc landing in any Operations folder root with a *weak* reason ("Default routing for ..." or "Misc Invoices - need approval") is redirected to AP review folder with `routing_status="exception"`. Named-rule reasons are trusted (Canpack vendor, credit-memo description, WH_ pattern, freight vendor, resolved BC PO, "All Others" domestic, LocationCode=, etc.).
+- `backend/tests/test_ap_evidence_based_routing.py` (new, 12 tests):
+  - Decision-shape contract: required keys + audit field presence + evidence_signals_used population.
+  - `auto_routed`: Canpack vendor, credit-memo description, WH_ pattern, resolved BC PO — each lands at the correct final accounting folder, no override.
+  - `needs_review`: BC-unresolved AP → AP Temp Folder; mailbox_lane_needs_review on AP/Sales lanes → AP review folder.
+  - `manual_override`: override flag preserves legacy Misc landing with `manual_override_applied=True`.
+  - Non-AP unchanged: Inventory_Report → Warehouse Reports; Shipping_Document weak case → Misc (not redirected, AP-lane wrapper does not fire).
+- `backend/scripts/ap_cutover_readiness_report.py` (new): full audit-grade breakdown of recent billing/AP intake by mailbox_category, doc_type, suggested_job_type, routing_status, folder_root, classification_method, top reasons. Sample sets for `auto_routed_ap_invoice`, `needs_review`, `exception`. Blocker findings (billing→Operations leak, AP_INVOICE in Operations roots via weak reason without override) and warnings (legacy classification_method, Temp Folder ratio > 50%). Synthesizes `routing_status` from persisted folder_path + reason + override flags so older rows are usable.
+
+### What's preserved
+- Mailbox-category propagation, intake logging, alias normalization (Billing → AP).
+- Classification evidence-gating (`mailbox:AP+evidence` / `mailbox_lane:AP:needs_review`).
+- All detailed accounting routing rules.
+- AP posting path, intake byte-parity.
+- `billing_intake_routing_probe.py` (the smoke-gate probe) — unchanged in shape; complementary to the readiness report.
+
+### Test results (local)
+- `pytest tests/test_ap_evidence_based_routing.py tests/test_ap_routing_square9_parity.py tests/test_s9_routing_fix.py tests/test_folder_routing_fix.py tests/test_mailbox_category_propagation.py tests/test_suggested_type_sync.py tests/test_email_polling_dedup.py tests/test_document_routing.py tests/test_bc_line_routing.py` → **139/139 PASS**.
+- Linter clean on all changed/new files.
+
+### Operator commands
+- Deploy:
+        docker compose build backend && docker compose up -d backend
+- One billing poll cycle (existing wrapper):
+        docker compose exec -T backend python -u -c "import asyncio; from services.email_polling_service import run_sales_email_poll; from server import set_db; from motor.motor_asyncio import AsyncIOMotorClient; import os; set_db(AsyncIOMotorClient(os.environ['MONGO_URL'])[os.environ['DB_NAME']]); print(asyncio.run(run_sales_email_poll()))"
+  (Or whichever AP-lane poll wrapper the operator already uses.)
+- Smoke-gate probe:
+        docker compose exec -T backend python -m scripts.billing_intake_routing_probe --since-hours 24 --limit 200
+- Audit-grade readiness report:
+        docker compose exec -T backend python -m scripts.ap_cutover_readiness_report --since-hours 48 --limit 500
+- Prod-vs-test fuzzy comparator:
+        docker compose exec -T backend bash -lc "mkdir -p prod_reports && python -m scripts.sharepoint_ap_compare --graph-pull --prod-folder-path 'General/Accounting/Accounts Payable/Temp Folder' --test-site-path '/sites/GPI-DocumentHub-Test' --test-folder-path 'AP_Invoices' --out-csv prod_reports/sp_ap_compare_fuzzy.csv --top 25"
+
+### Cutover readiness statement
+GPI Hub is **not** cutover-ready until both of the following hold for a real production window:
+1. `billing_intake_routing_probe` returns exit code 0 (no blockers).
+2. `ap_cutover_readiness_report` shows `auto_routed` as the dominant `routing_status` for AP_INVOICE in the window, with `needs_review`/`exception` confined to genuinely uncertain cases.
+3. `scripts.sharepoint_ap_compare --graph-pull` reports non-zero `exact_match` + `likely_match` counts proving prod-vs-test AP overlap.

@@ -277,6 +277,51 @@ def _is_weak_fallback_routing(path: str, reason: str) -> bool:
 # FOLDER ROUTING LOGIC
 # =============================================================================
 
+# Operations-style folder roots that may *only* receive an AP-lane document
+# when a specific evidence-backed rule explicitly placed it there (e.g.
+# Canpack vendor → Dropship/Canpack, freight vendor + resolved PO →
+# Freight Issues, credit-memo description → Vendor Credit Memos). The
+# scatter guard below treats a landing in one of these roots as suspicious
+# unless the routing reason matches a known strong-AP signal.
+_OPERATIONS_FOLDER_ROOTS = (
+    "Warehouse Reports",
+    "Dropship Not International Documents",
+    "Dropship International Documents",
+    "Warehouse Not International Documents",
+    "Warehouse International Documents",
+    "Freight Issues",
+    "Vendor Credit Memos",
+    "Miscellaneous Documents",
+)
+
+# Reason-string fragments that mark an AP-lane Operations-folder landing
+# as suspicious (defense-in-depth scatter guard). The weak-fallback wrapper
+# in `determine_folder_path` should already redirect these for AP-lane
+# documents, so this list is intentionally narrow — anything matching a
+# named rule (Canpack vendor, credit-memo description, WH_ pattern, freight
+# vendor, resolved BC PO, "All Others" domestic, LocationCode=, etc.) is
+# treated as strong evidence and allowed to land in Operations roots.
+_WEAK_SCATTER_REASON_FRAGMENTS = (
+    "Default routing for",
+    "Misc Invoices - need approval",
+)
+
+
+def _path_in_operations_root(path: str) -> bool:
+    if not path:
+        return False
+    return any(path.startswith(root) for root in _OPERATIONS_FOLDER_ROOTS)
+
+
+def _reason_is_weak_for_scatter_guard(reason: str) -> bool:
+    """True only when the reason matches a known weak / catch-all signal.
+    Named-rule reasons are *not* weak; the rule chain has already produced
+    the documented final destination."""
+    if not reason:
+        return True
+    return any(frag in reason for frag in _WEAK_SCATTER_REASON_FRAGMENTS)
+
+
 def determine_folder_path(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
@@ -312,6 +357,139 @@ def determine_folder_path(
                 details,
             )
     return path, reason, details
+
+
+# =============================================================================
+# Structured AP routing decision (mission-aligned, auditable contract)
+# =============================================================================
+
+# Routing status taxonomy.
+ROUTING_STATUS_AUTO_ROUTED = "auto_routed"        # final destination chosen by evidence
+ROUTING_STATUS_NEEDS_REVIEW = "needs_review"      # weak-evidence / lane-review fallback
+ROUTING_STATUS_EXCEPTION = "exception"            # hard block (forbidden scatter)
+ROUTING_STATUS_MANUAL_OVERRIDE = "manual_override"  # operator opted out of guard
+
+
+def determine_ap_routing_decision(
+    doc: Dict[str, Any],
+    freight_direction: Optional[str] = None,
+    is_international: bool = False,
+    location_code: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Evidence-based AP-lane routing decision.
+
+    Wraps the deterministic rule chain (`determine_folder_path`) in a
+    structured contract aligned with the GPI Hub mission: auto-classify
+    and auto-route AP documents using evidence, and only route to review
+    when evidence is insufficient or contradictory.
+
+    Returns a dict with::
+
+        {
+            "folder_path": str,
+            "routing_status": "auto_routed" | "needs_review" | "exception" | "manual_override",
+            "routing_reason": str,
+            "routing_details": {
+                # full routing details dict from the rule chain plus:
+                "mailbox_category": ...,
+                "doc_type": ...,
+                "suggested_job_type": ...,
+                "classification_method": ...,
+                "ai_confidence": ...,
+                "vendor_canonical": ...,
+                "vendor_match_method": ...,
+                "po_number_clean": ...,
+                "invoice_number_clean": ...,
+                "amount_float": ...,
+                "validation_results": ...,
+                "possible_duplicate": ...,
+                "manual_override_applied": bool,
+                "evidence_signals_used": [...],
+                "scatter_guard_blocked_destination": optional str,
+            },
+        }
+    """
+    folder_path, reason, details = determine_folder_path(
+        doc, freight_direction=freight_direction,
+        is_international=is_international, location_code=location_code,
+    )
+
+    is_ap = _is_ap_lane_doc(doc)
+    override = _accounting_override_set(doc)
+    needs_review_lane = bool(doc.get("mailbox_lane_needs_review"))
+
+    # Defense-in-depth scatter guard for AP-lane docs.
+    scatter_blocked: Optional[Tuple[str, str]] = None
+    if (
+        is_ap
+        and not override
+        and _path_in_operations_root(folder_path)
+        and _reason_is_weak_for_scatter_guard(reason)
+    ):
+        scatter_blocked = (folder_path, reason)
+        folder_path = AP_LANE_REVIEW_FOLDER
+        reason = (
+            f"AP-lane scatter guard: blocked landing in Operations folder "
+            f"({scatter_blocked[0]}) without strong AP evidence; held for review"
+        )
+
+    # Decide routing_status.
+    if override:
+        routing_status = ROUTING_STATUS_MANUAL_OVERRIDE
+    elif scatter_blocked:
+        routing_status = ROUTING_STATUS_EXCEPTION
+    elif folder_path in (AP_STAGING_FOLDER, AP_LANE_REVIEW_FOLDER):
+        routing_status = ROUTING_STATUS_NEEDS_REVIEW
+    elif folder_path.startswith(AP_LANE_REVIEW_FOLDER):
+        routing_status = ROUTING_STATUS_NEEDS_REVIEW
+    else:
+        routing_status = ROUTING_STATUS_AUTO_ROUTED
+
+    # Evidence signals captured by the rule chain (best-effort summary).
+    evidence_signals: list = []
+    if doc.get("vendor_canonical"):
+        evidence_signals.append("vendor_canonical")
+    if doc.get("po_number_clean") or doc.get("po_number_extracted"):
+        evidence_signals.append("po_number")
+    if doc.get("invoice_number_clean"):
+        evidence_signals.append("invoice_number")
+    if doc.get("bc_po_resolved") is True:
+        evidence_signals.append("bc_po_resolved")
+    if doc.get("amount_float") is not None:
+        evidence_signals.append("amount")
+    if (doc.get("file_name") or "").upper().startswith(("WH_", "AS_", "ML_")):
+        evidence_signals.append("filename_pattern")
+    if needs_review_lane:
+        evidence_signals.append("mailbox_lane_needs_review")
+
+    enriched_details = dict(details)
+    enriched_details.update({
+        "mailbox_category": doc.get("mailbox_category"),
+        "mailbox_lane_needs_review": needs_review_lane,
+        "doc_type": doc.get("doc_type") or doc.get("document_type"),
+        "suggested_job_type": doc.get("suggested_job_type"),
+        "classification_method": doc.get("classification_method"),
+        "ai_confidence": doc.get("ai_confidence") or doc.get("confidence"),
+        "vendor_canonical": doc.get("vendor_canonical"),
+        "vendor_match_method": doc.get("vendor_match_method"),
+        "po_number_clean": doc.get("po_number_clean") or doc.get("po_number_extracted"),
+        "invoice_number_clean": doc.get("invoice_number_clean"),
+        "amount_float": doc.get("amount_float"),
+        "validation_results": doc.get("validation_results"),
+        "possible_duplicate": doc.get("possible_duplicate"),
+        "manual_override_applied": override,
+        "evidence_signals_used": evidence_signals,
+    })
+    if scatter_blocked:
+        enriched_details["scatter_guard_blocked_destination"] = scatter_blocked[0]
+        enriched_details["scatter_guard_blocked_reason"] = scatter_blocked[1]
+
+    return {
+        "folder_path": folder_path,
+        "routing_status": routing_status,
+        "routing_reason": reason,
+        "routing_details": enriched_details,
+    }
 
 
 def _determine_folder_path_core(

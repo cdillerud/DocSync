@@ -46,6 +46,11 @@ set -uo pipefail
 cd /app
 
 MIN_MATCH_RATE="${MIN_MATCH_RATE:-85.0}"
+# Default to 168 hours (1 week). Matches the cutover deadline window,
+# guarantees the 24h-default-empty stages (triage / Bucket A / Bucket C)
+# actually have rows to process, and is overridable via env:
+#   docker compose exec -e PROOF_SINCE_HOURS=720 backend bash ops/...
+PROOF_SINCE_HOURS="${PROOF_SINCE_HOURS:-168}"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 PROOF_DIR="prod_reports/cutover_proof_${TIMESTAMP}"
 LOG_DIR="${PROOF_DIR}/logs"
@@ -55,7 +60,7 @@ MANIFEST="${PROOF_DIR}/manifest.json"
 mkdir -p "${LOG_DIR}" "${ARTIFACT_DIR}"
 
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "[proof] dir=${PROOF_DIR}  started=${STARTED_AT}  min_match_rate=${MIN_MATCH_RATE}"
+echo "[proof] dir=${PROOF_DIR}  started=${STARTED_AT}  min_match_rate=${MIN_MATCH_RATE}  since_hours=${PROOF_SINCE_HOURS}"
 
 # Manifest is built incrementally as a JSON array of step objects.
 echo "{" > "${MANIFEST}"
@@ -136,23 +141,27 @@ run_step() {
 # --- 1. AP cutover readiness report ----------------------------------------
 run_step ap_cutover_readiness_report \
     "AP cutover readiness report" \
-    python scripts/ap_cutover_readiness_report.py --json
+    python scripts/ap_cutover_readiness_report.py --json \
+        --since-hours "${PROOF_SINCE_HOURS}"
 
 # --- 2. Billing intake routing probe ---------------------------------------
 run_step billing_intake_routing_probe \
     "Billing intake routing probe" \
-    python scripts/billing_intake_routing_probe.py --json
+    python scripts/billing_intake_routing_probe.py --json \
+        --since-hours "${PROOF_SINCE_HOURS}"
 
 # --- 3. Square9 Hub-AP parity report ---------------------------------------
 run_step square9_hub_ap_parity_report \
     "Square9 Hub-AP parity report" \
-    python scripts/square9_hub_ap_parity_report.py --json
+    python scripts/square9_hub_ap_parity_report.py --json \
+        --since-hours "${PROOF_SINCE_HOURS}"
 
 # --- 4. Square9-only triage resolver ---------------------------------------
 run_step square9_only_triage_resolver \
     "Square9-only triage resolver" \
     python scripts/square9_only_triage_resolver.py \
-        --triage-csv prod_reports/square9_only_triage.csv
+        --triage-csv prod_reports/square9_only_triage.csv \
+        --since-hours "${PROOF_SINCE_HOURS}"
 
 # --- 5. Bucket A root-cause report -----------------------------------------
 run_step bucket_A_root_cause_report \

@@ -37,10 +37,18 @@ That's the entire command. Outputs land under
 directly because `prod_reports/` is bind-mounted in
 `docker-compose.yml`.
 
-Optional override of the GO threshold (default 85.0%):
+Optional overrides:
 
-    docker compose exec -e MIN_MATCH_RATE=90 backend \
-        bash ops/prod_verify_square9_cutover_readiness.sh
+    docker compose exec \
+        -e MIN_MATCH_RATE=85 \
+        -e PROOF_SINCE_HOURS=168 \
+        backend bash ops/prod_verify_square9_cutover_readiness.sh
+
+Defaults: `MIN_MATCH_RATE=85.0`, `PROOF_SINCE_HOURS=168` (1 week).
+The 168h default is chosen so the parity / triage / bucket stages
+have data to operate on; a 24h window typically yields zero
+Square9-only triage rows and cascades into FileNotFoundErrors
+through the downstream bucket stages.
 
 ## Output layout
 

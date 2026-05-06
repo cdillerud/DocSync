@@ -1,5 +1,67 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Square9 Cutover P0: Email Poll Watermark Strict-gt Cursor Fix
+**Root cause identified and patched.** AP intake was silently dead from
+2026-04-09 (last successful ingest run `450f2bb4`) through 2026-05-06.
+4,199 polling runs in that window all reported `attachments_ingested=0`.
+
+The bug: in `services.email_polling_service.poll_mailbox_for_attachments`
+the Graph $filter was `receivedDateTime ge {watermark - 5min}` combined
+with `$top=25, $orderby=receivedDateTime asc`. With ≥25 messages clustered
+inside a 5-minute window at the watermark, every cycle re-fetched the same
+25 oldest, `max(batch.receivedDateTime) == watermark`, watermark never
+advanced, polling looped on the same set forever. Production:
+hub-ap-intake@gamerpackaging.com watermark stuck at 2026-04-09T21:02:12Z.
+
+**Code patch:**
+- `backend/services/email_polling_service.py`:
+  - Replaced `ge {watermark - 5min}` with strict `gt {watermark}` (no buffer).
+  - Watermark write now requires `newest_received > watermark_time`.
+  - When a non-empty batch fails to advance the watermark, record
+    `stalled_watermark` audit block on the `mail_poll_runs` row and emit
+    a WARNING log line (defense-in-depth canary).
+  - Run stats now include `watermark_in`, `watermark_out`,
+    `watermark_advanced`.
+**Tests added:**
+- `backend/tests/test_email_polling_watermark.py` — 4 tests:
+  1. strict gt cursor in $filter (no 5-min back-buffer)
+  2. 25 dup messages at boundary do not trap polling
+  3. watermark advances to max(receivedDateTime) when newer messages seen
+  4. stalled_watermark audit block recorded when batch cannot advance
+**Test results:** 7/7 passed in prod container (4 new + 3 prior failure-audit).
+**Prod verification (within 9 minutes of restart):**
+- Watermark advanced 2026-04-09 → 2026-04-14 in 3 cycles.
+- Within ~9 hours, watermark caught up to 2026-05-06T01:48:05Z (present).
+- AP docs since 2026-04-21 grew from 0 to 264.
+- GPI-CUTOVER-TEST ingestion confirmed (1 unique-subject row).
+- 0 stalled_watermark events.
+
+**Pre-cursor: Exchange transport rule (no code, write to Exchange config):**
+Added `New-TransportRule "GPI-Hub-AP-Intake-Copy-Billing"` (Priority 41,
+Enabled, Enforce) — BCCs mail addressed to `billing@gamerpackaging.com`
+(M365 Group) into `hub-ap-intake@gamerpackaging.com` (SharedMailbox).
+Mirrors the existing `ap@`-targeted rule. Loop-protected via
+`-ExceptIfAnyOfRecipientAddressContainsWords hub-ap-intake@…`. Used
+`-AnyOfRecipientAddressContainsWords` since `-SentTo` rejects M365 Groups.
+
+**Known follow-ups (NOT for cutover, parked):**
+- 3 Graph "Failed to fetch attachments" errors in run `cabd3161`
+  (window 2026-05-04T20:50:52Z..2026-05-05T20:22:54Z). Watermark advanced
+  past them so no auto-retry. Same behavior as pre-patch (not a
+  regression). Manual replay possible if those messages are required.
+- 188 historical messages addressed to `billing@` between 4/26 and 5/6
+  arrived in `hub-ap-intake@` via the older `ap@` rule but were never
+  ingested (trapped behind the stuck watermark). The strict-gt drain has
+  now picked up most of them as the watermark advanced; remaining gaps
+  can be quantified post-drain.
+- `square9@gamerpackaging.com` is still a Subscriber+Member of the
+  `billing@` Unified Group. Remove only after Square9 cutover.
+- Per-mailbox watermark `mailbox_watermark:hub-ap-intake@` (last value
+  `2026-04-21T22:33:35Z`, updated 2026-04-22) is from a separate
+  per-mailbox-source code path (`poll_mailbox_for_documents`) that no
+  longer runs for this address since `hub-ap-intake@` is not in
+  `mailbox_sources`. Stale but inert; safe to leave.
+
 ## 2026-05 — Square9 Cutover P0: Mail Poll Audit + AP Source Cleanup
 **Code (lint clean, 3/3 regression tests passing in prod):**
 - `backend/services/email_polling_service.py` — `poll_mailbox_for_documents`

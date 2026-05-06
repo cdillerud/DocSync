@@ -1,5 +1,57 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Square9 Cutover P0: Bucket A + Bucket C Dry-Run Scripts
+**New read-only dry-run preview scripts** that show *exactly* what the
+Bucket A patch and routing-rule additions would do, plus an operator
+handoff doc for the Bucket C intake-channel changes. **No Mongo writes,
+no routing-rule registrations, no classifier changes.**
+
+- `backend/scripts/bucket_A_one_shot_data_patch_dryrun.py` — consumes
+  `bucket_A_remediation_plan.json` (cohort filter:
+  `change_type == "one_shot_data_patch"`) and `bucket_A_root_cause.csv`
+  (authoritative per-doc list). For every per-doc row in a one-shot
+  cohort, emits the exact `db.hub_documents.update_one` it would run,
+  setting `mailbox_category="AP"`, `doc_type="AP_INVOICE"`,
+  `suggested_job_type="AP_Invoice"`, plus a `remediation_audit` subdoc
+  `{source: "bucket_A_one_shot_patch", cohort_key, applied_at: null}`.
+  Outputs `prod_reports/bucket_A_one_shot_data_patch_dryrun.{csv,json}`.
+  Exit codes: 0=no one-shot cohorts / 1=cohorts but no matching rows /
+  2=patch previews emitted.
+- `backend/scripts/bucket_A_routing_rule_addition_dryrun.py` — consumes
+  the same plan JSON (cohort filter:
+  `change_type == "routing_rule_addition"`) and emits one routing-rule
+  preview row per cohort with `(sender_glob, target_mailbox_category,
+  target_doc_type, target_suggested_job_type, priority,
+  affected_doc_count, source_cohort_*)`. Priority is derived from
+  `confidence_band` (high=10 / medium=20 / low=30) with score fallback.
+  Outputs `prod_reports/bucket_A_routing_rule_addition_dryrun.{csv,json}`.
+  Exit codes: 0=no routing-rule cohorts / 1=all cohorts skipped (no
+  email_sender) / 2=rules emitted.
+- `backend/scripts/bucket_C_handoff_doc.py` — consumes
+  `bucket_C_remediation_plan.json` and renders an operator-friendly
+  Markdown grouped by `owner_hint` (IT vs AP) with one table + checklist
+  per owner, plus a "Parity exclusions" section and a cutover checklist.
+  Mirrors all rows into a CSV importable into ticket trackers. Outputs
+  `prod_reports/bucket_C_handoff.{md,csv}`. Exit codes: 0=empty plan /
+  1=only exclusions / 2=intake cohorts emitted.
+- **Tests**:
+  `backend/tests/test_bucket_A_one_shot_data_patch_dryrun.py` (16/16),
+  `backend/tests/test_bucket_A_routing_rule_addition_dryrun.py` (18/18),
+  `backend/tests/test_bucket_C_handoff_doc.py` (12/12). Pure synthetic
+  fixtures, no Mongo, no network. Covers selection, cohort-key matching,
+  update_one shape, audit subdoc immutability, priority derivation,
+  owner grouping, MD/CSV round-trip via `tmp_path`, and exit-code
+  contract.
+- **Aggregate green suite (Bucket A/C scope)**: 88/88 passed (42 prior
+  remediation-plan tests + 46 new dry-run tests).
+- **Live VM smoke**: not yet executed (user runs on remote VM). Run
+  commands provided.
+
+---
+
+
+# GPI Document Hub — Product Requirements Document
+
 ## 2026-05-06 — Square9 Cutover P0: Bucket A + Bucket C Remediation Plan Generators
 **New read-only plan generators** consume the diagnostic outputs from
 `bucket_A_root_cause_report.py` and `bucket_C_intake_gap_report.py` and

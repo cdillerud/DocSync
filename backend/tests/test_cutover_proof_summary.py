@@ -91,6 +91,29 @@ def test_load_parity_match_rate_returns_none_when_missing(tmp_path: Path):
     assert cps.load_parity_match_rate(str(tmp_path)) is None
 
 
+def test_load_parity_match_rate_reads_from_step_log_when_json_only(tmp_path: Path):
+    """The parity script prints JSON to stdout when run with --json; the
+    orchestrator captures stdout into the step log file. The summarizer
+    must accept that .log as a valid JSON source."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "square9_hub_ap_parity_report.log").write_text(
+        json.dumps({"match_rate": 0.913, "blockers": []}), encoding="utf-8")
+    rate = cps.load_parity_match_rate(str(tmp_path))
+    assert rate is not None
+    assert abs(rate - 91.3) < 1e-6
+
+
+def test_load_parity_match_rate_prefers_proof_dir_json_over_log(tmp_path: Path):
+    (tmp_path / "square9_hub_ap_parity.json").write_text(
+        json.dumps({"match_rate_pct": 92.0}), encoding="utf-8")
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    (logs_dir / "square9_hub_ap_parity_report.log").write_text(
+        json.dumps({"match_rate": 0.50}), encoding="utf-8")
+    assert cps.load_parity_match_rate(str(tmp_path)) == 92.0
+
+
 # ---------------------------------------------------------------------------
 # Decision engine
 # ---------------------------------------------------------------------------

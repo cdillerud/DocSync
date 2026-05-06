@@ -48,6 +48,10 @@ def load_parity_match_rate(proof_dir: str) -> Optional[float]:
     candidates = [
         os.path.join(proof_dir, "square9_hub_ap_parity.json"),
         os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.json"),
+        # The orchestrator runs the parity script with `--json`, which
+        # prints a JSON blob to stdout. The orchestrator captures stdout
+        # into the per-step log file, so the .log itself is valid JSON.
+        os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.log"),
     ]
     for p in candidates:
         if not os.path.exists(p):

@@ -42,6 +42,7 @@ services:
       - ADMIN_PASSWORD=ChangeMeOnFirstDeploy-K8p2q
     volumes:
       - uploads_data:/app/uploads
+      - ./prod_reports:/app/prod_reports
     networks:
       - gpi-network
     # Expose internally + map to host port 8005 (avoids conflict with airdash on 8001)

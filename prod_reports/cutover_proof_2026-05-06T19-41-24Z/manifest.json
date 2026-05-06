@@ -1,0 +1,25 @@
+{
+  "proof_dir": "prod_reports/cutover_proof_2026-05-06T19-41-24Z",
+  "started_at_utc": "2026-05-06T19:41:24Z",
+  "min_match_rate_pct": 85.0,
+  "steps": [
+    {"id": "ap_cutover_readiness_report", "label": "AP cutover readiness report", "cmd": "python scripts/ap_cutover_readiness_report.py --json", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/ap_cutover_readiness_report.log"}
+    ,
+    {"id": "billing_intake_routing_probe", "label": "Billing intake routing probe", "cmd": "python scripts/billing_intake_routing_probe.py --json", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/billing_intake_routing_probe.log"}
+    ,
+    {"id": "square9_hub_ap_parity_report", "label": "Square9 Hub-AP parity report", "cmd": "python scripts/square9_hub_ap_parity_report.py --json", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/square9_hub_ap_parity_report.log"}
+    ,
+    {"id": "square9_only_triage_resolver", "label": "Square9-only triage resolver", "cmd": "python scripts/square9_only_triage_resolver.py --triage-csv prod_reports/square9_only_triage.csv", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/square9_only_triage_resolver.log"}
+    ,
+    {"id": "bucket_A_root_cause_report", "label": "Bucket A root-cause report", "cmd": "python scripts/bucket_A_root_cause_report.py", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/bucket_A_root_cause_report.log"}
+    ,
+    {"id": "bucket_C_intake_gap_report", "label": "Bucket C intake-gap report", "cmd": "python scripts/bucket_C_intake_gap_report.py", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/bucket_C_intake_gap_report.log"}
+    ,
+    {"id": "bucket_A_misrouting_remediation_plan", "label": "Bucket A misrouting remediation plan", "cmd": "python scripts/bucket_A_misrouting_remediation_plan.py", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/bucket_A_misrouting_remediation_plan.log"}
+    ,
+    {"id": "bucket_C_intake_remediation_plan", "label": "Bucket C intake remediation plan", "cmd": "python scripts/bucket_C_intake_remediation_plan.py", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/bucket_C_intake_remediation_plan.log"}
+    ,
+    {"id": "email_poll_watermark_probe", "label": "mail_poll_runs health summary", "cmd": "python scripts/email_poll_watermark_probe.py", "rc": 2, "duration_sec": 0, "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-24Z/logs/email_poll_watermark_probe.log"}
+  ],
+  "finished_at_utc": "2026-05-06T19:41:24Z"
+}

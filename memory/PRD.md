@@ -1,5 +1,43 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Square9 Cutover Proof Pack (read-only, packaged)
+**Single-command, repo-owned production verification harness** for the
+Square9 cutover. Runs all 9 readiness probes in dependency order,
+captures every artifact under one timestamped directory, and renders a
+hard **GO / NO-GO** decision based on per-step exit codes plus the
+parity report's `match_rate_pct`. Strictly read-only — no Mongo writes,
+no Exchange / mailbox / transport-rule changes, no cutover toggle.
+
+- `ops/prod_verify_square9_cutover_readiness.sh` — bash orchestrator.
+  Runs ap_cutover_readiness → billing_intake_routing → square9 parity →
+  triage_resolver → bucket_A root_cause → bucket_C intake_gap →
+  bucket_A remediation plan → bucket_C remediation plan →
+  email_poll_watermark probe. Captures stdout/stderr/rc per step into
+  `prod_reports/cutover_proof_<UTC-ts>/logs/`, snapshots the parity
+  JSON, and assembles `manifest.json`. Final exit code propagates from
+  the summarizer (0 = GO, 1 = NO-GO).
+- `ops/cutover_proof_summary.py` — pure-Python decision engine. Reads
+  the manifest + parity JSON, classifies each step (rc 0 = ok / rc 1-2
+  = ok_signal / rc ≥ 3 = fail), derives blockers (failed steps,
+  missing `match_rate_pct`, below-threshold `match_rate_pct`), renders
+  `summary.json` + `summary.md`, prints a structured GO/NO-GO banner.
+- `ops/README.md` — operator documentation: what it does / does NOT do,
+  one-line VM run command, output layout, decision rules, stage list.
+- `docker-compose.yml` — added `./prod_reports:/app/prod_reports` bind
+  mount under the backend service so cutover artifacts persist on the
+  host across container rebuilds.
+- **Tests**: `backend/tests/test_cutover_proof_summary.py` (24/24
+  passed) — synthetic fixtures, covers step classification, match-rate
+  extraction (incl. nested `summary` and 0–1 fraction conversion),
+  blocker derivation, GO/NO-GO branches, MD/text rendering, manifest
+  round-trip via `tmp_path`, and CLI integration via `monkeypatch`.
+- **End-to-end smoke**: orchestrator stubbed with rc=0 / rc=2 step
+  scripts produces correct manifests and decisions in both branches.
+- **Aggregate green suite**: 112/112 (24 cutover_proof + 46 dry-run +
+  42 remediation-plan).
+- **One VM command** (after `git pull`):
+  `docker compose exec backend bash ops/prod_verify_square9_cutover_readiness.sh`
+
 ## 2026-05-06 — Square9 Cutover P0: Bucket A + Bucket C Dry-Run Scripts
 **New read-only dry-run preview scripts** that show *exactly* what the
 Bucket A patch and routing-rule additions would do, plus an operator

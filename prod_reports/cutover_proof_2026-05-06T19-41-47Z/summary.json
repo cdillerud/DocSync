@@ -1,0 +1,89 @@
+{
+  "decision": "NO-GO",
+  "blockers": [
+    "match_rate_pct unavailable (parity JSON missing or unparseable)"
+  ],
+  "match_rate_pct": null,
+  "min_match_rate_pct": 85.0,
+  "step_count_total": 9,
+  "step_count_ok": 0,
+  "step_count_ok_signal": 9,
+  "step_count_fail": 0,
+  "steps": [
+    {
+      "id": "ap_cutover_readiness_report",
+      "label": "AP cutover readiness report",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/ap_cutover_readiness_report.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "billing_intake_routing_probe",
+      "label": "Billing intake routing probe",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/billing_intake_routing_probe.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "square9_hub_ap_parity_report",
+      "label": "Square9 Hub-AP parity report",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/square9_hub_ap_parity_report.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "square9_only_triage_resolver",
+      "label": "Square9-only triage resolver",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/square9_only_triage_resolver.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "bucket_A_root_cause_report",
+      "label": "Bucket A root-cause report",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/bucket_A_root_cause_report.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "bucket_C_intake_gap_report",
+      "label": "Bucket C intake-gap report",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/bucket_C_intake_gap_report.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "bucket_A_misrouting_remediation_plan",
+      "label": "Bucket A misrouting remediation plan",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/bucket_A_misrouting_remediation_plan.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "bucket_C_intake_remediation_plan",
+      "label": "Bucket C intake remediation plan",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/bucket_C_intake_remediation_plan.log",
+      "duration_sec": 0
+    },
+    {
+      "id": "email_poll_watermark_probe",
+      "label": "mail_poll_runs health summary",
+      "rc": 2,
+      "status": "ok_signal",
+      "log_path": "prod_reports/cutover_proof_2026-05-06T19-41-47Z/logs/email_poll_watermark_probe.log",
+      "duration_sec": 0
+    }
+  ],
+  "proof_dir": "prod_reports/cutover_proof_2026-05-06T19-41-47Z",
+  "started_at_utc": "2026-05-06T19:41:47Z",
+  "finished_at_utc": "2026-05-06T19:41:47Z"
+}

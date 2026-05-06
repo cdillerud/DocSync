@@ -474,3 +474,57 @@ def test_load_remediation_plan_returns_dict_for_valid_json(tmp_path: Path):
     plan = cps.load_remediation_plan(str(p))
     assert plan is not None
     assert plan["actionable_doc_count"] == 42
+
+
+# ---------------------------------------------------------------------------
+# Matched-count derivation (parity script formula, not literal "matched" key)
+# ---------------------------------------------------------------------------
+
+def test_derive_matched_count_sums_four_match_buckets():
+    bc = {"exact_match": 5, "strong_evidence_match": 71,
+          "likely_match": 0, "possible_match": 18,
+          "no_match": 158, "hub_only": 218}
+    assert cps._derive_matched_count(bc) == 5 + 71 + 0 + 18
+
+
+def test_derive_matched_count_honors_precomputed_matched_key():
+    bc = {"matched": 99, "exact_match": 1}  # precomputed wins
+    assert cps._derive_matched_count(bc) == 99
+
+
+def test_derive_matched_count_returns_none_when_no_buckets():
+    assert cps._derive_matched_count({}) is None
+    # no_match is NOT a match bucket; without any of the four match
+    # buckets present, matched_count is unknown.
+    assert cps._derive_matched_count({"no_match": 10}) is None
+
+
+def test_derive_matched_count_returns_zero_when_match_buckets_all_zero():
+    assert cps._derive_matched_count({"exact_match": 0,
+                                      "strong_evidence_match": 0}) == 0
+
+
+def test_derive_matched_count_skips_non_numeric_values():
+    bc = {"exact_match": "x", "strong_evidence_match": 12,
+          "likely_match": None, "possible_match": 3}
+    assert cps._derive_matched_count(bc) == 15
+
+
+def test_build_key_counts_uses_match_bucket_sum_for_projection():
+    """Real-world parity payload: bucket_counts has the constituent
+    match buckets but no literal 'matched' key. Summarizer must still
+    compute matched_count and the projection."""
+    parity = {"square_count": 247,
+              "bucket_counts": {"exact_match": 0,
+                                "strong_evidence_match": 71,
+                                "likely_match": 0,
+                                "possible_match": 18,
+                                "no_match": 158,
+                                "hub_only": 218}}
+    bucket_a = {"actionable_doc_count": 43,
+                "cohort_count_actionable": 5}
+    kc = cps.build_key_counts(parity, bucket_a, None, 36.03)
+    assert kc["parity"]["matched_count"] == 89
+    proj = kc["projection"]["post_bucket_A_apply_match_rate_pct"]
+    # (89 + 43) / 247 = 53.44%
+    assert abs(proj - 53.44) < 0.05

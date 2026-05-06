@@ -146,6 +146,35 @@ def load_remediation_plan(path: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+# Match-bucket keys treated as "this Square9 doc IS reflected in Hub".
+# Mirrors square9_hub_ap_parity_report.py's match-rate formula:
+#   matched = exact_match + strong_evidence_match + likely_match + possible_match
+MATCHED_BUCKET_KEYS = (
+    "exact_match",
+    "strong_evidence_match",
+    "likely_match",
+    "possible_match",
+)
+
+
+def _derive_matched_count(bucket_counts: Dict[str, Any]) -> Optional[int]:
+    """Sum the four match buckets. Honors a precomputed `matched` key
+    if the parity script ever emits one, otherwise sums the constituent
+    buckets. Returns None when the data is unusable."""
+    if not isinstance(bucket_counts, dict):
+        return None
+    if isinstance(bucket_counts.get("matched"), (int, float)):
+        return int(bucket_counts["matched"])
+    total = 0
+    seen_any = False
+    for key in MATCHED_BUCKET_KEYS:
+        v = bucket_counts.get(key)
+        if isinstance(v, (int, float)):
+            total += int(v)
+            seen_any = True
+    return total if seen_any else None
+
+
 def build_key_counts(parity: Optional[Dict[str, Any]],
                      bucket_a_plan: Optional[Dict[str, Any]],
                      bucket_c_plan: Optional[Dict[str, Any]],
@@ -159,7 +188,7 @@ def build_key_counts(parity: Optional[Dict[str, Any]],
         bucket_counts = {}
     square_count = p.get("square_count")
     hub_count = p.get("hub_count")
-    matched = bucket_counts.get("matched")
+    matched = _derive_matched_count(bucket_counts)
 
     a = bucket_a_plan or {}
     a_actionable_cohorts = a.get("cohort_count_actionable")

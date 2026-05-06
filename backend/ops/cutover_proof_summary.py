@@ -115,6 +115,102 @@ def _extract_match_rate(payload: Any) -> Optional[float]:
 
 
 # ---------------------------------------------------------------------------
+# Key counts (parity buckets, Bucket A / C cohort numbers, projection)
+# ---------------------------------------------------------------------------
+
+def load_parity_payload(proof_dir: str) -> Optional[Dict[str, Any]]:
+    """Returns the parity report's full JSON payload (not just the
+    match rate). Used for bucket_counts and the apply-step projection."""
+    candidates = [
+        os.path.join(proof_dir, "square9_hub_ap_parity.json"),
+        os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.json"),
+        os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.log"),
+    ]
+    for p in candidates:
+        if not os.path.exists(p):
+            continue
+        payload = _try_parse_json_file(p)
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def load_remediation_plan(path: str) -> Optional[Dict[str, Any]]:
+    """Loads a remediation-plan JSON. Returns None on missing / parse failure."""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def build_key_counts(parity: Optional[Dict[str, Any]],
+                     bucket_a_plan: Optional[Dict[str, Any]],
+                     bucket_c_plan: Optional[Dict[str, Any]],
+                     match_rate_pct: Optional[float]) -> Dict[str, Any]:
+    """Distill the parity + remediation-plan JSONs into the small set of
+    counts that drive the cutover decision. Anything absent comes back
+    as None — never as zero — so the renderer can mark it 'unknown'."""
+    p = parity or {}
+    bucket_counts = p.get("bucket_counts") or {}
+    if not isinstance(bucket_counts, dict):
+        bucket_counts = {}
+    square_count = p.get("square_count")
+    hub_count = p.get("hub_count")
+    matched = bucket_counts.get("matched")
+
+    a = bucket_a_plan or {}
+    a_actionable_cohorts = a.get("cohort_count_actionable")
+    a_actionable_docs = a.get("actionable_doc_count")
+    a_manual_review_cohorts = a.get("cohort_count_manual_review")
+    a_change_type_counts = a.get("change_type_counts")
+
+    c = bucket_c_plan or {}
+    c_intake_cohorts = c.get("intake_channel_change_cohort_count")
+    c_exclusion_cohorts = c.get("parity_exclusion_cohort_count")
+    c_owner_counts = c.get("owner_hint_counts")
+
+    projected_match_rate_pct = None
+    projection_basis = None
+    if (isinstance(square_count, (int, float)) and square_count > 0
+            and isinstance(matched, (int, float))
+            and isinstance(a_actionable_docs, (int, float))):
+        projected_match_rate_pct = (
+            (matched + a_actionable_docs) / square_count) * 100.0
+        projection_basis = (
+            f"(matched={int(matched)} + bucket_A_actionable_docs="
+            f"{int(a_actionable_docs)}) / square_count={int(square_count)}"
+        )
+
+    return {
+        "parity": {
+            "square_count": square_count,
+            "hub_count": hub_count,
+            "matched_count": matched,
+            "match_rate_pct": match_rate_pct,
+            "bucket_counts": bucket_counts,
+        },
+        "bucket_A": {
+            "actionable_cohort_count": a_actionable_cohorts,
+            "actionable_doc_count": a_actionable_docs,
+            "manual_review_cohort_count": a_manual_review_cohorts,
+            "change_type_counts": a_change_type_counts,
+        },
+        "bucket_C": {
+            "intake_channel_change_cohort_count": c_intake_cohorts,
+            "parity_exclusion_cohort_count": c_exclusion_cohorts,
+            "owner_hint_counts": c_owner_counts,
+        },
+        "projection": {
+            "post_bucket_A_apply_match_rate_pct": projected_match_rate_pct,
+            "basis": projection_basis,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Pure decision engine
 # ---------------------------------------------------------------------------
 
@@ -175,11 +271,16 @@ def derive_blockers(manifest: Dict[str, Any],
 
 def build_summary(manifest: Dict[str, Any],
                   match_rate_pct: Optional[float],
-                  min_match_rate: float) -> Dict[str, Any]:
+                  min_match_rate: float,
+                  parity_payload: Optional[Dict[str, Any]] = None,
+                  bucket_a_plan: Optional[Dict[str, Any]] = None,
+                  bucket_c_plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     steps = manifest.get("steps", [])
     statuses = [classify_step(s) for s in steps]
     blockers = derive_blockers(manifest, match_rate_pct, min_match_rate)
     decision = "GO" if not blockers else "NO-GO"
+    key_counts = build_key_counts(parity_payload, bucket_a_plan,
+                                  bucket_c_plan, match_rate_pct)
     return {
         "decision": decision,
         "blockers": blockers,
@@ -189,6 +290,7 @@ def build_summary(manifest: Dict[str, Any],
         "step_count_ok": statuses.count("ok"),
         "step_count_ok_signal": statuses.count("ok_signal"),
         "step_count_fail": statuses.count("fail"),
+        "key_counts": key_counts,
         "steps": [
             {
                 "id": s.get("id"),
@@ -228,6 +330,37 @@ def render_markdown(summary: Dict[str, Any]) -> str:
                  f"ok_signal={summary['step_count_ok_signal']} "
                  f"fail={summary['step_count_fail']}")
     lines.append("")
+    kc = summary.get("key_counts") or {}
+    parity = kc.get("parity") or {}
+    a = kc.get("bucket_A") or {}
+    c = kc.get("bucket_C") or {}
+    proj = kc.get("projection") or {}
+    lines.append("## Key counts")
+    lines.append("")
+    lines.append("| metric | value |")
+    lines.append("| --- | --- |")
+    lines.append(f"| parity.square_count | {_fmt_int_or_unknown(parity.get('square_count'))} |")
+    lines.append(f"| parity.hub_count | {_fmt_int_or_unknown(parity.get('hub_count'))} |")
+    lines.append(f"| parity.matched_count | {_fmt_int_or_unknown(parity.get('matched_count'))} |")
+    lines.append(f"| bucket_A.actionable_cohorts | {_fmt_int_or_unknown(a.get('actionable_cohort_count'))} |")
+    lines.append(f"| bucket_A.actionable_docs | {_fmt_int_or_unknown(a.get('actionable_doc_count'))} |")
+    lines.append(f"| bucket_A.manual_review_cohorts | {_fmt_int_or_unknown(a.get('manual_review_cohort_count'))} |")
+    lines.append(f"| bucket_C.intake_channel_change_cohorts | {_fmt_int_or_unknown(c.get('intake_channel_change_cohort_count'))} |")
+    lines.append(f"| bucket_C.parity_exclusion_cohorts | {_fmt_int_or_unknown(c.get('parity_exclusion_cohort_count'))} |")
+    proj_rate = proj.get("post_bucket_A_apply_match_rate_pct")
+    if proj_rate is not None:
+        lines.append("")
+        lines.append("### Projected match rate after Bucket A apply")
+        lines.append("")
+        lines.append(f"- **{_fmt_pct_or_unknown(proj_rate)}** "
+                     f"(min required: {summary['min_match_rate_pct']:.2f}%)")
+        lines.append(f"- Basis: {proj.get('basis')}")
+        if proj_rate >= summary['min_match_rate_pct']:
+            lines.append("- Bucket A apply alone should clear the GO gate.")
+        else:
+            lines.append("- Bucket A apply alone is **not** sufficient; "
+                         "Bucket C intake-channel work also required.")
+    lines.append("")
     if summary["blockers"]:
         lines.append("## Blockers")
         for b in summary["blockers"]:
@@ -249,9 +382,24 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _fmt_int_or_unknown(v: Any) -> str:
+    if v is None:
+        return "unknown"
+    try:
+        return str(int(v))
+    except (TypeError, ValueError):
+        return str(v)
+
+
+def _fmt_pct_or_unknown(v: Any) -> str:
+    if isinstance(v, (int, float)):
+        return f"{v:.2f}%"
+    return "unknown"
+
+
 def render_text(summary: Dict[str, Any]) -> str:
     rate = summary.get("match_rate_pct")
-    rate_str = f"{rate:.2f}%" if isinstance(rate, (int, float)) else "unknown"
+    rate_str = _fmt_pct_or_unknown(rate)
     out: List[str] = []
     out.append("=" * 66)
     out.append(f" Square9 Cutover Readiness — DECISION: {summary['decision']}")
@@ -266,6 +414,52 @@ def render_text(summary: Dict[str, Any]) -> str:
                f"ok_signal={summary['step_count_ok_signal']} "
                f"fail={summary['step_count_fail']}")
     out.append("")
+
+    kc = summary.get("key_counts") or {}
+    parity = kc.get("parity") or {}
+    a = kc.get("bucket_A") or {}
+    c = kc.get("bucket_C") or {}
+    proj = kc.get("projection") or {}
+
+    out.append("  KEY COUNTS:")
+    out.append(f"    parity.square_count          : {_fmt_int_or_unknown(parity.get('square_count'))}")
+    out.append(f"    parity.hub_count             : {_fmt_int_or_unknown(parity.get('hub_count'))}")
+    out.append(f"    parity.matched_count         : {_fmt_int_or_unknown(parity.get('matched_count'))}")
+    bcs = parity.get("bucket_counts") or {}
+    if bcs:
+        out.append(f"    parity.bucket_counts         :")
+        for k, v in bcs.items():
+            out.append(f"      {k:30s} {_fmt_int_or_unknown(v)}")
+    out.append(f"    bucket_A.actionable_cohorts  : {_fmt_int_or_unknown(a.get('actionable_cohort_count'))}")
+    out.append(f"    bucket_A.actionable_docs     : {_fmt_int_or_unknown(a.get('actionable_doc_count'))}")
+    out.append(f"    bucket_A.manual_review_cohrts: {_fmt_int_or_unknown(a.get('manual_review_cohort_count'))}")
+    ctc = a.get("change_type_counts")
+    if ctc:
+        out.append(f"    bucket_A.change_type_counts  :")
+        for entry in ctc:
+            try:
+                k, v = entry[0], entry[1]
+            except (TypeError, IndexError):
+                continue
+            out.append(f"      {str(k):30s} {_fmt_int_or_unknown(v)}")
+    out.append(f"    bucket_C.intake_change_cohrts: {_fmt_int_or_unknown(c.get('intake_channel_change_cohort_count'))}")
+    out.append(f"    bucket_C.exclusion_cohorts   : {_fmt_int_or_unknown(c.get('parity_exclusion_cohort_count'))}")
+
+    proj_rate = proj.get("post_bucket_A_apply_match_rate_pct")
+    if proj_rate is not None:
+        out.append("")
+        out.append("  PROJECTED MATCH RATE AFTER BUCKET A APPLY:")
+        out.append(f"    {_fmt_pct_or_unknown(proj_rate)}  "
+                   f"{proj.get('basis') or ''}")
+        if proj_rate >= summary['min_match_rate_pct']:
+            out.append(f"    >= {summary['min_match_rate_pct']:.2f}%   "
+                       f"(Bucket A apply alone should clear the gate)")
+        else:
+            out.append(f"    <  {summary['min_match_rate_pct']:.2f}%   "
+                       f"(Bucket A apply NOT sufficient; Bucket C "
+                       f"intake-channel work also required)")
+    out.append("")
+
     if summary["blockers"]:
         out.append("  BLOCKERS:")
         for b in summary["blockers"]:
@@ -309,8 +503,21 @@ def main() -> int:
         args.proof_dir, "manifest.json")
     manifest = load_manifest(manifest_path)
     match_rate_pct = load_parity_match_rate(args.proof_dir)
+    parity_payload = load_parity_payload(args.proof_dir)
+    # Remediation-plan JSONs live under prod_reports/ (sibling of the
+    # proof dir), not inside the proof dir itself, because the bucket
+    # plan scripts have hardcoded default output paths. Resolve via the
+    # proof_dir's parent.
+    prod_reports_dir = os.path.dirname(os.path.normpath(args.proof_dir)) or "."
+    bucket_a_plan = load_remediation_plan(
+        os.path.join(prod_reports_dir, "bucket_A_remediation_plan.json"))
+    bucket_c_plan = load_remediation_plan(
+        os.path.join(prod_reports_dir, "bucket_C_remediation_plan.json"))
 
-    summary = build_summary(manifest, match_rate_pct, args.min_match_rate)
+    summary = build_summary(manifest, match_rate_pct, args.min_match_rate,
+                            parity_payload=parity_payload,
+                            bucket_a_plan=bucket_a_plan,
+                            bucket_c_plan=bucket_c_plan)
 
     summary_json = os.path.join(args.proof_dir, "summary.json")
     summary_md = os.path.join(args.proof_dir, "summary.md")

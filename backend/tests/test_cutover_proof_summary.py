@@ -337,3 +337,140 @@ def test_cli_returns_one_on_NO_GO(tmp_path: Path, monkeypatch):
                          "--proof-dir", str(tmp_path)])
     rc = cps.main()
     assert rc == 1
+
+
+# ---------------------------------------------------------------------------
+# Key counts + projection
+# ---------------------------------------------------------------------------
+
+def test_build_key_counts_projects_match_rate_after_bucket_A_apply():
+    parity = {"square_count": 1000, "hub_count": 800,
+              "bucket_counts": {"matched": 360, "square9_only": 640}}
+    bucket_a = {"cohort_count_actionable": 11,
+                "actionable_doc_count": 500,
+                "cohort_count_manual_review": 4}
+    bucket_c = {"intake_channel_change_cohort_count": 7,
+                "parity_exclusion_cohort_count": 2}
+    kc = cps.build_key_counts(parity, bucket_a, bucket_c, 36.0)
+    assert kc["parity"]["matched_count"] == 360
+    assert kc["bucket_A"]["actionable_doc_count"] == 500
+    assert kc["bucket_C"]["intake_channel_change_cohort_count"] == 7
+    proj = kc["projection"]["post_bucket_A_apply_match_rate_pct"]
+    # (360 + 500) / 1000 = 86.0
+    assert abs(proj - 86.0) < 1e-6
+    assert "matched=360" in kc["projection"]["basis"]
+
+
+def test_build_key_counts_handles_all_missing():
+    kc = cps.build_key_counts(None, None, None, None)
+    assert kc["parity"]["square_count"] is None
+    assert kc["parity"]["matched_count"] is None
+    assert kc["bucket_A"]["actionable_doc_count"] is None
+    assert kc["projection"]["post_bucket_A_apply_match_rate_pct"] is None
+
+
+def test_build_key_counts_skips_projection_when_inputs_missing():
+    parity = {"square_count": 1000,
+              "bucket_counts": {"matched": 360}}
+    kc = cps.build_key_counts(parity, None, None, 36.0)
+    assert kc["projection"]["post_bucket_A_apply_match_rate_pct"] is None
+
+
+def test_build_key_counts_skips_projection_when_square_count_zero():
+    parity = {"square_count": 0,
+              "bucket_counts": {"matched": 0}}
+    bucket_a = {"actionable_doc_count": 5}
+    kc = cps.build_key_counts(parity, bucket_a, None, 0.0)
+    assert kc["projection"]["post_bucket_A_apply_match_rate_pct"] is None
+
+
+def test_render_text_includes_key_counts_block():
+    parity = {"square_count": 100, "hub_count": 80,
+              "bucket_counts": {"matched": 36, "square9_only": 64}}
+    bucket_a = {"cohort_count_actionable": 11,
+                "actionable_doc_count": 50,
+                "cohort_count_manual_review": 4}
+    bucket_c = {"intake_channel_change_cohort_count": 7,
+                "parity_exclusion_cohort_count": 2}
+    summary = cps.build_summary(_manifest(_step("a", rc=0)),
+                                36.0, 85.0,
+                                parity_payload=parity,
+                                bucket_a_plan=bucket_a,
+                                bucket_c_plan=bucket_c)
+    text = cps.render_text(summary)
+    assert "KEY COUNTS:" in text
+    assert "parity.square_count" in text
+    assert "bucket_A.actionable_docs" in text
+    assert "bucket_C.intake_change_cohrts" in text
+    assert "PROJECTED MATCH RATE AFTER BUCKET A APPLY" in text
+    # (36+50)/100 = 86%
+    assert "86.00%" in text
+
+
+def test_render_text_projection_tags_ge_threshold_as_clearing_gate():
+    parity = {"square_count": 100,
+              "bucket_counts": {"matched": 60}}
+    bucket_a = {"actionable_doc_count": 30}
+    summary = cps.build_summary(_manifest(_step("a", rc=0)),
+                                60.0, 85.0,
+                                parity_payload=parity,
+                                bucket_a_plan=bucket_a,
+                                bucket_c_plan=None)
+    text = cps.render_text(summary)
+    # 90% >= 85% -> clears gate
+    assert "should clear the gate" in text
+
+
+def test_render_text_projection_tags_below_threshold_as_insufficient():
+    parity = {"square_count": 100,
+              "bucket_counts": {"matched": 36}}
+    bucket_a = {"actionable_doc_count": 20}
+    summary = cps.build_summary(_manifest(_step("a", rc=0)),
+                                36.0, 85.0,
+                                parity_payload=parity,
+                                bucket_a_plan=bucket_a,
+                                bucket_c_plan=None)
+    text = cps.render_text(summary)
+    # 56% < 85% -> not sufficient
+    assert "NOT sufficient" in text
+
+
+def test_render_markdown_includes_key_counts_table():
+    parity = {"square_count": 100,
+              "bucket_counts": {"matched": 36}}
+    bucket_a = {"actionable_doc_count": 50,
+                "cohort_count_actionable": 11}
+    summary = cps.build_summary(_manifest(_step("a", rc=0)),
+                                36.0, 85.0,
+                                parity_payload=parity,
+                                bucket_a_plan=bucket_a)
+    md = cps.render_markdown(summary)
+    assert "## Key counts" in md
+    assert "| parity.square_count | 100 |" in md
+    assert "| bucket_A.actionable_docs | 50 |" in md
+    assert "Projected match rate after Bucket A apply" in md
+
+
+def test_load_parity_payload_returns_full_dict(tmp_path: Path):
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    body = ("preamble line\n"
+            + json.dumps({"square_count": 99,
+                          "bucket_counts": {"matched": 33}}))
+    (logs / "square9_hub_ap_parity_report.log").write_text(body,
+                                                           encoding="utf-8")
+    payload = cps.load_parity_payload(str(tmp_path))
+    assert payload is not None
+    assert payload["square_count"] == 99
+
+
+def test_load_remediation_plan_returns_none_when_missing(tmp_path: Path):
+    assert cps.load_remediation_plan(str(tmp_path / "nope.json")) is None
+
+
+def test_load_remediation_plan_returns_dict_for_valid_json(tmp_path: Path):
+    p = tmp_path / "plan.json"
+    p.write_text(json.dumps({"actionable_doc_count": 42}), encoding="utf-8")
+    plan = cps.load_remediation_plan(str(p))
+    assert plan is not None
+    assert plan["actionable_doc_count"] == 42

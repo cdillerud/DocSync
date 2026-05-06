@@ -456,14 +456,28 @@ async def poll_mailbox_for_attachments():
         # max(batch.receivedDateTime) == current watermark, so the watermark
         # never advanced and the same 25 messages were re-fetched forever.
         # See: hub-ap-intake@gamerpackaging.com, stuck at 2026-04-09T21:02:12Z.
+        #
+        # Second stall mode (B2): Graph stores receivedDateTime at sub-second
+        # precision but serializes JSON at second precision. Server-side
+        # `gt 2026-05-06T12:06:58Z` correctly passes a message stored at
+        # 12:06:58.123Z, but our Python `max(receivedDateTime)` then sees
+        # the truncated string `2026-05-06T12:06:58Z` — equal to the existing
+        # watermark, so we don't advance. Tie-breaker: persist the IDs of
+        # messages we've already processed at the watermark second, and
+        # filter them out client-side on the next cycle.
         watermark_doc = await db.hub_settings.find_one({"type": "email_poll_watermark"}, {"_id": 0})
         if watermark_doc and watermark_doc.get("last_received_datetime"):
             watermark_time = watermark_doc["last_received_datetime"]
         else:
             watermark_time = (datetime.now(timezone.utc) - timedelta(minutes=EMAIL_POLLING_LOOKBACK_MINUTES)).isoformat()
 
+        last_seen_ids = set(
+            (watermark_doc or {}).get("last_seen_message_ids", []) or []
+        )
+
         filter_query = f"receivedDateTime gt {watermark_time}"
         stats["watermark_in"] = watermark_time
+        stats["last_seen_ids_count"] = len(last_seen_ids)
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             messages_resp = await client.get(
@@ -483,6 +497,23 @@ async def poll_mailbox_for_attachments():
                 return stats
 
             messages = messages_resp.json().get("value", [])
+
+            # B2 tie-breaker: drop boundary-equal messages we've already
+            # processed at the previous watermark second. Without this, Graph
+            # returns sub-second-precision messages whose JSON serialization
+            # equals the watermark string, and we re-process them every cycle
+            # without advancing.
+            if last_seen_ids:
+                before = len(messages)
+                messages = [
+                    m for m in messages
+                    if not (
+                        m.get("receivedDateTime") == watermark_time
+                        and m.get("id") in last_seen_ids
+                    )
+                ]
+                stats["boundary_dedup_dropped"] = before - len(messages)
+
             messages_with_attachments = [m for m in messages if m.get("hasAttachments")]
             stats["messages_detected"] = len(messages_with_attachments)
             logger.info("[EmailPoll:%s] Detected %d messages with attachments (out of %d total)",
@@ -597,14 +628,28 @@ async def poll_mailbox_for_attachments():
             # in practice, but we audit it as a defense-in-depth canary.
             if messages:
                 newest_received = max(msg.get("receivedDateTime", "") for msg in messages)
+                # IDs of every message at the new watermark second. These will
+                # be filtered out as duplicates on the NEXT cycle in case Graph
+                # is comparing at sub-second precision but serializing JSON at
+                # whole-second precision (B2 fix).
+                ids_at_new_watermark = sorted({
+                    m.get("id")
+                    for m in messages
+                    if m.get("receivedDateTime") == newest_received and m.get("id")
+                })
                 if newest_received and newest_received > watermark_time:
                     await db.hub_settings.update_one(
                         {"type": "email_poll_watermark"},
-                        {"$set": {"last_received_datetime": newest_received, "updated_utc": datetime.now(timezone.utc).isoformat()}},
+                        {"$set": {
+                            "last_received_datetime": newest_received,
+                            "last_seen_message_ids": ids_at_new_watermark,
+                            "updated_utc": datetime.now(timezone.utc).isoformat(),
+                        }},
                         upsert=True,
                     )
                     stats["watermark_out"] = newest_received
                     stats["watermark_advanced"] = True
+                    stats["last_seen_message_ids_persisted"] = len(ids_at_new_watermark)
                 else:
                     # Watermark could not advance — duplicates blocking forward progress.
                     stats["watermark_out"] = watermark_time
@@ -616,11 +661,13 @@ async def poll_mailbox_for_attachments():
                         "batch_size": len(messages),
                         "duplicates": stats["attachments_skipped_duplicate"],
                         "ingested": stats["attachments_ingested"],
+                        "boundary_dedup_dropped": stats.get("boundary_dedup_dropped", 0),
                     }
                     logger.warning(
-                        "[EmailPoll:%s] STALLED WATERMARK mailbox=%s watermark=%s max_seen=%s batch=%d duplicates=%d",
+                        "[EmailPoll:%s] STALLED WATERMARK mailbox=%s watermark=%s max_seen=%s batch=%d duplicates=%d boundary_dropped=%d",
                         run_id, EMAIL_POLLING_USER, watermark_time, newest_received,
                         len(messages), stats["attachments_skipped_duplicate"],
+                        stats.get("boundary_dedup_dropped", 0),
                     )
     except Exception as e:
         stats["errors"].append(f"Poll run failed: {str(e)}")

@@ -624,6 +624,25 @@ def format_summary_text(
 # Pure-function entrypoint (used by tests)
 # ---------------------------------------------------------------------------
 
+def filter_square_docs_by_modified(
+    docs: List[SquareDoc], since_hours: int
+) -> Tuple[List[SquareDoc], str]:
+    """Drop Square9 docs whose modified-time is older than `now - since_hours`.
+
+    Returns the filtered list and the cutoff iso string for reporting.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
+    cutoff_iso = cutoff.isoformat()
+    out: List[SquareDoc] = []
+    for d in docs:
+        if d.modified is None:
+            # No modified-time means we can't tell; conservative: exclude.
+            continue
+        if d.modified >= cutoff:
+            out.append(d)
+    return out, cutoff_iso
+
+
 def run_compare(
     square_docs: List[SquareDoc],
     hub_docs: List[HubDoc],
@@ -692,6 +711,11 @@ def main() -> int:
         description="Square9 vs GPI Hub AP-lane parity proof (read-only)."
     )
     ap.add_argument("--since-hours", type=int, default=24)
+    ap.add_argument(
+        "--prod-modified-since-hours", type=int, default=None,
+        help="Filter Square9 docs to those with modified-time within the last "
+             "N hours. Defaults to --since-hours so prod and Hub windows align.",
+    )
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--out-csv", default="prod_reports/square9_hub_ap_parity.csv")
     ap.add_argument("--top", type=int, default=25)
@@ -725,11 +749,20 @@ def main() -> int:
         label="prod", recursive=(not args.no_recursive),
         max_depth=args.max_depth,
     )
+    sq_docs_unfiltered_count = len(sq_docs)
+    prod_window_hours = args.prod_modified_since_hours or args.since_hours
+    sq_docs, prod_cutoff_iso = filter_square_docs_by_modified(sq_docs, prod_window_hours)
 
     # Pull Hub side from Mongo
     hub_docs = load_hub_ap_docs(args.since_hours, args.limit)
     poll_health = load_recent_poll_health(args.since_hours)
 
+    print(
+        f"Square9 listing: {sq_docs_unfiltered_count} total, "
+        f"{len(sq_docs)} within last {prod_window_hours}h "
+        f"(cutoff={prod_cutoff_iso}).",
+        file=sys.stderr,
+    )
     print(
         f"Loaded {len(sq_docs)} Square9 docs, {len(hub_docs)} Hub AP docs "
         f"(window={args.since_hours}h, limit={args.limit}).",
@@ -749,6 +782,11 @@ def main() -> int:
         # Strip rows; CSV is the row store.
         payload = {
             "square_count": result["square_count"],
+            "square_count_before_filter": sq_docs_unfiltered_count,
+            "prod_modified_since_hours": prod_window_hours,
+            "prod_modified_cutoff": prod_cutoff_iso,
+            "since_hours": args.since_hours,
+            "limit": args.limit,
             "hub_count": result["hub_count"],
             "bucket_counts": result["bucket_counts"],
             "match_rate": result["match_rate"],
@@ -771,6 +809,13 @@ def main() -> int:
             poll_health=poll_health,
             top_n=args.top,
         ))
+        print(
+            f"\n  prod_modified_window:      last {prod_window_hours}h "
+            f"(cutoff={prod_cutoff_iso})"
+        )
+        print(
+            f"  prod_listing_before_filter: {sq_docs_unfiltered_count} doc(s)"
+        )
 
     return 1 if result["findings"]["blockers"] else 0
 

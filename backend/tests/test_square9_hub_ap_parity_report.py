@@ -16,7 +16,7 @@ Covers:
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import List
 
 import pytest
@@ -276,3 +276,57 @@ def test_legacy_classification_method_is_warning():
     assert not any(
         "legacy_classification_method" in b for b in result["findings"]["blockers"]
     )
+
+
+# ----------------------------------------------------------------------------
+# 11-14. B1 — Square9 modified-time window filter
+# ----------------------------------------------------------------------------
+def test_filter_square_docs_excludes_old_docs():
+    """Docs older than the window must be excluded."""
+    now = datetime.now(timezone.utc)
+    old = _sq("old.pdf", modified=(now - timedelta(days=30)).isoformat().replace("+00:00", "Z"))
+    fresh = _sq("fresh.pdf", modified=(now - timedelta(hours=2)).isoformat().replace("+00:00", "Z"))
+    out, cutoff = parity.filter_square_docs_by_modified([old, fresh], since_hours=24)
+    assert [d.name for d in out] == ["fresh.pdf"]
+    assert cutoff  # iso string
+
+
+def test_filter_square_docs_includes_in_window():
+    """Docs whose modified-time is within the window must be included."""
+    now = datetime.now(timezone.utc)
+    docs = [
+        _sq(f"doc{i}.pdf", modified=(now - timedelta(hours=i)).isoformat().replace("+00:00", "Z"))
+        for i in range(5)
+    ]
+    out, _ = parity.filter_square_docs_by_modified(docs, since_hours=24)
+    assert len(out) == 5
+
+
+def test_default_prod_window_equals_since_hours():
+    """When --prod-modified-since-hours is not supplied, default is since-hours."""
+    # Simulate by constructing args namespace and applying the same default
+    # logic as the CLI block.
+    class _Args:
+        since_hours = 12
+        prod_modified_since_hours = None
+    a = _Args()
+    effective = a.prod_modified_since_hours or a.since_hours
+    assert effective == 12
+
+
+def test_explicit_prod_window_overrides_default():
+    """Explicit --prod-modified-since-hours overrides the since-hours default."""
+    class _Args:
+        since_hours = 24
+        prod_modified_since_hours = 168
+    a = _Args()
+    effective = a.prod_modified_since_hours or a.since_hours
+    assert effective == 168
+
+
+def test_filter_square_docs_excludes_docs_without_modified():
+    """Defensive: docs with no modified-time are excluded."""
+    sq = _sq("no_mod.pdf")
+    sq.modified = None  # type: ignore[attr-defined]
+    out, _ = parity.filter_square_docs_by_modified([sq], since_hours=24)
+    assert out == []

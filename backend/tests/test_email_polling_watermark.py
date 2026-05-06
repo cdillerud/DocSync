@@ -281,3 +281,165 @@ async def test_stalled_watermark_audit_when_no_advance(patched_module, fake_db):
     # And it must be in the persisted mail_poll_runs row.
     assert len(fake_db._inserted_runs) == 1
     assert "stalled_watermark" in fake_db._inserted_runs[0]
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B2 tie-breaker tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_boundary_equal_message_already_processed_is_skipped(patched_module, fake_db):
+    """Graph returns a boundary-equal message whose ID matches one already
+    persisted in last_seen_message_ids — the tie-breaker must drop it."""
+    eps = patched_module
+    fake_db._watermark_state.update({
+        "type": "email_poll_watermark",
+        "last_received_datetime": "2026-05-06T12:06:58Z",
+        "last_seen_message_ids": ["msg-already-seen-1"],
+    })
+
+    msgs_resp = _fake_graph_resp(200, body={"value": [
+        # Same id we've already processed at the same second
+        {"id": "msg-already-seen-1", "subject": "boundary-dup",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:06:58Z",
+         "internetMessageId": "<dup@x>",
+         "hasAttachments": False},
+    ]})
+    FakeClient, _ = _make_fake_client(msgs_resp)
+
+    with patch.object(eps, "httpx") as mock_httpx, \
+         patch("services.config_service.get_email_token",
+               new=AsyncMock(return_value="fake-token")):
+        mock_httpx.AsyncClient = FakeClient
+        stats = await eps.poll_mailbox_for_attachments()
+
+    # Boundary-dedup must have removed the message before processing.
+    assert stats.get("boundary_dedup_dropped") == 1
+    # Watermark unchanged (no messages remained after dedup).
+    assert fake_db._watermark_state["last_received_datetime"] == "2026-05-06T12:06:58Z"
+    # No stalled_watermark recorded — empty post-dedup batch is benign.
+    assert "stalled_watermark" not in stats
+
+
+@pytest.mark.asyncio
+async def test_boundary_equal_message_with_new_id_is_processed(patched_module, fake_db):
+    """A boundary-equal message whose ID is NOT in last_seen_ids is a NEW
+    message — it must be processed AND added to last_seen_ids alongside
+    the existing one (watermark string stays the same)."""
+    eps = patched_module
+    fake_db._watermark_state.update({
+        "type": "email_poll_watermark",
+        "last_received_datetime": "2026-05-06T12:06:58Z",
+        "last_seen_message_ids": ["msg-already-seen-1"],
+    })
+
+    msgs_resp = _fake_graph_resp(200, body={"value": [
+        {"id": "msg-already-seen-1", "subject": "dup",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:06:58Z",
+         "internetMessageId": "<a@x>", "hasAttachments": False},
+        # NEW message at the same second
+        {"id": "msg-new-2", "subject": "fresh",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:06:58Z",
+         "internetMessageId": "<b@x>", "hasAttachments": False},
+        # Strictly later message — clears the tie altogether
+        {"id": "msg-future-3", "subject": "future",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:09:00Z",
+         "internetMessageId": "<c@x>", "hasAttachments": False},
+    ]})
+    FakeClient, _ = _make_fake_client(msgs_resp)
+
+    with patch.object(eps, "httpx") as mock_httpx, \
+         patch("services.config_service.get_email_token",
+               new=AsyncMock(return_value="fake-token")):
+        mock_httpx.AsyncClient = FakeClient
+        stats = await eps.poll_mailbox_for_attachments()
+
+    # Only the already-seen message was dropped.
+    assert stats.get("boundary_dedup_dropped") == 1
+    # Watermark advanced to the strictly-later message.
+    assert fake_db._watermark_state["last_received_datetime"] == "2026-05-06T12:09:00Z"
+    # last_seen_message_ids must now contain ONLY the IDs at the new watermark
+    # second (not the old boundary).
+    assert fake_db._watermark_state["last_seen_message_ids"] == ["msg-future-3"]
+
+
+@pytest.mark.asyncio
+async def test_watermark_persists_last_seen_ids_when_advancing(patched_module, fake_db):
+    """When advancing the watermark, the IDs of all messages at the new
+    watermark second must be persisted as last_seen_message_ids."""
+    eps = patched_module
+    fake_db._watermark_state.update({
+        "type": "email_poll_watermark",
+        "last_received_datetime": "2026-05-06T11:00:00Z",
+    })
+
+    msgs_resp = _fake_graph_resp(200, body={"value": [
+        {"id": "m1", "subject": "a",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:30:00Z",
+         "internetMessageId": "<1@x>", "hasAttachments": False},
+        # Two messages tied at the latest second
+        {"id": "m2", "subject": "b",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:45:00Z",
+         "internetMessageId": "<2@x>", "hasAttachments": False},
+        {"id": "m3", "subject": "c",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:45:00Z",
+         "internetMessageId": "<3@x>", "hasAttachments": False},
+    ]})
+    FakeClient, _ = _make_fake_client(msgs_resp)
+
+    with patch.object(eps, "httpx") as mock_httpx, \
+         patch("services.config_service.get_email_token",
+               new=AsyncMock(return_value="fake-token")):
+        mock_httpx.AsyncClient = FakeClient
+        stats = await eps.poll_mailbox_for_attachments()
+
+    assert stats.get("watermark_advanced") is True
+    assert fake_db._watermark_state["last_received_datetime"] == "2026-05-06T12:45:00Z"
+    # Both tied IDs persisted (sorted).
+    assert fake_db._watermark_state["last_seen_message_ids"] == ["m2", "m3"]
+    assert stats.get("last_seen_message_ids_persisted") == 2
+
+
+@pytest.mark.asyncio
+async def test_stalled_watermark_only_when_truly_no_progress(patched_module, fake_db):
+    """If post-tie-breaker the batch is empty, that is NOT a stall (we made
+    progress by NOT re-processing). Only record stalled_watermark when there
+    are real messages we cannot advance past."""
+    eps = patched_module
+    fake_db._watermark_state.update({
+        "type": "email_poll_watermark",
+        "last_received_datetime": "2026-05-06T12:06:58Z",
+        "last_seen_message_ids": ["msg-1", "msg-2"],
+    })
+
+    msgs_resp = _fake_graph_resp(200, body={"value": [
+        {"id": "msg-1", "subject": "dup1",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:06:58Z",
+         "internetMessageId": "<1@x>", "hasAttachments": False},
+        {"id": "msg-2", "subject": "dup2",
+         "from": {"emailAddress": {"address": "v@x.com"}},
+         "receivedDateTime": "2026-05-06T12:06:58Z",
+         "internetMessageId": "<2@x>", "hasAttachments": False},
+    ]})
+    FakeClient, _ = _make_fake_client(msgs_resp)
+
+    with patch.object(eps, "httpx") as mock_httpx, \
+         patch("services.config_service.get_email_token",
+               new=AsyncMock(return_value="fake-token")):
+        mock_httpx.AsyncClient = FakeClient
+        stats = await eps.poll_mailbox_for_attachments()
+
+    # Both messages dropped by tie-breaker — no stall, just an effective no-op.
+    assert stats.get("boundary_dedup_dropped") == 2
+    assert "stalled_watermark" not in stats
+    # Watermark unchanged.
+    assert fake_db._watermark_state["last_received_datetime"] == "2026-05-06T12:06:58Z"

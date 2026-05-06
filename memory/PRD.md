@@ -1,5 +1,51 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Square9 Cutover P0: Bucket A + Bucket C Remediation Plan Generators
+**New read-only plan generators** consume the diagnostic outputs from
+`bucket_A_root_cause_report.py` and `bucket_C_intake_gap_report.py` and
+emit per-cohort remediation plans for AP-routing reclassification and
+intake-channel expansion. No live mutations; no DB writes; no classifier
+or routing-logic changes.
+
+- `backend/scripts/bucket_A_misrouting_remediation_plan.py` — reads
+  `prod_reports/bucket_A_root_cause.csv`, groups by `(email_sender,
+  classification_method, current_mailbox_category, current_doc_type,
+  current_suggested_job_type, sharepoint_folder_root)`, emits per-cohort
+  proposed targets (`AP / AP_INVOICE / AP_Invoice`), `change_type`
+  drawn from a closed taxonomy (`routing_rule_addition`,
+  `one_shot_data_patch`, `classifier_signal_uplift`, `manual_review`),
+  `confidence_band` (high≥0.90 / medium 0.60–0.89 / low <0.60),
+  evidence sample of 3 doc_ids, and risk notes. Cohort cutoff:
+  `affected_doc_count >= 2 AND avg_score >= 0.60` to be "actionable";
+  everything else → `manual_review_queue`. Outputs CSV/JSON/YAML to
+  `prod_reports/bucket_A_remediation_plan.{csv,json,yaml}`.
+- `backend/scripts/bucket_C_intake_remediation_plan.py` — reads
+  `prod_reports/bucket_C_intake_gap.csv`, partitions into
+  `parity_exclusions` (PSTs, treasury, templates, monthly recs, "DO NOT
+  PAY" markers) and `intake_channel_changes` (real intake gaps).
+  Intake cohorts keyed on `(likely_vendor, candidate_intake_channel)`
+  with recommendation drawn from a closed taxonomy
+  (`add_sender_to_AP_transport_rule`, `enable_portal_download`,
+  `forward_billing_alias_to_hub_ap_intake`, `manual_followup`) plus
+  owner_hint (IT/AP). Outputs CSV/JSON/YAML to
+  `prod_reports/bucket_C_remediation_plan.{csv,json,yaml}`.
+- `backend/scripts/print_top_remediation_plans.py` — convenience CLI to
+  print the top N cohorts from both plan JSONs.
+- **Tests**: `backend/tests/test_bucket_A_misrouting_remediation_plan.py`
+  (24/24 passed) + `backend/tests/test_bucket_C_intake_remediation_plan.py`
+  (18/18 passed) — synthetic CSV fixtures, no Mongo. Covers the
+  decision matrix, confidence bands, cohort-cutoff thresholds, IO
+  round-trip, exit codes, and source-inspection guardrails proving the
+  modules import no `pymongo`/`motor` and make no mutating HTTP calls.
+- **Aggregate Square9 suite**: 79/79 passed (28 prior diagnostic + 9
+  triage + 42 new remediation-plan tests). Lint clean.
+- **Exit codes**: `0` empty input; `1` rows present but no actionable
+  cohorts; `2` actionable cohorts emitted.
+- **Strict scope fence**: no DB writes, no classifier/routing/transport-
+  rule changes, no parity-report changes, no CFO summary, no cutover
+  call, no DocuSign/HTTPS/parked-AP work.
+
+
 ## 2026-05-06 — Square9 Cutover P0: Invoice-Document-Set Parity Proof
 **Patched** `backend/scripts/square9_hub_ap_parity_report.py` to support
 strongest-form parity proof per signed declaration "combine a + d":

@@ -35,6 +35,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -114,6 +115,62 @@ LEGACY_CLASSIFICATION_PREFIXES = (
 
 
 # ---------------------------------------------------------------------------
+# Filename invoice-date extraction (used in --match-by-invoice-date mode)
+# ---------------------------------------------------------------------------
+
+# Order matters: ISO YYYY-MM-DD checked first, then US MM-DD-YYYY, then 8-digit
+# YYYYMMDD. Each capture group must yield a parseable (Y, M, D) triple.
+_FILENAME_DATE_PATTERNS: List[Tuple[re.Pattern, str]] = [
+    # 2026-04-15 / 2026_04_15 / 2026.04.15 / 2026/04/15
+    (re.compile(r"(?<!\d)(20\d{2})[-_./](0[1-9]|1[0-2])[-_./](0[1-9]|[12]\d|3[01])(?!\d)"), "ymd"),
+    # 04-15-2026 / 04/15/2026
+    (re.compile(r"(?<!\d)(0[1-9]|1[0-2])[-_./](0[1-9]|[12]\d|3[01])[-_./](20\d{2})(?!\d)"), "mdy"),
+    # 20260415 (compact, no separators)
+    (re.compile(r"(?<!\d)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)"), "ymd"),
+]
+
+
+def extract_date_from_filename(name: str) -> Optional[datetime]:
+    """Parse an invoice/document date out of a filename.
+
+    Returns None if no recognizable date is present. Best-effort, conservative —
+    returns the first match, anchored to UTC midnight. Used as supporting
+    evidence for invoice-document-set parity matching.
+    """
+    if not name:
+        return None
+    base = name.rsplit(".", 1)[0] if "." in name else name
+    for pat, kind in _FILENAME_DATE_PATTERNS:
+        m = pat.search(base)
+        if not m:
+            continue
+        g = m.groups()
+        try:
+            if kind == "ymd":
+                y, mo, d = int(g[0]), int(g[1]), int(g[2])
+            else:  # mdy
+                mo, d, y = int(g[0]), int(g[1]), int(g[2])
+            if 2018 <= y <= 2035 and 1 <= mo <= 12 and 1 <= d <= 31:
+                return datetime(y, mo, d, tzinfo=timezone.utc)
+        except (ValueError, IndexError):
+            continue
+    return None
+
+
+def square_invoice_date(sq: "SquareDoc") -> Optional[datetime]:
+    """Inferred invoice date for a Square9 doc — filename token first, fallback
+    to SharePoint modified time. Used only in --match-by-invoice-date mode."""
+    return extract_date_from_filename(sq.name) or sq.modified
+
+
+def _invoice_dates_close(a: Optional[datetime], b: Optional[datetime],
+                         tol_days: int) -> bool:
+    if a is None or b is None:
+        return False
+    return abs((a - b).total_seconds()) <= tol_days * 86400
+
+
+# ---------------------------------------------------------------------------
 # Hub-side document model
 # ---------------------------------------------------------------------------
 
@@ -136,6 +193,7 @@ class HubDoc:
     created_utc: Optional[datetime]
     email_subject: str
     email_sender: str
+    invoice_date: Optional[datetime] = None
     norm_name: str = ""
     inv_po_tokens: List[str] = field(default_factory=list)
     vendor_tokens: List[str] = field(default_factory=list)
@@ -157,6 +215,24 @@ class HubDoc:
         else:
             created_dt = None
 
+        # Invoice date: prefer extracted_fields.invoice_date, fall back to
+        # top-level invoice_date. Either may be ISO string, "YYYY-MM-DD", or
+        # missing. Used only when --match-by-invoice-date is enabled.
+        inv_date_raw: Any = None
+        ef = d.get("extracted_fields")
+        if isinstance(ef, dict):
+            inv_date_raw = ef.get("invoice_date") or ef.get("inv_date")
+        if not inv_date_raw:
+            inv_date_raw = d.get("invoice_date")
+        invoice_dt: Optional[datetime] = None
+        if isinstance(inv_date_raw, datetime):
+            invoice_dt = (
+                inv_date_raw if inv_date_raw.tzinfo
+                else inv_date_raw.replace(tzinfo=timezone.utc)
+            )
+        elif isinstance(inv_date_raw, str) and inv_date_raw.strip():
+            invoice_dt = parse_modified(inv_date_raw.strip())
+
         name = (d.get("file_name") or "").strip()
         return cls(
             raw=d,
@@ -176,6 +252,7 @@ class HubDoc:
             created_utc=created_dt,
             email_subject=(d.get("email_subject") or "").strip(),
             email_sender=(d.get("email_sender") or "").strip(),
+            invoice_date=invoice_dt,
             norm_name=normalize_name(name),
             inv_po_tokens=extract_invoice_po_tokens(name) + (
                 [d["invoice_number_clean"].upper().lstrip("0")]
@@ -215,8 +292,17 @@ def _date_close_days(a: Optional[datetime], b: Optional[datetime], days: int) ->
     return abs((a - b).total_seconds()) <= days * 86400
 
 
-def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
-    """Layered evidence-based matching between a Square9 doc and a Hub doc."""
+def score_pair(sq: SquareDoc, hub: HubDoc,
+               invoice_date_tolerance_days: Optional[int] = None) -> MatchResult:
+    """Layered evidence-based matching between a Square9 doc and a Hub doc.
+
+    When `invoice_date_tolerance_days` is set (i.e. --match-by-invoice-date
+    mode), the matcher ALSO accepts invoice-date proximity as supporting
+    evidence — Hub uses `extracted_fields.invoice_date` (fallback
+    `created_utc`), Square9 uses filename-extracted date (fallback
+    SharePoint `modified`). Date proximity is supporting evidence only,
+    never a sole match key.
+    """
     bd: Dict[str, Any] = {}
     sq_norm = sq.norm_name
     hub_norm = hub.norm_name
@@ -225,11 +311,25 @@ def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
     sq_vendors = set(sq.vendor_tokens)
     hub_vendors = set(hub.vendor_tokens)
 
+    # Pre-compute date proximity once for the invoice-date mode.
+    invoice_date_close = False
+    if invoice_date_tolerance_days is not None:
+        sq_inv_date = extract_date_from_filename(sq.name) or sq.modified
+        hub_inv_date = hub.invoice_date or hub.created_utc
+        invoice_date_close = _invoice_dates_close(
+            sq_inv_date, hub_inv_date, invoice_date_tolerance_days
+        )
+        bd["invoice_date_close"] = invoice_date_close
+        if sq_inv_date:
+            bd["sq_invoice_date"] = sq_inv_date.isoformat()
+        if hub_inv_date:
+            bd["hub_invoice_date"] = hub_inv_date.isoformat()
+
     # 1. Exact normalized filename
     if sq_norm and sq_norm == hub_norm:
         return MatchResult(
             "exact_match", 1.0, "filename_exact",
-            {"sq_norm_name": sq_norm}
+            {**bd, "sq_norm_name": sq_norm}
         )
 
     # 2. Strong evidence: invoice number match + (vendor match OR amount match)
@@ -258,6 +358,14 @@ def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
                     "invoice_number_clean+hub_amount_present",
                     bd,
                 )
+            # Invoice-date-mode: invoice# + date proximity is strong evidence
+            # even when vendor and amount are both absent.
+            if invoice_date_tolerance_days is not None and invoice_date_close:
+                return MatchResult(
+                    "strong_evidence_match", 0.90,
+                    "invoice_number_clean+invoice_date_proximity",
+                    bd,
+                )
             return MatchResult(
                 "strong_evidence_match", 0.88,
                 "invoice_number_clean_in_filename",
@@ -272,6 +380,20 @@ def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
             )
         return MatchResult("possible_match", 0.55, "inv_po_token_only", bd)
 
+    # 2b. Invoice-date-mode strong tier: vendor + amount + invoice date proximity
+    # (priority slot 5 from the user's spec). Filename can be totally different.
+    if (
+        invoice_date_tolerance_days is not None
+        and (sq_vendors & hub_vendors)
+        and hub.amount_float is not None
+        and invoice_date_close
+    ):
+        return MatchResult(
+            "strong_evidence_match", 0.85,
+            "vendor_canonical+amount_float+invoice_date_proximity",
+            bd,
+        )
+
     # 3. Fuzzy filename ratio
     ratio = 0.0
     if sq_norm and hub_norm:
@@ -285,6 +407,18 @@ def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
         # Square9 has no amount field via Graph; this branch is a placeholder
         # for future integration if we ever ingest Square9 amounts.
         pass
+
+    # 4b. Invoice-date-mode: vendor + invoice date proximity → likely
+    if (
+        invoice_date_tolerance_days is not None
+        and (sq_vendors & hub_vendors)
+        and invoice_date_close
+    ):
+        return MatchResult(
+            "likely_match", 0.72,
+            "vendor_canonical+invoice_date_proximity",
+            bd,
+        )
 
     if (sq_vendors & hub_vendors) and _date_close_days(sq.modified, hub.created_utc, 7):
         return MatchResult(
@@ -306,11 +440,13 @@ def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
     return MatchResult("no_match", 0.0, "no_evidence", bd)
 
 
-def best_match(sq: SquareDoc, hubs: List[HubDoc]) -> Tuple[Optional[HubDoc], MatchResult]:
+def best_match(sq: SquareDoc, hubs: List[HubDoc],
+               invoice_date_tolerance_days: Optional[int] = None
+               ) -> Tuple[Optional[HubDoc], MatchResult]:
     best_doc: Optional[HubDoc] = None
     best_res = MatchResult("no_match", 0.0, "no_evidence", {})
     for h in hubs:
-        r = score_pair(sq, h)
+        r = score_pair(sq, h, invoice_date_tolerance_days=invoice_date_tolerance_days)
         if BUCKET_ORDER[r.bucket] > BUCKET_ORDER[best_res.bucket]:
             best_doc, best_res = h, r
         elif r.bucket == best_res.bucket and r.bucket != "no_match" and r.score > best_res.score:
@@ -342,12 +478,73 @@ def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
              "suggested_job_type": 1, "classification_method": 1,
              "vendor_canonical": 1, "invoice_number_clean": 1,
              "amount_float": 1, "po_number_clean": 1, "created_utc": 1,
-             "email_subject": 1, "email_sender": 1},
+             "email_subject": 1, "email_sender": 1,
+             "invoice_date": 1, "extracted_fields.invoice_date": 1,
+             "extracted_fields.inv_date": 1},
         )
         .sort("created_utc", -1)
         .limit(limit)
     )
     return [HubDoc.from_mongo(d) for d in cursor]
+
+
+# ---------------------------------------------------------------------------
+# Expanded Square9 AP corpus (Temp Folder non-recursive + AP root recursive)
+# ---------------------------------------------------------------------------
+
+PROD_AP_ROOT_PATH = "General/Accounting/Accounts Payable"
+PROD_AP_TEMP_FOLDER_NAME = "Temp Folder"
+
+
+def _square_doc_dedupe_key(d: "SquareDoc") -> str:
+    """Stable id for de-duplicating Square9 docs across multiple Graph pulls."""
+    raw = d.raw if isinstance(d.raw, dict) else {}
+    gid = (raw.get("id") or "").strip()
+    if gid:
+        return f"id::{gid}"
+    parent = (raw.get("parent_path") or "").strip()
+    return f"path::{parent}/{d.name}".lower()
+
+
+def pull_expanded_ap_corpus(
+    token: str, host: str, site_path: str, library: str,
+    ap_root_folder_path: str = PROD_AP_ROOT_PATH,
+    temp_folder_name: str = PROD_AP_TEMP_FOLDER_NAME,
+    max_depth: int = 25,
+) -> List["SquareDoc"]:
+    """Pull a complete Square9 AP corpus:
+
+      1) Temp Folder under AP root, NON-recursive (immediate children only).
+      2) AP root recursively (which structurally also includes Temp Folder
+         contents — those duplicates are removed via Graph item id).
+
+    De-duplication is done by Graph item id when present, falling back to a
+    case-insensitive `parent_path/name` key.
+    """
+    temp_path = f"{ap_root_folder_path.rstrip('/')}/{temp_folder_name}"
+    temp_docs = pull_listing_via_graph(
+        token=token, host=host, site_path=site_path, library=library,
+        folder_path=temp_path, label="prod_ap_temp", recursive=False,
+    )
+    root_docs = pull_listing_via_graph(
+        token=token, host=host, site_path=site_path, library=library,
+        folder_path=ap_root_folder_path, label="prod_ap_root",
+        recursive=True, max_depth=max_depth,
+    )
+    seen: set = set()
+    out: List[SquareDoc] = []
+    for d in (temp_docs + root_docs):
+        key = _square_doc_dedupe_key(d)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(d)
+    print(
+        f"  expanded_ap_corpus: temp={len(temp_docs)} + ap_root_recursive={len(root_docs)} "
+        f"=> deduped={len(out)} doc(s).",
+        file=sys.stderr,
+    )
+    return out
 
 
 def load_recent_poll_health(since_hours: int) -> Dict[str, Any]:
@@ -650,6 +847,8 @@ def run_compare(
     top_n: int,
     min_match_rate: float,
     poll_health: Optional[Dict[str, Any]] = None,
+    match_by_invoice_date: bool = False,
+    invoice_date_tolerance_days: int = 30,
 ) -> Dict[str, Any]:
     """Pure function — accepts loaded inputs, returns summary + rows."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
@@ -657,9 +856,11 @@ def run_compare(
     bucket_counts: Dict[str, int] = {b: 0 for b in BUCKET_ORDER}
     bucket_counts["hub_only"] = 0
 
+    inv_tol = invoice_date_tolerance_days if match_by_invoice_date else None
+
     matched_hub_ids: set = set()
     for sq in square_docs:
-        hub, res = best_match(sq, hub_docs)
+        hub, res = best_match(sq, hub_docs, invoice_date_tolerance_days=inv_tol)
         rows.append(_row_for(sq, hub if res.bucket != "no_match" else None, res))
         bucket_counts[res.bucket] = bucket_counts.get(res.bucket, 0) + 1
         if hub is not None and res.bucket != "no_match":
@@ -699,6 +900,12 @@ def run_compare(
         "hub_count": len(hub_docs),
         "poll_health": poll_health,
         "top_n": top_n,
+        "proof_mode": (
+            "invoice_document_set" if match_by_invoice_date else "ingest_window"
+        ),
+        "invoice_date_tolerance_days": (
+            invoice_date_tolerance_days if match_by_invoice_date else None
+        ),
     }
 
 
@@ -729,6 +936,35 @@ def main() -> int:
     ap.add_argument("--prod-folder-path", default=PROD_DEFAULT_FOLDER_PATH)
     ap.add_argument("--max-depth", type=int, default=25)
     ap.add_argument("--no-recursive", action="store_true")
+    ap.add_argument(
+        "--expanded-ap-corpus", action="store_true",
+        help="Pull a complete Square9 AP corpus: Temp Folder non-recursive + "
+             "AP root recursive, deduped by Graph item id. Recommended with "
+             "--prod-modified-since-hours 720 for invoice-document-set parity.",
+    )
+    ap.add_argument(
+        "--prod-ap-root-path", default=PROD_AP_ROOT_PATH,
+        help=f"AP root folder path under the document library (default: "
+             f"{PROD_AP_ROOT_PATH!r}). Only used with --expanded-ap-corpus.",
+    )
+    ap.add_argument(
+        "--prod-ap-temp-folder-name", default=PROD_AP_TEMP_FOLDER_NAME,
+        help=f"AP Temp Folder name under the AP root (default: "
+             f"{PROD_AP_TEMP_FOLDER_NAME!r}). Only used with "
+             f"--expanded-ap-corpus.",
+    )
+    ap.add_argument(
+        "--match-by-invoice-date", action="store_true",
+        help="Enable invoice-document-set parity: matcher accepts invoice-date "
+             "proximity as supporting evidence. Hub uses "
+             "extracted_fields.invoice_date (fallback created_utc); Square9 "
+             "uses filename date tokens (fallback SharePoint modified).",
+    )
+    ap.add_argument(
+        "--invoice-date-tolerance-days", type=int, default=30,
+        help="Date-proximity window for --match-by-invoice-date "
+             "(default: 30 days).",
+    )
     args = ap.parse_args()
 
     # Pull Square9 side via Graph
@@ -742,13 +978,22 @@ def main() -> int:
     )
     print(f"Graph token acquired. Host: {host}", file=sys.stderr)
 
-    sq_docs = pull_listing_via_graph(
-        token=token, host=host,
-        site_path=args.prod_site_path, library=args.prod_library,
-        folder_path=args.prod_folder_path,
-        label="prod", recursive=(not args.no_recursive),
-        max_depth=args.max_depth,
-    )
+    if args.expanded_ap_corpus:
+        sq_docs = pull_expanded_ap_corpus(
+            token=token, host=host,
+            site_path=args.prod_site_path, library=args.prod_library,
+            ap_root_folder_path=args.prod_ap_root_path,
+            temp_folder_name=args.prod_ap_temp_folder_name,
+            max_depth=args.max_depth,
+        )
+    else:
+        sq_docs = pull_listing_via_graph(
+            token=token, host=host,
+            site_path=args.prod_site_path, library=args.prod_library,
+            folder_path=args.prod_folder_path,
+            label="prod", recursive=(not args.no_recursive),
+            max_depth=args.max_depth,
+        )
     sq_docs_unfiltered_count = len(sq_docs)
     prod_window_hours = args.prod_modified_since_hours or args.since_hours
     sq_docs, prod_cutoff_iso = filter_square_docs_by_modified(sq_docs, prod_window_hours)
@@ -765,7 +1010,8 @@ def main() -> int:
     )
     print(
         f"Loaded {len(sq_docs)} Square9 docs, {len(hub_docs)} Hub AP docs "
-        f"(window={args.since_hours}h, limit={args.limit}).",
+        f"(window={args.since_hours}h, limit={args.limit}, "
+        f"proof_mode={'invoice_document_set' if args.match_by_invoice_date else 'ingest_window'}).",
         file=sys.stderr,
     )
 
@@ -776,20 +1022,32 @@ def main() -> int:
         top_n=args.top,
         min_match_rate=args.min_match_rate,
         poll_health=poll_health,
+        match_by_invoice_date=args.match_by_invoice_date,
+        invoice_date_tolerance_days=args.invoice_date_tolerance_days,
     )
 
     if args.json:
         # Strip rows; CSV is the row store.
         payload = {
-            "square_count": result["square_count"],
+            "proof_mode": result["proof_mode"],
+            "hub_window_hours": args.since_hours,
+            "square9_modified_window_hours": prod_window_hours,
+            "invoice_date_tolerance_days": result["invoice_date_tolerance_days"],
+            "expanded_ap_corpus": args.expanded_ap_corpus,
+            "square9_docs_count": result["square_count"],
             "square_count_before_filter": sq_docs_unfiltered_count,
-            "prod_modified_since_hours": prod_window_hours,
             "prod_modified_cutoff": prod_cutoff_iso,
-            "since_hours": args.since_hours,
-            "limit": args.limit,
+            "hub_ap_docs_count": result["hub_count"],
+            # Backward-compat aliases retained:
+            "square_count": result["square_count"],
             "hub_count": result["hub_count"],
+            "since_hours": args.since_hours,
+            "prod_modified_since_hours": prod_window_hours,
+            "limit": args.limit,
             "bucket_counts": result["bucket_counts"],
             "match_rate": result["match_rate"],
+            "blockers": result["findings"]["blockers"],
+            "warnings": result["findings"]["warnings"],
             "findings": result["findings"],
             "poll_health": {
                 "failed_run_count": poll_health["failed_run_count"],
@@ -810,8 +1068,21 @@ def main() -> int:
             top_n=args.top,
         ))
         print(
-            f"\n  prod_modified_window:      last {prod_window_hours}h "
+            f"\n  proof_mode:                {result['proof_mode']}"
+        )
+        print(
+            f"  hub_window_hours:          {args.since_hours}"
+        )
+        print(
+            f"  square9_modified_window:   last {prod_window_hours}h "
             f"(cutoff={prod_cutoff_iso})"
+        )
+        print(
+            f"  invoice_date_tolerance:    "
+            f"{result['invoice_date_tolerance_days']!r} days"
+        )
+        print(
+            f"  expanded_ap_corpus:        {args.expanded_ap_corpus}"
         )
         print(
             f"  prod_listing_before_filter: {sq_docs_unfiltered_count} doc(s)"

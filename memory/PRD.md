@@ -1,5 +1,61 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Square9 Cutover P0: Invoice-Document-Set Parity Proof
+**Patched** `backend/scripts/square9_hub_ap_parity_report.py` to support
+strongest-form parity proof per signed declaration "combine a + d":
+
+- New `extract_date_from_filename()` parses ISO / US / compact dates.
+- `HubDoc.invoice_date` populated from `extracted_fields.invoice_date`
+  (fallback `extracted_fields.inv_date`, fallback top-level
+  `invoice_date`).
+- `score_pair(..., invoice_date_tolerance_days=None)` adds three
+  invoice-date-evidence tiers:
+    * `invoice_number_clean+invoice_date_proximity` → strong (0.90)
+    * `vendor_canonical+amount_float+invoice_date_proximity` → strong (0.85)
+    * `vendor_canonical+invoice_date_proximity` → likely (0.72)
+  Date is supporting evidence only, never a sole match key. Default
+  kwarg=None preserves legacy behavior (object-identity-grade
+  regression guard test added).
+- New `pull_expanded_ap_corpus()` does Temp Folder non-recursive +
+  AP root recursive, deduped by Graph item id (fallback
+  parent_path/name case-insensitive).
+- `run_compare()` accepts `match_by_invoice_date` +
+  `invoice_date_tolerance_days`; returns `proof_mode` +
+  `invoice_date_tolerance_days` keys.
+- CLI: `--expanded-ap-corpus`, `--prod-ap-root-path`,
+  `--prod-ap-temp-folder-name`, `--match-by-invoice-date`,
+  `--invoice-date-tolerance-days` (default 30).
+- JSON output exposes `proof_mode`, `hub_window_hours`,
+  `square9_modified_window_hours`, `invoice_date_tolerance_days`,
+  `expanded_ap_corpus`, `square9_docs_count`, `hub_ap_docs_count`,
+  `bucket_counts`, `match_rate`, `blockers`, `warnings`.
+- Backward-compat JSON aliases retained: `square_count`, `hub_count`,
+  `since_hours`, `prod_modified_since_hours`.
+
+**Tests:** `backend/tests/test_square9_hub_ap_parity_report.py` —
+**28/28 passed** (14 prior + 14 new). New tests cover: filename date
+extraction (ISO/US/compact/none), invoice-date mode ignores
+ingest-time skew, vendor+amount+date passes with filename mismatch,
+low match rate still blocks under invoice-date mode, expanded-corpus
+dedupe by Graph id and parent_path fallback, proof_mode metadata
+round-trip, HubDoc invoice_date parsing, default-kwarg legacy parity.
+
+**Cutover remains blocked.** Operator runs the new command on the VM:
+
+    docker compose exec -T backend python -m scripts.square9_hub_ap_parity_report \
+        --since-hours 720 --prod-modified-since-hours 720 \
+        --expanded-ap-corpus --match-by-invoice-date \
+        --invoice-date-tolerance-days 30 \
+        --limit 1000 --top 25 --min-match-rate 0.85 \
+        --out-csv prod_reports/square9_hub_ap_parity_invoice_set.csv
+
+Cutover unblocks only when `match_rate >= 0.85` AND `blockers == []`
+in invoice-document-set mode.
+
+**Out of scope (preserved):** routing/classification logic, DocuSign
+Phase 4, parked AP contamination, HTTPS migration, CFO summary
+population, `POST /api/square9/archive-stage-data`.
+
 ## 2026-05-06 — Square9 Cutover P0: Email Poll Watermark Strict-gt Cursor Fix
 **Root cause identified and patched.** AP intake was silently dead from
 2026-04-09 (last successful ingest run `450f2bb4`) through 2026-05-06.

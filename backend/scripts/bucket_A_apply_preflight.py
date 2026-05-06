@@ -155,7 +155,7 @@ def preflight(plan: Dict[str, Any],
     placeholder_applied_at = "<set at live apply time>"
 
     for doc_id, ck, row in candidates:
-        live = collection.find_one({"_id": doc_id})
+        live = collection.find_one({ba_apply.HUB_DOC_ID_FIELD: doc_id})
         is_safe, reasons = evaluate_safety(live)
 
         record = {
@@ -167,7 +167,7 @@ def preflight(plan: Dict[str, Any],
         if is_safe:
             safe.append({**record, "live_doc": live})
             update_payloads.append({
-                "filter": {"_id": doc_id},
+                "filter": {ba_apply.HUB_DOC_ID_FIELD: doc_id},
                 "update": {
                     "$set": ba_apply.build_set_payload(
                         ck, placeholder_applied_at)

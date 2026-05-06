@@ -71,6 +71,12 @@ PATCH_SOURCE = ba_dryrun.PATCH_SOURCE
 PROPOSED_FIELDS = ba_dryrun.PROPOSED_FIELDS
 PATCH_FIELD_NAMES = list(PROPOSED_FIELDS.keys()) + ["remediation_audit"]
 
+# Canonical identifier on hub_documents. The Mongo _id is an auto-generated
+# ObjectId; the parity / Bucket A pipeline keys off the UUID stored in `id`.
+# Confirmed via scripts/diagnose_hub_documents_id_field.py against the live
+# collection (5/5 probe IDs hit `id`, 0/5 hit `_id`).
+HUB_DOC_ID_FIELD = "id"
+
 
 # ---------------------------------------------------------------------------
 # Mongo client construction (lazy import so tests can run without pymongo)
@@ -113,7 +119,7 @@ def build_set_payload(cohort_key: Dict[str, Any],
 def snapshot_doc_for_rollback(doc: Dict[str, Any]) -> Dict[str, Any]:
     """Capture the fields this patch will overwrite, plus a marker for
     docs that lacked the field at all (so rollback can $unset them)."""
-    snap: Dict[str, Any] = {"_id": str(doc.get("_id"))}
+    snap: Dict[str, Any] = {HUB_DOC_ID_FIELD: str(doc.get(HUB_DOC_ID_FIELD))}
     for f in PATCH_FIELD_NAMES:
         if f in doc:
             snap[f] = doc[f]
@@ -161,7 +167,7 @@ def apply_one_shot_patch(plan: Dict[str, Any],
     skipped_missing_in_db = 0
     to_update: List[Tuple[str, Dict[str, Any]]] = []
     for doc_id, ck in planned:
-        existing = collection.find_one({"_id": doc_id})
+        existing = collection.find_one({HUB_DOC_ID_FIELD: doc_id})
         if existing is None:
             skipped_missing_in_db += 1
             continue
@@ -185,7 +191,7 @@ def apply_one_shot_patch(plan: Dict[str, Any],
     modified = 0
     for doc_id, ck in to_update:
         result = collection.update_one(
-            {"_id": doc_id},
+            {HUB_DOC_ID_FIELD: doc_id},
             {"$set": build_set_payload(ck, applied_at)},
         )
         modified += int(getattr(result, "modified_count", 0) or 0)

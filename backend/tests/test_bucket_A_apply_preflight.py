@@ -178,7 +178,7 @@ def _parity(square_count: int = 100, matched: int = 36) -> Dict[str, Any]:
 
 def test_preflight_happy_path_emits_safe_candidate(tmp_path: Path):
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "AP_INVOICE",
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "Operations",
          "file_name": "valley.pdf",
@@ -197,7 +197,7 @@ def test_preflight_happy_path_emits_safe_candidate(tmp_path: Path):
     assert result["unsafe_count"] == 0
     payloads = result["update_payloads"]
     assert len(payloads) == 1
-    assert payloads[0]["filter"] == {"_id": "doc-1"}
+    assert payloads[0]["filter"] == {"id": "doc-1"}
     set_body = payloads[0]["update"]["$set"]
     assert set_body["mailbox_category"] == "AP"
     assert set_body["doc_type"] == "AP_INVOICE"
@@ -218,7 +218,7 @@ def test_preflight_happy_path_emits_safe_candidate(tmp_path: Path):
 
 def test_preflight_fails_when_doc_already_applied():
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "AP_INVOICE",
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "AP",
          "remediation_audit": {"source": "bucket_A_one_shot_patch",
@@ -254,10 +254,10 @@ def test_preflight_returns_two_when_no_candidates():
 
 def test_preflight_mixed_safe_and_unsafe_returns_one():
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "AP_INVOICE",
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "Operations"},
-        {"_id": "doc-2", "doc_type": "OTHER",
+        {"id": "doc-2", "doc_type": "OTHER",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "Operations"},
     ])
@@ -272,7 +272,7 @@ def test_preflight_mixed_safe_and_unsafe_returns_one():
 
 def test_projected_match_rate_unknown_when_parity_missing():
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "AP_INVOICE",
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "Operations"},
     ])
@@ -288,7 +288,7 @@ def test_projected_match_rate_unknown_when_parity_missing():
 
 def test_render_text_pass_includes_live_apply_command_and_rollback():
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "AP_INVOICE",
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "Operations"},
     ])
@@ -305,7 +305,7 @@ def test_render_text_pass_includes_live_apply_command_and_rollback():
 
 def test_render_text_fail_includes_unsafe_reasons():
     coll = _seed_collection([
-        {"_id": "doc-1", "doc_type": "OTHER",
+        {"id": "doc-1", "doc_type": "OTHER",
          "suggested_job_type": "Sales_Invoice",
          "mailbox_category": "AP"},
     ])

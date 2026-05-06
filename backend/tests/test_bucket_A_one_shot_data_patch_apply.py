@@ -125,13 +125,14 @@ def test_is_already_applied_false_when_applied_at_empty():
 # ---------------------------------------------------------------------------
 
 def test_snapshot_captures_existing_fields():
-    doc = {"_id": "doc-1",
+    doc = {"_id": "objectid_xyz",
+           "id": "doc-1",
            "mailbox_category": "Operations",
            "doc_type": "AP_INVOICE",
            "suggested_job_type": "AP_Invoice",
            "remediation_audit": {"source": "x"}}
     snap = ba_apply.snapshot_doc_for_rollback(doc)
-    assert snap["_id"] == "doc-1"
+    assert snap["id"] == "doc-1"
     assert snap["mailbox_category"] == "Operations"
     assert snap["doc_type"] == "AP_INVOICE"
     assert snap["suggested_job_type"] == "AP_Invoice"
@@ -139,7 +140,7 @@ def test_snapshot_captures_existing_fields():
 
 
 def test_snapshot_marks_missing_fields():
-    doc = {"_id": "doc-1", "mailbox_category": "Sales"}
+    doc = {"id": "doc-1", "mailbox_category": "Sales"}
     snap = ba_apply.snapshot_doc_for_rollback(doc)
     assert snap["__missing_doc_type"] is True
     assert snap["__missing_suggested_job_type"] is True
@@ -152,9 +153,9 @@ def test_snapshot_marks_missing_fields():
 
 def test_apply_updates_matching_docs_and_writes_rollback(tmp_path: Path):
     coll = _seed_collection([
-        {"_id": "doc-1", "mailbox_category": "Operations",
+        {"id": "doc-1", "mailbox_category": "Operations",
          "doc_type": "AP_INVOICE", "suggested_job_type": "AP_Invoice"},
-        {"_id": "doc-2", "mailbox_category": "Operations",
+        {"id": "doc-2", "mailbox_category": "Operations",
          "doc_type": "AP_INVOICE", "suggested_job_type": "AP_Invoice"},
     ])
     plan = _plan(_cohort())
@@ -171,7 +172,7 @@ def test_apply_updates_matching_docs_and_writes_rollback(tmp_path: Path):
 
     # Documents updated correctly
     for doc_id in ("doc-1", "doc-2"):
-        d = coll.find_one({"_id": doc_id})
+        d = coll.find_one({"id": doc_id})
         assert d["mailbox_category"] == "AP"
         assert d["doc_type"] == "AP_INVOICE"
         assert d["suggested_job_type"] == "AP_Invoice"
@@ -184,7 +185,7 @@ def test_apply_updates_matching_docs_and_writes_rollback(tmp_path: Path):
     rb = json.loads(rollback_path.read_text(encoding="utf-8"))
     assert rb["doc_count"] == 2
     assert rb["patch_source"] == "bucket_A_one_shot_patch"
-    ids = sorted(r["_id"] for r in rb["rollback_records"])
+    ids = sorted(r["id"] for r in rb["rollback_records"])
     assert ids == ["doc-1", "doc-2"]
     for r in rb["rollback_records"]:
         # Pre-patch values captured
@@ -193,7 +194,7 @@ def test_apply_updates_matching_docs_and_writes_rollback(tmp_path: Path):
 
 def test_apply_is_idempotent_skips_already_applied(tmp_path: Path):
     coll = _seed_collection([
-        {"_id": "doc-1", "mailbox_category": "AP",
+        {"id": "doc-1", "mailbox_category": "AP",
          "doc_type": "AP_INVOICE", "suggested_job_type": "AP_Invoice",
          "remediation_audit": {"source": "bucket_A_one_shot_patch",
                                "applied_at": "earlier-run"}},
@@ -225,7 +226,7 @@ def test_apply_skips_planned_docs_missing_from_db(tmp_path: Path):
 
 def test_apply_ignores_non_one_shot_change_types(tmp_path: Path):
     coll = _seed_collection([
-        {"_id": "doc-1", "mailbox_category": "Sales"},
+        {"id": "doc-1", "mailbox_category": "Sales"},
     ])
     plan = _plan(_cohort("routing_rule_addition"),
                  _cohort("classifier_signal_uplift"),
@@ -235,7 +236,7 @@ def test_apply_ignores_non_one_shot_change_types(tmp_path: Path):
     assert summary["planned_count"] == 0
     assert summary["updated_count"] == 0
     # And the doc was NOT touched.
-    doc = coll.find_one({"_id": "doc-1"})
+    doc = coll.find_one({"id": "doc-1"})
     assert doc["mailbox_category"] == "Sales"
 
 
@@ -243,7 +244,7 @@ def test_apply_writes_rollback_before_updates(tmp_path: Path, monkeypatch):
     """If an update_one call raises, the rollback file should already
     be on disk (so the operator can recover any partial updates)."""
     coll = _seed_collection([
-        {"_id": "doc-1", "mailbox_category": "Operations"},
+        {"id": "doc-1", "mailbox_category": "Operations"},
     ])
     plan = _plan(_cohort())
     rows = [_row(best_hub_doc_id="doc-1")]
@@ -265,7 +266,7 @@ def test_apply_writes_rollback_before_updates(tmp_path: Path, monkeypatch):
 
 def test_apply_two_cohorts_record_distinct_cohort_keys(tmp_path: Path):
     coll = _seed_collection([
-        {"_id": "doc-1"}, {"_id": "doc-2"},
+        {"id": "doc-1"}, {"id": "doc-2"},
     ])
     plan = _plan(
         _cohort(email_sender="a@x.com"),
@@ -277,8 +278,8 @@ def test_apply_two_cohorts_record_distinct_cohort_keys(tmp_path: Path):
         plan, rows, coll, str(tmp_path), applied_at="t")
     assert summary["updated_count"] == 2
     audits = sorted(
-        coll.find({}, {"_id": 1, "remediation_audit": 1}),
-        key=lambda d: d["_id"])
+        coll.find({}, {"_id": 0, "id": 1, "remediation_audit": 1}),
+        key=lambda d: d["id"])
     assert (audits[0]["remediation_audit"]["cohort_key"]["email_sender"]
             == "a@x.com")
     assert (audits[1]["remediation_audit"]["cohort_key"]["email_sender"]

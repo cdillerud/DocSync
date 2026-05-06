@@ -58,6 +58,47 @@ def test_classify_step_rc_three_or_more_is_fail():
     assert cps.classify_step(_step("a", rc=137)) == "fail"
 
 
+def test_classify_step_traceback_in_log_overrides_rc_one(tmp_path: Path):
+    log = tmp_path / "step.log"
+    log.write_text(
+        "Loaded 12 docs.\n"
+        "Traceback (most recent call last):\n"
+        "  File 'x.py', line 1, in <module>\n"
+        "FileNotFoundError: missing.csv\n",
+        encoding="utf-8",
+    )
+    step = _step("a", rc=1)
+    step["log_path"] = str(log)
+    assert cps.classify_step(step) == "fail"
+
+
+def test_classify_step_no_traceback_keeps_rc_one_as_ok_signal(tmp_path: Path):
+    log = tmp_path / "step.log"
+    log.write_text("workflow signal — no rows emitted\n",
+                   encoding="utf-8")
+    step = _step("a", rc=1)
+    step["log_path"] = str(log)
+    assert cps.classify_step(step) == "ok_signal"
+
+
+def test_step_log_has_traceback_returns_false_when_log_missing():
+    step = _step("a", rc=1)
+    step["log_path"] = "/nonexistent/path.log"
+    assert cps.step_log_has_traceback(step) is False
+
+
+def test_derive_blockers_marks_traceback_steps(tmp_path: Path):
+    log = tmp_path / "step.log"
+    log.write_text("Traceback (most recent call last):\n"
+                   "FileNotFoundError: missing.csv\n",
+                   encoding="utf-8")
+    step = _step("a", rc=1, label="A")
+    step["log_path"] = str(log)
+    m = _manifest(step)
+    blockers = cps.derive_blockers(m, 91.3, 85.0)
+    assert any("Python traceback in log" in b for b in blockers)
+
+
 # ---------------------------------------------------------------------------
 # match_rate extraction
 # ---------------------------------------------------------------------------

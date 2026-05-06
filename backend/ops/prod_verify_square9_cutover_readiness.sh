@@ -91,7 +91,23 @@ run_step() {
     finished=$(date +%s)
     duration=$(( finished - started ))
 
-    if [ "$rc" -eq 0 ]; then
+    # Tracebacks override workflow-signal exit codes. Several scripts in
+    # this repo use rc=1/2 as legitimate workflow signals (e.g. parity
+    # blockers), but Python's default exception exit code is also 1, so
+    # a crashed downstream script looks identical to a clean signal.
+    # If the log contains a Python traceback, force rc>=3 so the
+    # summarizer classifies the step as a hard failure.
+    local crashed=0
+    if grep -qE '^Traceback \(most recent call last\):' "${log_path}"; then
+        crashed=1
+        if [ "$rc" -lt 3 ]; then
+            rc=3
+        fi
+    fi
+
+    if [ "$crashed" -eq 1 ]; then
+        echo "[proof] [${id}] FAIL rc=${rc} (Python traceback detected)  (${duration}s) — see ${log_path}"
+    elif [ "$rc" -eq 0 ]; then
         echo "[proof] [${id}] OK rc=0  (${duration}s)"
     elif [ "$rc" -le 2 ]; then
         echo "[proof] [${id}] OK_SIGNAL rc=${rc}  (${duration}s)"

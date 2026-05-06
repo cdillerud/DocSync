@@ -120,6 +120,8 @@ def _extract_match_rate(payload: Any) -> Optional[float]:
 
 def classify_step(step: Dict[str, Any]) -> str:
     rc = int(step.get("rc", 0))
+    if rc < 3 and step_log_has_traceback(step):
+        rc = 3
     if rc >= 3:
         return "fail"
     if rc == 0:
@@ -127,16 +129,37 @@ def classify_step(step: Dict[str, Any]) -> str:
     return "ok_signal"  # rc 1/2 — completed with workflow signal
 
 
+def step_log_has_traceback(step: Dict[str, Any]) -> bool:
+    """Return True if the step's log file contains a Python traceback.
+    Defense in depth: the bash orchestrator already escalates rc on
+    traceback, but old proof dirs and any future orchestrator gap need
+    to be caught here too."""
+    log_path = step.get("log_path")
+    if not log_path or not os.path.exists(log_path):
+        return False
+    try:
+        with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("Traceback (most recent call last):"):
+                    return True
+    except OSError:
+        return False
+    return False
+
+
 def derive_blockers(manifest: Dict[str, Any],
                     match_rate_pct: Optional[float],
                     min_match_rate: float) -> List[str]:
     blockers: List[str] = []
-    failed = [s for s in manifest.get("steps", [])
-              if classify_step(s) == "fail"]
-    for s in failed:
+    for s in manifest.get("steps", []):
+        if classify_step(s) != "fail":
+            continue
+        suffix = ""
+        if step_log_has_traceback(s):
+            suffix = " [Python traceback in log]"
         blockers.append(
             f"step '{s.get('label', s.get('id', '?'))}' failed "
-            f"(rc={s.get('rc')})"
+            f"(rc={s.get('rc')}){suffix}"
         )
     if match_rate_pct is None:
         blockers.append(

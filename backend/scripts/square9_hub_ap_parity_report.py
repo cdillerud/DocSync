@@ -44,18 +44,45 @@ from typing import Any, Dict, List, Optional, Tuple
 # Reuse normalization / Graph-pull helpers from the sibling script. This is
 # intentional — we want IDENTICAL filename normalization on both sides so
 # bucket counts are directly comparable to the prior tool.
-from scripts.sharepoint_ap_compare import (  # type: ignore
-    Doc as SquareDoc,
-    acquire_graph_token,
-    extract_invoice_po_tokens,
-    extract_vendor_tokens,
-    normalize_name,
-    parse_modified,
-    pull_listing_via_graph,
-    PROD_DEFAULT_FOLDER_PATH,
-    PROD_DEFAULT_LIBRARY,
-    PROD_DEFAULT_SITE_PATH,
-)
+#
+# Make the import work whether this script is invoked as
+#   python -m scripts.square9_hub_ap_parity_report
+# (sys.path includes the parent of `scripts/`) or as
+#   python /app/scripts/square9_hub_ap_parity_report.py
+# (sys.path only includes /app/scripts).
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+_PARENT_DIR = os.path.dirname(_THIS_DIR)
+if _PARENT_DIR not in sys.path:
+    sys.path.insert(0, _PARENT_DIR)
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
+try:
+    from scripts.sharepoint_ap_compare import (  # type: ignore
+        Doc as SquareDoc,
+        acquire_graph_token,
+        extract_invoice_po_tokens,
+        extract_vendor_tokens,
+        normalize_name,
+        parse_modified,
+        pull_listing_via_graph,
+        PROD_DEFAULT_FOLDER_PATH,
+        PROD_DEFAULT_LIBRARY,
+        PROD_DEFAULT_SITE_PATH,
+    )
+except ModuleNotFoundError:  # invoked by absolute path; sibling import
+    from sharepoint_ap_compare import (  # type: ignore
+        Doc as SquareDoc,
+        acquire_graph_token,
+        extract_invoice_po_tokens,
+        extract_vendor_tokens,
+        normalize_name,
+        parse_modified,
+        pull_listing_via_graph,
+        PROD_DEFAULT_FOLDER_PATH,
+        PROD_DEFAULT_LIBRARY,
+        PROD_DEFAULT_SITE_PATH,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -114,6 +114,37 @@ def test_load_parity_match_rate_prefers_proof_dir_json_over_log(tmp_path: Path):
     assert cps.load_parity_match_rate(str(tmp_path)) == 92.0
 
 
+def test_load_parity_match_rate_tolerates_preamble_in_log(tmp_path: Path):
+    """The parity script prints progress prose to stderr before the
+    --json payload. The orchestrator captures stdout+stderr together,
+    so the log file starts with a few lines of preamble and ONLY THEN
+    contains the JSON object. The parser must scan past the preamble."""
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    body = (
+        "Graph token acquired. Host: example.sharepoint.com\n"
+        "  graph-pull[prod]: visited 247 folder(s), 3362 file(s).\n"
+        "Square9 listing: 3362 total, 87 within last 24h.\n"
+        "Loaded 87 Square9 docs, 296 Hub AP docs.\n"
+        + json.dumps({"match_rate": 0.5172, "blockers": []})
+    )
+    (logs_dir / "square9_hub_ap_parity_report.log").write_text(
+        body, encoding="utf-8")
+    rate = cps.load_parity_match_rate(str(tmp_path))
+    assert rate is not None
+    assert abs(rate - 51.72) < 1e-2
+
+
+def test_try_parse_json_file_returns_none_on_garbage(tmp_path: Path):
+    p = tmp_path / "bad.log"
+    p.write_text("no json anywhere here\njust prose\n", encoding="utf-8")
+    assert cps._try_parse_json_file(str(p)) is None
+
+
+def test_try_parse_json_file_returns_none_on_missing(tmp_path: Path):
+    assert cps._try_parse_json_file(str(tmp_path / "nope.log")) is None
+
+
 # ---------------------------------------------------------------------------
 # Decision engine
 # ---------------------------------------------------------------------------

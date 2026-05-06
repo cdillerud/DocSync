@@ -44,26 +44,57 @@ def load_manifest(path: str) -> Dict[str, Any]:
 def load_parity_match_rate(proof_dir: str) -> Optional[float]:
     """Best-effort: pulls match_rate_pct from the parity-report JSON if
     the orchestrator dumped one alongside the manifest. Returns None if
-    no parity JSON is present or it lacks the field."""
+    no parity JSON is present or it lacks the field.
+
+    Tolerates the parity script's mixed stdout/stderr capture: when run
+    with ``--json`` the script prints a few lines of progress prose
+    before the JSON blob, so we scan for the first ``{`` and parse from
+    there.
+    """
     candidates = [
         os.path.join(proof_dir, "square9_hub_ap_parity.json"),
         os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.json"),
         # The orchestrator runs the parity script with `--json`, which
         # prints a JSON blob to stdout. The orchestrator captures stdout
-        # into the per-step log file, so the .log itself is valid JSON.
+        # AND stderr into the per-step log file, so the .log starts with
+        # progress prose (Graph token, Square9 listing, doc counts) and
+        # only THEN contains a valid JSON object. Scan for the first
+        # opening brace before parsing.
         os.path.join(proof_dir, "logs", "square9_hub_ap_parity_report.log"),
     ]
     for p in candidates:
         if not os.path.exists(p):
             continue
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-        except (OSError, json.JSONDecodeError):
+        payload = _try_parse_json_file(p)
+        if payload is None:
             continue
         rate = _extract_match_rate(payload)
         if rate is not None:
             return rate
+    return None
+
+
+def _try_parse_json_file(path: str) -> Optional[Any]:
+    """Parse ``path`` as JSON. If strict parsing fails, fall back to
+    parsing from the first line that begins with ``{`` to the end of
+    file (handles parity-log preamble lines)."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("{"):
+            tail = "\n".join(lines[i:])
+            try:
+                return json.loads(tail)
+            except json.JSONDecodeError:
+                return None
     return None
 
 

@@ -1,5 +1,28 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05 — Square9 Cutover P0: Mail Poll Audit + AP Source Cleanup
+**Code (lint clean, 3/3 regression tests passing in prod):**
+- `backend/services/email_polling_service.py` — `poll_mailbox_for_documents`
+  rewritten so every poll cycle is observable:
+  - Adds `status` (`ok` / `failed_graph` / `failed_token` / `failed_exception`)
+    and `graph_http_status` to the stats payload.
+  - Captures Graph non-2xx body excerpt on failure.
+  - **Always** inserts an audit row to `mail_poll_runs` (was never
+    inserted before — the silent-swallow root cause).
+  - Logs `Complete:` on success, `FAILED:` on failure with
+    mailbox/category/HTTP status/errors.
+- `backend/tests/test_mailbox_poll_failure_audit.py` — 3 regression tests
+  covering Graph 404, missing token, and steady-state all-duplicate.
+**Data (non-destructive):**
+- Disabled `billing@gamerpackaging.com` in `mailbox_sources` with
+  `enabled=false`, `disabled_at`, `disabled_reason`. Source had been
+  silently 404'ing from Graph for ≥7 days. The working AP intake is
+  `hub-ap-intake@gamerpackaging.com`.
+**Open operational gate (NOT code):**
+- `hub-ap-intake@gamerpackaging.com` inbox has had no new mail with
+  attachments since 2026-04-09. Verify Exchange forwarding rule
+  (`billing@` → `hub-ap-intake@`) before declaring cutover-ready.
+
 ## 2026-05 — Square9 Cutover Probe Schema Fix
 Patched `backend/scripts/ap_cutover_readiness_report.py` and
 `backend/scripts/billing_intake_routing_probe.py` to match the real

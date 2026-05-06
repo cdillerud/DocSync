@@ -98,6 +98,10 @@ fixtures, no Mongo, no network). Run in preview or in the container:
 
 ## Files
 
-- `ops/prod_verify_square9_cutover_readiness.sh` — bash orchestrator
-- `ops/cutover_proof_summary.py` — Python summarizer + decision engine
-- `ops/README.md` — this file
+- `backend/ops/prod_verify_square9_cutover_readiness.sh` — bash orchestrator
+- `backend/ops/cutover_proof_summary.py` — Python summarizer + decision engine
+- `backend/ops/README.md` — this file
+
+(Inside the container these resolve to `/app/ops/...` because the
+backend image's `WORKDIR` is `/app` and the Dockerfile copies the
+`backend/` tree there.)

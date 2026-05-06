@@ -6,9 +6,10 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Make ops/ importable for tests run from /app or /app/backend.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+# Make backend/ importable so `from ops import cutover_proof_summary` works
+# regardless of pytest invocation cwd.
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND_ROOT))
 
 from ops import cutover_proof_summary as cps  # noqa: E402
 

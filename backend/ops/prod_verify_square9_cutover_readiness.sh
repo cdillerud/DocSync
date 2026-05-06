@@ -151,10 +151,13 @@ run_step billing_intake_routing_probe \
         --since-hours "${PROOF_SINCE_HOURS}"
 
 # --- 3. Square9 Hub-AP parity report ---------------------------------------
+# `--triage-square9-only` produces prod_reports/square9_only_triage.csv,
+# which stage 4 (and transitively stages 5-8) consume.
 run_step square9_hub_ap_parity_report \
     "Square9 Hub-AP parity report" \
     python scripts/square9_hub_ap_parity_report.py --json \
-        --since-hours "${PROOF_SINCE_HOURS}"
+        --since-hours "${PROOF_SINCE_HOURS}" \
+        --triage-square9-only
 
 # --- 4. Square9-only triage resolver ---------------------------------------
 run_step square9_only_triage_resolver \

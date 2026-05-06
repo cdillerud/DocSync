@@ -1,0 +1,752 @@
+"""
+square9_hub_ap_parity_report.py
+================================
+P0 cutover proof: compare Square9's AP intake folder against actual GPI Hub
+AP-lane documents (regardless of final destination folder).
+
+The earlier `sharepoint_ap_compare.py --graph-pull` tool compares Square9's
+`Accounts Payable/Temp Folder` against a single Hub folder
+(`AP_Invoices`). That assumption is invalid now that the Hub is
+evidence-routing AP docs into final destinations (Freight Issues,
+Dropship Not International Documents, Vendor Credit Memos, etc.). This
+report does NOT make that assumption — it reads the Hub side directly
+from `hub_documents` where `mailbox_category == "AP"` and matches by
+multiple evidence axes (filename, invoice number, vendor, amount,
+date).
+
+Read-only:
+  - reads SharePoint via Graph (Sites.Read.All)
+  - reads MongoDB hub_documents and mail_poll_runs
+  - writes one CSV (operator-supplied --out-csv) and stdout
+
+Operator example
+----------------
+
+    python -m scripts.square9_hub_ap_parity_report \\
+        --since-hours 24 --limit 500 --top 25 \\
+        --out-csv prod_reports/square9_hub_ap_parity.csv
+
+JSON mode (machine-readable summary + findings on stdout) is also
+available with `--json`. Exit code is non-zero when blockers fire.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import os
+import sys
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Tuple
+
+# Reuse normalization / Graph-pull helpers from the sibling script. This is
+# intentional — we want IDENTICAL filename normalization on both sides so
+# bucket counts are directly comparable to the prior tool.
+from scripts.sharepoint_ap_compare import (  # type: ignore
+    Doc as SquareDoc,
+    acquire_graph_token,
+    extract_invoice_po_tokens,
+    extract_vendor_tokens,
+    normalize_name,
+    parse_modified,
+    pull_listing_via_graph,
+    PROD_DEFAULT_FOLDER_PATH,
+    PROD_DEFAULT_LIBRARY,
+    PROD_DEFAULT_SITE_PATH,
+)
+
+
+# ---------------------------------------------------------------------------
+# Bucket model
+# ---------------------------------------------------------------------------
+
+# Strongest bucket wins on tie-break; higher value = stronger.
+BUCKET_ORDER: Dict[str, int] = {
+    "exact_match": 5,
+    "strong_evidence_match": 4,
+    "likely_match": 3,
+    "possible_match": 2,
+    "no_match": 1,
+}
+
+FORBIDDEN_HUB_FOLDER_ROOTS = {
+    # Operations is the catch-all for non-AP. AP docs landing under one of
+    # these is a routing bug. Match on the FIRST path segment.
+    "operations",
+    "general operations",
+    "warehouse documents",
+}
+
+LEGACY_CLASSIFICATION_PREFIXES = (
+    "legacy",
+    "fallback",
+    "rule:legacy",
+)
+
+
+# ---------------------------------------------------------------------------
+# Hub-side document model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class HubDoc:
+    raw: Dict[str, Any]
+    doc_id: str
+    file_name: str
+    sharepoint_web_url: str
+    sharepoint_folder_path: str
+    routing_status: str
+    routing_reason: str
+    doc_type: str
+    suggested_job_type: str
+    classification_method: str
+    vendor_canonical: str
+    invoice_number_clean: str
+    amount_float: Optional[float]
+    po_number_clean: str
+    created_utc: Optional[datetime]
+    email_subject: str
+    email_sender: str
+    norm_name: str = ""
+    inv_po_tokens: List[str] = field(default_factory=list)
+    vendor_tokens: List[str] = field(default_factory=list)
+
+    @classmethod
+    def from_mongo(cls, d: Dict[str, Any]) -> "HubDoc":
+        # Defensive: fields can be absent or null in legacy rows.
+        amount = d.get("amount_float")
+        try:
+            amount = float(amount) if amount not in (None, "") else None
+        except (TypeError, ValueError):
+            amount = None
+
+        created = d.get("created_utc")
+        if isinstance(created, str):
+            created_dt = parse_modified(created)
+        elif isinstance(created, datetime):
+            created_dt = created if created.tzinfo else created.replace(tzinfo=timezone.utc)
+        else:
+            created_dt = None
+
+        name = (d.get("file_name") or "").strip()
+        return cls(
+            raw=d,
+            doc_id=str(d.get("id") or d.get("doc_id") or "")[:64],
+            file_name=name,
+            sharepoint_web_url=(d.get("sharepoint_web_url") or "").strip(),
+            sharepoint_folder_path=(d.get("sharepoint_folder_path") or "").strip(),
+            routing_status=(d.get("routing_status") or "").strip(),
+            routing_reason=(d.get("folder_routing_reason") or d.get("routing_reason") or "").strip(),
+            doc_type=(d.get("doc_type") or "").strip(),
+            suggested_job_type=(d.get("suggested_job_type") or "").strip(),
+            classification_method=(d.get("classification_method") or "").strip(),
+            vendor_canonical=(d.get("vendor_canonical") or "").strip(),
+            invoice_number_clean=(d.get("invoice_number_clean") or "").strip(),
+            amount_float=amount,
+            po_number_clean=(d.get("po_number_clean") or "").strip(),
+            created_utc=created_dt,
+            email_subject=(d.get("email_subject") or "").strip(),
+            email_sender=(d.get("email_sender") or "").strip(),
+            norm_name=normalize_name(name),
+            inv_po_tokens=extract_invoice_po_tokens(name) + (
+                [d["invoice_number_clean"].upper().lstrip("0")]
+                if d.get("invoice_number_clean") else []
+            ),
+            vendor_tokens=extract_vendor_tokens(name) + (
+                [t.lower() for t in (d.get("vendor_canonical") or "").split() if len(t) >= 3]
+            ),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Matching
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MatchResult:
+    bucket: str
+    score: float                    # 0.0 .. 1.0
+    reason: str
+    breakdown: Dict[str, Any] = field(default_factory=dict)
+
+
+def _amount_close(a: Optional[float], b: Optional[float], tol: float = 0.02) -> bool:
+    if a is None or b is None:
+        return False
+    if a == b:
+        return True
+    if max(abs(a), abs(b)) == 0:
+        return False
+    return abs(a - b) / max(abs(a), abs(b)) <= tol
+
+
+def _date_close_days(a: Optional[datetime], b: Optional[datetime], days: int) -> bool:
+    if a is None or b is None:
+        return False
+    return abs((a - b).total_seconds()) <= days * 86400
+
+
+def score_pair(sq: SquareDoc, hub: HubDoc) -> MatchResult:
+    """Layered evidence-based matching between a Square9 doc and a Hub doc."""
+    bd: Dict[str, Any] = {}
+    sq_norm = sq.norm_name
+    hub_norm = hub.norm_name
+    sq_inv = set(sq.inv_po_tokens)
+    hub_inv = set(hub.inv_po_tokens)
+    sq_vendors = set(sq.vendor_tokens)
+    hub_vendors = set(hub.vendor_tokens)
+
+    # 1. Exact normalized filename
+    if sq_norm and sq_norm == hub_norm:
+        return MatchResult(
+            "exact_match", 1.0, "filename_exact",
+            {"sq_norm_name": sq_norm}
+        )
+
+    # 2. Strong evidence: invoice number match + (vendor match OR amount match)
+    inv_overlap = sq_inv & hub_inv
+    bd["inv_overlap"] = sorted(inv_overlap)
+    bd["vendor_overlap"] = sorted(sq_vendors & hub_vendors)
+
+    if inv_overlap:
+        if hub.invoice_number_clean and any(
+            t.upper().lstrip("0") == hub.invoice_number_clean.upper().lstrip("0")
+            for t in inv_overlap
+        ):
+            # Hub explicitly extracted this invoice number AND it's in the SP filename.
+            if hub.vendor_canonical and (sq_vendors & hub_vendors):
+                return MatchResult(
+                    "strong_evidence_match", 0.95,
+                    "invoice_number_clean+vendor_canonical",
+                    bd,
+                )
+            if hub.amount_float is not None:
+                # Treat any non-zero hub amount as strong corroboration of an
+                # invoice-number-based match. We can't compare to SP without
+                # hashing, but inv# equality is already very specific.
+                return MatchResult(
+                    "strong_evidence_match", 0.92,
+                    "invoice_number_clean+hub_amount_present",
+                    bd,
+                )
+            return MatchResult(
+                "strong_evidence_match", 0.88,
+                "invoice_number_clean_in_filename",
+                bd,
+            )
+        # Token match without canonicalized invoice_number_clean — softer.
+        if sq_vendors & hub_vendors:
+            return MatchResult(
+                "likely_match", 0.78,
+                "inv_po_token+vendor_token",
+                bd,
+            )
+        return MatchResult("possible_match", 0.55, "inv_po_token_only", bd)
+
+    # 3. Fuzzy filename ratio
+    ratio = 0.0
+    if sq_norm and hub_norm:
+        ratio = SequenceMatcher(None, sq_norm, hub_norm).ratio()
+    bd["norm_ratio"] = round(ratio, 3)
+    if ratio >= 0.92:
+        return MatchResult("likely_match", ratio, "filename_high_ratio", bd)
+
+    # 4. Vendor + amount + close date
+    if (sq_vendors & hub_vendors) and _amount_close(None, hub.amount_float):
+        # Square9 has no amount field via Graph; this branch is a placeholder
+        # for future integration if we ever ingest Square9 amounts.
+        pass
+
+    if (sq_vendors & hub_vendors) and _date_close_days(sq.modified, hub.created_utc, 7):
+        return MatchResult(
+            "possible_match", 0.50, "vendor_token+close_date_7d", bd
+        )
+
+    # 5. Fuzzy filename ratio fallback
+    if ratio >= 0.85:
+        return MatchResult("possible_match", ratio, "filename_mid_ratio", bd)
+
+    # 6. Vendor token overlap >= 2 + close date 14d
+    if len(sq_vendors & hub_vendors) >= 2 and _date_close_days(
+        sq.modified, hub.created_utc, 14
+    ):
+        return MatchResult(
+            "possible_match", 0.45, "multi_vendor_token+close_date_14d", bd
+        )
+
+    return MatchResult("no_match", 0.0, "no_evidence", bd)
+
+
+def best_match(sq: SquareDoc, hubs: List[HubDoc]) -> Tuple[Optional[HubDoc], MatchResult]:
+    best_doc: Optional[HubDoc] = None
+    best_res = MatchResult("no_match", 0.0, "no_evidence", {})
+    for h in hubs:
+        r = score_pair(sq, h)
+        if BUCKET_ORDER[r.bucket] > BUCKET_ORDER[best_res.bucket]:
+            best_doc, best_res = h, r
+        elif r.bucket == best_res.bucket and r.bucket != "no_match" and r.score > best_res.score:
+            best_doc, best_res = h, r
+        if best_res.bucket == "exact_match":
+            break
+    return best_doc, best_res
+
+
+# ---------------------------------------------------------------------------
+# Hub-side mongo loader
+# ---------------------------------------------------------------------------
+
+def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
+    """Read AP-lane docs from hub_documents within the requested window."""
+    from pymongo import MongoClient  # local import keeps unit tests dep-free
+
+    client = MongoClient(os.environ["MONGO_URL"])
+    db = client[os.environ["DB_NAME"]]
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    cursor = (
+        db.hub_documents
+        .find(
+            {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}},
+            {"_id": 0,
+             "id": 1, "file_name": 1, "sharepoint_web_url": 1,
+             "sharepoint_folder_path": 1, "routing_status": 1,
+             "folder_routing_reason": 1, "routing_reason": 1, "doc_type": 1,
+             "suggested_job_type": 1, "classification_method": 1,
+             "vendor_canonical": 1, "invoice_number_clean": 1,
+             "amount_float": 1, "po_number_clean": 1, "created_utc": 1,
+             "email_subject": 1, "email_sender": 1},
+        )
+        .sort("created_utc", -1)
+        .limit(limit)
+    )
+    return [HubDoc.from_mongo(d) for d in cursor]
+
+
+def load_recent_poll_health(since_hours: int) -> Dict[str, Any]:
+    """Read mail_poll_runs failures for the parity-companion diagnostic."""
+    from pymongo import MongoClient
+
+    client = MongoClient(os.environ["MONGO_URL"])
+    db = client[os.environ["DB_NAME"]]
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    failed_runs = list(
+        db.mail_poll_runs.find(
+            {"started_at": {"$gte": cutoff},
+             "$or": [
+                 {"status": {"$in": ["failed_graph", "failed_token", "failed_exception"]}},
+                 {"errors": {"$exists": True, "$not": {"$size": 0}}},
+                 {"attachments_failed": {"$gt": 0}},
+                 {"stalled_watermark": {"$exists": True}},
+             ]},
+            {"_id": 0, "run_id": 1, "mailbox": 1, "status": 1,
+             "errors": 1, "attachments_failed": 1, "messages_detected": 1,
+             "started_at": 1, "completed_at": 1, "ended_at": 1,
+             "watermark_in": 1, "watermark_out": 1, "stalled_watermark": 1},
+        ).sort("started_at", -1).limit(50)
+    )
+    return {
+        "failed_runs": failed_runs,
+        "failed_run_count": len(failed_runs),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+
+OUTPUT_COLUMNS = [
+    "match_bucket", "match_score", "match_reason",
+    "square9_name", "square9_parent_path", "square9_modified", "square9_web_url",
+    "hub_doc_id", "hub_file_name", "hub_sharepoint_web_url", "hub_sharepoint_folder_path",
+    "hub_routing_status", "hub_routing_reason", "hub_doc_type",
+    "hub_suggested_job_type", "hub_classification_method",
+    "hub_vendor_canonical", "hub_invoice_number_clean", "hub_amount_float",
+    "hub_po_number_clean", "hub_email_sender", "hub_email_subject", "hub_created_utc",
+]
+
+
+def _row_for(sq: SquareDoc, hub: Optional[HubDoc], r: MatchResult) -> Dict[str, Any]:
+    return {
+        "match_bucket": r.bucket,
+        "match_score": round(r.score, 3),
+        "match_reason": r.reason,
+        "square9_name": sq.name,
+        "square9_parent_path": sq.raw.get("parent_path", ""),
+        "square9_modified": sq.modified.isoformat() if sq.modified else "",
+        "square9_web_url": sq.web_url,
+        "hub_doc_id": hub.doc_id if hub else "",
+        "hub_file_name": hub.file_name if hub else "",
+        "hub_sharepoint_web_url": hub.sharepoint_web_url if hub else "",
+        "hub_sharepoint_folder_path": hub.sharepoint_folder_path if hub else "",
+        "hub_routing_status": hub.routing_status if hub else "",
+        "hub_routing_reason": hub.routing_reason if hub else "",
+        "hub_doc_type": hub.doc_type if hub else "",
+        "hub_suggested_job_type": hub.suggested_job_type if hub else "",
+        "hub_classification_method": hub.classification_method if hub else "",
+        "hub_vendor_canonical": hub.vendor_canonical if hub else "",
+        "hub_invoice_number_clean": hub.invoice_number_clean if hub else "",
+        "hub_amount_float": hub.amount_float if hub else "",
+        "hub_po_number_clean": hub.po_number_clean if hub else "",
+        "hub_email_sender": hub.email_sender if hub else "",
+        "hub_email_subject": hub.email_subject if hub else "",
+        "hub_created_utc": hub.created_utc.isoformat() if hub and hub.created_utc else "",
+    }
+
+
+def _row_hub_only(hub: HubDoc) -> Dict[str, Any]:
+    return {
+        "match_bucket": "hub_only",
+        "match_score": 0.0,
+        "match_reason": "no_square9_counterpart",
+        "square9_name": "",
+        "square9_parent_path": "",
+        "square9_modified": "",
+        "square9_web_url": "",
+        "hub_doc_id": hub.doc_id,
+        "hub_file_name": hub.file_name,
+        "hub_sharepoint_web_url": hub.sharepoint_web_url,
+        "hub_sharepoint_folder_path": hub.sharepoint_folder_path,
+        "hub_routing_status": hub.routing_status,
+        "hub_routing_reason": hub.routing_reason,
+        "hub_doc_type": hub.doc_type,
+        "hub_suggested_job_type": hub.suggested_job_type,
+        "hub_classification_method": hub.classification_method,
+        "hub_vendor_canonical": hub.vendor_canonical,
+        "hub_invoice_number_clean": hub.invoice_number_clean,
+        "hub_amount_float": hub.amount_float,
+        "hub_po_number_clean": hub.po_number_clean,
+        "hub_email_sender": hub.email_sender,
+        "hub_email_subject": hub.email_subject,
+        "hub_created_utc": hub.created_utc.isoformat() if hub.created_utc else "",
+    }
+
+
+def write_csv(out_path: str, rows: List[Dict[str, Any]]) -> None:
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=OUTPUT_COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+# ---------------------------------------------------------------------------
+# Findings (blockers + warnings)
+# ---------------------------------------------------------------------------
+
+def _hub_folder_root(p: str) -> str:
+    if not p:
+        return ""
+    parts = [seg for seg in p.replace("\\", "/").split("/") if seg]
+    return parts[0].lower() if parts else ""
+
+
+def evaluate_findings(
+    hub_docs: List[HubDoc],
+    bucket_counts: Dict[str, int],
+    match_rate: float,
+    min_match_rate: float,
+    poll_health: Dict[str, Any],
+) -> Dict[str, List[str]]:
+    blockers: List[str] = []
+    warnings: List[str] = []
+
+    if not hub_docs:
+        blockers.append("hub_ap_docs_empty: no AP docs in window — cannot prove parity.")
+        return {"blockers": blockers, "warnings": warnings}
+
+    missing_routing = sum(1 for d in hub_docs if not d.routing_status)
+    if missing_routing:
+        blockers.append(
+            f"hub_ap_docs_missing_routing_status: {missing_routing} doc(s) "
+            f"in window have no routing_status."
+        )
+
+    forbidden = [
+        d for d in hub_docs
+        if _hub_folder_root(d.sharepoint_folder_path) in FORBIDDEN_HUB_FOLDER_ROOTS
+    ]
+    if forbidden:
+        blockers.append(
+            f"ap_docs_in_forbidden_root: {len(forbidden)} AP doc(s) routed "
+            f"under Operations/Warehouse — sample: "
+            f"{[d.file_name for d in forbidden[:3]]}"
+        )
+
+    if match_rate < min_match_rate:
+        blockers.append(
+            f"match_rate_below_threshold: {match_rate:.1%} < {min_match_rate:.1%}"
+        )
+
+    legacy = sum(
+        1 for d in hub_docs
+        if d.classification_method.lower().startswith(LEGACY_CLASSIFICATION_PREFIXES)
+    )
+    if legacy:
+        warnings.append(f"legacy_classification_method: {legacy} doc(s).")
+
+    miss_inv = sum(1 for d in hub_docs if not d.invoice_number_clean)
+    if miss_inv:
+        warnings.append(f"missing_invoice_number_clean: {miss_inv} doc(s).")
+
+    miss_vendor = sum(1 for d in hub_docs if not d.vendor_canonical)
+    if miss_vendor:
+        warnings.append(f"missing_vendor_canonical: {miss_vendor} doc(s).")
+
+    miss_amount = sum(1 for d in hub_docs if d.amount_float is None)
+    if miss_amount:
+        warnings.append(f"missing_amount_float: {miss_amount} doc(s).")
+
+    if poll_health.get("failed_run_count", 0):
+        warnings.append(
+            f"recent_poll_failures: {poll_health['failed_run_count']} run(s) "
+            f"with errors / attachment failures / stalled watermarks."
+        )
+
+    return {"blockers": blockers, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# Console formatting
+# ---------------------------------------------------------------------------
+
+def format_summary_text(
+    sq_count: int,
+    hub_count: int,
+    bucket_counts: Dict[str, int],
+    match_rate: float,
+    findings: Dict[str, List[str]],
+    rows_for_top: List[Dict[str, Any]],
+    poll_health: Dict[str, Any],
+    top_n: int,
+) -> str:
+    out: List[str] = []
+    out.append("=== square9_hub_ap_parity ===")
+    out.append(f"  Square9 docs:              {sq_count}")
+    out.append(f"  Hub AP docs:               {hub_count}")
+    out.append(f"  exact_match:               {bucket_counts.get('exact_match', 0)}")
+    out.append(f"  strong_evidence_match:     {bucket_counts.get('strong_evidence_match', 0)}")
+    out.append(f"  likely_match:              {bucket_counts.get('likely_match', 0)}")
+    out.append(f"  possible_match:            {bucket_counts.get('possible_match', 0)}")
+    out.append(f"  square9_only (no_match):   {bucket_counts.get('no_match', 0)}")
+    out.append(f"  hub_only:                  {bucket_counts.get('hub_only', 0)}")
+    out.append(f"  match_rate:                {match_rate:.1%}")
+
+    matched = [
+        r for r in rows_for_top
+        if r["match_bucket"] in ("exact_match", "strong_evidence_match",
+                                 "likely_match", "possible_match")
+    ]
+    matched.sort(key=lambda r: (-BUCKET_ORDER.get(r["match_bucket"], 0),
+                                -float(r["match_score"] or 0)))
+    out.append("")
+    out.append(f"  TOP {top_n} STRONGEST MATCHES")
+    for r in matched[:top_n]:
+        out.append(
+            f"    [{r['match_bucket']}/{r['match_score']}] "
+            f"{r['square9_name']!r}  ↔  {r['hub_file_name']!r}  "
+            f"({r['match_reason']})"
+        )
+
+    sq_only = [r for r in rows_for_top if r["match_bucket"] == "no_match"]
+    out.append("")
+    out.append(f"  TOP {top_n} SQUARE9-ONLY MISSES")
+    for r in sq_only[:top_n]:
+        out.append(f"    {r['square9_name']!r}   parent={r['square9_parent_path']!r}")
+
+    hub_only = [r for r in rows_for_top if r["match_bucket"] == "hub_only"]
+    out.append("")
+    out.append(f"  TOP {top_n} HUB-ONLY DOCS (in Hub AP-lane, no Square9 counterpart)")
+    for r in hub_only[:top_n]:
+        out.append(
+            f"    {r['hub_file_name']!r}  → {r['hub_sharepoint_folder_path']!r}  "
+            f"vendor={r['hub_vendor_canonical']!r} inv#={r['hub_invoice_number_clean']!r}"
+        )
+
+    out.append("")
+    out.append("  POLL HEALTH (last window):")
+    out.append(f"    failed_run_count: {poll_health.get('failed_run_count', 0)}")
+    for r in poll_health.get("failed_runs", [])[:10]:
+        first_err = (r.get("errors") or [""])[0] if r.get("errors") else ""
+        out.append(
+            f"    run_id={r.get('run_id')!r} mailbox={r.get('mailbox')!r} "
+            f"status={r.get('status')!r} attachments_failed={r.get('attachments_failed', 0)} "
+            f"err={first_err[:140]!r}"
+        )
+
+    out.append("")
+    if findings["blockers"]:
+        out.append("  BLOCKERS:")
+        for b in findings["blockers"]:
+            out.append(f"    - {b}")
+    if findings["warnings"]:
+        out.append("  WARNINGS:")
+        for w in findings["warnings"]:
+            out.append(f"    - {w}")
+    if not findings["blockers"] and not findings["warnings"]:
+        out.append("  RESULT: clean. AP-lane parity proof passed.")
+    elif findings["blockers"]:
+        out.append("  RESULT: BLOCKED. See blockers above.")
+    else:
+        out.append("  RESULT: warnings only. Review and re-run.")
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Pure-function entrypoint (used by tests)
+# ---------------------------------------------------------------------------
+
+def run_compare(
+    square_docs: List[SquareDoc],
+    hub_docs: List[HubDoc],
+    out_csv: Optional[str],
+    top_n: int,
+    min_match_rate: float,
+    poll_health: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Pure function — accepts loaded inputs, returns summary + rows."""
+    poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
+    rows: List[Dict[str, Any]] = []
+    bucket_counts: Dict[str, int] = {b: 0 for b in BUCKET_ORDER}
+    bucket_counts["hub_only"] = 0
+
+    matched_hub_ids: set = set()
+    for sq in square_docs:
+        hub, res = best_match(sq, hub_docs)
+        rows.append(_row_for(sq, hub if res.bucket != "no_match" else None, res))
+        bucket_counts[res.bucket] = bucket_counts.get(res.bucket, 0) + 1
+        if hub is not None and res.bucket != "no_match":
+            matched_hub_ids.add(hub.doc_id)
+
+    for h in hub_docs:
+        if h.doc_id in matched_hub_ids:
+            continue
+        rows.append(_row_hub_only(h))
+        bucket_counts["hub_only"] += 1
+
+    matched = (
+        bucket_counts["exact_match"]
+        + bucket_counts["strong_evidence_match"]
+        + bucket_counts["likely_match"]
+        + bucket_counts["possible_match"]
+    )
+    match_rate = (matched / len(square_docs)) if square_docs else 0.0
+
+    findings = evaluate_findings(
+        hub_docs=hub_docs,
+        bucket_counts=bucket_counts,
+        match_rate=match_rate,
+        min_match_rate=min_match_rate,
+        poll_health=poll_health,
+    )
+
+    if out_csv:
+        write_csv(out_csv, rows)
+
+    return {
+        "rows": rows,
+        "bucket_counts": bucket_counts,
+        "match_rate": match_rate,
+        "findings": findings,
+        "square_count": len(square_docs),
+        "hub_count": len(hub_docs),
+        "poll_health": poll_health,
+        "top_n": top_n,
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        description="Square9 vs GPI Hub AP-lane parity proof (read-only)."
+    )
+    ap.add_argument("--since-hours", type=int, default=24)
+    ap.add_argument("--limit", type=int, default=500)
+    ap.add_argument("--out-csv", default="prod_reports/square9_hub_ap_parity.csv")
+    ap.add_argument("--top", type=int, default=25)
+    ap.add_argument(
+        "--min-match-rate", type=float, default=0.85,
+        help="Match rate threshold (0..1). Below this is a blocker. Default 0.85.",
+    )
+    ap.add_argument("--json", action="store_true")
+    ap.add_argument("--prod-site-path", default=PROD_DEFAULT_SITE_PATH)
+    ap.add_argument("--prod-library", default=PROD_DEFAULT_LIBRARY)
+    ap.add_argument("--prod-folder-path", default=PROD_DEFAULT_FOLDER_PATH)
+    ap.add_argument("--max-depth", type=int, default=25)
+    ap.add_argument("--no-recursive", action="store_true")
+    args = ap.parse_args()
+
+    # Pull Square9 side via Graph
+    tenant = os.environ.get("TENANT_ID")
+    cid = os.environ.get("GRAPH_CLIENT_ID")
+    csec = os.environ.get("GRAPH_CLIENT_SECRET")
+    token = acquire_graph_token(tenant, cid, csec)
+    host = os.environ.get(
+        "SHAREPOINT_HOST",
+        f"{(os.environ.get('SHAREPOINT_TENANT_NAME') or 'gamerpackaging1')}.sharepoint.com",
+    )
+    print(f"Graph token acquired. Host: {host}", file=sys.stderr)
+
+    sq_docs = pull_listing_via_graph(
+        token=token, host=host,
+        site_path=args.prod_site_path, library=args.prod_library,
+        folder_path=args.prod_folder_path,
+        label="prod", recursive=(not args.no_recursive),
+        max_depth=args.max_depth,
+    )
+
+    # Pull Hub side from Mongo
+    hub_docs = load_hub_ap_docs(args.since_hours, args.limit)
+    poll_health = load_recent_poll_health(args.since_hours)
+
+    print(
+        f"Loaded {len(sq_docs)} Square9 docs, {len(hub_docs)} Hub AP docs "
+        f"(window={args.since_hours}h, limit={args.limit}).",
+        file=sys.stderr,
+    )
+
+    result = run_compare(
+        square_docs=sq_docs,
+        hub_docs=hub_docs,
+        out_csv=args.out_csv,
+        top_n=args.top,
+        min_match_rate=args.min_match_rate,
+        poll_health=poll_health,
+    )
+
+    if args.json:
+        # Strip rows; CSV is the row store.
+        payload = {
+            "square_count": result["square_count"],
+            "hub_count": result["hub_count"],
+            "bucket_counts": result["bucket_counts"],
+            "match_rate": result["match_rate"],
+            "findings": result["findings"],
+            "poll_health": {
+                "failed_run_count": poll_health["failed_run_count"],
+                "failed_runs": poll_health["failed_runs"][:50],
+            },
+            "out_csv": args.out_csv,
+        }
+        print(json.dumps(payload, default=str, indent=2))
+    else:
+        print(format_summary_text(
+            sq_count=result["square_count"],
+            hub_count=result["hub_count"],
+            bucket_counts=result["bucket_counts"],
+            match_rate=result["match_rate"],
+            findings=result["findings"],
+            rows_for_top=result["rows"],
+            poll_health=poll_health,
+            top_n=args.top,
+        ))
+
+    return 1 if result["findings"]["blockers"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

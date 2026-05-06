@@ -175,6 +175,28 @@ def _derive_matched_count(bucket_counts: Dict[str, Any]) -> Optional[int]:
     return total if seen_any else None
 
 
+def _summarize_bucket_c_cohorts(cohorts: List[Any]) -> List[Dict[str, Any]]:
+    """Compact view of Bucket C intake cohorts: vendor, channel, owner,
+    recommended action, count. Used by both renderers so an operator
+    sees ticket-ready rows without opening the handoff CSV."""
+    out: List[Dict[str, Any]] = []
+    for c in cohorts:
+        if not isinstance(c, dict):
+            continue
+        ck = c.get("cohort_key") or {}
+        out.append({
+            "likely_vendor": str(ck.get("likely_vendor") or "<unknown>"),
+            "candidate_intake_channel": str(
+                ck.get("candidate_intake_channel") or "unknown"),
+            "owner_hint": str(c.get("owner_hint") or ""),
+            "recommended_intake_change": str(
+                c.get("recommended_intake_change") or ""),
+            "affected_doc_count": int(c.get("affected_doc_count") or 0),
+        })
+    out.sort(key=lambda r: (-r["affected_doc_count"], r["owner_hint"]))
+    return out
+
+
 def build_key_counts(parity: Optional[Dict[str, Any]],
                      bucket_a_plan: Optional[Dict[str, Any]],
                      bucket_c_plan: Optional[Dict[str, Any]],
@@ -200,6 +222,7 @@ def build_key_counts(parity: Optional[Dict[str, Any]],
     c_intake_cohorts = c.get("intake_channel_change_cohort_count")
     c_exclusion_cohorts = c.get("parity_exclusion_cohort_count")
     c_owner_counts = c.get("owner_hint_counts")
+    c_intake_detail = _summarize_bucket_c_cohorts(c.get("intake_channel_changes") or [])
 
     projected_match_rate_pct = None
     projection_basis = None
@@ -231,6 +254,7 @@ def build_key_counts(parity: Optional[Dict[str, Any]],
             "intake_channel_change_cohort_count": c_intake_cohorts,
             "parity_exclusion_cohort_count": c_exclusion_cohorts,
             "owner_hint_counts": c_owner_counts,
+            "intake_cohort_detail": c_intake_detail,
         },
         "projection": {
             "post_bucket_A_apply_match_rate_pct": projected_match_rate_pct,
@@ -376,6 +400,20 @@ def render_markdown(summary: Dict[str, Any]) -> str:
     lines.append(f"| bucket_A.manual_review_cohorts | {_fmt_int_or_unknown(a.get('manual_review_cohort_count'))} |")
     lines.append(f"| bucket_C.intake_channel_change_cohorts | {_fmt_int_or_unknown(c.get('intake_channel_change_cohort_count'))} |")
     lines.append(f"| bucket_C.parity_exclusion_cohorts | {_fmt_int_or_unknown(c.get('parity_exclusion_cohort_count'))} |")
+    detail = c.get("intake_cohort_detail") or []
+    if detail:
+        lines.append("")
+        lines.append("### Bucket C intake cohorts (IT/AP ticket pack)")
+        lines.append("")
+        lines.append("| docs | owner | vendor | channel | recommended action |")
+        lines.append("| ---: | --- | --- | --- | --- |")
+        for row in detail:
+            lines.append(
+                f"| {row['affected_doc_count']} | {row['owner_hint']} | "
+                f"{row['likely_vendor']} | "
+                f"{row['candidate_intake_channel']} | "
+                f"{row['recommended_intake_change']} |"
+            )
     proj_rate = proj.get("post_bucket_A_apply_match_rate_pct")
     if proj_rate is not None:
         lines.append("")
@@ -473,6 +511,21 @@ def render_text(summary: Dict[str, Any]) -> str:
             out.append(f"      {str(k):30s} {_fmt_int_or_unknown(v)}")
     out.append(f"    bucket_C.intake_change_cohrts: {_fmt_int_or_unknown(c.get('intake_channel_change_cohort_count'))}")
     out.append(f"    bucket_C.exclusion_cohorts   : {_fmt_int_or_unknown(c.get('parity_exclusion_cohort_count'))}")
+
+    detail = c.get("intake_cohort_detail") or []
+    if detail:
+        out.append("")
+        out.append(f"  BUCKET C INTAKE COHORTS ({len(detail)} — IT/AP ticket pack):")
+        out.append(f"    {'docs':>4}  {'owner':6s}  {'vendor':25s}  "
+                   f"{'channel':35s}  recommended_action")
+        for row in detail:
+            out.append(
+                f"    {row['affected_doc_count']:>4d}  "
+                f"{row['owner_hint']:6s}  "
+                f"{row['likely_vendor'][:25]:25s}  "
+                f"{row['candidate_intake_channel'][:35]:35s}  "
+                f"{row['recommended_intake_change']}"
+            )
 
     proj_rate = proj.get("post_bucket_A_apply_match_rate_pct")
     if proj_rate is not None:

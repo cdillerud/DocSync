@@ -191,6 +191,13 @@ run_step email_poll_watermark_probe \
     "mail_poll_runs health summary" \
     python scripts/email_poll_watermark_probe.py
 
+# --- 10. Bucket C handoff doc (IT/AP ticket pack) --------------------------
+# Read-only: renders prod_reports/bucket_C_handoff.{md,csv} from the
+# Bucket C remediation plan written in stage 8. Snapshot afterwards.
+run_step bucket_C_handoff_doc \
+    "Bucket C handoff doc (IT/AP ticket pack)" \
+    python scripts/bucket_C_handoff_doc.py
+
 # --- Manifest close ---------------------------------------------------------
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {
@@ -199,9 +206,15 @@ FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "}"
 } >> "${MANIFEST}"
 
-# --- Snapshot the parity JSON into the proof dir for the summarizer --------
+# --- Snapshot the parity JSON + Bucket C handoff into the proof dir --------
 if [ -f prod_reports/square9_hub_ap_parity.json ]; then
     cp -f prod_reports/square9_hub_ap_parity.json "${PROOF_DIR}/square9_hub_ap_parity.json"
+fi
+if [ -f prod_reports/bucket_C_handoff.md ]; then
+    cp -f prod_reports/bucket_C_handoff.md "${PROOF_DIR}/bucket_C_handoff.md"
+fi
+if [ -f prod_reports/bucket_C_handoff.csv ]; then
+    cp -f prod_reports/bucket_C_handoff.csv "${PROOF_DIR}/bucket_C_handoff.csv"
 fi
 
 # --- Final summary ---------------------------------------------------------

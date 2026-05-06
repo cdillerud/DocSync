@@ -1,5 +1,71 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-06 — Cutover Proof Pack v2 + Bucket A Apply (gated)
+
+**Read-only proof pack (no production writes)** — extended with key
+counts, a deterministic projection of the post-Bucket-A match rate, and
+inline IT/AP ticket detail. Plus the **gated Bucket A apply script**
+(strict `--apply --confirm CUTOVER` requirement, mongomock-tested
+end-to-end in preview).
+
+Proof-pack changes
+- Stage 10 added: `bucket_C_handoff_doc` regenerates the IT/AP ticket
+  pack (`bucket_C_handoff.{md,csv}`) on every run; both files are
+  snapshotted into the proof_dir.
+- `cutover_proof_summary.py` now loads the parity payload AND the two
+  remediation-plan JSONs. Surfaces:
+  - `parity.matched_count` derived from
+    `exact_match + strong_evidence_match + likely_match + possible_match`
+    (matches the parity script's match-rate formula);
+  - `bucket_A.actionable_cohorts/docs/manual_review`,
+    `change_type_counts`;
+  - `bucket_C.intake_change_cohorts/exclusion_cohorts` plus per-cohort
+    detail (vendor / channel / owner / recommended action / doc count)
+    rendered inline in both summary.md and the CLI banner;
+  - **PROJECTED MATCH RATE AFTER BUCKET A APPLY** computed as
+    `(matched + bucket_A_actionable_docs) / square_count`, tagged as
+    "clears the gate" or "Bucket A apply NOT sufficient" against
+    `MIN_MATCH_RATE`.
+- Robustness fixes from the live VM run:
+  - parity log preamble (Graph token, listing prose) parsed by scanning
+    for the first `{` line;
+  - `Traceback (most recent call last):` in any step log forces rc>=3 in
+    both the bash orchestrator AND the summarizer (defense in depth);
+  - `PROOF_SINCE_HOURS` env override (default 168h = 1 week);
+  - `--triage-square9-only` flag added to the parity stage so the
+    triage CSV exists for downstream stages.
+
+Bucket A apply (live writes — gated)
+- `scripts/bucket_A_one_shot_data_patch_apply.py` — opt-in apply
+  companion to the existing dry-run. Idempotent via
+  `remediation_audit.source = "bucket_A_one_shot_patch"`. Writes
+  `prod_reports/apply_bucket_A_<UTC-ts>/rollback.json` BEFORE any
+  `update_one`. Refuses without `--apply --confirm CUTOVER` (rc=3).
+  Exit codes: 2 dry-run / 3 refused / 4 updates applied / 5 all already
+  idempotent.
+- Tests: `tests/test_bucket_A_one_shot_data_patch_apply.py` —
+  mongomock-backed end-to-end coverage of build_set_payload,
+  is_already_applied, snapshot_doc_for_rollback, the apply path
+  (happy / idempotent / docs missing / non-one-shot cohorts ignored /
+  rollback-before-update ordering / cohort-key fidelity), and CLI
+  refusal without `--confirm`.
+
+Aggregate green suite: 153/153 (added 9 cutover_proof key-counts +
+12 apply tests on top of the existing 132).
+
+Live data observed on this VM (168h window):
+- Square9 docs: 247
+- Hub AP docs: 298
+- matched (computed): 89 → 36.03%
+- Bucket A actionable cohorts: 5 / actionable docs: 43 / manual review
+  cohorts: 35
+- Bucket A change_type_counts: routing_rule_addition=3,
+  one_shot_data_patch=1, classifier_signal_uplift=1
+- Bucket C intake-channel-change cohorts: 12 / parity exclusions: 1
+- Projected match rate after Bucket A apply alone:
+  (89 + 43) / 247 = 53.44% (insufficient; Bucket C intake-channel work
+  also required to reach 85%).
+
 ## 2026-05-06 — Square9 Cutover Proof Pack (read-only, packaged)
 **Single-command, repo-owned production verification harness** for the
 Square9 cutover. Runs all 9 readiness probes in dependency order,

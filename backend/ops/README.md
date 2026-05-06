@@ -95,6 +95,32 @@ emitted").
 | 7 | `bucket_A_misrouting_remediation_plan` | `scripts/bucket_A_misrouting_remediation_plan.py` |
 | 8 | `bucket_C_intake_remediation_plan` | `scripts/bucket_C_intake_remediation_plan.py` |
 | 9 | `email_poll_watermark_probe` | `scripts/email_poll_watermark_probe.py` |
+| 10 | `bucket_C_handoff_doc` | `scripts/bucket_C_handoff_doc.py` (IT/AP ticket pack) |
+
+## Bucket A apply (gated, NOT part of the read-only proof pack)
+
+`scripts/bucket_A_one_shot_data_patch_apply.py` is the live-write
+companion to the dry-run script. It **mutates `hub_documents`** when run
+with both `--apply` and `--confirm CUTOVER`. Without those flags it is
+indistinguishable from the dry-run.
+
+Behavior:
+
+- Idempotent: documents already carrying
+  `remediation_audit.source == "bucket_A_one_shot_patch"` are skipped.
+- Rollback-safe: a `prod_reports/apply_bucket_A_<ts>/rollback.json`
+  snapshot of every prior field value is written **before** the first
+  `update_one` call.
+- Refuses to write without `--confirm CUTOVER` (rc=3).
+
+Run on the VM after the proof pack has surfaced the cohort numbers and
+you've reviewed `prod_reports/cutover_proof_<ts>/summary.md`:
+
+    docker compose exec backend python scripts/bucket_A_one_shot_data_patch_apply.py \
+        --apply --confirm CUTOVER
+
+Tests: `backend/tests/test_bucket_A_one_shot_data_patch_apply.py` —
+mongomock-backed end-to-end coverage (no live DB calls in preview).
 
 ## Tests
 

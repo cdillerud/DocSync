@@ -496,6 +496,81 @@ PROD_AP_ROOT_PATH = "General/Accounting/Accounts Payable"
 PROD_AP_TEMP_FOLDER_NAME = "Temp Folder"
 
 
+def parse_exclude_subpaths(arg: Optional[str]) -> List[str]:
+    """Parse --exclude-square9-subpaths CSV string into a normalized list.
+
+    Empty / None / whitespace-only items are dropped. Each token is
+    lowercased and trimmed. Used downstream as case-insensitive substring
+    match against `parent_path`.
+    """
+    if not arg:
+        return []
+    tokens: List[str] = []
+    for raw in arg.split(","):
+        t = (raw or "").strip().lower()
+        if t:
+            tokens.append(t)
+    return tokens
+
+
+def filter_square_docs_by_subpath(
+    docs: List["SquareDoc"], exclude_subpaths: List[str]
+) -> Tuple[List["SquareDoc"], int, List["SquareDoc"]]:
+    """Drop Square9 docs whose `parent_path` matches ANY excluded substring.
+
+    Returns (kept_docs, excluded_count, excluded_docs). Case-insensitive,
+    substring match — handles full prefixes like "Outgoing Wires" and
+    nested paths like "Outgoing Wires/2026" identically. Returns the input
+    unchanged when `exclude_subpaths` is empty.
+    """
+    if not exclude_subpaths:
+        return list(docs), 0, []
+    kept: List[SquareDoc] = []
+    excluded: List[SquareDoc] = []
+    for d in docs:
+        parent_path = ""
+        if isinstance(d.raw, dict):
+            parent_path = (d.raw.get("parent_path") or "").lower()
+        if any(token in parent_path for token in exclude_subpaths):
+            excluded.append(d)
+        else:
+            kept.append(d)
+    return kept, len(excluded), excluded
+
+
+# ---------------------------------------------------------------------------
+# Triage CSV — write square9_only (no_match) rows for operator review
+# ---------------------------------------------------------------------------
+
+TRIAGE_OUTPUT_COLUMNS = [
+    "square9_name", "square9_parent_path", "square9_modified",
+    "best_hub_candidate", "best_score", "best_reason",
+]
+
+
+def write_triage_csv(out_path: str, rows: List[Dict[str, Any]]) -> int:
+    """Write the square9_only rows out for operator review. Returns count."""
+    triage_rows = [r for r in rows if r.get("match_bucket") == "no_match"]
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+    with open(out_path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=TRIAGE_OUTPUT_COLUMNS, extrasaction="ignore")
+        w.writeheader()
+        for r in triage_rows:
+            w.writerow({
+                "square9_name": r.get("square9_name", ""),
+                "square9_parent_path": r.get("square9_parent_path", ""),
+                "square9_modified": r.get("square9_modified", ""),
+                # `_row_for` writes hub_* fields only when bucket != no_match,
+                # so for triage rows these come back empty — exposed for any
+                # future scoring tweak that lets near-misses surface their
+                # closest candidate.
+                "best_hub_candidate": r.get("hub_file_name", ""),
+                "best_score": r.get("match_score", 0.0),
+                "best_reason": r.get("match_reason", "no_evidence"),
+            })
+    return len(triage_rows)
+
+
 def _square_doc_dedupe_key(d: "SquareDoc") -> str:
     """Stable id for de-duplicating Square9 docs across multiple Graph pulls."""
     raw = d.raw if isinstance(d.raw, dict) else {}
@@ -849,6 +924,9 @@ def run_compare(
     poll_health: Optional[Dict[str, Any]] = None,
     match_by_invoice_date: bool = False,
     invoice_date_tolerance_days: int = 30,
+    excluded_subpaths: Optional[List[str]] = None,
+    excluded_count: int = 0,
+    triage_out_csv: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Pure function — accepts loaded inputs, returns summary + rows."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
@@ -891,6 +969,10 @@ def run_compare(
     if out_csv:
         write_csv(out_csv, rows)
 
+    triage_written = 0
+    if triage_out_csv:
+        triage_written = write_triage_csv(triage_out_csv, rows)
+
     return {
         "rows": rows,
         "bucket_counts": bucket_counts,
@@ -906,6 +988,10 @@ def run_compare(
         "invoice_date_tolerance_days": (
             invoice_date_tolerance_days if match_by_invoice_date else None
         ),
+        "excluded_subpaths": list(excluded_subpaths or []),
+        "excluded_count": excluded_count,
+        "triage_out_csv": triage_out_csv if triage_out_csv else None,
+        "triage_rows_written": triage_written,
     }
 
 
@@ -965,6 +1051,26 @@ def main() -> int:
         help="Date-proximity window for --match-by-invoice-date "
              "(default: 30 days).",
     )
+    ap.add_argument(
+        "--exclude-square9-subpaths", default="",
+        help="Comma-separated list of substrings; any Square9 doc whose "
+             "parent_path contains any of these tokens (case-insensitive) "
+             "is dropped from the corpus before scoring. Example: "
+             "\"Outgoing Wires,Wells Fargo Positive Pay Uploads\". "
+             "Default: empty (no filtering).",
+    )
+    ap.add_argument(
+        "--triage-square9-only", action="store_true",
+        help="Write a CSV of all square9_only (no_match) docs for operator "
+             "triage. Output path defaults to "
+             "prod_reports/square9_only_triage.csv; override via "
+             "--triage-out-csv.",
+    )
+    ap.add_argument(
+        "--triage-out-csv", default="prod_reports/square9_only_triage.csv",
+        help="Override the triage CSV output path. Only honored when "
+             "--triage-square9-only is set.",
+    )
     args = ap.parse_args()
 
     # Pull Square9 side via Graph
@@ -997,6 +1103,11 @@ def main() -> int:
     sq_docs_unfiltered_count = len(sq_docs)
     prod_window_hours = args.prod_modified_since_hours or args.since_hours
     sq_docs, prod_cutoff_iso = filter_square_docs_by_modified(sq_docs, prod_window_hours)
+    sq_count_before_subpath_exclusion = len(sq_docs)
+    excluded_subpaths = parse_exclude_subpaths(args.exclude_square9_subpaths)
+    sq_docs, excluded_count, _excluded_docs = filter_square_docs_by_subpath(
+        sq_docs, excluded_subpaths
+    )
 
     # Pull Hub side from Mongo
     hub_docs = load_hub_ap_docs(args.since_hours, args.limit)
@@ -1004,8 +1115,9 @@ def main() -> int:
 
     print(
         f"Square9 listing: {sq_docs_unfiltered_count} total, "
-        f"{len(sq_docs)} within last {prod_window_hours}h "
-        f"(cutoff={prod_cutoff_iso}).",
+        f"{sq_count_before_subpath_exclusion} within last {prod_window_hours}h "
+        f"(cutoff={prod_cutoff_iso}); excluded_by_subpath={excluded_count} "
+        f"({excluded_subpaths!r}); kept={len(sq_docs)}.",
         file=sys.stderr,
     )
     print(
@@ -1014,6 +1126,8 @@ def main() -> int:
         f"proof_mode={'invoice_document_set' if args.match_by_invoice_date else 'ingest_window'}).",
         file=sys.stderr,
     )
+
+    triage_out = args.triage_out_csv if args.triage_square9_only else None
 
     result = run_compare(
         square_docs=sq_docs,
@@ -1024,6 +1138,9 @@ def main() -> int:
         poll_health=poll_health,
         match_by_invoice_date=args.match_by_invoice_date,
         invoice_date_tolerance_days=args.invoice_date_tolerance_days,
+        excluded_subpaths=excluded_subpaths,
+        excluded_count=excluded_count,
+        triage_out_csv=triage_out,
     )
 
     if args.json:
@@ -1034,6 +1151,9 @@ def main() -> int:
             "square9_modified_window_hours": prod_window_hours,
             "invoice_date_tolerance_days": result["invoice_date_tolerance_days"],
             "expanded_ap_corpus": args.expanded_ap_corpus,
+            "excluded_subpaths": result["excluded_subpaths"],
+            "excluded_count": result["excluded_count"],
+            "square9_count_before_subpath_exclusion": sq_count_before_subpath_exclusion,
             "square9_docs_count": result["square_count"],
             "square_count_before_filter": sq_docs_unfiltered_count,
             "prod_modified_cutoff": prod_cutoff_iso,
@@ -1054,6 +1174,8 @@ def main() -> int:
                 "failed_runs": poll_health["failed_runs"][:50],
             },
             "out_csv": args.out_csv,
+            "triage_out_csv": result["triage_out_csv"],
+            "triage_rows_written": result["triage_rows_written"],
         }
         print(json.dumps(payload, default=str, indent=2))
     else:
@@ -1085,8 +1207,20 @@ def main() -> int:
             f"  expanded_ap_corpus:        {args.expanded_ap_corpus}"
         )
         print(
+            f"  excluded_subpaths:         {result['excluded_subpaths']!r}"
+        )
+        print(
+            f"  excluded_count:            {result['excluded_count']}  "
+            f"(square9 corpus before exclusion: {sq_count_before_subpath_exclusion})"
+        )
+        print(
             f"  prod_listing_before_filter: {sq_docs_unfiltered_count} doc(s)"
         )
+        if result["triage_out_csv"]:
+            print(
+                f"  triage_csv_written:        {result['triage_out_csv']}  "
+                f"({result['triage_rows_written']} square9_only row(s))"
+            )
 
     return 1 if result["findings"]["blockers"] else 0
 

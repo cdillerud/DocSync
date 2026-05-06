@@ -563,3 +563,183 @@ def test_score_pair_default_kwarg_preserves_legacy_behavior():
     res_explicit_none = parity.score_pair(sq, hub, invoice_date_tolerance_days=None)
     assert res_default.bucket == res_explicit_none.bucket == "exact_match"
     assert res_default.score == res_explicit_none.score == 1.0
+
+
+# ----------------------------------------------------------------------------
+# 24. parse_exclude_subpaths handles CSV / whitespace / empty correctly
+# ----------------------------------------------------------------------------
+def test_parse_exclude_subpaths_basic():
+    assert parity.parse_exclude_subpaths(
+        "Outgoing Wires,Wells Fargo Positive Pay Uploads"
+    ) == ["outgoing wires", "wells fargo positive pay uploads"]
+
+
+def test_parse_exclude_subpaths_strips_and_drops_empty():
+    assert parity.parse_exclude_subpaths(
+        "  Outgoing Wires  ,, ,Work Instructions"
+    ) == ["outgoing wires", "work instructions"]
+
+
+def test_parse_exclude_subpaths_empty_inputs():
+    assert parity.parse_exclude_subpaths("") == []
+    assert parity.parse_exclude_subpaths(None) == []
+    assert parity.parse_exclude_subpaths("   ,, ,") == []
+
+
+# ----------------------------------------------------------------------------
+# 25. filter_square_docs_by_subpath drops parent_path matches case-insensitively
+# ----------------------------------------------------------------------------
+def test_filter_square_docs_by_subpath_drops_matching():
+    docs = [
+        _sq("a.pdf", parent_path="Outgoing Wires/2026"),
+        _sq("b.pdf", parent_path="Wells Fargo Positive Pay Uploads"),
+        _sq("c.pdf", parent_path="VendorA/2026-04"),  # keep
+        _sq("d.pdf", parent_path="outgoing wires/2025"),  # case-insensitive drop
+    ]
+    kept, excluded_count, excluded_docs = parity.filter_square_docs_by_subpath(
+        docs, ["outgoing wires", "wells fargo positive pay uploads"]
+    )
+    assert [d.name for d in kept] == ["c.pdf"]
+    assert excluded_count == 3
+    assert sorted(d.name for d in excluded_docs) == ["a.pdf", "b.pdf", "d.pdf"]
+
+
+def test_filter_square_docs_by_subpath_no_excludes_preserves_corpus():
+    docs = [
+        _sq("a.pdf", parent_path="Outgoing Wires/2026"),
+        _sq("b.pdf", parent_path="VendorA/2026-04"),
+    ]
+    kept, excluded_count, excluded_docs = parity.filter_square_docs_by_subpath(docs, [])
+    assert [d.name for d in kept] == ["a.pdf", "b.pdf"]
+    assert excluded_count == 0
+    assert excluded_docs == []
+
+
+def test_filter_square_docs_by_subpath_substring_anywhere():
+    """Substring match — token can appear anywhere in parent_path, not just
+    as a leading folder. Hardens against operator typo'ing leading slashes."""
+    docs = [
+        _sq("a.pdf", parent_path="2026/Outgoing Wires"),
+        _sq("b.pdf", parent_path="Vendor/Outgoing Wires/Apr"),
+        _sq("c.pdf", parent_path="VendorA"),
+    ]
+    kept, excluded_count, _ = parity.filter_square_docs_by_subpath(
+        docs, ["outgoing wires"]
+    )
+    assert [d.name for d in kept] == ["c.pdf"]
+    assert excluded_count == 2
+
+
+# ----------------------------------------------------------------------------
+# 26. run_compare propagates excluded_subpaths + excluded_count metadata
+# ----------------------------------------------------------------------------
+def test_run_compare_propagates_exclude_metadata():
+    result = parity.run_compare(
+        square_docs=[_sq("any.pdf")],
+        hub_docs=[_hub("any.pdf")],
+        out_csv=None,
+        top_n=5,
+        min_match_rate=0.0,
+        excluded_subpaths=["outgoing wires", "positive pay"],
+        excluded_count=42,
+    )
+    assert result["excluded_subpaths"] == ["outgoing wires", "positive pay"]
+    assert result["excluded_count"] == 42
+
+
+def test_run_compare_default_exclude_metadata_is_empty():
+    result = parity.run_compare(
+        square_docs=[],
+        hub_docs=[_hub("x.pdf")],
+        out_csv=None,
+        top_n=5,
+        min_match_rate=0.0,
+    )
+    assert result["excluded_subpaths"] == []
+    assert result["excluded_count"] == 0
+
+
+# ----------------------------------------------------------------------------
+# 27. Triage CSV writes exactly the square9_only / no_match rows
+# ----------------------------------------------------------------------------
+def test_triage_csv_writes_square9_only_rows(tmp_path):
+    out = tmp_path / "triage.csv"
+    rows = [
+        {  # match — must NOT appear in triage
+            "match_bucket": "exact_match",
+            "match_score": 1.0,
+            "match_reason": "filename_exact",
+            "square9_name": "matched.pdf",
+            "square9_parent_path": "VendorA/2026-04",
+            "square9_modified": "2026-05-06T10:00:00+00:00",
+            "hub_file_name": "matched.pdf",
+        },
+        {  # square9_only — must appear
+            "match_bucket": "no_match",
+            "match_score": 0.0,
+            "match_reason": "no_evidence",
+            "square9_name": "260401 UPLOAD.xls",
+            "square9_parent_path": "Wells Fargo Positive Pay Uploads",
+            "square9_modified": "2026-05-06T11:00:00+00:00",
+            "hub_file_name": "",
+        },
+        {  # hub_only — must NOT appear
+            "match_bucket": "hub_only",
+            "match_score": 0.0,
+            "match_reason": "no_square9_counterpart",
+            "square9_name": "",
+            "square9_parent_path": "",
+            "square9_modified": "",
+            "hub_file_name": "0306293.pdf",
+        },
+    ]
+    written = parity.write_triage_csv(str(out), rows)
+    assert written == 1
+    import csv as _csv
+    with open(out, newline="", encoding="utf-8") as f:
+        reader = list(_csv.DictReader(f))
+    assert len(reader) == 1
+    r = reader[0]
+    assert r["square9_name"] == "260401 UPLOAD.xls"
+    assert r["square9_parent_path"] == "Wells Fargo Positive Pay Uploads"
+    assert r["best_reason"] == "no_evidence"
+    assert set(reader[0].keys()) == set(parity.TRIAGE_OUTPUT_COLUMNS)
+
+
+def test_triage_csv_runs_via_run_compare(tmp_path):
+    """Wiring smoke: passing triage_out_csv makes run_compare write it."""
+    out = tmp_path / "triage.csv"
+    sq_only = _sq("orphan.pdf", parent_path="VendorZ/2026-04")
+    sq_match = _sq("hit.pdf", parent_path="VendorA/2026-04")
+    hub = _hub("hit.pdf")
+    result = parity.run_compare(
+        square_docs=[sq_only, sq_match],
+        hub_docs=[hub],
+        out_csv=None,
+        top_n=5,
+        min_match_rate=0.0,
+        triage_out_csv=str(out),
+    )
+    assert result["triage_out_csv"] == str(out)
+    assert result["triage_rows_written"] == 1
+    assert out.exists()
+    with open(out, newline="", encoding="utf-8") as f:
+        rows = list(__import__("csv").DictReader(f))
+    assert len(rows) == 1
+    assert rows[0]["square9_name"] == "orphan.pdf"
+    assert rows[0]["square9_parent_path"] == "VendorZ/2026-04"
+
+
+def test_triage_csv_not_written_when_path_omitted(tmp_path):
+    """No path → no triage CSV side effect; triage_rows_written=0."""
+    sq_only = _sq("orphan.pdf")
+    result = parity.run_compare(
+        square_docs=[sq_only],
+        hub_docs=[],
+        out_csv=None,
+        top_n=5,
+        min_match_rate=0.0,
+        triage_out_csv=None,
+    )
+    assert result["triage_out_csv"] is None
+    assert result["triage_rows_written"] == 0

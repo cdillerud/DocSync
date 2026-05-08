@@ -2408,3 +2408,40 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
   NO cutover/archive actions, NO DocuSign / HTTPS / parked AP work
   touched, NO new env vars, NO new auth flows.
 
+
+
+## 2026-02 — square9_web_url propagation through audit -> triage -> probe
+
+Root cause of 100% empty_url discovered via the diagnostic banner:
+neither no_match_square9_audit.py nor uncertain_square9_deep_triage.py
+was carrying square9_web_url through to its output CSV/JSON. The
+fetcher was wired correctly; we never gave it a URL to fetch.
+
+- `scripts/no_match_square9_audit.py`:
+  - per-row dict in classify_all now carries `square9_web_url`
+    from the input parity row.
+  - `OUTPUT_CSV_COLUMNS` adds `square9_web_url`.
+  - `_trim_examples` (used in JSON top_examples_by_bucket) keeps
+    `square9_web_url` so the JSON also surfaces the URL for
+    auditors.
+- `scripts/uncertain_square9_deep_triage.py`:
+  - per-row dict in classify_all now carries `square9_web_url`
+    from the audit CSV.
+  - `OUTPUT_CSV_COLUMNS` adds `square9_web_url`.
+  - `_trim_for_top` keeps `square9_web_url` in JSON top examples.
+- Tests (+9):
+  - test_no_match_square9_audit.py: 4 new tests proving URL is
+    carried into classified rows, present in OUTPUT_CSV_COLUMNS,
+    written to CSV, and surfaced in JSON top_examples_by_bucket.
+  - test_uncertain_square9_deep_triage.py: 5 new tests proving
+    URL is carried into classified rows, present in
+    OUTPUT_CSV_COLUMNS, written to CSV, surfaced in JSON top
+    examples, AND a cross-pipeline integration test that proves
+    the body reconciliation probe actually reads the URL back.
+- Combined run: 108 passed in 0.42s (38 upstream + 49 probe +
+  30 fetcher - already overlapping counts include the 9 new).
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing/classifier changes, NO Square9 changes,
+  NO cutover/archive actions, NO DocuSign / HTTPS / parked AP
+  work touched, NO new env vars, NO new auth flows.
+

@@ -465,6 +465,7 @@ def classify_all(rows: List[Dict[str, str]],
             "square9_name": r.get("square9_name", ""),
             "square9_parent_path": r.get("square9_parent_path", ""),
             "square9_modified": r.get("square9_modified", ""),
+            "square9_web_url": r.get("square9_web_url", ""),
             "extracted_invoice_tokens": ",".join(invoice_tokens),
             "extracted_vendor_tokens": ",".join(vendor_tokens),
             "best_hub_doc_id": hub_doc.get("hub_doc_id", ""),
@@ -603,6 +604,7 @@ def build_summary(parity_rows: List[Dict[str, str]],
 OUTPUT_CSV_COLUMNS = [
     "bucket", "recommended_action",
     "square9_name", "square9_parent_path", "square9_modified",
+    "square9_web_url",
     "extracted_invoice_tokens", "extracted_vendor_tokens",
     "best_hub_doc_id", "best_hub_file_name",
     "best_hub_mailbox_category", "best_hub_doc_type",
@@ -624,6 +626,7 @@ def write_csv(path: str, classified: List[Dict[str, Any]]) -> None:
 def _trim_examples(examples: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     keep = ("bucket", "recommended_action", "square9_name",
             "square9_parent_path", "square9_modified",
+            "square9_web_url",
             "extracted_invoice_tokens", "extracted_vendor_tokens",
             "best_hub_doc_id", "best_hub_file_name",
             "best_match_score", "best_match_reason")

@@ -537,6 +537,7 @@ def classify_all(rows: List[Dict[str, str]], idx: HubIndex
             "square9_name": r.get("square9_name", ""),
             "square9_parent_path": r.get("square9_parent_path", ""),
             "square9_modified": r.get("square9_modified", ""),
+            "square9_web_url": r.get("square9_web_url", ""),
             "extracted_invoice_tokens": ",".join(invoice_tokens),
             "extracted_po_tokens": ",".join(po_tokens),
             "extracted_vendor_tokens": ",".join(vendor_tokens),
@@ -600,6 +601,7 @@ def decide_exit_code(after_both: float) -> int:
 def _trim_for_top(rows: List[Dict[str, Any]], n: int) -> List[Dict[str, Any]]:
     keep = ("triage_bucket", "confidence", "recommended_action",
             "square9_name", "square9_parent_path",
+            "square9_web_url",
             "extracted_invoice_tokens", "extracted_po_tokens",
             "best_hub_doc_id", "best_hub_file_name",
             "best_hub_vendor_canonical", "best_hub_invoice_number_clean",
@@ -675,6 +677,7 @@ def build_summary(classified: List[Dict[str, Any]],
 OUTPUT_CSV_COLUMNS = [
     "triage_bucket", "confidence", "recommended_action",
     "square9_name", "square9_parent_path", "square9_modified",
+    "square9_web_url",
     "extracted_invoice_tokens", "extracted_po_tokens",
     "extracted_vendor_tokens",
     "best_hub_doc_id", "best_hub_file_name",

@@ -446,3 +446,108 @@ def test_main_writes_three_artifacts_and_returns_exit_code(
     payload = json.loads(json_out.read_text())
     assert payload["total_uncertain"] == 4
     assert csv_out.exists() and md_out.exists()
+
+
+
+# ---------------------------------------------------------------------------
+# square9_web_url propagation (downstream pipelines depend on it)
+# ---------------------------------------------------------------------------
+
+def test_classify_all_carries_square9_web_url_into_each_row():
+    """Each row produced by classify_all must preserve
+    ``square9_web_url`` so document_body_reconciliation_probe can fetch
+    the SharePoint document."""
+    url = "https://example.sharepoint.com/sites/x/Documents/acme.pdf"
+    rows = [_audit_uncertain_row(
+        square9_name="Acme misc.pdf",
+        square9_parent_path="AP/Acme/Misc",
+        square9_web_url=url,
+    )]
+    idx = dt.build_hub_index_from_docs([
+        _hub_doc(id="hub-acme", vendor_canonical="Acme Corp"),
+    ])
+    classified = dt.classify_all(rows, idx)
+    assert classified
+    assert all(c.get("square9_web_url") == url for c in classified)
+
+
+def test_output_csv_columns_include_square9_web_url():
+    assert "square9_web_url" in dt.OUTPUT_CSV_COLUMNS
+
+
+def test_write_csv_preserves_square9_web_url_end_to_end(tmp_path: Path):
+    url = "https://example.sharepoint.com/sites/x/Documents/acme.pdf"
+    rows = [_audit_uncertain_row(
+        square9_name="Acme misc.pdf",
+        square9_web_url=url,
+    )]
+    idx = dt.build_hub_index_from_docs([_hub_doc(id="hub-acme")])
+    classified = dt.classify_all(rows, idx)
+    out = tmp_path / "triage.csv"
+    dt.write_csv(str(out), classified)
+    with open(out, encoding="utf-8") as f:
+        out_rows = list(csv.DictReader(f))
+    assert out_rows
+    assert out_rows[0]["square9_web_url"] == url
+
+
+def test_json_top_examples_preserve_square9_web_url(tmp_path: Path):
+    url = "https://example.sharepoint.com/sites/x/Documents/acme.pdf"
+    rows = [_audit_uncertain_row(
+        square9_name="Acme misc.pdf",
+        square9_web_url=url,
+        square9_parent_path="AP/Vendors/Acme",
+    )]
+    idx = dt.build_hub_index_from_docs([
+        _hub_doc(id="hub-acme", vendor_canonical="Acme Corp"),
+    ])
+    classified = dt.classify_all(rows, idx)
+    s = dt.build_summary(
+        classified=classified,
+        matched=10, square_count=20,
+        prior_recoverable=0, prior_excludable=0,
+        source_audit_csv="audit.csv", source_audit_json="audit.json",
+        hub_doc_count=idx.doc_count,
+    )
+    out = tmp_path / "triage.json"
+    dt.write_json(str(out), s)
+    payload = json.loads(out.read_text())
+    found: List[str] = []
+    for key in ("top_recoverable", "top_exclusions",
+                "top_intake_gaps", "top_manual_review"):
+        for ex in payload.get(key) or []:
+            if ex.get("square9_web_url"):
+                found.append(ex["square9_web_url"])
+    assert url in found
+
+
+# ---------------------------------------------------------------------------
+# Cross-pipeline integration: triage CSV -> body reconciliation probe
+# ---------------------------------------------------------------------------
+
+def test_triage_csv_is_consumable_by_body_probe_with_url(tmp_path: Path):
+    """End-to-end propagation: an audit row with square9_web_url goes
+    through classify_all + write_csv, and the body probe reads the URL
+    back from the triage CSV (no empty_url for that row)."""
+    from scripts import document_body_reconciliation_probe as probe
+
+    url = "https://example.sharepoint.com/sites/x/Documents/acme.pdf"
+    audit_rows = [_audit_uncertain_row(
+        square9_name="Acme misc.pdf",
+        square9_parent_path="AP/Acme/Misc",
+        square9_web_url=url,
+    )]
+    idx = dt.build_hub_index_from_docs([
+        _hub_doc(id="hub-acme", vendor_canonical="Acme Corp"),
+    ])
+    classified = dt.classify_all(audit_rows, idx)
+    triage_csv = tmp_path / "uncertain_triage.csv"
+    dt.write_csv(str(triage_csv), classified)
+
+    # Body probe reads the same CSV. We don't need to actually fetch;
+    # just prove the URL survives the round-trip.
+    triage_read = probe.read_csv_rows(str(triage_csv))
+    target = next((r for r in triage_read
+                   if r.get("square9_name") == "Acme misc.pdf"), None)
+    assert target is not None
+    assert target.get("square9_web_url") == url

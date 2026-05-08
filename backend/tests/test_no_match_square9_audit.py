@@ -453,3 +453,78 @@ def test_main_writes_three_artifacts_and_returns_exit_code(
     assert payload["matched"] == 2
     assert payload["no_match_count"] == 4
     assert csv_out.exists() and md_out.exists()
+
+
+
+# ---------------------------------------------------------------------------
+# square9_web_url propagation (downstream pipelines depend on it)
+# ---------------------------------------------------------------------------
+
+def test_classify_all_carries_square9_web_url_into_each_row():
+    """Each row produced by classify_all must preserve the original
+    ``square9_web_url`` so downstream pipelines (deep_triage, body
+    reconciliation probe) can reach the SharePoint document."""
+    url = "https://example.sharepoint.com/sites/x/Documents/acme-12345.pdf"
+    rows = [_no_match_row(
+        square9_name="Acme 12345.pdf",
+        square9_parent_path="AP/Vendors/Acme",
+        square9_web_url=url,
+    )]
+    index = nms.build_hub_index_from_docs([
+        _hub_doc(id="hub-acme", invoice_number_clean="12345"),
+    ])
+    classified = nms.classify_all(
+        rows, hub_corpus_start=_hub_corpus_start(), index=index)
+    assert classified, "expected at least one classified row"
+    assert all(c.get("square9_web_url") == url for c in classified)
+
+
+def test_output_csv_columns_include_square9_web_url():
+    assert "square9_web_url" in nms.OUTPUT_CSV_COLUMNS
+
+
+def test_write_csv_preserves_square9_web_url_end_to_end(tmp_path: Path):
+    url = "https://example.sharepoint.com/sites/x/Documents/acme-12345.pdf"
+    rows = [_no_match_row(
+        square9_name="Acme 12345.pdf",
+        square9_web_url=url,
+    )]
+    index = nms.build_hub_index_from_docs([_hub_doc(id="hub-acme")])
+    classified = nms.classify_all(
+        rows, hub_corpus_start=_hub_corpus_start(), index=index)
+    out = tmp_path / "audit.csv"
+    nms.write_csv(str(out), classified)
+    with open(out, encoding="utf-8") as f:
+        out_rows = list(csv.DictReader(f))
+    assert out_rows
+    assert out_rows[0]["square9_web_url"] == url
+
+
+def test_write_json_top_examples_preserve_square9_web_url(tmp_path: Path):
+    url = "https://example.sharepoint.com/sites/x/Documents/acme-12345.pdf"
+    rows = [_no_match_row(
+        square9_name="Acme 12345.pdf",
+        square9_web_url=url,
+        square9_parent_path="AP/Vendors/Acme",
+    )]
+    index = nms.build_hub_index_from_docs([
+        _hub_doc(id="hub-acme", invoice_number_clean="12345"),
+    ])
+    classified = nms.classify_all(
+        rows, hub_corpus_start=_hub_corpus_start(), index=index)
+    summary = nms.build_summary(
+        parity_rows=rows + [_matched_row(square9_name="m1.pdf")],
+        classified=classified,
+        hub_corpus_start=_hub_corpus_start(),
+        hub_doc_count=index.doc_count,
+        source_csv="fake.csv",
+    )
+    out = tmp_path / "audit.json"
+    nms.write_json(str(out), summary)
+    payload = json.loads(out.read_text())
+    found = []
+    for bucket_examples in payload["top_examples_by_bucket"].values():
+        for ex in bucket_examples:
+            if ex.get("square9_web_url"):
+                found.append(ex["square9_web_url"])
+    assert url in found

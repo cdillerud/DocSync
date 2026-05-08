@@ -2662,3 +2662,25 @@ NO Square9 changes, NO cutover/archive actions, NO DocuSign /
 HTTPS / parked AP work touched, NO new env vars, NO new auth
 flows.
 
+
+
+## 2026-02 — body reconciliation findings memo
+
+- `prod_reports/DOCUMENT_BODY_RECONCILIATION_FINDINGS.md` created.
+- Read-only deliverable. No code changes, no tests added (per
+  strict scope).
+- Single-page memo summarising the 100-row final distribution
+  (86 / 5 / 5 / 2 / 2 / 0 / 0 / 0 across the eight buckets),
+  with clear owner/action lanes:
+  * AP: 2 Hub-metadata backfill rows (Hawkemedia BILL-2026-04-84480,
+    XPO 104-570966).
+  * AP + Engineering: 5 non-invoice attachments (Buske / Evergreen
+    / Peppertree / Freight Issues tracking sheets) to exclude from
+    AP cohort.
+  * Engineering P2: 5 OCR rows (genuine image/scanned PDFs).
+  * IT: 2 SharePoint 403s under `Dropship Not International/Ball/`.
+  * Engineering: parked backlog (routing_status / mail_poll_runs /
+    CARGOMO / CITICARGO / DocuSign Phase 4 / HTTPS).
+- Style: no hype, no cutover language, no CFO framing. Closes the
+  body-reconciliation iteration.
+

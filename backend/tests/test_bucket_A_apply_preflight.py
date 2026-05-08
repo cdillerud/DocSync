@@ -216,20 +216,165 @@ def test_preflight_happy_path_emits_safe_candidate(tmp_path: Path):
     assert pf._exit_code(result) == 0
 
 
-def test_preflight_fails_when_doc_already_applied():
+def test_preflight_passes_when_doc_already_applied():
+    """A doc whose live state EXACTLY matches the expected post-apply
+    state is classified as already_applied (not unsafe). Preflight
+    must exit 0 so the wrapper can skip the apply step and proceed to
+    verification + proof pack."""
     coll = _seed_collection([
         {"id": "doc-1", "doc_type": "AP_INVOICE",
          "suggested_job_type": "AP_Invoice",
          "mailbox_category": "AP",
          "remediation_audit": {"source": "bucket_A_one_shot_patch",
-                               "applied_at": "earlier"}},
+                               "applied_at": "2026-05-06T22:00:00Z"}},
     ])
     plan = _plan(_cohort())
     rows = [_row(best_hub_doc_id="doc-1")]
     result = pf.preflight(plan, rows, coll, parity_payload=_parity())
     assert result["safe_count"] == 0
+    assert result["unsafe_count"] == 0
+    assert result["already_applied_count"] == 1
+    assert result["already_applied"][0]["doc_id"] == "doc-1"
+    assert (result["already_applied"][0]["remediation_audit_source"]
+            == "bucket_A_one_shot_patch")
+    assert pf._exit_code(result) == 0
+    # Idempotent state means no apply payloads should be queued.
+    assert result["update_payloads"] == []
+
+
+def test_preflight_passes_when_all_candidates_already_applied():
+    """Every candidate already in expected post-apply state -> exit 0."""
+    coll = _seed_collection([
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP",
+         "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                               "applied_at": "2026-05-06T22:00:00Z"}},
+        {"id": "doc-2", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP",
+         "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                               "applied_at": "2026-05-06T22:00:01Z"}},
+    ])
+    plan = _plan(_cohort())
+    rows = [_row(best_hub_doc_id="doc-1"),
+            _row(best_hub_doc_id="doc-2", email_sender="billing@valley.com")]
+    result = pf.preflight(plan, rows, coll, parity_payload=_parity())
+    assert result["candidate_count"] == 2
+    assert result["already_applied_count"] == 2
+    assert result["safe_count"] == 0
+    assert result["unsafe_count"] == 0
+    assert pf._exit_code(result) == 0
+
+
+def test_preflight_passes_when_mixed_safe_and_already_applied():
+    """Mix of safe + already_applied (and zero unsafe) -> exit 0."""
+    coll = _seed_collection([
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "Operations"},
+        {"id": "doc-2", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP",
+         "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                               "applied_at": "2026-05-06T22:00:01Z"}},
+    ])
+    plan = _plan(_cohort())
+    rows = [_row(best_hub_doc_id="doc-1"),
+            _row(best_hub_doc_id="doc-2")]
+    result = pf.preflight(plan, rows, coll, parity_payload=_parity())
+    assert result["candidate_count"] == 2
+    assert result["safe_count"] == 1
+    assert result["already_applied_count"] == 1
+    assert result["unsafe_count"] == 0
+    assert pf._exit_code(result) == 0
+
+
+def test_preflight_fails_when_already_applied_mixed_with_truly_unsafe():
+    """already_applied does not mask a truly unsafe candidate."""
+    coll = _seed_collection([
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP",
+         "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                               "applied_at": "2026-05-06T22:00:00Z"}},
+        {"id": "doc-2", "doc_type": "OTHER",
+         "suggested_job_type": "Sales_Invoice",
+         "mailbox_category": "Operations"},
+    ])
+    plan = _plan(_cohort())
+    rows = [_row(best_hub_doc_id="doc-1"),
+            _row(best_hub_doc_id="doc-2")]
+    result = pf.preflight(plan, rows, coll, parity_payload=_parity())
+    assert result["already_applied_count"] == 1
     assert result["unsafe_count"] == 1
     assert pf._exit_code(result) == 1
+
+
+def test_preflight_partial_final_state_is_not_already_applied():
+    """A doc with mailbox_category=AP but no remediation_audit must
+    NOT be classified as already_applied — that is an inconsistent
+    in-flight state and must remain unsafe (S3)."""
+    coll = _seed_collection([
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP"},  # no remediation_audit
+    ])
+    plan = _plan(_cohort())
+    rows = [_row(best_hub_doc_id="doc-1")]
+    result = pf.preflight(plan, rows, coll, parity_payload=_parity())
+    assert result["already_applied_count"] == 0
+    assert result["unsafe_count"] == 1
+    assert pf._exit_code(result) == 1
+
+
+def test_evaluate_already_applied_strict_predicate():
+    """All four fields are required."""
+    base = {"doc_type": "AP_INVOICE",
+            "suggested_job_type": "AP_Invoice",
+            "mailbox_category": "AP",
+            "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                                  "applied_at": "x"}}
+    assert pf.evaluate_already_applied(base) is True
+    assert pf.evaluate_already_applied(None) is False
+    assert pf.evaluate_already_applied(
+        {**base, "mailbox_category": "Operations"}) is False
+    assert pf.evaluate_already_applied(
+        {**base, "doc_type": "OTHER"}) is False
+    assert pf.evaluate_already_applied(
+        {**base, "suggested_job_type": "Sales_Invoice"}) is False
+    assert pf.evaluate_already_applied(
+        {**base, "remediation_audit": None}) is False
+    assert pf.evaluate_already_applied(
+        {**base, "remediation_audit": {"source": "other", "applied_at": "x"}}
+    ) is False
+    # audit.source matches but applied_at missing -> not already applied.
+    assert pf.evaluate_already_applied(
+        {**base, "remediation_audit": {"source": "bucket_A_one_shot_patch"}}
+    ) is False
+
+
+def test_render_text_includes_already_applied_section_and_status_line():
+    coll = _seed_collection([
+        {"id": "doc-1", "doc_type": "AP_INVOICE",
+         "suggested_job_type": "AP_Invoice",
+         "mailbox_category": "AP",
+         "remediation_audit": {"source": "bucket_A_one_shot_patch",
+                               "applied_at": "2026-05-06T22:00:00Z"}},
+    ])
+    plan = _plan(_cohort())
+    rows = [_row(best_hub_doc_id="doc-1")]
+    result = pf.preflight(plan, rows, coll, parity_payload=_parity())
+    text = pf.render_text(result, pf._exit_code(result))
+    assert "PASS" in text
+    assert "already_applied_count" in text
+    assert "ALREADY APPLIED DOC IDS" in text
+    assert "doc-1" in text
+    # Machine-friendly status line is present.
+    assert "[preflight-status]" in text
+    assert "safe_count=0" in text
+    assert "already_applied_count=1" in text
+    assert "unsafe_count=0" in text
 
 
 def test_preflight_fails_when_doc_missing_from_db():

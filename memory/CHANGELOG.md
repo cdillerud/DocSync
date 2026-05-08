@@ -2064,3 +2064,52 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
   AP contamination work, no unrelated refactors.
 - Single packaged VM command:
   `docker compose exec backend bash ops/run_bucket_A_apply_and_verify.sh`
+
+## 2026-02 — Bucket A Preflight Idempotency Fix
+- `scripts/bucket_A_apply_preflight.py`:
+  - Added `evaluate_already_applied(live_doc)` — strict 4-field predicate
+    (mailbox_category=AP, doc_type=AP_INVOICE, suggested_job_type=AP_Invoice,
+    remediation_audit.source=bucket_A_one_shot_patch).
+  - `preflight()` now classifies each candidate into already_applied / safe /
+    unsafe (in that priority order). Already-applied is an idempotent
+    success, NOT a regression: it is no longer reported as unsafe.
+  - `_exit_code` returns 0 when `unsafe_count==0` and
+    `safe_count + already_applied_count == candidate_count`.
+  - `render_text` prints `already_applied_count`, an "ALREADY APPLIED DOC IDS"
+    section, and a stable machine-friendly status line:
+      `[preflight-status] candidate_count=N safe_count=N already_applied_count=N unsafe_count=N`
+- `scripts/bucket_A_wrapper_decision.py` — NEW. Pure decision helper that
+  reads `BUCKET_A_APPLY_PREFLIGHT.json` and emits one of
+  `DECISION=apply | skip_apply | abort` plus a REASON line. Exits 0 when
+  decision in {apply, skip_apply}, 1 on abort, 2 on bad input.
+- `ops/run_bucket_A_apply_and_verify.sh`:
+  - cd respects optional `BUCKET_A_APP_ROOT` env override (for tests; defaults
+    to `/app`).
+  - Calls preflight with `--proof-dir`, then runs the decision helper.
+  - DECISION=skip_apply -> Step 3 prints "Apply SKIPPED — every candidate
+    is already in the expected post-apply state" and APPLY_RC=0; verify
+    + proof-pack still run.
+  - DECISION=abort -> wrapper exits before any apply.
+  - DECISION=apply -> existing gated apply (`--apply --confirm CUTOVER`)
+    runs unchanged.
+  - SUMMARY block now also prints `decision` and `preflight_json`.
+- Tests:
+  - `tests/test_bucket_A_apply_preflight.py` — added 7 new tests covering
+    already_applied classification, exit-code matrix (already-only,
+    mixed-safe-and-already-applied, already-applied-with-unsafe, partial
+    final state stays unsafe), the strict 4-field predicate, and the new
+    rendered status line. Updated the "doc already applied" case to
+    expect exit 0 instead of 1.
+  - `tests/test_run_bucket_A_apply_and_verify.py` — NEW. 6 unit tests on
+    `decide()` plus 4 end-to-end bash tests that build a fake app root
+    with stub scripts and assert: skip_apply path runs verify+proof but
+    NOT apply; safe path runs apply+verify+proof; unsafe path aborts
+    before any of the three; SUMMARY block content.
+- Test results: `pytest tests/test_bucket_A_apply_preflight.py
+  tests/test_run_bucket_A_apply_and_verify.py
+  tests/test_verify_bucket_A_apply.py` -> 39 passed.
+- Sibling regression: `pytest tests/test_bucket_A_one_shot_data_patch_apply.py
+  tests/test_bucket_A_one_shot_data_patch_dryrun.py` -> 31 passed.
+- Strict scope respected: no Mongo writes, no live apply rerun, no
+  cutover, no Square9 archive, no CFO summary, no routing/classification
+  changes, no unrelated refactors.

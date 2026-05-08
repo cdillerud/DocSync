@@ -62,6 +62,13 @@ REQUIRED_DOC_TYPE = "AP_INVOICE"
 COMPATIBLE_SUGGESTED_JOB_TYPES = {"AP_Invoice", "", None}
 TARGET_MAILBOX_CATEGORY = "AP"
 
+# Strict expected final state after a successful Bucket A patch. Used by
+# evaluate_already_applied() so already-applied docs are not classified
+# as unsafe (they are an idempotent success, not a regression).
+EXPECTED_FINAL_MAILBOX_CATEGORY = "AP"
+EXPECTED_FINAL_DOC_TYPE = "AP_INVOICE"
+EXPECTED_FINAL_SUGGESTED_JOB_TYPE = "AP_Invoice"
+
 LIVE_APPLY_COMMAND = (
     "docker compose exec backend python "
     "scripts/bucket_A_one_shot_data_patch_apply.py --apply --confirm CUTOVER"
@@ -119,6 +126,30 @@ def evaluate_safety(live_doc: Optional[Dict[str, Any]]) -> Tuple[bool, List[str]
     return (len(reasons) == 0), reasons
 
 
+def evaluate_already_applied(live_doc: Optional[Dict[str, Any]]) -> bool:
+    """Return True iff this live doc EXACTLY matches the expected
+    post-Bucket-A final state.
+
+    Strict definition (all four must hold):
+      - mailbox_category == "AP"
+      - doc_type == "AP_INVOICE"
+      - suggested_job_type == "AP_Invoice"
+      - remediation_audit.source == "bucket_A_one_shot_patch"
+
+    Docs in this state are an idempotent success and MUST NOT be
+    classified as unsafe by the preflight wrapper.
+    """
+    if not isinstance(live_doc, dict):
+        return False
+    if live_doc.get("mailbox_category") != EXPECTED_FINAL_MAILBOX_CATEGORY:
+        return False
+    if live_doc.get("doc_type") != EXPECTED_FINAL_DOC_TYPE:
+        return False
+    if live_doc.get("suggested_job_type") != EXPECTED_FINAL_SUGGESTED_JOB_TYPE:
+        return False
+    return ba_apply.is_already_applied(live_doc)
+
+
 # ---------------------------------------------------------------------------
 # Preflight core (collection injectable for tests)
 # ---------------------------------------------------------------------------
@@ -148,6 +179,7 @@ def preflight(plan: Dict[str, Any],
               ) -> Dict[str, Any]:
     candidates = select_candidates(plan, rows)
     safe: List[Dict[str, Any]] = []
+    already_applied: List[Dict[str, Any]] = []
     unsafe: List[Dict[str, Any]] = []
     before_after_table: List[Dict[str, Any]] = []
     update_payloads: List[Dict[str, Any]] = []
@@ -156,14 +188,28 @@ def preflight(plan: Dict[str, Any],
 
     for doc_id, ck, row in candidates:
         live = collection.find_one({ba_apply.HUB_DOC_ID_FIELD: doc_id})
-        is_safe, reasons = evaluate_safety(live)
-
         record = {
             "doc_id": doc_id,
             "cohort_key": dict(ck),
             "live_present": live is not None,
-            "reasons": reasons,
         }
+
+        # Classification order: already_applied takes precedence over
+        # any S1-S5 failure so that an idempotent success is not
+        # mistaken for an unsafe state. evaluate_already_applied is the
+        # strict 4-field expected-final-state predicate.
+        if evaluate_already_applied(live):
+            audit = (live or {}).get("remediation_audit") or {}
+            already_applied.append({
+                **record,
+                "live_doc": live,
+                "remediation_audit_source": audit.get("source"),
+                "remediation_audit_applied_at": audit.get("applied_at"),
+            })
+            continue
+
+        is_safe, reasons = evaluate_safety(live)
+        record["reasons"] = reasons
         if is_safe:
             safe.append({**record, "live_doc": live})
             update_payloads.append({
@@ -198,8 +244,10 @@ def preflight(plan: Dict[str, Any],
     return {
         "candidate_count": len(candidates),
         "safe_count": len(safe),
+        "already_applied_count": len(already_applied),
         "unsafe_count": len(unsafe),
         "safe": safe,
+        "already_applied": already_applied,
         "unsafe": unsafe,
         "before_after_table": before_after_table,
         "update_payloads": update_payloads,
@@ -247,11 +295,15 @@ def _projected_match_rate(parity: Optional[Dict[str, Any]],
 def _exit_code(result: Dict[str, Any]) -> int:
     if result["candidate_count"] == 0:
         return 2
-    if result["unsafe_count"] > 0:
+    if result.get("unsafe_count", 0) > 0:
         return 1
-    if result["safe_count"] == 0:
-        return 1
-    return 0
+    safe = result.get("safe_count", 0)
+    already = result.get("already_applied_count", 0)
+    # Pass when every candidate is either ready-to-apply (safe) or
+    # already in the expected post-apply state (idempotent success).
+    if (safe + already) == result["candidate_count"] and (safe + already) > 0:
+        return 0
+    return 1
 
 
 ROLLBACK_PROCEDURE = """\
@@ -281,23 +333,42 @@ def render_text(result: Dict[str, Any], rc: int) -> str:
     out.append(f" Bucket A apply preflight — {'PASS' if rc == 0 else 'FAIL'} "
                f"(exit code {rc})")
     out.append("=" * 72)
-    out.append(f"  candidate_count  : {result['candidate_count']}")
-    out.append(f"  safe_count       : {result['safe_count']}")
-    out.append(f"  unsafe_count     : {result['unsafe_count']}")
+    out.append(f"  candidate_count       : {result['candidate_count']}")
+    out.append(f"  safe_count            : {result['safe_count']}")
+    out.append(f"  already_applied_count : "
+               f"{result.get('already_applied_count', 0)}")
+    out.append(f"  unsafe_count          : {result['unsafe_count']}")
     proj = result.get("projected_match_rate_pct")
     if isinstance(proj, (int, float)):
-        out.append(f"  projected match  : {proj:.2f}%   "
+        out.append(f"  projected match       : {proj:.2f}%   "
                    f"(after {result['safe_count']} safe apply(s))")
     else:
-        out.append("  projected match  : unknown "
+        out.append("  projected match       : unknown "
                    "(parity payload unavailable)")
-    out.append(f"  rollback_path    : {result['predicted_rollback_path']}")
+    out.append(f"  rollback_path         : {result['predicted_rollback_path']}")
+    # Machine-friendly status line consumed by the wrapper decision
+    # helper. Stable token, single line, never reformatted.
+    out.append(
+        f"[preflight-status] "
+        f"candidate_count={result['candidate_count']} "
+        f"safe_count={result['safe_count']} "
+        f"already_applied_count={result.get('already_applied_count', 0)} "
+        f"unsafe_count={result['unsafe_count']}"
+    )
     out.append("")
 
     if result["safe"]:
         out.append(f"  SAFE DOC IDS ({len(result['safe'])}):")
         for s in result["safe"]:
             out.append(f"    {s['doc_id']}")
+        out.append("")
+
+    if result.get("already_applied"):
+        out.append(f"  ALREADY APPLIED DOC IDS "
+                   f"({len(result['already_applied'])}):")
+        for a in result["already_applied"]:
+            applied_at = a.get("remediation_audit_applied_at") or "<unknown>"
+            out.append(f"    {a['doc_id']}  (applied_at={applied_at})")
         out.append("")
 
     if result["unsafe"]:
@@ -419,6 +490,10 @@ def _strip_for_json(result: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(result)
     out["safe"] = [{k: v for k, v in s.items() if k != "live_doc"}
                    for s in result.get("safe", [])]
+    out["already_applied"] = [
+        {k: v for k, v in a.items() if k != "live_doc"}
+        for a in result.get("already_applied", [])
+    ]
     return out
 
 

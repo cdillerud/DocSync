@@ -2176,3 +2176,37 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: NO Mongo writes, NO matcher logic touched,
   NO cutover, NO Square9 archive, NO scope-filter changes, NO CFO
   summary, NO DocuSign/HTTPS work.
+
+## 2026-02 — Square9-side no_match Audit (read-only)
+- `scripts/no_match_square9_audit.py` — NEW. Reads the latest parity
+  CSV, filters to `match_bucket=="no_match"` (Square9-only docs that
+  the matcher could not pair with Hub), and classifies each into:
+  non_ap_in_square9_corpus / pre_hub_corpus /
+  matcher_miss_with_hub_candidate / vendor_not_in_hub_intake / uncertain.
+  Predicate priority: non-AP keyword signal -> pre-hub-corpus date
+  cutoff -> Hub invoice-digit substring match -> Hub filename Jaccard
+  >= 0.34 -> Hub vendor/sender token overlap -> uncertain.
+  Mongo touch is a SINGLE read-only `find` projection on
+  `hub_documents` to build an in-memory token index (vendor_canonical,
+  email_sender domain root, invoice_number_clean digits, file_name
+  tokens). Tests inject a synthetic index directly.
+  Projects four match-rate scenarios (baseline, after_exclude_only,
+  after_improve_only, after_both) using exact integer arithmetic with
+  a denominator floor of 1.
+  Exit codes: 0 (after_both >= 85%), 1 (>=70% but <85%), 2 (<70%).
+  Outputs:
+    - prod_reports/no_match_square9_audit.csv  (per-doc)
+    - prod_reports/no_match_square9_audit.json (cohort summary +
+      projections + top examples per bucket)
+    - prod_reports/no_match_square9_audit.md   (human readable)
+- `tests/test_no_match_square9_audit.py` — NEW. 18 fixture-driven
+  tests covering tokenization, hub-index build, every classification
+  bucket (one test each, plus filename-overlap path), projection
+  arithmetic, denominator floor, decide_exit_code matrix, full
+  build_summary integration with both EXIT_GO and EXIT_NO_GO
+  populations, all three output writers, and a CLI smoke test using
+  mongomock to inject a Hub corpus.
+- Test results: 18 passed in 0.16s.
+- Strict scope respected: NO Mongo writes, NO matcher/scope-filter
+  logic touched, NO cutover, NO Square9 archive, NO CFO summary, NO
+  DocuSign/HTTPS/parked AP contamination work.

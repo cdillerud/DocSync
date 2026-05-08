@@ -99,6 +99,144 @@ def test_extract_body_signals_normalizes_invoice_date_long_format():
 
 
 # ---------------------------------------------------------------------------
+# Regex hardening (regression for production VM run on 2026-02:
+# garbage captures like 'OICE' / 'DATE' / 'LINE' / 'INVOICE')
+# ---------------------------------------------------------------------------
+
+# -- Failure-mode: the broken patterns must no longer emit noise -----------
+
+def test_invoice_regex_does_not_match_inv_inside_invoice():
+    """The previous regex matched ``inv`` as a label inside the word
+    ``INVOICE`` and captured the rest (``OICE``)."""
+    sig = probe.extract_body_signals(
+        "INVOICE\n123 Main St\nBill to: Acme Corp\n")
+    assert sig["invoice_number"] != "OICE"
+    assert sig["invoice_number"] is None
+
+
+def test_invoice_regex_rejects_bare_label_words():
+    sig = probe.extract_body_signals(
+        "DATE: 2026-04-30\nLINE 12345\nINVOICE\n")
+    assert sig["invoice_number"] not in ("DATE", "LINE", "INVOICE", "OICE")
+
+
+def test_po_regex_does_not_capture_invoice_as_po():
+    """Previous regex turned ``P.O. INVOICE NO 12345`` into
+    po_number=``INVOICE``."""
+    sig = probe.extract_body_signals("P.O. INVOICE NO 12345")
+    assert sig["po_number"] != "INVOICE"
+    assert sig["po_number"] != "LINE"
+
+
+def test_po_regex_does_not_match_inside_words_like_policy():
+    sig = probe.extract_body_signals("Our policy 9988 is strict")
+    # 'policy' must NOT be captured as a PO label.
+    assert sig["po_number"] is None
+
+
+def test_reference_regex_drops_pure_label_words():
+    sig = probe.extract_body_signals(
+        "Reference Number: A27300\nCONFIRMATION\nNUMBER\nORDER NO 9988\n")
+    refs = sig["reference_numbers"]
+    for noise in ("CONFIRMATION", "NUMBER", "REFERENCE", "ORDER", "OICE"):
+        assert noise not in refs
+
+
+def test_oice_oices_never_extracted_as_invoice_or_po():
+    """The literal 'OICE' / 'OICES' tokens were the dominant garbage
+    in production. They must never come back."""
+    text = "INVOICES are due\nINVOICE 110604\nOICE noise\n"
+    sig = probe.extract_body_signals(text)
+    assert sig["invoice_number"] not in ("OICE", "OICES")
+
+
+def test_clean_capture_rejects_noise_tokens_directly():
+    for noise in ("OICE", "OICES", "DATE", "LINE", "INVOICE",
+                  "NUMBER", "REFERENCE", "CONFIRMATION", "TOTAL",
+                  "BALANCE"):
+        assert probe._clean_capture(noise) is None
+    # Empty / whitespace.
+    assert probe._clean_capture("") is None
+    assert probe._clean_capture("   ") is None
+    # No-digit garbage.
+    assert probe._clean_capture("ALPHA") is None
+    # Real invoice value survives.
+    assert probe._clean_capture("INV-12345") == "INV-12345"
+    assert probe._clean_capture("110604") == "110604"
+
+
+# -- Positive: real values still extract --------------------------------
+
+@pytest.mark.parametrize("text,expected", [
+    ("Invoice 110604\nDate: 04/15/2026", "110604"),
+    ("Invoice No. 306665", "306665"),
+    ("INVOICE NUMBER 110604", "110604"),
+    ("Invoice #: INV-12345", "INV-12345"),
+    ("Inv. No. 2923600", "2923600"),
+    ("Invoice P0024316-32", "P0024316-32"),
+    ("INVOICE\nNumber: 110604", "110604"),
+])
+def test_invoice_regex_extracts_real_values(text: str, expected: str):
+    sig = probe.extract_body_signals(text)
+    assert sig["invoice_number"] == expected
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("P.O. 113881", "113881"),
+    ("PO# 113881", "113881"),
+    ("PO-113881", "113881"),
+    ("Purchase Order: 113881", "113881"),
+    ("PO Number 113881", "113881"),
+    ("P.O. Number 2923600", "2923600"),
+])
+def test_po_regex_extracts_real_values(text: str, expected: str):
+    sig = probe.extract_body_signals(text)
+    assert sig["po_number"] == expected
+
+
+def test_reference_regex_extracts_real_values():
+    sig = probe.extract_body_signals(
+        "Reference: A27300\nORDER NO 1234567\nBOL: BOL-99887\n"
+        "Ref# 2923600")
+    refs = sig["reference_numbers"]
+    assert "A27300" in refs
+    assert "1234567" in refs
+    assert "BOL-99887" in refs
+    assert "2923600" in refs
+    # Pure label words stripped.
+    for noise in ("REFERENCE", "ORDER", "BOL", "REF"):
+        assert noise not in refs
+
+
+def test_extracted_values_always_contain_a_digit():
+    sig = probe.extract_body_signals(
+        "Invoice ALPHA\nP.O. BETA\nReference: GAMMA")
+    assert sig["invoice_number"] is None
+    assert sig["po_number"] is None
+    assert sig["reference_numbers"] == []
+
+
+# Production regression: the actual broken row from the VM run
+# ('110604 Global Grinders 260210 ORD006852.pdf') had body text whose
+# previous extraction emitted invoice='OICE', po='INVOICE'. Verify
+# extraction is now sane on that file's likely structure.
+def test_production_regression_global_grinders_style_invoice():
+    body = (
+        "INVOICE\n"
+        "Date: 02/10/2026\n"
+        "Invoice Number: 110604\n"
+        "Order Reference: ORD006852\n"
+        "Total: $2,250.40\n"
+    )
+    sig = probe.extract_body_signals(body)
+    assert sig["invoice_number"] == "110604"
+    assert sig["po_number"] is None
+    assert "ORD006852" in sig["reference_numbers"]
+    assert sig["amount"] == 2250.40
+    assert sig["invoice_date"] == "2026-02-10"
+
+
+# ---------------------------------------------------------------------------
 # Hub index + scoring
 # ---------------------------------------------------------------------------
 

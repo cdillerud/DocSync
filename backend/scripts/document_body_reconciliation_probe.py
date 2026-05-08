@@ -98,12 +98,45 @@ WEIGHTS = {
 }
 assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
 
+# Identity-signal regexes.
+#
+# Design notes (lessons from production VM run on 2026-02 with the
+# diagnostic banner):
+# - The previous patterns let the loose ``inv`` alternative match
+#   inside the word ``INVOICE`` itself, then capture the rest of the
+#   word (``OICE``) as the "invoice number". They also captured noise
+#   words like ``DATE`` / ``LINE`` / ``INVOICE`` as PO / reference
+#   numbers.
+# - Fix has three parts, applied to invoice / PO / generic-ref
+#   patterns:
+#     1. Word boundary + ``(?![A-Za-z])`` after the label so ``inv``
+#        cannot match inside ``invoice``, ``po`` cannot match inside
+#        ``policy``, ``ref`` cannot match inside ``reference`` body
+#        text, etc.
+#     2. ``(?=[A-Za-z0-9\-/]*\d)`` lookahead requires the captured
+#        identifier to contain at least one digit. Real AP invoice /
+#        PO / reference numbers always do; ``OICE`` / ``DATE`` /
+#        ``LINE`` / ``INVOICE`` do not.
+#     3. A small NOISE_CAPTURE_TOKENS post-filter is applied in
+#        ``_clean_capture`` as belt-and-suspenders to drop any
+#        residual bare label words that slip through.
 INVOICE_NUMBER_RE = re.compile(
-    r"\b(?:invoice\s*(?:no\.?|#|number)?|inv\s*(?:no\.?|#)?)\s*[:\-]?\s*"
-    r"([A-Z0-9][A-Z0-9\-]{3,})", re.I)
+    r"\b(?:invoice|inv)(?![A-Za-z])"          # 'invoice' or 'inv', not inside another word
+    r"\s*\.?\s*(?:no\.?|number|num|#)?"       # optional 'no'/'number'/'num'/'#'
+    r"\s*[:#\-]?\s*"                            # optional separator
+    r"(?=[A-Za-z0-9\-/]*\d)"                   # capture must contain a digit
+    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    re.I,
+)
 PO_NUMBER_RE = re.compile(
-    r"\b(?:po|p\.o\.|po#|purchase\s+order)\s*[:\-#]?\s*"
-    r"([A-Z0-9][A-Z0-9\-]{3,})", re.I)
+    r"\b(?:p\s*\.\s*o\s*\.?|po|purchase\s+order)"
+    r"(?![A-Za-z])"
+    r"\s*(?:no\.?|number|num|#)?"
+    r"\s*[:#\-]?\s*"
+    r"(?=[A-Za-z0-9\-/]*\d)"
+    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    re.I,
+)
 AMOUNT_RE = re.compile(
     r"(?:total|amount\s+due|balance\s+due|invoice\s+total)\s*[:\$]?\s*"
     r"\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{2})|\d+\.\d{2})", re.I)
@@ -116,13 +149,43 @@ VENDOR_HINT_RE = re.compile(
     r"\b(?:remit\s+to|bill\s+from|from|vendor|payee)\s*[:\-]?\s*([^\n,]{3,80})",
     re.I)
 GENERIC_REF_RE = re.compile(
-    r"\b(?:bol|order|reference|ref|order\s+no)\s*[:\-#]?\s*"
-    r"([A-Z0-9][A-Z0-9\-]{3,})", re.I)
+    r"\b(?:bol|order(?:\s+no\.?)?|reference|ref\.?)"
+    r"(?![A-Za-z])"
+    r"\s*[:#\-]?\s*"
+    r"(?=[A-Za-z0-9\-/]*\d)"
+    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    re.I,
+)
 
 STOP_TOKENS = {
     "the", "and", "of", "for", "to", "by", "in", "on",
     "invoice", "inv", "doc", "ap", "pdf",
 }
+
+# Bare label words that production data has shown the previous regex
+# extracting by accident. They are never legitimate AP identifiers
+# and are filtered out of every captured value in
+# ``extract_body_signals``.
+NOISE_CAPTURE_TOKENS = {
+    "INVOICE", "INVOICES", "INV", "OICE", "OICES",
+    "NUMBER", "NUM", "DATE", "LINE",
+    "REFERENCE", "REF", "CONFIRMATION",
+    "TOTAL", "BALANCE", "AMOUNT", "DUE", "PAID",
+    "ORDER", "BOL",
+}
+
+
+def _clean_capture(value: Optional[str]) -> Optional[str]:
+    """Reject obvious-noise captures: empty, no digits, or a known
+    bare label word."""
+    if not value:
+        return None
+    t = value.strip().upper()
+    if not t or t in NOISE_CAPTURE_TOKENS:
+        return None
+    if not any(c.isdigit() for c in t):
+        return None
+    return t
 
 
 CONTENT_OK = "ok"
@@ -206,21 +269,30 @@ def _date_to_iso(raw: Optional[str]) -> Optional[str]:
 
 
 def extract_body_signals(text: str) -> Dict[str, Any]:
-    """Pull AP-relevant identity signals from raw document text."""
+    """Pull AP-relevant identity signals from raw document text.
+
+    Captures are routed through ``_clean_capture`` so common noise
+    words (``OICE``, ``DATE``, ``LINE``, ``INVOICE``,
+    ``CONFIRMATION``, ...) the regex previously emitted by accident
+    are dropped, and every returned identifier is guaranteed to
+    contain at least one digit."""
     text = text or ""
+    cleaned_refs: List[str] = []
+    for raw in GENERIC_REF_RE.findall(text):
+        cleaned = _clean_capture(raw)
+        if cleaned:
+            cleaned_refs.append(cleaned)
     return {
         "invoice_number":
-            (_first_match(INVOICE_NUMBER_RE, text) or "").upper() or None,
+            _clean_capture(_first_match(INVOICE_NUMBER_RE, text)),
         "po_number":
-            (_first_match(PO_NUMBER_RE, text) or "").upper() or None,
+            _clean_capture(_first_match(PO_NUMBER_RE, text)),
         "amount":
             _amount_to_float(_first_match(AMOUNT_RE, text)),
         "invoice_date":
             _date_to_iso(_first_match(DATE_RE, text)),
         "vendor_hint": _first_match(VENDOR_HINT_RE, text),
-        "reference_numbers": [
-            r.upper() for r in GENERIC_REF_RE.findall(text)
-        ],
+        "reference_numbers": cleaned_refs,
     }
 
 

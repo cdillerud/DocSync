@@ -2445,3 +2445,54 @@ fetcher was wired correctly; we never gave it a URL to fetch.
   NO cutover/archive actions, NO DocuSign / HTTPS / parked AP
   work touched, NO new env vars, NO new auth flows.
 
+
+
+## 2026-02 — body-signal regex hardening (kills OICE / DATE / LINE / INVOICE noise)
+
+Production VM diagnostic (after URL propagation was fixed) revealed
+the regex extractors were emitting garbage captures: `OICE` /
+`OICES` for invoice numbers, `INVOICE` / `LINE` for PO numbers,
+`CONFIRMATION` / `NUMBER` / `REFERENCE` in reference numbers. Root
+cause: the loose `inv` alternative matched inside the word
+`INVOICE` itself; the loose `po` alternative matched inside words
+like `policy`; and there was no digit requirement on captured
+identifiers.
+
+- `scripts/document_body_reconciliation_probe.py`:
+  - INVOICE_NUMBER_RE rewritten:
+    - `\b(?:invoice|inv)(?![A-Za-z])` so `inv` cannot match inside
+      `INVOICE` and `invoice` cannot match inside another word.
+    - Optional `\.?` between `inv` and a suffix label so
+      `Inv. No. 12345` still matches.
+    - Lookahead `(?=[A-Za-z0-9\-/]*\d)` requires the captured
+      identifier to contain at least one digit.
+  - PO_NUMBER_RE rewritten with the same boundary + digit-required
+    structure. `policy 9988` no longer extracts a PO.
+  - GENERIC_REF_RE rewritten the same way. `CONFIRMATION` /
+    `NUMBER` / `REFERENCE` / `ORDER` / `BOL` no longer leak into
+    `extracted_reference_numbers`.
+  - New `NOISE_CAPTURE_TOKENS` set + `_clean_capture()` helper
+    applies a belt-and-suspenders post-filter: drops empty,
+    drops bare label words, and drops any value with no digits.
+  - `extract_body_signals` now routes every capture through
+    `_clean_capture` before returning.
+  - AMOUNT_RE / DATE_RE / VENDOR_HINT_RE unchanged.
+- Tests (+23 regressions in test_document_body_reconciliation_probe.py):
+  - Failure-mode: `inv` no longer matched inside `INVOICE`; bare
+    label words (`OICE`, `OICES`, `DATE`, `LINE`, `INVOICE`,
+    `NUMBER`, `REFERENCE`, `CONFIRMATION`, etc.) rejected;
+    `policy 9988` does not yield a PO; `_clean_capture` directly.
+  - Positive (parametrised): `Invoice 110604`, `Invoice No. 306665`,
+    `INVOICE NUMBER 110604`, `Invoice #: INV-12345`, `Inv. No. 2923600`,
+    `Invoice P0024316-32`, multi-line `INVOICE\nNumber: 110604`.
+    Same coverage for PO formats. Reference parametric.
+  - Production regression test mirroring the actual broken VM row
+    `110604 Global Grinders 260210 ORD006852.pdf`: confirms
+    invoice=110604, ORD006852 in references, amount=2250.40,
+    date=2026-02-10, NO false PO.
+- Combined: 131 passed in 0.41s. Lint clean.
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing/classifier changes, NO Square9 changes,
+  NO cutover/archive actions, NO DocuSign / HTTPS / parked AP
+  work touched, NO new env vars, NO new auth flows.
+

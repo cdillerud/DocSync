@@ -2244,3 +2244,42 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: NO Mongo writes, NO matcher logic touched,
   NO parity scope changed, NO cutover, NO archive, NO CFO summary
   populate, NO DocuSign / HTTPS / parked AP contamination work.
+
+## 2026-02 — Document-Body Reconciliation Probe (read-only)
+- New objective: build the next layer of GPI Hub document
+  intelligence. Header-only reconciliation has reached its ceiling
+  (~57.7%); the remaining work needs the actual document content,
+  not more parity math.
+- `scripts/document_body_reconciliation_probe.py` — NEW.
+  Reads ``manual_review_required`` rows from
+  `prod_reports/uncertain_square9_deep_triage.csv`, attempts to extract
+  document text via an injectable ``BodyExtractor`` callable
+  (production stub returns ``no_access`` so the script never makes
+  unwired network calls), pulls AP-relevant identity signals from the
+  body (invoice number, PO, amount, invoice date, vendor hint,
+  generic reference numbers), then scores each Square9 doc against a
+  read-only Hub index (single Mongo ``find`` projection on
+  ``hub_documents``). Each Square9 doc gets classified:
+    - content_match_found
+    - likely_same_invoice_different_attachment_granularity
+    - square9_only_true_gap
+    - ocr_required
+    - insufficient_content_access
+    - manual_review_still_required
+  Emits per-doc CSV with extracted body fields + best Hub fingerprint
+  + per-row recommended_next_action; cohort JSON; human-readable MD
+  with plain-English summary, bucket counts, top-25 examples per
+  bucket, and recommended engineering next steps.
+- `tests/test_document_body_reconciliation_probe.py` — NEW. 18 tests
+  covering body-signal regex extraction (invoice / PO / amount with
+  commas / long-form date / empty body), hub-index build,
+  invoice+amount strong scoring, classification (one test per bucket
+  including same-invoice-different-attachment-granularity), summary
+  builder + recommendations, all three output writers, and a CLI
+  smoke test using mongomock and an injected extractor (no network,
+  no Mongo writes).
+- Test results: 18 passed in 0.16s.
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing changes, NO classifier changes, NO Square9
+  changes, NO cutover triggers, NO CFO memo work, NO header-only
+  parity audit work.

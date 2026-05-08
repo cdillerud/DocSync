@@ -2113,3 +2113,29 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: no Mongo writes, no live apply rerun, no
   cutover, no Square9 archive, no CFO summary, no routing/classification
   changes, no unrelated refactors.
+
+## 2026-02 — Hub-only Audit (read-only investigation of 307 hub_only docs)
+- `scripts/hub_only_audit.py` — NEW. Reads the latest
+  `prod_reports/cutover_proof_*/square9_hub_ap_parity*.csv`, filters to
+  `match_bucket=="hub_only"`, classifies each doc into one of:
+  non_ap_in_ap_scope / duplicate_or_backlog_artifact / square9_scope_gap /
+  matcher_miss / true_hub_extra / uncertain. Each bucket maps to a
+  recommended_action: fix_ap_scope_filter / exclude_from_parity_denominator
+  / improve_matcher / no_action_hub_extra / manual_review. Predicate order
+  matters (non-AP -> backlog -> identity-signals -> lane/folder ->
+  uncertain). Outputs three artifacts:
+    - prod_reports/hub_only_audit.csv  (per-doc classification)
+    - prod_reports/hub_only_audit.json (cohort summary + top lists)
+    - prod_reports/hub_only_audit.md   (human-readable report)
+  Exit codes:
+    - 0 mostly explainable
+    - 1 uncertain >10%
+    - 2 matcher_miss >=10% OR non_ap_in_ap_scope >=10%
+- `tests/test_hub_only_audit.py` — NEW. 20 fixture-driven tests covering
+  every bucket, exit-code matrix, IO discovery (proof-pack dir vs
+  fallback vs missing), and CSV/JSON/MD output shapes.
+- Test results: pytest -> 20 passed. CLI smoke run on synthetic parity
+  CSV emits all three artifacts and the expected console banner.
+- Strict scope respected: NO Mongo writes, no cutover, no Bucket A
+  routing-rule changes, no classifier changes, no CFO summary, no
+  DocuSign/HTTPS/contamination work.

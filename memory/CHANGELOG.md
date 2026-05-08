@@ -2139,3 +2139,40 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: NO Mongo writes, no cutover, no Bucket A
   routing-rule changes, no classifier changes, no CFO summary, no
   DocuSign/HTTPS/contamination work.
+
+## 2026-02 — Matcher-miss Vendor Diagnostic (read-only)
+- `scripts/matcher_miss_vendor_diagnostic.py` — NEW. For a single
+  --sender (default billing@tumalocreek.us) and configurable name
+  fragments (default tumalo,tumalocreek,tumalo creek), pulls hub_only
+  rows from that sender and no_match (square9_only) rows whose
+  Square9 name/parent_path/web_url contains a fragment, then scores
+  each Hub doc against each candidate on four signals:
+    - invoice_number_match   weight 0.85 (digits-only invoice number
+                                          inside digits-only Square9
+                                          name+parent_path)
+    - filename_token_overlap weight 0.07 (Jaccard of normalized fname
+                                          tokens; stop-word filtered)
+    - vendor_token_overlap   weight 0.04 (vendor_canonical + sender
+                                          domain root vs Square9
+                                          name+parent_path tokens)
+    - date_proximity         weight 0.04 (1.0 within 7d, linear decay
+                                          to 0 at 90d)
+  Score >= 0.85 = strong. Three artifacts emitted:
+    - prod_reports/matcher_miss_vendor_diagnostic.csv
+    - prod_reports/matcher_miss_vendor_diagnostic.json
+    - prod_reports/matcher_miss_vendor_diagnostic.md
+  Exit codes: 0 (>=80% strong -> matcher fix), 1 (30..80% -> mixed),
+  2 (<30% -> Square9 scope gap, not matcher bug). Recommended
+  matcher_rule attribution counts which winning signal drove each
+  strong match and emits the most common rule in the JSON summary.
+- `tests/test_matcher_miss_vendor_diagnostic.py` — NEW. 20 tests
+  covering normalizers (digits_only, normalize_filename, jaccard,
+  vendor_root_from_sender, date_proximity_score), score_pair (strong
+  alignment, zero overlap), best_candidate (winner selection, empty
+  corpus), filtering (sender / fragments / wrong bucket exclusion),
+  run_diagnostic exit-code matrix (all-strong / none / partial),
+  CSV/JSON/MD output shape, and CLI smoke test.
+- Test results: 20 passed in 0.07s.
+- Strict scope respected: NO Mongo writes, NO matcher logic touched,
+  NO cutover, NO Square9 archive, NO scope-filter changes, NO CFO
+  summary, NO DocuSign/HTTPS work.

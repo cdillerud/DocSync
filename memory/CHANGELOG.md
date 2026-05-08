@@ -2210,3 +2210,37 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: NO Mongo writes, NO matcher/scope-filter
   logic touched, NO cutover, NO Square9 archive, NO CFO summary, NO
   DocuSign/HTTPS/parked AP contamination work.
+
+## 2026-02 — Square9 Uncertain Deep Triage (read-only)
+- `scripts/uncertain_square9_deep_triage.py` — NEW. Reads the 105
+  uncertain rows from the prior `no_match_square9_audit` and
+  reclassifies each into recoverable_matcher_miss / square9_scope_exclusion
+  / true_intake_gap / manual_review_required, using a richer signal set:
+  invoice digit runs (>=4 digits), PO tokens (regex requires >=1 digit
+  to avoid prose false positives), filename token Jaccard >= 0.30,
+  email-subject Jaccard >= 0.45, vendor + amount overlap, broader
+  non-AP keyword list (treasury / wire / template / payroll / bank
+  statement / 1099 / chargeback / etc.). Predicate priority:
+  scope_exclusion -> recoverable -> intake_gap -> manual_review.
+  Reads prior audit JSON to combine prior_recoverable=19 and
+  prior_excludable=14 into the projection math:
+    current
+    after_recoverable_only = (matched + prior_R + new_R) / square_count
+    after_exclusions_only  = matched / max(square_count - prior_E - new_E, 1)
+    after_both             = (matched + prior_R + new_R)
+                             / max(square_count - prior_E - new_E, 1)
+  Three artifacts (csv / json / md) with top-25 tables per bucket.
+  Exit codes: 0 if after_both >= 85%, 1 if 70..85%, 2 if <70%.
+  Mongo touch is one read-only `find` projection on `hub_documents`.
+- `tests/test_uncertain_square9_deep_triage.py` — NEW. 20 tests
+  covering tokenizers (invoice digits / PO with digit-required regex /
+  amount with commas), hub-index build (all six signal kinds),
+  classification (one test per bucket plus PO and filename-Jaccard
+  paths), projection arithmetic (combining prior + new), exit-code
+  matrix, full build_summary integration including an EXIT_GO
+  population, all three output writers, and a CLI smoke test using
+  mongomock.
+- Test results: 20 passed in 0.14s.
+- Strict scope respected: NO Mongo writes, NO matcher logic touched,
+  NO parity scope changed, NO cutover, NO archive, NO CFO summary
+  populate, NO DocuSign / HTTPS / parked AP contamination work.

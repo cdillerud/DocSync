@@ -38,6 +38,9 @@ PROJECTION_FIELDS = [
     "doc_type",
     "suggested_job_type",
     "remediation_audit",
+    "routing_status",
+    "routing_reason",
+    "sharepoint_folder_path",
 ]
 
 

@@ -828,6 +828,8 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
                    default="prod_reports/document_body_reconciliation_probe.json")
     p.add_argument("--md",
                    default="prod_reports/document_body_reconciliation_probe.md")
+    p.add_argument("--no-cache", action="store_true",
+                   help="Bypass /tmp/body_probe_cache and force re-fetch.")
     args = p.parse_args()
 
     if not os.path.exists(args.triage_csv):
@@ -838,9 +840,18 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
     coll = get_hub_documents_collection()
     idx = build_hub_index_from_mongo(coll)
 
+    if extractor is None:
+        try:
+            from scripts.sharepoint_body_fetcher import build_production_fetcher
+            extractor = build_production_fetcher(no_cache=args.no_cache)
+        except Exception as e:  # noqa: BLE001
+            print(f"probe: could not build production fetcher ({e!r}); "
+                  f"falling back to no-op default extractor.")
+            extractor = default_body_extractor
+
     probed = probe(
         rows,
-        extractor=extractor or default_body_extractor,
+        extractor=extractor,
         idx=idx,
         limit=args.limit,
     )

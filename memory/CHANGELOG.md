@@ -2283,3 +2283,45 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
   touched, NO routing changes, NO classifier changes, NO Square9
   changes, NO cutover triggers, NO CFO memo work, NO header-only
   parity audit work.
+
+## 2026-02 — SharePoint/Graph Body Fetcher (read-only)
+- `scripts/sharepoint_body_fetcher.py` — NEW. Wires the document body
+  reconciliation probe to real SharePoint content via Microsoft Graph,
+  reusing the existing client-credentials auth (TENANT_ID,
+  GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET) already used by
+  `sharepoint_ap_compare.acquire_graph_token`. No new env vars, no
+  new auth flow.
+  - Resolves `square9_web_url` to a Graph drive item via the
+    `/shares/u!{base64url}/driveItem/content` endpoint.
+  - 30-second hard timeout per file. 4xx / 5xx / network errors /
+    parse failures all return `("", "no_access")` and never raise.
+  - PDF text via pypdf. >= 50 non-whitespace chars -> ("text", "ok");
+    less -> ("", "ocr_required").
+  - Image / TIFF / PNG / JPG / GIF / BMP suffixes (with optional
+    query string) short-circuit to `("", "ocr_required")`.
+  - Cache at `/tmp/body_probe_cache/<sha256>.bin`, keyed by SHA-256
+    of the web URL. Cache write failures are swallowed; cache reads
+    that fail fall through to a network fetch.
+  - `--no-cache` CLI flag on the probe forces a re-fetch.
+  - GraphBodyFetcher is constructor-injected with token_provider and
+    http_client_factory so tests run completely offline.
+- `scripts/document_body_reconciliation_probe.py`: `main()` now
+  builds a production fetcher via
+  `sharepoint_body_fetcher.build_production_fetcher(no_cache=...)`
+  unless an extractor is injected; falls back to the no-op default
+  if production fetcher build fails. Added `--no-cache` flag.
+- `tests/test_document_body_sharepoint_fetcher.py` — NEW. 17 offline
+  tests covering: graph share-id encoding; stable cache key;
+  classify_bytes for image/tiff (with and without query string),
+  blank-page PDF, monkey-patched long-text PDF; happy-path fetch +
+  OK; empty-text PDF -> ocr_required; image suffix short-circuits
+  pypdf; missing/empty web_url -> no_access; 404 / 403 / timeout /
+  token-failure -> no_access (no raise); cache reuse on second
+  call; --no-cache forces refetch; cache-write failure does not
+  crash the fetcher.
+- Sibling regression: `tests/test_document_body_reconciliation_probe.py`
+  still 18/18 passing.
+- Combined run: 35 passed in 0.22s.
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing changes, NO classifier changes, NO Square9
+  changes, NO cutover triggers, NO new env vars, NO new auth flows.

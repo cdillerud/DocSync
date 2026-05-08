@@ -842,10 +842,19 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
                    default="prod_reports/document_body_reconciliation_probe.md")
     p.add_argument("--no-cache", action="store_true",
                    help="Bypass /tmp/body_probe_cache and force re-fetch.")
+    p.add_argument(
+        "--use-noop-fetcher", action="store_true",
+        help=("Explicitly run with the no-op body extractor (no document "
+              "bodies will be read; every row will classify as "
+              "insufficient_content_access). Intended only for plumbing "
+              "verification / test runs. Without this flag the probe "
+              "REQUIRES the production SharePoint/Graph fetcher and will "
+              "exit non-zero if it cannot be built."))
     args = p.parse_args()
 
     if not os.path.exists(args.triage_csv):
-        print(f"probe: triage CSV not found at {args.triage_csv!r}.")
+        print(f"probe: triage CSV not found at {args.triage_csv!r}.",
+              file=sys.stderr)
         return 2
 
     rows = filter_manual_review(read_csv_rows(args.triage_csv))
@@ -853,13 +862,32 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
     idx = build_hub_index_from_mongo(coll)
 
     if extractor is None:
-        try:
-            from scripts.sharepoint_body_fetcher import build_production_fetcher
-            extractor = build_production_fetcher(no_cache=args.no_cache)
-        except Exception as e:  # noqa: BLE001
-            print(f"probe: could not build production fetcher ({e!r}); "
-                  f"falling back to no-op default extractor.")
+        if args.use_noop_fetcher:
+            print(
+                "probe: --use-noop-fetcher set; no document bodies will be "
+                "read. Every row will classify as "
+                "insufficient_content_access. This mode is for plumbing "
+                "verification only.",
+                file=sys.stderr,
+            )
             extractor = default_body_extractor
+        else:
+            try:
+                from scripts.sharepoint_body_fetcher import (
+                    build_production_fetcher,
+                )
+                extractor = build_production_fetcher(no_cache=args.no_cache)
+            except Exception as e:  # noqa: BLE001
+                print(
+                    "probe: could not build production SharePoint/Graph "
+                    f"fetcher: {e!r}. Refusing to silently fall back to "
+                    "the no-op extractor. If you intentionally want to "
+                    "run the probe without reading document bodies "
+                    "(plumbing check only), re-run with "
+                    "--use-noop-fetcher.",
+                    file=sys.stderr,
+                )
+                return 3
 
     probed = probe(
         rows,

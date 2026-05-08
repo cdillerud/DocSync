@@ -391,3 +391,200 @@ def test_main_writes_three_artifacts_with_injected_extractor(
     assert payload["content_match_found"] == 1
     assert payload["ocr_required"] == 1
     assert csv_out.exists() and md_out.exists()
+
+
+
+# ---------------------------------------------------------------------------
+# Fail-loud behavior: production fetcher is required by default
+# ---------------------------------------------------------------------------
+
+def _write_minimal_triage(tmp_path: Path) -> Path:
+    triage_csv = tmp_path / "uncertain_square9_deep_triage.csv"
+    fields = list(_triage_row().keys())
+    with open(triage_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerow(_triage_row(square9_name="acme.pdf"))
+    return triage_csv
+
+
+def test_main_exits_nonzero_when_production_fetcher_import_fails(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    """If the production fetcher cannot be built and --use-noop-fetcher
+    is NOT passed, main() must refuse to silently fall back: print a
+    clear stderr message and return a non-zero exit code."""
+    import mongomock
+    import sys as _sys
+
+    triage_csv = _write_minimal_triage(tmp_path)
+    coll = mongomock.MongoClient().db.hub_documents
+    coll.insert_one(_hub_doc(id="hub-acme"))
+    monkeypatch.setattr(
+        "scripts.document_body_reconciliation_probe.get_hub_documents_collection",
+        lambda: coll,
+    )
+
+    # Force the production-fetcher import path to blow up.
+    fake_mod = type(_sys)("scripts.sharepoint_body_fetcher")
+
+    def _boom(no_cache: bool = False):
+        raise RuntimeError("simulated import/build failure")
+    fake_mod.build_production_fetcher = _boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "scripts.sharepoint_body_fetcher",
+                        fake_mod)
+
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(triage_csv),
+        "--out-csv", str(tmp_path / "out.csv"),
+        "--json", str(tmp_path / "out.json"),
+        "--md", str(tmp_path / "out.md"),
+    ])
+
+    rc = probe.main(extractor=None)
+    assert rc != 0, "must not silently fall back to no-op extractor"
+    err = capsys.readouterr().err
+    assert "production" in err.lower()
+    assert "--use-noop-fetcher" in err
+
+
+def test_main_runs_with_noop_extractor_when_flag_is_explicit(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    """--use-noop-fetcher is the only way to legitimately run the probe
+    without reading bodies. Every row must classify as
+    insufficient_content_access and stderr must warn loudly."""
+    import mongomock
+    import sys as _sys
+
+    triage_csv = _write_minimal_triage(tmp_path)
+    coll = mongomock.MongoClient().db.hub_documents
+    coll.insert_one(_hub_doc(id="hub-acme"))
+    monkeypatch.setattr(
+        "scripts.document_body_reconciliation_probe.get_hub_documents_collection",
+        lambda: coll,
+    )
+    # Even if the production fetcher were importable, --use-noop-fetcher
+    # must not invoke it. Plant a tripwire to prove that.
+    fake_mod = type(_sys)("scripts.sharepoint_body_fetcher")
+
+    def _tripwire(no_cache: bool = False):
+        raise AssertionError("production fetcher must not be built when "
+                             "--use-noop-fetcher is set")
+    fake_mod.build_production_fetcher = _tripwire  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "scripts.sharepoint_body_fetcher",
+                        fake_mod)
+
+    json_out = tmp_path / "out.json"
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(triage_csv),
+        "--use-noop-fetcher",
+        "--out-csv", str(tmp_path / "out.csv"),
+        "--json", str(json_out),
+        "--md", str(tmp_path / "out.md"),
+    ])
+
+    rc = probe.main(extractor=None)
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "--use-noop-fetcher" in err
+    assert "no document bodies will be read" in err
+    payload = json.loads(json_out.read_text())
+    assert payload["total_attempted"] == 1
+    assert payload["insufficient_content_access"] == 1
+
+
+def test_main_uses_production_fetcher_by_default_when_importable(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """When the production fetcher imports cleanly and no flag is
+    passed, main() must use it (not the no-op default)."""
+    import mongomock
+    import sys as _sys
+
+    triage_csv = _write_minimal_triage(tmp_path)
+    coll = mongomock.MongoClient().db.hub_documents
+    coll.insert_one(_hub_doc(id="hub-acme"))
+    monkeypatch.setattr(
+        "scripts.document_body_reconciliation_probe.get_hub_documents_collection",
+        lambda: coll,
+    )
+
+    built = {"called": False, "no_cache": None}
+
+    def _stub_extractor(_row):
+        return (
+            "Acme Corp\nInvoice #: INV-12345\nDate: 04/15/2026\n"
+            "Total: $1,500.00",
+            probe.CONTENT_OK,
+        )
+
+    fake_mod = type(_sys)("scripts.sharepoint_body_fetcher")
+
+    def _build(no_cache: bool = False):
+        built["called"] = True
+        built["no_cache"] = no_cache
+        return _stub_extractor
+    fake_mod.build_production_fetcher = _build  # type: ignore[attr-defined]
+    monkeypatch.setitem(_sys.modules, "scripts.sharepoint_body_fetcher",
+                        fake_mod)
+
+    json_out = tmp_path / "out.json"
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(triage_csv),
+        "--no-cache",
+        "--out-csv", str(tmp_path / "out.csv"),
+        "--json", str(json_out),
+        "--md", str(tmp_path / "out.md"),
+    ])
+
+    rc = probe.main(extractor=None)
+    assert rc == 0
+    assert built["called"] is True
+    assert built["no_cache"] is True
+    payload = json.loads(json_out.read_text())
+    assert payload["content_match_found"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Subprocess regression: import resolution for both invocation modes
+# ---------------------------------------------------------------------------
+
+def _backend_root() -> Path:
+    # tests/test_document_body_reconciliation_probe.py -> /app/backend
+    return Path(__file__).resolve().parent.parent
+
+
+def test_subprocess_help_works_with_direct_script_invocation():
+    """python scripts/document_body_reconciliation_probe.py --help
+    must succeed. This is the exact invocation that produced the
+    ModuleNotFoundError("No module named 'scripts'") on the VM."""
+    import subprocess
+    result = subprocess.run(
+        ["python", "scripts/document_body_reconciliation_probe.py", "--help"],
+        cwd=str(_backend_root()),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"direct invocation failed (rc={result.returncode}):\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
+    assert "--use-noop-fetcher" in result.stdout
+    assert "--triage-csv" in result.stdout
+
+
+def test_subprocess_help_works_with_module_invocation():
+    """python -m scripts.document_body_reconciliation_probe --help must
+    also work."""
+    import subprocess
+    result = subprocess.run(
+        ["python", "-m", "scripts.document_body_reconciliation_probe",
+         "--help"],
+        cwd=str(_backend_root()),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"module invocation failed (rc={result.returncode}):\n"
+        f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
+    assert "--use-noop-fetcher" in result.stdout

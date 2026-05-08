@@ -2325,3 +2325,37 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 - Strict scope respected: NO Mongo writes, NO matcher logic
   touched, NO routing changes, NO classifier changes, NO Square9
   changes, NO cutover triggers, NO new env vars, NO new auth flows.
+
+
+## 2026-02 — body reconciliation probe: fail-loud import + --use-noop-fetcher
+
+- `scripts/document_body_reconciliation_probe.py`:
+  - sys.path bootstrap (added in prior step) keeps `from scripts...`
+    imports working whether the probe is launched as
+    `python scripts/document_body_reconciliation_probe.py` or
+    `python -m scripts.document_body_reconciliation_probe`.
+  - `main()` no longer silently falls back to the no-op extractor
+    when the production SharePoint/Graph fetcher cannot be built.
+    On import/build failure it now writes a clear stderr message
+    (mentioning `--use-noop-fetcher`) and returns exit code 3.
+  - New `--use-noop-fetcher` CLI flag is the only sanctioned way
+    to run the probe without reading document bodies (plumbing
+    verification only). Stderr warns loudly when this mode is on.
+  - Triage-CSV-not-found now also writes to stderr.
+- `tests/test_document_body_reconciliation_probe.py` (+5 tests):
+  - main() exits non-zero when production fetcher import fails and
+    no flag is passed (tripwire on `scripts.sharepoint_body_fetcher`).
+  - main() runs cleanly with `--use-noop-fetcher`; production
+    fetcher is NOT invoked even when present (assertion tripwire).
+  - main() builds the production fetcher by default and threads
+    `--no-cache` through.
+  - Subprocess regression: `python scripts/document_body_reconciliation_probe.py --help`
+    succeeds (this was the exact failure mode reported on the VM).
+  - Subprocess regression: `python -m scripts.document_body_reconciliation_probe --help`
+    succeeds.
+- Combined: 40 passed in 0.32s. Lint clean.
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing/classifier changes, NO new env vars, NO new
+  auth flows, NO Square9 changes, NO cutover triggers, NO archive
+  of stage data, NO DocuSign / HTTPS / parked AP work touched.
+

@@ -237,6 +237,232 @@ def test_production_regression_global_grinders_style_invoice():
 
 
 # ---------------------------------------------------------------------------
+# Regex tightening pass #2 (production VM 2026-02 follow-up):
+# - dates must not be captured as invoice numbers
+# - invoice values must not absorb the next word (ACCOUNT, NUMBER, ...)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Invoice 05/01/26",
+    "Invoice Date: 05/01/26",
+    "INVOICE\n4/30/26",
+    "Invoice 2026-04-30",
+    "Inv 04-15-2026",
+])
+def test_dates_are_never_extracted_as_invoice_numbers(text: str):
+    sig = probe.extract_body_signals(text)
+    inv = sig["invoice_number"] or ""
+    # No slash should ever appear in an invoice capture.
+    assert "/" not in inv
+    # And no MM-DD-YY/YYYY-MM-DD shape.
+    assert not probe._DATE_SHAPE_RE.match(inv)
+
+
+def test_invoice_capture_does_not_absorb_trailing_word():
+    """Production case: ``9-275-62775ACCOUNT`` was captured as one
+    token because the previous regex allowed letters after digits."""
+    sig = probe.extract_body_signals("Invoice 9-275-62775ACCOUNT 04/29/2026")
+    assert sig["invoice_number"] == "9-275-62775"
+
+
+def test_invoice_capture_does_not_absorb_trailing_account_word_v2():
+    sig = probe.extract_body_signals("Invoice No 9-285-37538 ACCOUNT NUMBER")
+    assert sig["invoice_number"] == "9-285-37538"
+
+
+def test_invoice_capture_does_not_absorb_word_directly_glued():
+    # Even with the word right next to the digit run, capture must
+    # end in a digit, dropping the glued letters.
+    sig = probe.extract_body_signals("Invoice 30018395INVOICE")
+    assert sig["invoice_number"] == "30018395"
+
+
+@pytest.mark.parametrize("text,expected", [
+    # Hawkemedia-style production value.
+    ("Invoice BILL-2026-04-84480", "BILL-2026-04-84480"),
+    # First Choice / BlueTiger.
+    ("Invoice MN-1259515", "MN-1259515"),
+    ("Invoice MN-1283736", "MN-1283736"),
+    # MRA.
+    ("Invoice 30018395", "30018395"),
+    # Vans.
+    ("Invoice ST026692", "ST026692"),
+    # FedEx-style.
+    ("Invoice 9-275-62775", "9-275-62775"),
+    ("Invoice 9-285-37538", "9-285-37538"),
+])
+def test_invoice_regex_pass2_preserves_real_values(
+        text: str, expected: str):
+    sig = probe.extract_body_signals(text)
+    assert sig["invoice_number"] == expected
+
+
+# ---------------------------------------------------------------------------
+# Reference-number scoring (Part B)
+# ---------------------------------------------------------------------------
+
+def test_hub_record_builds_reference_haystack_from_extracted_fields():
+    rec = probe._hub_doc_record({
+        "id": "hub-1",
+        "file_name": "vendor_INV-99.pdf",
+        "extracted_fields": {"invoice_number": "REF-2923600"},
+        "normalized_fields": {"po_number": "PO-77777"},
+        "email_subject": "Order 10713221 confirmation",
+    })
+    hay = rec["hub_ref_haystack"]
+    assert "REF-2923600" in hay
+    assert "PO-77777" in hay
+    assert "10713221" in hay
+    assert "INV-99" in hay
+
+
+def test_reference_match_alone_does_not_create_content_match():
+    """Reference weight is 0.10. Threshold is 0.85. A reference-only
+    hit must not classify as ``content_match_found``."""
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-x",
+        "file_name": "ignore.pdf",
+        "vendor_canonical": "Ball Metal",
+        "extracted_fields": {"invoice_number": "BMC-2923600"},
+    }])
+    signals = {
+        "invoice_number": None, "po_number": None,
+        "amount": None, "invoice_date": None,
+        "vendor_hint": None,
+        "reference_numbers": ["2923600"],
+    }
+    score, doc, breakdown, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc is not None
+    assert doc["hub_doc_id"] == "hub-x"
+    assert score == pytest.approx(0.10, abs=1e-6)
+    assert score < probe.CONTENT_MATCH_THRESHOLD
+    assert breakdown.get("reference_number") == 1.0
+
+
+def test_reference_lifts_a_near_match_above_threshold():
+    """Body has invoice + amount + date that nearly match a Hub doc;
+    reference number provides the final +0.10 needed."""
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-near",
+        "vendor_canonical": "Ball Metal Beverage Container",
+        "invoice_number_clean": "6214787",
+        "amount_float": "1500.00",
+        "invoice_date": "2026-04-30",
+        "file_name": "BallMetal_2923600_inv.pdf",
+        "po_number_clean": "",
+    }])
+    signals = {
+        "invoice_number": "6214787",
+        "po_number": None,
+        "amount": 1500.00,
+        "invoice_date": "2026-04-30",
+        "vendor_hint": None,
+        "reference_numbers": ["2923600"],
+    }
+    score, doc, breakdown, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc["hub_doc_id"] == "hub-near"
+    # invoice 0.55 + amount 0.20 + date 0.10 + reference 0.10 = 0.95
+    assert score == pytest.approx(0.95, abs=1e-6)
+    assert score >= probe.CONTENT_MATCH_THRESHOLD
+    assert breakdown["reference_number"] == 1.0
+    assert "2923600" in breakdown["_reference_numbers_matched"]
+
+
+def test_reference_match_uses_digits_only_form():
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-digits",
+        "vendor_canonical": "X",
+        "extracted_fields": {"invoice_number": "2923600"},
+    }])
+    # Body extracted it as 'REF-2923600'; Hub stored it as bare digits.
+    signals = {
+        "invoice_number": None, "po_number": None,
+        "amount": None, "invoice_date": None,
+        "vendor_hint": None,
+        "reference_numbers": ["REF-2923600"],
+    }
+    score, doc, breakdown, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc is not None
+    assert breakdown.get("reference_number") == 1.0
+    assert score == pytest.approx(0.10, abs=1e-6)
+
+
+@pytest.mark.parametrize("ref", [
+    "2923600", "2931273", "10713221", "SI-02-26-32395",
+])
+def test_specific_production_references_match_against_haystack(ref: str):
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-prod",
+        "vendor_canonical": "X",
+        "file_name": f"misc_{ref}_doc.pdf",
+    }])
+    signals = {
+        "invoice_number": None, "po_number": None,
+        "amount": None, "invoice_date": None,
+        "vendor_hint": None,
+        "reference_numbers": [ref],
+    }
+    score, doc, breakdown, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc is not None
+    assert breakdown.get("reference_number") == 1.0
+
+
+def test_short_reference_tokens_are_not_substring_matched():
+    """A 3-char reference like 'ABC' must not blow up the haystack
+    via accidental substring hits in unrelated docs."""
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-noise", "vendor_canonical": "X",
+        "file_name": "lots_of_text_ABC_in_random_place.pdf",
+    }])
+    signals = {
+        "invoice_number": None, "po_number": None,
+        "amount": None, "invoice_date": None,
+        "vendor_hint": None,
+        "reference_numbers": ["AB"],   # too short
+    }
+    score, doc, _, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc is None
+    assert score == 0.0
+
+
+def test_probe_csv_includes_reference_match_columns(tmp_path: Path):
+    """Per-row CSV must surface ``reference_numbers_used`` and
+    ``reference_match_score`` so operators can audit the new
+    signal."""
+    triage = [{
+        "square9_name": "Ball_2923600.pdf",
+        "square9_parent_path": "AP/Ball",
+        "square9_web_url": "https://x/ball.pdf",
+    }]
+
+    class _Stub:
+        last_diagnostic = {"failure_reason_detail": "ok",
+                           "graph_url": "g", "http_status": 200,
+                           "error_body_snippet": "", "exception_class": ""}
+
+        def __call__(self, _row):
+            return ("Reference: 2923600\nTotal: $1,500.00", probe.CONTENT_OK)
+
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-prod",
+        "vendor_canonical": "Ball",
+        "file_name": "BallMetal_2923600.pdf",
+        "amount_float": "1500.00",
+    }])
+    out = probe.probe(triage, extractor=_Stub(), idx=idx, limit=1)
+    assert out[0]["reference_numbers_used"] == "2923600"
+    assert out[0]["reference_match_score"] == "0.10"
+
+    csv_path = tmp_path / "p.csv"
+    probe.write_csv(str(csv_path), out)
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert "reference_numbers_used" in rows[0]
+    assert "reference_match_score" in rows[0]
+    assert rows[0]["reference_numbers_used"] == "2923600"
+
+
+# ---------------------------------------------------------------------------
 # Hub index + scoring
 # ---------------------------------------------------------------------------
 

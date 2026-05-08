@@ -95,8 +95,16 @@ WEIGHTS = {
     "po_number": 0.10,
     "invoice_date": 0.10,
     "vendor": 0.05,
+    # Reference numbers (e.g. order IDs, BOL numbers, freight refs)
+    # are a low-weight supporting signal. Because the threshold is
+    # 0.85, a reference-only hit (0.10) cannot create a content
+    # match by itself; it can only lift a near-match where invoice /
+    # amount / date / vendor evidence is also aligned.
+    "reference_number": 0.10,
 }
-assert abs(sum(WEIGHTS.values()) - 1.0) < 1e-9
+# Total can exceed 1.0 with multiple aligned signals — the threshold
+# (CONTENT_MATCH_THRESHOLD = 0.85) is what gates a confident match.
+assert sum(WEIGHTS.values()) >= 1.0
 
 # Identity-signal regexes.
 #
@@ -124,8 +132,8 @@ INVOICE_NUMBER_RE = re.compile(
     r"\b(?:invoice|inv)(?![A-Za-z])"          # 'invoice' or 'inv', not inside another word
     r"\s*\.?\s*(?:no\.?|number|num|#)?"       # optional 'no'/'number'/'num'/'#'
     r"\s*[:#\-]?\s*"                            # optional separator
-    r"(?=[A-Za-z0-9\-/]*\d)"                   # capture must contain a digit
-    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    r"(?=[A-Za-z0-9\-]*\d)"                    # capture must contain a digit
+    r"([A-Z0-9][A-Z0-9\-]{2,}\d)",             # MUST end in a digit (no trailing word)
     re.I,
 )
 PO_NUMBER_RE = re.compile(
@@ -133,8 +141,8 @@ PO_NUMBER_RE = re.compile(
     r"(?![A-Za-z])"
     r"\s*(?:no\.?|number|num|#)?"
     r"\s*[:#\-]?\s*"
-    r"(?=[A-Za-z0-9\-/]*\d)"
-    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    r"(?=[A-Za-z0-9\-]*\d)"
+    r"([A-Z0-9][A-Z0-9\-]{2,}\d)",
     re.I,
 )
 AMOUNT_RE = re.compile(
@@ -152,8 +160,8 @@ GENERIC_REF_RE = re.compile(
     r"\b(?:bol|order(?:\s+no\.?)?|reference|ref\.?)"
     r"(?![A-Za-z])"
     r"\s*[:#\-]?\s*"
-    r"(?=[A-Za-z0-9\-/]*\d)"
-    r"([A-Z0-9][A-Z0-9\-/]{3,})",
+    r"(?=[A-Za-z0-9\-]*\d)"
+    r"([A-Z0-9][A-Z0-9\-]{2,}\d)",
     re.I,
 )
 
@@ -175,15 +183,27 @@ NOISE_CAPTURE_TOKENS = {
 }
 
 
+_DATE_SHAPE_RE = re.compile(
+    r"^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$"
+    r"|^\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2}$"
+)
+
+
 def _clean_capture(value: Optional[str]) -> Optional[str]:
-    """Reject obvious-noise captures: empty, no digits, or a known
-    bare label word."""
+    """Reject obvious-noise captures: empty, no digits, a known
+    bare label word, or a date-shaped string."""
     if not value:
         return None
     t = value.strip().upper()
     if not t or t in NOISE_CAPTURE_TOKENS:
         return None
     if not any(c.isdigit() for c in t):
+        return None
+    # ``MM/DD/YY`` and ``YYYY-MM-DD`` style dates are not invoice
+    # numbers. Belt-and-suspenders: regex char class no longer
+    # allows '/' in captures, but real-world PDF text occasionally
+    # produces ``05-01-26`` shapes via a different code path.
+    if _DATE_SHAPE_RE.match(t):
         return None
     return t
 
@@ -341,6 +361,32 @@ class HubIndex:
 
 
 def _hub_doc_record(d: Dict[str, Any]) -> Dict[str, str]:
+    extr = d.get("extracted_fields") or {}
+    norm = d.get("normalized_fields") or {}
+    if not isinstance(extr, dict):
+        extr = {}
+    if not isinstance(norm, dict):
+        norm = {}
+    # Reference-number haystack: a single uppercase string built from
+    # every Hub field that production density showed actually
+    # populated. Used by the reference_number signal to look up
+    # whether any extracted Square9 reference number appears anywhere
+    # on a candidate Hub doc.
+    haystack_parts = [
+        str(d.get("invoice_number_clean") or ""),
+        str(d.get("po_number_clean") or ""),
+        str(extr.get("invoice_number") or ""),
+        str(extr.get("invoice_no") or ""),
+        str(extr.get("invoiceNumber") or ""),
+        str(extr.get("po_number") or ""),
+        str(norm.get("invoice_number") or ""),
+        str(norm.get("invoice_number_clean") or ""),
+        str(norm.get("po_number") or ""),
+        str(norm.get("po_number_clean") or ""),
+        str(d.get("file_name") or ""),
+        str(d.get("email_subject") or ""),
+    ]
+    ref_haystack = "|".join(p for p in haystack_parts if p).upper()
     return {
         "hub_doc_id": str(d.get("id") or d.get("hub_doc_id") or ""),
         "hub_file_name": str(d.get("file_name") or ""),
@@ -354,11 +400,10 @@ def _hub_doc_record(d: Dict[str, Any]) -> Dict[str, str]:
         "hub_doc_type": str(d.get("doc_type") or ""),
         "hub_suggested_job_type": str(d.get("suggested_job_type") or ""),
         "hub_invoice_date":
-            str(d.get("invoice_date")
-                or (d.get("normalized_fields") or {}).get("invoice_date")
-                or ""),
+            str(d.get("invoice_date") or norm.get("invoice_date") or ""),
         "hub_created_utc":
             str(d.get("created_utc") or d.get("created_at") or ""),
+        "hub_ref_haystack": ref_haystack,
     }
 
 
@@ -410,7 +455,7 @@ def build_hub_index_from_mongo(collection) -> HubIndex:
             "email_subject": 1, "sharepoint_folder_path": 1,
             "mailbox_category": 1, "doc_type": 1,
             "suggested_job_type": 1, "created_utc": 1, "created_at": 1,
-            "normalized_fields": 1,
+            "normalized_fields": 1, "extracted_fields": 1,
         },
     )
     return build_hub_index_from_docs(cursor)
@@ -429,11 +474,39 @@ def _amount_match(a: Optional[float], b_str: str) -> bool:
         return False
 
 
+def _refs_matching_doc(refs: List[str],
+                       doc: Dict[str, str]
+                       ) -> List[str]:
+    """Return the subset of reference numbers that appear (as
+    substring, case-insensitive) somewhere on this Hub doc's
+    identifying fields. The haystack is built once at index time."""
+    haystack = doc.get("hub_ref_haystack") or ""
+    if not haystack or not refs:
+        return []
+    matched: List[str] = []
+    for r in refs:
+        if not r:
+            continue
+        u = r.upper()
+        if len(u) >= 4 and u in haystack:
+            matched.append(r)
+            continue
+        d = _digits_only(u)
+        if d and len(d) >= 4 and d in haystack:
+            matched.append(r)
+    return matched
+
+
 def score_signals_against_hub(signals: Dict[str, Any],
                               idx: HubIndex
                               ) -> Tuple[float, Optional[Dict[str, str]],
                                          Dict[str, float], List[str]]:
-    """Return (score, best_hub_doc, per-signal-breakdown, signals_won)."""
+    """Return (score, best_hub_doc, per-signal-breakdown, signals_won).
+
+    The per-signal-breakdown carries one extra key when reference
+    matching contributes: ``_reference_numbers_matched`` (List[str]),
+    so the probe runner can surface the matched refs in CSV/JSON
+    diagnostics."""
     if idx.doc_count == 0:
         return 0.0, None, {}, []
 
@@ -461,6 +534,16 @@ def score_signals_against_hub(signals: Dict[str, Any],
     if amt is not None:
         for doc in idx.by_amount.get(f"{amt:.2f}", ()):
             candidates.setdefault(doc["hub_doc_id"], doc)
+
+    # Reference numbers can pull a Hub doc into the candidate set on
+    # their own (linear scan, only when no invoice/PO/amount candidate
+    # was found). This is the only path that reads the per-doc
+    # haystack, so it's also bounded by ``len(refs) > 0``.
+    refs = signals.get("reference_numbers") or []
+    if not candidates and refs:
+        for doc in idx.all_docs:
+            if _refs_matching_doc(refs, doc):
+                candidates.setdefault(doc["hub_doc_id"], doc)
 
     if not candidates:
         return 0.0, None, {}, []
@@ -490,13 +573,21 @@ def score_signals_against_hub(signals: Dict[str, Any],
             & set(tokenize(doc["hub_vendor_canonical"]))
         ):
             breakdown["vendor"] = 1.0
+        # Reference-number signal (low weight — supports, never
+        # creates, a confident match).
+        ref_hits = _refs_matching_doc(refs, doc) if refs else []
+        if ref_hits:
+            breakdown["reference_number"] = 1.0
 
         score = sum(breakdown.get(k, 0.0) * w for k, w in WEIGHTS.items())
         if score > best_score:
             best_score = score
             best_doc = doc
-            best_breakdown = breakdown
-            best_signals_won = list(breakdown.keys())
+            best_breakdown = dict(breakdown)
+            if ref_hits:
+                best_breakdown["_reference_numbers_matched"] = list(ref_hits)
+            best_signals_won = [k for k in breakdown.keys()
+                                if not k.startswith("_")]
     return best_score, best_doc, best_breakdown, best_signals_won
 
 
@@ -623,6 +714,9 @@ def probe(rows: List[Dict[str, str]],
                 detail = "ocr_required"
             else:
                 detail = "no_diagnostic_available"
+        # Reference-number scoring telemetry (Part B).
+        ref_matches = breakdown.get("_reference_numbers_matched") or []
+        ref_score = WEIGHTS["reference_number"] if ref_matches else 0.0
         out.append({
             "square9_name": row.get("square9_name", ""),
             "square9_parent_path": row.get("square9_parent_path", ""),
@@ -644,6 +738,9 @@ def probe(rows: List[Dict[str, str]],
             "extracted_po_number": signals.get("po_number") or "",
             "extracted_reference_numbers":
                 ",".join(signals.get("reference_numbers") or []),
+            "reference_numbers_used": ",".join(ref_matches),
+            "reference_match_score":
+                f"{ref_score:.2f}" if ref_score else "",
             "best_hub_doc_id": hub.get("hub_doc_id", ""),
             "best_hub_file_name": hub.get("hub_file_name", ""),
             "best_hub_vendor_canonical":
@@ -760,6 +857,7 @@ OUTPUT_CSV_COLUMNS = [
     "extracted_invoice_number", "extracted_vendor", "extracted_amount",
     "extracted_invoice_date", "extracted_po_number",
     "extracted_reference_numbers",
+    "reference_numbers_used", "reference_match_score",
     "best_hub_doc_id", "best_hub_file_name",
     "best_hub_vendor_canonical", "best_hub_invoice_number_clean",
     "best_hub_amount_float", "best_hub_po_number_clean",

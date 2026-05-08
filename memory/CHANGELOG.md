@@ -2496,3 +2496,79 @@ identifiers.
   NO cutover/archive actions, NO DocuSign / HTTPS / parked AP
   work touched, NO new env vars, NO new auth flows.
 
+
+
+## 2026-02 — regex pass #2 + reference_number scoring signal
+
+Production VM visibility (preceding step) revealed five remaining
+extraction bugs (dates captured as invoices, invoice values
+absorbing the next word like ``9-275-62775ACCOUNT``) and that
+clean-extracted reference numbers like ``2923600`` were dropped on
+the floor by the matcher.
+
+PART A — regex pass #2 (`scripts/document_body_reconciliation_probe.py`):
+- INVOICE_NUMBER_RE / PO_NUMBER_RE / GENERIC_REF_RE: removed `/`
+  from capture char class so dates like ``05/01/26`` no longer
+  match. Added end-anchor ``\d`` so the capture is forced to end on
+  a digit (kills ``9-275-62775ACCOUNT`` → ``9-275-62775``,
+  ``30018395INVOICE`` → ``30018395``).
+- New ``_DATE_SHAPE_RE`` belt-and-suspenders rejection in
+  `_clean_capture` for ``MM/DD/YY`` and ``YYYY-MM-DD`` strings, in
+  case a different pypdf code path produces a date-shaped token.
+
+PART B — reference-number scoring (read-only, scoring-only):
+- WEIGHTS gains ``reference_number: 0.10``. The total now exceeds
+  1.0 by design — multiple aligned signals can over-score; the
+  threshold (``CONTENT_MATCH_THRESHOLD = 0.85``) is what gates a
+  match. Reference-only evidence (0.10) cannot create a confident
+  match by itself; it can only lift a near-match.
+- HubIndex per-doc record gains ``hub_ref_haystack`` — a single
+  uppercase string built from ``invoice_number_clean``,
+  ``po_number_clean``, ``extracted_fields.invoice_number/_no/Number/po_number``,
+  ``normalized_fields.invoice_number/_clean/po_number/_clean``,
+  ``file_name``, ``email_subject``. Each of these fields was
+  density-validated on the production VM (33-56% populated).
+- ``build_hub_index_from_mongo`` projection extended to include
+  ``extracted_fields`` so the haystack is fully populated.
+- ``score_signals_against_hub``:
+  * Added ``_refs_matching_doc`` (substring + digits-only,
+    minimum 4-char tokens to avoid trivial collisions).
+  * When no candidate is found via invoice / PO / amount and
+    references are present, performs a bounded linear scan over
+    ``idx.all_docs`` to find any doc whose haystack contains a
+    reference. This is the only path that walks all docs, and it
+    is gated behind ``not candidates and refs``.
+  * Per-candidate scoring sets ``breakdown["reference_number"] =
+    1.0`` when refs match and stores the matched refs under
+    ``_reference_numbers_matched`` for diagnostic surfacing.
+- Probe runner threads matched refs into the per-row output as two
+  new CSV/JSON columns: ``reference_numbers_used`` and
+  ``reference_match_score`` (e.g. ``"0.10"`` when active).
+
+Tests (+25 in test_document_body_reconciliation_probe.py):
+- Pass #2 negative: 5 parametric cases proving dates are never
+  invoice numbers; ``9-275-62775ACCOUNT`` → ``9-275-62775``;
+  ``9-285-37538`` separated from trailing ``ACCOUNT NUMBER``;
+  ``30018395INVOICE`` → ``30018395``.
+- Pass #2 positive: 7 parametric cases preserving real production
+  values (``BILL-2026-04-84480``, ``MN-1259515``, ``MN-1283736``,
+  ``30018395``, ``ST026692``, ``9-275-62775``, ``9-285-37538``).
+- Reference scoring:
+  * Haystack built from extracted_fields / normalized_fields /
+    file_name / email_subject.
+  * Reference-only match scores 0.10, NOT a content match.
+  * Reference lifts a near-match across 0.85 threshold.
+  * Digits-only fallback works (body ``REF-2923600`` matches Hub
+    ``2923600``).
+  * 4 parametric production refs (2923600, 2931273, 10713221,
+    SI-02-26-32395) all match against a haystack.
+  * Tokens shorter than 4 chars are rejected (collision guard).
+  * Probe CSV includes ``reference_numbers_used`` and
+    ``reference_match_score`` columns end-to-end.
+
+Combined: 109 passed in 0.37s. Lint clean.
+Strict scope respected: NO Mongo writes, NO matcher production
+logic outside this probe, NO routing/classifier/Square9 changes,
+NO cutover/archive actions, NO DocuSign / HTTPS / parked AP work
+touched, NO new env vars, NO new auth flows.
+

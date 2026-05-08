@@ -291,9 +291,9 @@ def test_build_summary_counts_and_recommendations():
     assert bc["insufficient_content_access"] == 1
     assert (bc["square9_only_true_gap"]
             + bc["manual_review_still_required"]) == 1
-    # Recommendations include both fetcher and OCR steps.
+    # Recommendations include both failure-detail investigation and OCR.
     steps = " ".join(s["recommended_engineering_next_steps"])
-    assert "Graph" in steps
+    assert "failure_reason_detail" in steps
     assert "OCR" in steps
 
 
@@ -588,3 +588,239 @@ def test_subprocess_help_works_with_module_invocation():
         f"module invocation failed (rc={result.returncode}):\n"
         f"STDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}")
     assert "--use-noop-fetcher" in result.stdout
+
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic capture from extractors with last_diagnostic side-channel
+# ---------------------------------------------------------------------------
+
+class _DiagnosticExtractor:
+    """Test double mimicking GraphBodyFetcher's diagnostic protocol."""
+
+    def __init__(self, mapping):
+        # mapping: square9_name -> (text, status, diagnostic dict)
+        self._mapping = mapping
+        self.last_diagnostic: Dict[str, Any] = {}
+
+    def __call__(self, row):
+        name = row.get("square9_name", "")
+        text, status, diag = self._mapping.get(
+            name, ("", probe.CONTENT_NO_ACCESS,
+                   {"failure_reason_detail": "empty_url",
+                    "graph_url": "", "http_status": None,
+                    "error_body_snippet": "", "exception_class": ""}))
+        self.last_diagnostic = dict(diag)
+        return text, status
+
+
+def test_probe_captures_failure_reason_detail_from_extractor():
+    """When the extractor publishes ``last_diagnostic``, the probe
+    must thread that detail into each output row."""
+    triage = [
+        _triage_row(square9_name="ok.pdf"),
+        _triage_row(square9_name="forbidden.pdf"),
+        _triage_row(square9_name="missing.pdf"),
+        _triage_row(square9_name="timeout.pdf"),
+    ]
+    extractor = _DiagnosticExtractor({
+        "ok.pdf": (
+            "Acme Corp\nInvoice #: INV-12345\nDate: 04/15/2026\n"
+            "Total: $1,500.00",
+            probe.CONTENT_OK,
+            {"failure_reason_detail": "ok",
+             "graph_url": "https://graph.microsoft.com/v1.0/shares/u!ok",
+             "http_status": 200,
+             "error_body_snippet": "", "exception_class": ""},
+        ),
+        "forbidden.pdf": (
+            "", probe.CONTENT_NO_ACCESS,
+            {"failure_reason_detail": "http_403",
+             "graph_url": "https://graph.microsoft.com/v1.0/shares/u!fb",
+             "http_status": 403,
+             "error_body_snippet": "{\"error\":\"forbidden\"}",
+             "exception_class": ""},
+        ),
+        "missing.pdf": (
+            "", probe.CONTENT_NO_ACCESS,
+            {"failure_reason_detail": "http_404",
+             "graph_url": "https://graph.microsoft.com/v1.0/shares/u!ms",
+             "http_status": 404,
+             "error_body_snippet": "{\"error\":\"itemNotFound\"}",
+             "exception_class": ""},
+        ),
+        "timeout.pdf": (
+            "", probe.CONTENT_NO_ACCESS,
+            {"failure_reason_detail": "timeout",
+             "graph_url": "https://graph.microsoft.com/v1.0/shares/u!tm",
+             "http_status": None,
+             "error_body_snippet": "",
+             "exception_class": "ReadTimeout"},
+        ),
+    })
+    idx = probe.build_hub_index_from_docs([_hub_doc(id="hub-acme")])
+    out = probe.probe(triage, extractor=extractor, idx=idx, limit=4)
+    by_name = {r["square9_name"]: r for r in out}
+    assert by_name["ok.pdf"]["failure_reason_detail"] == "ok"
+    assert by_name["forbidden.pdf"]["failure_reason_detail"] == "http_403"
+    assert by_name["forbidden.pdf"]["http_status"] == "403"
+    assert "forbidden" in by_name["forbidden.pdf"]["error_body_snippet"]
+    assert by_name["missing.pdf"]["failure_reason_detail"] == "http_404"
+    assert by_name["timeout.pdf"]["failure_reason_detail"] == "timeout"
+    assert by_name["timeout.pdf"]["exception_class"] == "ReadTimeout"
+
+
+def test_build_summary_aggregates_failure_reason_detail_counts():
+    triage = [
+        _triage_row(square9_name="a.pdf"),
+        _triage_row(square9_name="b.pdf"),
+        _triage_row(square9_name="c.pdf"),
+    ]
+    extractor = _DiagnosticExtractor({
+        "a.pdf": ("", probe.CONTENT_NO_ACCESS,
+                  {"failure_reason_detail": "http_404",
+                   "graph_url": "g/a", "http_status": 404,
+                   "error_body_snippet": "", "exception_class": ""}),
+        "b.pdf": ("", probe.CONTENT_NO_ACCESS,
+                  {"failure_reason_detail": "http_404",
+                   "graph_url": "g/b", "http_status": 404,
+                   "error_body_snippet": "", "exception_class": ""}),
+        "c.pdf": ("", probe.CONTENT_NO_ACCESS,
+                  {"failure_reason_detail": "graph_resolve_failed",
+                   "graph_url": "g/c", "http_status": 400,
+                   "error_body_snippet": "", "exception_class": ""}),
+    })
+    idx = probe.build_hub_index_from_docs([_hub_doc()])
+    probed = probe.probe(triage, extractor=extractor, idx=idx, limit=3)
+    s = probe.build_summary(probed, hub_doc_count=1, source_csv="x.csv")
+    counts = s["failure_reason_detail_counts"]
+    assert counts["http_404"] == 2
+    assert counts["graph_resolve_failed"] == 1
+
+
+def test_render_diag_sample_includes_url_status_and_body_snippet():
+    triage = [_triage_row(square9_name="forbidden.pdf",
+                          square9_parent_path="AP/Vendors/X")]
+    extractor = _DiagnosticExtractor({
+        "forbidden.pdf": (
+            "", probe.CONTENT_NO_ACCESS,
+            {"failure_reason_detail": "http_403",
+             "graph_url": "https://graph.microsoft.com/v1.0/shares/u!xyz",
+             "http_status": 403,
+             "error_body_snippet": "{\"error\":{\"code\":\"accessDenied\"}}",
+             "exception_class": ""},
+        ),
+    })
+    idx = probe.build_hub_index_from_docs([_hub_doc()])
+    out = probe.probe(triage, extractor=extractor, idx=idx, limit=1)
+    banner = probe.render_diag_sample(out, n=1)
+    assert "DIAGNOSTIC SAMPLE" in banner
+    assert "forbidden.pdf" in banner
+    assert "AP/Vendors/X" in banner
+    assert "graph.microsoft.com" in banner
+    assert "http_403" in banner
+    assert "403" in banner
+    assert "accessDenied" in banner
+
+
+def test_render_diag_sample_returns_empty_when_n_is_zero():
+    assert probe.render_diag_sample([{"square9_name": "x"}], n=0) == ""
+
+
+def test_csv_output_includes_diagnostic_columns(tmp_path: Path):
+    triage = [_triage_row(square9_name="forbidden.pdf")]
+    extractor = _DiagnosticExtractor({
+        "forbidden.pdf": (
+            "", probe.CONTENT_NO_ACCESS,
+            {"failure_reason_detail": "http_403",
+             "graph_url": "https://g/x", "http_status": 403,
+             "error_body_snippet": "denied", "exception_class": ""},
+        ),
+    })
+    idx = probe.build_hub_index_from_docs([_hub_doc()])
+    out = probe.probe(triage, extractor=extractor, idx=idx, limit=1)
+    csv_path = tmp_path / "p.csv"
+    probe.write_csv(str(csv_path), out)
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert rows[0]["failure_reason_detail"] == "http_403"
+    assert rows[0]["http_status"] == "403"
+    assert rows[0]["graph_url_attempted"] == "https://g/x"
+    assert rows[0]["error_body_snippet"] == "denied"
+
+
+def test_md_output_includes_failure_reason_detail_section(tmp_path: Path):
+    triage = [_triage_row(square9_name="x.pdf")]
+    extractor = _DiagnosticExtractor({
+        "x.pdf": ("", probe.CONTENT_NO_ACCESS,
+                  {"failure_reason_detail": "http_404",
+                   "graph_url": "g", "http_status": 404,
+                   "error_body_snippet": "", "exception_class": ""}),
+    })
+    idx = probe.build_hub_index_from_docs([_hub_doc()])
+    out = probe.probe(triage, extractor=extractor, idx=idx, limit=1)
+    s = probe.build_summary(out, hub_doc_count=1, source_csv="x.csv")
+    md_path = tmp_path / "p.md"
+    probe.write_md(str(md_path), s)
+    text = md_path.read_text()
+    assert "## failure_reason_detail counts" in text
+    assert "http_404" in text
+
+
+def test_main_emits_diag_sample_banner_when_flag_is_set(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    import mongomock
+
+    triage_csv = tmp_path / "t.csv"
+    fields = list(_triage_row().keys())
+    rows_in = [
+        _triage_row(square9_name="ok.pdf"),
+        _triage_row(square9_name="bad.pdf"),
+    ]
+    with open(triage_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        for r in rows_in:
+            w.writerow(r)
+
+    coll = mongomock.MongoClient().db.hub_documents
+    coll.insert_one(_hub_doc(id="hub-acme"))
+    monkeypatch.setattr(
+        "scripts.document_body_reconciliation_probe.get_hub_documents_collection",
+        lambda: coll,
+    )
+
+    extractor = _DiagnosticExtractor({
+        "ok.pdf": ("Acme\nInvoice #: INV-12345\nDate: 04/15/2026\n"
+                   "Total: $1,500.00", probe.CONTENT_OK,
+                   {"failure_reason_detail": "ok",
+                    "graph_url": "https://g/ok", "http_status": 200,
+                    "error_body_snippet": "", "exception_class": ""}),
+        "bad.pdf": ("", probe.CONTENT_NO_ACCESS,
+                    {"failure_reason_detail": "http_403",
+                     "graph_url": "https://g/bad", "http_status": 403,
+                     "error_body_snippet": "denied",
+                     "exception_class": ""}),
+    })
+
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(triage_csv),
+        "--diag-sample", "2",
+        "--out-csv", str(tmp_path / "out.csv"),
+        "--json", str(tmp_path / "out.json"),
+        "--md", str(tmp_path / "out.md"),
+    ])
+
+    rc = probe.main(extractor=extractor)
+    assert rc == 0
+    captured = capsys.readouterr()
+    out = captured.out
+    assert "DIAGNOSTIC SAMPLE" in out
+    assert "ok.pdf" in out
+    assert "bad.pdf" in out
+    assert "http_403" in out
+    assert "denied" in out
+    # And the failure_reason_detail counts show up in the regular summary too.
+    assert "failure_reason_detail counts" in out

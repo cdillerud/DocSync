@@ -2359,3 +2359,52 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
   auth flows, NO Square9 changes, NO cutover triggers, NO archive
   of stage data, NO DocuSign / HTTPS / parked AP work touched.
 
+
+
+## 2026-02 — body reconciliation probe: failure_reason_detail diagnostics + --diag-sample
+
+- `scripts/sharepoint_body_fetcher.py`:
+  - GraphBodyFetcher now records a per-call diagnostic on
+    `self.last_diagnostic`: `graph_url`, `http_status`,
+    `failure_reason_detail`, `error_body_snippet` (max 500 chars,
+    safe-truncated), `exception_class`, `exception_message`.
+  - failure_reason_detail buckets: ok, ocr_required, empty_url,
+    unsupported_url_scheme, token_error, timeout, network_error,
+    graph_resolve_failed (HTTP 400), http_403, http_404, http_429,
+    http_other_<code>, download_failed, unknown_error.
+  - Existing fetcher contract `(text, status)` is unchanged;
+    diagnostics are a side-channel so existing callers keep working.
+  - Cache hits populate diagnostic with http_status='cache_hit'.
+- `scripts/document_body_reconciliation_probe.py`:
+  - Probe captures `extractor.last_diagnostic` after each call
+    (when available) and threads failure_reason_detail,
+    graph_url_attempted, http_status, error_body_snippet, and
+    exception_class into every output row.
+  - CSV gains 5 new columns; JSON summary gains
+    `failure_reason_detail_counts`; MD gains a dedicated
+    'failure_reason_detail counts' table; console renderer prints
+    the same counts inline.
+  - New CLI flag `--diag-sample N` prints a clear banner for the
+    first N probed rows on stdout (web URL, parent path, resolved
+    Graph URL, HTTP status, failure_reason_detail, exception class,
+    truncated error body, classification).
+  - When 100% of rows fail, the recommended-next-steps section now
+    points operators at the dominant failure_reason_detail bucket
+    instead of the old generic 'wire a fetcher' message.
+- Tests (+21):
+  - test_document_body_sharepoint_fetcher.py: 13 new tests covering
+    each failure_reason_detail bucket (ok, ocr_required, http_404,
+    http_403, http_429, graph_resolve_failed, http_other_503,
+    timeout, network_error, unknown_error, token_error, empty_url,
+    unsupported_url_scheme) plus a between-call reset assertion.
+  - test_document_body_reconciliation_probe.py: 8 new tests for the
+    diagnostic capture path, summary aggregation,
+    render_diag_sample banner content, CSV/MD column emission, and
+    a CLI smoke test that asserts `--diag-sample 2` prints the
+    banner and the failure_reason_detail counts.
+- Combined: 61 passed in 0.34s. Lint clean.
+- Strict scope respected: NO Mongo writes, NO matcher logic
+  touched, NO routing/classifier changes, NO Square9 changes,
+  NO cutover/archive actions, NO DocuSign / HTTPS / parked AP work
+  touched, NO new env vars, NO new auth flows.
+

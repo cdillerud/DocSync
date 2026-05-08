@@ -304,3 +304,167 @@ def test_cache_write_failure_does_not_crash(
     text, status = fetcher(_row())
     # Cache failure is swallowed; the fetch result is still ok.
     assert status == sbf.STATUS_OK
+
+
+
+# ---------------------------------------------------------------------------
+# Diagnostic side-channel: last_diagnostic populated per __call__
+# ---------------------------------------------------------------------------
+
+def _new_fetcher(tmp_path: Path, *, response=None, exc=None,
+                 token_provider=None, no_cache=True):
+    return sbf.GraphBodyFetcher(
+        token_provider=token_provider or (lambda: "TKN"),
+        http_client_factory=_client_factory(_FakeClient(
+            response=response, exc=exc)),
+        cache_dir=str(tmp_path / "cache"),
+        no_cache=no_cache,
+    )
+
+
+def test_diagnostic_ok_on_successful_fetch(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sbf, "_extract_pdf_text",
+                        lambda _d: "Invoice INV-1 " * 20)
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(200, b"%PDF"))
+    fetcher(_row())
+    diag = fetcher.last_diagnostic
+    assert diag["failure_reason_detail"] == "ok"
+    assert diag["http_status"] == 200
+    assert diag["graph_url"].startswith("https://graph.microsoft.com/v1.0/")
+
+
+def test_diagnostic_ocr_required_when_pdf_has_no_text(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(sbf, "_extract_pdf_text", lambda _d: "")
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(200, b"%PDF"))
+    fetcher(_row())
+    assert fetcher.last_diagnostic["failure_reason_detail"] == "ocr_required"
+
+
+def test_diagnostic_http_404(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(404, b"itemNotFound"))
+    fetcher(_row())
+    diag = fetcher.last_diagnostic
+    assert diag["failure_reason_detail"] == "http_404"
+    assert diag["http_status"] == 404
+    assert "itemNotFound" in diag["error_body_snippet"]
+
+
+def test_diagnostic_http_403(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(403, b"accessDenied"))
+    fetcher(_row())
+    assert fetcher.last_diagnostic["failure_reason_detail"] == "http_403"
+
+
+def test_diagnostic_http_429(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(429, b"throttle"))
+    fetcher(_row())
+    assert fetcher.last_diagnostic["failure_reason_detail"] == "http_429"
+
+
+def test_diagnostic_graph_resolve_failed_on_400(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(400, b"badRequest"))
+    fetcher(_row())
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "graph_resolve_failed")
+
+
+def test_diagnostic_http_other_for_unusual_codes(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path,
+                           response=_FakeResponse(503, b"unavailable"))
+    fetcher(_row())
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "http_other_503")
+
+
+def test_diagnostic_timeout_exception(tmp_path: Path):
+    class _ReadTimeout(Exception):
+        pass
+    fetcher = _new_fetcher(tmp_path, exc=_ReadTimeout("boom"))
+    fetcher(_row())
+    diag = fetcher.last_diagnostic
+    assert diag["failure_reason_detail"] == "timeout"
+    assert diag["exception_class"] == "_ReadTimeout"
+
+
+def test_diagnostic_network_error_exception(tmp_path: Path):
+    class _ConnectError(Exception):
+        pass
+    fetcher = _new_fetcher(tmp_path, exc=_ConnectError("dns"))
+    fetcher(_row())
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "network_error")
+
+
+def test_diagnostic_unknown_error_exception(tmp_path: Path):
+    class _Weird(Exception):
+        pass
+    fetcher = _new_fetcher(tmp_path, exc=_Weird("???"))
+    fetcher(_row())
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "unknown_error")
+
+
+def test_diagnostic_token_error(tmp_path: Path):
+    def _bad():
+        raise RuntimeError("creds missing")
+    fetcher = _new_fetcher(tmp_path, token_provider=_bad)
+    fetcher(_row())
+    diag = fetcher.last_diagnostic
+    assert diag["failure_reason_detail"] == "token_error"
+    assert diag["exception_class"] == "RuntimeError"
+
+
+def test_diagnostic_empty_url(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path)
+    fetcher({"square9_web_url": ""})
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "empty_url")
+
+
+def test_diagnostic_unsupported_url_scheme(tmp_path: Path):
+    fetcher = _new_fetcher(tmp_path)
+    fetcher({"square9_web_url": "file:///etc/passwd"})
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == "unsupported_url_scheme")
+
+
+def test_diagnostic_resets_between_calls(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """A failing call must not leak into the next (successful) call."""
+    monkeypatch.setattr(sbf, "_extract_pdf_text",
+                        lambda _d: "Invoice " * 50)
+
+    class _RotatingClient(_FakeClient):
+        def __init__(self):
+            super().__init__(response=None)
+            self._calls = 0
+
+        def get(self, url, headers=None, follow_redirects=False):
+            self.calls.append(url)
+            self._calls += 1
+            if self._calls == 1:
+                return _FakeResponse(404, b"not found")
+            return _FakeResponse(200, b"%PDF")
+
+    client = _RotatingClient()
+    fetcher = sbf.GraphBodyFetcher(
+        token_provider=lambda: "TKN",
+        http_client_factory=_client_factory(client),
+        cache_dir=str(tmp_path / "cache"),
+        no_cache=True,
+    )
+    fetcher(_row("https://x.sharepoint.com/sites/x/a.pdf"))
+    first = dict(fetcher.last_diagnostic)
+    fetcher(_row("https://x.sharepoint.com/sites/x/b.pdf"))
+    second = fetcher.last_diagnostic
+    assert first["failure_reason_detail"] == "http_404"
+    assert second["failure_reason_detail"] == "ok"
+    assert first["graph_url"] != second["graph_url"]

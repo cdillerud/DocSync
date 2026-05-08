@@ -55,6 +55,68 @@ STATUS_OK = "ok"
 STATUS_OCR = "ocr_required"
 STATUS_NO_ACCESS = "no_access"
 
+# Failure reason detail buckets recorded on the fetcher's
+# ``last_diagnostic`` after each call. Successful fetches use "ok";
+# OCR-required (image/scanned) fetches use "ocr_required".
+DETAIL_OK = "ok"
+DETAIL_OCR_REQUIRED = "ocr_required"
+DETAIL_EMPTY_URL = "empty_url"
+DETAIL_UNSUPPORTED_URL_SCHEME = "unsupported_url_scheme"
+DETAIL_TOKEN_ERROR = "token_error"
+DETAIL_TIMEOUT = "timeout"
+DETAIL_NETWORK_ERROR = "network_error"
+DETAIL_HTTP_400_RESOLVE_FAILED = "graph_resolve_failed"
+DETAIL_HTTP_403 = "http_403"
+DETAIL_HTTP_404 = "http_404"
+DETAIL_HTTP_429 = "http_429"
+DETAIL_DOWNLOAD_FAILED = "download_failed"
+DETAIL_UNKNOWN_ERROR = "unknown_error"
+
+
+def _http_other(status: int) -> str:
+    return f"http_other_{int(status)}"
+
+
+_URL_SCHEME_RE = re.compile(r"^https?://", re.I)
+
+
+def _classify_exception(e: BaseException) -> str:
+    name = type(e).__name__.lower()
+    if "timeout" in name:
+        return DETAIL_TIMEOUT
+    if any(k in name for k in (
+            "connect", "network", "remoteprotocol", "transport",
+            "readerror", "writeerror", "proxyerror", "dnserror")):
+        return DETAIL_NETWORK_ERROR
+    return DETAIL_UNKNOWN_ERROR
+
+
+def _truncate_body(b: Any, limit: int = 500) -> str:
+    if b is None:
+        return ""
+    try:
+        if isinstance(b, bytes):
+            text = b.decode("utf-8", errors="replace")
+        else:
+            text = str(b)
+    except Exception:  # noqa: BLE001
+        return ""
+    text = text.strip()
+    if len(text) > limit:
+        return text[:limit] + f"... (+{len(text) - limit} chars)"
+    return text
+
+
+def _fresh_diag() -> Dict[str, Any]:
+    return {
+        "graph_url": "",
+        "http_status": None,
+        "failure_reason_detail": None,
+        "error_body_snippet": "",
+        "exception_class": "",
+        "exception_message": "",
+    }
+
 
 # ---------------------------------------------------------------------------
 # Pure helpers
@@ -136,6 +198,8 @@ class GraphBodyFetcher:
         self._cache_dir = cache_dir
         self._no_cache = no_cache
         self._timeout = timeout
+        # Per-call diagnostic. Reset on each __call__.
+        self.last_diagnostic: Dict[str, Any] = _fresh_diag()
 
     # Pluggable token caching: re-using the email-poller's tokens is fine,
     # but we resolve once per fetcher instance and reuse for the whole probe.
@@ -168,13 +232,18 @@ class GraphBodyFetcher:
 
     def _fetch_bytes(self, web_url: str) -> Optional[bytes]:
         """Resolve the web_url via Graph 'shares' endpoint and download
-        the file content. Returns None on any failure."""
+        the file content. Returns None on any failure. Records details
+        on ``self.last_diagnostic``."""
         share_id = url_to_share_id(web_url)
         graph_url = f"{GRAPH_BASE}/shares/{share_id}/driveItem/content"
+        self.last_diagnostic["graph_url"] = graph_url
         try:
             token = self._token()
         except Exception as e:  # noqa: BLE001
             logger.warning("token acquisition failed: %s", e)
+            self.last_diagnostic["failure_reason_detail"] = DETAIL_TOKEN_ERROR
+            self.last_diagnostic["exception_class"] = type(e).__name__
+            self.last_diagnostic["exception_message"] = str(e)
             return None
         try:
             with self._http_client_factory(self._timeout) as client:
@@ -184,32 +253,80 @@ class GraphBodyFetcher:
                     follow_redirects=True,
                 )
                 status = getattr(resp, "status_code", 0)
+                self.last_diagnostic["http_status"] = status
                 if status != 200:
+                    self.last_diagnostic["error_body_snippet"] = (
+                        _truncate_body(getattr(resp, "content", None)))
+                    if status == 400:
+                        detail = DETAIL_HTTP_400_RESOLVE_FAILED
+                    elif status == 403:
+                        detail = DETAIL_HTTP_403
+                    elif status == 404:
+                        detail = DETAIL_HTTP_404
+                    elif status == 429:
+                        detail = DETAIL_HTTP_429
+                    else:
+                        detail = _http_other(status)
+                    self.last_diagnostic["failure_reason_detail"] = detail
                     logger.warning(
-                        "graph fetch %s returned status=%s", web_url, status)
+                        "graph fetch %s returned status=%s detail=%s",
+                        web_url, status, detail)
                     return None
                 content = getattr(resp, "content", None)
                 if content is None:
+                    self.last_diagnostic["failure_reason_detail"] = (
+                        DETAIL_DOWNLOAD_FAILED)
                     return None
                 return content
         except Exception as e:  # noqa: BLE001
             logger.warning("graph fetch %s failed: %s", web_url, e)
+            self.last_diagnostic["failure_reason_detail"] = (
+                _classify_exception(e))
+            self.last_diagnostic["exception_class"] = type(e).__name__
+            self.last_diagnostic["exception_message"] = str(e)
             return None
 
     def __call__(self, row: Dict[str, str]) -> Tuple[str, str]:
+        # Reset diagnostics for this call so callers always see this
+        # row's outcome (not a previous row's).
+        self.last_diagnostic = _fresh_diag()
+
         web_url = (row.get("square9_web_url") or "").strip()
         if not web_url:
+            self.last_diagnostic["failure_reason_detail"] = DETAIL_EMPTY_URL
+            return "", STATUS_NO_ACCESS
+        if not _URL_SCHEME_RE.match(web_url):
+            self.last_diagnostic["failure_reason_detail"] = (
+                DETAIL_UNSUPPORTED_URL_SCHEME)
             return "", STATUS_NO_ACCESS
 
         data: Optional[bytes] = None
+        cache_hit = False
         if not self._no_cache:
             data = self._read_cache(web_url)
+            if data is not None:
+                cache_hit = True
         if data is None:
             data = self._fetch_bytes(web_url)
             if data is None:
+                # _fetch_bytes already set failure_reason_detail.
+                if not self.last_diagnostic.get("failure_reason_detail"):
+                    self.last_diagnostic["failure_reason_detail"] = (
+                        DETAIL_UNKNOWN_ERROR)
                 return "", STATUS_NO_ACCESS
             self._write_cache(web_url, data)
-        return classify_bytes(data, web_url)
+        elif cache_hit:
+            # Even on a cache hit we want the graph_url field populated
+            # so diagnostics are consistent.
+            self.last_diagnostic["graph_url"] = (
+                f"{GRAPH_BASE}/shares/{url_to_share_id(web_url)}"
+                f"/driveItem/content")
+            self.last_diagnostic["http_status"] = "cache_hit"
+
+        text, status = classify_bytes(data, web_url)
+        self.last_diagnostic["failure_reason_detail"] = (
+            DETAIL_OK if status == STATUS_OK else DETAIL_OCR_REQUIRED)
+        return text, status
 
 
 # ---------------------------------------------------------------------------

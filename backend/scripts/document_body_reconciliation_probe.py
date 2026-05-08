@@ -503,6 +503,16 @@ def classify(*, status: str,
 # Probe runner
 # ---------------------------------------------------------------------------
 
+def _extract_diagnostic(extractor: Any) -> Dict[str, Any]:
+    """Pull the per-call diagnostic dict off an extractor if it
+    publishes one. Returns an empty dict for plain function extractors
+    (e.g., ``default_body_extractor`` or test fixtures)."""
+    diag = getattr(extractor, "last_diagnostic", None)
+    if isinstance(diag, dict):
+        return dict(diag)
+    return {}
+
+
 def probe(rows: List[Dict[str, str]],
           *,
           extractor: BodyExtractor,
@@ -512,6 +522,7 @@ def probe(rows: List[Dict[str, str]],
     out: List[Dict[str, Any]] = []
     for row in rows[:limit] if limit else rows:
         text, status = extractor(row)
+        diag = _extract_diagnostic(extractor)
         if status == CONTENT_OK and not text.strip():
             status = CONTENT_OCR_REQUIRED
         signals = (extract_body_signals(text)
@@ -528,11 +539,30 @@ def probe(rows: List[Dict[str, str]],
             vendor_known=vendor_in_hub(row, idx),
         )
         hub = best_hub or {}
+        # Pin the failure_reason_detail. For extractors that don't
+        # publish diagnostics (the no-op default and test fixtures),
+        # synthesize a value from the status so the output column is
+        # never empty.
+        detail = diag.get("failure_reason_detail")
+        if not detail:
+            if status == CONTENT_OK:
+                detail = "ok"
+            elif status == CONTENT_OCR_REQUIRED:
+                detail = "ocr_required"
+            else:
+                detail = "no_diagnostic_available"
         out.append({
             "square9_name": row.get("square9_name", ""),
             "square9_parent_path": row.get("square9_parent_path", ""),
             "square9_web_url": row.get("square9_web_url", ""),
             "content_access_status": status,
+            "failure_reason_detail": detail,
+            "graph_url_attempted": diag.get("graph_url", ""),
+            "http_status": (
+                "" if diag.get("http_status") in (None, "")
+                else str(diag.get("http_status"))),
+            "error_body_snippet": diag.get("error_body_snippet", ""),
+            "exception_class": diag.get("exception_class", ""),
             "extracted_invoice_number": signals.get("invoice_number") or "",
             "extracted_vendor": signals.get("vendor_hint") or "",
             "extracted_amount":
@@ -588,12 +618,17 @@ def build_summary(probed: List[Dict[str, Any]],
     for r in probed:
         by_bucket[r["classification"]].append(r)
 
+    failure_detail_counts: Counter = Counter(
+        (r.get("failure_reason_detail") or "unknown") for r in probed)
+
     next_steps: List[str] = []
     if bc.get("insufficient_content_access", 0) > 0:
         next_steps.append(
-            "Wire a SharePoint/Graph fetcher into "
-            "default_body_extractor so the probe can read Square9 "
-            "files directly.")
+            "Investigate failure_reason_detail counts: most "
+            "no_access rows have a specific cause (http_404, "
+            "graph_resolve_failed, http_403, token_error, "
+            "unsupported_url_scheme, timeout). Fix the dominant "
+            "bucket first.")
     if bc.get("ocr_required", 0) > 0:
         next_steps.append(
             "Add an OCR pass (pytesseract / Azure OCR / similar) "
@@ -630,6 +665,8 @@ def build_summary(probed: List[Dict[str, Any]],
         "manual_review_still_required":
             bc.get("manual_review_still_required", 0),
         "bucket_counts": {b: bc.get(b, 0) for b in BUCKET_ORDER},
+        "failure_reason_detail_counts":
+            dict(failure_detail_counts.most_common()),
         "top_vendors": top_vendors.most_common(top),
         "top_failure_reasons": failure_reasons.most_common(top),
         "top_examples_by_bucket": {
@@ -646,6 +683,8 @@ def build_summary(probed: List[Dict[str, Any]],
 OUTPUT_CSV_COLUMNS = [
     "square9_name", "square9_parent_path", "square9_web_url",
     "content_access_status",
+    "failure_reason_detail", "graph_url_attempted", "http_status",
+    "error_body_snippet", "exception_class",
     "extracted_invoice_number", "extracted_vendor", "extracted_amount",
     "extracted_invoice_date", "extracted_po_number",
     "extracted_reference_numbers",
@@ -736,6 +775,18 @@ def write_md(path: str, summary: Dict[str, Any], top: int = 25) -> None:
                      f"{ACTION_FOR_BUCKET[b]} |")
     lines.append("")
 
+    detail_counts = summary.get("failure_reason_detail_counts") or {}
+    lines.append("## failure_reason_detail counts")
+    lines.append("")
+    if not detail_counts:
+        lines.append("_no diagnostics captured_")
+    else:
+        lines.append("| failure_reason_detail | count | pct |")
+        lines.append("| --- | ---: | ---: |")
+        for detail, n in detail_counts.items():
+            lines.append(f"| {detail} | {n} | {pct(n):.1f}% |")
+    lines.append("")
+
     def _table(title: str, rows: List[Dict[str, Any]]) -> None:
         lines.append(f"## {title}")
         lines.append("")
@@ -801,6 +852,15 @@ def render_console(summary: Dict[str, Any],
         pct_v = (n / total * 100.0) if total else 0.0
         out.append(f"    {b:55s} {n:5d}  ({pct_v:5.1f}%)")
     out.append("")
+
+    detail_counts = summary.get("failure_reason_detail_counts") or {}
+    if detail_counts:
+        out.append("  failure_reason_detail counts:")
+        for detail, n in detail_counts.items():
+            pct_v = (n / total * 100.0) if total else 0.0
+            out.append(f"    {detail:55s} {n:5d}  ({pct_v:5.1f}%)")
+        out.append("")
+
     if summary["recommended_engineering_next_steps"]:
         out.append("  recommended next steps:")
         for s in summary["recommended_engineering_next_steps"]:
@@ -811,6 +871,48 @@ def render_console(summary: Dict[str, Any],
     out.append(f"  md_out   : {md_out}")
     out.append("")
     out.append("  READ-ONLY probe. No DB writes, no routing changes.")
+    out.append("=" * 72)
+    return "\n".join(out)
+
+
+def render_diag_sample(probed: List[Dict[str, Any]], n: int) -> str:
+    """Render a diagnostic banner for the first ``n`` probed rows so
+    the operator can immediately see, on the production VM, why each
+    fetch did or did not succeed (which URL was attempted, what HTTP
+    status came back, what failure_reason_detail was assigned, and a
+    truncated error body)."""
+    if n <= 0 or not probed:
+        return ""
+    out: List[str] = []
+    out.append("")
+    out.append("=" * 72)
+    out.append(f" DIAGNOSTIC SAMPLE — first {min(n, len(probed))} rows")
+    out.append("=" * 72)
+    for i, r in enumerate(probed[:n], start=1):
+        out.append(f"  [{i}] square9_name        : {r.get('square9_name','')}")
+        out.append(f"      square9_parent_path : "
+                   f"{r.get('square9_parent_path','')}")
+        out.append(f"      square9_web_url     : "
+                   f"{r.get('square9_web_url','')}")
+        out.append(f"      content_access_status   : "
+                   f"{r.get('content_access_status','')}")
+        out.append(f"      failure_reason_detail   : "
+                   f"{r.get('failure_reason_detail','')}")
+        out.append(f"      graph_url_attempted     : "
+                   f"{r.get('graph_url_attempted','')}")
+        out.append(f"      http_status             : "
+                   f"{r.get('http_status','')}")
+        if r.get("exception_class"):
+            out.append(f"      exception_class         : "
+                       f"{r.get('exception_class','')}")
+        body = r.get("error_body_snippet", "")
+        if body:
+            out.append("      error_body_snippet      :")
+            for line in body.splitlines():
+                out.append(f"        | {line}")
+        out.append(f"      classification          : "
+                   f"{r.get('classification','')}")
+        out.append("")
     out.append("=" * 72)
     return "\n".join(out)
 
@@ -850,6 +952,12 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
               "verification / test runs. Without this flag the probe "
               "REQUIRES the production SharePoint/Graph fetcher and will "
               "exit non-zero if it cannot be built."))
+    p.add_argument(
+        "--diag-sample", type=int, default=0, metavar="N",
+        help=("Print a diagnostic banner for the first N probed rows "
+              "(square9_web_url, square9_parent_path, resolved Graph "
+              "URL attempted, HTTP status, failure_reason_detail, and "
+              "any truncated error body). N=0 disables the banner."))
     args = p.parse_args()
 
     if not os.path.exists(args.triage_csv):
@@ -904,6 +1012,10 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
     write_json(args.json, summary)
     write_md(args.md, summary, top=args.top)
 
+    if args.diag_sample and args.diag_sample > 0:
+        banner = render_diag_sample(probed, args.diag_sample)
+        if banner:
+            print(banner)
     print(render_console(summary, args.out_csv, args.json, args.md))
     return 0
 

@@ -2049,3 +2049,18 @@ GPI Hub is **not** cutover-ready until both of the following hold for a real pro
 1. `billing_intake_routing_probe` returns exit code 0 (no blockers).
 2. `ap_cutover_readiness_report` shows `auto_routed` as the dominant `routing_status` for AP_INVOICE in the window, with `needs_review`/`exception` confined to genuinely uncertain cases.
 3. `scripts.sharepoint_ap_compare --graph-pull` reports non-zero `exact_match` + `likely_match` counts proving prod-vs-test AP overlap.
+
+## 2026-02 — Bucket A Post-Apply Verifier Rendering Patch
+- `scripts/verify_bucket_A_apply.py::render()` now prints `routing_status`,
+  `routing_reason`, and `sharepoint_folder_path` inline with the existing
+  per-doc block (right after `suggested_job_type`, before `remediation_audit`).
+- `tests/test_verify_bucket_A_apply.py::test_render_shows_all_seven_required_fields`
+  extended to assert the three new labels and their values appear in the
+  rendered text. All 5 tests in the file pass.
+- `ops/run_bucket_A_apply_and_verify.sh` confirmed intact (preflight →
+  gated apply → verify → re-run proof pack → SUMMARY block).
+- Strict scope respected: no Square9 cutover, no archive call, no
+  additional Mongo writes, no CFO summary, no DocuSign / HTTPS / parked
+  AP contamination work, no unrelated refactors.
+- Single packaged VM command:
+  `docker compose exec backend bash ops/run_bucket_A_apply_and_verify.sh`

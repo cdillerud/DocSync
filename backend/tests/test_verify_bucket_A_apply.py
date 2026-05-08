@@ -48,6 +48,9 @@ def test_render_shows_all_seven_required_fields():
         "mailbox_category": "AP",
         "doc_type": "AP_INVOICE",
         "suggested_job_type": "AP_Invoice",
+        "routing_status": "ROUTED",
+        "routing_reason": "bucket_A_one_shot_patch",
+        "sharepoint_folder_path": "/sites/AP/Inbox/Vendor",
         "remediation_audit": {"source": "bucket_A_one_shot_patch",
                               "applied_at": "2026-05-06T22:00:00Z",
                               "cohort_key": {"email_sender": "x@y.com"}},
@@ -55,8 +58,12 @@ def test_render_shows_all_seven_required_fields():
     records = vfy.fetch_docs(coll, ["doc-1"])
     text = vfy.render(records)
     for label in ("file_name", "email_sender", "mailbox_category",
-                  "doc_type", "suggested_job_type", "remediation_audit"):
+                  "doc_type", "suggested_job_type", "remediation_audit",
+                  "routing_status", "routing_reason",
+                  "sharepoint_folder_path"):
         assert label in text
+    assert "ROUTED" in text
+    assert "/sites/AP/Inbox/Vendor" in text
     assert "bucket_A_one_shot_patch" in text
     assert "READ-ONLY" in text
 

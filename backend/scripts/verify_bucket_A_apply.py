@@ -85,6 +85,9 @@ def render(records: Dict[str, Optional[Dict[str, Any]]]) -> str:
         lines.append(f"    mailbox_category    : {doc.get('mailbox_category')}")
         lines.append(f"    doc_type            : {doc.get('doc_type')}")
         lines.append(f"    suggested_job_type  : {doc.get('suggested_job_type')}")
+        lines.append(f"    routing_status      : {doc.get('routing_status')}")
+        lines.append(f"    routing_reason      : {doc.get('routing_reason')}")
+        lines.append(f"    sharepoint_folder_path : {doc.get('sharepoint_folder_path')}")
         audit = doc.get("remediation_audit")
         if isinstance(audit, dict):
             lines.append(f"    remediation_audit   :")

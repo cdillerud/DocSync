@@ -62,8 +62,20 @@ import glob
 import json
 import os
 import re
+import sys
 from collections import Counter, defaultdict
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
+
+
+# Bootstrap: when invoked as ``python scripts/document_body_reconciliation_probe.py``
+# Python places ``scripts/`` on sys.path[0], not the project root, which
+# breaks ``from scripts.sharepoint_body_fetcher import …``. Prepend the
+# project root so package-style imports resolve regardless of how the
+# script is launched.
+_PROJECT_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), os.pardir))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 
 # ---------------------------------------------------------------------------

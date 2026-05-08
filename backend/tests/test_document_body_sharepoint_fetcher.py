@@ -468,3 +468,63 @@ def test_diagnostic_resets_between_calls(
     assert first["failure_reason_detail"] == "http_404"
     assert second["failure_reason_detail"] == "ok"
     assert first["graph_url"] != second["graph_url"]
+
+
+
+# ---------------------------------------------------------------------------
+# non_invoice_attachment status: Office binaries (xlsx / xls / docx)
+# masquerading as .pdf, or legitimately attached as .xlsx / .xls.
+# ---------------------------------------------------------------------------
+
+def test_classify_bytes_returns_non_invoice_attachment_for_ooxml():
+    """``PK\\x03\\x04`` magic = ZIP/OOXML (xlsx/docx/pptx). Must not
+    be routed to OCR — it is not an invoice body, just a tracking
+    spreadsheet or Word doc."""
+    text, status = sbf.classify_bytes(
+        b"PK\x03\x04\x14\x00\x06\x00...", "https://x/Inventory.xlsx")
+    assert status == sbf.STATUS_NON_INVOICE_ATTACHMENT
+    assert text == ""
+
+
+def test_classify_bytes_returns_non_invoice_attachment_for_ole():
+    """``\\xd0\\xcf\\x11\\xe0`` magic = OLE compound document
+    (legacy .xls / .doc / .ppt)."""
+    text, status = sbf.classify_bytes(
+        b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1...", "https://x/old.xls")
+    assert status == sbf.STATUS_NON_INVOICE_ATTACHMENT
+    assert text == ""
+
+
+def test_non_invoice_attachment_takes_precedence_over_image_extension():
+    """Even if the URL ends in .tiff, real ZIP bytes mean it's an
+    OOXML file, not a scanned image."""
+    text, status = sbf.classify_bytes(
+        b"PK\x03\x04hello", "https://x/weird.tiff")
+    assert status == sbf.STATUS_NON_INVOICE_ATTACHMENT
+
+
+def test_real_image_pdf_still_returns_ocr_required(
+        monkeypatch: pytest.MonkeyPatch):
+    """Scanned PDF (real %PDF magic, no extractable text) must keep
+    routing to ocr_required, not get reclassified."""
+    monkeypatch.setattr(sbf, "_extract_pdf_text", lambda _d: "")
+    text, status = sbf.classify_bytes(
+        b"%PDF-1.4 some scanned content", "https://x/scan.pdf")
+    assert status == sbf.STATUS_OCR
+    assert text == ""
+
+
+def test_diagnostic_marks_non_invoice_attachment_on_fetcher_call(
+        tmp_path: Path):
+    fetcher = sbf.GraphBodyFetcher(
+        token_provider=lambda: "TKN",
+        http_client_factory=_client_factory(_FakeClient(
+            response=_FakeResponse(200, b"PK\x03\x04tracking.xlsx"))),
+        cache_dir=str(tmp_path / "cache"),
+        no_cache=True,
+    )
+    text, status = fetcher(_row("https://x.sharepoint.com/sites/x/track.xlsx"))
+    assert status == sbf.STATUS_NON_INVOICE_ATTACHMENT
+    assert text == ""
+    assert (fetcher.last_diagnostic["failure_reason_detail"]
+            == sbf.DETAIL_NON_INVOICE_ATTACHMENT)

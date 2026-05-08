@@ -211,12 +211,17 @@ def _clean_capture(value: Optional[str]) -> Optional[str]:
 CONTENT_OK = "ok"
 CONTENT_OCR_REQUIRED = "ocr_required"
 CONTENT_NO_ACCESS = "no_access"
+# Excel/Word/OOXML/OLE files masquerading as ``.pdf`` or attached
+# directly. Not invoice bodies — flag out of the AP cohort.
+CONTENT_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"
 
 BUCKET_ORDER = (
     "content_match_found",
+    "content_match_invoice_only_below_threshold",
     "likely_same_invoice_different_attachment_granularity",
     "square9_only_true_gap",
     "ocr_required",
+    "non_invoice_attachment",
     "insufficient_content_access",
     "manual_review_still_required",
 )
@@ -224,12 +229,16 @@ BUCKET_ORDER = (
 ACTION_FOR_BUCKET = {
     "content_match_found":
         "wire_into_matcher_as_body_signal_match",
+    "content_match_invoice_only_below_threshold":
+        "improve_hub_metadata_for_this_doc",
     "likely_same_invoice_different_attachment_granularity":
         "decide_aggregation_strategy_per_vendor",
     "square9_only_true_gap":
         "investigate_square9_intake_lane",
     "ocr_required":
         "add_ocr_pipeline",
+    "non_invoice_attachment":
+        "exclude_from_ap_cohort",
     "insufficient_content_access":
         "wire_sharepoint_graph_fetcher",
     "manual_review_still_required":
@@ -622,6 +631,25 @@ def vendor_in_hub(row: Dict[str, str], idx: HubIndex) -> bool:
         bool(sq_tokens & idx.sender_domain_roots)
 
 
+def hub_missing_fields(doc: Optional[Dict[str, str]]) -> List[str]:
+    """For a Hub doc, return the names of identifying metadata fields
+    that are blank/empty. Used by
+    ``content_match_invoice_only_below_threshold`` to surface what
+    Hub-side cleanup would lift the score across the threshold."""
+    if not doc:
+        return []
+    missing: List[str] = []
+    for key, label in (
+        ("hub_amount_float", "amount_float"),
+        ("hub_vendor_canonical", "vendor_canonical"),
+        ("hub_invoice_date", "invoice_date"),
+        ("hub_po_number_clean", "po_number_clean"),
+    ):
+        if not (doc.get(key) or "").strip():
+            missing.append(label)
+    return missing
+
+
 def classify(*, status: str,
              signals: Dict[str, Any],
              score: float,
@@ -632,6 +660,10 @@ def classify(*, status: str,
     if status == CONTENT_NO_ACCESS:
         return ("insufficient_content_access",
                 "could not retrieve document content")
+    if status == CONTENT_NON_INVOICE_ATTACHMENT:
+        return ("non_invoice_attachment",
+                "binary Office file (xlsx/xls/docx) — not an invoice "
+                "body; exclude from AP cohort")
     if status == CONTENT_OCR_REQUIRED:
         return ("ocr_required",
                 "PDF body had no extractable text; OCR pass needed")
@@ -640,6 +672,19 @@ def classify(*, status: str,
         return ("content_match_found",
                 f"score {score:.2f} >= {CONTENT_MATCH_THRESHOLD} on "
                 f"hub_doc_id={best_hub['hub_doc_id']!r}")
+
+    # Invoice number agrees with a Hub doc but other signals (often
+    # because Hub-side metadata is thin) cannot lift the score across
+    # the 0.85 threshold. Surface as actionable Hub-cleanup work.
+    if (best_hub
+            and breakdown.get("invoice_number", 0) == 1.0
+            and score < CONTENT_MATCH_THRESHOLD):
+        missing = hub_missing_fields(best_hub)
+        miss_str = (", ".join(missing) or "n/a")
+        return ("content_match_invoice_only_below_threshold",
+                f"invoice_number agrees with hub_doc_id="
+                f"{best_hub['hub_doc_id']!r} (score {score:.2f}); "
+                f"hub_missing_fields=[{miss_str}]")
 
     # Same vendor + amount + date but invoice number disagrees -> very
     # likely the same economic event split into multiple files.
@@ -712,11 +757,19 @@ def probe(rows: List[Dict[str, str]],
                 detail = "ok"
             elif status == CONTENT_OCR_REQUIRED:
                 detail = "ocr_required"
+            elif status == CONTENT_NON_INVOICE_ATTACHMENT:
+                detail = "non_invoice_attachment"
             else:
                 detail = "no_diagnostic_available"
-        # Reference-number scoring telemetry (Part B).
+        # Reference-number scoring telemetry (Part B from earlier).
         ref_matches = breakdown.get("_reference_numbers_matched") or []
         ref_score = WEIGHTS["reference_number"] if ref_matches else 0.0
+        # Hub-missing-fields telemetry (Task A, this iteration). Only
+        # populated when classify() routes the row into
+        # ``content_match_invoice_only_below_threshold``.
+        missing = (",".join(hub_missing_fields(hub))
+                   if bucket == "content_match_invoice_only_below_threshold"
+                   else "")
         out.append({
             "square9_name": row.get("square9_name", ""),
             "square9_parent_path": row.get("square9_parent_path", ""),
@@ -741,6 +794,7 @@ def probe(rows: List[Dict[str, str]],
             "reference_numbers_used": ",".join(ref_matches),
             "reference_match_score":
                 f"{ref_score:.2f}" if ref_score else "",
+            "hub_missing_fields": missing,
             "best_hub_doc_id": hub.get("hub_doc_id", ""),
             "best_hub_file_name": hub.get("hub_file_name", ""),
             "best_hub_vendor_canonical":
@@ -802,6 +856,20 @@ def build_summary(probed: List[Dict[str, Any]],
         next_steps.append(
             "Add an OCR pass (pytesseract / Azure OCR / similar) "
             "for PDFs that have no embedded text.")
+    if bc.get("content_match_invoice_only_below_threshold", 0) > 0:
+        next_steps.append(
+            "These rows have a confirmed Hub doc on invoice number "
+            "but the Hub-side metadata is too thin to clear the 0.85 "
+            "score threshold. Backfill amount_float / vendor_canonical "
+            "/ invoice_date on those Hub docs (see hub_missing_fields "
+            "column). After cleanup these rows promote to "
+            "content_match_found.")
+    if bc.get("non_invoice_attachment", 0) > 0:
+        next_steps.append(
+            "Excel/Word/OOXML/OLE files (tracking sheets) routed to "
+            "non_invoice_attachment. Exclude these from the AP "
+            "reconciliation cohort upstream rather than retrying "
+            "OCR on them.")
     if bc.get("content_match_found", 0) > 0:
         next_steps.append(
             "Promote body-signal matches into the parity matcher as a "
@@ -858,6 +926,7 @@ OUTPUT_CSV_COLUMNS = [
     "extracted_invoice_date", "extracted_po_number",
     "extracted_reference_numbers",
     "reference_numbers_used", "reference_match_score",
+    "hub_missing_fields",
     "best_hub_doc_id", "best_hub_file_name",
     "best_hub_vendor_canonical", "best_hub_invoice_number_clean",
     "best_hub_amount_float", "best_hub_po_number_clean",

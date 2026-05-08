@@ -54,12 +54,22 @@ OCR_REQUIRED_SUFFIXES = (
 STATUS_OK = "ok"
 STATUS_OCR = "ocr_required"
 STATUS_NO_ACCESS = "no_access"
+# Excel / Word / OOXML / OLE attachments masquerading as ``.pdf`` (or
+# legitimately attached as ``.xlsx`` / ``.xls``) are not invoice
+# bodies. They are typically operational tracking sheets and should
+# be flagged out of the AP reconciliation cohort entirely rather
+# than queued for OCR (which would not help). See production VM
+# wider-sweep finding (2026-02): of 10 ``ocr_required`` rows in the
+# 100-row cohort, ~6 were Buske / Evergreen / Peppertree tracking
+# spreadsheets.
+STATUS_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"
 
 # Failure reason detail buckets recorded on the fetcher's
 # ``last_diagnostic`` after each call. Successful fetches use "ok";
 # OCR-required (image/scanned) fetches use "ocr_required".
 DETAIL_OK = "ok"
 DETAIL_OCR_REQUIRED = "ocr_required"
+DETAIL_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"
 DETAIL_EMPTY_URL = "empty_url"
 DETAIL_UNSUPPORTED_URL_SCHEME = "unsupported_url_scheme"
 DETAIL_TOKEN_ERROR = "token_error"
@@ -71,6 +81,10 @@ DETAIL_HTTP_404 = "http_404"
 DETAIL_HTTP_429 = "http_429"
 DETAIL_DOWNLOAD_FAILED = "download_failed"
 DETAIL_UNKNOWN_ERROR = "unknown_error"
+
+# Magic-number prefixes for binary Office formats that are not PDFs.
+_OOXML_MAGIC = b"PK\x03\x04"            # .xlsx / .docx / .pptx (ZIP)
+_OLE_MAGIC = b"\xd0\xcf\x11\xe0"        # legacy .xls / .doc / .ppt
 
 
 def _http_other(status: int) -> str:
@@ -165,6 +179,12 @@ def _extract_pdf_text(data: bytes) -> str:
 
 def classify_bytes(data: bytes, web_url: str) -> Tuple[str, str]:
     """Pure decision: bytes + url -> (text, status). No I/O."""
+    # Spreadsheets / Word docs masquerading as .pdf (or legitimately
+    # attached as .xlsx / .xls) are not invoice bodies. Flag them
+    # out of the AP reconciliation cohort instead of routing them to
+    # OCR (which would not help).
+    if data.startswith(_OOXML_MAGIC) or data.startswith(_OLE_MAGIC):
+        return "", STATUS_NON_INVOICE_ATTACHMENT
     if _is_image_or_tiff(web_url):
         return "", STATUS_OCR
     text = _extract_pdf_text(data)
@@ -324,8 +344,13 @@ class GraphBodyFetcher:
             self.last_diagnostic["http_status"] = "cache_hit"
 
         text, status = classify_bytes(data, web_url)
-        self.last_diagnostic["failure_reason_detail"] = (
-            DETAIL_OK if status == STATUS_OK else DETAIL_OCR_REQUIRED)
+        if status == STATUS_OK:
+            detail = DETAIL_OK
+        elif status == STATUS_NON_INVOICE_ATTACHMENT:
+            detail = DETAIL_NON_INVOICE_ATTACHMENT
+        else:
+            detail = DETAIL_OCR_REQUIRED
+        self.last_diagnostic["failure_reason_detail"] = detail
         return text, status
 
 

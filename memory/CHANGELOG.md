@@ -2572,3 +2572,93 @@ logic outside this probe, NO routing/classifier/Square9 changes,
 NO cutover/archive actions, NO DocuSign / HTTPS / parked AP work
 touched, NO new env vars, NO new auth flows.
 
+
+
+## 2026-02 — content_match_invoice_only_below_threshold + non_invoice_attachment buckets
+
+Production VM 100-row sweep (preceding step) showed:
+- 2/100 rows = invoice agrees with a Hub doc but Hub-side metadata
+  is too thin to clear the 0.85 threshold (Hawkemedia
+  BILL-2026-04-84480, XPO 104-570966). These need to be visible to
+  AP as Hub-cleanup work, not buried in `square9_only_true_gap`.
+- ~6/10 ocr_required were Excel/Word tracking spreadsheets
+  (`Buske Commers Inventory.xls`, `Evergreen freight allocation.xlsx`,
+  `WTR Peppertree to Buske Fairfield Tracking.xlsx`,
+  `Freight Issues Tracking Sheet.xlsx`, etc.), not invoice bodies
+  at all. OCR cannot help; these belong out of the AP cohort.
+
+TASK A — new `content_match_invoice_only_below_threshold` bucket
+(`scripts/document_body_reconciliation_probe.py`):
+- New constant `CONTENT_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"`.
+- `BUCKET_ORDER` extended; new bucket sits right after
+  `content_match_found`. `non_invoice_attachment` added at the end
+  of the OCR/non-data side.
+- `ACTION_FOR_BUCKET` extended:
+  - `content_match_invoice_only_below_threshold` → `improve_hub_metadata_for_this_doc`
+  - `non_invoice_attachment` → `exclude_from_ap_cohort`
+- New `hub_missing_fields(doc)` helper returns the names of
+  identifying Hub fields (`amount_float`, `vendor_canonical`,
+  `invoice_date`, `po_number_clean`) that are blank for a given Hub
+  doc.
+- `classify()` extended: when invoice agrees with the best Hub doc
+  AND score is below 0.85, route to the new bucket and embed
+  `hub_missing_fields=[...]` in the reason text.
+- Per-row CSV gains a `hub_missing_fields` column (populated only
+  for the new bucket).
+
+TASK B — non_invoice_attachment routing
+(`scripts/sharepoint_body_fetcher.py`):
+- New constants `STATUS_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"`
+  and `DETAIL_NON_INVOICE_ATTACHMENT = "non_invoice_attachment"`.
+- `classify_bytes` short-circuits BEFORE the OCR check when the
+  file bytes start with the OOXML ZIP magic (`PK\x03\x04`) or the
+  legacy OLE magic (`\xd0\xcf\x11\xe0`). Returns
+  `("", STATUS_NON_INVOICE_ATTACHMENT)`.
+- `GraphBodyFetcher.__call__` populates
+  `last_diagnostic["failure_reason_detail"]` with the new value
+  when this status is returned.
+- True image PDFs (real `%PDF` magic but no extractable text)
+  continue to route to `STATUS_OCR` unchanged.
+
+Probe summary (`build_summary` / `write_md`):
+- Both new buckets surface naturally in `bucket_counts`,
+  `top_examples_by_bucket`, the markdown bucket table, and the
+  console renderer (no special-casing needed — they live in
+  `BUCKET_ORDER`).
+- `recommended_engineering_next_steps` extended:
+  - When `content_match_invoice_only_below_threshold > 0`: ask AP
+    to backfill amount_float / vendor_canonical / invoice_date on
+    the listed Hub docs (using the new `hub_missing_fields`
+    column) — promotes them to `content_match_found`.
+  - When `non_invoice_attachment > 0`: exclude the listed Excel /
+    Word tracking sheets from the AP cohort upstream rather than
+    retrying OCR.
+
+Tests (+16):
+- test_document_body_reconciliation_probe.py (+11):
+  - classify routes invoice-only to the new bucket; reason embeds
+    hub_doc_id + hub_missing_fields.
+  - recommended_action for the new bucket is
+    `improve_hub_metadata_for_this_doc`.
+  - score >= 0.85 still routes to `content_match_found` (new bucket
+    does not preempt).
+  - `hub_missing_fields()` lists blank keys only; handles None.
+  - classify routes `CONTENT_NON_INVOICE_ATTACHMENT` to new bucket;
+    action is `exclude_from_ap_cohort`.
+  - BUCKET_ORDER ordering invariant.
+  - Probe CSV emits `hub_missing_fields` for invoice-only rows.
+  - Probe CSV/JSON/MD include both new buckets end-to-end.
+- test_document_body_sharepoint_fetcher.py (+5):
+  - OOXML magic → `STATUS_NON_INVOICE_ATTACHMENT`.
+  - OLE magic → `STATUS_NON_INVOICE_ATTACHMENT`.
+  - Office binary takes precedence over image-extension URL.
+  - Real scanned PDF still returns `STATUS_OCR`.
+  - Fetcher last_diagnostic surfaces the new detail.
+
+Combined: 125 passed in 0.42s. Lint clean.
+Strict scope respected: NO Mongo writes, NO matcher production
+logic outside this probe, NO routing/classifier pipeline changes,
+NO Square9 changes, NO cutover/archive actions, NO DocuSign /
+HTTPS / parked AP work touched, NO new env vars, NO new auth
+flows.
+

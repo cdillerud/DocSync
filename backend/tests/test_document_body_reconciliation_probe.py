@@ -1188,3 +1188,209 @@ def test_main_emits_diag_sample_banner_when_flag_is_set(
     assert "denied" in out
     # And the failure_reason_detail counts show up in the regular summary too.
     assert "failure_reason_detail counts" in out
+
+
+
+# ---------------------------------------------------------------------------
+# Task A: content_match_invoice_only_below_threshold bucket
+# Task B: non_invoice_attachment status flowing through classify()
+# ---------------------------------------------------------------------------
+
+def test_classify_routes_invoice_only_match_to_new_bucket():
+    """Invoice agrees with a Hub doc, but other signals can't lift
+    score across 0.85. Must route to
+    ``content_match_invoice_only_below_threshold`` and recommend
+    Hub-side metadata cleanup."""
+    best_hub = {
+        "hub_doc_id": "hub-hawkemedia",
+        "hub_invoice_number_clean": "BILL-2026-04-84480",
+        "hub_amount_float": "",            # blank — Hub-side gap
+        "hub_vendor_canonical": "",        # blank — Hub-side gap
+        "hub_invoice_date": "",
+        "hub_po_number_clean": "",
+    }
+    bucket, reason = probe.classify(
+        status=probe.CONTENT_OK,
+        signals={"invoice_number": "BILL-2026-04-84480"},
+        score=0.55,
+        best_hub=best_hub,
+        breakdown={"invoice_number": 1.0},
+        vendor_known=True,
+    )
+    assert bucket == "content_match_invoice_only_below_threshold"
+    assert "BILL-2026-04-84480" not in reason  # we surface hub_doc_id, not the raw value
+    assert "hub-hawkemedia" in reason
+    assert "hub_missing_fields" in reason
+    assert "amount_float" in reason
+    assert "vendor_canonical" in reason
+
+
+def test_recommended_action_for_invoice_only_bucket_is_hub_metadata_cleanup():
+    assert (probe.ACTION_FOR_BUCKET[
+        "content_match_invoice_only_below_threshold"]
+        == "improve_hub_metadata_for_this_doc")
+
+
+def test_classify_keeps_content_match_found_above_threshold():
+    """Invoice + amount + date + vendor sums above 0.85; the new
+    bucket must NOT preempt content_match_found."""
+    best_hub = {
+        "hub_doc_id": "hub-strong",
+        "hub_invoice_number_clean": "INV-12345",
+        "hub_amount_float": "1500.00",
+        "hub_vendor_canonical": "Acme Corp",
+        "hub_invoice_date": "2026-04-15",
+        "hub_po_number_clean": "PO-9999",
+    }
+    bucket, _ = probe.classify(
+        status=probe.CONTENT_OK,
+        signals={"invoice_number": "INV-12345"},
+        score=0.95,
+        best_hub=best_hub,
+        breakdown={"invoice_number": 1.0, "amount": 1.0,
+                   "invoice_date": 1.0, "vendor": 1.0},
+        vendor_known=True,
+    )
+    assert bucket == "content_match_found"
+
+
+def test_hub_missing_fields_lists_blank_keys_only():
+    doc = {
+        "hub_amount_float": "1500.00",
+        "hub_vendor_canonical": "",
+        "hub_invoice_date": "",
+        "hub_po_number_clean": "PO-9999",
+    }
+    missing = probe.hub_missing_fields(doc)
+    assert "vendor_canonical" in missing
+    assert "invoice_date" in missing
+    assert "amount_float" not in missing
+    assert "po_number_clean" not in missing
+
+
+def test_hub_missing_fields_handles_none():
+    assert probe.hub_missing_fields(None) == []
+
+
+def test_classify_routes_non_invoice_attachment_status_to_new_bucket():
+    bucket, reason = probe.classify(
+        status=probe.CONTENT_NON_INVOICE_ATTACHMENT,
+        signals={"invoice_number": None},
+        score=0.0, best_hub=None, breakdown={},
+        vendor_known=True,
+    )
+    assert bucket == "non_invoice_attachment"
+    assert "Office" in reason or "xlsx" in reason
+
+
+def test_action_for_non_invoice_attachment_is_exclude_from_cohort():
+    assert (probe.ACTION_FOR_BUCKET["non_invoice_attachment"]
+            == "exclude_from_ap_cohort")
+
+
+def test_bucket_order_includes_both_new_buckets():
+    assert "content_match_invoice_only_below_threshold" in probe.BUCKET_ORDER
+    assert "non_invoice_attachment" in probe.BUCKET_ORDER
+    # Ordering: invoice_only sits right after content_match_found.
+    order = list(probe.BUCKET_ORDER)
+    assert (order.index("content_match_invoice_only_below_threshold")
+            == order.index("content_match_found") + 1)
+
+
+def test_probe_csv_emits_hub_missing_fields_for_invoice_only_row(
+        tmp_path: Path):
+    triage = [{
+        "square9_name": "Hawkemedia.pdf",
+        "square9_parent_path": "AP/Hawkemedia",
+        "square9_web_url": "https://x/hawk.pdf",
+    }]
+
+    class _Stub:
+        last_diagnostic = {"failure_reason_detail": "ok",
+                           "graph_url": "g", "http_status": 200,
+                           "error_body_snippet": "", "exception_class": ""}
+
+        def __call__(self, _row):
+            return ("Invoice BILL-2026-04-84480", probe.CONTENT_OK)
+
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-hawk",
+        "invoice_number_clean": "BILL-2026-04-84480",
+        # Hub doc is otherwise empty — this is the data-quality
+        # situation we want to flag to AP.
+    }])
+    out = probe.probe(triage, extractor=_Stub(), idx=idx, limit=1)
+    assert out[0]["classification"] == \
+        "content_match_invoice_only_below_threshold"
+    assert out[0]["recommended_next_action"] == \
+        "improve_hub_metadata_for_this_doc"
+    assert "amount_float" in out[0]["hub_missing_fields"]
+    assert "vendor_canonical" in out[0]["hub_missing_fields"]
+
+    csv_path = tmp_path / "p.csv"
+    probe.write_csv(str(csv_path), out)
+    with open(csv_path, encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    assert "hub_missing_fields" in rows[0]
+    assert "amount_float" in rows[0]["hub_missing_fields"]
+
+
+def test_probe_routes_non_invoice_attachment_status_into_csv():
+    triage = [{
+        "square9_name": "tracking.xlsx",
+        "square9_parent_path": "AP/Misc",
+        "square9_web_url": "https://x/t.xlsx",
+    }]
+
+    class _Stub:
+        last_diagnostic = {
+            "failure_reason_detail": "non_invoice_attachment",
+            "graph_url": "g", "http_status": 200,
+            "error_body_snippet": "", "exception_class": ""}
+
+        def __call__(self, _row):
+            return ("", probe.CONTENT_NON_INVOICE_ATTACHMENT)
+
+    idx = probe.build_hub_index_from_docs([])
+    out = probe.probe(triage, extractor=_Stub(), idx=idx, limit=1)
+    assert out[0]["content_access_status"] == "non_invoice_attachment"
+    assert out[0]["classification"] == "non_invoice_attachment"
+    assert out[0]["recommended_next_action"] == "exclude_from_ap_cohort"
+
+
+def test_summary_md_includes_both_new_buckets(tmp_path: Path):
+    triage = [
+        {"square9_name": "hawk.pdf", "square9_parent_path": "",
+         "square9_web_url": "https://x/h.pdf"},
+        {"square9_name": "tracking.xlsx", "square9_parent_path": "",
+         "square9_web_url": "https://x/t.xlsx"},
+    ]
+    responses = {
+        "hawk.pdf": ("Invoice BILL-2026-04-84480", probe.CONTENT_OK),
+        "tracking.xlsx": ("", probe.CONTENT_NON_INVOICE_ATTACHMENT),
+    }
+
+    class _Stub:
+        last_diagnostic = {"failure_reason_detail": "ok",
+                           "graph_url": "g", "http_status": 200,
+                           "error_body_snippet": "", "exception_class": ""}
+
+        def __call__(self, row):
+            return responses[row["square9_name"]]
+
+    idx = probe.build_hub_index_from_docs([{
+        "id": "hub-hawk",
+        "invoice_number_clean": "BILL-2026-04-84480",
+    }])
+    out = probe.probe(triage, extractor=_Stub(), idx=idx, limit=2)
+    s = probe.build_summary(out, hub_doc_count=1, source_csv="x.csv")
+    md = tmp_path / "summary.md"
+    probe.write_md(str(md), s)
+    text = md.read_text()
+    assert "content_match_invoice_only_below_threshold" in text
+    assert "non_invoice_attachment" in text
+    assert "improve_hub_metadata_for_this_doc" in text
+    assert "exclude_from_ap_cohort" in text
+    # Engineering next steps should mention the Hub-cleanup guidance.
+    steps = " ".join(s["recommended_engineering_next_steps"])
+    assert "hub_missing_fields" in steps

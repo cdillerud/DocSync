@@ -1,5 +1,33 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-02 — Document Body Reconciliation: AP Feedback Loop (`--rerun-rows-csv`)
+
+Targeted rerun mode added to `backend/scripts/document_body_reconciliation_probe.py`
+so the AP team can re-score specific Square9↔Hub pairs after backfilling
+Hub metadata (without rerunning the entire 100-row sweep).
+
+- New CLI flag `--rerun-rows-csv PATH`. Required columns: `square9_name`,
+  `hub_doc_id`. When set, the probe filters the triage source down to
+  only rows whose `square9_name` appears in the rerun CSV and seeds
+  `hub_doc_id` into the candidate set per row via the existing
+  `score_signals_against_hub(priority_hub_doc_id=...)` and
+  `probe(priority_hub_doc_id_by_row=...)` plumbing.
+- New helpers: `read_rerun_rows_csv()`, `filter_to_rerun_subset()`,
+  `RERUN_CSV_REQUIRED_COLUMNS` constant.
+- Fail-loud exit codes: missing rerun CSV (rc=4), empty rerun CSV (rc=4),
+  zero overlap with triage source (rc=5).
+- Tests: 11 new pytests (101 total in
+  `tests/test_document_body_reconciliation_probe.py`, all green) covering
+  the CSV reader (happy path, missing file, missing columns, empty,
+  blank-name skip), `filter_to_rerun_subset()`, priority-doc threading
+  in `score_signals_against_hub` and end-to-end through `probe()`, plus
+  `main()` smoke tests for happy-path subset filtering, missing CSV,
+  empty CSV, and zero-overlap-with-triage refusal.
+- Strictly read-only. No Mongo writes. No matcher production changes
+  beyond the already-approved probe rerun plumbing. No routing /
+  classifier / Square9 / cutover / DocuSign / HTTPS work.
+
+
 ## 2026-05-06 — Cutover Proof Pack v2 + Bucket A Apply (gated)
 
 **Read-only proof pack (no production writes)** — extended with key

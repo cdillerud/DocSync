@@ -1394,3 +1394,302 @@ def test_summary_md_includes_both_new_buckets(tmp_path: Path):
     # Engineering next steps should mention the Hub-cleanup guidance.
     steps = " ".join(s["recommended_engineering_next_steps"])
     assert "hub_missing_fields" in steps
+
+
+# ---------------------------------------------------------------------------
+# AP feedback loop: --rerun-rows-csv targeted rerun mode
+# ---------------------------------------------------------------------------
+
+def _write_rerun_csv(path: Path, rows: List[Dict[str, str]]) -> None:
+    cols = list(probe.RERUN_CSV_REQUIRED_COLUMNS)
+    extra: List[str] = []
+    for r in rows:
+        for k in r.keys():
+            if k not in cols and k not in extra:
+                extra.append(k)
+    fieldnames = cols + extra
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        for r in rows:
+            w.writerow(r)
+
+
+def test_read_rerun_rows_csv_returns_name_to_hub_doc_id_map(tmp_path: Path):
+    p = tmp_path / "rerun.csv"
+    _write_rerun_csv(p, [
+        {"square9_name": "hawk.pdf", "hub_doc_id": "674926c1-d4d"},
+        {"square9_name": "xpo.pdf", "hub_doc_id": "34a351ba-c1e"},
+    ])
+    out = probe.read_rerun_rows_csv(str(p))
+    assert out == {"hawk.pdf": "674926c1-d4d", "xpo.pdf": "34a351ba-c1e"}
+
+
+def test_read_rerun_rows_csv_missing_file_raises(tmp_path: Path):
+    with pytest.raises(FileNotFoundError):
+        probe.read_rerun_rows_csv(str(tmp_path / "does_not_exist.csv"))
+
+
+def test_read_rerun_rows_csv_missing_required_columns_raises(tmp_path: Path):
+    p = tmp_path / "rerun.csv"
+    with open(p, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=["square9_name"])
+        w.writeheader()
+        w.writerow({"square9_name": "hawk.pdf"})
+    with pytest.raises(ValueError) as exc:
+        probe.read_rerun_rows_csv(str(p))
+    assert "hub_doc_id" in str(exc.value)
+
+
+def test_read_rerun_rows_csv_empty_raises(tmp_path: Path):
+    p = tmp_path / "rerun.csv"
+    _write_rerun_csv(p, [])
+    with pytest.raises(ValueError) as exc:
+        probe.read_rerun_rows_csv(str(p))
+    assert "no usable rows" in str(exc.value)
+
+
+def test_read_rerun_rows_csv_skips_blank_square9_name(tmp_path: Path):
+    p = tmp_path / "rerun.csv"
+    _write_rerun_csv(p, [
+        {"square9_name": "", "hub_doc_id": "ignored"},
+        {"square9_name": "hawk.pdf", "hub_doc_id": "674926c1-d4d"},
+    ])
+    out = probe.read_rerun_rows_csv(str(p))
+    assert out == {"hawk.pdf": "674926c1-d4d"}
+
+
+def test_filter_to_rerun_subset_keeps_only_listed_rows():
+    rows = [
+        _triage_row(square9_name="a.pdf"),
+        _triage_row(square9_name="b.pdf"),
+        _triage_row(square9_name="c.pdf"),
+    ]
+    rerun_map = {"a.pdf": "hub-a", "c.pdf": "hub-c"}
+    out = probe.filter_to_rerun_subset(rows, rerun_map)
+    assert [r["square9_name"] for r in out] == ["a.pdf", "c.pdf"]
+
+
+def test_score_signals_seeds_priority_hub_doc_into_candidates():
+    """Without priority, an index-thin Hub doc is unreachable when the
+    body's only matching signal is one that the index doesn't key
+    on. With priority, the named doc is forced into the candidate set
+    so the body signals can still score against it."""
+    # Hub doc with vendor only — invoice/po/amount all blank, so
+    # no normal index path can pull it as a candidate.
+    idx = probe.build_hub_index_from_docs([
+        _hub_doc(id="hub-priority",
+                 invoice_number_clean="",
+                 po_number_clean="",
+                 amount_float="",
+                 vendor_canonical="Hawkemedia",
+                 invoice_date="2026-04-15"),
+    ])
+    # Body has an invoice + a date that align with hub-priority's
+    # invoice_date and a vendor hint. Invoice number lookup misses (no
+    # index entry), amount missing, PO missing, no refs.
+    signals = {
+        "invoice_number": "BILL-2026-04-84480",
+        "po_number": None,
+        "amount": None,
+        "invoice_date": "2026-04-15",
+        "vendor_hint": "Hawkemedia",
+        "reference_numbers": [],
+    }
+    # Without priority: no candidate paths hit -> score 0, doc None.
+    score_no, doc_no, _, _ = probe.score_signals_against_hub(signals, idx)
+    assert doc_no is None
+    assert score_no == 0.0
+    # With priority: hub-priority is forced in. invoice_date + vendor
+    # align -> non-zero score, doc returned.
+    score_pri, doc_pri, breakdown_pri, _ = (
+        probe.score_signals_against_hub(
+            signals, idx, priority_hub_doc_id="hub-priority"))
+    assert doc_pri is not None
+    assert doc_pri["hub_doc_id"] == "hub-priority"
+    assert score_pri > 0
+    assert breakdown_pri.get("invoice_date") == 1.0
+    assert breakdown_pri.get("vendor") == 1.0
+
+
+def test_probe_threads_priority_hub_doc_id_per_row_into_scoring():
+    """End-to-end: when probe() is called with a per-row priority map,
+    each row scores against the named Hub doc."""
+    triage = [_triage_row(square9_name="hawk.pdf")]
+
+    class _Stub:
+        last_diagnostic = {"failure_reason_detail": "ok",
+                           "graph_url": "g", "http_status": 200,
+                           "error_body_snippet": "", "exception_class": ""}
+
+        def __call__(self, _row):
+            # Body has invoice, amount, date — Hub-side has the same
+            # but only because we seeded the right doc.
+            return ("Hawkemedia\nInvoice BILL-2026-04-84480\n"
+                    "Date: 04/15/2026\nTotal: $1,500.00",
+                    probe.CONTENT_OK)
+
+    idx = probe.build_hub_index_from_docs([
+        _hub_doc(id="hub-priority",
+                 invoice_number_clean="BILL-2026-04-84480",
+                 amount_float="1500.00",
+                 vendor_canonical="Hawkemedia",
+                 invoice_date="2026-04-15"),
+    ])
+    out = probe.probe(triage, extractor=_Stub(), idx=idx, limit=1,
+                      priority_hub_doc_id_by_row={"hawk.pdf": "hub-priority"})
+    assert out[0]["best_hub_doc_id"] == "hub-priority"
+    assert out[0]["classification"] == "content_match_found"
+
+
+def _make_rerun_main_environ(tmp_path: Path,
+                             monkeypatch: pytest.MonkeyPatch
+                             ) -> Dict[str, Path]:
+    """Set up a minimal triage CSV + mongomock collection + paths for
+    main() invocation tests below."""
+    import mongomock
+    triage_csv = tmp_path / "uncertain_square9_deep_triage.csv"
+    fields = list(_triage_row().keys())
+    with open(triage_csv, "w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=fields)
+        w.writeheader()
+        w.writerow(_triage_row(square9_name="hawk.pdf"))
+        w.writerow(_triage_row(square9_name="xpo.pdf"))
+        w.writerow(_triage_row(square9_name="other.pdf"))
+
+    coll = mongomock.MongoClient().db.hub_documents
+    coll.insert_one(_hub_doc(id="hub-hawk",
+                             invoice_number_clean="BILL-2026-04-84480",
+                             amount_float="1500.00",
+                             vendor_canonical="Hawkemedia",
+                             invoice_date="2026-04-15"))
+    coll.insert_one(_hub_doc(id="hub-xpo",
+                             invoice_number_clean="104-570966",
+                             amount_float="250.00",
+                             vendor_canonical="XPO Logistics",
+                             invoice_date="2026-04-10"))
+    monkeypatch.setattr(
+        "scripts.document_body_reconciliation_probe.get_hub_documents_collection",
+        lambda: coll,
+    )
+    return {
+        "triage_csv": triage_csv,
+        "out_csv": tmp_path / "out.csv",
+        "json_out": tmp_path / "out.json",
+        "md_out": tmp_path / "out.md",
+    }
+
+
+def test_main_rerun_mode_filters_to_subset_and_uses_priority_hub_doc(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """End-to-end main() smoke: --rerun-rows-csv loads only the listed
+    rows and re-scores against the named Hub docs."""
+    paths = _make_rerun_main_environ(tmp_path, monkeypatch)
+    rerun_csv = tmp_path / "rerun.csv"
+    _write_rerun_csv(rerun_csv, [
+        {"square9_name": "hawk.pdf", "hub_doc_id": "hub-hawk"},
+        {"square9_name": "xpo.pdf", "hub_doc_id": "hub-xpo"},
+    ])
+
+    body_by_name = {
+        "hawk.pdf": (
+            "Hawkemedia\nInvoice BILL-2026-04-84480\n"
+            "Date: 04/15/2026\nTotal: $1,500.00",
+            probe.CONTENT_OK,
+        ),
+        "xpo.pdf": (
+            "XPO Logistics\nInvoice 104-570966\n"
+            "Date: 04/10/2026\nTotal: $250.00",
+            probe.CONTENT_OK,
+        ),
+    }
+    extractor = _make_extractor(body_by_name)
+
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(paths["triage_csv"]),
+        "--rerun-rows-csv", str(rerun_csv),
+        "--out-csv", str(paths["out_csv"]),
+        "--json", str(paths["json_out"]),
+        "--md", str(paths["md_out"]),
+    ])
+    rc = probe.main(extractor=extractor)
+    assert rc == 0
+    payload = json.loads(paths["json_out"].read_text())
+    # Only the 2 rerun rows were scored — 'other.pdf' must be absent.
+    assert payload["total_attempted"] == 2
+    assert payload["content_match_found"] == 2
+    with open(paths["out_csv"], encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    names = sorted(r["square9_name"] for r in rows)
+    assert names == ["hawk.pdf", "xpo.pdf"]
+    by_name = {r["square9_name"]: r for r in rows}
+    assert by_name["hawk.pdf"]["best_hub_doc_id"] == "hub-hawk"
+    assert by_name["xpo.pdf"]["best_hub_doc_id"] == "hub-xpo"
+
+
+def test_main_rerun_mode_missing_csv_returns_nonzero(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    paths = _make_rerun_main_environ(tmp_path, monkeypatch)
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(paths["triage_csv"]),
+        "--rerun-rows-csv", str(tmp_path / "missing.csv"),
+        "--use-noop-fetcher",
+        "--out-csv", str(paths["out_csv"]),
+        "--json", str(paths["json_out"]),
+        "--md", str(paths["md_out"]),
+    ])
+    rc = probe.main(extractor=None)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "rerun-rows-csv" in err
+    assert "not found" in err.lower()
+
+
+def test_main_rerun_mode_empty_csv_returns_nonzero(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    paths = _make_rerun_main_environ(tmp_path, monkeypatch)
+    rerun_csv = tmp_path / "rerun.csv"
+    _write_rerun_csv(rerun_csv, [])
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(paths["triage_csv"]),
+        "--rerun-rows-csv", str(rerun_csv),
+        "--use-noop-fetcher",
+        "--out-csv", str(paths["out_csv"]),
+        "--json", str(paths["json_out"]),
+        "--md", str(paths["md_out"]),
+    ])
+    rc = probe.main(extractor=None)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "no usable rows" in err.lower() or "empty" in err.lower()
+
+
+def test_main_rerun_mode_no_overlap_with_triage_returns_nonzero(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str]):
+    """If the rerun CSV lists square9_names that don't appear in the
+    triage CSV, main() must refuse with a clear message rather than
+    write empty outputs."""
+    paths = _make_rerun_main_environ(tmp_path, monkeypatch)
+    rerun_csv = tmp_path / "rerun.csv"
+    _write_rerun_csv(rerun_csv, [
+        {"square9_name": "ghost-row.pdf", "hub_doc_id": "nope"},
+    ])
+    monkeypatch.setattr("sys.argv", [
+        "document_body_reconciliation_probe.py",
+        "--triage-csv", str(paths["triage_csv"]),
+        "--rerun-rows-csv", str(rerun_csv),
+        "--use-noop-fetcher",
+        "--out-csv", str(paths["out_csv"]),
+        "--json", str(paths["json_out"]),
+        "--md", str(paths["md_out"]),
+    ])
+    rc = probe.main(extractor=None)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "matched 0 rows" in err

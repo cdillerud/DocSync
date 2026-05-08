@@ -262,6 +262,62 @@ def filter_manual_review(rows: Iterable[Dict[str, str]]
 
 
 # ---------------------------------------------------------------------------
+# Rerun CSV (AP feedback loop)
+# ---------------------------------------------------------------------------
+
+RERUN_CSV_REQUIRED_COLUMNS = ("square9_name", "hub_doc_id")
+
+
+def read_rerun_rows_csv(path: str) -> Dict[str, str]:
+    """Read the AP-team rerun CSV. Returns mapping
+    ``square9_name -> hub_doc_id`` (the Hub doc that AP just backfilled
+    metadata on; the probe re-scores against that specific Hub record).
+
+    Required columns: ``square9_name`` and ``hub_doc_id``. Rows with
+    blank ``square9_name`` are skipped silently. Rows with blank
+    ``hub_doc_id`` are kept (priority is then None — body row is
+    re-scored normally with the standard candidate set).
+
+    Raises:
+        FileNotFoundError if ``path`` does not exist.
+        ValueError if required columns are missing or no usable rows
+            were read.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"--rerun-rows-csv file not found: {path!r}")
+    with open(path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        cols = set(reader.fieldnames or [])
+        missing = [c for c in RERUN_CSV_REQUIRED_COLUMNS if c not in cols]
+        if missing:
+            raise ValueError(
+                f"--rerun-rows-csv {path!r} is missing required "
+                f"column(s): {missing}. Required columns: "
+                f"{list(RERUN_CSV_REQUIRED_COLUMNS)}.")
+        out: Dict[str, str] = {}
+        for row in reader:
+            name = (row.get("square9_name") or "").strip()
+            if not name:
+                continue
+            out[name] = (row.get("hub_doc_id") or "").strip()
+    if not out:
+        raise ValueError(
+            f"--rerun-rows-csv {path!r} contained no usable rows "
+            f"(every row had a blank square9_name).")
+    return out
+
+
+def filter_to_rerun_subset(rows: List[Dict[str, str]],
+                           rerun_map: Dict[str, str]
+                           ) -> List[Dict[str, str]]:
+    """Return only the triage rows whose ``square9_name`` is in
+    ``rerun_map``. Order is preserved from the source triage CSV."""
+    wanted = set(rerun_map.keys())
+    return [r for r in rows if (r.get("square9_name") or "") in wanted]
+
+
+# ---------------------------------------------------------------------------
 # Body signal extraction (pure)
 # ---------------------------------------------------------------------------
 
@@ -1213,6 +1269,16 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
               "(square9_web_url, square9_parent_path, resolved Graph "
               "URL attempted, HTTP status, failure_reason_detail, and "
               "any truncated error body). N=0 disables the banner."))
+    p.add_argument(
+        "--rerun-rows-csv", default=None, metavar="PATH",
+        help=("AP feedback-loop targeted rerun. CSV with required "
+              "columns 'square9_name' and 'hub_doc_id'. When set, the "
+              "probe loads only the triage rows whose square9_name "
+              "appears in this CSV and re-scores each one with the "
+              "given hub_doc_id seeded into the candidate set. Used "
+              "after the AP team backfills Hub metadata to verify the "
+              "row promotes to content_match_found without rerunning "
+              "the entire 100-row sweep."))
     args = p.parse_args()
 
     if not os.path.exists(args.triage_csv):
@@ -1221,6 +1287,36 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
         return 2
 
     rows = filter_manual_review(read_csv_rows(args.triage_csv))
+
+    rerun_map: Optional[Dict[str, str]] = None
+    if args.rerun_rows_csv:
+        try:
+            rerun_map = read_rerun_rows_csv(args.rerun_rows_csv)
+        except FileNotFoundError as e:
+            print(f"probe: {e}", file=sys.stderr)
+            return 4
+        except ValueError as e:
+            print(f"probe: {e}", file=sys.stderr)
+            return 4
+        rows = filter_to_rerun_subset(rows, rerun_map)
+        if not rows:
+            print(
+                f"probe: --rerun-rows-csv {args.rerun_rows_csv!r} "
+                f"matched 0 rows in triage CSV "
+                f"{args.triage_csv!r}. Nothing to re-score. "
+                f"Verify the square9_name values in the rerun CSV "
+                f"exactly match a manual_review_required row in the "
+                f"triage source.",
+                file=sys.stderr,
+            )
+            return 5
+        print(
+            f"probe: --rerun-rows-csv mode — loaded "
+            f"{len(rerun_map)} rerun row(s); matched "
+            f"{len(rows)} triage row(s).",
+            file=sys.stderr,
+        )
+
     coll = get_hub_documents_collection()
     idx = build_hub_index_from_mongo(coll)
 
@@ -1257,6 +1353,7 @@ def main(extractor: Optional[BodyExtractor] = None) -> int:
         extractor=extractor,
         idx=idx,
         limit=args.limit,
+        priority_hub_doc_id_by_row=rerun_map,
     )
     summary = build_summary(probed,
                             hub_doc_count=idx.doc_count,

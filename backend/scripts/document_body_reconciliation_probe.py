@@ -507,7 +507,8 @@ def _refs_matching_doc(refs: List[str],
 
 
 def score_signals_against_hub(signals: Dict[str, Any],
-                              idx: HubIndex
+                              idx: HubIndex,
+                              priority_hub_doc_id: Optional[str] = None,
                               ) -> Tuple[float, Optional[Dict[str, str]],
                                          Dict[str, float], List[str]]:
     """Return (score, best_hub_doc, per-signal-breakdown, signals_won).
@@ -515,11 +516,22 @@ def score_signals_against_hub(signals: Dict[str, Any],
     The per-signal-breakdown carries one extra key when reference
     matching contributes: ``_reference_numbers_matched`` (List[str]),
     so the probe runner can surface the matched refs in CSV/JSON
-    diagnostics."""
+    diagnostics.
+
+    ``priority_hub_doc_id`` (used by the AP rerun mode) seeds the
+    candidate set with that specific Hub doc so a body row can be
+    re-scored against a known Hub record after AP backfills its
+    metadata."""
     if idx.doc_count == 0:
         return 0.0, None, {}, []
 
     candidates: Dict[str, Dict[str, str]] = {}
+
+    if priority_hub_doc_id:
+        for doc in idx.all_docs:
+            if doc.get("hub_doc_id") == priority_hub_doc_id:
+                candidates[priority_hub_doc_id] = doc
+                break
 
     inv = signals.get("invoice_number")
     if inv:
@@ -726,8 +738,10 @@ def probe(rows: List[Dict[str, str]],
           extractor: BodyExtractor,
           idx: HubIndex,
           limit: int = DEFAULT_LIMIT,
+          priority_hub_doc_id_by_row: Optional[Dict[str, str]] = None,
           ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
+    pri = priority_hub_doc_id_by_row or {}
     for row in rows[:limit] if limit else rows:
         text, status = extractor(row)
         diag = _extract_diagnostic(extractor)
@@ -738,8 +752,10 @@ def probe(rows: List[Dict[str, str]],
                    {"invoice_number": None, "po_number": None,
                     "amount": None, "invoice_date": None,
                     "vendor_hint": None, "reference_numbers": []})
+        priority = pri.get(row.get("square9_name") or "")
         score, best_hub, breakdown, _signals_won = (
-            score_signals_against_hub(signals, idx)
+            score_signals_against_hub(signals, idx,
+                                      priority_hub_doc_id=priority)
             if status == CONTENT_OK else (0.0, None, {}, []))
         bucket, reason = classify(
             status=status, signals=signals, score=score,

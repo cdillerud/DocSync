@@ -9,6 +9,12 @@ describe("labelForBlocker", () => {
     expect(labelForBlocker("some_unknown_code")).toBe("Some Unknown Code");
   });
 
+  test("maps the AP-readiness raw codes to plain English", () => {
+    expect(labelForBlocker("vendor_match")).toBe("Vendor match failed");
+    expect(labelForBlocker("po_validation")).toBe("PO validation failed");
+    expect(labelForBlocker("po_missing")).toBe("PO missing");
+  });
+
   test("returns empty string for nullish input", () => {
     expect(labelForBlocker(null)).toBe("");
     expect(labelForBlocker(undefined)).toBe("");

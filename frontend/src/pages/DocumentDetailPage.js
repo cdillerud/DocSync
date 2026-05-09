@@ -1045,15 +1045,28 @@ export default function DocumentDetailPage() {
                   </div>
                 )}
                 
-                {/* Blocking Issues */}
-                {derivedState.blocking_issues?.length > 0 && (
+                {/* Blocking Issues — route through labelForBlocker so
+                    raw check_name codes (e.g. "vendor_match",
+                    "po_validation") render as plain English instead
+                    of leaking to AP-facing surfaces. Dedupe by final
+                    display text to suppress collisions when the
+                    backend sends both the code and the human form. */}
+                {derivedState.blocking_issues?.length > 0 && (() => {
+                  const labels = [...new Set(
+                    derivedState.blocking_issues
+                      .map(labelForBlocker)
+                      .filter(Boolean)
+                  )];
+                  if (labels.length === 0) return null;
+                  return (
                   <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-2.5 mb-3">
                     <p className="text-xs font-medium text-red-700 dark:text-red-300 mb-1">Blocking Issues</p>
-                    {derivedState.blocking_issues.map((issue, idx) => (
-                      <p key={idx} className="text-xs text-red-600 dark:text-red-400">• {issue}</p>
+                    {labels.map((label, idx) => (
+                      <p key={idx} className="text-xs text-red-600 dark:text-red-400">• {label}</p>
                     ))}
                   </div>
-                )}
+                  );
+                })()}
                 
                 {/* Warnings */}
                 {derivedState.warnings?.length > 0 && (

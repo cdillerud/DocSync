@@ -7,6 +7,15 @@ describe("labelForBlocker", () => {
 
   test("title-cases an unknown snake_case code", () => {
     expect(labelForBlocker("some_unknown_code")).toBe("Some Unknown Code");
+    expect(labelForBlocker("unknown_blocker_xyz")).toBe("Unknown Blocker Xyz");
+  });
+
+  test("returns already-human sentences unchanged (no title-case mangling)", () => {
+    expect(labelForBlocker("Vendor not matched")).toBe("Vendor not matched");
+    expect(labelForBlocker("Total amount missing")).toBe("Total amount missing");
+    expect(
+      labelForBlocker("Vendor 'Hawke Media, LLC' not resolved to BC vendor")
+    ).toBe("Vendor 'Hawke Media, LLC' not resolved to BC vendor");
   });
 
   test("maps the AP-readiness raw codes to plain English", () => {

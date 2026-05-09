@@ -51,7 +51,14 @@ export const BLOCKER_LABELS = {
 export function labelForBlocker(code) {
   if (!code) return "";
   if (BLOCKER_LABELS[code]) return BLOCKER_LABELS[code];
-  // Fallback: preserve existing snake→Title Case behavior for unmapped codes
+  // If the input already contains whitespace, treat it as a
+  // pre-formatted human sentence and return it unchanged. This
+  // avoids the title-case fallback mangling sentences like
+  // "Vendor 'X' not resolved to BC vendor" into "Vendor 'X' Not
+  // Resolved To BC Vendor".
+  if (/\s/.test(String(code))) return String(code);
+  // Otherwise it's an unmapped snake_case code — title-case it so
+  // AP testers never see a raw identifier.
   return String(code)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());

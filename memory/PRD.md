@@ -1,5 +1,62 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-08 — AP UAT readiness frontend fixes (live in production)
+
+Three frontend-only fixes shipped to production and verified on the two
+P0 metadata-cleanup documents (Hawkemedia, XPO). The Hub is now usable
+for an internal IT/Alani smoke walk. Accounting still not engaged.
+
+- **Fix 1 — AP Review panel above PDF preview.** `<APReviewPanel>` block
+  in `frontend/src/pages/DocumentDetailPage.js` moved from below the
+  PDF preview to immediately after the Stable Vendor Routing card.
+  Wrapped in `<div id="ap-review-panel" data-testid="ap-review-panel-anchor">`.
+- **Fix 2 — Plain-English warnings.** New `labelForWarning()` helper in
+  `frontend/src/lib/blockerLabels.js`. Both warning render sites in
+  `DocumentDetailPage.js` (BC Validation card, Derived State Summary)
+  routed through it. Mapped seven check_name codes including
+  `freight_direction_unknown`. No `JSON.stringify` fallback.
+- **Fix 3 — Plain-English blocking issues with sentence-case
+  preservation.** `derivedState.blocking_issues` now mapped through
+  `labelForBlocker` and deduped by display text. `labelForBlocker`
+  short-circuits on whitespace so already-human strings are returned
+  unchanged (no Title Case mangling). New BLOCKER_LABELS entries:
+  `vendor_match` → "Vendor match failed", `po_validation` → "PO
+  validation failed".
+- **Tests:** 14 unit tests in
+  `frontend/src/lib/__tests__/blockerLabels.test.js`, all green; lint
+  clean on touched files.
+- **Bundle hash on prod:** `main.17bcddab.js` (was `main.b74d42e1.js`).
+- **Strict scope held:** frontend render only. No backend / matcher /
+  classifier / routing / Square9 / cutover / DocuSign / HTTPS / Mongo
+  writes.
+
+### Engineering hygiene backlog (parked, not started)
+
+- **Document Intelligence empty-state endpoints — normalize 404 → 200
+  empty payload.** `GET /api/document-intelligence/{doc_id}` and
+  `GET /api/document-intelligence/decision/{doc_id}` raise 404 by
+  design when no result has been generated yet (see
+  `backend/routers/document_intelligence.py` lines 418–424 and
+  373–379). Frontend handles it via `try/catch` and renders the
+  "No intelligence result yet" empty state correctly, but the browser
+  network layer logs the 404 to DevTools console regardless.
+  - **Reason parked:** UI behaves correctly. AP testers will not have
+    DevTools open. Does **not** block AP UAT.
+  - **Suggested fix:** return 200 with `{"exists": false, "result": null}`
+    when no resource exists, mirroring the pattern already used by
+    `/resolution/{doc_id}` and `/transaction-matches/{doc_id}` in the
+    same router. ~6 lines, two hunks.
+  - **Pickup gate:** after AP UAT smoke testing completes.
+
+### Internal status snapshot
+
+`prod_reports/AP_UAT_READINESS_STATUS_2026-05-08.md` written —
+captures bundle hash, per-fix file paths, P0 verification, posture
+fence, next action (internal IT/Alani smoke walk using the existing
+quick-start + smoke set), and the parked Document Intelligence 404
+backlog item.
+
+
 ## 2026-02 — Document Body Reconciliation: AP Feedback Loop (`--rerun-rows-csv`)
 
 Targeted rerun mode added to `backend/scripts/document_body_reconciliation_probe.py`

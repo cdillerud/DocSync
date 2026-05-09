@@ -1,5 +1,73 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-09 — AP smoke DOM checker now supports authenticated Playwright sessions (Option A: storage_state)
+
+The automated AP UI smoke checker is the supported smoke-test path
+(no manual click-through). Auth is handled client-side only; no
+backend changes, no Mongo writes, no Save/Mark Ready/Post.
+
+- **`backend/scripts/ap_smoke_walk_dom_check.py` patched.** New CLI
+  flag `--storage-state-path PATH` threads a Playwright `storage_state`
+  JSON into `browser.new_context(storage_state=...)`. New helper
+  `validate_storage_state_path()` raises clear errors when the file
+  is missing or non-JSON (CLI returns rc=2). New helper
+  `build_browser_context_kwargs()` keeps the wiring testable without
+  a real browser. Login-wall short-circuit now appends a second error
+  line telling the operator to pass `--storage-state-path` and naming
+  the capture helper. The script does **not** silently fall back to
+  manual testing.
+- **`tools/capture_hub_storage_state.py` (new).** Laptop-side helper
+  that opens headed Chromium at `--hub-origin`, waits for the operator
+  to sign in normally, then exports `storage_state(path=…)`. Prints
+  the next runnable command (`ap_smoke_walk_dom_check.py …
+  --storage-state-path …`). Read-only — no clicks issued.
+- **`tools/run_ap_smoke_dom_check_local.py` (new).** Convenience
+  wrapper so the DOM check can run on the same workstation that
+  captured login state (no SCP to the VM required). Locates
+  `ap_smoke_walk_dom_check.py` via repo-relative or `/app/backend/...`
+  fallback; refuses to run if `--storage-state-path` or `--smoke-csv`
+  are missing.
+- **Docs.** `prod_reports/AP_SMOKE_DOM_CHECK_AUTH_INSTRUCTIONS.md`
+  documents the full TL;DR flow, expected outputs, exit codes, and
+  the explicit login-failure recovery message.
+- **Tests.** New `backend/tests/test_ap_smoke_walk_dom_check.py` —
+  10 tests, all green. Covers: storage-state validation (none/missing/
+  bad-JSON/valid), context-kwargs construction, login-wall message
+  contents, CLI-flag threading via fake Playwright, missing-file fail-
+  fast (rc=2). 21 existing `test_ap_smoke_walk_pack.py` tests still
+  green (31 total).
+- **Lint.** ruff clean on all four touched files.
+- **VM-side OS deps.** During this session we resolved the prior
+  Playwright Chromium crash (`libglib-2.0.so.0: cannot open shared
+  object`) by running `playwright install-deps chromium` inside the
+  backend container; sanity launch confirmed. The container now
+  needs only an authenticated session to complete the smoke run.
+- **Strict scope held.** Client-side auth/session only. No backend
+  auth bypass, no Mongo writes, no data changes, no Save/Mark Ready/
+  Post, no matcher/classifier/routing/Square9/DocuSign/HTTPS work.
+
+### Operator commands (post-this-change)
+
+```
+# laptop, one-time
+pip install playwright
+python -m playwright install chromium
+
+# 1. capture login state
+python tools/capture_hub_storage_state.py \
+  --hub-origin http://4.204.41.190:8080 \
+  --out hub_storage_state.json
+
+# 2. run DOM check locally with that state
+python tools/run_ap_smoke_dom_check_local.py \
+  --hub-origin http://4.204.41.190:8080 \
+  --storage-state-path hub_storage_state.json
+```
+
+Outputs: `prod_reports/AP_SMOKE_WALK_DOM_CHECK_RESULTS.csv`,
+`AP_SMOKE_WALK_DOM_CHECK_SUMMARY.md`, `ap_smoke_walk_screens/*.png`.
+
+
 ## 2026-05-08 — AP UAT readiness frontend fixes (live in production)
 
 Three frontend-only fixes shipped to production and verified on the two

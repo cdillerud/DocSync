@@ -23,6 +23,12 @@ CLI:
     --screenshot-dir DIR      Optional. If set, saves one PNG per doc.
     --headed (true|false)     Default: false.
     --timeout-ms N            Default: 15000.
+    --storage-state-path PATH Optional. Path to a Playwright storage_state
+                              JSON file captured by tools/capture_hub_storage_state.py.
+                              Required when the Hub UI is behind a login
+                              wall; without it, the script will detect the
+                              login redirect and refuse to silently fall
+                              back to manual testing.
 """
 from __future__ import annotations
 
@@ -123,6 +129,47 @@ def filter_rows(rows: List[Dict[str, str]],
     return [r for r in rows if (r.get("priority") or "").upper() in wanted]
 
 
+def validate_storage_state_path(path: Optional[str]) -> Optional[str]:
+    """Validate a storage-state JSON path passed via CLI.
+
+    Returns the path unchanged when valid (or None when not supplied).
+    Raises FileNotFoundError when supplied but missing on disk; raises
+    ValueError when the file is not parseable as JSON. Caller is expected
+    to surface the exception to the operator with a clear message.
+    """
+    if not path:
+        return None
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"--storage-state-path points to a missing file: {path!r}. "
+            "Capture it first with tools/capture_hub_storage_state.py.")
+    # Parse to make sure Playwright will accept it.
+    import json
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            json.load(f)
+    except (OSError, ValueError) as e:
+        raise ValueError(
+            f"--storage-state-path file at {path!r} is not valid JSON: {e}"
+        ) from e
+    return path
+
+
+def build_browser_context_kwargs(
+    storage_state_path: Optional[str],
+) -> Dict[str, str]:
+    """Build the kwargs dict passed to ``browser.new_context``.
+
+    Kept as a pure function so tests can assert that
+    ``--storage-state-path`` correctly threads through to Playwright
+    without needing a real browser.
+    """
+    kwargs: Dict[str, str] = {}
+    if storage_state_path:
+        kwargs["storage_state"] = storage_state_path
+    return kwargs
+
+
 def resolve_url(row: Dict[str, str], hub_origin: str) -> str:
     raw = (row.get("hub_document_url") or "").strip()
     if raw.startswith(("http://", "https://")):
@@ -172,6 +219,12 @@ def check_doc(page, row: Dict[str, str], url: str,
         # markers AND has a sign-in form, treat as auth wall.
         if page.locator("input[type=password]").count() > 0:
             errors.append("login_redirect_detected")
+            errors.append(
+                "Hub UI is gated behind a login form. Pass "
+                "--storage-state-path with a JSON exported by "
+                "tools/capture_hub_storage_state.py so the Playwright "
+                "context is already authenticated. The script does NOT "
+                "fall back to manual testing.")
             out["page_loaded"] = "no"
             out["overall_pass"] = "no"
             out["errors"] = "; ".join(errors)
@@ -431,10 +484,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--screenshot-dir", default="")
     p.add_argument("--headed", default="false")
     p.add_argument("--timeout-ms", type=int, default=15000)
+    p.add_argument(
+        "--storage-state-path", default="",
+        help="Optional Playwright storage_state JSON. Required when the "
+             "Hub UI is behind a login wall. Capture with "
+             "tools/capture_hub_storage_state.py.")
     args = p.parse_args(argv)
 
     _import_playwright_or_die()
     from playwright.sync_api import sync_playwright  # noqa: WPS433
+
+    try:
+        storage_state_path = validate_storage_state_path(
+            args.storage_state_path or None)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"ap_smoke_walk_dom_check: {e}", file=sys.stderr)
+        return 2
 
     try:
         rows = read_smoke_csv(args.input_csv)
@@ -455,7 +520,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     results: List[Dict[str, str]] = []
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=not headed)
-        context = browser.new_context()
+        ctx_kwargs = build_browser_context_kwargs(storage_state_path)
+        context = browser.new_context(**ctx_kwargs)
         page = context.new_page()
         for row in filtered:
             url = resolve_url(row, args.hub_origin)

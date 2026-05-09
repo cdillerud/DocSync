@@ -19,7 +19,7 @@ import {
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import OwnershipEvidencePanel from '../components/OwnershipEvidencePanel';
-import { labelForBlocker } from '../lib/blockerLabels';
+import { labelForBlocker, labelForWarning } from '../lib/blockerLabels';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
 import SplitPreviewPanel from '../components/SplitPreviewPanel';
 import ReferenceIntelligencePanel from '../components/ReferenceIntelligencePanel';
@@ -864,7 +864,7 @@ export default function DocumentDetailPage() {
                     <p className="text-xs font-medium mb-2 text-amber-600 dark:text-amber-400">Warnings</p>
                     {doc.validation_results.warnings.map((warn, idx) => (
                       <p key={idx} className="text-[11px] text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-2 py-1 mb-1">
-                        {typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}
+                        {labelForWarning(warn)}
                       </p>
                     ))}
                   </div>
@@ -1060,7 +1060,7 @@ export default function DocumentDetailPage() {
                   <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md p-2.5 mb-3">
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-300 mb-1">Warnings</p>
                     {derivedState.warnings.map((warn, idx) => (
-                      <p key={idx} className="text-xs text-amber-600 dark:text-amber-400">• {typeof warn === 'string' ? warn : warn.message || JSON.stringify(warn)}</p>
+                      <p key={idx} className="text-xs text-amber-600 dark:text-amber-400">• {labelForWarning(warn)}</p>
                     ))}
                   </div>
                 )}
@@ -1127,22 +1127,26 @@ export default function DocumentDetailPage() {
             </Card>
           )}
 
+          {/* AP Review Panel - only for AP Invoice documents.
+              Rendered ABOVE the PDF preview so AP testers see the
+              action surface as their first scroll-stop. */}
+          {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
+            <div id="ap-review-panel" data-testid="ap-review-panel-anchor">
+              <APReviewPanel 
+                document={doc} 
+                onUpdate={(updatedDoc) => {
+                  setDoc(prev => ({ ...prev, ...updatedDoc }));
+                  fetchDoc();
+                }} 
+              />
+            </div>
+          )}
+
           {/* PDF Preview - show for ALL documents */}
           <PDFPreviewPanel document={doc} />
           
           {/* Split Preview - show for multi-page documents */}
           <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />
-          
-          {/* AP Review Panel - only for AP Invoice documents */}
-          {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
-            <APReviewPanel 
-              document={doc} 
-              onUpdate={(updatedDoc) => {
-                setDoc(prev => ({ ...prev, ...updatedDoc }));
-                fetchDoc();
-              }} 
-            />
-          )}
           
           {/* Event Timeline - New Event-Driven UI */}
           <Card className="border border-border" data-testid="event-timeline-card">

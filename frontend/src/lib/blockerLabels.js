@@ -2,7 +2,8 @@
  * Human-readable labels for readiness blocker / warning codes.
  *
  * Scope: presentation-layer mapping only. Raw codes still live unchanged in
- * backend payloads (readiness.blocking_reasons, top_blocking_reasons, etc.).
+ * backend payloads (readiness.blocking_reasons, top_blocking_reasons,
+ * validation_results.warnings, etc.).
  *
  * Wording aligns with the document-detail OwnershipEvidencePanel so reviewers
  * see the same business language in both surfaces.
@@ -31,6 +32,18 @@ export const BLOCKER_LABELS = {
 
   // Lane C Step 2.75 — warn-severity master-data gate
   master_data_incomplete: "Master data incomplete",
+
+  // Warning-side codes (validation_results.warnings, derivedState.warnings)
+  freight_direction_unknown:
+    "Could not determine if this freight invoice is inbound or outbound — the order reference does not match any Sales Order or Purchase Order",
+  vendor_unmatched: "Vendor not matched to a Business Central record yet",
+  amount_missing: "Total amount is missing",
+  invoice_date_missing: "Invoice date is missing",
+  duplicate_suspect: "Possible duplicate of another invoice",
+  extraction_low_confidence:
+    "Some fields were extracted with low confidence — please double-check",
+  bc_validation_failed:
+    "Business Central validation failed — see details below",
 };
 
 export function labelForBlocker(code) {
@@ -40,4 +53,38 @@ export function labelForBlocker(code) {
   return String(code)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Render any warning value into plain English. Accepts:
+ *
+ *   - null / undefined -> ""
+ *   - string -> delegated to labelForBlocker (so "po_missing" becomes
+ *     "PO missing" and unknown codes become Title Case rather than raw
+ *     snake_case)
+ *   - object with .message -> message (UI-friendly text from upstream)
+ *   - object with .check_name -> mapped plain-English label, optionally
+ *     followed by ".  <details>" when .details is present
+ *   - object with only .details -> details
+ *   - anything else -> "Warning"
+ *
+ * Never returns JSON.stringify output. The whole point of this helper is
+ * that AP-facing surfaces should never display a stringified dict.
+ */
+export function labelForWarning(warn) {
+  if (warn === null || warn === undefined) return "";
+  if (typeof warn === "string") return labelForBlocker(warn);
+  if (typeof warn !== "object") return "Warning";
+
+  if (warn.message) return String(warn.message);
+
+  if (warn.check_name) {
+    const human = labelForBlocker(warn.check_name);
+    if (warn.details) return `${human}. ${warn.details}`;
+    return human;
+  }
+
+  if (warn.details) return String(warn.details);
+
+  return "Warning";
 }

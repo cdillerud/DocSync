@@ -1,0 +1,3 @@
+Date,Tester,Test ID,Vendor,Invoice Number,Hub Document Link,What I Expected,What Happened,Pass/Fail,Severity,Screenshot Attached,Notes,Needs IT Follow-Up
+2026-XX-XX,JDOE,T-01,,,,Hub login screen accepts my credentials and lands me on the home page.,Example: logged in successfully on first try.,Pass,,No,First-time login was straightforward.,No
+2026-XX-XX,JDOE,T-05,Hawkemedia,BILL-2026-04-84480,https://hub.example.com/documents/674926c1-d4da-42aa-897b-59cd4867c15f,Vendor field shows Hawkemedia (matching the invoice header).,"Example: vendor field was blank; auto-match did not pick up Hawkemedia.",Fail,High,Yes,Manually corrected by selecting Hawkemedia in the BC vendor lookup; saved successfully.,Yes

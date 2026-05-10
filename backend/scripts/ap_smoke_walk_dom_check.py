@@ -245,7 +245,7 @@ def check_doc(page, row: Dict[str, str], url: str,
 
         # 3. Document Status card
         out["document_status_card_present"] = (
-            "yes" if "Document Status" in body_text else "no")
+            "yes" if "document status" in body_text.lower() else "no")
 
         # 4. Document preview section
         preview_present = (

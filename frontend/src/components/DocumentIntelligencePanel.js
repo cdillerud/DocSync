@@ -14,6 +14,26 @@ import {
   matchTransactions, getTransactionMatches, autoLinkDocument, confirmTransactionMatch,
   getBundle, validateLifecycle, evaluateDecision, executeDecision, getDecision, getDocumentLearningEvents
 } from '@/lib/api';
+import { labelForBlocker } from '@/lib/blockerLabels';
+
+/**
+ * Convert a raw entity-resolution blocking item like
+ *   "vendor_unmatched: 'MRP Solutions'"
+ * into plain English using BLOCKER_LABELS, while preserving any
+ * value that follows the colon. Falls back to labelForBlocker on
+ * the whole string when no colon is present so unknown codes never
+ * leak in raw snake_case.
+ */
+function humanizeBlockingItem(item) {
+  if (item === null || item === undefined) return "";
+  const s = String(item);
+  const colonIdx = s.indexOf(":");
+  if (colonIdx <= 0) return labelForBlocker(s);
+  const code = s.slice(0, colonIdx).trim();
+  const rest = s.slice(colonIdx + 1).trim();
+  const human = labelForBlocker(code);
+  return rest ? `${human} — ${rest}` : human;
+}
 
 const READINESS_COLORS = {
   ready: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', text: 'text-emerald-400', icon: CheckCircle },
@@ -861,7 +881,7 @@ export default function DocumentIntelligencePanel({ document, onUpdate }) {
                 </div>
                 <p className="text-[11px] text-muted-foreground">Resolve unmatched entities before creating drafts.</p>
                 {result.entity_resolution_blocking_items?.map((item, i) => (
-                  <Badge key={i} variant="outline" className="text-[9px] font-mono border-red-500/30 text-red-400 mt-1 mr-1">{item}</Badge>
+                  <Badge key={i} variant="outline" className="text-[11px] border-red-500/30 text-red-400 mt-1 mr-1" data-testid={`er-blocker-item-${i}`}>{humanizeBlockingItem(item)}</Badge>
                 ))}
               </div>
             )}

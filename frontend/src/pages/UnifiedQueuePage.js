@@ -537,7 +537,11 @@ export default function UnifiedQueuePage() {
           <div className="flex items-center gap-1.5" data-testid="stat-auto-rate">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span className="text-muted-foreground">Auto-validated</span>
-            <span className="font-semibold text-foreground">{stats.auto_validation_rate}%</span>
+            <span className="font-semibold text-foreground" data-testid="auto-validated-pct">
+              {Number.isFinite(stats.auto_validation_rate)
+                ? `${Math.min(Math.max(stats.auto_validation_rate, 0), 100)}%`
+                : "—"}
+            </span>
           </div>
           <div className="w-px h-4 bg-border/40" />
           <div className="flex items-center gap-1.5" data-testid="stat-pending">

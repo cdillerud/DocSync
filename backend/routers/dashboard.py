@@ -929,16 +929,30 @@ async def get_inbox_stats():
     ingested_7d = await db.hub_documents.count_documents(seven_d_filter)
     avg_daily = round(ingested_7d / 7, 1)
 
-    # Auto-validation rate: docs where automation_decision=auto OR auto_cleared=True
+    # Auto-validation rate: docs where automation_decision=auto OR auto_cleared=True.
+    # IMPORTANT: numerator and denominator must apply the SAME exclusions or
+    # the ratio can exceed 100% when batch_parent containers carry an auto
+    # status they inherited from their children. Both sides exclude
+    # batch_parent here so the rate is well-formed.
+    NON_BATCH = {"status": {"$ne": "batch_parent"}}
     auto_processed = await db.hub_documents.count_documents({
-        "$or": [
-            {"automation_decision": "auto"},
-            {"auto_cleared": True},
-            {"sales_review_status": "auto_approved"},
+        "$and": [
+            NON_BATCH,
+            {"$or": [
+                {"automation_decision": "auto"},
+                {"auto_cleared": True},
+                {"sales_review_status": "auto_approved"},
+            ]},
         ]
     })
-    non_batch_total = await db.hub_documents.count_documents({"status": {"$ne": "batch_parent"}})
-    auto_rate = round((auto_processed / non_batch_total * 100), 1) if non_batch_total > 0 else 0
+    non_batch_total = await db.hub_documents.count_documents(NON_BATCH)
+    if non_batch_total > 0:
+        raw_rate = (auto_processed / non_batch_total) * 100
+        # Defensive clamp at the rounding boundary; only kicks in if the
+        # math is already at 100 (e.g. 99.95 -> 100.0 after round).
+        auto_rate = round(min(max(raw_rate, 0.0), 100.0), 1)
+    else:
+        auto_rate = 0
 
     # Pending review (docs needing human attention — exclude duplicates to match inbox)
     pending_review = await db.hub_documents.count_documents({

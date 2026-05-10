@@ -1,5 +1,57 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-10 — Inbox KPI: auto_validation_rate >100% bug fixed
+
+The dashboard's "Auto-validated" tile was showing 101.3% on the
+production VM. Root cause: numerator/denominator filter mismatch
+in `/api/dashboard/inbox-stats`. Strict scope: KPI math only — no
+Mongo writes, no routing/classifier/matcher changes, no AP pilot
+docs touched, no Save/Mark Ready/Post to BC.
+
+- **Backend** (`backend/routers/dashboard.py:933–953`): the
+  `auto_validation_rate` numerator counted docs matching
+  `{"$or": [automation_decision="auto", auto_cleared=True,
+  sales_review_status="auto_approved"]}` *without* the
+  `status != "batch_parent"` filter the denominator already
+  applied. Batch-parent containers inherit auto status from their
+  children; any leaking parent inflated the numerator and pushed
+  the ratio above 100. Fix: wrap the auto query in `$and` with the
+  same `NON_BATCH = {"status": {"$ne": "batch_parent"}}` filter
+  used by the denominator. Belt-and-suspenders clamp at the
+  rounding boundary (`round(min(max(raw, 0.0), 100.0), 1)`) so any
+  future floating-point edge case can't re-emerge as 100.1.
+  Empty-denominator case still yields 0 (not NaN/Infinity) as
+  before.
+- **Frontend** (`frontend/src/pages/UnifiedQueuePage.js:540–545`):
+  defensive render guard. `Number.isFinite(rate) ?
+  Math.min(Math.max(rate, 0), 100) + "%" : "—"`. Never masks the
+  backend bug (the backend is now correct), only protects the UI
+  from null/undefined/NaN/Infinity slipping in via stale cache or
+  any future regression.
+- **Tests** (`backend/tests/test_inbox_stats_invariants.py`, new):
+  5 tests, all green:
+  - `test_batch_parent_auto_doc_does_not_inflate_numerator` — the
+    exact production regression scenario.
+  - `test_all_eligible_docs_auto_yields_exactly_100` — clamp at
+    the boundary works.
+  - `test_zero_non_batch_denominator_yields_zero` — no NaN/Infinity.
+  - `test_invariant_rate_in_zero_to_hundred` — property check
+    across a mix of leaking parents + duplicates + all 3 auto
+    signals.
+  - `test_other_kpis_still_render_after_fix` — smoke check that
+    the rest of the inbox-stats payload is structurally intact.
+  - Tests are pure unit tests with a tiny in-memory `_FakeDB` /
+    `_FakeCollection` matching only the operators dashboard.py
+    actually uses (`$and`, `$or`, `$ne`, `$nin`, `$in`, `$gte`,
+    `$exists`). No live Mongo, no mongomock dependency.
+- **Lint**: ruff clean on the new test file; eslint clean on the
+  frontend change. Pre-existing ruff issues elsewhere in
+  `dashboard.py` (lines 119, 705, 760, 776, 803) are unrelated to
+  this edit and out of scope.
+- **Live curl** of `/api/dashboard/inbox-stats` post-fix returns
+  `auto_validation_rate: 95.2` with all required fields present.
+
+
 ## 2026-05-10 — Weekend engineering cleanup (4 contained items, no business sign-off needed)
 
 Strict scope held: no Mongo writes, no document reclassification, no

@@ -140,9 +140,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     candidates: List[Dict[str, Any]] = []
 
     if "hub_settings" in db.list_collection_names():
-        for rec in db["hub_settings"].find(
+        # Match both the global watermark and all per-mailbox watermarks
+        # (`type: "mailbox_watermark:<address>"`).
+        wm_query = {
+            "$or": [
                 {"type": "email_poll_watermark"},
-                {"_id": 0}):
+                {"type": {"$regex": r"^mailbox_watermark:"}},
+            ]
+        }
+        for rec in db["hub_settings"].find(wm_query, {"_id": 0}):
+            wm_type = rec.get("type") or ""
+            if wm_type.startswith("mailbox_watermark:") and not rec.get("mailbox"):
+                # Synthesize mailbox from the type key for reporting.
+                rec["mailbox"] = wm_type.split(":", 1)[1]
             candidates.append({**rec, "_source_collection": "hub_settings"})
 
     if "mail_poll_runs" in db.list_collection_names():

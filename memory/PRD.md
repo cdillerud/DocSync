@@ -1,5 +1,64 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-10 — AP UAT smoke run is GREEN (16/16) on production VM
+
+End-to-end AP UI readiness validated on the live production VM with
+authenticated Playwright. Two real findings surfaced + fixed in the
+same session.
+
+- **DOM checker calibration fix.** `Document Status` substring check
+  is now case-insensitive (`backend/scripts/ap_smoke_walk_dom_check.py`).
+  The Hub UI renders the card label as `DOCUMENT STATUS`; the original
+  exact-match assertion was a false negative on every doc.
+- **Frontend bug fix — `entity_resolution_blocking_items` no longer
+  leaks raw snake_case codes to the AP UI.** `frontend/src/components/
+  DocumentIntelligencePanel.js` line 864 was rendering items like
+  `vendor_unmatched: 'MRP Solutions'` as raw badges. Now wrapped in a
+  new `humanizeBlockingItem()` helper that splits on `:`, runs the
+  prefix through `labelForBlocker()`, and preserves any quoted value.
+  Renders as `Vendor not matched to a Business Central record yet —
+  'MRP Solutions'` instead of the raw code. data-testid added per item
+  for future regression testing.
+- **Tests.** New `frontend/src/lib/__tests__/humanizeBlockingItem.test.js`
+  with 5 tests (mapped-label preservation, unknown-code title-case
+  fallback, no-colon delegation, nullish handling, pre-humanised
+  passthrough). All 19 frontend lib tests green; all 31 backend tests
+  green; lint clean.
+- **Production VM run.** After `docker compose build --no-cache --pull
+  frontend && docker compose up -d --force-recreate frontend`
+  (BuildKit cache-bust required), the DOM checker re-ran against the
+  P0+P1 smoke set (16 docs) with the captured storage_state and
+  reported `passed: 16 / failed: 0 / exit_code=0`.
+- **Operator workflow that worked end-to-end.**
+  1. PowerShell heredoc paste created `capture_hub_storage_state.py`
+     v2 on Windows (operator-confirmed `input()` instead of
+     auto-detect).
+  2. Captured 1019-byte storage state with 1 cookie + localStorage
+     (`access_token`, `gpi_user`, `gpi_token`).
+  3. Base64-pasted via `cat > /tmp/state.b64 <<'B64_EOF' … B64_EOF`
+     heredoc (avoided SCP key auth entirely).
+  4. `docker compose cp` staged the JSON into the backend container.
+  5. In-place Python patch added `--storage-state-path` CLI to the
+     VM script (avoided 30 KB base64 paste).
+  6. Re-ran DOM checker → 0/16 → 10/16 (after Doc Status fix) →
+     **16/16** (after frontend rebuild).
+- **Strict scope held.** No backend auth bypass, no Mongo writes, no
+  Save/Mark Ready/Post, no matcher/classifier/routing changes, no
+  Square9/cutover/DocuSign/HTTPS/parked-AP work. Read-only smoke
+  validation only.
+
+### What this unlocks
+
+- AP UAT engagement is now technically clean to start: Hub UI
+  passes structural smoke checks on every P0/P1 invoice in the
+  internal set with no raw JSON, no raw snake_case, all 5 AP fields
+  visible, AP Review panel above the PDF preview, plain-English
+  blocker labels.
+- The smoke checker is now a repeatable regression tool: every
+  future Hub release can be validated in minutes (capture state,
+  one bash command, get pass/fail per doc).
+
+
 ## 2026-05-09 — AP smoke DOM checker now supports authenticated Playwright sessions (Option A: storage_state)
 
 The automated AP UI smoke checker is the supported smoke-test path

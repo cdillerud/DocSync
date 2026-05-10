@@ -1,0 +1,128 @@
+SUBJECT: Quick AP pilot of the GPI Document Hub — [DATE_TBD], ~90 minutes
+
+Hi [AP_TESTERS_AND_SUPERVISOR_NAMES],
+
+Thank you for agreeing to help with this. Here's everything you
+need ahead of the session.
+
+
+WHAT THIS IS
+------------
+
+A short, controlled pilot of the GPI Document Hub. We want fresh
+AP eyes to look at how invoices read inside the Hub — vendor,
+invoice number, invoice date, total amount, PO number — and tell
+us whether anything is confusing, wrong, or missing.
+
+This is NOT a switch from Square9. Square9 stays your working
+system of record throughout this pilot and beyond. The Hub will
+not post anything to Business Central from your hands during the
+session.
+
+
+WHAT WE NEED FROM YOU
+---------------------
+
+About 90 minutes of your time, once.
+
+  - 30 min  Kickoff with IT — we read a one-page handout
+            together, confirm your login works, and walk one
+            example document so you know what to expect.
+  - 60 min  You walk through 10–15 assigned documents at your
+            own pace. IT is in the room the whole time. One row
+            of feedback per document.
+  - 15 min  Quick debrief. We read your rows together and
+            answer questions. Done.
+
+If we go meaningfully over 90 minutes, that itself is feedback.
+Tell us; we sized it small on purpose.
+
+
+WHEN AND WHERE
+--------------
+
+  Date / time:    [DATE_TIME_TBD]
+  Location:       [LOCATION_OR_TEAMS_LINK_TBD]
+  Hub URL:        [HUB_URL_TBD]
+  IT engineer:    [IT_ATTENDEE_NAME_TBD]
+  Feedback drop:  [FEEDBACK_DROP_LOCATION_TBD]
+
+Please reply by [REPLY_BY_DATE_TBD] to confirm or to suggest a
+better time.
+
+
+THE GUARDRAILS (please read these before the session)
+-----------------------------------------------------
+
+These are the rules that keep the pilot safe.
+
+  - Do NOT click "Post to BC." Posting writes real entries to
+    Business Central; it is not part of this pilot.
+  - Do NOT click "Mark Ready" or "Save" unless IT specifically
+    asks you to on a single document.
+  - Test only the documents on the assigned list we hand you.
+  - Report every observation through the feedback CSV — even
+    small things. One row per document.
+  - If a real payment is at risk because of something you see
+    in the Hub, call your AP supervisor first, then fall back to
+    Square9 and process the payment there. Hub bugs do not
+    block real payments.
+
+These rules will also be on the kickoff handout we hand you in
+the room.
+
+
+WHAT TO BRING
+-------------
+
+Just yourself. We'll provide:
+
+  - A printed kickoff handout (one page).
+  - A printed test plan (one page).
+  - Your assigned document list (one printed sheet).
+  - The blank feedback CSV.
+  - Coffee.
+
+You can use your normal company laptop. No special setup.
+
+
+WHAT TO EXPECT IN THE HUB
+-------------------------
+
+When you open a document, you will see:
+
+  - The filename at the top.
+  - A "Document Status" card.
+  - An "AP Review" panel with five fields: Vendor, Invoice #,
+    Invoice Date, Total Amount, PO Number.
+  - The PDF preview.
+
+Your job is to compare each field in the AP Review panel to the
+PDF and tell us whether it matches. That's it.
+
+
+REASSURANCES
+------------
+
+  - Square9 is not going away during this pilot.
+  - The Hub is not going to post anything to BC from your hands.
+  - You don't need to learn a new system today — we just want
+    you to read what's on the screen.
+  - You won't be asked to keep testing daily unless we mutually
+    decide a longer pilot is useful.
+  - There is no "wrong" feedback. If something looks weird, it's
+    worth a row.
+
+
+QUESTIONS BEFORE THE SESSION?
+-----------------------------
+
+Reply to this email or message me directly. I'd rather answer
+five questions in advance than have anyone walk in unsure.
+
+Thanks again for the time. The Hub has come a long way and your
+eyes on it are the part we can't automate.
+
+
+[CHAD_SIGNATURE]
+GPI IT

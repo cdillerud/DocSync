@@ -1,5 +1,66 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-10 — AP-facing pilot package created (controlled-pilot release)
+
+Pilot approved by user; package converted from internal drafts to
+AP-facing materials. Documentation and pilot materials only — no
+code changes, no Mongo writes, no Save / Mark Ready / Post, no
+cutover/Square9 work, no DocuSign / HTTPS / parked AP work.
+
+**Files created in `prod_reports/`:**
+
+1. `AP_UAT_PILOT_KICKOFF_HANDOUT.md` (234 lines) — one-page-style
+   Day-1 cheat sheet for AP testers. Five rules, 90-minute timing
+   table, plain-language walkthrough of the document detail page,
+   feedback column-by-column guide, severity guide, "who to call"
+   block. Strict guardrails: no Post, no Mark Ready, no Save without
+   IT direction, only assigned docs, real-payment fallback to
+   Square9.
+2. `AP_UAT_PILOT_TEST_PLAN.md` (246 lines) — remedial test plan
+   assuming zero Hub knowledge. Sections cover login, opening a
+   document, the five-field AP Review panel walkthrough, status
+   reading, the 12-scenario checklist (open / preview / vendor /
+   invoice # / date / amount / PO / status text / duplicate
+   warning / non-invoice attachment / report missing-or-wrong /
+   save-nothing-unless-directed), feedback CSV column meanings,
+   severity ladder, and what NOT to do. Mirrored guardrails.
+3. `AP_UAT_PILOT_FEEDBACK_TEMPLATE.csv` — clean header-only CSV with
+   the 12 AP-facing columns: Tester, Date, Document / Vendor,
+   Invoice Number, Hub Link, What looked right, What looked wrong,
+   What did you expect?, Severity, Screenshot attached?, Notes,
+   IT follow-up needed?. No example rows (those live only in the
+   internal-draft template).
+4. `AP_UAT_PILOT_EMAIL_DRAFT.txt` (128 lines) — concise email from
+   Chad to AP testers + supervisor. Covers purpose, 90-min ask,
+   guardrails, what to bring, what to expect on screen,
+   reassurances about Square9 + no-BC-posting, RSVP request.
+
+**Internal-only language stripped from all four files:**
+- No INTERNAL DRAFT banners.
+- No engineering file paths or Python/JS module references.
+- No "smoke checker", "DOM checker", "Playwright", "Mongo".
+- No "cutover" or "go-live" language.
+- No "Square9 replacement" or "Square9 retirement" claims.
+- No proof-pack terminology.
+- No mention of body-reconciliation, vendor extraction profiles, or
+  any internal probe / IT memo files.
+
+**Placeholders Chad must fill before sending (consistent across all
+four files):**
+- `[HUB_URL_TBD]`
+- `[FEEDBACK_DROP_LOCATION_TBD]`
+- `[IT_ATTENDEE_NAME_TBD]` / `[IT_ATTENDEE_TBD]`
+- `[IT_MAILBOX_TBD]`
+- `[DATE_TBD]` / `[DATE_TIME_TBD]`
+- `[LOCATION_OR_TEAMS_LINK_TBD]`
+- `[REPLY_BY_DATE_TBD]`
+- `[AP_TESTERS_AND_SUPERVISOR_NAMES]`
+- `[CHAD_SIGNATURE]`
+
+**Posture unchanged**: READY for controlled pilot, NOT READY for
+floor rollout / cutover.
+
+
 ## 2026-05-10 — AP UAT controlled-pilot package finalized + `po_not_found` fix
 
 Documentation/package update only. No backend code changed; one

@@ -1,5 +1,102 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-10 — Weekend engineering cleanup (4 contained items, no business sign-off needed)
+
+Strict scope held: no Mongo writes, no document reclassification, no
+routing/classifier behaviour change, no Save/Mark Ready/Post, no
+Square9/cutover/DocuSign/HTTPS/parked-AP work, no AP-facing
+materials touched. AP pilot package files in `prod_reports/` left
+exactly as delivered.
+
+### 1. Playwright deps persisted in backend Dockerfile
+- `backend/Dockerfile` rewritten to `apt-get install` the Chromium
+  shared libraries (`libglib2.0-0`, `libnss3`, `libnspr4`,
+  `libdbus-1-3`, atk/atk-bridge/atspi, cups/drm/xkbcommon/xcomposite/
+  xdamage/xfixes/xrandr, gbm/pango/cairo/asound/xshmfence/x11/xcb/
+  xext/xi, fonts-liberation) at build time, plus a best-effort
+  `python -m playwright install chromium` so the binary is in the
+  image. AP smoke DOM checker now survives a clean
+  `docker compose build --no-cache backend`. No browser auto-launch
+  at runtime; capability only.
+
+### 2. Document Intelligence empty-state endpoints
+- `backend/routers/document_intelligence.py`:
+  - `GET /api/document-intelligence/{doc_id}` now returns `{"exists":
+    false, "result": null, "document_id": ...}` 200 instead of 404.
+  - `GET /api/document-intelligence/decision/{doc_id}` now returns
+    `{"exists": false, "decision": null, "document_id": ...}` 200
+    instead of 404.
+- Browser-console 404 noise on document detail page loads
+  eliminated. Existing successful payloads pass through unchanged.
+- Curl smoke confirms 200 + new envelope on a missing doc id.
+- 4 new tests in `backend/tests/test_document_intelligence_empty_state.py`
+  cover both endpoints' empty-state and present-state behaviour.
+
+### 3. AP smoke-set generator dedupe (within-cluster)
+- `backend/scripts/build_ap_smoke_test_set.py` `_emit()` now also
+  dedupes by `(cluster, hub_doc_id)` in addition to the existing
+  `(category, hub_doc_id)`. Categories are clustered by semantic
+  intent: `happy_path` (clean + 4 field-populated), `exception`,
+  `duplicate`, `misclassified`, `non_invoice`, `ocr`, `permission`,
+  `pinned_curated`. A doc in the happy-path cluster only emits
+  once (under its strongest/first-emitted category, e.g.
+  `clean_ap_invoice` wins over `ap_invoice_invoice_number_populated`).
+  Across clusters the same doc may legitimately appear (e.g. clean
+  AND duplicate-flagged are two separate findings).
+  `metadata_cleanup_example` remains pinned and always emits.
+- The duplicate `CS 3000000223 / 29de41c0…` row that surfaced in
+  the AP UAT smoke run will not regenerate.
+- 4 new tests in `backend/tests/test_build_ap_smoke_test_set_dedupe.py`
+  cover within-cluster dedupe, pinned-category exemption, distinct-
+  doc-distinct-category preservation, and absolute no-exact-dup
+  invariant. One existing test
+  (`test_curator_emits_field_populated_rows_per_field`) updated to
+  use distinct docs (the old fixture used a single doc to span all
+  4 field-populated categories — that was implicitly relying on
+  the cosmetic-bug behaviour we just fixed).
+
+### 4. Read-only diagnostic scripts (no writes)
+- `backend/scripts/diagnose_missing_routing_status.py`: queries
+  `hub_documents` for docs with no `routing_status`, buckets them by
+  cause (`pre_classification`, `post_classification_pre_routing`,
+  `blocked_before_routing`, `unknown`), captures hub_doc_id /
+  filename / doc_type / age / source mailbox / blocking-issue count,
+  recommends next step per bucket, marks whether a safe auto-fix is
+  apparent. Outputs `prod_reports/MISSING_ROUTING_STATUS_DIAG.{md,
+  csv,json}`.
+- `backend/scripts/diagnose_stalled_watermarks.py`: probes both
+  `hub_settings` (type=`email_poll_watermark`) and `mail_poll_runs`
+  (most recent per mailbox via aggregation), filters by `--stale-hours
+  N` (default 24), buckets stalled rows into `active_error`,
+  `polling_loop_inactive`, `high_consecutive_empty_polls`,
+  `watermark_legitimately_quiet`. Outputs
+  `prod_reports/STALLED_WATERMARKS_DIAG.{md,csv,json}`.
+- Both scripts: zero writes; both surface counts, ages, causes, and
+  per-bucket next-step recommendations only.
+
+### Tests run
+- `pytest test_document_intelligence_empty_state.py
+   test_build_ap_smoke_test_set_dedupe.py
+   test_build_ap_smoke_test_set.py
+   test_ap_smoke_walk_pack.py
+   test_ap_smoke_walk_dom_check.py` → **60 passed**.
+- ruff lint clean on all 6 touched files.
+- Backend service healthy post-change (`/api/health` → 200,
+  document-intelligence/{missing} → 200 with new envelope).
+- **Dockerfile rebuild not exercised in this environment** —
+  Dockerfile changes are container-only; user must rebuild on the
+  VM with `docker compose build --no-cache --pull backend &&
+  docker compose up -d --force-recreate backend` then re-run
+  `docker compose exec -T backend python -m playwright --version`
+  + the smoke DOM checker `--help` to confirm Playwright survives
+  the fresh build.
+- **Mongo diagnostics not exercised in this environment** — these
+  scripts read live data from the production VM's Mongo; user runs
+  them on the VM via `docker compose exec backend python
+  /app/scripts/diagnose_missing_routing_status.py` and
+  `… diagnose_stalled_watermarks.py`.
+
+
 ## 2026-05-10 — AP-facing pilot package created (controlled-pilot release)
 
 Pilot approved by user; package converted from internal drafts to

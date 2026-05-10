@@ -372,10 +372,20 @@ async def api_decision_queue(
 
 @router.get("/decision/{doc_id}")
 async def api_get_decision(doc_id: str):
-    """Get the latest decision for a document."""
+    """Get the latest decision for a document.
+
+    Returns a 200 empty-state envelope when no decision has been
+    evaluated yet so callers (the frontend in particular) don't have
+    to treat the "not yet processed" case as an error in the browser
+    console.
+    """
     result = await get_decision(doc_id)
     if not result:
-        raise HTTPException(status_code=404, detail=f"No decision for document: {doc_id}")
+        return {
+            "exists": False,
+            "decision": None,
+            "document_id": doc_id,
+        }
     return result
 
 
@@ -417,10 +427,20 @@ async def api_document_learning_events(doc_id: str):
 
 @router.get("/{doc_id}")
 async def api_get_intelligence(doc_id: str):
-    """Get the latest intelligence result for a document."""
+    """Get the latest intelligence result for a document.
+
+    Returns a 200 empty-state envelope when the document has not been
+    processed yet, instead of a 404. This is the expected
+    "no-result-yet" case for documents the pipeline hasn't touched and
+    should not produce browser-console error noise.
+    """
     result = await get_intelligence_result(doc_id)
     if not result:
-        raise HTTPException(status_code=404, detail=f"No intelligence result for document: {doc_id}")
+        return {
+            "exists": False,
+            "result": None,
+            "document_id": doc_id,
+        }
     return result
 
 

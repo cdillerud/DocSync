@@ -421,14 +421,53 @@ def curate(*, hub_docs: List[Dict[str, Any]],
 
     rows: List[Dict[str, str]] = []
     seen_pairs: set = set()  # (category, hub_doc_id) — avoid dup rows in same cat
+    seen_in_cluster: Dict[str, set] = {}  # cluster_key -> set(hub_doc_id)
+
+    # Categories that share semantic intent are clustered. Within a
+    # cluster a hub_doc_id only emits once (preserving the strongest
+    # — first-emitted — category). Across clusters the same doc may
+    # legitimately appear, since it represents a different finding
+    # (e.g. a doc that's both a "clean AP invoice" AND flagged as a
+    # possible duplicate is two separate observations).
+    CLUSTER_OF: Dict[str, str] = {
+        "clean_ap_invoice": "happy_path",
+        "ap_invoice_vendor_populated": "happy_path",
+        "ap_invoice_invoice_number_populated": "happy_path",
+        "ap_invoice_amount_populated": "happy_path",
+        "ap_invoice_po_populated": "happy_path",
+        "needs_review_or_exception": "exception",
+        "duplicate_or_possible_duplicate": "duplicate",
+        "misclassified_or_corrected": "misclassified",
+        "non_invoice_attachment": "non_invoice",
+        "ocr_required": "ocr",
+        "sharepoint_permission_edge": "permission",
+        # Pinned curatorial examples have their own cluster and a
+        # dedicated allow-list so they always emit.
+        "metadata_cleanup_example": "pinned_curated",
+    }
+    # Categories that may always re-emit even if the doc has been
+    # seen elsewhere in the SAME cluster (none today, but the slot
+    # is here for future curatorial overrides).
+    PINNED_CATEGORIES = {"metadata_cleanup_example"}
     missing: List[str] = []
 
     def _emit(category: str, doc: Dict[str, Any], why: str,
               check: str, expected: str, notes: str = "") -> None:
-        key = (category, str(doc.get("id") or ""))
+        hub_id = str(doc.get("id") or "")
+        key = (category, hub_id)
         if key in seen_pairs:
             return
+        cluster = CLUSTER_OF.get(category, category)
+        cluster_seen = seen_in_cluster.setdefault(cluster, set())
+        # Within a cluster, the first emit wins (highest priority
+        # category in `curate()`'s top-down ordering). Pinned
+        # categories bypass the cluster gate.
+        if (hub_id and hub_id in cluster_seen
+                and category not in PINNED_CATEGORIES):
+            return
         seen_pairs.add(key)
+        if hub_id and category not in PINNED_CATEGORIES:
+            cluster_seen.add(hub_id)
         rows.append(_shape_row(
             doc, category,
             why=why, check=check, expected=expected, notes=notes,

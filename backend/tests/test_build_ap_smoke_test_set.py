@@ -71,7 +71,32 @@ def test_curator_marks_missing_when_no_clean_invoice():
 
 
 def test_curator_emits_field_populated_rows_per_field():
-    docs = [_hub_doc(id="hub-1")]
+    """Each field-populated category should be representable. After
+    the within-cluster dedupe, distinct docs are needed because the
+    happy_path cluster (clean + 4 field-populated) collapses
+    same-doc duplicates."""
+    docs = [
+        _hub_doc(id="hub-vendor",
+                 vendor_canonical="V", invoice_number_clean="",
+                 amount_float=0, po_number_clean="",
+                 validation_errors=["amount_missing"],
+                 workflow_status="data_correction_pending"),
+        _hub_doc(id="hub-inv",
+                 vendor_canonical="", invoice_number_clean="INV-9",
+                 amount_float=0, po_number_clean="",
+                 validation_errors=["amount_missing"],
+                 workflow_status="data_correction_pending"),
+        _hub_doc(id="hub-amt",
+                 vendor_canonical="", invoice_number_clean="",
+                 amount_float=42.50, po_number_clean="",
+                 validation_errors=["po_missing"],
+                 workflow_status="data_correction_pending"),
+        _hub_doc(id="hub-po",
+                 vendor_canonical="", invoice_number_clean="",
+                 amount_float=0, po_number_clean="PO-9",
+                 validation_errors=["amount_missing"],
+                 workflow_status="data_correction_pending"),
+    ]
     rows, _ = smk.curate(hub_docs=docs, probe_rows=[], per_category=1)
     cats = {r["test_doc_category"] for r in rows}
     assert "ap_invoice_vendor_populated" in cats

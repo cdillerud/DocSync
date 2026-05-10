@@ -1,5 +1,64 @@
 # GPI Document Hub — Product Requirements Document
 
+## 2026-05-10 — AP UAT controlled-pilot package finalized + `po_not_found` fix
+
+Documentation/package update only. No backend code changed; one
+already-identified frontend label cleanup applied. No Mongo writes,
+no Save/Mark Ready/Post, no cutover, no Square9 work, no DocuSign
+or HTTPS work.
+
+- **Test plan updated** (`memory/GPI_HUB_AP_USER_ACCEPTANCE_TEST_PLAN_DRAFT.md`):
+  added Section 0 (Readiness baseline 2026-05-10, 16/16 smoke,
+  explicit non-claims), Section 14 (Day-one pilot plan with the
+  30/60/15 timing breakdown), Section 15 (Pilot guardrails — no
+  Post-to-BC, no system-of-record, every issue via CSV, only
+  assigned docs), Section 16 (Known limitations: doc-intel 404
+  noise, OCR exclusion, non-invoice attachments, Square9 parallel,
+  no BC posting), Section 17 (Pre-send checklist — testers, AP
+  supervisor, URL, login, drop location, mailbox, "no Post" repeated
+  three places, on-call IT, ≤48h smoke, CSV examples stripped,
+  banners removed, all TBDs resolved, AP supervisor sign-off).
+- **Kickoff notes updated** (`memory/GPI_HUB_AP_UAT_KICKOFF_NOTES_DRAFT.md`):
+  added Readiness baseline header, Pilot guardrails (read-aloud
+  block), Day-one pilot plan, and matching Pre-send checklist.
+- **Readiness status updated**
+  (`prod_reports/AP_UAT_READINESS_STATUS_2026-05-08.md`): prepended
+  a 2026-05-10 controlled-pilot baseline section with the 16/16
+  smoke matrix, the two real findings (entity-resolution leak fix,
+  Document Status case-insensitive fix), the cosmetic `po_not_found`
+  cleanup, what the pilot unlocks vs. does NOT, and gates before
+  pilot. Original 2026-05-08 status preserved underneath.
+- **Feedback CSV**
+  (`memory/GPI_HUB_AP_TEST_FEEDBACK_TEMPLATE.csv`): no change. The
+  template already has the right columns plus 2 example rows that
+  the kickoff explicitly says to strip before AP-facing send.
+- **Cosmetic backlog cleared.** `po_not_found` mapping was **NOT**
+  already in `BLOCKER_LABELS` — added it now in
+  `frontend/src/lib/blockerLabels.js` as
+  *"PO extracted but not found in Business Central"*. Eliminates
+  the "Po Not Found" title-case fallback. 19 lib tests + 5
+  humanizer tests still green; eslint clean.
+
+### AP UAT readiness summary (2026-05-10)
+
+| Item | Status |
+| --- | --- |
+| Production VM smoke (P0+P1, 16 docs) | **16/16 pass, exit_code=0** |
+| Raw JSON warning leakage | 0 |
+| Raw snake_case blocker leakage | 0 |
+| AP Review panel above PDF preview | verified on every doc |
+| All 5 AP fields visible | verified on every doc |
+| `entity_resolution_blocking_items` humanized | shipped |
+| `po_not_found` plain-English mapping | shipped |
+| Test plan + kickoff + readiness doc updated for pilot | done |
+| AP supervisor sign-off | **PENDING** (gate before AP send) |
+| Pilot testers identified | **PENDING** |
+| Feedback drop location resolved | **PENDING** |
+
+**Posture:** READY for controlled pilot, NOT READY for floor
+rollout / cutover.
+
+
 ## 2026-05-10 — AP UAT smoke run is GREEN (16/16) on production VM
 
 End-to-end AP UI readiness validated on the live production VM with

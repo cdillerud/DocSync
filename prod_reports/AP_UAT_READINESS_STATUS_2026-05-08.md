@@ -2,9 +2,97 @@
 
 > **INTERNAL — IT / Engineering only.**
 > Accounting has not been engaged. Do not send this to AP.
-> **Date:** 2026-05-08
+> **Last updated:** 2026-05-10 (controlled-pilot baseline).
+> **Original draft:** 2026-05-08.
 
 ---
+
+## 2026-05-10 — Controlled pilot baseline (GREEN)
+
+The Hub is ready for a **controlled AP pilot**. This is not cutover,
+not Square9 replacement, not posting-to-BC testing. It is a guided
+review with 1–2 AP testers under IT supervision.
+
+### Production VM smoke run
+
+The automated DOM smoke checker
+(`backend/scripts/ap_smoke_walk_dom_check.py`) was run against the
+P0+P1 set (16 documents) on the production VM at
+`http://4.204.41.190:8080` with an authenticated Playwright session.
+
+| Check | Result |
+| --- | --- |
+| Documents loaded under authenticated session | 16 / 16 |
+| `doc_id_in_url` for every doc | 16 / 16 |
+| Filename or title visible on page | 16 / 16 |
+| Document Status card present | 16 / 16 |
+| Document preview rendered | 16 / 16 |
+| AP Review panel anchored above the PDF preview | 16 / 16 |
+| All five AP fields visible (Vendor, Invoice #, Date, Amount, PO) | 16 / 16 |
+| Raw JSON warnings leaked to UI | 0 / 16 |
+| Raw snake_case blocker codes leaked to UI | 0 / 16 |
+| Save / Mark Ready / Post / Re-process actions triggered | **none** |
+| **Automated DOM smoke checker exit code** | **0 (pass)** |
+
+Output artifacts on the VM:
+- `/opt/gpi-hub/prod_reports/AP_SMOKE_WALK_DOM_CHECK_RESULTS.csv`
+- `/opt/gpi-hub/prod_reports/AP_SMOKE_WALK_DOM_CHECK_SUMMARY.md`
+- `/opt/gpi-hub/prod_reports/ap_smoke_walk_screens/*.png` (16 PNGs)
+
+### Two real findings surfaced and fixed in this round
+
+1. **`entity_resolution_blocking_items` raw leak.** Five documents
+   were rendering items like `vendor_unmatched: 'MRP Solutions'` as
+   raw `<Badge>` content in the AP-facing
+   `DocumentIntelligencePanel.js`. Fix: new `humanizeBlockingItem()`
+   helper that splits on `:`, runs the prefix through
+   `labelForBlocker()`, and preserves any quoted value. Now renders
+   as *"Vendor not matched to a Business Central record yet —
+   'MRP Solutions'"*. Frontend rebuilt with
+   `docker compose build --no-cache --pull frontend && docker compose
+   up -d --force-recreate frontend`. Re-smoked → 0 leaks.
+2. **DOM checker false-negative on `Document Status`.** Hub UI
+   renders the card label as `DOCUMENT STATUS` (uppercase). The
+   smoke checker's substring match was case-sensitive and failed on
+   every doc. Fixed in `ap_smoke_walk_dom_check.py` to use
+   `body_text.lower()`. Re-smoked → all 16 pass.
+
+### One small cosmetic fix in the same session
+
+3. **`po_not_found` blocker code now mapped to plain English** —
+   previously fell through to the title-case fallback ("Po Not
+   Found"). Added to `BLOCKER_LABELS` in `frontend/src/lib/blockerLabels.js`
+   as "PO extracted but not found in Business Central".
+
+### Strict scope held
+
+- No backend auth bypass.
+- No Mongo writes.
+- No Save / Mark Ready / Post / Re-process actions.
+- No matcher / classifier / routing / Square9 / DocuSign / HTTPS /
+  parked-AP changes.
+- No production cutover.
+- Smoke validation is read-only end-to-end.
+
+### What this unlocks (and what it does NOT)
+
+✅ Controlled pilot with 1–2 AP testers, IT-supervised, read-and-edit
+   only, on the assigned smoke-set documents.
+❌ Open AP-floor rollout.
+❌ Square9 retirement.
+❌ Hub-to-BC posting from AP hands.
+❌ Treating Hub as system of record.
+
+### Next gates before the pilot
+
+- AP supervisor sign-off on the test plan and kickoff doc.
+- Pilot testers identified and IT on-call assigned.
+- Pre-send checklist (test plan §17, kickoff "Pre-send checklist"
+  section) all green.
+
+---
+
+## 2026-05-08 — Original status (preserved for context)
 
 ## Where we are
 

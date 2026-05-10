@@ -24,6 +24,7 @@ export const BLOCKER_LABELS = {
 
   // Pre-Lane-C readiness codes (common ones; others fall through)
   po_missing: "PO missing",
+  po_not_found: "PO extracted but not found in Business Central",
   po_validation: "PO validation failed",
   vendor_match: "Vendor match failed",
   vendor_unresolved: "Vendor unresolved",

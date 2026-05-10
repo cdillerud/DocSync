@@ -1,7 +1,7 @@
-# GPI Hub — AP UAT Kickoff Notes (INTERNAL DRAFT)
+# GPI Hub — AP UAT Kickoff Notes (INTERNAL DRAFT — Controlled Pilot)
 
 > **Status:** Internal draft for IT / Engineering review.
-> **NOT for distribution to Accounting.**
+> **NOT for distribution to Accounting** until final approval.
 > Accounting has not been engaged. These notes are the stub of what
 > we will eventually hand to AP testers as a ~1-page kickoff sheet on
 > Day 0 of the pilot. The tone here will be re-edited for an
@@ -9,6 +9,62 @@
 > **Companion docs (also internal drafts):**
 > - `GPI_HUB_AP_USER_ACCEPTANCE_TEST_PLAN_DRAFT.md`
 > - `GPI_HUB_AP_TEST_FEEDBACK_TEMPLATE.csv`
+> - `prod_reports/AP_UAT_READINESS_STATUS_2026-05-08.md`
+> - `prod_reports/AP_SMOKE_WALK_DOM_CHECK_SUMMARY.md` (16/16 baseline)
+
+---
+
+## Readiness baseline (2026-05-10)
+
+The Hub passes the internal smoke checks for AP UAT. **Controlled
+pilot** mode only — not cutover, not Square9 replacement.
+
+- 16 / 16 internal smoke documents passed on the production VM.
+- Automated DOM smoke completed against the production app.
+- No user-visible raw JSON or raw snake_case codes anywhere on the
+  AP-facing surfaces.
+- AP Review panel placement verified above the PDF preview on every
+  AP_Invoice doc in the smoke set.
+- Accounting has **not** yet tested. This kickoff is what will be
+  used when they do.
+
+---
+
+## Pilot guardrails (read these aloud at kickoff)
+
+These are non-negotiable for the pilot. Repeat them verbatim. AP
+should leave Day 0 knowing them by heart.
+
+- **Do NOT click "Post to BC"** during the pilot. Posting is real
+  and writes to Business Central. The pilot is read-and-edit only.
+- **Do NOT treat the Hub as system of record yet.** Square9 stays
+  the source of truth for AP throughout the testing window.
+- **Report every issue via the feedback CSV template.** No hallway
+  reports, no Slack-only feedback, no "I'll just tell IT later."
+  One CSV row per observation keeps triage clean.
+- **Test only the documents you are assigned.** Random invoices are
+  not part of the pilot set. Don't go fishing.
+- **If a real payment is at risk because of a Hub bug, call the AP
+  supervisor first, not IT.** Fall back to Square9 and flag it.
+
+---
+
+## Day-one pilot plan (single short session)
+
+Before opening the full 5-day window, run one short guided session
+with 1–2 AP testers. Treat this as the gate for everything that
+follows.
+
+| Slot | Activity |
+| --- | --- |
+| 0:00 – 0:30 | **Kickoff** — read this doc aloud, confirm logins, walk one example document together. |
+| 0:30 – 1:30 | **Guided review** — testers walk 10–15 assigned documents from the P0+P1 smoke set. One row per doc in the feedback CSV. No Post, no Mark Ready, Save only when IT explicitly directs it for a single test row. |
+| 1:30 – 1:45 | **Feedback review** — IT reads the new CSV rows on the spot, flags anything Critical / Blocker, confirms understanding before testers leave. |
+| 1:45 onward | **IT / engineering triage** — fix-then-expand or expand-now decision. |
+
+If a Critical or Blocker shows up in the day-one session, STOP. Do
+not move to the 5-day window in the test plan until it's fixed and
+re-smoked.
 
 ---
 
@@ -158,3 +214,27 @@ tester — IT compares the Hub against Square9 separately.
   data that shouldn't leave the AP UAT group.
 - AP UAT environment URL, IT mailbox, and feedback drop location are
   marked TBD here. Resolve before printing the AP-facing version.
+
+---
+
+## Pre-send checklist (IT must complete before sending the AP-facing version)
+
+Tick all of these before any AP-facing send. Mirror these on the
+test plan's section 17.
+
+- [ ] Pilot testers identified and confirmed (1–2 names).
+- [ ] AP supervisor named and looped in.
+- [ ] Hub URL confirmed reachable from each tester's workstation.
+- [ ] Login / SSO / MFA confirmed for each tester.
+- [ ] Feedback drop location resolved (Teams / SharePoint).
+- [ ] AP UAT IT mailbox confirmed and monitored.
+- [ ] "Do not click Post to BC" repeated in three places: kickoff,
+      test plan, and feedback CSV header banner.
+- [ ] On-call IT engineer named and present for the day-one session.
+- [ ] Latest smoke-checker run is green within the last 48 hours.
+- [ ] CSV example rows stripped from the AP-facing template.
+- [ ] INTERNAL DRAFT banners and engineering language removed from
+      the AP-facing version.
+- [ ] All `TBD` markers in this kickoff and the test plan resolved.
+- [ ] AP supervisor signs off in writing.
+

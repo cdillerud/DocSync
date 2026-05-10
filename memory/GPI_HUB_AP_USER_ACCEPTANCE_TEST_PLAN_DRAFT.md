@@ -1,12 +1,55 @@
-# GPI Hub — AP User Acceptance Test Plan (INTERNAL DRAFT)
+# GPI Hub — AP User Acceptance Test Plan (INTERNAL DRAFT — Controlled Pilot)
 
 > **Status:** Internal draft for IT / Engineering review.
-> **NOT for distribution to Accounting.**
+> **NOT for distribution to Accounting** until final approval.
 > Accounting has not been engaged. This document is a working draft
 > of what we will eventually hand to AP testers, captured now while
 > the context is fresh. Language and tone will be re-edited for an
 > AP-facing audience before any external send.
-> **Source context:** `prod_reports/INTERNAL_AP_REVIEW_METADATA_VALIDATION.md`.
+> **Source context:** `prod_reports/INTERNAL_AP_REVIEW_METADATA_VALIDATION.md`,
+> `prod_reports/AP_UAT_READINESS_STATUS_2026-05-08.md`,
+> `prod_reports/AP_SMOKE_WALK_DOM_CHECK_SUMMARY.md` (2026-05-10).
+
+---
+
+## 0. Readiness baseline (2026-05-10)
+
+The Hub is technically clean enough to begin a **controlled AP pilot**.
+This is not cutover, not Square9 replacement, not posting-to-BC
+testing — it is a guided review with a small set of testers.
+
+**Production VM smoke baseline (P0 + P1 set, 16 documents):**
+
+| Check | Result |
+| --- | --- |
+| Documents loaded under authenticated session | 16 / 16 |
+| AP Review panel rendered above the PDF preview | 16 / 16 |
+| All five AP fields visible (Vendor, Invoice #, Date, Amount, PO) | 16 / 16 |
+| Document Status card present | 16 / 16 |
+| Raw JSON warnings leaked to UI | 0 / 16 |
+| Raw snake_case blocker codes leaked to UI | 0 / 16 |
+| Save / Mark Ready / Post / Re-process actions triggered | **none** |
+| Automated DOM smoke checker exit code | **0 (pass)** |
+
+**What changed since the 2026-05-08 status:**
+1. `entity_resolution_blocking_items` rendering bug fixed — items like
+   `vendor_unmatched: 'MRP Solutions'` now render as
+   *"Vendor not matched to a Business Central record yet — 'MRP
+   Solutions'"* via the new `humanizeBlockingItem()` helper in
+   `DocumentIntelligencePanel.js`. Caught by the automated DOM smoke
+   checker, fixed, redeployed, re-validated.
+2. `po_not_found` blocker code now mapped to plain English
+   ("PO extracted but not found in Business Central"). No more
+   "Po Not Found" title-case fallback.
+3. Smoke checker calibration: Document Status substring match made
+   case-insensitive (Hub renders `DOCUMENT STATUS`).
+
+**Explicit non-claims (DO NOT promise to AP):**
+- Square9 is **not** being replaced or retired.
+- Hub is **not** the system of record yet.
+- Posting to BC from Hub is **not** part of this pilot.
+- 16/16 smoke ≠ 100% accuracy guarantee — extraction errors are
+  exactly what the pilot is meant to surface on real documents.
 
 ---
 
@@ -547,6 +590,103 @@ The pilot exits **as not-ready** if any of:
 In the not-ready case, IT triages the open list, fixes top items,
 and a second short pilot is scheduled. We do not declare cutover
 until exit criteria are met.
+
+---
+
+## 14. Day-one pilot plan (controlled-pilot mode)
+
+Before opening the pilot to a full week, run a **single short
+session** with 1–2 AP testers to confirm the on-the-ground
+experience. This day-one pass is the gate for everything that
+follows in this plan.
+
+| Time | Step | Owner |
+| --- | --- | --- |
+| 0:00 – 0:30 | **Kickoff** — read `GPI_HUB_AP_UAT_KICKOFF_NOTES_DRAFT.md` aloud, confirm logins work, confirm everyone knows where to log feedback, walk one example doc together. | IT |
+| 0:30 – 1:30 | **Guided review** — testers walk **10–15** assigned documents from the P0+P1 smoke set (already validated 16/16). One observation row per doc in the feedback CSV. **No clicking Post to BC. No Mark Ready. No Save unless explicitly directed by IT for a single test row.** | AP testers (with IT in the room) |
+| 1:30 – 1:45 | **Feedback review** — IT reads the new CSV rows on the spot, flags anything Critical/Blocker, confirms tester's understanding before they leave. | IT + AP testers |
+| 1:45 onward | **IT triage** — engineering decides whether to fix-then-expand or expand-now. | IT |
+
+If the day-one session surfaces a Critical or Blocker, **stop the
+pilot here**. Do not proceed to the 5-day window in section 7 until
+the issue is fixed and re-smoked.
+
+---
+
+## 15. Pilot guardrails (must remain explicit to AP)
+
+Carry these forward verbatim into any AP-facing send. These are not
+suggestions; they are the conditions under which the pilot is safe.
+
+- **AP must NOT click "Post to BC".** Posting writes to Business
+  Central and is out of scope for this pilot. If the button is
+  visible, leave it alone.
+- **AP must NOT treat the Hub as system-of-record.** Square9 remains
+  the source of truth for AP throughout the pilot.
+- **AP must report all issues via the feedback template** — no
+  hallway / Slack / email-only reports. Every observation gets a
+  CSV row so triage stays auditable.
+- **AP must test only assigned documents.** Random invoices are not
+  part of the pilot set; testing them muddies the regression signal.
+- **AP must not change classification, routing rules, or vendor
+  master data.** Those are admin actions; the pilot is read-and-edit
+  on individual documents only.
+- **AP must call the AP supervisor (not IT) if a real payment is at
+  risk.** Hub bugs do not block real payments; if a real payment is
+  on the line, fall back to Square9 and flag it.
+
+---
+
+## 16. Known limitations heading into the pilot
+
+These are real and expected. Note them in the AP-facing kickoff;
+they should not become Blocker rows during testing.
+
+- **Document Intelligence empty-state 404s** are engineering-console
+  noise only. AP will not see them in the UI. (Tracked as
+  engineering hygiene; no AP impact.)
+- **OCR examples are not part of the first pilot.** Documents that
+  require OCR show empty extracted fields by design today; they are
+  excluded from the smoke-set walk.
+- **Non-invoice attachment handling is still being refined.**
+  Tracking spreadsheets, statements, freight issues — these may
+  appear in the AP queue and should just be noted-and-skipped, not
+  fixed.
+- **Square9 remains available throughout the pilot.** Nothing about
+  AP's day changes. The pilot is parallel.
+- **No production BC posting from the Hub during the pilot** unless
+  IT explicitly approves and supervises a specific test row. Default
+  posture is "do not post."
+- **Some vendors with inconsistent header names** show lower
+  vendor-match confidence. AP can correct via the BC lookup; that's
+  expected behaviour for the pilot.
+
+---
+
+## 17. Final pre-send checklist (IT must complete before AP send)
+
+Do not send any AP-facing version of this plan until every box
+below is ticked.
+
+- [ ] Pilot testers identified and confirmed (1–2 names).
+- [ ] AP supervisor named and looped in.
+- [ ] Hub URL confirmed reachable from each tester's workstation.
+- [ ] Login / SSO / MFA confirmed for each tester.
+- [ ] Feedback drop location resolved (Teams / SharePoint / shared
+      folder), permissions scoped to the AP UAT group.
+- [ ] AP UAT IT mailbox confirmed and monitored.
+- [ ] "Do not click Post to BC" instruction repeated **in the
+      kickoff**, the **test plan**, and the **feedback CSV header
+      banner**. (Three places, on purpose.)
+- [ ] On-call IT engineer named and present for the day-one session.
+- [ ] Latest smoke-checker run is green within the last 48 hours.
+- [ ] CSV example rows stripped from the AP-facing template (the
+      INTERNAL DRAFT keeps them for IT's reference).
+- [ ] INTERNAL DRAFT banners and engineering-language references
+      removed from the AP-facing version.
+- [ ] All `TBD` markers in this plan and in the kickoff doc are
+      resolved.
+- [ ] AP supervisor has read this plan and signed off in writing.
 
 ---
 

@@ -1276,46 +1276,89 @@ async def get_insights_trends(days: int = Query(30, le=90)):
 
 @router.get("/ap-metrics")
 async def get_ap_metrics():
-    """AP Invoice posting metrics: submitted, failed, pending, timing, errors."""
+    """AP Invoice posting metrics: submitted, failed, pending, timing, errors.
+
+    Field-name correctness (see PRD 2026-04-10 BC field-name migration
+    and the matching logic in `/inbox-stats`):
+    - AP docs are identified by `doc_type` (case-insensitive). The
+      legacy `document_type` field is rarely populated in the current
+      corpus and was producing a 52x undercount on this card.
+    - "Posted to BC" uses the canonical signal set already used by
+      `/inbox-stats`: presence of bc_purchase_invoice_no /
+      bc_record_no / bc_document_no / bc_record_id, OR status=="Posted".
+      `bc_posting_status` is auto-post-pipeline-only and is NOT
+      required.
+    - "Failed" uses bc_posting_status=="failed" OR a non-empty
+      bc_posting_error OR final_state=="auto_post_failed",
+      AND the doc has NOT also reached a posted signal (so a doc
+      that failed once and then succeeded counts as posted, not
+      failed).
+    - `success_rate = posted / (posted + failed)` -- attempts that
+      succeeded -- never `posted / total_ap` (which is coverage).
+    """
     db = get_db()
 
-    AP_TYPES = ["AP_Invoice", "AP_INVOICE", "Purchase_Invoice", "PURCHASE_INVOICE", "PurchaseInvoice"]
+    AP_TYPE_FILTER = {
+        "doc_type": {"$regex": r"^(ap[_-]?invoice|purchase[_-]?invoice)$",
+                     "$options": "i"}
+    }
+    POSTED_SIGNAL = {"$or": [
+        {"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}},
+        {"bc_record_no":           {"$exists": True, "$nin": [None, ""]}},
+        {"bc_document_no":         {"$exists": True, "$nin": [None, ""]}},
+        {"bc_record_id":           {"$exists": True, "$nin": [None, ""]}},
+        {"status": "Posted"},
+    ]}
+    FAILED_SIGNAL = {"$or": [
+        {"bc_posting_status": "failed"},
+        {"bc_posting_error":  {"$exists": True, "$nin": [None, ""]}},
+        {"final_state":       "auto_post_failed"},
+    ]}
 
-    total_ap = await db.hub_documents.count_documents({"document_type": {"$in": AP_TYPES}})
-    posted = await db.hub_documents.count_documents({
-        "document_type": {"$in": AP_TYPES},
-        "bc_posting_status": "posted",
-    })
-    failed = await db.hub_documents.count_documents({
-        "document_type": {"$in": AP_TYPES},
-        "bc_posting_status": "failed",
-    })
-    pending_review = await db.hub_documents.count_documents({
-        "document_type": {"$in": AP_TYPES},
-        "bc_posting_status": {"$nin": ["posted", "failed"]},
-        "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent"]},
-    })
+    total_ap = await db.hub_documents.count_documents(AP_TYPE_FILTER)
+
+    posted = await db.hub_documents.count_documents(
+        {"$and": [AP_TYPE_FILTER, POSTED_SIGNAL]})
+
+    # Failed = matches a failure signal AND has NOT reached a posted
+    # signal. Prevents double-counting docs that failed-then-succeeded.
+    failed = await db.hub_documents.count_documents({"$and": [
+        AP_TYPE_FILTER, FAILED_SIGNAL, {"$nor": [POSTED_SIGNAL]},
+    ]})
+
+    pending_review = await db.hub_documents.count_documents({"$and": [
+        AP_TYPE_FILTER,
+        {"$nor": [POSTED_SIGNAL]},
+        {"$nor": [FAILED_SIGNAL]},
+        {"status": {"$nin": ["Completed", "Archived", "batch_parent"]}},
+    ]})
 
     # Validation pass rate
-    validated = await db.hub_documents.count_documents({
-        "document_type": {"$in": AP_TYPES},
-        "validation_results.all_passed": True,
-    })
+    validated = await db.hub_documents.count_documents({"$and": [
+        AP_TYPE_FILTER, {"validation_results.all_passed": True},
+    ]})
     validation_rate = round((validated / total_ap * 100) if total_ap > 0 else 0, 1)
 
     # Average time from ingestion to BC posting (for posted docs)
     posted_docs = await db.hub_documents.find(
-        {"document_type": {"$in": AP_TYPES}, "bc_posting_status": "posted",
-         "created_utc": {"$exists": True}, "bc_posted_at": {"$exists": True}},
-        {"_id": 0, "created_utc": 1, "bc_posted_at": 1}
-    ).limit(100).to_list(100)
+        {"$and": [
+            AP_TYPE_FILTER, POSTED_SIGNAL,
+            {"created_utc": {"$exists": True, "$nin": [None, ""]}},
+        ]},
+        {"_id": 0, "created_utc": 1, "bc_posted_at": 1,
+         "posted_to_bc_at": 1, "posted_at": 1, "updated_utc": 1}
+    ).limit(200).to_list(200)
     avg_time_hours = 0
     if posted_docs:
         deltas = []
         for d in posted_docs:
+            posted_ts = (d.get("bc_posted_at") or d.get("posted_to_bc_at")
+                         or d.get("posted_at") or d.get("updated_utc"))
+            if not posted_ts:
+                continue
             try:
                 created = datetime.fromisoformat(d["created_utc"].replace("Z", "+00:00"))
-                posted_at = datetime.fromisoformat(d["bc_posted_at"].replace("Z", "+00:00"))
+                posted_at = datetime.fromisoformat(posted_ts.replace("Z", "+00:00"))
                 delta_h = (posted_at - created).total_seconds() / 3600
                 if delta_h > 0:
                     deltas.append(delta_h)
@@ -1324,15 +1367,27 @@ async def get_ap_metrics():
         if deltas:
             avg_time_hours = round(sum(deltas) / len(deltas), 1)
 
-    # Error breakdown (top reasons)
+    # Error breakdown (top reasons) -- keyed off the fast-access summary
+    # projection `bc_posting_error`. Excludes docs that later reached a
+    # posted signal so we don't surface stale errors for recovered docs.
     error_pipeline = [
-        {"$match": {"document_type": {"$in": AP_TYPES}, "bc_posting_status": "failed", "bc_posting_error": {"$exists": True}}},
+        {"$match": {"$and": [
+            AP_TYPE_FILTER,
+            {"bc_posting_error": {"$exists": True, "$nin": [None, ""]}},
+            {"$nor": [POSTED_SIGNAL]},
+        ]}},
         {"$group": {"_id": "$bc_posting_error", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 5},
     ]
     errors_raw = await db.hub_documents.aggregate(error_pipeline).to_list(5)
-    error_breakdown = [{"reason": e["_id"][:80], "count": e["count"]} for e in errors_raw if e["_id"]]
+    error_breakdown = [{"reason": (e["_id"] or "")[:80], "count": e["count"]}
+                       for e in errors_raw if e["_id"]]
+
+    # Attempts = posted + failed. Success rate is the fraction of
+    # attempts that succeeded -- NOT coverage over total_ap.
+    attempts = posted + failed
+    success_rate = round((posted / attempts * 100) if attempts > 0 else 0, 1)
 
     return {
         "total_ap": total_ap,
@@ -1341,6 +1396,6 @@ async def get_ap_metrics():
         "pending_review": pending_review,
         "validation_rate": validation_rate,
         "avg_time_to_post_hours": avg_time_hours,
-        "success_rate": round((posted / total_ap * 100) if total_ap > 0 else 0, 1),
+        "success_rate": success_rate,
         "error_breakdown": error_breakdown,
     }

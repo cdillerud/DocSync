@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import FileImportPage from "@/pages/FileImportPage";
 import SharePointMigrationPage from "@/pages/SharePointMigrationPage";
+import BCDocumentEventsPage from "@/pages/BCDocumentEventsPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -32,6 +33,7 @@ function AppRoutes() {
         <Route path="file-import" element={<FileImportPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
+        <Route path="bc-document-events" element={<BCDocumentEventsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="migration/onegamer-poc" element={<SharePointMigrationPage />} />
       </Route>

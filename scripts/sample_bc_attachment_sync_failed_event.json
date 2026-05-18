@@ -1,0 +1,32 @@
+{
+  "event_id": "sample-attachment-sync-failed-001",
+  "idempotency_key": "sample-attachment-sync-failed-001",
+  "correlation_id": "sandbox-bc-attachment-test-002",
+  "event_timestamp": "2026-05-18T21:30:00Z",
+  "source_app": "BC_AL_EXTENSION_SANDBOX",
+  "source_system": "BC_NATIVE",
+  "actor": "sandbox-user",
+  "bc_record": {
+    "company_id": "sandbox-company-id",
+    "company_name": "Sandbox Company",
+    "environment": "Sandbox",
+    "record_type": "Purchase Order",
+    "record_id": "sandbox-po-record-guid-002",
+    "record_no": "SAMPLE-PO-002",
+    "record_system_id": "sandbox-po-system-id-002",
+    "posted": false
+  },
+  "document_no": "SAMPLE-PO-002",
+  "document_type": "PURCHASE_ORDER",
+  "file_name": "SAMPLE-PO-002.pdf",
+  "attachment_id": "sandbox-attachment-id-002",
+  "attachment_source": "bc_document_attachment",
+  "content_type": "application/pdf",
+  "file_size_bytes": 123456,
+  "storage_status": "failed",
+  "error": "Sandbox simulated attachment sync failure",
+  "metadata": {
+    "test_payload": true,
+    "notes": "Sanitized sandbox attachment sync failure event for BC document delivery integration"
+  }
+}

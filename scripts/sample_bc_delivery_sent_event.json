@@ -1,0 +1,46 @@
+{
+  "event_id": "sample-delivery-sent-001",
+  "idempotency_key": "sample-document-delivery-001",
+  "correlation_id": "sandbox-bc-delivery-test-001",
+  "event_timestamp": "2026-05-18T21:15:00Z",
+  "source_app": "BC_AL_EXTENSION_SANDBOX",
+  "source_system": "BC_NATIVE",
+  "actor": "sandbox-user",
+  "bc_record": {
+    "company_id": "sandbox-company-id",
+    "company_name": "Sandbox Company",
+    "environment": "Sandbox",
+    "record_type": "Posted Sales Invoice",
+    "record_id": "sandbox-record-guid",
+    "record_no": "SAMPLE-INV-001",
+    "record_system_id": "sandbox-system-id",
+    "posted": true
+  },
+  "document_no": "SAMPLE-INV-001",
+  "document_type": "SALES_INVOICE",
+  "file_name": "SAMPLE-INV-001.pdf",
+  "delivery_method": "bc_email",
+  "delivery_status": "sent",
+  "template_code": "SALES_INVOICE_DEFAULT",
+  "subject": "Sandbox Invoice SAMPLE-INV-001",
+  "email_message_id": "sandbox-message-id-001",
+  "recipient_resolution_method": "master_record_fallback",
+  "recipients": {
+    "to": ["recipient@example.invalid"],
+    "cc": [],
+    "bcc": []
+  },
+  "sharepoint": {
+    "site_id": "sandbox-site-id",
+    "drive_id": "sandbox-drive-id",
+    "item_id": "sandbox-item-id",
+    "web_url": "https://example.invalid/sandbox/SAMPLE-INV-001.pdf",
+    "folder_path": "BC/Customer/SAMPLE/Sales Invoice/2026/SAMPLE-INV-001",
+    "file_name": "SAMPLE-INV-001.pdf",
+    "storage_status": "synced"
+  },
+  "metadata": {
+    "test_payload": true,
+    "notes": "Sanitized sandbox test event for BC document delivery integration"
+  }
+}

@@ -6,7 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator
 } from '../components/ui/dropdown-menu';
 import {
-  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, FolderSync
+  LayoutDashboard, UploadCloud, Files, Settings, Moon, Sun, LogOut, Menu, X, Brain, FileSpreadsheet, ChevronRight, FolderSync, Cable
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
@@ -19,6 +19,7 @@ const navItems = [
   { to: '/queue', icon: Files, label: 'Document Queue' },
   { to: '/file-import', icon: FileSpreadsheet, label: 'File Import' },
   { to: '/email-parser', icon: Brain, label: 'Email Config' },
+  { to: '/bc-document-events', icon: Cable, label: 'BC Events' },
   { to: '/migration/onegamer-poc', icon: FolderSync, label: 'SP Migration POC' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
@@ -97,6 +98,7 @@ export default function Layout() {
     if (path === '/file-import') return 'File Import';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path === '/email-parser') return 'Email Config';
+    if (path === '/bc-document-events') return 'BC Document Events';
     if (path === '/settings') return 'Settings';
     if (path === '/migration/onegamer-poc') return 'SharePoint Migration POC';
     return 'GPI Document Hub';

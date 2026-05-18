@@ -1,0 +1,40 @@
+{
+  "event_id": "sample-attachment-linked-001",
+  "idempotency_key": "sample-attachment-linked-001",
+  "correlation_id": "sandbox-bc-attachment-test-001",
+  "event_timestamp": "2026-05-18T21:25:00Z",
+  "source_app": "BC_AL_EXTENSION_SANDBOX",
+  "source_system": "BC_NATIVE",
+  "actor": "sandbox-user",
+  "bc_record": {
+    "company_id": "sandbox-company-id",
+    "company_name": "Sandbox Company",
+    "environment": "Sandbox",
+    "record_type": "Purchase Order",
+    "record_id": "sandbox-po-record-guid-001",
+    "record_no": "SAMPLE-PO-001",
+    "record_system_id": "sandbox-po-system-id-001",
+    "posted": false
+  },
+  "document_no": "SAMPLE-PO-001",
+  "document_type": "PURCHASE_ORDER",
+  "file_name": "SAMPLE-PO-001.pdf",
+  "attachment_id": "sandbox-attachment-id-001",
+  "attachment_source": "bc_document_attachment",
+  "content_type": "application/pdf",
+  "file_size_bytes": 123456,
+  "storage_status": "synced",
+  "sharepoint": {
+    "site_id": "sandbox-site-id",
+    "drive_id": "sandbox-drive-id",
+    "item_id": "sandbox-po-item-id",
+    "web_url": null,
+    "folder_path": "SANDBOX/BC/PURCHASE_ORDER/SAMPLE-PO-001",
+    "file_name": "SAMPLE-PO-001.pdf",
+    "storage_status": "synced"
+  },
+  "metadata": {
+    "test_payload": true,
+    "notes": "Sanitized sandbox attachment linked event for BC document delivery integration"
+  }
+}

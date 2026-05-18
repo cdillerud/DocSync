@@ -19,10 +19,10 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 import hashlib
 import json
-import uuid
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
+from pymongo.errors import DuplicateKeyError
 
 
 router = APIRouter(prefix="/bc-document-events", tags=["bc-document-events"])
@@ -129,6 +129,35 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _normalize_doc_type(value: Optional[str]) -> str:
+    return (value or "").upper().replace(" ", "_").replace("-", "_")
+
+
+def _infer_doc_type_from_record_type(record_type: Optional[str], explicit: Optional[str] = None) -> str:
+    normalized_explicit = _normalize_doc_type(explicit)
+    if normalized_explicit:
+        return normalized_explicit
+
+    rt = (record_type or "").lower()
+    if "sales" in rt and "credit" in rt:
+        return "SALES_CREDIT_MEMO"
+    if "purchase" in rt and "credit" in rt:
+        return "PURCHASE_CREDIT_MEMO"
+    if "sales" in rt and "invoice" in rt:
+        return "SALES_INVOICE"
+    if "purchase" in rt and "invoice" in rt:
+        return "AP_INVOICE"
+    if "purchase" in rt and "order" in rt:
+        return "PURCHASE_ORDER"
+    if "sales" in rt and "order" in rt:
+        return "SALES_ORDER"
+    if "statement" in rt:
+        return "STATEMENT"
+    if "reminder" in rt:
+        return "REMINDER"
+    return "BC_DOCUMENT"
+
+
 def _stable_event_key(event_type: str, payload: BCEventBase) -> str:
     record = payload.bc_record
     base = "|".join([
@@ -172,28 +201,7 @@ def _document_id(payload: BCEventBase) -> str:
 
 
 def _infer_doc_type(payload: BCEventBase) -> str:
-    explicit = (payload.document_type or "").upper().replace(" ", "_").replace("-", "_")
-    if explicit:
-        return explicit
-
-    record_type = (payload.bc_record.record_type or "").lower()
-    if "sales" in record_type and "credit" in record_type:
-        return "SALES_CREDIT_MEMO"
-    if "purchase" in record_type and "credit" in record_type:
-        return "PURCHASE_CREDIT_MEMO"
-    if "sales" in record_type and "invoice" in record_type:
-        return "SALES_INVOICE"
-    if "purchase" in record_type and "invoice" in record_type:
-        return "AP_INVOICE"
-    if "purchase" in record_type and "order" in record_type:
-        return "PURCHASE_ORDER"
-    if "sales" in record_type and "order" in record_type:
-        return "SALES_ORDER"
-    if "statement" in record_type:
-        return "STATEMENT"
-    if "reminder" in record_type:
-        return "REMINDER"
-    return "BC_DOCUMENT"
+    return _infer_doc_type_from_record_type(payload.bc_record.record_type, payload.document_type)
 
 
 def _infer_category(doc_type: str) -> str:
@@ -287,6 +295,82 @@ def _attachment_doc(payload: AttachmentEventPayload, event_type: str) -> Dict[st
     }
 
 
+def _status_for_event_type(event_type: str) -> Dict[str, str]:
+    if event_type == EventType.DELIVERY_SENT.value:
+        return {"status": "sent", "workflow_status": "exported"}
+    if event_type == EventType.DELIVERY_FAILED.value:
+        return {"status": "delivery_failed", "workflow_status": "exception"}
+    if event_type == EventType.ATTACHMENT_LINKED.value:
+        return {"status": "attachment_linked", "workflow_status": "captured"}
+    if event_type == EventType.ATTACHMENT_SYNC_FAILED.value:
+        return {"status": "attachment_sync_failed", "workflow_status": "exception"}
+    return {"status": "received", "workflow_status": "captured"}
+
+
+async def _repair_hub_document_from_existing_event(existing_event: Dict[str, Any]) -> bool:
+    """Repair an orphan event whose event row exists but hub_documents was not created."""
+    db = _require_db()
+    doc_id = existing_event.get("hub_document_id")
+    if not doc_id:
+        return False
+
+    already_exists = await db.hub_documents.find_one({"id": doc_id}, {"_id": 1})
+    if already_exists:
+        return False
+
+    now = _now_iso()
+    event_type = existing_event.get("event_type", "bc_document_event")
+    event_id = existing_event.get("event_id")
+    bc_source = existing_event.get("bc_source") or {}
+    payload = existing_event.get("payload") or {}
+    doc_type = _infer_doc_type_from_record_type(bc_source.get("record_type"), existing_event.get("document_type"))
+    category = _infer_category(doc_type)
+    statuses = _status_for_event_type(event_type)
+
+    repaired_doc = {
+        "id": doc_id,
+        "bc_document_event_key": existing_event.get("bc_document_event_key"),
+        "source": "bc_document_event",
+        "source_system": existing_event.get("source_system") or "BC_NATIVE",
+        "capture_channel": "API",
+        "doc_type": doc_type,
+        "document_type": doc_type,
+        "category": category,
+        "status": statuses["status"],
+        "workflow_status": statuses["workflow_status"],
+        "created_utc": now,
+        "updated_utc": now,
+        "file_name": existing_event.get("file_name"),
+        "document_no": existing_event.get("document_no"),
+        "bc_source": bc_source,
+        "last_bc_event_type": event_type,
+        "last_bc_event_id": event_id,
+        "last_bc_event_utc": now,
+        "bc_event_ids": [event_id] if event_id else [],
+        "bc_event_types": [event_type],
+        "legacy_context": {
+            "source_system": existing_event.get("source_system") or "BC_NATIVE",
+            "capture_channel": "API",
+        },
+        "workflow_history": [{
+            "timestamp": now,
+            "event": event_type,
+            "actor": existing_event.get("actor") or existing_event.get("source_app") or "BC_DOCUMENT_EVENTS_REPAIR",
+            "event_id": event_id,
+            "correlation_id": existing_event.get("correlation_id"),
+            "note": "Repaired hub document from previously recorded BC document event",
+        }],
+    }
+
+    if event_type in {EventType.DELIVERY_SENT.value, EventType.DELIVERY_FAILED.value}:
+        repaired_doc["delivery"] = payload
+    elif event_type in {EventType.ATTACHMENT_LINKED.value, EventType.ATTACHMENT_SYNC_FAILED.value}:
+        repaired_doc["attachments"] = [payload]
+
+    await db.hub_documents.insert_one(_jsonable(repaired_doc))
+    return True
+
+
 async def _record_event(event_type: str, payload: BCEventBase, specific_payload: Dict[str, Any]) -> Dict[str, Any]:
     db = _require_db()
     event_id = _event_id(event_type, payload)
@@ -294,16 +378,18 @@ async def _record_event(event_type: str, payload: BCEventBase, specific_payload:
 
     existing_event = await db.bc_document_events.find_one({"event_id": event_id}, {"_id": 0})
     if existing_event:
+        doc_id = existing_event.get("hub_document_id")
+        repaired = await _repair_hub_document_from_existing_event(existing_event)
+        doc_exists = bool(doc_id and await db.hub_documents.find_one({"id": doc_id}, {"_id": 1}))
         return {
             "success": True,
             "duplicate": True,
+            "repaired_document": repaired,
+            "orphaned_document": not doc_exists,
             "event_id": event_id,
-            "document_id": existing_event.get("hub_document_id"),
-            "message": "Event already recorded; no duplicate document update performed",
+            "document_id": doc_id,
+            "message": "Event already recorded; hub document checked and repaired if needed",
         }
-
-    event_doc = _base_event_document(event_type, event_id, payload, specific_payload)
-    await db.bc_document_events.insert_one(_jsonable(event_doc))
 
     doc_id = _document_id(payload)
     doc_type = _infer_doc_type(payload)
@@ -336,8 +422,6 @@ async def _record_event(event_type: str, payload: BCEventBase, specific_payload:
         "last_bc_event_id": event_id,
         "last_bc_event_utc": now,
         "bc_source": _build_bc_source(payload),
-        "source_system": payload.source_system,
-        "capture_channel": "API",
     }
 
     update_ops: Dict[str, Any] = {
@@ -352,11 +436,29 @@ async def _record_event(event_type: str, payload: BCEventBase, specific_payload:
         },
     }
 
+    # Upsert the hub document before recording the event row. This avoids an
+    # orphan event if the document update fails.
     await db.hub_documents.update_one(
         {"id": doc_id},
-        update_ops,
+        _jsonable(update_ops),
         upsert=True,
     )
+
+    event_doc = _base_event_document(event_type, event_id, payload, specific_payload)
+    try:
+        await db.bc_document_events.insert_one(_jsonable(event_doc))
+    except DuplicateKeyError:
+        # Another caller recorded the same event after the hub document upsert.
+        return {
+            "success": True,
+            "duplicate": True,
+            "event_id": event_id,
+            "document_id": doc_id,
+            "bc_document_event_key": doc_event_key,
+            "event_type": event_type,
+            "received_utc": now,
+            "message": "Event already recorded after hub document update",
+        }
 
     return {
         "success": True,
@@ -374,9 +476,6 @@ async def _record_delivery_event(event_type: str, payload: DeliveryEventPayload)
     delivery = _delivery_doc(payload, event_type)
     result = await _record_event(event_type, payload, delivery)
 
-    if result.get("duplicate"):
-        return result
-
     doc_update = {
         "delivery": delivery,
     }
@@ -384,17 +483,13 @@ async def _record_delivery_event(event_type: str, payload: DeliveryEventPayload)
     if payload.sharepoint:
         doc_update["sharepoint"] = _jsonable(payload.sharepoint.model_dump())
 
-    if event_type == EventType.DELIVERY_SENT.value:
-        doc_update["status"] = "sent"
-        doc_update["workflow_status"] = "exported"
-    else:
-        doc_update["status"] = "delivery_failed"
-        doc_update["workflow_status"] = "exception"
+    doc_update.update(_status_for_event_type(event_type))
 
-    await db.hub_documents.update_one(
-        {"id": result["document_id"]},
-        {"$set": _jsonable(doc_update)},
-    )
+    if result.get("document_id"):
+        await db.hub_documents.update_one(
+            {"id": result["document_id"]},
+            {"$set": _jsonable(doc_update)},
+        )
 
     return result
 
@@ -404,23 +499,24 @@ async def _record_attachment_event(event_type: str, payload: AttachmentEventPayl
     attachment = _attachment_doc(payload, event_type)
     result = await _record_event(event_type, payload, attachment)
 
-    if result.get("duplicate"):
-        return result
-
-    set_fields: Dict[str, Any] = {
-        "status": "attachment_linked" if event_type == EventType.ATTACHMENT_LINKED.value else "attachment_sync_failed",
-    }
+    set_fields: Dict[str, Any] = _status_for_event_type(event_type)
 
     if payload.sharepoint:
         set_fields["sharepoint"] = _jsonable(payload.sharepoint.model_dump())
 
-    await db.hub_documents.update_one(
-        {"id": result["document_id"]},
-        {
-            "$set": _jsonable(set_fields),
-            "$push": {"attachments": _jsonable(attachment)},
-        },
-    )
+    if result.get("document_id") and not result.get("duplicate"):
+        await db.hub_documents.update_one(
+            {"id": result["document_id"]},
+            {
+                "$set": _jsonable(set_fields),
+                "$push": {"attachments": _jsonable(attachment)},
+            },
+        )
+    elif result.get("document_id"):
+        await db.hub_documents.update_one(
+            {"id": result["document_id"]},
+            {"$set": _jsonable(set_fields)},
+        )
 
     return result
 
@@ -433,10 +529,14 @@ async def get_bc_document_events_status():
     db = _require_db()
     events_count = await db.bc_document_events.count_documents({})
     docs_count = await db.hub_documents.count_documents({"source": "bc_document_event"})
+    orphan_count = await db.bc_document_events.count_documents({
+        "hub_document_id": {"$nin": await db.hub_documents.distinct("id", {"source": "bc_document_event"})}
+    })
     return {
         "status": "ready",
         "events_recorded": events_count,
         "bc_event_documents": docs_count,
+        "orphan_events": orphan_count,
         "writes_to_bc": False,
         "mailbox_polling": False,
     }
@@ -464,6 +564,32 @@ async def attachment_linked(payload: AttachmentEventPayload):
 async def attachment_sync_failed(payload: AttachmentEventPayload):
     """Record a BC attachment sync failure."""
     return await _record_attachment_event(EventType.ATTACHMENT_SYNC_FAILED.value, payload)
+
+
+@router.post("/repair-orphans")
+async def repair_orphan_events():
+    """Repair any BC document events that exist without matching hub_documents rows."""
+    db = _require_db()
+    events = await db.bc_document_events.find({}, {"_id": 0}).to_list(10000)
+    repaired = 0
+    checked = 0
+
+    for event_doc in events:
+        checked += 1
+        doc_id = event_doc.get("hub_document_id")
+        if not doc_id:
+            continue
+        existing_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 1})
+        if existing_doc:
+            continue
+        if await _repair_hub_document_from_existing_event(event_doc):
+            repaired += 1
+
+    return {
+        "success": True,
+        "checked_events": checked,
+        "repaired_documents": repaired,
+    }
 
 
 @router.get("/records/{bc_record_type}/{bc_record_no}")

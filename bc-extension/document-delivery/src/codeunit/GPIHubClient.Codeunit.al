@@ -101,7 +101,6 @@ codeunit 70150003 "GPI Hub Client"
     var
         ResponseJson: JsonObject;
         Token: JsonToken;
-        BoolValue: Boolean;
         TextValue: Text;
     begin
         if ResponseText = '' then
@@ -110,19 +109,15 @@ codeunit 70150003 "GPI Hub Client"
         if not ResponseJson.ReadFrom(ResponseText) then
             exit;
 
-        if ResponseJson.Get('duplicate', Token) then begin
-            if Token.IsValue() then begin
-                Evaluate(BoolValue, Format(Token.AsValue().AsBoolean()));
-                LogEntry.Duplicate := BoolValue;
-            end;
-        end;
+        if ResponseJson.Get('duplicate', Token) then
+            if Token.IsValue() then
+                LogEntry.Duplicate := Token.AsValue().AsBoolean();
 
-        if ResponseJson.Get('document_id', Token) then begin
+        if ResponseJson.Get('document_id', Token) then
             if Token.IsValue() then begin
                 TextValue := Token.AsValue().AsText();
                 LogEntry."Hub Document ID" := CopyStr(TextValue, 1, MaxStrLen(LogEntry."Hub Document ID"));
             end;
-        end;
     end;
 
     local procedure GetSetup(var Setup: Record "GPI Doc Delivery Setup")
@@ -159,11 +154,16 @@ codeunit 70150003 "GPI Hub Client"
     var
         Headers: HttpHeaders;
     begin
-        Client.DefaultRequestHeaders(Headers);
-        Headers.Add('Accept', 'application/json');
+        Headers := Client.DefaultRequestHeaders();
 
-        if Setup."API Key" <> '' then
+        if not Headers.Contains('Accept') then
+            Headers.Add('Accept', 'application/json');
+
+        if Setup."API Key" <> '' then begin
+            if Headers.Contains('X-GPI-Hub-Api-Key') then
+                Headers.Remove('X-GPI-Hub-Api-Key');
             Headers.Add('X-GPI-Hub-Api-Key', Setup."API Key");
+        end;
     end;
 
     local procedure NormalizeBaseUrl(BaseUrl: Text): Text

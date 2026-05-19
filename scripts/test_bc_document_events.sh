@@ -15,11 +15,14 @@ set -Eeuo pipefail
 #   - No orphan events remain.
 #   - writes_to_bc remains false.
 #   - mailbox_polling remains false.
+#   - write endpoints require X-GPI-Hub-Api-Key when configured.
 ###############################################################################
 
 BASE_URL="${BC_EVENTS_BASE_URL:-http://127.0.0.1:8010/api}"
 EXPECTED_EVENTS="${BC_EVENTS_EXPECTED_EVENTS:-4}"
 EXPECTED_DOCS="${BC_EVENTS_EXPECTED_DOCS:-4}"
+ENV_FILE="${BC_EVENTS_ENV_FILE:-backend/.env}"
+API_KEY="${BC_DOCUMENT_EVENTS_API_KEY:-}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -38,6 +41,22 @@ need_command() {
   command -v "$1" >/dev/null 2>&1 || fail "Required command not found: $1"
 }
 
+load_api_key() {
+  if [[ -n "$API_KEY" ]]; then
+    return
+  fi
+
+  if [[ -f "$ENV_FILE" ]]; then
+    API_KEY="$(grep -E '^BC_DOCUMENT_EVENTS_API_KEY=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- || true)"
+  fi
+}
+
+curl_auth_args() {
+  if [[ -n "$API_KEY" ]]; then
+    printf '%s\n' "-H" "X-GPI-Hub-Api-Key: ${API_KEY}"
+  fi
+}
+
 post_json() {
   local endpoint="$1"
   local file="$2"
@@ -45,11 +64,20 @@ post_json() {
   need_file "$file"
   log "POST ${endpoint} using ${file}"
 
-  curl -fsS \
-    -X POST "${BASE_URL}${endpoint}" \
-    -H 'Content-Type: application/json' \
-    -d "@${file}" \
-    | python3 -m json.tool
+  if [[ -n "$API_KEY" ]]; then
+    curl -fsS \
+      -X POST "${BASE_URL}${endpoint}" \
+      -H "X-GPI-Hub-Api-Key: ${API_KEY}" \
+      -H 'Content-Type: application/json' \
+      -d "@${file}" \
+      | python3 -m json.tool
+  else
+    curl -fsS \
+      -X POST "${BASE_URL}${endpoint}" \
+      -H 'Content-Type: application/json' \
+      -d "@${file}" \
+      | python3 -m json.tool
+  fi
 }
 
 get_json() {
@@ -86,17 +114,53 @@ assert_json_equals() {
   log "OK: ${expr}=${expected}"
 }
 
+assert_protected_when_key_configured() {
+  local status_json="$1"
+  local api_key_configured
+  local api_key_required
+  local http_code
+
+  api_key_configured="$(json_value "$status_json" "api_key_configured")"
+  api_key_required="$(json_value "$status_json" "api_key_required")"
+
+  if [[ "$api_key_configured" != "True" || "$api_key_required" != "True" ]]; then
+    log "API key is not configured/required. Skipping unauthenticated rejection check."
+    return
+  fi
+
+  log "Checking that unauthenticated write request is rejected."
+  http_code="$(curl -sS -o /tmp/bc-events-unauth-response.json -w '%{http_code}' \
+    -X POST "${BASE_URL}/bc-document-events/delivery-sent" \
+    -H 'Content-Type: application/json' \
+    -d @scripts/sample_bc_delivery_sent_event.json)"
+
+  if [[ "$http_code" != "401" ]]; then
+    cat /tmp/bc-events-unauth-response.json || true
+    fail "Expected unauthenticated write to return 401, got ${http_code}"
+  fi
+
+  log "OK: unauthenticated write returned 401"
+}
+
 main() {
   need_command curl
   need_command python3
 
   cd "$(dirname "$0")/.."
+  load_api_key
 
   log "BC Document Events Smoke Test"
   log "Base URL: ${BASE_URL}"
+  if [[ -n "$API_KEY" ]]; then
+    log "API key loaded from environment/.env."
+  else
+    log "No API key loaded. Write tests will run without X-GPI-Hub-Api-Key."
+  fi
 
   log "Checking status endpoint."
-  get_json "/bc-document-events/status"
+  status_before="$(curl -fsS "${BASE_URL}/bc-document-events/status")"
+  echo "$status_before" | python3 -m json.tool
+  assert_protected_when_key_configured "$status_before"
 
   post_json "/bc-document-events/delivery-sent" "scripts/sample_bc_delivery_sent_event.json"
   post_json "/bc-document-events/delivery-failed" "scripts/sample_bc_delivery_failed_event.json"
@@ -104,10 +168,18 @@ main() {
   post_json "/bc-document-events/attachment-sync-failed" "scripts/sample_bc_attachment_sync_failed_event.json"
 
   log "Checking idempotency by reposting delivery-sent sample."
-  duplicate_response="$(curl -fsS \
-    -X POST "${BASE_URL}/bc-document-events/delivery-sent" \
-    -H 'Content-Type: application/json' \
-    -d @scripts/sample_bc_delivery_sent_event.json)"
+  if [[ -n "$API_KEY" ]]; then
+    duplicate_response="$(curl -fsS \
+      -X POST "${BASE_URL}/bc-document-events/delivery-sent" \
+      -H "X-GPI-Hub-Api-Key: ${API_KEY}" \
+      -H 'Content-Type: application/json' \
+      -d @scripts/sample_bc_delivery_sent_event.json)"
+  else
+    duplicate_response="$(curl -fsS \
+      -X POST "${BASE_URL}/bc-document-events/delivery-sent" \
+      -H 'Content-Type: application/json' \
+      -d @scripts/sample_bc_delivery_sent_event.json)"
+  fi
 
   echo "$duplicate_response" | python3 -m json.tool
   assert_json_equals "$duplicate_response" "duplicate" "True"

@@ -13,14 +13,10 @@ codeunit 70150004 "GPI Doc Delivery Test"
     begin
         GetSetup(Setup);
 
-        EventId := CopyStr('al-sample-delivery-sent-' + Format(CurrentDateTime(), 0, 9), 1, MaxStrLen(EventId));
-        EventId := ConvertStr(EventId, ':', '-');
-        EventId := ConvertStr(EventId, '.', '-');
-        CorrelationId := CopyStr('al-sandbox-test-' + Format(CurrentDateTime(), 0, 9), 1, MaxStrLen(CorrelationId));
-        CorrelationId := ConvertStr(CorrelationId, ':', '-');
-        CorrelationId := ConvertStr(CorrelationId, '.', '-');
+        EventId := MakeSafeId('al-sample-delivery-sent');
+        CorrelationId := MakeSafeId('al-sandbox-test');
 
-        Builder.BuildSampleDeliverySentPayload(Setup, EventId, CorrelationId, Payload);
+        Payload := Builder.BuildSampleDeliverySentPayload(Setup, EventId, CorrelationId);
 
         if Client.SendDeliverySentEvent(Payload, EventId, CorrelationId, 'Posted Sales Invoice', 'AL-SAMPLE-INV-001', 'SALES_INVOICE', 'AL-SAMPLE-INV-001.pdf') then
             Message('Sample delivery event sent to GPI Hub.')
@@ -49,5 +45,11 @@ codeunit 70150004 "GPI Doc Delivery Test"
             Setup."Log Successful Events" := true;
             Setup.Insert(true);
         end;
+    end;
+
+    local procedure MakeSafeId(Prefix: Text[50]) SafeId: Text[100]
+    begin
+        SafeId := CopyStr(Prefix + '-' + Format(CurrentDateTime(), 0, 9), 1, MaxStrLen(SafeId));
+        SafeId := ConvertStr(SafeId, ':./\ ', '-----');
     end;
 }

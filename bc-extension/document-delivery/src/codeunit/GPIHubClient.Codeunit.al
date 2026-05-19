@@ -79,6 +79,7 @@ codeunit 70150003 "GPI Hub Client"
         LogEntry.Success := Success and Response.IsSuccessStatusCode();
         LogEntry."Created At" := CurrentDateTime();
         LogEntry."Created By" := UserId();
+        ParseHubResponse(ResponseText, LogEntry);
         LogEntry.SetResponseBody(ResponseText);
 
         if not LogEntry.Success then
@@ -94,6 +95,34 @@ codeunit 70150003 "GPI Hub Client"
         Setup.Modify(true);
 
         exit(LogEntry.Success);
+    end;
+
+    local procedure ParseHubResponse(ResponseText: Text; var LogEntry: Record "GPI Doc Delivery Log")
+    var
+        ResponseJson: JsonObject;
+        Token: JsonToken;
+        BoolValue: Boolean;
+        TextValue: Text;
+    begin
+        if ResponseText = '' then
+            exit;
+
+        if not ResponseJson.ReadFrom(ResponseText) then
+            exit;
+
+        if ResponseJson.Get('duplicate', Token) then begin
+            if Token.IsValue() then begin
+                Evaluate(BoolValue, Format(Token.AsValue().AsBoolean()));
+                LogEntry.Duplicate := BoolValue;
+            end;
+        end;
+
+        if ResponseJson.Get('document_id', Token) then begin
+            if Token.IsValue() then begin
+                TextValue := Token.AsValue().AsText();
+                LogEntry."Hub Document ID" := CopyStr(TextValue, 1, MaxStrLen(LogEntry."Hub Document ID"));
+            end;
+        end;
     end;
 
     local procedure GetSetup(var Setup: Record "GPI Doc Delivery Setup")

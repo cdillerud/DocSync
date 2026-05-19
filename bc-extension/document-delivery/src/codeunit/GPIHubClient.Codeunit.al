@@ -7,6 +7,14 @@ codeunit 70150003 "GPI Hub Client"
         exit(SendEvent('/api/bc-document-events/delivery-sent', 'delivery_sent', Payload, EventId, CorrelationId, RecordType, RecordNo, DocumentType, FileName));
     end;
 
+    procedure SendDocumentLinkedEvent(Payload: Text; EventId: Text[100]; CorrelationId: Text[100]; RecordType: Text[100]; RecordNo: Code[50]; DocumentType: Text[50]; FileName: Text[250]) Success: Boolean
+    begin
+        // Uses the existing GPI Hub attachment-linked event endpoint as the first
+        // Option B bridge slice. This represents an externally stored document
+        // reference, not a PDF binary upload from Business Central.
+        exit(SendEvent('/api/bc-document-events/attachment-linked', 'document_linked', Payload, EventId, CorrelationId, RecordType, RecordNo, DocumentType, FileName));
+    end;
+
     procedure TestConnection(var Setup: Record "GPI Doc Delivery Setup") Success: Boolean
     var
         Client: HttpClient;

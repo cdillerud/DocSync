@@ -77,6 +77,12 @@ table 70150000 "GPI Doc Delivery Setup"
             InitValue = 'SharePoint/Zetadocs';
             ToolTip = 'Specifies the external document storage label to include in event metadata.';
         }
+        field(145; "Document Link Version"; Code[20])
+        {
+            Caption = 'Document Link Version';
+            InitValue = 'v1';
+            ToolTip = 'Specifies a short version key used for document-link event idempotency. Increment this value when the link template changes and you need to send a new link event for the same BC document.';
+        }
         field(150; "Preview Document No."; Code[50])
         {
             Caption = 'Preview Document No.';

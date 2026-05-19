@@ -47,6 +47,7 @@ export const updateDocument = (id, data) => api.put(`/documents/${id}`, data);
 export const linkDocument = (id) => api.post(`/documents/${id}/link`);
 export const deleteDocument = (id) => api.delete(`/documents/${id}`);
 export const resubmitDocument = (id) => api.post(`/documents/${id}/reprocess?reclassify=true`);
+export const verifyBCDocumentLink = (id) => api.post(`/bc-document-events/documents/${id}/verify-link`);
 
 // Square9 Workflow Retry
 export const retryDocument = (id, reason = 'Manual retry') => api.post(`/documents/${id}/retry?reason=${encodeURIComponent(reason)}`);

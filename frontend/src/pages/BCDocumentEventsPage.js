@@ -65,9 +65,49 @@ function formatDate(value) {
 }
 
 function statusVariant(value) {
-  if (value === true || value === 'sent' || value === 'exported' || value === 'ready') return 'default';
-  if (value === false || value === 0 || value === 'captured') return 'secondary';
+  if (value === true || value === 'sent' || value === 'exported' || value === 'ready' || value === 'external_link' || value === 'healthy') return 'default';
+  if (value === false || value === 0 || value === 'captured' || value === 'missing') return 'secondary';
   return 'outline';
+}
+
+function getLinkHealth(doc) {
+  const sharepoint = doc?.sharepoint || {};
+  const webUrl = (sharepoint.web_url || '').trim();
+  const folderPath = (sharepoint.folder_path || '').trim();
+  const fileName = (sharepoint.file_name || doc?.file_name || '').trim();
+  const issues = [];
+
+  if (!webUrl) issues.push('Missing URL');
+  if (webUrl && !/^https?:\/\//i.test(webUrl)) issues.push('URL is not HTTP/HTTPS');
+  if (webUrl && /^\s*Document Link Template:/i.test(webUrl)) issues.push('Template label included in URL');
+  if (!folderPath) issues.push('Missing folder path');
+  if (folderPath && /^\s*Document Folder Template:/i.test(folderPath)) issues.push('Template label included in folder');
+  if (fileName && webUrl && !webUrl.toLowerCase().includes(fileName.toLowerCase())) issues.push('URL does not include file name');
+
+  if (!webUrl && !folderPath) {
+    return {
+      state: 'missing',
+      label: 'No link',
+      detail: 'No external SharePoint/Zetadocs link stored yet',
+      variant: 'secondary',
+    };
+  }
+
+  if (issues.length > 0) {
+    return {
+      state: 'warning',
+      label: 'Check link',
+      detail: issues.join('; '),
+      variant: 'outline',
+    };
+  }
+
+  return {
+    state: 'healthy',
+    label: 'Link ready',
+    detail: sharepoint.storage_status || 'external link present',
+    variant: 'default',
+  };
 }
 
 function StatCard({ label, value, icon: Icon, tone = 'text-primary' }) {
@@ -285,52 +325,60 @@ export default function BCDocumentEventsPage() {
                 <TableHead>Workflow</TableHead>
                 <TableHead>BC Record</TableHead>
                 <TableHead>Last Event</TableHead>
+                <TableHead>Link Health</TableHead>
                 <TableHead className="text-right">Open</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(recordResult?.documents || []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No linked hub documents found.</TableCell>
+                  <TableCell colSpan={8} className="text-center text-muted-foreground py-8">No linked hub documents found.</TableCell>
                 </TableRow>
               ) : (
-                recordResult.documents.map((doc) => (
-                  <TableRow
-                    key={doc.id}
-                    className="cursor-pointer hover:bg-muted/40"
-                    onClick={() => openDocument(doc.id)}
-                    data-testid={`bc-linked-document-row-${doc.id}`}
-                  >
-                    <TableCell>
-                      <div className="font-medium">{doc.file_name || doc.document_no || doc.id}</div>
-                      <div className="text-xs text-muted-foreground font-mono break-all">{doc.id}</div>
-                    </TableCell>
-                    <TableCell><Badge variant="outline">{doc.doc_type || '-'}</Badge></TableCell>
-                    <TableCell><Badge variant={statusVariant(doc.status)}>{doc.status || '-'}</Badge></TableCell>
-                    <TableCell><Badge variant={statusVariant(doc.workflow_status)}>{doc.workflow_status || '-'}</Badge></TableCell>
-                    <TableCell>
-                      <div>{doc.bc_source?.record_type || '-'}</div>
-                      <div className="text-xs text-muted-foreground font-mono">{doc.bc_source?.record_no || '-'}</div>
-                    </TableCell>
-                    <TableCell>
-                      <div>{doc.last_bc_event_type || '-'}</div>
-                      <div className="text-xs text-muted-foreground">{formatDate(doc.last_bc_event_utc)}</div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openDocument(doc.id);
-                        }}
-                        data-testid={`open-bc-linked-document-${doc.id}`}
-                      >
-                        <ExternalLink className="w-4 h-4 mr-1.5" /> Open
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
+                recordResult.documents.map((doc) => {
+                  const linkHealth = getLinkHealth(doc);
+                  return (
+                    <TableRow
+                      key={doc.id}
+                      className="cursor-pointer hover:bg-muted/40"
+                      onClick={() => openDocument(doc.id)}
+                      data-testid={`bc-linked-document-row-${doc.id}`}
+                    >
+                      <TableCell>
+                        <div className="font-medium">{doc.file_name || doc.document_no || doc.id}</div>
+                        <div className="text-xs text-muted-foreground font-mono break-all">{doc.id}</div>
+                      </TableCell>
+                      <TableCell><Badge variant="outline">{doc.doc_type || '-'}</Badge></TableCell>
+                      <TableCell><Badge variant={statusVariant(doc.status)}>{doc.status || '-'}</Badge></TableCell>
+                      <TableCell><Badge variant={statusVariant(doc.workflow_status)}>{doc.workflow_status || '-'}</Badge></TableCell>
+                      <TableCell>
+                        <div>{doc.bc_source?.record_type || '-'}</div>
+                        <div className="text-xs text-muted-foreground font-mono">{doc.bc_source?.record_no || '-'}</div>
+                      </TableCell>
+                      <TableCell>
+                        <div>{doc.last_bc_event_type || '-'}</div>
+                        <div className="text-xs text-muted-foreground">{formatDate(doc.last_bc_event_utc)}</div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={linkHealth.variant}>{linkHealth.label}</Badge>
+                        <div className="text-xs text-muted-foreground max-w-[260px] truncate" title={linkHealth.detail}>{linkHealth.detail}</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openDocument(doc.id);
+                          }}
+                          data-testid={`open-bc-linked-document-${doc.id}`}
+                        >
+                          <ExternalLink className="w-4 h-4 mr-1.5" /> Open
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>

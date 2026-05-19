@@ -47,13 +47,38 @@ set_env_key() {
   fi
 }
 
-comment_out_env_key() {
+get_env_key() {
   local key="$1"
   local file="$2"
+  grep -E "^${key}=" "$file" 2>/dev/null | tail -n 1 | cut -d= -f2- || true
+}
 
-  if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=|# ${key}=|" "$file"
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+  else
+    printf 'change-me-%s-%s' "$(date +%s)" "$RANDOM"
   fi
+}
+
+ensure_bc_events_api_key() {
+  local existing_key
+  existing_key="$(get_env_key "BC_DOCUMENT_EVENTS_API_KEY" "$ENV_FILE")"
+
+  if [[ -z "$existing_key" ]]; then
+    existing_key="$(generate_secret)"
+    set_env_key "BC_DOCUMENT_EVENTS_API_KEY" "$existing_key" "$ENV_FILE"
+    log "Generated BC_DOCUMENT_EVENTS_API_KEY for sandbox."
+  else
+    log "Preserving existing BC_DOCUMENT_EVENTS_API_KEY."
+  fi
+
+  set_env_key "BC_DOCUMENT_EVENTS_REQUIRE_API_KEY" "true" "$ENV_FILE"
 }
 
 main() {
@@ -77,11 +102,16 @@ main() {
   set_env_key "EMAIL_POLLING_USER" "" "$ENV_FILE"
   set_env_key "SALES_EMAIL_POLLING_USER" "" "$ENV_FILE"
 
+  ensure_bc_events_api_key
+
   # Leave Graph credentials intact for later deliberate testing, but keep polling users blank.
   # If a test requires email access later, restore the user intentionally and only in sandbox.
 
-  log "Current sandbox polling-related environment values:"
-  grep -E '^(EMAIL_POLLING_ENABLED|EMAIL_POLLING_USER|SALES_EMAIL_POLLING_ENABLED|SALES_EMAIL_POLLING_USER|DYNAMIC_MAILBOX_POLLING_ENABLED|ENABLE_CREATE_DRAFT_HEADER|BC_BLOCK_PRODUCTION_WRITES|PILOT_MODE_ENABLED)=' "$ENV_FILE" || true
+  log "Current sandbox safety-related environment values:"
+  grep -E '^(EMAIL_POLLING_ENABLED|EMAIL_POLLING_USER|SALES_EMAIL_POLLING_ENABLED|SALES_EMAIL_POLLING_USER|DYNAMIC_MAILBOX_POLLING_ENABLED|ENABLE_CREATE_DRAFT_HEADER|BC_BLOCK_PRODUCTION_WRITES|PILOT_MODE_ENABLED|BC_DOCUMENT_EVENTS_REQUIRE_API_KEY)=' "$ENV_FILE" || true
+  if grep -q '^BC_DOCUMENT_EVENTS_API_KEY=' "$ENV_FILE"; then
+    log "BC_DOCUMENT_EVENTS_API_KEY is configured."
+  fi
 
   log "Restarting sandbox containers."
   docker_compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d --build
@@ -100,6 +130,7 @@ Expected:
   - /api/health checks are OK
   - No new [SalesPoll:*] mailbox polling attempts
   - No Graph /mailFolders/Inbox/messages requests
+  - /api/bc-document-events/status shows api_key_required=true and api_key_configured=true
 EOF
 }
 

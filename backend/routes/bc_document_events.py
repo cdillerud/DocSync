@@ -18,11 +18,13 @@ Design rules:
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 import hashlib
 import json
 import os
 import secrets
 
+import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
@@ -35,6 +37,7 @@ _db = None
 
 BC_DOCUMENT_EVENTS_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_API_KEY", "").strip()
 BC_DOCUMENT_EVENTS_REQUIRE_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_REQUIRE_API_KEY", "true").lower() != "false"
+LINK_VERIFY_TIMEOUT_SECONDS = float(os.environ.get("BC_DOCUMENT_LINK_VERIFY_TIMEOUT_SECONDS", "10"))
 
 
 def set_db(database):
@@ -182,52 +185,6 @@ def _infer_doc_type_from_record_type(record_type: Optional[str], explicit: Optio
     return "BC_DOCUMENT"
 
 
-def _stable_event_key(event_type: str, payload: BCEventBase) -> str:
-    record = payload.bc_record
-    base = "|".join([
-        event_type,
-        payload.idempotency_key or "",
-        payload.correlation_id or "",
-        record.company_id or record.company_name or "",
-        record.environment or "",
-        record.record_type or "",
-        record.record_id or "",
-        record.record_no or "",
-        record.record_system_id or "",
-        payload.document_no or "",
-        payload.file_name or "",
-        payload.event_timestamp or "",
-    ])
-    return f"bc_evt_{_sha256_text(base)[:32]}"
-
-
-def _event_id(event_type: str, payload: BCEventBase) -> str:
-    return payload.event_id or _stable_event_key(event_type, payload)
-
-
-def _document_event_key(payload: BCEventBase) -> str:
-    record = payload.bc_record
-    base = "|".join([
-        record.company_id or record.company_name or "",
-        record.environment or "",
-        record.record_type or "",
-        record.record_id or "",
-        record.record_no or "",
-        record.record_system_id or "",
-        payload.document_no or "",
-        payload.file_name or "",
-    ])
-    return f"bc_doc_{_sha256_text(base)[:32]}"
-
-
-def _document_id(payload: BCEventBase) -> str:
-    return payload.hub_document_id or _document_event_key(payload)
-
-
-def _infer_doc_type(payload: BCEventBase) -> str:
-    return _infer_doc_type_from_record_type(payload.bc_record.record_type, payload.document_type)
-
-
 def _infer_category(doc_type: str) -> str:
     if doc_type in {"AP_INVOICE", "PURCHASE_CREDIT_MEMO", "PURCHASE_ORDER"}:
         return "AP"
@@ -249,6 +206,193 @@ def _build_bc_source(payload: BCEventBase) -> Dict[str, Any]:
         "posted": record.posted,
         "document_no": payload.document_no,
     }
+
+
+def _sharepoint_from_doc(doc: Dict[str, Any]) -> Dict[str, Any]:
+    sharepoint = doc.get("sharepoint") or {}
+    if not isinstance(sharepoint, dict):
+        sharepoint = {}
+    return sharepoint
+
+
+def _metadata_link_health(doc: Dict[str, Any]) -> Dict[str, Any]:
+    sharepoint = _sharepoint_from_doc(doc)
+    web_url = (sharepoint.get("web_url") or doc.get("sharepoint_share_link_url") or "").strip()
+    folder_path = (sharepoint.get("folder_path") or "").strip()
+    file_name = (sharepoint.get("file_name") or doc.get("file_name") or "").strip()
+    issues: List[str] = []
+    checked_at = _now_iso()
+
+    if not web_url:
+        issues.append("Missing SharePoint URL")
+    elif not web_url.lower().startswith(("http://", "https://")):
+        issues.append("SharePoint URL is not HTTP/HTTPS")
+    else:
+        parsed = urlparse(web_url)
+        if not parsed.netloc:
+            issues.append("SharePoint URL has no host")
+        if parsed.scheme not in {"http", "https"}:
+            issues.append("Unsupported URL scheme")
+
+    if web_url.lower().startswith("document link template:"):
+        issues.append("Template label is included in URL")
+    if folder_path.lower().startswith("document folder template:"):
+        issues.append("Template label is included in folder path")
+    if not folder_path:
+        issues.append("Missing folder path")
+    if file_name and web_url and file_name.lower() not in web_url.lower():
+        issues.append("URL does not include expected file name")
+
+    if not web_url and not folder_path:
+        return {
+            "status": "missing",
+            "label": "No link",
+            "detail": "No SharePoint/Zetadocs link is stored on this document",
+            "method": "metadata",
+            "checked_at": checked_at,
+            "web_url": web_url,
+            "folder_path": folder_path,
+            "file_name": file_name,
+            "issues": issues,
+        }
+
+    if issues:
+        return {
+            "status": "invalid",
+            "label": "Invalid link metadata",
+            "detail": "; ".join(issues),
+            "method": "metadata",
+            "checked_at": checked_at,
+            "web_url": web_url,
+            "folder_path": folder_path,
+            "file_name": file_name,
+            "issues": issues,
+        }
+
+    return {
+        "status": "unchecked",
+        "label": "Link ready",
+        "detail": "External link is present but has not been verified by HTTP/Graph yet",
+        "method": "metadata",
+        "checked_at": checked_at,
+        "web_url": web_url,
+        "folder_path": folder_path,
+        "file_name": file_name,
+        "issues": [],
+    }
+
+
+async def _verify_external_link(doc: Dict[str, Any]) -> Dict[str, Any]:
+    metadata_health = _metadata_link_health(doc)
+    if metadata_health["status"] in {"missing", "invalid"}:
+        return metadata_health
+
+    web_url = metadata_health["web_url"]
+    checked_at = _now_iso()
+
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=LINK_VERIFY_TIMEOUT_SECONDS,
+            headers={"User-Agent": "GPI-Hub-LinkVerifier/1.0"},
+        ) as client:
+            response = await client.head(web_url)
+            if response.status_code in {405, 501}:
+                response = await client.get(web_url, headers={"Range": "bytes=0-0"})
+    except httpx.TimeoutException:
+        return {
+            **metadata_health,
+            "status": "unreachable",
+            "label": "Verification timeout",
+            "detail": "Timed out while trying to verify the external SharePoint link",
+            "method": "http",
+            "checked_at": checked_at,
+        }
+    except httpx.HTTPError as exc:
+        return {
+            **metadata_health,
+            "status": "unreachable",
+            "label": "Verification failed",
+            "detail": str(exc),
+            "method": "http",
+            "checked_at": checked_at,
+        }
+
+    status_code = response.status_code
+    final_url = str(response.url)
+
+    if 200 <= status_code < 300 or status_code == 304:
+        return {
+            **metadata_health,
+            "status": "verified",
+            "label": "Verified",
+            "detail": "External SharePoint link returned a successful HTTP response",
+            "method": "http",
+            "checked_at": checked_at,
+            "http_status_code": status_code,
+            "final_url": final_url,
+        }
+
+    if status_code in {401, 403}:
+        return {
+            **metadata_health,
+            "status": "auth_required",
+            "label": "Auth required",
+            "detail": "SharePoint requires authentication from the verifier. The link may still open for signed-in users.",
+            "method": "http",
+            "checked_at": checked_at,
+            "http_status_code": status_code,
+            "final_url": final_url,
+        }
+
+    if status_code == 404:
+        return {
+            **metadata_health,
+            "status": "missing",
+            "label": "Missing file",
+            "detail": "SharePoint returned 404 for the external document link",
+            "method": "http",
+            "checked_at": checked_at,
+            "http_status_code": status_code,
+            "final_url": final_url,
+        }
+
+    return {
+        **metadata_health,
+        "status": "unreachable",
+        "label": f"HTTP {status_code}",
+        "detail": f"External document link returned HTTP {status_code}",
+        "method": "http",
+        "checked_at": checked_at,
+        "http_status_code": status_code,
+        "final_url": final_url,
+    }
+
+
+async def _store_link_health(document_id: str, health: Dict[str, Any]) -> None:
+    db = _require_db()
+    await db.hub_documents.update_one(
+        {"id": document_id},
+        {
+            "$set": _jsonable({
+                "link_health": health,
+                "link_health_status": health.get("status"),
+                "link_health_checked_at": health.get("checked_at"),
+                "sharepoint.link_health": health,
+                "sharepoint.link_health_status": health.get("status"),
+                "sharepoint.link_verified_at": health.get("checked_at"),
+            }),
+            "$push": {
+                "workflow_history": _jsonable({
+                    "timestamp": _now_iso(),
+                    "event": "link_health_checked",
+                    "actor": "GPI_HUB_LINK_VERIFIER",
+                    "note": health.get("detail"),
+                    "link_health_status": health.get("status"),
+                })
+            }
+        }
+    )
 
 
 def _workflow_history_entry(event_type: str, event_id: str, payload: BCEventBase, note: Optional[str] = None) -> Dict[str, Any]:
@@ -618,6 +762,67 @@ async def repair_orphan_events():
     }
 
 
+@router.post("/documents/{document_id}/verify-link")
+async def verify_document_link(document_id: str):
+    """Verify and store link health for one BC-originated hub document."""
+    db = _require_db()
+    doc = await db.hub_documents.find_one(
+        {"id": document_id, "source": "bc_document_event"},
+        {"_id": 0},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="BC event document not found")
+
+    health = await _verify_external_link(doc)
+    await _store_link_health(document_id, health)
+
+    updated = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    return {
+        "success": True,
+        "document_id": document_id,
+        "link_health": health,
+        "document": updated,
+    }
+
+
+@router.post("/records/{bc_record_type}/{bc_record_no}/verify-links")
+async def verify_links_for_bc_record(
+    bc_record_type: str,
+    bc_record_no: str,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Verify and store link health for all GPI Hub documents tied to a BC record."""
+    db = _require_db()
+    docs = await db.hub_documents.find(
+        {
+            "source": "bc_document_event",
+            "bc_source.record_type": bc_record_type,
+            "bc_source.record_no": bc_record_no,
+        },
+        {"_id": 0},
+    ).sort("updated_utc", -1).limit(limit).to_list(limit)
+
+    results = []
+    for doc in docs:
+        document_id = doc.get("id")
+        health = await _verify_external_link(doc)
+        if document_id:
+            await _store_link_health(document_id, health)
+        results.append({
+            "document_id": document_id,
+            "file_name": doc.get("file_name"),
+            "link_health": health,
+        })
+
+    return {
+        "success": True,
+        "bc_record_type": bc_record_type,
+        "bc_record_no": bc_record_no,
+        "checked_count": len(results),
+        "results": results,
+    }
+
+
 @router.get("/records/{bc_record_type}/{bc_record_no}")
 async def get_events_for_bc_record(
     bc_record_type: str,
@@ -633,6 +838,10 @@ async def get_events_for_bc_record(
         },
         {"_id": 0},
     ).sort("updated_utc", -1).limit(limit).to_list(limit)
+
+    for doc in docs:
+        if not doc.get("link_health"):
+            doc["link_health"] = _metadata_link_health(doc)
 
     events = await db.bc_document_events.find(
         {

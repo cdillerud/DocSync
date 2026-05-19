@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==================== ROUTERS ====================
-from routes import documents, ingestion, workflows, dashboard, config
+from routes import documents, ingestion, workflows, dashboard, config, bc_document_events
 
 # ==================== SERVICES ====================
 from services.workflow_engine import WorkflowEngine
@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
     workflows.set_dependencies(db, WorkflowEngine)
     dashboard.set_db(db)
     config.set_db(db)
+    bc_document_events.set_db(db)
     
     # Create indexes
     await create_indexes()
@@ -73,7 +74,19 @@ async def create_indexes():
     await db.hub_documents.create_index("source")
     await db.hub_documents.create_index("content_hash")
     await db.hub_documents.create_index("created_utc")
+    await db.hub_documents.create_index("bc_document_event_key")
+    await db.hub_documents.create_index("bc_source.record_type")
+    await db.hub_documents.create_index("bc_source.record_no")
+    await db.hub_documents.create_index("last_bc_event_utc")
     
+    # BC Document Events
+    await db.bc_document_events.create_index("event_id", unique=True)
+    await db.bc_document_events.create_index("hub_document_id")
+    await db.bc_document_events.create_index("bc_document_event_key")
+    await db.bc_document_events.create_index("bc_source.record_type")
+    await db.bc_document_events.create_index("bc_source.record_no")
+    await db.bc_document_events.create_index("received_utc")
+
     # Mailboxes
     await db.mailbox_sources.create_index("id", unique=True)
     await db.mailbox_sources.create_index("email_address")
@@ -165,6 +178,7 @@ api_router.include_router(ingestion.router)
 api_router.include_router(workflows.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(config.router)
+api_router.include_router(bc_document_events.router)
 
 # Mount to app
 app.include_router(api_router)

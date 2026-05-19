@@ -1,0 +1,65 @@
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: gpi-hub-bc-sandbox-mongodb
+    restart: unless-stopped
+    volumes:
+      - bc_sandbox_mongodb_data:/data/db
+    networks:
+      - gpi-bc-sandbox-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gpi-hub-bc-sandbox-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      - MONGO_URL=mongodb://mongodb:27017
+      - DB_NAME=gpi_hub_bc_sandbox
+      - EMAIL_POLLING_ENABLED=false
+      - ENABLE_CREATE_DRAFT_HEADER=false
+      - BC_BLOCK_PRODUCTION_WRITES=true
+      - DEMO_MODE=true
+      - ENVIRONMENT=bc-document-delivery-sandbox
+    volumes:
+      - bc_sandbox_uploads_data:/app/uploads
+    ports:
+      - "127.0.0.1:8010:8001"
+    networks:
+      - gpi-bc-sandbox-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - REACT_APP_BACKEND_URL=http://localhost:3010
+    container_name: gpi-hub-bc-sandbox-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "3010:3000"
+    networks:
+      - gpi-bc-sandbox-network
+
+volumes:
+  bc_sandbox_mongodb_data:
+    driver: local
+  bc_sandbox_uploads_data:
+    driver: local
+
+networks:
+  gpi-bc-sandbox-network:
+    driver: bridge

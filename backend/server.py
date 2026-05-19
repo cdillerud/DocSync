@@ -161,6 +161,9 @@ import routes.sharepoint_migration as sharepoint_migration_module
 from routes.spiro import spiro_router, set_spiro_routes_db
 from services.spiro.spiro_sync import set_spiro_db
 
+# ==================== BC DOCUMENT EVENTS ====================
+from routes.bc_document_events import router as bc_document_events_router, set_db as set_bc_document_events_db
+
 import jwt as pyjwt
 
 TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}
@@ -12813,6 +12816,8 @@ app.include_router(ap_review_router)
 app.include_router(sharepoint_migration_router, prefix="/api")
 # Spiro Integration Module
 app.include_router(spiro_router)
+# BC Document Events Module
+app.include_router(bc_document_events_router, prefix="/api")
 
 @app.get("/api/health")
 async def health_check():
@@ -12921,6 +12926,17 @@ async def startup():
     await db.hub_documents.create_index("review_status")
     await db.hub_documents.create_index("bc_posting_status")
     await db.hub_documents.create_index("vendor_id")
+    # BC Document Events indexes
+    await db.hub_documents.create_index("bc_document_event_key")
+    await db.hub_documents.create_index("bc_source.record_type")
+    await db.hub_documents.create_index("bc_source.record_no")
+    await db.hub_documents.create_index("last_bc_event_utc")
+    await db.bc_document_events.create_index("event_id", unique=True)
+    await db.bc_document_events.create_index("hub_document_id")
+    await db.bc_document_events.create_index("bc_document_event_key")
+    await db.bc_document_events.create_index("bc_source.record_type")
+    await db.bc_document_events.create_index("bc_source.record_no")
+    await db.bc_document_events.create_index("received_utc")
     # Initialize AP Review router dependencies
     set_ap_review_deps(db, get_bc_service())
     # Legacy indexes (keep for backward compat)
@@ -12950,6 +12966,8 @@ async def startup():
     # Spiro Integration: Initialize database
     set_spiro_db(db)
     set_spiro_routes_db(db)
+    # BC Document Events: Initialize database
+    set_bc_document_events_db(db)
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

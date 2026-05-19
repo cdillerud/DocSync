@@ -9,6 +9,9 @@ pageextension 70150000 "GPI Posted Sales Inv Ext" extends "Posted Sales Invoice"
                 ApplicationArea = All;
                 Caption = 'Send GPI Hub Test Event';
                 Image = SendTo;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
                 ToolTip = 'Sends a metadata-only test event for this posted sales invoice to GPI Document Hub. This does not resend the invoice, replace document delivery, or change Zetadocs behavior.';
 
                 trigger OnAction()

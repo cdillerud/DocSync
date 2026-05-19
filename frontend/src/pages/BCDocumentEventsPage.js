@@ -6,7 +6,7 @@ import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
-import { AlertCircle, CheckCircle2, ExternalLink, FileClock, RefreshCw, Search, Send, Wrench } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ExternalLink, FileClock, RefreshCw, Search, Send, ShieldCheck, Wrench } from 'lucide-react';
 
 const SAMPLE_DELIVERY_EVENT = {
   event_id: 'sample-delivery-sent-001',
@@ -65,12 +65,30 @@ function formatDate(value) {
 }
 
 function statusVariant(value) {
-  if (value === true || value === 'sent' || value === 'exported' || value === 'ready' || value === 'external_link' || value === 'healthy') return 'default';
-  if (value === false || value === 0 || value === 'captured' || value === 'missing') return 'secondary';
+  if (value === true || value === 'sent' || value === 'exported' || value === 'ready' || value === 'external_link' || value === 'healthy' || value === 'verified') return 'default';
+  if (value === false || value === 0 || value === 'captured' || value === 'missing' || value === 'unchecked') return 'secondary';
+  return 'outline';
+}
+
+function linkHealthVariant(status) {
+  if (status === 'verified') return 'default';
+  if (status === 'auth_required' || status === 'unchecked') return 'secondary';
+  if (status === 'missing' || status === 'invalid' || status === 'unreachable') return 'destructive';
   return 'outline';
 }
 
 function getLinkHealth(doc) {
+  const storedHealth = doc?.link_health || doc?.sharepoint?.link_health;
+  if (storedHealth) {
+    return {
+      state: storedHealth.status || 'unchecked',
+      label: storedHealth.label || storedHealth.status || 'Link health stored',
+      detail: storedHealth.detail || storedHealth.web_url || 'Stored link health result',
+      checkedAt: storedHealth.checked_at,
+      variant: linkHealthVariant(storedHealth.status),
+    };
+  }
+
   const sharepoint = doc?.sharepoint || {};
   const webUrl = (sharepoint.web_url || '').trim();
   const folderPath = (sharepoint.folder_path || '').trim();
@@ -95,7 +113,7 @@ function getLinkHealth(doc) {
 
   if (issues.length > 0) {
     return {
-      state: 'warning',
+      state: 'invalid',
       label: 'Check link',
       detail: issues.join('; '),
       variant: 'outline',
@@ -103,10 +121,10 @@ function getLinkHealth(doc) {
   }
 
   return {
-    state: 'healthy',
+    state: 'unchecked',
     label: 'Link ready',
-    detail: sharepoint.storage_status || 'external link present',
-    variant: 'default',
+    detail: sharepoint.storage_status || 'External link present, not verified yet',
+    variant: 'secondary',
   };
 }
 
@@ -133,6 +151,7 @@ export default function BCDocumentEventsPage() {
   const [lastPostResult, setLastPostResult] = useState(null);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const refreshStatus = async () => {
     const res = await api.get('/bc-document-events/status');
@@ -155,6 +174,24 @@ export default function BCDocumentEventsPage() {
       toast.error(err.response?.data?.detail || err.message || 'Record search failed');
     } finally {
       setWorking(false);
+    }
+  };
+
+  const verifyLinks = async () => {
+    if (!recordType.trim() || !recordNo.trim()) {
+      toast.error('Enter both BC record type and record number');
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      const res = await api.post(`/bc-document-events/records/${encodeURIComponent(recordType.trim())}/${encodeURIComponent(recordNo.trim())}/verify-links`);
+      toast.success(`Verified ${res.data.checked_count} link(s)`);
+      await searchRecord();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || err.message || 'Link verification failed');
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -234,13 +271,13 @@ export default function BCDocumentEventsPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={refreshStatus} disabled={working} data-testid="refresh-bc-events-btn">
+          <Button variant="secondary" onClick={refreshStatus} disabled={working || verifying} data-testid="refresh-bc-events-btn">
             <RefreshCw className="w-4 h-4 mr-2" /> Refresh
           </Button>
-          <Button variant="secondary" onClick={repairOrphans} disabled={working} data-testid="repair-bc-events-btn">
+          <Button variant="secondary" onClick={repairOrphans} disabled={working || verifying} data-testid="repair-bc-events-btn">
             <Wrench className="w-4 h-4 mr-2" /> Repair Orphans
           </Button>
-          <Button onClick={sendSampleEvent} disabled={working} data-testid="send-sample-bc-event-btn">
+          <Button onClick={sendSampleEvent} disabled={working || verifying} data-testid="send-sample-bc-event-btn">
             <Send className="w-4 h-4 mr-2" /> Send Sample Event
           </Button>
         </div>
@@ -258,7 +295,7 @@ export default function BCDocumentEventsPage() {
           <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Lookup by BC Record</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto_auto] gap-3">
             <input
               value={recordType}
               onChange={(e) => setRecordType(e.target.value)}
@@ -275,8 +312,11 @@ export default function BCDocumentEventsPage() {
               placeholder="BC record number, e.g. 296152"
               data-testid="bc-record-no-input"
             />
-            <Button onClick={searchRecord} disabled={working} data-testid="search-bc-record-btn">
+            <Button onClick={searchRecord} disabled={working || verifying} data-testid="search-bc-record-btn">
               <Search className="w-4 h-4 mr-2" /> Search
+            </Button>
+            <Button variant="secondary" onClick={verifyLinks} disabled={working || verifying} data-testid="verify-bc-record-links-btn">
+              <ShieldCheck className="w-4 h-4 mr-2" /> {verifying ? 'Verifying...' : 'Verify Links'}
             </Button>
           </div>
           {recordResult && (
@@ -362,6 +402,7 @@ export default function BCDocumentEventsPage() {
                       <TableCell>
                         <Badge variant={linkHealth.variant}>{linkHealth.label}</Badge>
                         <div className="text-xs text-muted-foreground max-w-[260px] truncate" title={linkHealth.detail}>{linkHealth.detail}</div>
+                        {linkHealth.checkedAt && <div className="text-[10px] text-muted-foreground">Checked {formatDate(linkHealth.checkedAt)}</div>}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

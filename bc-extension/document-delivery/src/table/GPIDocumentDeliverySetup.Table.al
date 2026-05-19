@@ -61,6 +61,22 @@ table 70150000 "GPI Doc Delivery Setup"
             Caption = 'Last Event Error';
             Editable = false;
         }
+        field(120; "Document Link Template"; Text[500])
+        {
+            Caption = 'Document Link Template';
+            ToolTip = 'Specifies an optional SharePoint/Zetadocs-style URL template to include in GPI Hub events. Supported tokens: {DocumentNo}, {RecordNo}, {FileName}, {CompanyName}, {EnvironmentName}.';
+        }
+        field(130; "Document Folder Template"; Text[250])
+        {
+            Caption = 'Document Folder Template';
+            ToolTip = 'Specifies an optional logical folder path template to include in GPI Hub events. Supported tokens: {DocumentNo}, {RecordNo}, {FileName}, {CompanyName}, {EnvironmentName}.';
+        }
+        field(140; "Document Storage Provider"; Text[50])
+        {
+            Caption = 'Document Storage Provider';
+            InitValue = 'SharePoint/Zetadocs';
+            ToolTip = 'Specifies the external document storage label to include in event metadata.';
+        }
     }
 
     keys

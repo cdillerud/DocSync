@@ -46,8 +46,12 @@ codeunit 70150002 "GPI Hub Event Builder"
         Recipients.Add('bcc', BccArray);
         Root.Add('recipients', Recipients);
 
+        AddExternalDocumentLink(Root, Setup, 'AL-SAMPLE-INV-001', 'AL-SAMPLE-INV-001.pdf');
+
         Metadata.Add('test_payload', true);
         Metadata.Add('notes', 'Business Central AL sandbox sample delivery event');
+        Metadata.Add('document_storage_provider', Setup."Document Storage Provider");
+        Metadata.Add('document_link_strategy', 'external_link');
         Root.Add('metadata', Metadata);
 
         Root.WriteTo(Payload);
@@ -107,11 +111,50 @@ codeunit 70150002 "GPI Hub Event Builder"
         Recipients.Add('bcc', BccArray);
         Root.Add('recipients', Recipients);
 
+        AddExternalDocumentLink(Root, Setup, RecordNo, FileName);
+
         Metadata.Add('test_payload', false);
         Metadata.Add('notes', 'Business Central native delivery event');
+        Metadata.Add('document_storage_provider', Setup."Document Storage Provider");
+        Metadata.Add('document_link_strategy', 'external_link');
         Root.Add('metadata', Metadata);
 
         Root.WriteTo(Payload);
+    end;
+
+    local procedure AddExternalDocumentLink(var Root: JsonObject; var Setup: Record "GPI Doc Delivery Setup"; DocumentNo: Text; FileName: Text)
+    var
+        SharePoint: JsonObject;
+        WebUrl: Text;
+        FolderPath: Text;
+    begin
+        WebUrl := ApplyTemplate(Setup."Document Link Template", Setup, DocumentNo, FileName);
+        FolderPath := ApplyTemplate(Setup."Document Folder Template", Setup, DocumentNo, FileName);
+
+        if (WebUrl = '') and (FolderPath = '') then
+            exit;
+
+        SharePoint.Add('site_id', '');
+        SharePoint.Add('drive_id', '');
+        SharePoint.Add('item_id', '');
+        SharePoint.Add('web_url', WebUrl);
+        SharePoint.Add('folder_path', FolderPath);
+        SharePoint.Add('file_name', FileName);
+        SharePoint.Add('storage_status', 'external_link');
+        Root.Add('sharepoint', SharePoint);
+    end;
+
+    local procedure ApplyTemplate(TemplateText: Text; var Setup: Record "GPI Doc Delivery Setup"; DocumentNo: Text; FileName: Text) Result: Text
+    begin
+        Result := TemplateText;
+        if Result = '' then
+            exit('');
+
+        Result := Result.Replace('{DocumentNo}', DocumentNo);
+        Result := Result.Replace('{RecordNo}', DocumentNo);
+        Result := Result.Replace('{FileName}', FileName);
+        Result := Result.Replace('{CompanyName}', Setup."Company Name");
+        Result := Result.Replace('{EnvironmentName}', Setup."Environment Name");
     end;
 
     local procedure AddCsvRecipients(var TargetArray: JsonArray; RecipientsCsv: Text)

@@ -21,8 +21,11 @@ codeunit 70150005 "GPI Posted Sales Inv Bridge"
         if SalesInvoiceHeader."No." = '' then
             Error('A posted sales invoice number is required.');
 
-        EventId := MakeSafeId('posted-sales-invoice-test-' + SalesInvoiceHeader."No.");
-        CorrelationId := MakeSafeId('posted-sales-invoice-' + SalesInvoiceHeader."No.");
+        // Stable event/idempotency key for this manual test action.
+        // Re-clicking the action for the same posted invoice should be treated
+        // as a duplicate by GPI Hub, not as a new delivery event.
+        EventId := MakeStableId('posted-sales-invoice-test-' + SalesInvoiceHeader."No.");
+        CorrelationId := MakeStableId('posted-sales-invoice-' + SalesInvoiceHeader."No.");
         RecordId := CopyStr(Format(SalesInvoiceHeader.RecordId(), 0, 9), 1, MaxStrLen(RecordId));
         RecordSystemId := CopyStr(Format(SalesInvoiceHeader.SystemId), 1, MaxStrLen(RecordSystemId));
         FileName := CopyStr(SalesInvoiceHeader."No." + '.pdf', 1, MaxStrLen(FileName));
@@ -79,9 +82,9 @@ codeunit 70150005 "GPI Posted Sales Inv Bridge"
         end;
     end;
 
-    local procedure MakeSafeId(Prefix: Text[100]) SafeId: Text[100]
+    local procedure MakeStableId(Value: Text[100]) StableId: Text[100]
     begin
-        SafeId := CopyStr(Prefix + '-' + Format(CurrentDateTime(), 0, 9), 1, MaxStrLen(SafeId));
-        SafeId := ConvertStr(SafeId, ':./\ ', '-----');
+        StableId := CopyStr(LowerCase(Value), 1, MaxStrLen(StableId));
+        StableId := ConvertStr(StableId, ':./\ {}[]()_', '------------');
     end;
 }

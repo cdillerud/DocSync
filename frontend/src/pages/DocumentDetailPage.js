@@ -43,6 +43,35 @@ function isBCEventDocument(doc) {
   return doc?.source === 'bc_document_event' || doc?.source_system === 'BC_NATIVE' || Boolean(doc?.bc_source);
 }
 
+function isBCExternalDocumentLink(doc) {
+  const storageStatus = doc?.sharepoint?.storage_status || doc?.sharepoint_storage_status;
+  const webUrl = doc?.sharepoint_share_link_url || doc?.sharepoint?.web_url || doc?.sharepoint_web_url;
+
+  return isBCEventDocument(doc)
+    && Boolean(webUrl)
+    && (
+      storageStatus === 'external_link'
+      || doc?.status === 'attachment_linked'
+      || doc?.last_bc_event_type === 'attachment_linked'
+    );
+}
+
+function displayDocumentStatus(doc) {
+  if (doc?.status === 'attachment_linked' && isBCExternalDocumentLink(doc)) {
+    return 'External document link';
+  }
+
+  return doc?.status || '-';
+}
+
+function displayBCEventType(doc, value) {
+  if ((value === 'attachment_linked' || value === 'attachment-linked') && isBCExternalDocumentLink(doc)) {
+    return 'document_linked';
+  }
+
+  return value || '-';
+}
+
 function bcSourceValue(doc, field, fallback = '-') {
   return doc?.bc_source?.[field] || fallback;
 }
@@ -150,6 +179,7 @@ export default function DocumentDetailPage() {
 
   const bcEventDoc = isBCEventDocument(doc);
   const sharePointWebUrl = doc.sharepoint_share_link_url || doc.sharepoint?.web_url || doc.sharepoint_web_url;
+  const displayStatus = displayDocumentStatus(doc);
 
   return (
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
@@ -164,7 +194,7 @@ export default function DocumentDetailPage() {
               {doc.file_name}
             </h2>
             <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${STATUS_CLASSES[doc.status] || ''}`}>
-              {doc.status}
+              {displayStatus}
             </span>
             {bcEventDoc && <Badge variant="outline" className="text-xs">BC Event</Badge>}
           </div>
@@ -276,7 +306,7 @@ export default function DocumentDetailPage() {
                 <InfoRow label="Company" value={bcSourceValue(doc, 'company_name')} />
                 <InfoRow label="Environment" value={bcSourceValue(doc, 'environment')} mono />
                 <InfoRow label="Posted" value={String(bcSourceValue(doc, 'posted', false))} />
-                <InfoRow label="Last Event" value={doc.last_bc_event_type || '-'} mono />
+                <InfoRow label="Last Event" value={displayBCEventType(doc, doc.last_bc_event_type)} mono />
                 <InfoRow label="Event ID" value={shortValue(doc.last_bc_event_id, 24)} mono copyable={doc.last_bc_event_id} onCopy={copyToClipboard} />
               </CardContent>
             </Card>
@@ -568,7 +598,7 @@ function BCEventDetailPanel({ doc, sharePointWebUrl }) {
               Business Central Event Detail
             </CardTitle>
           </div>
-          <Badge variant="secondary">Metadata Event</Badge>
+          <Badge variant="secondary">{sharePointWebUrl ? 'External Document Link' : 'Metadata Event'}</Badge>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">

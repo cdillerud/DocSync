@@ -77,7 +77,10 @@ codeunit 70150006 "GPI Posted Purch Inv Bridge"
         if Setup."Document Link Template" = '' then
             Error('Document Link Template must be configured before sending a GPI Hub document link event.');
 
-        LinkVersionKey := MakeStableId(Setup."Document Folder Template" + '-' + Setup."Document Link Template");
+        LinkVersionKey := Setup."Document Link Version";
+        if LinkVersionKey = '' then
+            LinkVersionKey := 'v1';
+
         EventId := MakeStableId('posted-purchase-invoice-document-link-' + PurchInvHeader."No." + '-' + LinkVersionKey);
         CorrelationId := MakeStableId('posted-purchase-invoice-document-link-' + PurchInvHeader."No." + '-' + LinkVersionKey);
         RecordId := CopyStr(Format(PurchInvHeader.RecordId(), 0, 9), 1, MaxStrLen(RecordId));
@@ -135,6 +138,7 @@ codeunit 70150006 "GPI Posted Purch Inv Bridge"
             Setup."Primary Key" := 'SETUP';
             Setup."Integration Enabled" := false;
             Setup."Log Successful Events" := true;
+            Setup."Document Link Version" := 'v1';
             Setup.Insert(true);
         end;
     end;

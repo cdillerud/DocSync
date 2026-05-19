@@ -67,6 +67,7 @@ codeunit 70150005 "GPI Posted Sales Inv Bridge"
         FileName: Text[250];
         Subject: Text[250];
         RecipientsCsv: Text[1000];
+        LinkVersionKey: Text[100];
     begin
         GetSetup(Setup);
 
@@ -76,8 +77,12 @@ codeunit 70150005 "GPI Posted Sales Inv Bridge"
         if Setup."Document Link Template" = '' then
             Error('Document Link Template must be configured before sending a GPI Hub document link event.');
 
-        EventId := MakeStableId('posted-sales-invoice-document-link-' + SalesInvoiceHeader."No.");
-        CorrelationId := MakeStableId('posted-sales-invoice-document-link-' + SalesInvoiceHeader."No.");
+        // Link events are idempotent by invoice + link template intent.
+        // This lets a corrected SharePoint/Zetadocs path create a new event,
+        // while repeat-clicking the same configured link remains duplicate-safe.
+        LinkVersionKey := MakeStableId(Setup."Document Folder Template" + '-' + Setup."Document Link Template");
+        EventId := MakeStableId('posted-sales-invoice-document-link-' + SalesInvoiceHeader."No." + '-' + LinkVersionKey);
+        CorrelationId := MakeStableId('posted-sales-invoice-document-link-' + SalesInvoiceHeader."No." + '-' + LinkVersionKey);
         RecordId := CopyStr(Format(SalesInvoiceHeader.RecordId(), 0, 9), 1, MaxStrLen(RecordId));
         RecordSystemId := CopyStr(Format(SalesInvoiceHeader.SystemId), 1, MaxStrLen(RecordSystemId));
         FileName := CopyStr(SalesInvoiceHeader."No." + '.pdf', 1, MaxStrLen(FileName));

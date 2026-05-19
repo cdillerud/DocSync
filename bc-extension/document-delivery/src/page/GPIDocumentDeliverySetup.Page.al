@@ -68,6 +68,11 @@ page 70150000 "GPI Doc Delivery Setup"
                     ApplicationArea = All;
                     ToolTip = 'Specifies the external document storage label to include in event metadata.';
                 }
+                field("Document Link Version"; Rec."Document Link Version")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Short version key used for document-link event idempotency. Increment this value when the link template changes and you need to send a new link event for the same BC document.';
+                }
                 field("Document Link Template"; Rec."Document Link Template")
                 {
                     ApplicationArea = All;
@@ -162,8 +167,9 @@ page 70150000 "GPI Doc Delivery Setup"
                     ResolvedUrl := ApplyTemplate(Rec."Document Link Template", PreviewDocumentNo, PreviewFileName);
                     ResolvedFolder := ApplyTemplate(Rec."Document Folder Template", PreviewDocumentNo, PreviewFileName);
 
-                    Message('Document Link Preview\Provider: %1\Document No.: %2\File Name: %3\URL: %4\Folder Path: %5',
+                    Message('Document Link Preview\Provider: %1\Link Version: %2\Document No.: %3\File Name: %4\URL: %5\Folder Path: %6',
                         Rec."Document Storage Provider",
+                        Rec."Document Link Version",
                         PreviewDocumentNo,
                         PreviewFileName,
                         ResolvedUrl,
@@ -204,6 +210,7 @@ page 70150000 "GPI Doc Delivery Setup"
             Rec."Integration Enabled" := false;
             Rec."Log Successful Events" := true;
             Rec."Document Storage Provider" := 'External Link';
+            Rec."Document Link Version" := 'v1';
             Rec."Preview Document No." := '296152';
             Rec."Preview File Name" := '296152.pdf';
             Rec.Insert(true);

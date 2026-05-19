@@ -27,6 +27,29 @@ pageextension 70150000 "GPI Posted Sales Inv Ext" extends "Posted Sales Invoice"
                         Message('GPI Hub test event was not sent successfully. Check GPI Document Delivery Log.');
                 end;
             }
+
+            action(GPISendHubDocumentLinkEvent)
+            {
+                ApplicationArea = All;
+                Caption = 'Send GPI Hub Document Link';
+                Image = LinkWeb;
+                Promoted = true;
+                PromotedCategory = Process;
+                ToolTip = 'Sends a separate external-document-link event for this posted sales invoice to GPI Document Hub. This does not upload a PDF or resend the invoice.';
+
+                trigger OnAction()
+                var
+                    Bridge: Codeunit "GPI Posted Sales Inv Bridge";
+                    SalesInvoiceHeader: Record "Sales Invoice Header";
+                begin
+                    SalesInvoiceHeader.Get(Rec."No.");
+
+                    if Bridge.SendPostedSalesInvoiceDocumentLinkEvent(SalesInvoiceHeader) then
+                        Message('GPI Hub document link event sent for posted sales invoice %1.', Rec."No.")
+                    else
+                        Message('GPI Hub document link event was not sent successfully. Check GPI Document Delivery Log.');
+                end;
+            }
         }
     }
 }

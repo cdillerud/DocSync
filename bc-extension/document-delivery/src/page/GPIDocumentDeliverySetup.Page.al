@@ -24,7 +24,7 @@ page 70150000 "GPI Doc Delivery Setup"
                 field("Hub Base URL"; Rec."Hub Base URL")
                 {
                     ApplicationArea = All;
-                    ToolTip = 'Specifies the base URL for GPI Hub. Example: https://gpi-hub-sandbox.example.com';
+                    ToolTip = 'Specifies the base URL for GPI Hub.';
                 }
                 field("API Key"; Rec."API Key")
                 {
@@ -56,6 +56,27 @@ page 70150000 "GPI Doc Delivery Setup"
                 {
                     ApplicationArea = All;
                     ToolTip = 'Specifies the Business Central company name to include in event payloads.';
+                }
+            }
+
+            group("External Document Link")
+            {
+                Caption = 'External Document Link';
+
+                field("Document Storage Provider"; Rec."Document Storage Provider")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the external document storage label to include in event metadata.';
+                }
+                field("Document Link Template"; Rec."Document Link Template")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Optional URL template to include in GPI Hub events. Tokens: {DocumentNo}, {RecordNo}, {FileName}, {CompanyName}, {EnvironmentName}.';
+                }
+                field("Document Folder Template"; Rec."Document Folder Template")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Optional folder path template to include in GPI Hub events. Tokens: {DocumentNo}, {RecordNo}, {FileName}, {CompanyName}, {EnvironmentName}.';
                 }
             }
 
@@ -139,6 +160,7 @@ page 70150000 "GPI Doc Delivery Setup"
             Rec."Primary Key" := 'SETUP';
             Rec."Integration Enabled" := false;
             Rec."Log Successful Events" := true;
+            Rec."Document Storage Provider" := 'External Link';
             Rec.Insert(true);
         end;
     end;

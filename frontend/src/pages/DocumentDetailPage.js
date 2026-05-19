@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getDocument, linkDocument, updateDocument, resubmitDocument } from '../lib/api';
+import { getDocument, linkDocument, updateDocument, resubmitDocument, verifyBCDocumentLink } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -92,6 +92,18 @@ function sharePointValue(doc, field, fallback = '-') {
   return doc?.sharepoint?.[field] || doc?.[`sharepoint_${field}`] || fallback;
 }
 
+function linkHealthValue(doc) {
+  return doc?.link_health || doc?.sharepoint?.link_health || null;
+}
+
+function linkHealthVariant(status) {
+  if (status === 'verified') return 'secondary';
+  if (status === 'auth_required' || status === 'unchecked') return 'outline';
+  if (status === 'missing' || status === 'invalid' || status === 'unreachable') return 'destructive';
+  return 'outline';
+}
+
+
 function shortValue(value, length = 16) {
   if (!value || value === '-') return '-';
   return value.length > length ? `${value.slice(0, length)}...` : value;
@@ -107,6 +119,7 @@ export default function DocumentDetailPage() {
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
   const [resubmitting, setResubmitting] = useState(false);
+  const [verifyingLink, setVerifyingLink] = useState(false);
 
   const fetchDoc = async () => {
     try {
@@ -167,6 +180,21 @@ export default function DocumentDetailPage() {
     }
   };
 
+  const handleVerifyLink = async () => {
+    setVerifyingLink(true);
+    try {
+      const res = await verifyBCDocumentLink(id);
+      setDoc(res.data.document || res.data);
+      const health = res.data.link_health || res.data.document?.link_health;
+      toast.success(`Link verification complete: ${health?.label || health?.status || 'checked'}`);
+      fetchDoc();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Link verification failed');
+    } finally {
+      setVerifyingLink(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64" data-testid="doc-detail-loading">
@@ -180,6 +208,7 @@ export default function DocumentDetailPage() {
   const bcEventDoc = isBCEventDocument(doc);
   const sharePointWebUrl = doc.sharepoint_share_link_url || doc.sharepoint?.web_url || doc.sharepoint_web_url;
   const displayStatus = displayDocumentStatus(doc);
+  const linkHealth = linkHealthValue(doc);
 
   return (
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
@@ -314,14 +343,37 @@ export default function DocumentDetailPage() {
 
           <Card className="border border-border" data-testid="doc-sharepoint-card">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                SharePoint
-              </CardTitle>
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                  SharePoint
+                </CardTitle>
+                {bcEventDoc && sharePointWebUrl && (
+                  <Button variant="secondary" size="sm" className="h-7 text-xs" onClick={handleVerifyLink} disabled={verifyingLink} data-testid="verify-sharepoint-link-btn">
+                    {verifyingLink ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <ShieldCheck className="w-3 h-3 mr-1.5" />}
+                    {verifyingLink ? 'Checking...' : 'Verify Link'}
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <InfoRow label="Drive ID" value={shortValue(sharePointValue(doc, 'drive_id'), 16)} mono />
               <InfoRow label="Item ID" value={shortValue(sharePointValue(doc, 'item_id'), 16)} mono />
               <InfoRow label="Folder Path" value={sharePointValue(doc, 'folder_path')} mono />
+              {linkHealth && (
+                <div className="rounded-md border border-border bg-muted/20 p-2.5" data-testid="sharepoint-link-health">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <span className="text-xs text-muted-foreground">Link Health</span>
+                    <Badge variant={linkHealthVariant(linkHealth.status)}>{linkHealth.label || linkHealth.status}</Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{linkHealth.detail || '-'}</p>
+                  {linkHealth.checked_at && (
+                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">Checked {formatDate(linkHealth.checked_at)}</p>
+                  )}
+                  {linkHealth.http_status_code && (
+                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">HTTP {linkHealth.http_status_code}</p>
+                  )}
+                </div>
+              )}
               {sharePointWebUrl && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Share Link</p>

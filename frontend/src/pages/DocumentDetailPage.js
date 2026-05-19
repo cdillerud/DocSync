@@ -10,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import {
   ArrowLeft, ExternalLink, Link, RefreshCw, FileText,
-  CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
-  ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt
+  CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw,
+  ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt, Cable, Send
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
@@ -37,6 +37,35 @@ const STEP_ICONS = {
 function formatDate(iso) {
   if (!iso) return '-';
   return new Date(iso).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function isBCEventDocument(doc) {
+  return doc?.source === 'bc_document_event' || doc?.source_system === 'BC_NATIVE' || Boolean(doc?.bc_source);
+}
+
+function bcSourceValue(doc, field, fallback = '-') {
+  return doc?.bc_source?.[field] || fallback;
+}
+
+function bcRecordType(doc) {
+  return bcSourceValue(doc, 'record_type', doc?.bc_record_type || '-');
+}
+
+function bcRecordNo(doc) {
+  return bcSourceValue(doc, 'record_no', doc?.bc_document_no || doc?.document_no || '-');
+}
+
+function bcRecordId(doc) {
+  return bcSourceValue(doc, 'record_id', doc?.bc_record_id || '-');
+}
+
+function sharePointValue(doc, field, fallback = '-') {
+  return doc?.sharepoint?.[field] || doc?.[`sharepoint_${field}`] || fallback;
+}
+
+function shortValue(value, length = 16) {
+  if (!value || value === '-') return '-';
+  return value.length > length ? `${value.slice(0, length)}...` : value;
 }
 
 export default function DocumentDetailPage() {
@@ -119,6 +148,9 @@ export default function DocumentDetailPage() {
 
   if (!doc) return null;
 
+  const bcEventDoc = isBCEventDocument(doc);
+  const sharePointWebUrl = doc.sharepoint_share_link_url || doc.sharepoint?.web_url || doc.sharepoint_web_url;
+
   return (
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
       {/* Header */}
@@ -134,22 +166,24 @@ export default function DocumentDetailPage() {
             <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${STATUS_CLASSES[doc.status] || ''}`}>
               {doc.status}
             </span>
+            {bcEventDoc && <Badge variant="outline" className="text-xs">BC Event</Badge>}
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1" data-testid="doc-id-display">{doc.id}</p>
         </div>
         <div className="flex gap-2 shrink-0">
-          {doc.sharepoint_share_link_url && (
+          {sharePointWebUrl && (
             <Button variant="secondary" size="sm" asChild data-testid="open-sharepoint-btn">
-              <a href={doc.sharepoint_share_link_url} target="_blank" rel="noopener noreferrer">
+              <a href={sharePointWebUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="w-3 h-3 mr-1.5" /> SharePoint
               </a>
             </Button>
           )}
-          {/* Re-process button - always visible for all documents */}
-          <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
-            {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
-            {resubmitting ? 'Re-processing...' : 'Re-process'}
-          </Button>
+          {!bcEventDoc && (
+            <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
+              {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
+              {resubmitting ? 'Re-processing...' : 'Re-process'}
+            </Button>
+          )}
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (
             <Button size="sm" onClick={handleLink} disabled={linking} data-testid="link-to-bc-btn">
               {linking ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Link className="w-3 h-3 mr-1.5" />}
@@ -170,9 +204,11 @@ export default function DocumentDetailPage() {
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <InfoRow label="Source" value={doc.source} />
-              <InfoRow label="Content Type" value={doc.content_type} mono />
+              <InfoRow label="Source System" value={doc.source_system || '-'} />
+              <InfoRow label="Capture Channel" value={doc.capture_channel || '-'} />
+              <InfoRow label="Content Type" value={doc.content_type || (bcEventDoc ? 'BC event metadata' : '-')} mono />
               <InfoRow label="File Size" value={doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : '-'} />
-              <InfoRow label="SHA-256" value={doc.sha256_hash?.slice(0, 16) + '...'} mono copyable={doc.sha256_hash} onCopy={copyToClipboard} />
+              <InfoRow label="SHA-256" value={doc.sha256_hash ? `${doc.sha256_hash.slice(0, 16)}...` : '-'} mono copyable={doc.sha256_hash} onCopy={copyToClipboard} />
               <InfoRow label="Created" value={formatDate(doc.created_utc)} mono />
               <InfoRow label="Updated" value={formatDate(doc.updated_utc)} mono />
             </CardContent>
@@ -184,7 +220,7 @@ export default function DocumentDetailPage() {
                 <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
                   Classification
                 </CardTitle>
-                {!editing && (
+                {!editing && !bcEventDoc && (
                   <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => { setEditing(true); setEditData({ document_type: doc.document_type, bc_document_no: doc.bc_document_no || '' }); }} data-testid="edit-classification-btn">
                     Edit
                   </Button>
@@ -216,14 +252,35 @@ export default function DocumentDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3 text-sm">
-                  <InfoRow label="Document Type" value={<Badge variant="secondary">{doc.document_type}</Badge>} />
-                  <InfoRow label="BC Record Type" value={doc.bc_record_type || '-'} />
-                  <InfoRow label="BC Document No" value={doc.bc_document_no || '-'} mono />
-                  <InfoRow label="BC Record ID" value={doc.bc_record_id ? doc.bc_record_id.slice(0, 12) + '...' : '-'} mono />
+                  <InfoRow label="Document Type" value={<Badge variant="secondary">{doc.document_type || doc.doc_type || '-'}</Badge>} />
+                  <InfoRow label="BC Record Type" value={bcRecordType(doc)} />
+                  <InfoRow label="BC Document No" value={bcRecordNo(doc)} mono copyable={bcRecordNo(doc) !== '-' ? bcRecordNo(doc) : null} onCopy={copyToClipboard} />
+                  <InfoRow label="BC Record ID" value={shortValue(bcRecordId(doc), 20)} mono copyable={bcRecordId(doc) !== '-' ? bcRecordId(doc) : null} onCopy={copyToClipboard} />
+                  <InfoRow label="BC System ID" value={shortValue(bcSourceValue(doc, 'record_system_id'), 20)} mono copyable={bcSourceValue(doc, 'record_system_id') !== '-' ? bcSourceValue(doc, 'record_system_id') : null} onCopy={copyToClipboard} />
                 </div>
               )}
             </CardContent>
           </Card>
+
+          {bcEventDoc && (
+            <Card className="border border-border" data-testid="doc-bc-source-card">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-2">
+                  <Cable className="w-4 h-4 text-blue-500" />
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    BC Event Source
+                  </CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <InfoRow label="Company" value={bcSourceValue(doc, 'company_name')} />
+                <InfoRow label="Environment" value={bcSourceValue(doc, 'environment')} mono />
+                <InfoRow label="Posted" value={String(bcSourceValue(doc, 'posted', false))} />
+                <InfoRow label="Last Event" value={doc.last_bc_event_type || '-'} mono />
+                <InfoRow label="Event ID" value={shortValue(doc.last_bc_event_id, 24)} mono copyable={doc.last_bc_event_id} onCopy={copyToClipboard} />
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="border border-border" data-testid="doc-sharepoint-card">
             <CardHeader className="pb-3">
@@ -232,14 +289,15 @@ export default function DocumentDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
-              <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
-              {doc.sharepoint_share_link_url && (
+              <InfoRow label="Drive ID" value={shortValue(sharePointValue(doc, 'drive_id'), 16)} mono />
+              <InfoRow label="Item ID" value={shortValue(sharePointValue(doc, 'item_id'), 16)} mono />
+              <InfoRow label="Folder Path" value={sharePointValue(doc, 'folder_path')} mono />
+              {sharePointWebUrl && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Share Link</p>
                   <div className="flex items-center gap-2">
-                    <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">{doc.sharepoint_share_link_url}</code>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => copyToClipboard(doc.sharepoint_share_link_url)} data-testid="copy-share-link-btn">
+                    <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">{sharePointWebUrl}</code>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => copyToClipboard(sharePointWebUrl)} data-testid="copy-share-link-btn">
                       <Copy className="w-3 h-3" />
                     </Button>
                   </div>
@@ -393,31 +451,36 @@ export default function DocumentDetailPage() {
           )}
 
           {/* Square9 Workflow Tracker */}
-          <Square9WorkflowTracker 
-            documentId={id} 
-            onRetry={(result) => {
-              toast.success(`Retry ${result.retry_count} completed`);
-              fetchData(); // Refresh document data
-            }}
-          />
+          {!bcEventDoc && (
+            <Square9WorkflowTracker
+              documentId={id}
+              onRetry={(result) => {
+                toast.success(`Retry ${result.retry_count} completed`);
+                fetchDoc();
+              }}
+            />
+          )}
         </div>
 
         {/* Right: Document Preview + AP Review (if AP_Invoice) + Workflow Audit Trail */}
         <div className="lg:col-span-2 space-y-4">
-          {/* PDF Preview - show for ALL documents */}
-          <PDFPreviewPanel document={doc} />
-          
+          {bcEventDoc ? (
+            <BCEventDetailPanel doc={doc} sharePointWebUrl={sharePointWebUrl} />
+          ) : (
+            <PDFPreviewPanel document={doc} />
+          )}
+
           {/* AP Review Panel - only for AP Invoice documents */}
-          {(doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
-            <APReviewPanel 
-              document={doc} 
+          {!bcEventDoc && (doc.document_type === 'AP_Invoice' || doc.suggested_job_type === 'AP_Invoice') && (
+            <APReviewPanel
+              document={doc}
               onUpdate={(updatedDoc) => {
                 setDoc(prev => ({ ...prev, ...updatedDoc }));
                 fetchDoc();
-              }} 
+              }}
             />
           )}
-          
+
           <Card className="border border-border" data-testid="workflow-audit-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
@@ -480,7 +543,7 @@ export default function DocumentDetailPage() {
                 </div>
               ) : (
                 <div className="py-8 text-center text-sm text-muted-foreground">
-                  No workflow runs for this document
+                  {bcEventDoc ? 'No internal workflow runs. This record was captured from a Business Central event.' : 'No workflow runs for this document'}
                 </div>
               )}
             </CardContent>
@@ -488,6 +551,69 @@ export default function DocumentDetailPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function BCEventDetailPanel({ doc, sharePointWebUrl }) {
+  const delivery = doc.delivery || {};
+  const recipients = [...(delivery.to || []), ...(delivery.cc || [])];
+
+  return (
+    <Card className="border border-border" data-testid="bc-event-detail-panel">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Send className="w-4 h-4 text-blue-500" />
+            <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+              Business Central Event Detail
+            </CardTitle>
+          </div>
+          <Badge variant="secondary">Metadata Event</Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="rounded-lg border border-border bg-muted/20 p-4">
+          <p className="text-sm font-semibold mb-1">No PDF preview is available for this record yet.</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            This document was created from a Business Central event callback. The bridge has captured the delivery metadata and BC record context, but no PDF binary has been uploaded to GPI Hub in this phase.
+          </p>
+          {sharePointWebUrl && (
+            <Button variant="secondary" size="sm" asChild className="mt-3">
+              <a href={sharePointWebUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="w-3 h-3 mr-1.5" /> Open SharePoint File
+              </a>
+            </Button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">BC Record</h4>
+            <InfoRow label="Type" value={bcRecordType(doc)} />
+            <InfoRow label="No" value={bcRecordNo(doc)} mono />
+            <InfoRow label="Company" value={bcSourceValue(doc, 'company_name')} />
+            <InfoRow label="Environment" value={bcSourceValue(doc, 'environment')} mono />
+          </div>
+          <div className="space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Delivery</h4>
+            <InfoRow label="Status" value={delivery.delivery_status || doc.status || '-'} />
+            <InfoRow label="Method" value={delivery.delivery_method || '-'} mono />
+            <InfoRow label="Template" value={delivery.template_code || '-'} mono />
+            <InfoRow label="Sent By" value={delivery.sent_by || '-'} mono />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Subject / Recipients</h4>
+          <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+            <p className="font-medium">{delivery.subject || '-'}</p>
+            <p className="text-xs text-muted-foreground mt-2 font-mono break-all">
+              {recipients.length > 0 ? recipients.join(', ') : 'No recipients stored'}
+            </p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

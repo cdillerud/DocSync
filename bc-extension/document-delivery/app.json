@@ -1,0 +1,32 @@
+{
+  "id": "a9df3b3d-8b31-4a39-a3c8-85e61d1f1b31",
+  "name": "GPI Hub Document Delivery Bridge",
+  "publisher": "Gamer Packaging",
+  "version": "0.1.0.0",
+  "brief": "Sandbox bridge from Business Central document events to GPI Document Hub.",
+  "description": "Disabled-by-default scaffold for sending Business Central document delivery and attachment events to GPI Document Hub.",
+  "privacyStatement": "",
+  "EULA": "",
+  "help": "",
+  "url": "",
+  "logo": "",
+  "dependencies": [],
+  "screenshots": [],
+  "platform": "24.0.0.0",
+  "application": "24.0.0.0",
+  "idRanges": [
+    {
+      "from": 70150000,
+      "to": 70150099
+    }
+  ],
+  "resourceExposurePolicy": {
+    "allowDebugging": true,
+    "allowDownloadingSource": true,
+    "includeSourceInSymbolFile": true
+  },
+  "runtime": "13.0",
+  "features": [
+    "NoImplicitWith"
+  ]
+}

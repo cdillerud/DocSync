@@ -12,6 +12,7 @@ Design rules:
 - Idempotent event capture.
 - Creates or updates hub_documents records using stable BC document event keys.
 - Preserves event history for audit and troubleshooting.
+- Requires X-GPI-Hub-Api-Key when BC_DOCUMENT_EVENTS_API_KEY is configured.
 """
 
 from datetime import datetime, timezone
@@ -19,8 +20,10 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 import hashlib
 import json
+import os
+import secrets
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pymongo.errors import DuplicateKeyError
 
@@ -30,10 +33,31 @@ router = APIRouter(prefix="/bc-document-events", tags=["bc-document-events"])
 # Database reference - set by main app at startup
 _db = None
 
+BC_DOCUMENT_EVENTS_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_API_KEY", "").strip()
+BC_DOCUMENT_EVENTS_REQUIRE_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_REQUIRE_API_KEY", "true").lower() != "false"
+
 
 def set_db(database):
     global _db
     _db = database
+
+
+async def require_bc_document_events_api_key(x_gpi_hub_api_key: Optional[str] = Header(default=None)):
+    """Protect write/repair endpoints when a BC document-events API key is configured."""
+    if not BC_DOCUMENT_EVENTS_REQUIRE_API_KEY:
+        return
+
+    if not BC_DOCUMENT_EVENTS_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="BC document-events API key is not configured on the server"
+        )
+
+    if not x_gpi_hub_api_key:
+        raise HTTPException(status_code=401, detail="Missing X-GPI-Hub-Api-Key header")
+
+    if not secrets.compare_digest(x_gpi_hub_api_key, BC_DOCUMENT_EVENTS_API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid X-GPI-Hub-Api-Key header")
 
 
 class EventType(str, Enum):
@@ -539,34 +563,36 @@ async def get_bc_document_events_status():
         "orphan_events": orphan_count,
         "writes_to_bc": False,
         "mailbox_polling": False,
+        "api_key_required": BC_DOCUMENT_EVENTS_REQUIRE_API_KEY,
+        "api_key_configured": bool(BC_DOCUMENT_EVENTS_API_KEY),
     }
 
 
-@router.post("/delivery-sent")
+@router.post("/delivery-sent", dependencies=[Depends(require_bc_document_events_api_key)])
 async def delivery_sent(payload: DeliveryEventPayload):
     """Record a successful BC document delivery event."""
     return await _record_delivery_event(EventType.DELIVERY_SENT.value, payload)
 
 
-@router.post("/delivery-failed")
+@router.post("/delivery-failed", dependencies=[Depends(require_bc_document_events_api_key)])
 async def delivery_failed(payload: DeliveryEventPayload):
     """Record a failed BC document delivery event."""
     return await _record_delivery_event(EventType.DELIVERY_FAILED.value, payload)
 
 
-@router.post("/attachment-linked")
+@router.post("/attachment-linked", dependencies=[Depends(require_bc_document_events_api_key)])
 async def attachment_linked(payload: AttachmentEventPayload):
     """Record a BC attachment successfully linked/synced to SharePoint."""
     return await _record_attachment_event(EventType.ATTACHMENT_LINKED.value, payload)
 
 
-@router.post("/attachment-sync-failed")
+@router.post("/attachment-sync-failed", dependencies=[Depends(require_bc_document_events_api_key)])
 async def attachment_sync_failed(payload: AttachmentEventPayload):
     """Record a BC attachment sync failure."""
     return await _record_attachment_event(EventType.ATTACHMENT_SYNC_FAILED.value, payload)
 
 
-@router.post("/repair-orphans")
+@router.post("/repair-orphans", dependencies=[Depends(require_bc_document_events_api_key)])
 async def repair_orphan_events():
     """Repair any BC document events that exist without matching hub_documents rows."""
     db = _require_db()

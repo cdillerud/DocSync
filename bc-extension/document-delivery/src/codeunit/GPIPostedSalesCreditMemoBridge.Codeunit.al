@@ -1,4 +1,4 @@
-codeunit 70150007 "GPI Posted Sales Cr Memo Bridge"
+codeunit 70150007 "GPI Sales Cr Memo Bridge"
 {
     Access = Internal;
 

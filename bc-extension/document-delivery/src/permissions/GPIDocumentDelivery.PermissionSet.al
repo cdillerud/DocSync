@@ -14,5 +14,7 @@ permissionset 70150000 "GPI DOC DELIVERY"
         codeunit "GPI Hub Client" = X,
         codeunit "GPI Doc Delivery Test" = X,
         codeunit "GPI Posted Sales Inv Bridge" = X,
-        codeunit "GPI Posted Purch Inv Bridge" = X;
+        codeunit "GPI Posted Purch Inv Bridge" = X,
+        codeunit "GPI Sales Cr Memo Bridge" = X,
+        codeunit "GPI Purch Cr Memo Bridge" = X;
 }

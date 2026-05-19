@@ -1,4 +1,4 @@
-codeunit 70150008 "GPI Posted Purch Cr Memo Bridge"
+codeunit 70150008 "GPI Purch Cr Memo Bridge"
 {
     Access = Internal;
 

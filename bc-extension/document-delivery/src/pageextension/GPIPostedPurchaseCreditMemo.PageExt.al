@@ -16,7 +16,7 @@ pageextension 70150003 "GPI Posted Purch Cr Memo Ext" extends "Posted Purchase C
 
                 trigger OnAction()
                 var
-                    Bridge: Codeunit "GPI Posted Purch Cr Memo Bridge";
+                    Bridge: Codeunit "GPI Purch Cr Memo Bridge";
                     PurchCrMemoHeader: Record "Purch. Cr. Memo Hdr.";
                 begin
                     PurchCrMemoHeader.Get(Rec."No.");
@@ -39,7 +39,7 @@ pageextension 70150003 "GPI Posted Purch Cr Memo Ext" extends "Posted Purchase C
 
                 trigger OnAction()
                 var
-                    Bridge: Codeunit "GPI Posted Purch Cr Memo Bridge";
+                    Bridge: Codeunit "GPI Purch Cr Memo Bridge";
                     PurchCrMemoHeader: Record "Purch. Cr. Memo Hdr.";
                 begin
                     PurchCrMemoHeader.Get(Rec."No.");

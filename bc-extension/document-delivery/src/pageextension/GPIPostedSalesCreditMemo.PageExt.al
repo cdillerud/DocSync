@@ -16,7 +16,7 @@ pageextension 70150002 "GPI Posted Sales Cr Memo Ext" extends "Posted Sales Cred
 
                 trigger OnAction()
                 var
-                    Bridge: Codeunit "GPI Posted Sales Cr Memo Bridge";
+                    Bridge: Codeunit "GPI Sales Cr Memo Bridge";
                     SalesCrMemoHeader: Record "Sales Cr.Memo Header";
                 begin
                     SalesCrMemoHeader.Get(Rec."No.");
@@ -39,7 +39,7 @@ pageextension 70150002 "GPI Posted Sales Cr Memo Ext" extends "Posted Sales Cred
 
                 trigger OnAction()
                 var
-                    Bridge: Codeunit "GPI Posted Sales Cr Memo Bridge";
+                    Bridge: Codeunit "GPI Sales Cr Memo Bridge";
                     SalesCrMemoHeader: Record "Sales Cr.Memo Header";
                 begin
                     SalesCrMemoHeader.Get(Rec."No.");

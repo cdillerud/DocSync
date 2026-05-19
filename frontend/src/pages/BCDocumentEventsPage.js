@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { toast } from 'sonner';
-import { AlertCircle, CheckCircle2, FileClock, RefreshCw, Search, Send, Wrench } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ExternalLink, FileClock, RefreshCw, Search, Send, Wrench } from 'lucide-react';
 
 const SAMPLE_DELIVERY_EVENT = {
   event_id: 'sample-delivery-sent-001',
@@ -43,7 +44,7 @@ const SAMPLE_DELIVERY_EVENT = {
     site_id: 'sandbox-site-id',
     drive_id: 'sandbox-drive-id',
     item_id: 'sandbox-item-id',
-    web_url: 'https://example.invalid/sandbox/SAMPLE-INV-001.pdf',
+    web_url: null,
     folder_path: 'BC/Customer/SAMPLE/Sales Invoice/2026/SAMPLE-INV-001',
     file_name: 'SAMPLE-INV-001.pdf',
     storage_status: 'synced',
@@ -84,6 +85,7 @@ function StatCard({ label, value, icon: Icon, tone = 'text-primary' }) {
 }
 
 export default function BCDocumentEventsPage() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState(null);
   const [recordType, setRecordType] = useState('Posted Sales Invoice');
   const [recordNo, setRecordNo] = useState('SAMPLE-INV-001');
@@ -114,6 +116,18 @@ export default function BCDocumentEventsPage() {
     } finally {
       setWorking(false);
     }
+  };
+
+  const handleLookupKeyDown = (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      searchRecord();
+    }
+  };
+
+  const openDocument = (documentId) => {
+    if (!documentId) return;
+    navigate(`/documents/${documentId}`);
   };
 
   const repairOrphans = async () => {
@@ -203,11 +217,12 @@ export default function BCDocumentEventsPage() {
         <CardHeader>
           <CardTitle className="text-base font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>Lookup by BC Record</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3">
             <input
               value={recordType}
               onChange={(e) => setRecordType(e.target.value)}
+              onKeyDown={handleLookupKeyDown}
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
               placeholder="BC record type, e.g. Posted Sales Invoice"
               data-testid="bc-record-type-input"
@@ -215,14 +230,28 @@ export default function BCDocumentEventsPage() {
             <input
               value={recordNo}
               onChange={(e) => setRecordNo(e.target.value)}
+              onKeyDown={handleLookupKeyDown}
               className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              placeholder="BC record number, e.g. SAMPLE-INV-001"
+              placeholder="BC record number, e.g. 296152"
               data-testid="bc-record-no-input"
             />
             <Button onClick={searchRecord} disabled={working} data-testid="search-bc-record-btn">
               <Search className="w-4 h-4 mr-2" /> Search
             </Button>
           </div>
+          {recordResult && (
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm">
+              <div>
+                <span className="text-muted-foreground">Current lookup:</span>{' '}
+                <span className="font-medium">{recordResult.bc_record_type}</span>{' '}
+                <span className="font-mono">{recordResult.bc_record_no}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Badge variant="secondary">{recordResult.document_count} document(s)</Badge>
+                <Badge variant="secondary">{recordResult.event_count} event(s)</Badge>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -256,16 +285,22 @@ export default function BCDocumentEventsPage() {
                 <TableHead>Workflow</TableHead>
                 <TableHead>BC Record</TableHead>
                 <TableHead>Last Event</TableHead>
+                <TableHead className="text-right">Open</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(recordResult?.documents || []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-8">No linked hub documents found.</TableCell>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">No linked hub documents found.</TableCell>
                 </TableRow>
               ) : (
                 recordResult.documents.map((doc) => (
-                  <TableRow key={doc.id}>
+                  <TableRow
+                    key={doc.id}
+                    className="cursor-pointer hover:bg-muted/40"
+                    onClick={() => openDocument(doc.id)}
+                    data-testid={`bc-linked-document-row-${doc.id}`}
+                  >
                     <TableCell>
                       <div className="font-medium">{doc.file_name || doc.document_no || doc.id}</div>
                       <div className="text-xs text-muted-foreground font-mono break-all">{doc.id}</div>
@@ -280,6 +315,19 @@ export default function BCDocumentEventsPage() {
                     <TableCell>
                       <div>{doc.last_bc_event_type || '-'}</div>
                       <div className="text-xs text-muted-foreground">{formatDate(doc.last_bc_event_utc)}</div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openDocument(doc.id);
+                        }}
+                        data-testid={`open-bc-linked-document-${doc.id}`}
+                      >
+                        <ExternalLink className="w-4 h-4 mr-1.5" /> Open
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

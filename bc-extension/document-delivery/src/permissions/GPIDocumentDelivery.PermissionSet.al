@@ -12,5 +12,7 @@ permissionset 70150000 "GPI DOC DELIVERY"
         page "GPI Doc Delivery Log" = X,
         codeunit "GPI Hub Event Builder" = X,
         codeunit "GPI Hub Client" = X,
-        codeunit "GPI Doc Delivery Test" = X;
+        codeunit "GPI Doc Delivery Test" = X,
+        codeunit "GPI Posted Sales Inv Bridge" = X,
+        codeunit "GPI Posted Purch Inv Bridge" = X;
 }

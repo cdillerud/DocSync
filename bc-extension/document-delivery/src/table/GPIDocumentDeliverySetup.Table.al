@@ -77,6 +77,18 @@ table 70150000 "GPI Doc Delivery Setup"
             InitValue = 'SharePoint/Zetadocs';
             ToolTip = 'Specifies the external document storage label to include in event metadata.';
         }
+        field(150; "Preview Document No."; Code[50])
+        {
+            Caption = 'Preview Document No.';
+            InitValue = '296152';
+            ToolTip = 'Specifies the sample document number used by the Preview Document Link action.';
+        }
+        field(160; "Preview File Name"; Text[250])
+        {
+            Caption = 'Preview File Name';
+            InitValue = '296152.pdf';
+            ToolTip = 'Specifies the sample file name used by the Preview Document Link action.';
+        }
     }
 
     keys

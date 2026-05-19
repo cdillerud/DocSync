@@ -163,6 +163,7 @@ from services.spiro.spiro_sync import set_spiro_db
 
 # ==================== BC DOCUMENT EVENTS ====================
 from routes.bc_document_events import router as bc_document_events_router, set_db as set_bc_document_events_db
+from routes.zetadocs_mirror import router as zetadocs_mirror_router
 
 import jwt as pyjwt
 
@@ -12818,6 +12819,8 @@ app.include_router(sharepoint_migration_router, prefix="/api")
 app.include_router(spiro_router)
 # BC Document Events Module
 app.include_router(bc_document_events_router, prefix="/api")
+# Zetadocs Mirror Module
+app.include_router(zetadocs_mirror_router, prefix="/api")
 
 @app.get("/api/health")
 async def health_check():

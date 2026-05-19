@@ -4,7 +4,8 @@ GPI Document Hub - Zetadocs Delivery Mirror Router
 Preview-only parity helpers for replacing Zetadocs outbound delivery.
 
 Safety rules:
-- Read-only Business Central calls.
+- Preview-only by default.
+- Optional read-only Business Central lookup when live_bc=true.
 - No email sends.
 - No BC writes.
 - No SharePoint writes.
@@ -77,7 +78,7 @@ async def _get_bc_token() -> str:
     if DEMO_MODE or not BC_CLIENT_ID or not BC_CLIENT_SECRET:
         raise HTTPException(
             status_code=503,
-            detail="BC credentials are not configured for live preview. Set DEMO_MODE=false and BC_CLIENT_ID/BC_CLIENT_SECRET.",
+            detail="BC credentials are not configured for live preview. Use live_bc=false with overrides, or set DEMO_MODE=false and BC_CLIENT_ID/BC_CLIENT_SECRET.",
         )
 
     async with httpx.AsyncClient(timeout=BC_TIMEOUT_SECONDS) as client:
@@ -123,7 +124,6 @@ async def _get_bc_company(token: str) -> Dict[str, Any]:
 
 
 async def _get_sales_order(token: str, company_id: str, order_no: str) -> Dict[str, Any]:
-    # OData filter through the standard BC API. This is read-only.
     async with httpx.AsyncClient(timeout=BC_TIMEOUT_SECONDS) as client:
         response = await client.get(
             f"{BC_API_BASE}/{TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders",
@@ -208,7 +208,6 @@ def _build_preview(
 
     subject = _replace_zetadocs_tokens(ORDER_CONFIRMATION_TEMPLATE["subject_template"], token_values)
     body = _replace_zetadocs_tokens(ORDER_CONFIRMATION_TEMPLATE["body_template"], token_values)
-
     attachment_name = f"Sales-Order {order_no}.pdf"
 
     warnings = []
@@ -265,20 +264,25 @@ def _build_preview(
 @router.get("/order-confirmations/{order_no}/preview")
 async def preview_order_confirmation(
     order_no: str,
+    live_bc: bool = Query(False, description="When true, read the sales order from BC. Default false is offline parity preview."),
     recipient_override: Optional[str] = Query(None, description="Optional recipient override for parity testing"),
     sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
     organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
     external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
 ):
     """Preview a GPI Hub replacement package for Zetadocs Order Confirmation delivery."""
-    token = await _get_bc_token()
-    company = await _get_bc_company(token)
-    company_id = company.get("id")
-    if not company_id:
-        raise HTTPException(status_code=502, detail="BC company response did not include id")
+    sales_order: Dict[str, Any] = {}
+    customer: Optional[Dict[str, Any]] = None
+    company: Dict[str, Any] = {"name": BC_COMPANY_NAME, "displayName": BC_COMPANY_NAME, "source": "offline_preview"}
 
-    sales_order = await _get_sales_order(token, company_id, order_no)
-    customer = await _get_customer(token, company_id, sales_order)
+    if live_bc:
+        token = await _get_bc_token()
+        company = await _get_bc_company(token)
+        company_id = company.get("id")
+        if not company_id:
+            raise HTTPException(status_code=502, detail="BC company response did not include id")
+        sales_order = await _get_sales_order(token, company_id, order_no)
+        customer = await _get_customer(token, company_id, sales_order)
 
     preview = _build_preview(
         order_no=order_no,
@@ -289,5 +293,6 @@ async def preview_order_confirmation(
         organization_override=organization_override,
         external_doc_no_override=external_doc_no_override,
     )
+    preview["live_bc"] = live_bc
     preview["bc"]["company_record"] = company
     return preview

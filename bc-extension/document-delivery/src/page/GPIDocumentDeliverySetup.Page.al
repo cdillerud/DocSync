@@ -78,6 +78,16 @@ page 70150000 "GPI Doc Delivery Setup"
                     ApplicationArea = All;
                     ToolTip = 'Optional folder path template to include in GPI Hub events. Tokens: {DocumentNo}, {RecordNo}, {FileName}, {CompanyName}, {EnvironmentName}.';
                 }
+                field("Preview Document No."; Rec."Preview Document No.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the sample document number used by the Preview Document Link action.';
+                }
+                field("Preview File Name"; Rec."Preview File Name")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the sample file name used by the Preview Document Link action.';
+                }
             }
 
             group(Status)
@@ -127,6 +137,39 @@ page 70150000 "GPI Doc Delivery Setup"
                     CurrPage.Update(false);
                 end;
             }
+            action(PreviewDocumentLink)
+            {
+                ApplicationArea = All;
+                Caption = 'Preview Document Link';
+                Image = ViewDetails;
+                ToolTip = 'Previews the resolved external document URL and folder path without sending anything to GPI Hub.';
+
+                trigger OnAction()
+                var
+                    ResolvedUrl: Text;
+                    ResolvedFolder: Text;
+                    PreviewDocumentNo: Text;
+                    PreviewFileName: Text;
+                begin
+                    PreviewDocumentNo := Rec."Preview Document No.";
+                    PreviewFileName := Rec."Preview File Name";
+
+                    if PreviewDocumentNo = '' then
+                        PreviewDocumentNo := '296152';
+                    if PreviewFileName = '' then
+                        PreviewFileName := PreviewDocumentNo + '.pdf';
+
+                    ResolvedUrl := ApplyTemplate(Rec."Document Link Template", PreviewDocumentNo, PreviewFileName);
+                    ResolvedFolder := ApplyTemplate(Rec."Document Folder Template", PreviewDocumentNo, PreviewFileName);
+
+                    Message('Document Link Preview\Provider: %1\Document No.: %2\File Name: %3\URL: %4\Folder Path: %5',
+                        Rec."Document Storage Provider",
+                        PreviewDocumentNo,
+                        PreviewFileName,
+                        ResolvedUrl,
+                        ResolvedFolder);
+                end;
+            }
             action(SendSampleDeliveryEvent)
             {
                 ApplicationArea = All;
@@ -161,7 +204,22 @@ page 70150000 "GPI Doc Delivery Setup"
             Rec."Integration Enabled" := false;
             Rec."Log Successful Events" := true;
             Rec."Document Storage Provider" := 'External Link';
+            Rec."Preview Document No." := '296152';
+            Rec."Preview File Name" := '296152.pdf';
             Rec.Insert(true);
         end;
+    end;
+
+    local procedure ApplyTemplate(TemplateText: Text; DocumentNo: Text; FileName: Text) Result: Text
+    begin
+        Result := TemplateText;
+        if Result = '' then
+            exit('');
+
+        Result := Result.Replace('{DocumentNo}', DocumentNo);
+        Result := Result.Replace('{RecordNo}', DocumentNo);
+        Result := Result.Replace('{FileName}', FileName);
+        Result := Result.Replace('{CompanyName}', Rec."Company Name");
+        Result := Result.Replace('{EnvironmentName}', Rec."Environment Name");
     end;
 }

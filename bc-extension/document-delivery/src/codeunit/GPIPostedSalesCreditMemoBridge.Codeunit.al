@@ -143,6 +143,17 @@ codeunit 70150007 "GPI Sales Cr Memo Bridge"
     local procedure MakeStableId(Value: Text[100]) StableId: Text[100]
     begin
         StableId := CopyStr(LowerCase(Value), 1, MaxStrLen(StableId));
-        StableId := ConvertStr(StableId, ':./\\ {}[]()_', '------------');
+        StableId := StableId.Replace(':', '-');
+        StableId := StableId.Replace('.', '-');
+        StableId := StableId.Replace('/', '-');
+        StableId := StableId.Replace('\\', '-');
+        StableId := StableId.Replace(' ', '-');
+        StableId := StableId.Replace('{', '-');
+        StableId := StableId.Replace('}', '-');
+        StableId := StableId.Replace('[', '-');
+        StableId := StableId.Replace(']', '-');
+        StableId := StableId.Replace('(', '-');
+        StableId := StableId.Replace(')', '-');
+        StableId := StableId.Replace('_', '-');
     end;
 }

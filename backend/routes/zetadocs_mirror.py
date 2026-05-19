@@ -9,18 +9,22 @@ Safety rules:
 - No email sends.
 - No BC writes.
 - No SharePoint writes.
+- Delivery package records are send-disabled audit records only.
 - Produces a preview package that can be compared to real Zetadocs output.
 """
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 import os
+import uuid
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
 
 router = APIRouter(prefix="/zetadocs-mirror", tags=["zetadocs-mirror"])
+
+db = None
 
 TENANT_ID = os.environ.get("TENANT_ID", "").strip()
 BC_ENVIRONMENT = os.environ.get("BC_ENVIRONMENT", "").strip()
@@ -52,6 +56,12 @@ ORDER_CONFIRMATION_TEMPLATE = {
 }
 
 
+def set_db(database):
+    """Inject MongoDB dependency from server startup."""
+    global db
+    db = database
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -72,6 +82,14 @@ def _replace_zetadocs_tokens(template: str, values: Dict[str, str]) -> str:
         rendered = rendered.replace(f"%%[{key}]", value or "")
         rendered = rendered.replace(f"%%[{key} ]", value or "")
     return rendered
+
+
+def _ensure_db():
+    if db is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Zetadocs mirror database dependency is not initialized. Confirm set_zetadocs_mirror_db(db) runs during startup.",
+        )
 
 
 async def _get_bc_token() -> str:
@@ -261,16 +279,14 @@ def _build_preview(
     }
 
 
-@router.get("/order-confirmations/{order_no}/preview")
-async def preview_order_confirmation(
+async def _build_order_confirmation_preview_payload(
     order_no: str,
-    live_bc: bool = Query(False, description="When true, read the sales order from BC. Default false is offline parity preview."),
-    recipient_override: Optional[str] = Query(None, description="Optional recipient override for parity testing"),
-    sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
-    organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
-    external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
-):
-    """Preview a GPI Hub replacement package for Zetadocs Order Confirmation delivery."""
+    live_bc: bool,
+    recipient_override: Optional[str],
+    sender_override: Optional[str],
+    organization_override: Optional[str],
+    external_doc_no_override: Optional[str],
+) -> Dict[str, Any]:
     sales_order: Dict[str, Any] = {}
     customer: Optional[Dict[str, Any]] = None
     company: Dict[str, Any] = {"name": BC_COMPANY_NAME, "displayName": BC_COMPANY_NAME, "source": "offline_preview"}
@@ -296,3 +312,157 @@ async def preview_order_confirmation(
     preview["live_bc"] = live_bc
     preview["bc"]["company_record"] = company
     return preview
+
+
+def _build_delivery_package_record(
+    order_no: str,
+    preview: Dict[str, Any],
+    created_by: str,
+    notes: Optional[str],
+) -> Dict[str, Any]:
+    package_id = f"zdm-{uuid.uuid4()}"
+    now = _now_iso()
+    resolved = preview.get("resolved_values", {})
+    rendered_email = preview.get("rendered_email", {})
+
+    return {
+        "package_id": package_id,
+        "created_utc": now,
+        "updated_utc": now,
+        "created_by": created_by,
+        "updated_by": created_by,
+        "source_system": "gpi_hub_zetadocs_mirror",
+        "workflow_type": "order_confirmation",
+        "status": "preview_created",
+        "delivery_enabled": False,
+        "email_send_status": "disabled_preview_only",
+        "bc_write_status": "not_applicable_no_bc_write",
+        "order_no": order_no,
+        "bc_environment": preview.get("bc", {}).get("environment"),
+        "bc_company": preview.get("bc", {}).get("company"),
+        "document_set_no": preview.get("zetadocs", {}).get("document_set_no"),
+        "document_set_name": preview.get("zetadocs", {}).get("document_set_name"),
+        "template_id": preview.get("zetadocs", {}).get("template_id"),
+        "template_file": preview.get("zetadocs", {}).get("template_file"),
+        "report_id": preview.get("zetadocs", {}).get("report_id"),
+        "report_name": preview.get("zetadocs", {}).get("report_name"),
+        "email": {
+            "from": rendered_email.get("from", ""),
+            "to": rendered_email.get("to", ""),
+            "cc": rendered_email.get("cc", ""),
+            "bcc": rendered_email.get("bcc", ""),
+            "subject": rendered_email.get("subject", ""),
+            "body_text": rendered_email.get("body_text", ""),
+        },
+        "attachments": [
+            {
+                "name": rendered_email.get("attachment_name") or resolved.get("attachment_name"),
+                "type": "bc_report_pdf",
+                "report_id": preview.get("zetadocs", {}).get("report_id"),
+                "report_name": preview.get("zetadocs", {}).get("report_name"),
+                "content_status": "not_generated_yet",
+                "generation_status": "pending_future_step",
+            }
+        ],
+        "resolved_values": resolved,
+        "warnings": preview.get("warnings", []),
+        "notes": notes or "",
+        "audit_events": [
+            {
+                "event": "delivery_package_preview_created",
+                "event_utc": now,
+                "actor": created_by,
+                "details": "Send-disabled Zetadocs mirror delivery package created from preview payload. No email was sent and no BC write occurred.",
+            }
+        ],
+        "preview_payload": preview,
+    }
+
+
+def _public_package_response(package: Dict[str, Any]) -> Dict[str, Any]:
+    public = dict(package)
+    public.pop("_id", None)
+    return public
+
+
+@router.get("/order-confirmations/{order_no}/preview")
+async def preview_order_confirmation(
+    order_no: str,
+    live_bc: bool = Query(False, description="When true, read the sales order from BC. Default false is offline parity preview."),
+    recipient_override: Optional[str] = Query(None, description="Optional recipient override for parity testing"),
+    sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
+    organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
+    external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
+):
+    """Preview a GPI Hub replacement package for Zetadocs Order Confirmation delivery."""
+    return await _build_order_confirmation_preview_payload(
+        order_no=order_no,
+        live_bc=live_bc,
+        recipient_override=recipient_override,
+        sender_override=sender_override,
+        organization_override=organization_override,
+        external_doc_no_override=external_doc_no_override,
+    )
+
+
+@router.post("/order-confirmations/{order_no}/delivery-package-preview")
+async def create_order_confirmation_delivery_package_preview(
+    order_no: str,
+    live_bc: bool = Query(False, description="When true, read the sales order from BC. Default false is offline parity preview."),
+    recipient_override: Optional[str] = Query(None, description="Optional recipient override for parity testing"),
+    sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
+    organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
+    external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
+    created_by: str = Query("gpi-hub-preview", description="Audit actor for the preview package"),
+    notes: Optional[str] = Query(None, description="Optional audit note"),
+):
+    """Create a send-disabled delivery package record from an order confirmation preview."""
+    _ensure_db()
+    preview = await _build_order_confirmation_preview_payload(
+        order_no=order_no,
+        live_bc=live_bc,
+        recipient_override=recipient_override,
+        sender_override=sender_override,
+        organization_override=organization_override,
+        external_doc_no_override=external_doc_no_override,
+    )
+    package = _build_delivery_package_record(
+        order_no=order_no,
+        preview=preview,
+        created_by=created_by,
+        notes=notes,
+    )
+    await db.zetadocs_delivery_packages.insert_one(package)
+    return {
+        "success": True,
+        "message": "Send-disabled delivery package preview created. No email was sent and no BC write occurred.",
+        "package_id": package["package_id"],
+        "delivery_enabled": False,
+        "email_send_status": package["email_send_status"],
+        "bc_write_status": package["bc_write_status"],
+        "package": _public_package_response(package),
+    }
+
+
+@router.get("/delivery-packages/{package_id}")
+async def get_delivery_package(package_id: str):
+    """Get a previously created send-disabled delivery package preview."""
+    _ensure_db()
+    package = await db.zetadocs_delivery_packages.find_one({"package_id": package_id}, {"_id": 0})
+    if not package:
+        raise HTTPException(status_code=404, detail=f"Delivery package {package_id} was not found")
+    return {"success": True, "package": package}
+
+
+@router.get("/order-confirmations/{order_no}/delivery-packages")
+async def list_order_confirmation_delivery_packages(
+    order_no: str,
+    limit: int = Query(25, ge=1, le=100),
+) -> Dict[str, Any]:
+    """List send-disabled delivery package previews for an order confirmation."""
+    _ensure_db()
+    packages: List[Dict[str, Any]] = await db.zetadocs_delivery_packages.find(
+        {"workflow_type": "order_confirmation", "order_no": order_no},
+        {"_id": 0},
+    ).sort("created_utc", -1).limit(limit).to_list(limit)
+    return {"success": True, "order_no": order_no, "count": len(packages), "packages": packages}

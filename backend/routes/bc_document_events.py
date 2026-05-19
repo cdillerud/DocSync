@@ -18,7 +18,7 @@ Design rules:
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import quote, unquote, urlparse
 import hashlib
 import json
 import os
@@ -38,6 +38,12 @@ _db = None
 BC_DOCUMENT_EVENTS_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_API_KEY", "").strip()
 BC_DOCUMENT_EVENTS_REQUIRE_API_KEY = os.environ.get("BC_DOCUMENT_EVENTS_REQUIRE_API_KEY", "true").lower() != "false"
 LINK_VERIFY_TIMEOUT_SECONDS = float(os.environ.get("BC_DOCUMENT_LINK_VERIFY_TIMEOUT_SECONDS", "10"))
+
+TENANT_ID = os.environ.get("TENANT_ID", "").strip()
+GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "").strip()
+GRAPH_CLIENT_SECRET = os.environ.get("GRAPH_CLIENT_SECRET", "").strip()
+GRAPH_LINK_VERIFY_ENABLED = os.environ.get("BC_DOCUMENT_LINK_VERIFY_GRAPH_ENABLED", "true").lower() != "false"
+GRAPH_SCOPE = "https://graph.microsoft.com/.default"
 
 
 def set_db(database):
@@ -282,10 +288,197 @@ def _metadata_link_health(doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _graph_link_verify_configured() -> bool:
+    return GRAPH_LINK_VERIFY_ENABLED and bool(TENANT_ID and GRAPH_CLIENT_ID and GRAPH_CLIENT_SECRET)
+
+
+async def _get_graph_access_token() -> str:
+    token_url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+    async with httpx.AsyncClient(timeout=LINK_VERIFY_TIMEOUT_SECONDS) as client:
+        response = await client.post(
+            token_url,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": GRAPH_CLIENT_ID,
+                "client_secret": GRAPH_CLIENT_SECRET,
+                "scope": GRAPH_SCOPE,
+            },
+        )
+
+    if response.status_code >= 400:
+        raise RuntimeError(f"Graph token request failed with HTTP {response.status_code}: {response.text[:500]}")
+
+    token = response.json().get("access_token")
+    if not token:
+        raise RuntimeError("Graph token response did not include access_token")
+
+    return token
+
+
+def _parse_sharepoint_web_url(web_url: str) -> Dict[str, Any]:
+    parsed = urlparse(web_url)
+    path_parts = [unquote(part) for part in parsed.path.split("/") if part]
+
+    if not parsed.netloc:
+        raise ValueError("SharePoint URL has no host")
+
+    if len(path_parts) < 3:
+        raise ValueError("SharePoint URL path is too short to resolve site and file")
+
+    if path_parts[0].lower() in {"sites", "teams"} and len(path_parts) >= 4:
+        site_path = f"/{path_parts[0]}/{path_parts[1]}"
+        remaining = path_parts[2:]
+    else:
+        site_path = "/"
+        remaining = path_parts
+
+    library_name = remaining[0] if remaining else ""
+    if library_name.lower() in {"shared documents", "documents"}:
+        item_parts = remaining[1:]
+    else:
+        item_parts = remaining
+
+    item_path = "/".join(item_parts)
+    if not item_path:
+        raise ValueError("SharePoint URL does not include a file path")
+
+    return {
+        "hostname": parsed.netloc,
+        "site_path": site_path,
+        "library_name": library_name,
+        "item_path": item_path,
+    }
+
+
+async def _verify_external_link_with_graph(metadata_health: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if not _graph_link_verify_configured():
+        return None
+
+    checked_at = _now_iso()
+    web_url = metadata_health.get("web_url") or ""
+
+    try:
+        parsed = _parse_sharepoint_web_url(web_url)
+        token = await _get_graph_access_token()
+    except Exception as exc:
+        return {
+            **metadata_health,
+            "status": "graph_setup_failed",
+            "label": "Graph setup failed",
+            "detail": str(exc),
+            "method": "graph",
+            "checked_at": checked_at,
+        }
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=LINK_VERIFY_TIMEOUT_SECONDS, headers=headers) as client:
+            site_lookup_path = quote(parsed["site_path"], safe="/")
+            site_url = f"https://graph.microsoft.com/v1.0/sites/{parsed['hostname']}:{site_lookup_path}"
+            site_response = await client.get(site_url)
+
+            if site_response.status_code >= 400:
+                return {
+                    **metadata_health,
+                    "status": "graph_unauthorized" if site_response.status_code in {401, 403} else "graph_error",
+                    "label": "Graph unauthorized" if site_response.status_code in {401, 403} else f"Graph site HTTP {site_response.status_code}",
+                    "detail": "Microsoft Graph could not resolve the SharePoint site from the stored URL",
+                    "method": "graph",
+                    "checked_at": checked_at,
+                    "http_status_code": site_response.status_code,
+                    "graph_site_url": site_url,
+                    "graph_error": site_response.text[:500],
+                }
+
+            site = site_response.json()
+            site_id = site.get("id")
+            encoded_item_path = quote(parsed["item_path"], safe="/")
+            item_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:/{encoded_item_path}"
+            item_response = await client.get(item_url)
+
+            if item_response.status_code == 404:
+                return {
+                    **metadata_health,
+                    "status": "missing",
+                    "label": "Missing file",
+                    "detail": "Microsoft Graph resolved the SharePoint site but could not find the file",
+                    "method": "graph",
+                    "checked_at": checked_at,
+                    "http_status_code": item_response.status_code,
+                    "site_id": site_id,
+                    "graph_item_url": item_url,
+                }
+
+            if item_response.status_code >= 400:
+                return {
+                    **metadata_health,
+                    "status": "graph_unauthorized" if item_response.status_code in {401, 403} else "graph_error",
+                    "label": "Graph unauthorized" if item_response.status_code in {401, 403} else f"Graph file HTTP {item_response.status_code}",
+                    "detail": "Microsoft Graph could not read the SharePoint file at the stored path",
+                    "method": "graph",
+                    "checked_at": checked_at,
+                    "http_status_code": item_response.status_code,
+                    "site_id": site_id,
+                    "graph_item_url": item_url,
+                    "graph_error": item_response.text[:500],
+                }
+
+            item = item_response.json()
+            parent_ref = item.get("parentReference") or {}
+
+            return {
+                **metadata_health,
+                "status": "verified",
+                "label": "Verified",
+                "detail": "Microsoft Graph confirmed the SharePoint file exists",
+                "method": "graph",
+                "checked_at": checked_at,
+                "http_status_code": item_response.status_code,
+                "site_id": site_id,
+                "drive_id": parent_ref.get("driveId"),
+                "item_id": item.get("id"),
+                "item_name": item.get("name"),
+                "item_size": item.get("size"),
+                "graph_web_url": item.get("webUrl"),
+                "graph_item_url": item_url,
+                "library_name": parsed.get("library_name"),
+            }
+
+    except httpx.TimeoutException:
+        return {
+            **metadata_health,
+            "status": "unreachable",
+            "label": "Graph timeout",
+            "detail": "Timed out while verifying the SharePoint link through Microsoft Graph",
+            "method": "graph",
+            "checked_at": checked_at,
+        }
+    except httpx.HTTPError as exc:
+        return {
+            **metadata_health,
+            "status": "unreachable",
+            "label": "Graph verification failed",
+            "detail": str(exc),
+            "method": "graph",
+            "checked_at": checked_at,
+        }
+
+
 async def _verify_external_link(doc: Dict[str, Any]) -> Dict[str, Any]:
     metadata_health = _metadata_link_health(doc)
     if metadata_health["status"] in {"missing", "invalid"}:
         return metadata_health
+
+    graph_health = await _verify_external_link_with_graph(metadata_health)
+    if graph_health is not None:
+        if graph_health.get("status") == "verified":
+            return graph_health
+        if graph_health.get("status") not in {"graph_setup_failed"}:
+            return graph_health
 
     web_url = metadata_health["web_url"]
     checked_at = _now_iso()
@@ -371,17 +564,27 @@ async def _verify_external_link(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 async def _store_link_health(document_id: str, health: Dict[str, Any]) -> None:
     db = _require_db()
+
+    set_fields = {
+        "link_health": health,
+        "link_health_status": health.get("status"),
+        "link_health_checked_at": health.get("checked_at"),
+        "sharepoint.link_health": health,
+        "sharepoint.link_health_status": health.get("status"),
+        "sharepoint.link_verified_at": health.get("checked_at"),
+    }
+
+    if health.get("site_id"):
+        set_fields["sharepoint.site_id"] = health.get("site_id")
+    if health.get("drive_id"):
+        set_fields["sharepoint.drive_id"] = health.get("drive_id")
+    if health.get("item_id"):
+        set_fields["sharepoint.item_id"] = health.get("item_id")
+
     await db.hub_documents.update_one(
         {"id": document_id},
         {
-            "$set": _jsonable({
-                "link_health": health,
-                "link_health_status": health.get("status"),
-                "link_health_checked_at": health.get("checked_at"),
-                "sharepoint.link_health": health,
-                "sharepoint.link_health_status": health.get("status"),
-                "sharepoint.link_verified_at": health.get("checked_at"),
-            }),
+            "$set": _jsonable(set_fields),
             "$push": {
                 "workflow_history": _jsonable({
                     "timestamp": _now_iso(),
@@ -389,6 +592,7 @@ async def _store_link_health(document_id: str, health: Dict[str, Any]) -> None:
                     "actor": "GPI_HUB_LINK_VERIFIER",
                     "note": health.get("detail"),
                     "link_health_status": health.get("status"),
+                    "link_health_method": health.get("method"),
                 })
             }
         }
@@ -709,6 +913,8 @@ async def get_bc_document_events_status():
         "mailbox_polling": False,
         "api_key_required": BC_DOCUMENT_EVENTS_REQUIRE_API_KEY,
         "api_key_configured": bool(BC_DOCUMENT_EVENTS_API_KEY),
+        "graph_link_verification_enabled": GRAPH_LINK_VERIFY_ENABLED,
+        "graph_link_verification_configured": _graph_link_verify_configured(),
     }
 
 

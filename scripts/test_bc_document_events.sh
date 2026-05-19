@@ -23,6 +23,7 @@ EXPECTED_EVENTS="${BC_EVENTS_EXPECTED_EVENTS:-4}"
 EXPECTED_DOCS="${BC_EVENTS_EXPECTED_DOCS:-4}"
 ENV_FILE="${BC_EVENTS_ENV_FILE:-backend/.env}"
 API_KEY="${BC_DOCUMENT_EVENTS_API_KEY:-}"
+HEALTH_TIMEOUT_SECONDS="${BC_EVENTS_HEALTH_TIMEOUT_SECONDS:-90}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"
@@ -51,10 +52,32 @@ load_api_key() {
   fi
 }
 
-curl_auth_args() {
-  if [[ -n "$API_KEY" ]]; then
-    printf '%s\n' "-H" "X-GPI-Hub-Api-Key: ${API_KEY}"
-  fi
+wait_for_endpoint() {
+  local endpoint="$1"
+  local label="$2"
+  local start_time
+  local now
+  local elapsed
+  local response
+
+  start_time="$(date +%s)"
+  log "Waiting for ${label} at ${BASE_URL}${endpoint}."
+
+  while true; do
+    if response="$(curl -fsS --connect-timeout 2 --max-time 5 "${BASE_URL}${endpoint}" 2>/tmp/bc-events-wait-error.txt)"; then
+      log "${label} is responding."
+      return 0
+    fi
+
+    now="$(date +%s)"
+    elapsed=$((now - start_time))
+    if [[ "$elapsed" -ge "$HEALTH_TIMEOUT_SECONDS" ]]; then
+      cat /tmp/bc-events-wait-error.txt >&2 || true
+      fail "Timed out waiting for ${label} after ${HEALTH_TIMEOUT_SECONDS} seconds"
+    fi
+
+    sleep 2
+  done
 }
 
 post_json() {
@@ -156,6 +179,9 @@ main() {
   else
     log "No API key loaded. Write tests will run without X-GPI-Hub-Api-Key."
   fi
+
+  wait_for_endpoint "/health" "backend health"
+  wait_for_endpoint "/bc-document-events/status" "BC document events status endpoint"
 
   log "Checking status endpoint."
   status_before="$(curl -fsS "${BASE_URL}/bc-document-events/status")"

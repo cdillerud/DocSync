@@ -163,7 +163,7 @@ from services.spiro.spiro_sync import set_spiro_db
 
 # ==================== BC DOCUMENT EVENTS ====================
 from routes.bc_document_events import router as bc_document_events_router, set_db as set_bc_document_events_db
-from routes.zetadocs_mirror import router as zetadocs_mirror_router
+from routes.zetadocs_mirror import router as zetadocs_mirror_router, set_db as set_zetadocs_mirror_db
 
 import jwt as pyjwt
 
@@ -12971,6 +12971,7 @@ async def startup():
     set_spiro_routes_db(db)
     # BC Document Events: Initialize database
     set_bc_document_events_db(db)
+    set_zetadocs_mirror_db(db)
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

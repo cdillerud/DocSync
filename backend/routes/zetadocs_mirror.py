@@ -55,6 +55,25 @@ ORDER_CONFIRMATION_TEMPLATE = {
     ),
 }
 
+INTERNAL_CUSTOMER_MARKERS = {
+    "GAMER",
+    "GAMER PACKAGING",
+    "GAMER PACKAGING INC",
+    "GAMER PACKAGING, INC",
+    "GAMER PACKAGING, INC.",
+}
+
+TRANSFER_AFFECTED_DOCUMENT_TYPES = {
+    "WRN",
+    "WAREHOUSE_RECEIVING_NOTICE",
+    "WAREHOUSE_RECEIVING_NOTICE_DOCUMENT",
+    "PICK_TICKET",
+    "PICK_TICKET_DOCUMENT",
+    "PICK_INSTRUCTION",
+    "TRANSFER_ORDER",
+    "TRANSFER",
+}
+
 
 def set_db(database):
     """Inject MongoDB dependency from server startup."""
@@ -74,6 +93,27 @@ def _first_non_empty(*values: Any) -> str:
         if value_str:
             return value_str
     return ""
+
+
+def _normalize_for_rule(value: Any) -> str:
+    if value is None:
+        return ""
+    normalized = str(value).strip().upper()
+    normalized = normalized.replace(".", "")
+    normalized = " ".join(normalized.split())
+    return normalized
+
+
+def _is_gamer_internal_customer(*values: Any) -> bool:
+    for value in values:
+        normalized = _normalize_for_rule(value)
+        if not normalized:
+            continue
+        if normalized in INTERNAL_CUSTOMER_MARKERS:
+            return True
+        if normalized.startswith("GAMER PACKAGING"):
+            return True
+    return False
 
 
 def _replace_zetadocs_tokens(template: str, values: Dict[str, str]) -> str:
@@ -187,6 +227,133 @@ async def _get_customer(token: str, company_id: str, sales_order: Dict[str, Any]
     return data
 
 
+def _build_routing_context(
+    source_document_type: Optional[str],
+    source_order_type: Optional[str],
+    managed_by_department: Optional[str],
+    customer_no: Optional[str],
+    sell_to_customer_no: Optional[str],
+    bill_to_customer_no: Optional[str],
+    ship_to_customer_no: Optional[str],
+    organization: str,
+    sales_order: Dict[str, Any],
+    customer: Optional[Dict[str, Any]],
+    is_transfer_order_override: Optional[bool],
+    internal_customer_override: Optional[bool],
+    include_osr_override: Optional[bool],
+    include_isr_override: Optional[bool],
+    show_in_sales_tiles_override: Optional[bool],
+) -> Dict[str, Any]:
+    document_type = _normalize_for_rule(source_document_type or "ORDER_CONFIRMATION")
+    order_type = _normalize_for_rule(
+        source_order_type
+        or sales_order.get("orderType")
+        or sales_order.get("documentType")
+        or "SALES_ORDER"
+    )
+
+    resolved_customer_no = _first_non_empty(
+        customer_no,
+        sales_order.get("customerNumber"),
+        customer.get("number") if customer else None,
+    )
+    resolved_sell_to_customer_no = _first_non_empty(
+        sell_to_customer_no,
+        sales_order.get("sellToCustomerNumber"),
+        sales_order.get("sellToCustomerNo"),
+    )
+    resolved_bill_to_customer_no = _first_non_empty(
+        bill_to_customer_no,
+        sales_order.get("billToCustomerNumber"),
+        sales_order.get("billToCustomerNo"),
+    )
+    resolved_ship_to_customer_no = _first_non_empty(
+        ship_to_customer_no,
+        sales_order.get("shipToCustomerNumber"),
+        sales_order.get("shipToCustomerNo"),
+    )
+
+    inferred_internal_customer = _is_gamer_internal_customer(
+        resolved_customer_no,
+        resolved_sell_to_customer_no,
+        resolved_bill_to_customer_no,
+        resolved_ship_to_customer_no,
+        organization,
+        sales_order.get("customerName"),
+        sales_order.get("sellToCustomerName"),
+        sales_order.get("billToName"),
+        customer.get("displayName") if customer else None,
+    )
+    internal_customer = internal_customer_override if internal_customer_override is not None else inferred_internal_customer
+
+    inferred_transfer_order = "TRANSFER" in order_type or document_type in {"TRANSFER", "TRANSFER_ORDER"}
+    is_transfer_order = is_transfer_order_override if is_transfer_order_override is not None else inferred_transfer_order
+
+    affected_transfer_document = document_type in TRANSFER_AFFECTED_DOCUMENT_TYPES
+    logistics_accounting_owned = bool(is_transfer_order or (internal_customer and affected_transfer_document))
+
+    process_owner_department = _first_non_empty(
+        managed_by_department,
+        "Logistics/Accounting" if logistics_accounting_owned else "Sales",
+    )
+
+    include_osr = include_osr_override if include_osr_override is not None else not logistics_accounting_owned
+    include_isr = include_isr_override if include_isr_override is not None else not logistics_accounting_owned
+    show_in_sales_tiles = show_in_sales_tiles_override if show_in_sales_tiles_override is not None else not logistics_accounting_owned
+
+    routing_exclusions: List[str] = []
+    rule_notes: List[str] = []
+
+    if logistics_accounting_owned:
+        routing_rule_applied = "transfer_or_internal_customer_logistics_accounting_exclusion"
+        routing_exclusions.extend([
+            "exclude_sales_team_auto_copy",
+            "exclude_sales_tile_visibility",
+        ])
+        rule_notes.append(
+            "Transfer/internal-customer documents owned by logistics/accounting should not automatically copy sales teams or appear in sales tiles."
+        )
+    else:
+        routing_rule_applied = "standard_sales_document_distribution"
+        rule_notes.append(
+            "Standard sales document routing remains eligible for OSR/ISR copy and sales tile visibility unless overridden."
+        )
+
+    if include_osr:
+        audience_roles = ["external_recipient", "osr_copy"]
+    else:
+        audience_roles = ["external_recipient"]
+    if include_isr:
+        audience_roles.append("isr_visibility")
+
+    return {
+        "source_document_type": document_type,
+        "source_order_type": order_type,
+        "customer_no": resolved_customer_no,
+        "sell_to_customer_no": resolved_sell_to_customer_no,
+        "bill_to_customer_no": resolved_bill_to_customer_no,
+        "ship_to_customer_no": resolved_ship_to_customer_no,
+        "is_internal_customer": internal_customer,
+        "is_transfer_order": is_transfer_order,
+        "managed_by_department": process_owner_department,
+        "include_osr": include_osr,
+        "include_isr": include_isr,
+        "show_in_sales_tiles": show_in_sales_tiles,
+        "routing_rule_applied": routing_rule_applied,
+        "routing_exclusions": routing_exclusions,
+        "audience_roles": audience_roles,
+        "rule_notes": rule_notes,
+        "override_flags": {
+            "is_transfer_order_override_used": is_transfer_order_override is not None,
+            "internal_customer_override_used": internal_customer_override is not None,
+            "include_osr_override_used": include_osr_override is not None,
+            "include_isr_override_used": include_isr_override is not None,
+            "show_in_sales_tiles_override_used": show_in_sales_tiles_override is not None,
+        },
+        "mission_alignment": "Do not blindly route by customer alone. Document type, order type, process owner, internal/customer-facing status, and visibility rules must control delivery and tile behavior.",
+    }
+
+
 def _build_preview(
     order_no: str,
     sales_order: Dict[str, Any],
@@ -195,6 +362,18 @@ def _build_preview(
     sender_override: Optional[str],
     organization_override: Optional[str],
     external_doc_no_override: Optional[str],
+    source_document_type: Optional[str],
+    source_order_type: Optional[str],
+    managed_by_department: Optional[str],
+    customer_no: Optional[str],
+    sell_to_customer_no: Optional[str],
+    bill_to_customer_no: Optional[str],
+    ship_to_customer_no: Optional[str],
+    is_transfer_order_override: Optional[bool],
+    internal_customer_override: Optional[bool],
+    include_osr_override: Optional[bool],
+    include_isr_override: Optional[bool],
+    show_in_sales_tiles_override: Optional[bool],
 ) -> Dict[str, Any]:
     organization = _first_non_empty(
         organization_override,
@@ -217,6 +396,24 @@ def _build_preview(
         customer.get("email") if customer else None,
     )
     sender = _first_non_empty(sender_override, sales_order.get("salespersonEmail"), "")
+
+    routing_context = _build_routing_context(
+        source_document_type=source_document_type,
+        source_order_type=source_order_type,
+        managed_by_department=managed_by_department,
+        customer_no=customer_no,
+        sell_to_customer_no=sell_to_customer_no,
+        bill_to_customer_no=bill_to_customer_no,
+        ship_to_customer_no=ship_to_customer_no,
+        organization=organization,
+        sales_order=sales_order,
+        customer=customer,
+        is_transfer_order_override=is_transfer_order_override,
+        internal_customer_override=internal_customer_override,
+        include_osr_override=include_osr_override,
+        include_isr_override=include_isr_override,
+        show_in_sales_tiles_override=show_in_sales_tiles_override,
+    )
 
     token_values = {
         "ZetadocsRecordNo": order_no,
@@ -256,6 +453,7 @@ def _build_preview(
             "from": sender,
             "attachment_name": attachment_name,
         },
+        "routing_context": routing_context,
         "rendered_email": {
             "from": sender,
             "to": recipient,
@@ -275,7 +473,7 @@ def _build_preview(
             "attachment_name": "Sales-Order 100729.pdf",
         },
         "warnings": warnings,
-        "next_step": "Compare this preview against the real Zetadocs email. When subject/body/recipient match, add PDF retrieval/rendering and then a send-disabled delivery package record.",
+        "next_step": "Compare routing/audience context before adding PDF content or send behavior.",
     }
 
 
@@ -286,6 +484,18 @@ async def _build_order_confirmation_preview_payload(
     sender_override: Optional[str],
     organization_override: Optional[str],
     external_doc_no_override: Optional[str],
+    source_document_type: Optional[str],
+    source_order_type: Optional[str],
+    managed_by_department: Optional[str],
+    customer_no: Optional[str],
+    sell_to_customer_no: Optional[str],
+    bill_to_customer_no: Optional[str],
+    ship_to_customer_no: Optional[str],
+    is_transfer_order_override: Optional[bool],
+    internal_customer_override: Optional[bool],
+    include_osr_override: Optional[bool],
+    include_isr_override: Optional[bool],
+    show_in_sales_tiles_override: Optional[bool],
 ) -> Dict[str, Any]:
     sales_order: Dict[str, Any] = {}
     customer: Optional[Dict[str, Any]] = None
@@ -308,6 +518,18 @@ async def _build_order_confirmation_preview_payload(
         sender_override=sender_override,
         organization_override=organization_override,
         external_doc_no_override=external_doc_no_override,
+        source_document_type=source_document_type,
+        source_order_type=source_order_type,
+        managed_by_department=managed_by_department,
+        customer_no=customer_no,
+        sell_to_customer_no=sell_to_customer_no,
+        bill_to_customer_no=bill_to_customer_no,
+        ship_to_customer_no=ship_to_customer_no,
+        is_transfer_order_override=is_transfer_order_override,
+        internal_customer_override=internal_customer_override,
+        include_osr_override=include_osr_override,
+        include_isr_override=include_isr_override,
+        show_in_sales_tiles_override=show_in_sales_tiles_override,
     )
     preview["live_bc"] = live_bc
     preview["bc"]["company_record"] = company
@@ -324,6 +546,7 @@ def _build_delivery_package_record(
     now = _now_iso()
     resolved = preview.get("resolved_values", {})
     rendered_email = preview.get("rendered_email", {})
+    routing_context = preview.get("routing_context", {})
 
     return {
         "package_id": package_id,
@@ -346,6 +569,7 @@ def _build_delivery_package_record(
         "template_file": preview.get("zetadocs", {}).get("template_file"),
         "report_id": preview.get("zetadocs", {}).get("report_id"),
         "report_name": preview.get("zetadocs", {}).get("report_name"),
+        "routing_context": routing_context,
         "email": {
             "from": rendered_email.get("from", ""),
             "to": rendered_email.get("to", ""),
@@ -373,7 +597,13 @@ def _build_delivery_package_record(
                 "event_utc": now,
                 "actor": created_by,
                 "details": "Send-disabled Zetadocs mirror delivery package created from preview payload. No email was sent and no BC write occurred.",
-            }
+            },
+            {
+                "event": "routing_context_evaluated",
+                "event_utc": now,
+                "actor": "system",
+                "details": f"Routing rule applied: {routing_context.get('routing_rule_applied', 'unknown')}",
+            },
         ],
         "preview_payload": preview,
     }
@@ -385,6 +615,36 @@ def _public_package_response(package: Dict[str, Any]) -> Dict[str, Any]:
     return public
 
 
+def _routing_query_kwargs(
+    source_document_type: Optional[str],
+    source_order_type: Optional[str],
+    managed_by_department: Optional[str],
+    customer_no: Optional[str],
+    sell_to_customer_no: Optional[str],
+    bill_to_customer_no: Optional[str],
+    ship_to_customer_no: Optional[str],
+    is_transfer_order: Optional[bool],
+    internal_customer: Optional[bool],
+    include_osr: Optional[bool],
+    include_isr: Optional[bool],
+    show_in_sales_tiles: Optional[bool],
+) -> Dict[str, Any]:
+    return {
+        "source_document_type": source_document_type,
+        "source_order_type": source_order_type,
+        "managed_by_department": managed_by_department,
+        "customer_no": customer_no,
+        "sell_to_customer_no": sell_to_customer_no,
+        "bill_to_customer_no": bill_to_customer_no,
+        "ship_to_customer_no": ship_to_customer_no,
+        "is_transfer_order_override": is_transfer_order,
+        "internal_customer_override": internal_customer,
+        "include_osr_override": include_osr,
+        "include_isr_override": include_isr,
+        "show_in_sales_tiles_override": show_in_sales_tiles,
+    }
+
+
 @router.get("/order-confirmations/{order_no}/preview")
 async def preview_order_confirmation(
     order_no: str,
@@ -393,6 +653,18 @@ async def preview_order_confirmation(
     sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
     organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
     external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
+    source_document_type: Optional[str] = Query("ORDER_CONFIRMATION", description="Document type used for routing rules"),
+    source_order_type: Optional[str] = Query("SALES_ORDER", description="Order/process type used for routing rules"),
+    managed_by_department: Optional[str] = Query(None, description="Optional process-owner override"),
+    customer_no: Optional[str] = Query(None, description="Optional customer number override used for routing"),
+    sell_to_customer_no: Optional[str] = Query(None, description="Optional sell-to customer number override used for routing"),
+    bill_to_customer_no: Optional[str] = Query(None, description="Optional bill-to customer number override used for routing"),
+    ship_to_customer_no: Optional[str] = Query(None, description="Optional ship-to customer number override used for routing"),
+    is_transfer_order: Optional[bool] = Query(None, description="Optional transfer-order override used for routing"),
+    internal_customer: Optional[bool] = Query(None, description="Optional internal-customer override used for routing"),
+    include_osr: Optional[bool] = Query(None, description="Optional OSR copy/visibility override"),
+    include_isr: Optional[bool] = Query(None, description="Optional ISR copy/visibility override"),
+    show_in_sales_tiles: Optional[bool] = Query(None, description="Optional sales tile visibility override"),
 ):
     """Preview a GPI Hub replacement package for Zetadocs Order Confirmation delivery."""
     return await _build_order_confirmation_preview_payload(
@@ -402,6 +674,20 @@ async def preview_order_confirmation(
         sender_override=sender_override,
         organization_override=organization_override,
         external_doc_no_override=external_doc_no_override,
+        **_routing_query_kwargs(
+            source_document_type=source_document_type,
+            source_order_type=source_order_type,
+            managed_by_department=managed_by_department,
+            customer_no=customer_no,
+            sell_to_customer_no=sell_to_customer_no,
+            bill_to_customer_no=bill_to_customer_no,
+            ship_to_customer_no=ship_to_customer_no,
+            is_transfer_order=is_transfer_order,
+            internal_customer=internal_customer,
+            include_osr=include_osr,
+            include_isr=include_isr,
+            show_in_sales_tiles=show_in_sales_tiles,
+        ),
     )
 
 
@@ -413,6 +699,18 @@ async def create_order_confirmation_delivery_package_preview(
     sender_override: Optional[str] = Query(None, description="Optional sender override for parity testing"),
     organization_override: Optional[str] = Query(None, description="Optional organization/customer name override"),
     external_doc_no_override: Optional[str] = Query(None, description="Optional customer PO/external document number override"),
+    source_document_type: Optional[str] = Query("ORDER_CONFIRMATION", description="Document type used for routing rules"),
+    source_order_type: Optional[str] = Query("SALES_ORDER", description="Order/process type used for routing rules"),
+    managed_by_department: Optional[str] = Query(None, description="Optional process-owner override"),
+    customer_no: Optional[str] = Query(None, description="Optional customer number override used for routing"),
+    sell_to_customer_no: Optional[str] = Query(None, description="Optional sell-to customer number override used for routing"),
+    bill_to_customer_no: Optional[str] = Query(None, description="Optional bill-to customer number override used for routing"),
+    ship_to_customer_no: Optional[str] = Query(None, description="Optional ship-to customer number override used for routing"),
+    is_transfer_order: Optional[bool] = Query(None, description="Optional transfer-order override used for routing"),
+    internal_customer: Optional[bool] = Query(None, description="Optional internal-customer override used for routing"),
+    include_osr: Optional[bool] = Query(None, description="Optional OSR copy/visibility override"),
+    include_isr: Optional[bool] = Query(None, description="Optional ISR copy/visibility override"),
+    show_in_sales_tiles: Optional[bool] = Query(None, description="Optional sales tile visibility override"),
     created_by: str = Query("gpi-hub-preview", description="Audit actor for the preview package"),
     notes: Optional[str] = Query(None, description="Optional audit note"),
 ):
@@ -425,6 +723,20 @@ async def create_order_confirmation_delivery_package_preview(
         sender_override=sender_override,
         organization_override=organization_override,
         external_doc_no_override=external_doc_no_override,
+        **_routing_query_kwargs(
+            source_document_type=source_document_type,
+            source_order_type=source_order_type,
+            managed_by_department=managed_by_department,
+            customer_no=customer_no,
+            sell_to_customer_no=sell_to_customer_no,
+            bill_to_customer_no=bill_to_customer_no,
+            ship_to_customer_no=ship_to_customer_no,
+            is_transfer_order=is_transfer_order,
+            internal_customer=internal_customer,
+            include_osr=include_osr,
+            include_isr=include_isr,
+            show_in_sales_tiles=show_in_sales_tiles,
+        ),
     )
     package = _build_delivery_package_record(
         order_no=order_no,
@@ -440,6 +752,8 @@ async def create_order_confirmation_delivery_package_preview(
         "delivery_enabled": False,
         "email_send_status": package["email_send_status"],
         "bc_write_status": package["bc_write_status"],
+        "routing_rule_applied": package.get("routing_context", {}).get("routing_rule_applied"),
+        "show_in_sales_tiles": package.get("routing_context", {}).get("show_in_sales_tiles"),
         "package": _public_package_response(package),
     }
 

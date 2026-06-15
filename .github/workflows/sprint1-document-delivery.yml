@@ -55,4 +55,4 @@ jobs:
       - name: Run Sprint 1 preflight tests
         env:
           BC_DOCUMENT_EVENTS_REQUIRE_API_KEY: "false"
-        run: pytest -q tests/test_document_delivery_preflight.py
+        run: pytest -vv --tb=short tests/test_document_delivery_preflight.py

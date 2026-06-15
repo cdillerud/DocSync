@@ -4,17 +4,18 @@
 
 Sprint 1 establishes the first production-shaped contract between Business Central and GPI Document Hub for replacing Zetadocs outbound delivery.
 
-Business Central remains responsible for generating report 50020, attaching the PDF to a native BC email, and showing the email editor to the user. GPI Hub evaluates deterministic routing, renders the email metadata, records an auditable delivery package, and returns warnings before BC creates the draft.
+Business Central supplies the authoritative Sales Order, customer, salesperson, and current-user context. GPI Hub evaluates deterministic routing, renders the email metadata, records an auditable delivery package, and returns warnings. Business Central then presents a read-only delivery preview and allows the user to run report 50020 as a PDF preview.
 
 ## Current safety state
 
 This slice is preview-only.
 
-- No email is sent.
-- No Business Central record is written.
+- No email message is created or sent.
+- No Business Central transaction record is written.
 - No SharePoint file or folder is created.
 - No mailbox is polled.
-- GPI Hub only records the preflight package in MongoDB.
+- GPI Hub records only the preflight package in MongoDB.
+- Business Central records the API result in GPI Document Delivery Log.
 - The existing Zetadocs process remains unchanged.
 
 ## Sandbox endpoint
@@ -81,6 +82,40 @@ The response includes:
 - Audit events
 - Original normalized request
 
+## Business Central action
+
+Extension version `0.2.0.0` adds this Sales Order action:
+
+```text
+Preview GPI Order Confirmation
+```
+
+The action:
+
+1. Saves the current Sales Order.
+2. Verifies that the record is a Sales Order with a sell-to customer.
+3. Resolves the customer email from Sales Header and Customer.
+4. Resolves the OSR from Salesperson Code and Salesperson/Purchaser email.
+5. Uses the current BC user as the initiating sender for this pilot.
+6. Builds a stable correlation ID from order number, system row version, and user security ID.
+7. Calls the GPI Hub preflight endpoint with the configured API key.
+8. Stores the full API response in GPI Document Delivery Log.
+9. Opens a read-only GPI Order Confirmation Preview page.
+10. Allows the user to run report 50020 using the current Sales Order filter.
+
+The preview page displays:
+
+- Preflight status
+- Package and correlation IDs
+- Sender and recipients
+- Subject and email body
+- Attachment file name
+- Planned SharePoint path
+- Routing rule
+- Warnings
+
+The PDF action runs the BC report only. It does not create an email draft or send anything.
+
 ## Routing behavior
 
 The endpoint reuses the routing rules already proven in the Zetadocs mirror.
@@ -99,13 +134,14 @@ The preflight is blocked when any of these are missing:
 
 A missing customer PO/external document number is currently a warning, not a block.
 
-BC must not create the email draft when `can_create_email_draft` is false.
+The preview page still opens for a blocked package so the user can see the exact reason. A future draft action must refuse to continue when `can_create_email_draft` is false.
 
 ## Idempotency
 
-`correlation_id` identifies one business operation.
+`correlation_id` identifies one BC user previewing one saved version of a Sales Order.
 
-- Same correlation ID and same normalized payload: return the existing package.
+- Same user, same system row version, and same payload: return the existing package.
+- A saved Sales Order change produces a new system row version and correlation ID.
 - Same correlation ID and materially different payload: return HTTP 409.
 - Package IDs are deterministic from the correlation ID.
 
@@ -132,12 +168,14 @@ uvicorn server_sprint1:app --host 0.0.0.0 --port 8001
 5. Correlation ID collision protection
 6. Report 50020 enforcement
 
+`.github/workflows/sprint1-document-delivery.yml` compiles the Sprint 1 Python modules and runs these tests on pushes and pull requests that affect the preflight contract.
+
 ## Next build slice
 
-The next slice is the Business Central AL client and Sales Order page action:
+After the extension compiles and the preview is validated in the BC sandbox, add a separately gated action:
 
 ```text
-Preview GPI Order Confirmation
+Create GPI Email Draft (Sandbox)
 ```
 
-That action will collect authoritative BC values, call this preflight endpoint, generate report 50020 into a temporary stream, and open the native BC email editor. It will remain draft/preview-only until parity is validated against Zetadocs.
+That action will reuse the successful preflight package, generate report 50020 to a temporary stream, attach it to a native BC email message, and open the BC email editor. Automated sending will remain disabled.

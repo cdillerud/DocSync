@@ -69,12 +69,13 @@ jobs:
           pytest -vv --tb=short tests/test_document_delivery_preflight.py 2>&1 | tee pytest-output.txt
 
       - name: Validate AL object IDs
-        run: python ../scripts/check_sprint1_al_ids.py
+        run: cd .. && python scripts/check_sprint1_al_ids.py
 
       - name: Validate Sprint 1 shell syntax
         run: |
-          bash -n ../scripts/deploy_sprint1_preflight.sh
-          bash -n ../scripts/test_sprint1_preflight.sh
+          cd ..
+          bash -n scripts/deploy_sprint1_preflight.sh
+          bash -n scripts/test_sprint1_preflight.sh
 
       - name: Upload Sprint 1 test output
         if: always()

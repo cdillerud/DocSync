@@ -55,4 +55,14 @@ jobs:
       - name: Run Sprint 1 preflight tests
         env:
           BC_DOCUMENT_EVENTS_REQUIRE_API_KEY: "false"
-        run: pytest -vv --tb=short tests/test_document_delivery_preflight.py
+        run: |
+          set -o pipefail
+          pytest -vv --tb=short tests/test_document_delivery_preflight.py 2>&1 | tee pytest-output.txt
+
+      - name: Upload Sprint 1 test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sprint1-pytest-output
+          path: backend/pytest-output.txt
+          if-no-files-found: warn

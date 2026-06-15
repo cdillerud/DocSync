@@ -1,0 +1,58 @@
+name: Sprint 1 Document Delivery
+
+on:
+  pull_request:
+    paths:
+      - "backend/routes/document_delivery.py"
+      - "backend/routes/zetadocs_mirror.py"
+      - "backend/routes/bc_document_events.py"
+      - "backend/tests/test_document_delivery_preflight.py"
+      - ".github/workflows/sprint1-document-delivery.yml"
+  push:
+    branches:
+      - feature/sprint1-order-confirmation-preflight
+    paths:
+      - "backend/routes/document_delivery.py"
+      - "backend/routes/zetadocs_mirror.py"
+      - "backend/routes/bc_document_events.py"
+      - "backend/tests/test_document_delivery_preflight.py"
+      - ".github/workflows/sprint1-document-delivery.yml"
+
+jobs:
+  preflight-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            fastapi==0.110.1 \
+            pydantic==2.12.5 \
+            pymongo==4.5.0 \
+            httpx==0.28.1 \
+            pytest==9.0.2 \
+            pytest-asyncio==1.3.0
+
+      - name: Compile Sprint 1 Python modules
+        run: |
+          python -m py_compile \
+            routes/document_delivery.py \
+            routes/zetadocs_mirror.py \
+            routes/bc_document_events.py \
+            tests/test_document_delivery_preflight.py
+
+      - name: Run Sprint 1 preflight tests
+        env:
+          BC_DOCUMENT_EVENTS_REQUIRE_API_KEY: "false"
+        run: pytest -q tests/test_document_delivery_preflight.py

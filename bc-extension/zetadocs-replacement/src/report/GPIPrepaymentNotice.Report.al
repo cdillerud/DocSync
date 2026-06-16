@@ -13,6 +13,7 @@ report 70521 "GPI Prepayment Notice"
             DataItemTableView = sorting("Document Type", "No.") where("Document Type" = const(Order));
             RequestFilterFields = "No.";
 
+            column(CompanyLogo; CompanyInfo.Picture) { }
             column(CompanyName; CompanyInfo.Name) { }
             column(CompanyAddress; CompanyInfo.Address) { }
             column(CompanyAddress2; CompanyInfo."Address 2") { }
@@ -136,6 +137,7 @@ report 70521 "GPI Prepayment Notice"
     trigger OnPreReport()
     begin
         CompanyInfo.Get();
+        CompanyInfo.CalcFields(Picture);
         GeneralLedgerSetup.Get();
     end;
 

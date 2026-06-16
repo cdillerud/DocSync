@@ -12,7 +12,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;
-                ToolTip = 'Creates report 50020 as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
+                ToolTip = 'Creates the Gamer-owned Sales Order Confirmation as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
 
                 trigger OnAction()
                 var
@@ -73,7 +73,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 Caption = 'Preview GPI-Owned Order Confirmation';
                 Image = Print;
                 Promoted = false;
-                ToolTip = 'Previews the independent Gamer-owned Sales Order Confirmation report 70520 for comparison with the existing report. It does not create or send an email.';
+                ToolTip = 'Previews the Gamer-owned Sales Order Confirmation report 70520. It does not create or send an email.';
 
                 trigger OnAction()
                 var

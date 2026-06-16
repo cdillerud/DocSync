@@ -2,35 +2,56 @@ codeunit 70510 "GPI Sales Order Email"
 {
     procedure OpenSalesOrderConfirmationDraft(var SalesHeader: Record "Sales Header")
     var
+        ToRecipients: List of [Text];
         Subject: Text;
         Body: Text;
         AttachmentName: Text[250];
     begin
+        BuildCustomerRecipients(SalesHeader, ToRecipients);
         Subject := StrSubstNo('Sales Order Confirmation %1', SalesHeader."No.");
         Body := StrSubstNo(
             '<p>Hello,</p><p>Please find attached Sales Order Confirmation %1.</p><p>Thank you,</p>',
             SalesHeader."No.");
         AttachmentName := CopyStr(StrSubstNo('Sales-Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
 
-        OpenSalesDocumentDraft(SalesHeader, 50020, Subject, Body, AttachmentName);
+        OpenSalesDocumentDraft(SalesHeader, 50020, Subject, Body, AttachmentName, ToRecipients);
     end;
 
     procedure OpenPrepaymentNoticeDraft(var SalesHeader: Record "Sales Header")
     var
+        ToRecipients: List of [Text];
         Subject: Text;
         Body: Text;
         AttachmentName: Text[250];
     begin
+        BuildCustomerRecipients(SalesHeader, ToRecipients);
         Subject := StrSubstNo('Prepayment Notice - Order %1', SalesHeader."No.");
         Body := StrSubstNo(
             '<p>Hello,</p><p>Please find attached the prepayment notice for Sales Order %1.</p><p>Thank you,</p>',
             SalesHeader."No.");
         AttachmentName := CopyStr(StrSubstNo('Pre-Payment - Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
 
-        OpenSalesDocumentDraft(SalesHeader, 50003, Subject, Body, AttachmentName);
+        OpenSalesDocumentDraft(SalesHeader, 50003, Subject, Body, AttachmentName, ToRecipients);
     end;
 
-    local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250])
+    procedure OpenPickTicketDraft(var SalesHeader: Record "Sales Header")
+    var
+        ToRecipients: List of [Text];
+        Subject: Text;
+        Body: Text;
+        AttachmentName: Text[250];
+    begin
+        BuildLocationRecipients(SalesHeader, ToRecipients);
+        Subject := StrSubstNo('Pick Ticket - Order %1', SalesHeader."No.");
+        Body := StrSubstNo(
+            '<p>Hello,</p><p>Please find attached the pick ticket for Sales Order %1.</p><p>Thank you,</p>',
+            SalesHeader."No.");
+        AttachmentName := CopyStr(StrSubstNo('Pick-Ticket - Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
+
+        OpenSalesDocumentDraft(SalesHeader, 50013, Subject, Body, AttachmentName, ToRecipients);
+    end;
+
+    local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250]; var ToRecipients: List of [Text])
     var
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
@@ -38,10 +59,8 @@ codeunit 70510 "GPI Sales Order Email"
         SalesHeaderRef: RecordRef;
         AttachmentOutStream: OutStream;
         AttachmentInStream: InStream;
-        ToRecipients: List of [Text];
         CCRecipients: List of [Text];
         BCCRecipients: List of [Text];
-        RecipientEmail: Text;
         SalespersonEmail: Text;
         InsideSalespersonCode: Code[20];
         InsideSalespersonEmail: Text;
@@ -52,22 +71,17 @@ codeunit 70510 "GPI Sales Order Email"
         SalesHeader.TestField("No.");
         SalesHeader.TestField("Sell-to Customer No.");
 
-        RecipientEmail := GetRecipientEmail(SalesHeader);
-        if RecipientEmail = '' then
-            Error(
-                'Sales Order %1 does not have a recipient email address. Add an email to the Sell-to Contact, the Sales Order, or customer %2.',
-                SalesHeader."No.",
-                SalesHeader."Sell-to Customer No.");
+        if ToRecipients.Count() = 0 then
+            Error('No email recipients were resolved for Sales Order %1.', SalesHeader."No.");
 
-        ToRecipients.Add(RecipientEmail);
         CurrentUserEmail := UserId();
 
         SalespersonEmail := GetSalespersonEmail(SalesHeader."Salesperson Code");
-        AddCcRecipient(CCRecipients, SalespersonEmail, RecipientEmail, CurrentUserEmail);
+        AddCcRecipient(CCRecipients, SalespersonEmail, ToRecipients, CurrentUserEmail);
 
         InsideSalespersonCode := GetInsideSalespersonCode(SalesHeader);
         InsideSalespersonEmail := GetSalespersonEmail(InsideSalespersonCode);
-        AddCcRecipient(CCRecipients, InsideSalespersonEmail, RecipientEmail, CurrentUserEmail);
+        AddCcRecipient(CCRecipients, InsideSalespersonEmail, ToRecipients, CurrentUserEmail);
 
         EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
 
@@ -88,7 +102,36 @@ codeunit 70510 "GPI Sales Order Email"
         Email.OpenInEditorModally(EmailMessage);
     end;
 
-    local procedure GetRecipientEmail(SalesHeader: Record "Sales Header"): Text
+    local procedure BuildCustomerRecipients(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text])
+    var
+        RecipientText: Text;
+    begin
+        RecipientText := GetCustomerRecipientText(SalesHeader);
+        if RecipientText = '' then
+            Error(
+                'Sales Order %1 does not have a recipient email address. Add an email to the Sell-to Contact, the Sales Order, or customer %2.',
+                SalesHeader."No.",
+                SalesHeader."Sell-to Customer No.");
+
+        AddRecipientsFromText(ToRecipients, RecipientText);
+    end;
+
+    local procedure BuildLocationRecipients(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text])
+    var
+        Location: Record Location;
+    begin
+        SalesHeader.TestField("Location Code");
+
+        if not Location.Get(SalesHeader."Location Code") then
+            Error('Location %1 could not be found for Sales Order %2.', SalesHeader."Location Code", SalesHeader."No.");
+
+        if Location."E-Mail" = '' then
+            Error('Location %1 does not have an email address for Sales Order %2.', SalesHeader."Location Code", SalesHeader."No.");
+
+        AddRecipientsFromText(ToRecipients, Location."E-Mail");
+    end;
+
+    local procedure GetCustomerRecipientText(SalesHeader: Record "Sales Header"): Text
     var
         Contact: Record Contact;
         Customer: Record Customer;
@@ -158,7 +201,30 @@ codeunit 70510 "GPI Sales Order Email"
             (StrPos(FieldCaptionText, 'isr code') > 0));
     end;
 
-    local procedure AddCcRecipient(var CCRecipients: List of [Text]; EmailAddress: Text; ToAddress: Text; SenderAddress: Text)
+    local procedure AddRecipientsFromText(var Recipients: List of [Text]; RecipientText: Text)
+    var
+        RemainingText: Text;
+        Recipient: Text;
+        SeparatorPosition: Integer;
+    begin
+        RemainingText := ConvertStr(RecipientText, ',', ';');
+
+        while RemainingText <> '' do begin
+            SeparatorPosition := StrPos(RemainingText, ';');
+            if SeparatorPosition = 0 then begin
+                Recipient := RemainingText;
+                RemainingText := '';
+            end else begin
+                Recipient := CopyStr(RemainingText, 1, SeparatorPosition - 1);
+                RemainingText := CopyStr(RemainingText, SeparatorPosition + 1);
+            end;
+
+            Recipient := DelChr(Recipient, '<>', ' ');
+            AddUniqueRecipient(Recipients, Recipient);
+        end;
+    end;
+
+    local procedure AddUniqueRecipient(var Recipients: List of [Text]; EmailAddress: Text)
     var
         ExistingRecipient: Text;
         NormalizedEmail: Text;
@@ -167,7 +233,23 @@ codeunit 70510 "GPI Sales Order Email"
         if NormalizedEmail = '' then
             exit;
 
-        if NormalizedEmail = LowerCase(ToAddress) then
+        foreach ExistingRecipient in Recipients do
+            if NormalizedEmail = LowerCase(ExistingRecipient) then
+                exit;
+
+        Recipients.Add(EmailAddress);
+    end;
+
+    local procedure AddCcRecipient(var CCRecipients: List of [Text]; EmailAddress: Text; ToRecipients: List of [Text]; SenderAddress: Text)
+    var
+        ExistingRecipient: Text;
+        NormalizedEmail: Text;
+    begin
+        NormalizedEmail := LowerCase(EmailAddress);
+        if NormalizedEmail = '' then
+            exit;
+
+        if IsRecipientInList(ToRecipients, NormalizedEmail) then
             exit;
 
         if NormalizedEmail = LowerCase(SenderAddress) then
@@ -178,5 +260,16 @@ codeunit 70510 "GPI Sales Order Email"
                 exit;
 
         CCRecipients.Add(EmailAddress);
+    end;
+
+    local procedure IsRecipientInList(Recipients: List of [Text]; NormalizedEmail: Text): Boolean
+    var
+        ExistingRecipient: Text;
+    begin
+        foreach ExistingRecipient in Recipients do
+            if NormalizedEmail = LowerCase(ExistingRecipient) then
+                exit(true);
+
+        exit(false);
     end;
 }

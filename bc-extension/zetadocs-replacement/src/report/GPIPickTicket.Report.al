@@ -62,30 +62,38 @@ report 70522 "GPI Pick Ticket"
                 if Location.Get("Location Code") then begin
                     WarehouseDisplayName := Location.Code + ' ' + Location.Name;
                     if Location."Name 2" <> '' then
-                        WarehouseDisplayName += ' ' + Location."Name 2";
+                        WarehouseDisplayName := WarehouseDisplayName + ' ' + Location."Name 2";
                 end;
+
                 Clear(ShippingAgentDescription);
                 if ShippingAgent.Get("Shipping Agent Code") then
                     ShippingAgentDescription := ShippingAgent.Name;
+
                 Clear(SalespersonName);
                 if Salesperson.Get("Salesperson Code") then
                     SalespersonName := Salesperson.Name;
+
                 PrimaryCode := FindISRCode(SalesHeader, false);
                 Clear(InsideSalespersonName);
                 if PrimaryCode <> '' then
                     if Salesperson.Get(PrimaryCode) then
                         InsideSalespersonName := Salesperson.Name;
+
                 BackupCode := FindISRCode(SalesHeader, true);
                 Clear(BackupInsideSalespersonName);
                 if BackupCode <> '' then
                     if Salesperson.Get(BackupCode) then
                         BackupInsideSalespersonName := Salesperson.Name;
+
                 BuildContactLine();
             end;
         }
     }
 
-    requestpage { SaveValues = false; }
+    requestpage
+    {
+        SaveValues = false;
+    }
 
     rendering
     {
@@ -122,6 +130,8 @@ report 70522 "GPI Pick Ticket"
             if IsISR and (IsBackup = FindBackup) then
                 exit(CopyStr(Format(Fld.Value), 1, 20));
         end;
+
+        exit('');
     end;
 
     local procedure BuildContactLine()

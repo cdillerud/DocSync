@@ -45,6 +45,27 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                     SalesOrderEmail.OpenPrepaymentNoticeDraft(SalesHeader);
                 end;
             }
+
+            action(GPIEmailPickTicket)
+            {
+                ApplicationArea = All;
+                Caption = 'Preview and Email Pick Ticket';
+                Image = Email;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+                ToolTip = 'Creates report 50013 as a PDF, sends it to the email addresses on the Sales Order location, and opens the native Business Central email for review. Nothing is sent automatically.';
+
+                trigger OnAction()
+                var
+                    SalesOrderEmail: Codeunit "GPI Sales Order Email";
+                    SalesHeader: Record "Sales Header";
+                begin
+                    CurrPage.SaveRecord();
+                    SalesHeader.Get(Rec."Document Type", Rec."No.");
+                    SalesOrderEmail.OpenPickTicketDraft(SalesHeader);
+                end;
+            }
         }
     }
 }

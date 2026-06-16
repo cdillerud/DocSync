@@ -2,7 +2,7 @@
   "id": "b6eb6cc8-d984-4ab0-bb15-d3569db41171",
   "name": "GPI Sales Document Email",
   "publisher": "Gamer Packaging",
-  "version": "0.1.0.2",
+  "version": "0.1.0.3",
   "brief": "Simple Business Central replacement for Zetadocs Sales Order Confirmation email drafting.",
   "description": "Creates a reviewable Business Central email draft with report 50020 attached from the Sales Order page. No automatic sending and no external service dependency.",
   "privacyStatement": "",

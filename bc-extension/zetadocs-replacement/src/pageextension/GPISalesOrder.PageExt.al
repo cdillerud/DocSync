@@ -66,6 +66,25 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                     SalesOrderEmail.OpenPickTicketDraft(SalesHeader);
                 end;
             }
+
+            action(GPIPreviewOwnedOrderConfirmation)
+            {
+                ApplicationArea = All;
+                Caption = 'Preview GPI-Owned Order Confirmation';
+                Image = Print;
+                Promoted = false;
+                ToolTip = 'Previews the independent Gamer-owned Sales Order Confirmation report 70520 for comparison with the existing report. It does not create or send an email.';
+
+                trigger OnAction()
+                var
+                    SalesHeader: Record "Sales Header";
+                begin
+                    CurrPage.SaveRecord();
+                    SalesHeader.Get(Rec."Document Type", Rec."No.");
+                    SalesHeader.SetRecFilter();
+                    Report.RunModal(Report::"GPI Sales Order Confirmation", true, false, SalesHeader);
+                end;
+            }
         }
     }
 }

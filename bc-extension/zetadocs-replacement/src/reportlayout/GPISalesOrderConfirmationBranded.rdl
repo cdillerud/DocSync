@@ -1,74 +1,178 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
-<AutoRefresh>0</AutoRefresh>
-<DataSources><DataSource Name="DataSource"><ConnectionProperties><DataProvider>SQL</DataProvider><ConnectString /></ConnectionProperties><rd:DataSourceID>0fbe49d3-0b13-45f7-8a2e-c0ff7e601520</rd:DataSourceID></DataSource></DataSources>
-<DataSets><DataSet Name="DataSet_Result"><Query><DataSourceName>DataSource</DataSourceName><CommandText /></Query><Fields>
-<Field Name="CompanyLogo"><DataField>CompanyLogo</DataField><rd:TypeName>System.Byte[]</rd:TypeName></Field>
-<Field Name="CompanyName"><DataField>CompanyName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CompanyAddress"><DataField>CompanyAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CompanyCity"><DataField>CompanyCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CompanyState"><DataField>CompanyState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CompanyPostCode"><DataField>CompanyPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="BillToName"><DataField>BillToName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="BillToAddress"><DataField>BillToAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="BillToCity"><DataField>BillToCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="BillToState"><DataField>BillToState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="BillToPostCode"><DataField>BillToPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipToName"><DataField>ShipToName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipToAddress"><DataField>ShipToAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipToCity"><DataField>ShipToCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipToState"><DataField>ShipToState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipToPostCode"><DataField>ShipToPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ConfirmTo"><DataField>ConfirmTo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="OrderNo"><DataField>OrderNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="OrderDate"><DataField>OrderDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
-<Field Name="CustomerNo"><DataField>CustomerNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CustomerPONo"><DataField>CustomerPONo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="ShipmentMethodDescription"><DataField>ShipmentMethodDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="PaymentTermsDescription"><DataField>PaymentTermsDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="SalespersonName"><DataField>SalespersonName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="InsideSalespersonName"><DataField>InsideSalespersonName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="CurrencyCode"><DataField>CurrencyCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="SubtotalAmount"><DataField>SubtotalAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-<Field Name="TaxAmount"><DataField>TaxAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-<Field Name="OrderTotalAmount"><DataField>OrderTotalAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-<Field Name="ItemNo"><DataField>ItemNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="LineDescription"><DataField>LineDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="LineLocationCode"><DataField>LineLocationCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="UnitOfMeasureCode"><DataField>UnitOfMeasureCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
-<Field Name="Quantity"><DataField>Quantity</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-<Field Name="UnitPrice"><DataField>UnitPrice</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-<Field Name="LineAmount"><DataField>LineAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
-</Fields></DataSet></DataSets>
-<ReportSections><ReportSection><Body><ReportItems>
-<Image Name="Logo"><Source>Database</Source><Value>=First(Fields!CompanyLogo.Value,"DataSet_Result")</Value><MIMEType>image/bmp</MIMEType><Sizing>FitProportional</Sizing><Top>0in</Top><Left>0in</Left><Height>0.72in</Height><Width>3.35in</Width><Style><Border><Style>None</Style></Border></Style></Image>
-<Textbox Name="Addr"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CompanyName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!CompanyAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!CompanyCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!CompanyPostCode.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><Top>0.76in</Top><Left>0.18in</Left><Height>0.5in</Height><Width>3.15in</Width><Style><Border><Style>None</Style></Border></Style></Textbox>
-<Textbox Name="Title"><Paragraphs><Paragraph><TextRuns><TextRun><Value>SALES ORDER</Value><Style><FontFamily>Arial</FontFamily><FontSize>13pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph><Paragraph><TextRuns><TextRun><Value>CONFIRMATION</Value><Style><FontFamily>Arial</FontFamily><FontSize>13pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>0.18in</Top><Left>5.05in</Left><Height>0.5in</Height><Width>2.75in</Width><Style><Border><Style>None</Style></Border></Style></Textbox>
-<Textbox Name="Bill"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>BILL TO</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>=First(Fields!BillToName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!BillToAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!BillToCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!BillToState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!BillToPostCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Top>1.35in</Top><Left>0in</Left><Height>0.95in</Height><Width>3.75in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop><BackgroundColor>#FAFAFA</BackgroundColor></Style></Textbox>
-<Textbox Name="Ship"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>SHIP TO</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>=First(Fields!ShipToName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!ShipToState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!ShipToPostCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Top>1.35in</Top><Left>4.05in</Left><Height>0.95in</Height><Width>3.75in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop><BackgroundColor>#FAFAFA</BackgroundColor></Style></Textbox>
-<Textbox Name="Details"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>="Confirm To: " &amp; First(Fields!ConfirmTo.Value,"DataSet_Result") &amp; "        Order Number: " &amp; First(Fields!OrderNo.Value,"DataSet_Result") &amp; "        Order Date: " &amp; Format(First(Fields!OrderDate.Value,"DataSet_Result"),"MM/dd/yy")</Value></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>="Salesperson: " &amp; First(Fields!SalespersonName.Value,"DataSet_Result") &amp; "        Inside Salesperson: " &amp; First(Fields!InsideSalespersonName.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>="Customer No.: " &amp; First(Fields!CustomerNo.Value,"DataSet_Result") &amp; "        Customer P.O.: " &amp; First(Fields!CustomerPONo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>="Shipping Method: " &amp; First(Fields!ShipmentMethodDescription.Value,"DataSet_Result") &amp; "        Terms: " &amp; First(Fields!PaymentTermsDescription.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Top>2.48in</Top><Left>0in</Left><Height>1in</Height><Width>7.8in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop></Style></Textbox>
-<Tablix Name="Lines"><TablixBody><TablixColumns><TablixColumn><Width>0.9in</Width></TablixColumn><TablixColumn><Width>3.15in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.75in</Width></TablixColumn><TablixColumn><Width>0.85in</Width></TablixColumn><TablixColumn><Width>1.05in</Width></TablixColumn></TablixColumns><TablixRows>
-<TablixRow><Height>0.28in</Height><TablixCells>
-<TablixCell><CellContents><Textbox Name="H1"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Item Code</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H2"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H3"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Whse</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H4"><Paragraphs><Paragraph><TextRuns><TextRun><Value>U/M</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H5"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Qty.</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Price</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="H7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Line Total</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
-</TablixCells></TablixRow>
-<TablixRow><Height>0.3in</Height><TablixCells>
-<TablixCell><CellContents><Textbox Name="D1"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ItemNo.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D2"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDescription.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D3"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineLocationCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D4"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UnitOfMeasureCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D5"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!Quantity.Value,"0.##")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!UnitPrice.Value,"N2")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-<TablixCell><CellContents><Textbox Name="D7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LineAmount.Value,"N2")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
-</TablixCells></TablixRow>
-</TablixRows></TablixBody><TablixColumnHierarchy><TablixMembers><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/></TablixMembers></TablixColumnHierarchy><TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="DetailsGroup"/></TablixMember></TablixMembers></TablixRowHierarchy><DataSetName>DataSet_Result</DataSetName><Top>3.65in</Top><Left>0in</Left><Height>0.58in</Height><Width>7.8in</Width><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize></Style></Tablix>
-<Textbox Name="Totals"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>="Subtotal:      " &amp; Format(First(Fields!SubtotalAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph><Paragraph><TextRuns><TextRun><Value>="Sales Tax:      " &amp; Format(First(Fields!TaxAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph><Paragraph><TextRuns><TextRun><Value>="Order Total (" &amp; First(Fields!CurrencyCode.Value,"DataSet_Result") &amp; "):      " &amp; Format(First(Fields!OrderTotalAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Top>6.25in</Top><Left>5.05in</Left><Height>0.82in</Height><Width>2.75in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingTop>6pt</PaddingTop><PaddingRight>7pt</PaddingRight></Style></Textbox>
-<Textbox Name="Footer"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>NOTE: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>Upon receipt and inspection of your order, please note any damage or discrepancy on the carrier's copy of the bill of lading.</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>This offer is subject to the Standard Terms and Conditions for Customer Sales of Gamer Packaging, Inc. available at www.gamerpackaging.com/terms-conditions-customer-sales/.</Value></TextRun></TextRuns></Paragraph></Paragraphs><Top>8.2in</Top><Left>0in</Left><Height>0.65in</Height><Width>7.8in</Width><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><Border><Style>None</Style></Border></Style></Textbox>
-</ReportItems><Height>9in</Height><Style /></Body><Width>7.8in</Width><Page><PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth><LeftMargin>0.35in</LeftMargin><RightMargin>0.35in</RightMargin><TopMargin>0.3in</TopMargin><BottomMargin>0.3in</BottomMargin><Style /></Page></ReportSection></ReportSections>
-<rd:ReportUnitType>Inch</rd:ReportUnitType><rd:ReportID>13c9ad98-1f1e-44bf-8eab-494b70c23210</rd:ReportID>
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties><DataProvider>SQL</DataProvider><ConnectString /></ConnectionProperties>
+      <rd:DataSourceID>0fbe49d3-0b13-45f7-8a2e-c0ff7e601520</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Query><DataSourceName>DataSource</DataSourceName><CommandText /></Query>
+      <Fields>
+        <Field Name="CompanyLogo"><DataField>CompanyLogo</DataField><rd:TypeName>System.Byte[]</rd:TypeName></Field>
+        <Field Name="CompanyName"><DataField>CompanyName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyAddress"><DataField>CompanyAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyCity"><DataField>CompanyCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyState"><DataField>CompanyState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyPostCode"><DataField>CompanyPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BillToName"><DataField>BillToName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BillToAddress"><DataField>BillToAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BillToCity"><DataField>BillToCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BillToState"><DataField>BillToState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="BillToPostCode"><DataField>BillToPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipToName"><DataField>ShipToName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipToAddress"><DataField>ShipToAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipToCity"><DataField>ShipToCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipToState"><DataField>ShipToState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipToPostCode"><DataField>ShipToPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ConfirmTo"><DataField>ConfirmTo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="OrderNo"><DataField>OrderNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="OrderDate"><DataField>OrderDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="CustomerNo"><DataField>CustomerNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerPONo"><DataField>CustomerPONo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ShipmentMethodDescription"><DataField>ShipmentMethodDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="PaymentTermsDescription"><DataField>PaymentTermsDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="SalespersonName"><DataField>SalespersonName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="InsideSalespersonName"><DataField>InsideSalespersonName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CurrencyCode"><DataField>CurrencyCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="SubtotalAmount"><DataField>SubtotalAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="TaxAmount"><DataField>TaxAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="OrderTotalAmount"><DataField>OrderTotalAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="ItemNo"><DataField>ItemNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDescription"><DataField>LineDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDescription2"><DataField>LineDescription2</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineLocationCode"><DataField>LineLocationCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="UnitOfMeasureCode"><DataField>UnitOfMeasureCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="Quantity"><DataField>Quantity</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="UnitPrice"><DataField>UnitPrice</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LineAmount"><DataField>LineAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Image Name="Logo">
+            <Source>Database</Source>
+            <Value>=First(Fields!CompanyLogo.Value,"DataSet_Result")</Value>
+            <MIMEType>image/jpeg</MIMEType>
+            <Sizing>FitProportional</Sizing>
+            <Top>0in</Top><Left>0in</Left><Height>0.78in</Height><Width>3.5in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Image>
+          <Textbox Name="CompanyAddressBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CompanyName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!CompanyAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!CompanyCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!CompanyPostCode.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>0.84in</Top><Left>0.12in</Left><Height>0.48in</Height><Width>3.3in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="TitleBox">
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>SALES ORDER</Value><Style><FontFamily>Arial</FontFamily><FontSize>12pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>CONFIRMATION</Value><Style><FontFamily>Arial</FontFamily><FontSize>12pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
+            </Paragraphs>
+            <Top>0.2in</Top><Left>5.25in</Left><Height>0.48in</Height><Width>2.55in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="BillToBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>BILL TO</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>=First(Fields!BillToName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!BillToAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!BillToCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!BillToState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!BillToPostCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>1.38in</Top><Left>0in</Left><Height>0.92in</Height><Width>3.75in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop><BackgroundColor>#FAFAFA</BackgroundColor></Style>
+          </Textbox>
+          <Textbox Name="ShipToBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>SHIP TO</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>=First(Fields!ShipToName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!ShipToState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!ShipToPostCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>1.38in</Top><Left>4.05in</Left><Height>0.92in</Height><Width>3.75in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop><BackgroundColor>#FAFAFA</BackgroundColor></Style>
+          </Textbox>
+          <Textbox Name="DetailsLeft">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>Confirm To: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!ConfirmTo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Salesperson: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!SalespersonName.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Customer No.: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CustomerNo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Shipping Method: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!ShipmentMethodDescription.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>2.48in</Top><Left>0in</Left><Height>1.02in</Height><Width>3.55in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingLeft>9pt</PaddingLeft><PaddingTop>7pt</PaddingTop></Style>
+          </Textbox>
+          <Textbox Name="DetailsRight">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>Order Number: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!OrderNo.Value,"DataSet_Result")</Value></TextRun><TextRun><Value>    Order Date: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=Format(First(Fields!OrderDate.Value,"DataSet_Result"),"MM/dd/yy")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Inside Salesperson: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!InsideSalespersonName.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Customer P.O.: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CustomerPONo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Terms: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!PaymentTermsDescription.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>2.48in</Top><Left>3.55in</Left><Height>1.02in</Height><Width>4.25in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingLeft>9pt</PaddingLeft><PaddingTop>7pt</PaddingTop></Style>
+          </Textbox>
+          <Tablix Name="LinesTable">
+            <TablixBody>
+              <TablixColumns><TablixColumn><Width>0.9in</Width></TablixColumn><TablixColumn><Width>3.15in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.75in</Width></TablixColumn><TablixColumn><Width>0.85in</Width></TablixColumn><TablixColumn><Width>1.05in</Width></TablixColumn></TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.28in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="H1"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Item Code</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H2"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H3"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Whse</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H4"><Paragraphs><Paragraph><TextRuns><TextRun><Value>U/M</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H5"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Qty.</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Price</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Line Total</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.31in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="D1"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ItemNo.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D2"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDescription.Value &amp; IIF(Fields!LineDescription2.Value="","",vbCrLf &amp; Fields!LineDescription2.Value)</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D3"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineLocationCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D4"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UnitOfMeasureCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D5"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!Quantity.Value,"0.##")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!UnitPrice.Value,"N2")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="D7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LineAmount.Value,"N2")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="DetailsGroup"/></TablixMember></TablixMembers></TablixRowHierarchy>
+            <DataSetName>DataSet_Result</DataSetName>
+            <Top>3.68in</Top><Left>0in</Left><Height>0.59in</Height><Width>7.8in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize></Style>
+          </Tablix>
+          <Textbox Name="TotalsBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>="Subtotal:      " &amp; Format(First(Fields!SubtotalAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>="Sales Tax:      " &amp; Format(First(Fields!TaxAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>="Order Total (" &amp; First(Fields!CurrencyCode.Value,"DataSet_Result") &amp; "):      " &amp; Format(First(Fields!OrderTotalAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
+            </Paragraphs>
+            <Top>5.35in</Top><Left>5.05in</Left><Height>0.82in</Height><Width>2.75in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingTop>6pt</PaddingTop><PaddingRight>7pt</PaddingRight></Style>
+          </Textbox>
+          <Textbox Name="FooterBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>NOTE: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>Upon receipt and inspection of your order, please note any damage or discrepancy on the carrier's copy of the bill of lading.</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>This offer is subject to the Standard Terms and Conditions for Customer Sales of Gamer Packaging, Inc. available at www.gamerpackaging.com/terms-conditions-customer-sales/.</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>7.35in</Top><Left>0in</Left><Height>0.65in</Height><Width>7.8in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><Border><Style>None</Style></Border></Style>
+          </Textbox>
+        </ReportItems>
+        <Height>8.15in</Height><Style />
+      </Body>
+      <Width>7.8in</Width>
+      <Page><PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth><LeftMargin>0.35in</LeftMargin><RightMargin>0.35in</RightMargin><TopMargin>0.3in</TopMargin><BottomMargin>0.3in</BottomMargin><Style /></Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>13c9ad98-1f1e-44bf-8eab-494b70c23210</rd:ReportID>
 </Report>

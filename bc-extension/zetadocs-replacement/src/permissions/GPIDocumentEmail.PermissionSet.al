@@ -4,5 +4,6 @@ permissionset 70510 "GPI DOC EMAIL"
     Caption = 'GPI Document Email';
 
     Permissions =
-        codeunit "GPI Sales Order Email" = X;
+        codeunit "GPI Sales Order Email" = X,
+        report "GPI Sales Order Confirmation" = X;
 }

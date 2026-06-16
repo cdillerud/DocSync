@@ -52,6 +52,7 @@ codeunit 70510 "GPI Sales Order Email"
         SalesHeader.SetRecFilter();
         SalesHeaderRef.GetTable(SalesHeader);
 
+        Commit();
         RequestPageParameters := Report.RunRequestPage(50020);
         if RequestPageParameters = '' then
             exit;

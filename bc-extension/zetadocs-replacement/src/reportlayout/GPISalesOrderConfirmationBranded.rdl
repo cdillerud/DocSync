@@ -33,7 +33,7 @@
         <Field Name="ConfirmTo"><DataField>ConfirmTo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="OrderNo"><DataField>OrderNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="OrderDate"><DataField>OrderDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
-        <Field Name="RequestedDeliveryDate"><DataField>RequestedDeliveryDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="RequestedReceiveByDate"><DataField>RequestedReceiveByDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
         <Field Name="CustomerNo"><DataField>CustomerNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="CustomerPONo"><DataField>CustomerPONo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
         <Field Name="ShipmentMethodDescription"><DataField>ShipmentMethodDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
@@ -120,7 +120,7 @@
             <CanGrow>true</CanGrow>
             <Paragraphs>
               <Paragraph><TextRuns><TextRun><Value>Order Number: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!OrderNo.Value,"DataSet_Result")</Value></TextRun><TextRun><Value>    Order Date: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=Format(First(Fields!OrderDate.Value,"DataSet_Result"),"MM/dd/yy")</Value></TextRun></TextRuns></Paragraph>
-              <Paragraph><TextRuns><TextRun><Value>Requested Receive by Date: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=IIF(Year(First(Fields!RequestedDeliveryDate.Value,"DataSet_Result"))=1,"",Format(First(Fields!RequestedDeliveryDate.Value,"DataSet_Result"),"MM/dd/yy"))</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Requested Receive by Date: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=IIF(Year(First(Fields!RequestedReceiveByDate.Value,"DataSet_Result"))=1,"",Format(First(Fields!RequestedReceiveByDate.Value,"DataSet_Result"),"MM/dd/yy"))</Value></TextRun></TextRuns></Paragraph>
               <Paragraph><TextRuns><TextRun><Value>Inside Salesperson: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!InsideSalespersonName.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
               <Paragraph><TextRuns><TextRun><Value>Customer P.O.: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CustomerPONo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
               <Paragraph><TextRuns><TextRun><Value>Terms: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!PaymentTermsDescription.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
@@ -130,7 +130,7 @@
           </Textbox>
           <Tablix Name="LinesTable">
             <TablixBody>
-              <TablixColumns><TablixColumn><Width>0.9in</Width></TablixColumn><TablixColumn><Width>3.15in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.75in</Width></TablixColumn><TablixColumn><Width>0.85in</Width></TablixColumn><TablixColumn><Width>1.05in</Width></TablixColumn></TablixColumns>
+              <TablixColumns><TablixColumn><Width>0.9in</Width></TablixColumn><TablixColumn><Width>2.95in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.55in</Width></TablixColumn><TablixColumn><Width>0.75in</Width></TablixColumn><TablixColumn><Width>1.05in</Width></TablixColumn><TablixColumn><Width>1.05in</Width></TablixColumn></TablixColumns>
               <TablixRows>
                 <TablixRow><Height>0.32in</Height><TablixCells>
                   <TablixCell><CellContents><Textbox Name="H1"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Item Code</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
@@ -138,7 +138,7 @@
                   <TablixCell><CellContents><Textbox Name="H3"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Whse</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="H4"><Paragraphs><Paragraph><TextRuns><TextRun><Value>U/M</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="H5"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Amt. Ordered</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
-                  <TablixCell><CellContents><Textbox Name="H6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Price (USD$)</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="H6"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Price (USD$)</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color><FontSize>7pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
                   <TablixCell><CellContents><Textbox Name="H7"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Line Total</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
                 </TablixCells></TablixRow>
                 <TablixRow><Height>0.31in</Height><TablixCells>
@@ -165,7 +165,7 @@
               <Paragraph><TextRuns><TextRun><Value>="Sales Tax:      " &amp; Format(First(Fields!TaxAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
               <Paragraph><TextRuns><TextRun><Value>="Order Total (" &amp; First(Fields!CurrencyCode.Value,"DataSet_Result") &amp; "):      " &amp; Format(First(Fields!OrderTotalAmount.Value,"DataSet_Result"),"N2")</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
             </Paragraphs>
-            <Top>5.05in</Top><Left>5.05in</Left><Height>0.82in</Height><Width>2.75in</Width>
+            <Top>4.72in</Top><Left>5.05in</Left><Height>0.82in</Height><Width>2.75in</Width>
             <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingTop>6pt</PaddingTop><PaddingRight>7pt</PaddingRight></Style>
           </Textbox>
           <Textbox Name="ContactLineBox">

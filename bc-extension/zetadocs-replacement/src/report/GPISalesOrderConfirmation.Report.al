@@ -13,6 +13,7 @@ report 70520 "GPI Sales Order Confirmation"
             DataItemTableView = sorting("Document Type", "No.") where("Document Type" = const(Order));
             RequestFilterFields = "No.";
 
+            column(CompanyLogo; CompanyInfo.Picture) { }
             column(CompanyName; CompanyInfo.Name) { }
             column(CompanyAddress; CompanyInfo.Address) { }
             column(CompanyAddress2; CompanyInfo."Address 2") { }
@@ -129,6 +130,7 @@ report 70520 "GPI Sales Order Confirmation"
     trigger OnPreReport()
     begin
         CompanyInfo.Get();
+        CompanyInfo.CalcFields(Picture);
         GeneralLedgerSetup.Get();
     end;
 

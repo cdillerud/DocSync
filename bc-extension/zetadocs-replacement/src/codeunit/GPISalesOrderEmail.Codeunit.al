@@ -1,4 +1,4 @@
-codeunit 70151000 "GPI Sales Order Email"
+codeunit 70510 "GPI Sales Order Email"
 {
     procedure OpenSalesOrderConfirmationDraft(var SalesHeader: Record "Sales Header")
     var

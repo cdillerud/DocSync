@@ -1,25 +1,56 @@
 # GPI Sales Document Email
 
-A small Business Central-only replacement for the first Zetadocs workflow.
+A small Business Central-only replacement for selected Zetadocs document-email workflows.
 
-## Phase 1 scope
+## Supported document actions
 
-Adds **Preview and Email Order Confirmation** to the standard Sales Order page.
+The extension adds these actions to the standard Sales Order page:
 
-The action:
+- **Preview and Email Order Confirmation**
+  - Report 50020
+  - Customer/contact recipient logic
+  - Attachment: `Sales-Order <order no>.pdf`
+
+- **Preview and Email Prepayment Notice**
+  - Report 50003
+  - Customer/contact recipient logic
+  - Attachment: `Pre-Payment - Order <order no>.pdf`
+
+- **Preview and Email Pick Ticket**
+  - Report 50013
+  - Recipient comes from the Sales Order Location Card email field
+  - Supports multiple location recipients separated by semicolons or commas
+  - Attachment: `Pick-Ticket - Order <order no>.pdf`
+
+## Shared behavior
+
+Each action:
 
 1. Validates that the record is a Sales Order.
-2. Resolves the recipient in this order:
-   - Sell-to Contact email
-   - Sales Order Sell-to Email
-   - Customer email
+2. Resolves the appropriate To recipient or recipients.
 3. Adds the Salesperson email to CC.
 4. Attempts to locate the existing custom Inside Salesperson or ISR field dynamically and adds that salesperson's email to CC.
-5. Excludes duplicates, the To recipient, and the initiating user from CC.
-6. Generates report **50020** as PDF.
-7. Names the file `Sales-Order <order no>.pdf`.
-8. Opens the native Business Central Email Editor modally.
-9. Requires the user to review and send the message manually.
+5. Excludes duplicates, To recipients, and the initiating user from CC.
+6. Generates the selected report as a PDF.
+7. Opens the native Business Central Email Editor modally.
+8. Requires the user to review and send the message manually.
+
+## Customer recipient order
+
+For Order Confirmations and Prepayment Notices, the recipient is resolved in this order:
+
+1. Sell-to Contact email
+2. Sales Order Sell-to Email
+3. Customer email
+
+## Pick Ticket routing
+
+For Pick Tickets, the Sales Order must have a Location Code. The extension reads the email field from that Location Card and adds each semicolon- or comma-separated address as a separate To recipient.
+
+Example for Location 012:
+
+- `KLOGILGamerPkg@kochlogistics.com`
+- `egonzalez@kochlogistics.com`
 
 ## Explicitly not included
 
@@ -33,21 +64,23 @@ The action:
 ## Extension details
 
 - Name: `GPI Sales Document Email`
-- Version: `0.1.0.0`
-- Object range: `70151000..70151049`
+- Version: `0.3.0.0`
+- Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
-- Target: Business Central 28.x, runtime 17.0
+- Target: Business Central 27.4 or later, runtime 16.0
 
 ## Publish
 
-Open this folder as the VS Code workspace, download symbols for the target BC sandbox, package, and publish. Assign `GPI DOC EMAIL` to pilot users.
+Open this folder as the VS Code workspace, use the existing Business Central symbol cache, package, and upload the generated `.app` through Extension Management. Assign `GPI DOC EMAIL` to pilot users.
 
 ## Validation checklist
 
-- Report 50020 exists in the target environment.
-- The Sales Order recipient resolves correctly.
+- Report 50020 generates the correct Sales Order Confirmation.
+- Report 50003 generates the correct Prepayment Notice.
+- Report 50013 generates the correct Pick Ticket.
+- Customer recipients resolve correctly for customer-facing documents.
+- Pick Ticket recipients come from the Sales Order Location Card.
 - OSR email is populated from Salesperson/Purchaser.
 - ISR email is found from the existing custom Sales Header field.
-- PDF opens and matches the current Zetadocs output.
 - User can edit To, CC, subject, body, sender account, and attachment before sending.
 - Canceling the editor sends nothing.

@@ -12,6 +12,7 @@ report 70522 "GPI Pick Ticket"
         {
             DataItemTableView = sorting("Document Type", "No.") where("Document Type" = const(Order));
             RequestFilterFields = "No.";
+            column(CompanyLogo; CompanyInfo.Picture) { }
             column(CompanyName; CompanyInfo.Name) { }
             column(CompanyAddress; CompanyInfo.Address) { }
             column(CompanyAddress2; CompanyInfo."Address 2") { }
@@ -100,6 +101,7 @@ report 70522 "GPI Pick Ticket"
     trigger OnPreReport()
     begin
         CompanyInfo.Get();
+        CompanyInfo.CalcFields(Picture);
     end;
 
     local procedure FindISRCode(SalesHeader: Record "Sales Header"; FindBackup: Boolean): Code[20]

@@ -1,4 +1,4 @@
-permissionset 70151000 "GPI DOC EMAIL"
+permissionset 70510 "GPI DOC EMAIL"
 {
     Assignable = true;
     Caption = 'GPI Document Email';

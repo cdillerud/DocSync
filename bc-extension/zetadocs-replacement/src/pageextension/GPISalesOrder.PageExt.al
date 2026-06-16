@@ -1,4 +1,4 @@
-pageextension 70151000 "GPI Sales Order Email Ext" extends "Sales Order"
+pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 {
     actions
     {

@@ -53,6 +53,8 @@ report 70520 "GPI Sales Order Confirmation"
             column(PaymentTermsDescription; PaymentTermsDescription) { }
             column(SalespersonName; SalespersonName) { }
             column(InsideSalespersonName; InsideSalespersonName) { }
+            column(BackupInsideSalespersonName; BackupInsideSalespersonName) { }
+            column(ContactLine; ContactLine) { }
             column(CurrencyCode; CurrencyCode) { }
             column(SubtotalAmount; Amount) { }
             column(TaxAmount; TaxAmount) { }
@@ -80,6 +82,7 @@ report 70520 "GPI Sales Order Confirmation"
                 ShipmentMethod: Record "Shipment Method";
                 Salesperson: Record "Salesperson/Purchaser";
                 InsideSalespersonCode: Code[20];
+                BackupInsideSalespersonCode: Code[20];
             begin
                 CalcFields(Amount, "Amount Including VAT");
 
@@ -97,8 +100,15 @@ report 70520 "GPI Sales Order Confirmation"
 
                 InsideSalespersonCode := GetInsideSalespersonCode(SalesHeader);
                 Clear(InsideSalespersonName);
-                if Salesperson.Get(InsideSalespersonCode) then
+                if (InsideSalespersonCode <> '') and Salesperson.Get(InsideSalespersonCode) then
                     InsideSalespersonName := Salesperson.Name;
+
+                BackupInsideSalespersonCode := GetBackupInsideSalespersonCode(SalesHeader);
+                Clear(BackupInsideSalespersonName);
+                if (BackupInsideSalespersonCode <> '') and Salesperson.Get(BackupInsideSalespersonCode) then
+                    BackupInsideSalespersonName := Salesperson.Name;
+
+                BuildContactLine();
 
                 FOBText := GetFieldValue(SalesHeader, 'fob');
 
@@ -134,6 +144,28 @@ report 70520 "GPI Sales Order Confirmation"
         GeneralLedgerSetup.Get();
     end;
 
+    local procedure BuildContactLine()
+    begin
+        Clear(ContactLine);
+
+        if (InsideSalespersonName <> '') and (BackupInsideSalespersonName <> '') then
+            ContactLine := StrSubstNo(
+                'Please contact %1 or %2 at %3 with any questions.',
+                InsideSalespersonName,
+                BackupInsideSalespersonName,
+                CompanyInfo."Phone No.")
+        else
+            if InsideSalespersonName <> '' then
+                ContactLine := StrSubstNo(
+                    'Please contact %1 at %2 with any questions.',
+                    InsideSalespersonName,
+                    CompanyInfo."Phone No.")
+            else
+                ContactLine := StrSubstNo(
+                    'Please contact Gamer Packaging at %1 with any questions.',
+                    CompanyInfo."Phone No.");
+    end;
+
     local procedure GetInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
     var
         SalesHeaderRef: RecordRef;
@@ -150,7 +182,38 @@ report 70520 "GPI Sales Order Confirmation"
             CandidateName := LowerCase(CandidateField.Name);
             CandidateCaption := LowerCase(CandidateField.Caption);
 
-            if IsInsideSalespersonField(CandidateName, CandidateCaption) then begin
+            if IsInsideSalespersonField(CandidateName, CandidateCaption) and
+               (StrPos(CandidateName, 'backup') = 0) and
+               (StrPos(CandidateCaption, 'backup') = 0)
+            then begin
+                CandidateValue := Format(CandidateField.Value);
+                exit(CopyStr(CandidateValue, 1, 20));
+            end;
+        end;
+
+        exit('');
+    end;
+
+    local procedure GetBackupInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateName: Text;
+        CandidateCaption: Text;
+        CandidateValue: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            CandidateName := LowerCase(CandidateField.Name);
+            CandidateCaption := LowerCase(CandidateField.Caption);
+
+            if IsInsideSalespersonField(CandidateName, CandidateCaption) and
+               ((StrPos(CandidateName, 'backup') > 0) or
+                (StrPos(CandidateCaption, 'backup') > 0))
+            then begin
                 CandidateValue := Format(CandidateField.Value);
                 exit(CopyStr(CandidateValue, 1, 20));
             end;
@@ -166,10 +229,8 @@ report 70520 "GPI Sales Order Confirmation"
             (StrPos(FieldCaptionText, 'inside salesperson') > 0) or
             (StrPos(FieldNameText, 'inside sales') > 0) or
             (StrPos(FieldCaptionText, 'inside sales') > 0) or
-            (FieldNameText = 'isr') or
-            (FieldCaptionText = 'isr') or
-            (StrPos(FieldNameText, 'isr code') > 0) or
-            (StrPos(FieldCaptionText, 'isr code') > 0));
+            (StrPos(FieldNameText, 'isr') > 0) or
+            (StrPos(FieldCaptionText, 'isr') > 0));
     end;
 
     local procedure GetFieldValue(SalesHeader: Record "Sales Header"; SearchText: Text): Text
@@ -201,6 +262,8 @@ report 70520 "GPI Sales Order Confirmation"
         ShipmentMethodDescription: Text[100];
         SalespersonName: Text[100];
         InsideSalespersonName: Text[100];
+        BackupInsideSalespersonName: Text[100];
+        ContactLine: Text[250];
         FOBText: Text[100];
         CurrencyCode: Code[10];
         TaxAmount: Decimal;

@@ -2,6 +2,36 @@ codeunit 70510 "GPI Sales Order Email"
 {
     procedure OpenSalesOrderConfirmationDraft(var SalesHeader: Record "Sales Header")
     var
+        Subject: Text;
+        Body: Text;
+        AttachmentName: Text[250];
+    begin
+        Subject := StrSubstNo('Sales Order Confirmation %1', SalesHeader."No.");
+        Body := StrSubstNo(
+            '<p>Hello,</p><p>Please find attached Sales Order Confirmation %1.</p><p>Thank you,</p>',
+            SalesHeader."No.");
+        AttachmentName := CopyStr(StrSubstNo('Sales-Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
+
+        OpenSalesDocumentDraft(SalesHeader, 50020, Subject, Body, AttachmentName);
+    end;
+
+    procedure OpenPrepaymentNoticeDraft(var SalesHeader: Record "Sales Header")
+    var
+        Subject: Text;
+        Body: Text;
+        AttachmentName: Text[250];
+    begin
+        Subject := StrSubstNo('Prepayment Notice - Order %1', SalesHeader."No.");
+        Body := StrSubstNo(
+            '<p>Hello,</p><p>Please find attached the prepayment notice for Sales Order %1.</p><p>Thank you,</p>',
+            SalesHeader."No.");
+        AttachmentName := CopyStr(StrSubstNo('Pre-Payment - Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
+
+        OpenSalesDocumentDraft(SalesHeader, 50003, Subject, Body, AttachmentName);
+    end;
+
+    local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250])
+    var
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -16,9 +46,6 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonCode: Code[20];
         InsideSalespersonEmail: Text;
         CurrentUserEmail: Text;
-        Subject: Text;
-        Body: Text;
-        AttachmentName: Text[250];
         RequestPageParameters: Text;
     begin
         SalesHeader.TestField("Document Type", SalesHeader."Document Type"::Order);
@@ -42,26 +69,20 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonEmail := GetSalespersonEmail(InsideSalespersonCode);
         AddCcRecipient(CCRecipients, InsideSalespersonEmail, RecipientEmail, CurrentUserEmail);
 
-        Subject := StrSubstNo('Sales Order Confirmation %1', SalesHeader."No.");
-        Body := StrSubstNo(
-            '<p>Hello,</p><p>Please find attached Sales Order Confirmation %1.</p><p>Thank you,</p>',
-            SalesHeader."No.");
-
         EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
 
         SalesHeader.SetRecFilter();
         SalesHeaderRef.GetTable(SalesHeader);
 
         Commit();
-        RequestPageParameters := Report.RunRequestPage(50020);
+        RequestPageParameters := Report.RunRequestPage(ReportId);
         if RequestPageParameters = '' then
             exit;
 
         TempBlob.CreateOutStream(AttachmentOutStream);
-        Report.SaveAs(50020, RequestPageParameters, ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef);
+        Report.SaveAs(ReportId, RequestPageParameters, ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef);
 
         TempBlob.CreateInStream(AttachmentInStream);
-        AttachmentName := CopyStr(StrSubstNo('Sales-Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
         EmailMessage.AddAttachment(AttachmentName, 'application/pdf', AttachmentInStream);
 
         Email.OpenInEditorModally(EmailMessage);

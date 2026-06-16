@@ -44,7 +44,7 @@ report 70520 "GPI Sales Order Confirmation"
             column(ConfirmTo; "Sell-to Contact") { }
             column(OrderNo; "No.") { }
             column(OrderDate; "Order Date") { }
-            column(RequestedDeliveryDate; "Requested Delivery Date") { }
+            column(RequestedReceiveByDate; RequestedReceiveByDate) { }
             column(CustomerNo; "Sell-to Customer No.") { }
             column(CustomerPONo; "External Document No.") { }
             column(LocationCode; "Location Code") { }
@@ -108,6 +108,7 @@ report 70520 "GPI Sales Order Confirmation"
                 if (BackupInsideSalespersonCode <> '') and Salesperson.Get(BackupInsideSalespersonCode) then
                     BackupInsideSalespersonName := Salesperson.Name;
 
+                RequestedReceiveByDate := GetRequestedReceiveByDate(SalesHeader);
                 BuildContactLine();
 
                 FOBText := GetFieldValue(SalesHeader, 'fob');
@@ -142,6 +143,44 @@ report 70520 "GPI Sales Order Confirmation"
         CompanyInfo.Get();
         CompanyInfo.CalcFields(Picture);
         GeneralLedgerSetup.Get();
+    end;
+
+    local procedure GetRequestedReceiveByDate(SalesHeader: Record "Sales Header"): Date
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateName: Text;
+        CandidateCaption: Text;
+        CandidateText: Text;
+        ResolvedDate: Date;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            CandidateName := LowerCase(CandidateField.Name);
+            CandidateCaption := LowerCase(CandidateField.Caption);
+
+            if IsRequestedReceiveDateField(CandidateName, CandidateCaption) then begin
+                CandidateText := Format(CandidateField.Value);
+                if Evaluate(ResolvedDate, CandidateText) then
+                    exit(ResolvedDate);
+            end;
+        end;
+
+        exit(SalesHeader."Requested Delivery Date");
+    end;
+
+    local procedure IsRequestedReceiveDateField(FieldNameText: Text; FieldCaptionText: Text): Boolean
+    begin
+        exit(
+            (StrPos(FieldNameText, 'requested receive by date') > 0) or
+            (StrPos(FieldCaptionText, 'requested receive by date') > 0) or
+            (StrPos(FieldNameText, 'requested receive date') > 0) or
+            (StrPos(FieldCaptionText, 'requested receive date') > 0) or
+            (StrPos(FieldNameText, 'receive by date') > 0) or
+            (StrPos(FieldCaptionText, 'receive by date') > 0));
     end;
 
     local procedure BuildContactLine()
@@ -267,4 +306,5 @@ report 70520 "GPI Sales Order Confirmation"
         FOBText: Text[100];
         CurrencyCode: Code[10];
         TaxAmount: Decimal;
+        RequestedReceiveByDate: Date;
 }

@@ -123,7 +123,7 @@ report 70520 "GPI Sales Order Confirmation"
             Type = RDLC;
             Caption = 'GPI Sales Order Confirmation';
             Summary = 'Gamer-owned Sales Order Confirmation layout.';
-            LayoutFile = 'src/reportlayout/GPISalesOrderConfirmation.rdl';
+            LayoutFile = 'src/reportlayout/GPISalesOrderConfirmationBranded.rdl';
         }
     }
 

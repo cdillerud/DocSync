@@ -19,6 +19,7 @@ codeunit 70510 "GPI Sales Order Email"
         Subject: Text;
         Body: Text;
         AttachmentName: Text[250];
+        RequestPageParameters: Text;
     begin
         SalesHeader.TestField("Document Type", SalesHeader."Document Type"::Order);
         SalesHeader.TestField("No.");
@@ -48,10 +49,15 @@ codeunit 70510 "GPI Sales Order Email"
 
         EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
 
-        TempBlob.CreateOutStream(AttachmentOutStream);
+        SalesHeader.SetRecFilter();
         SalesHeaderRef.GetTable(SalesHeader);
-        if not Report.SaveAs(50020, '', ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef) then
-            Error('Business Central could not generate report 50020 for Sales Order %1.', SalesHeader."No.");
+
+        RequestPageParameters := Report.RunRequestPage(50020);
+        if RequestPageParameters = '' then
+            exit;
+
+        TempBlob.CreateOutStream(AttachmentOutStream);
+        Report.SaveAs(50020, RequestPageParameters, ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef);
 
         TempBlob.CreateInStream(AttachmentInStream);
         AttachmentName := CopyStr(StrSubstNo('Sales-Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));

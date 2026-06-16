@@ -78,11 +78,6 @@
             <Top>1.05in</Top><Left>0.1in</Left><Height>0.25in</Height><Width>4.4in</Width>
             <Style><Border><Style>None</Style></Border></Style>
           </Textbox>
-          <Textbox Name="PageCount">
-            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
-            <Top>0in</Top><Left>6.65in</Left><Height>0.2in</Height><Width>1.15in</Width>
-            <Style><Border><Style>None</Style></Border></Style>
-          </Textbox>
           <Textbox Name="TitleBox">
             <Paragraphs>
               <Paragraph><TextRuns><TextRun><Value>SALES ORDER</Value><Style><FontFamily>Arial</FontFamily><FontSize>12pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph>
@@ -194,7 +189,22 @@
         <Height>8.15in</Height><Style />
       </Body>
       <Width>7.8in</Width>
-      <Page><PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth><LeftMargin>0.35in</LeftMargin><RightMargin>0.35in</RightMargin><TopMargin>0.3in</TopMargin><BottomMargin>0.3in</BottomMargin><Style /></Page>
+      <Page>
+        <PageHeader>
+          <Height>0.2in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="PageCountHeader">
+              <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+              <Top>0in</Top><Left>6.65in</Left><Height>0.2in</Height><Width>1.15in</Width>
+              <Style><Border><Style>None</Style></Border></Style>
+            </Textbox>
+          </ReportItems>
+          <Style />
+        </PageHeader>
+        <PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth><LeftMargin>0.35in</LeftMargin><RightMargin>0.35in</RightMargin><TopMargin>0.3in</TopMargin><BottomMargin>0.3in</BottomMargin><Style />
+      </Page>
     </ReportSection>
   </ReportSections>
   <rd:ReportUnitType>Inch</rd:ReportUnitType>

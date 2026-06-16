@@ -24,15 +24,22 @@ report 70521 "GPI Prepayment Notice"
             column(CompanyHomePage; CompanyInfo."Home Page") { }
 
             column(BillToName; "Bill-to Name") { }
+            column(BillToName2; "Bill-to Name 2") { }
             column(BillToAddress; "Bill-to Address") { }
+            column(BillToAddress2; "Bill-to Address 2") { }
             column(BillToCity; "Bill-to City") { }
             column(BillToState; "Bill-to County") { }
             column(BillToPostCode; "Bill-to Post Code") { }
+            column(BillToCountry; "Bill-to Country/Region Code") { }
+
             column(ShipToName; "Ship-to Name") { }
+            column(ShipToName2; "Ship-to Name 2") { }
             column(ShipToAddress; "Ship-to Address") { }
+            column(ShipToAddress2; "Ship-to Address 2") { }
             column(ShipToCity; "Ship-to City") { }
             column(ShipToState; "Ship-to County") { }
             column(ShipToPostCode; "Ship-to Post Code") { }
+            column(ShipToCountry; "Ship-to Country/Region Code") { }
 
             column(ConfirmTo; "Sell-to Contact") { }
             column(OrderNo; "No.") { }
@@ -59,6 +66,7 @@ report 70521 "GPI Prepayment Notice"
                 DataItemLink = "Document Type" = field("Document Type"), "Document No." = field("No.");
                 DataItemTableView = sorting("Document Type", "Document No.", "Line No.");
 
+                column(LineNo; "Line No.") { }
                 column(ItemNo; "No.") { }
                 column(LineDescription; Description) { }
                 column(LineDescription2; "Description 2") { }
@@ -93,15 +101,13 @@ report 70521 "GPI Prepayment Notice"
 
                 InsideSalespersonCode := GetInsideSalespersonCode(SalesHeader);
                 Clear(InsideSalespersonName);
-                if InsideSalespersonCode <> '' then
-                    if Salesperson.Get(InsideSalespersonCode) then
-                        InsideSalespersonName := Salesperson.Name;
+                if (InsideSalespersonCode <> '') and Salesperson.Get(InsideSalespersonCode) then
+                    InsideSalespersonName := Salesperson.Name;
 
                 BackupInsideSalespersonCode := GetBackupInsideSalespersonCode(SalesHeader);
                 Clear(BackupInsideSalespersonName);
-                if BackupInsideSalespersonCode <> '' then
-                    if Salesperson.Get(BackupInsideSalespersonCode) then
-                        BackupInsideSalespersonName := Salesperson.Name;
+                if (BackupInsideSalespersonCode <> '') and Salesperson.Get(BackupInsideSalespersonCode) then
+                    BackupInsideSalespersonName := Salesperson.Name;
 
                 RequestedReceiveByDate := GetRequestedReceiveByDate(SalesHeader);
                 BuildContactLine();
@@ -113,6 +119,9 @@ report 70521 "GPI Prepayment Notice"
 
                 TaxAmount := "Amount Including VAT" - Amount;
                 PrepaymentPercent := "Prepayment %";
+                if (PrepaymentPercent = 0) and IsAdvancePaymentTerms("Payment Terms Code", PaymentTermsDescription) then
+                    PrepaymentPercent := 100;
+
                 PrepaymentAmountDue := Round("Amount Including VAT" * PrepaymentPercent / 100, 0.01);
             end;
         }
@@ -259,6 +268,17 @@ report 70521 "GPI Prepayment Notice"
                 exit(Format(CandidateField.Value));
         end;
         exit('');
+    end;
+
+    local procedure IsAdvancePaymentTerms(PaymentTermsCode: Code[10]; PaymentTermsDescriptionText: Text): Boolean
+    var
+        SearchValue: Text;
+    begin
+        SearchValue := LowerCase(PaymentTermsCode + ' ' + PaymentTermsDescriptionText);
+        exit(
+            (StrPos(SearchValue, 'advance') > 0) or
+            (StrPos(SearchValue, 'prepay') > 0) or
+            (StrPos(SearchValue, 'pre-pay') > 0));
     end;
 
     var

@@ -20,7 +20,7 @@ table 70510 "GPI Document Delivery Log"
             DataClassification = CustomerContent;
         }
 
-        field(3; "Status"; Enum "GPI Delivery Status")
+        field(3; Status; Enum "GPI Delivery Status")
         {
             Caption = 'Status';
             DataClassification = CustomerContent;
@@ -83,7 +83,7 @@ table 70510 "GPI Document Delivery Log"
             DataClassification = EndUserIdentifiableInformation;
         }
 
-        field(13; "Subject"; Text[2048])
+        field(13; Subject; Text[2048])
         {
             Caption = 'Subject';
             DataClassification = CustomerContent;
@@ -137,6 +137,90 @@ table 70510 "GPI Document Delivery Log"
             DataClassification = OrganizationIdentifiableInformation;
             ExtendedDatatype = URL;
         }
+
+        field(22; "Source Table ID"; Integer)
+        {
+            Caption = 'Source Table ID';
+            DataClassification = SystemMetadata;
+        }
+
+        field(23; "Source SystemId"; Guid)
+        {
+            Caption = 'Source System ID';
+            DataClassification = SystemMetadata;
+        }
+
+        field(24; "Source Document Type"; Text[50])
+        {
+            Caption = 'Source Document Type';
+            DataClassification = CustomerContent;
+        }
+
+        field(25; "Source Document No."; Code[20])
+        {
+            Caption = 'Source Document No.';
+            DataClassification = CustomerContent;
+        }
+
+        field(26; "Source Party Type"; Text[20])
+        {
+            Caption = 'Source Party Type';
+            DataClassification = CustomerContent;
+        }
+
+        field(27; "Source Party No."; Code[20])
+        {
+            Caption = 'Source Party No.';
+            DataClassification = CustomerContent;
+        }
+
+        field(28; "Sender User"; Text[100])
+        {
+            Caption = 'Sender User';
+            DataClassification = EndUserIdentifiableInformation;
+        }
+
+        field(29; "Sender Email Address"; Text[250])
+        {
+            Caption = 'Sender Email Address';
+            DataClassification = EndUserIdentifiableInformation;
+        }
+
+        field(30; "Sender Policy"; Text[50])
+        {
+            Caption = 'Sender Policy';
+            DataClassification = CustomerContent;
+        }
+
+        field(31; "Routing Rule Entry Nos."; Text[250])
+        {
+            Caption = 'Routing Rule Entry Nos.';
+            DataClassification = SystemMetadata;
+        }
+
+        field(32; "BCC Recipients"; Text[2048])
+        {
+            Caption = 'BCC';
+            DataClassification = EndUserIdentifiableInformation;
+        }
+
+        field(33; "Sender Account Name"; Text[250])
+        {
+            Caption = 'Sender Account Name';
+            DataClassification = SystemMetadata;
+        }
+
+        field(34; "Sender Connector"; Text[100])
+        {
+            Caption = 'Sender Connector';
+            DataClassification = SystemMetadata;
+        }
+
+        field(35; "Sender Account ID"; Guid)
+        {
+            Caption = 'Sender Account ID';
+            DataClassification = SystemMetadata;
+        }
     }
 
     keys
@@ -147,6 +231,10 @@ table 70510 "GPI Document Delivery Log"
         }
 
         key(SalesOrder; "Sales Order No.", "Created Date/Time")
+        {
+        }
+
+        key(Source; "Source Table ID", "Source Document No.", "Created Date/Time")
         {
         }
 

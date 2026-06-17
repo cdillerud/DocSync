@@ -17,7 +17,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                     Promoted = true;
                     PromotedCategory = Process;
                     PromotedIsBig = true;
-                    ToolTip = 'Creates the Gamer-owned Order Confirmation PDF and opens an email for review.';
+                    ToolTip = 'Creates the Gamer-owned Order Confirmation PDF and opens an email from the current Business Central user for review.';
 
                     trigger OnAction()
                     var
@@ -39,7 +39,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                     Promoted = true;
                     PromotedCategory = Process;
                     PromotedIsBig = true;
-                    ToolTip = 'Creates the Gamer-owned Prepayment Notice PDF and opens an email for review.';
+                    ToolTip = 'Creates the Gamer-owned Prepayment Notice PDF and opens an email from the current Business Central user for review.';
 
                     trigger OnAction()
                     var
@@ -61,7 +61,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                     Promoted = true;
                     PromotedCategory = Process;
                     PromotedIsBig = true;
-                    ToolTip = 'Creates the Gamer-owned Pick Ticket PDF and opens an email for review.';
+                    ToolTip = 'Creates the Gamer-owned Pick Ticket PDF and opens an email from the current Business Central user for review.';
 
                     trigger OnAction()
                     var
@@ -143,6 +143,15 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         DeliveryLog.SetRange("Sales Order No.", Rec."No.");
                         Page.Run(Page::"GPI Document Delivery Log", DeliveryLog);
                     end;
+                }
+
+                action(GPIViewRoutingRules)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Document Routing Rules';
+                    Image = Setup;
+                    RunObject = page "GPI Document Routing Rules";
+                    ToolTip = 'Opens customer, vendor, location, and document-specific email recipient rules.';
                 }
 
                 action(GPIViewNativeSentEmails)

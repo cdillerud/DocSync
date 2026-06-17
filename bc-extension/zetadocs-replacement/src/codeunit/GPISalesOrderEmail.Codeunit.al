@@ -37,7 +37,13 @@ codeunit 70510 "GPI Sales Order Email"
             SalesHeader."No.");
         AttachmentName := CopyStr(StrSubstNo('Pre-Payment - Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
 
-        OpenSalesDocumentDraft(SalesHeader, 50003, Subject, Body, AttachmentName, ToRecipients);
+        OpenSalesDocumentDraft(
+            SalesHeader,
+            Report::"GPI Prepayment Notice",
+            Subject,
+            Body,
+            AttachmentName,
+            ToRecipients);
     end;
 
     procedure OpenPickTicketDraft(var SalesHeader: Record "Sales Header")

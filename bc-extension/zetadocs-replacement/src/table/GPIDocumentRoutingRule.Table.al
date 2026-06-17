@@ -63,7 +63,7 @@ table 70512 "GPI Document Routing Rule"
             TableRelation = Location.Code;
         }
 
-        field(9; Action; Enum "GPI Routing Rule Action")
+        field(9; "Recipient Action"; Enum "GPI Routing Rule Action")
         {
             Caption = 'Recipient Action';
             DataClassification = CustomerContent;

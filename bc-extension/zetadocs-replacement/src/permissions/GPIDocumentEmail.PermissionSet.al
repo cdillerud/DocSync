@@ -4,6 +4,9 @@ permissionset 70510 "GPI DOC EMAIL"
     Caption = 'GPI Document Email';
 
     Permissions =
+        tabledata "GPI Document Delivery Log" = RIMD,
+        table "GPI Document Delivery Log" = X,
+        page "GPI Document Delivery Log" = X,
         codeunit "GPI Sales Order Email" = X,
         report "GPI Sales Order Confirmation" = X,
         report "GPI Prepayment Notice" = X,

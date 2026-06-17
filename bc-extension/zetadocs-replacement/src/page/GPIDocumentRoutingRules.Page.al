@@ -55,7 +55,7 @@ page 70512 "GPI Document Routing Rules"
                     ToolTip = 'Specifies the location the rule applies to. Leave blank to match every location.';
                 }
 
-                field(Action; Rec.Action)
+                field("Recipient Action"; Rec."Recipient Action")
                 {
                     ApplicationArea = All;
                     ToolTip = 'Specifies whether the rule adds recipients to the defaults or replaces all defaults.';

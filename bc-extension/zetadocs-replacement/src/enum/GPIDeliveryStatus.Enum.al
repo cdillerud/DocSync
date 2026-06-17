@@ -32,4 +32,14 @@ enum 70511 "GPI Delivery Status"
     {
         Caption = 'Archived';
     }
+
+    value(6; Ready)
+    {
+        Caption = 'Ready';
+    }
+
+    value(7; "Missing Recipient")
+    {
+        Caption = 'Missing Recipient';
+    }
 }

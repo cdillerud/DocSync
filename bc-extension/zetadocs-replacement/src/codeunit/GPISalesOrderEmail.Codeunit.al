@@ -77,6 +77,8 @@ codeunit 70510 "GPI Sales Order Email"
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
+        EmailScenario: Codeunit "Email Scenario";
+        DefaultEmailAccount: Record "Email Account";
         DeliveryLog: Record "GPI Document Delivery Log";
         SalesHeaderRef: RecordRef;
         AttachmentOutStream: OutStream;
@@ -87,14 +89,13 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonCode: Code[20];
         InsideSalespersonEmail: Text;
         CurrentUserEmail: Text;
+        AppliedRoutingRuleEntries: Text[250];
         EmailAction: Enum "Email Action";
+        EmailErrorText: Text;
     begin
         SalesHeader.TestField("Document Type", SalesHeader."Document Type"::Order);
         SalesHeader.TestField("No.");
         SalesHeader.TestField("Sell-to Customer No.");
-
-        if ToRecipients.Count() = 0 then
-            Error('No email recipients were resolved for Sales Order %1.', SalesHeader."No.");
 
         CurrentUserEmail := UserId();
 
@@ -104,6 +105,18 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonCode := GetInsideSalespersonCode(SalesHeader);
         InsideSalespersonEmail := GetSalespersonEmail(InsideSalespersonCode);
         AddCcRecipient(CCRecipients, InsideSalespersonEmail, ToRecipients, CurrentUserEmail);
+
+        ApplyRoutingRules(
+            SalesHeader,
+            DeliveryDocumentType,
+            ToRecipients,
+            CCRecipients,
+            BCCRecipients,
+            AppliedRoutingRuleEntries);
+        NormalizeRecipientLists(ToRecipients, CCRecipients, BCCRecipients);
+
+        if ToRecipients.Count() = 0 then
+            Error('No email recipients were resolved for Sales Order %1 after document routing rules were applied.', SalesHeader."No.");
 
         SalesHeader.SetRecFilter();
         SalesHeaderRef.GetTable(SalesHeader);
@@ -122,6 +135,9 @@ codeunit 70510 "GPI Sales Order Email"
             Enum::"Email Relation Type"::"Primary Source",
             Enum::"Email Relation Origin"::"Compose Context");
 
+        Clear(DefaultEmailAccount);
+        EmailScenario.GetDefaultEmailAccount(DefaultEmailAccount);
+
         CreateDeliveryLog(
             DeliveryLog,
             SalesHeader,
@@ -131,11 +147,22 @@ codeunit 70510 "GPI Sales Order Email"
             Subject,
             ToRecipients,
             CCRecipients,
+            BCCRecipients,
+            AppliedRoutingRuleEntries,
             EmailMessage,
+            DefaultEmailAccount,
             TempBlob);
 
         Commit();
-        EmailAction := Email.OpenInEditorModally(EmailMessage);
+        if not TryOpenEmailEditor(EmailMessage, EmailAction) then begin
+            EmailErrorText := GetLastErrorText();
+            if EmailErrorText = '' then
+                EmailErrorText := 'The Business Central email editor returned an unexpected error.';
+
+            UpdateDeliveryLogFailed(DeliveryLog, EmailErrorText);
+            Commit();
+            Error('%1', EmailErrorText);
+        end;
 
         UpdateDeliveryLogAfterEditor(DeliveryLog, EmailMessage, EmailAction);
 
@@ -143,11 +170,24 @@ codeunit 70510 "GPI Sales Order Email"
             MarkSalesDocumentSent(SalesHeader, DeliveryDocumentType);
     end;
 
-    local procedure CreateDeliveryLog(var DeliveryLog: Record "GPI Document Delivery Log"; SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; ReportId: Integer; AttachmentName: Text[250]; Subject: Text; ToRecipients: List of [Text]; CCRecipients: List of [Text]; EmailMessage: Codeunit "Email Message"; TempBlob: Codeunit "Temp Blob")
+    [TryFunction]
+    local procedure TryOpenEmailEditor(EmailMessage: Codeunit "Email Message"; var EmailAction: Enum "Email Action")
+    var
+        Email: Codeunit Email;
+    begin
+        EmailAction := Email.OpenInEditorModally(EmailMessage);
+    end;
+
+    local procedure CreateDeliveryLog(var DeliveryLog: Record "GPI Document Delivery Log"; SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; ReportId: Integer; AttachmentName: Text[250]; Subject: Text; ToRecipients: List of [Text]; CCRecipients: List of [Text]; BCCRecipients: List of [Text]; AppliedRoutingRuleEntries: Text[250]; EmailMessage: Codeunit "Email Message"; DefaultEmailAccount: Record "Email Account"; TempBlob: Codeunit "Temp Blob")
     var
         DocumentInStream: InStream;
         DocumentOutStream: OutStream;
+        SenderEmailAddress: Text;
     begin
+        SenderEmailAddress := DefaultEmailAccount."Email Address";
+        if SenderEmailAddress = '' then
+            SenderEmailAddress := UserId();
+
         DeliveryLog.Init();
         DeliveryLog."Delivery Document Type" := DeliveryDocumentType;
         DeliveryLog.Status := DeliveryLog.Status::Created;
@@ -159,10 +199,24 @@ codeunit 70510 "GPI Sales Order Email"
         DeliveryLog."Attachment Filename" := AttachmentName;
         DeliveryLog."To Recipients" := CopyStr(JoinRecipients(ToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(CCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
+        DeliveryLog."BCC Recipients" := CopyStr(JoinRecipients(BCCRecipients), 1, MaxStrLen(DeliveryLog."BCC Recipients"));
         DeliveryLog.Subject := CopyStr(Subject, 1, MaxStrLen(DeliveryLog.Subject));
         DeliveryLog."Email Message ID" := EmailMessage.GetId();
         DeliveryLog."Created Date/Time" := CurrentDateTime();
         DeliveryLog."Created By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Created By"));
+        DeliveryLog."Source Table ID" := Database::"Sales Header";
+        DeliveryLog."Source SystemId" := SalesHeader.SystemId;
+        DeliveryLog."Source Document Type" := CopyStr(Format(SalesHeader."Document Type"), 1, MaxStrLen(DeliveryLog."Source Document Type"));
+        DeliveryLog."Source Document No." := SalesHeader."No.";
+        DeliveryLog."Source Party Type" := 'Customer';
+        DeliveryLog."Source Party No." := SalesHeader."Sell-to Customer No.";
+        DeliveryLog."Sender User" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Sender User"));
+        DeliveryLog."Sender Email Address" := CopyStr(SenderEmailAddress, 1, MaxStrLen(DeliveryLog."Sender Email Address"));
+        DeliveryLog."Sender Policy" := 'Current User';
+        DeliveryLog."Routing Rule Entry Nos." := AppliedRoutingRuleEntries;
+        DeliveryLog."Sender Account Name" := CopyStr(DefaultEmailAccount.Name, 1, MaxStrLen(DeliveryLog."Sender Account Name"));
+        DeliveryLog."Sender Connector" := CopyStr(Format(DefaultEmailAccount.Connector), 1, MaxStrLen(DeliveryLog."Sender Connector"));
+        DeliveryLog."Sender Account ID" := DefaultEmailAccount."Account Id";
         DeliveryLog.Insert(true);
 
         TempBlob.CreateInStream(DocumentInStream);
@@ -175,15 +229,19 @@ codeunit 70510 "GPI Sales Order Email"
     var
         FinalToRecipients: List of [Text];
         FinalCCRecipients: List of [Text];
+        FinalBCCRecipients: List of [Text];
     begin
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"To", FinalToRecipients);
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Cc", FinalCCRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Bcc", FinalBCCRecipients);
 
         DeliveryLog."To Recipients" := CopyStr(JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
+        DeliveryLog."BCC Recipients" := CopyStr(JoinRecipients(FinalBCCRecipients), 1, MaxStrLen(DeliveryLog."BCC Recipients"));
         DeliveryLog.Subject := CopyStr(EmailMessage.GetSubject(), 1, MaxStrLen(DeliveryLog.Subject));
         DeliveryLog."Completed Date/Time" := CurrentDateTime();
         DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        Clear(DeliveryLog."Error Message");
 
         case EmailAction of
             Enum::"Email Action"::Sent:
@@ -198,6 +256,125 @@ codeunit 70510 "GPI Sales Order Email"
         end;
 
         DeliveryLog.Modify(true);
+    end;
+
+    local procedure UpdateDeliveryLogFailed(var DeliveryLog: Record "GPI Document Delivery Log"; EmailErrorText: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure ApplyRoutingRules(SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRoutingRuleEntries: Text[250])
+    var
+        RoutingRule: Record "GPI Document Routing Rule";
+    begin
+        RoutingRule.SetCurrentKey(Enabled, "Delivery Document Type", Priority, "Entry No.");
+        RoutingRule.SetRange(Enabled, true);
+        RoutingRule.SetRange("Delivery Document Type", DeliveryDocumentType);
+
+        if not RoutingRule.FindSet() then
+            exit;
+
+        repeat
+            if RoutingRuleMatchesSalesOrder(RoutingRule, SalesHeader) and
+               RoutingRuleIsActive(RoutingRule, Today())
+            then begin
+                if RoutingRule.Action = RoutingRule.Action::Replace then begin
+                    Clear(ToRecipients);
+                    Clear(CCRecipients);
+                    Clear(BCCRecipients);
+                end;
+
+                AddRecipientsFromText(ToRecipients, RoutingRule."To Addresses");
+                AddRecipientsFromText(CCRecipients, RoutingRule."CC Addresses");
+                AddRecipientsFromText(BCCRecipients, RoutingRule."BCC Addresses");
+                AppendRoutingRuleEntry(AppliedRoutingRuleEntries, RoutingRule."Entry No.");
+            end;
+        until RoutingRule.Next() = 0;
+    end;
+
+    local procedure RoutingRuleMatchesSalesOrder(RoutingRule: Record "GPI Document Routing Rule"; SalesHeader: Record "Sales Header"): Boolean
+    begin
+        if RoutingRule."Vendor No." <> '' then
+            exit(false);
+
+        if (RoutingRule."Customer No." <> '') and
+           (RoutingRule."Customer No." <> SalesHeader."Sell-to Customer No.")
+        then
+            exit(false);
+
+        if (RoutingRule."Location Code" <> '') and
+           (RoutingRule."Location Code" <> SalesHeader."Location Code")
+        then
+            exit(false);
+
+        exit(true);
+    end;
+
+    local procedure RoutingRuleIsActive(RoutingRule: Record "GPI Document Routing Rule"; EvaluationDate: Date): Boolean
+    begin
+        if (RoutingRule."Effective Start Date" <> 0D) and
+           (RoutingRule."Effective Start Date" > EvaluationDate)
+        then
+            exit(false);
+
+        if (RoutingRule."Effective End Date" <> 0D) and
+           (RoutingRule."Effective End Date" < EvaluationDate)
+        then
+            exit(false);
+
+        exit(true);
+    end;
+
+    local procedure AppendRoutingRuleEntry(var AppliedRoutingRuleEntries: Text[250]; EntryNo: Integer)
+    var
+        EntryText: Text;
+    begin
+        EntryText := Format(EntryNo);
+        if AppliedRoutingRuleEntries = '' then
+            AppliedRoutingRuleEntries := CopyStr(EntryText, 1, MaxStrLen(AppliedRoutingRuleEntries))
+        else
+            AppliedRoutingRuleEntries := CopyStr(
+                StrSubstNo('%1, %2', AppliedRoutingRuleEntries, EntryText),
+                1,
+                MaxStrLen(AppliedRoutingRuleEntries));
+    end;
+
+    local procedure NormalizeRecipientLists(var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text])
+    var
+        NormalizedToRecipients: List of [Text];
+        NormalizedCCRecipients: List of [Text];
+        NormalizedBCCRecipients: List of [Text];
+        Recipient: Text;
+    begin
+        foreach Recipient in ToRecipients do
+            AddUniqueRecipient(NormalizedToRecipients, Recipient);
+
+        foreach Recipient in CCRecipients do
+            if not IsRecipientInList(NormalizedToRecipients, LowerCase(Recipient)) then
+                AddUniqueRecipient(NormalizedCCRecipients, Recipient);
+
+        foreach Recipient in BCCRecipients do
+            if not IsRecipientInList(NormalizedToRecipients, LowerCase(Recipient)) and
+               not IsRecipientInList(NormalizedCCRecipients, LowerCase(Recipient))
+            then
+                AddUniqueRecipient(NormalizedBCCRecipients, Recipient);
+
+        ReplaceRecipientList(ToRecipients, NormalizedToRecipients);
+        ReplaceRecipientList(CCRecipients, NormalizedCCRecipients);
+        ReplaceRecipientList(BCCRecipients, NormalizedBCCRecipients);
+    end;
+
+    local procedure ReplaceRecipientList(var TargetRecipients: List of [Text]; SourceRecipients: List of [Text])
+    var
+        Recipient: Text;
+    begin
+        Clear(TargetRecipients);
+        foreach Recipient in SourceRecipients do
+            TargetRecipients.Add(Recipient);
     end;
 
     local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")

@@ -16,6 +16,7 @@ codeunit 70510 "GPI Sales Order Email"
 
         OpenSalesDocumentDraft(
             SalesHeader,
+            Enum::"GPI Delivery Document Type"::"Order Confirmation",
             Report::"GPI Sales Order Confirmation",
             Subject,
             Body,
@@ -39,6 +40,7 @@ codeunit 70510 "GPI Sales Order Email"
 
         OpenSalesDocumentDraft(
             SalesHeader,
+            Enum::"GPI Delivery Document Type"::"Prepayment Notice",
             Report::"GPI Prepayment Notice",
             Subject,
             Body,
@@ -62,6 +64,7 @@ codeunit 70510 "GPI Sales Order Email"
 
         OpenSalesDocumentDraft(
             SalesHeader,
+            Enum::"GPI Delivery Document Type"::"Pick Ticket",
             Report::"GPI Pick Ticket",
             Subject,
             Body,
@@ -69,11 +72,12 @@ codeunit 70510 "GPI Sales Order Email"
             ToRecipients);
     end;
 
-    local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250]; var ToRecipients: List of [Text])
+    local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250]; var ToRecipients: List of [Text])
     var
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
+        DeliveryLog: Record "GPI Document Delivery Log";
         SalesHeaderRef: RecordRef;
         AttachmentOutStream: OutStream;
         AttachmentInStream: InStream;
@@ -83,7 +87,7 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonCode: Code[20];
         InsideSalespersonEmail: Text;
         CurrentUserEmail: Text;
-        RequestPageParameters: Text;
+        EmailAction: Enum "Email Action";
     begin
         SalesHeader.TestField("Document Type", SalesHeader."Document Type"::Order);
         SalesHeader.TestField("No.");
@@ -101,23 +105,134 @@ codeunit 70510 "GPI Sales Order Email"
         InsideSalespersonEmail := GetSalespersonEmail(InsideSalespersonCode);
         AddCcRecipient(CCRecipients, InsideSalespersonEmail, ToRecipients, CurrentUserEmail);
 
-        EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
-
         SalesHeader.SetRecFilter();
         SalesHeaderRef.GetTable(SalesHeader);
 
-        Commit();
-        RequestPageParameters := Report.RunRequestPage(ReportId);
-        if RequestPageParameters = '' then
-            exit;
-
         TempBlob.CreateOutStream(AttachmentOutStream);
-        Report.SaveAs(ReportId, RequestPageParameters, ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef);
+        Report.SaveAs(ReportId, '', ReportFormat::Pdf, AttachmentOutStream, SalesHeaderRef);
 
+        EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
         TempBlob.CreateInStream(AttachmentInStream);
         EmailMessage.AddAttachment(AttachmentName, 'application/pdf', AttachmentInStream);
 
-        Email.OpenInEditorModally(EmailMessage);
+        Email.AddRelation(
+            EmailMessage,
+            Database::"Sales Header",
+            SalesHeader.SystemId,
+            Enum::"Email Relation Type"::"Primary Source",
+            Enum::"Email Relation Origin"::"Compose Context");
+
+        CreateDeliveryLog(
+            DeliveryLog,
+            SalesHeader,
+            DeliveryDocumentType,
+            ReportId,
+            AttachmentName,
+            Subject,
+            ToRecipients,
+            CCRecipients,
+            EmailMessage,
+            TempBlob);
+
+        Commit();
+        EmailAction := Email.OpenInEditorModally(EmailMessage);
+
+        UpdateDeliveryLogAfterEditor(DeliveryLog, EmailMessage, EmailAction);
+
+        if EmailAction = Enum::"Email Action"::Sent then
+            MarkSalesDocumentSent(SalesHeader, DeliveryDocumentType);
+    end;
+
+    local procedure CreateDeliveryLog(var DeliveryLog: Record "GPI Document Delivery Log"; SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; ReportId: Integer; AttachmentName: Text[250]; Subject: Text; ToRecipients: List of [Text]; CCRecipients: List of [Text]; EmailMessage: Codeunit "Email Message"; TempBlob: Codeunit "Temp Blob")
+    var
+        DocumentInStream: InStream;
+        DocumentOutStream: OutStream;
+    begin
+        DeliveryLog.Init();
+        DeliveryLog."Delivery Document Type" := DeliveryDocumentType;
+        DeliveryLog.Status := DeliveryLog.Status::Created;
+        DeliveryLog."Sales Order No." := SalesHeader."No.";
+        DeliveryLog."Sales Order SystemId" := SalesHeader.SystemId;
+        DeliveryLog."Customer No." := SalesHeader."Sell-to Customer No.";
+        DeliveryLog."Location Code" := SalesHeader."Location Code";
+        DeliveryLog."Report ID" := ReportId;
+        DeliveryLog."Attachment Filename" := AttachmentName;
+        DeliveryLog."To Recipients" := CopyStr(JoinRecipients(ToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
+        DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(CCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
+        DeliveryLog.Subject := CopyStr(Subject, 1, MaxStrLen(DeliveryLog.Subject));
+        DeliveryLog."Email Message ID" := EmailMessage.GetId();
+        DeliveryLog."Created Date/Time" := CurrentDateTime();
+        DeliveryLog."Created By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Created By"));
+        DeliveryLog.Insert(true);
+
+        TempBlob.CreateInStream(DocumentInStream);
+        DeliveryLog."Document Content".CreateOutStream(DocumentOutStream);
+        CopyStream(DocumentOutStream, DocumentInStream);
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure UpdateDeliveryLogAfterEditor(var DeliveryLog: Record "GPI Document Delivery Log"; EmailMessage: Codeunit "Email Message"; EmailAction: Enum "Email Action")
+    var
+        FinalToRecipients: List of [Text];
+        FinalCCRecipients: List of [Text];
+    begin
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::To, FinalToRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::Cc, FinalCCRecipients);
+
+        DeliveryLog."To Recipients" := CopyStr(JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
+        DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
+        DeliveryLog.Subject := CopyStr(EmailMessage.GetSubject(), 1, MaxStrLen(DeliveryLog.Subject));
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+
+        case EmailAction of
+            Enum::"Email Action"::Sent:
+                begin
+                    DeliveryLog.Status := DeliveryLog.Status::Sent;
+                    DeliveryLog."External Delivery ID" := CopyStr(EmailMessage.GetExternalId(), 1, MaxStrLen(DeliveryLog."External Delivery ID"));
+                end;
+            Enum::"Email Action"::"Saved As Draft":
+                DeliveryLog.Status := DeliveryLog.Status::"Saved As Draft";
+            Enum::"Email Action"::Discarded:
+                DeliveryLog.Status := DeliveryLog.Status::Discarded;
+        end;
+
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+
+            if (StrPos(FieldIdentity, PrimarySearchText) > 0) or
+               ((AlternateSearchText <> '') and (StrPos(FieldIdentity, AlternateSearchText) > 0))
+            then begin
+                CandidateField.Value := true;
+                SalesHeaderRef.Modify(true);
+                exit;
+            end;
+        end;
     end;
 
     local procedure BuildCustomerRecipients(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text])
@@ -197,8 +312,11 @@ codeunit 70510 "GPI Sales Order Email"
             CandidateName := LowerCase(CandidateField.Name);
             CandidateCaption := LowerCase(CandidateField.Caption);
 
-            if IsInsideSalespersonField(CandidateName, CandidateCaption) then begin
-                CandidateValue := Format(CandidateField);
+            if IsInsideSalespersonField(CandidateName, CandidateCaption) and
+               (StrPos(CandidateName, 'backup') = 0) and
+               (StrPos(CandidateCaption, 'backup') = 0)
+            then begin
+                CandidateValue := Format(CandidateField.Value);
                 exit(CopyStr(CandidateValue, 1, 20));
             end;
         end;
@@ -289,5 +407,19 @@ codeunit 70510 "GPI Sales Order Email"
                 exit(true);
 
         exit(false);
+    end;
+
+    local procedure JoinRecipients(Recipients: List of [Text]): Text
+    var
+        Recipient: Text;
+        JoinedRecipients: Text;
+    begin
+        foreach Recipient in Recipients do begin
+            if JoinedRecipients <> '' then
+                JoinedRecipients += '; ';
+            JoinedRecipients += Recipient;
+        end;
+
+        exit(JoinedRecipients);
     end;
 }

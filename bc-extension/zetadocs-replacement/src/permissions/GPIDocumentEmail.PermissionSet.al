@@ -10,7 +10,9 @@ permissionset 70510 "GPI DOC EMAIL"
         tabledata "GPI Document Routing Rule" = RIMD,
         table "GPI Document Routing Rule" = X,
         page "GPI Document Routing Rules" = X,
+        page "GPI Posted Invoice Queue" = X,
         codeunit "GPI Sales Order Email" = X,
+        codeunit "GPI Invoice Batch Email" = X,
         report "GPI Sales Order Confirmation" = X,
         report "GPI Prepayment Notice" = X,
         report "GPI Pick Ticket" = X;

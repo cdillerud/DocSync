@@ -33,22 +33,80 @@ page 70511 "GPI Document Delivery Log"
                     ToolTip = 'Specifies the Gamer-owned document that was generated.';
                 }
 
+                field("Source Document Type"; Rec."Source Document Type")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the Business Central source document type.';
+                }
+
+                field("Source Document No."; Rec."Source Document No.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the source document number.';
+                }
+
                 field("Sales Order No."; Rec."Sales Order No.")
                 {
                     ApplicationArea = All;
-                    ToolTip = 'Specifies the related sales order.';
+                    Visible = false;
+                    ToolTip = 'Specifies the legacy related sales order number.';
+                }
+
+                field("Source Party Type"; Rec."Source Party Type")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies whether the related party is a customer, vendor, or another entity.';
+                }
+
+                field("Source Party No."; Rec."Source Party No.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the related customer or vendor number.';
                 }
 
                 field("Customer No."; Rec."Customer No.")
                 {
                     ApplicationArea = All;
-                    ToolTip = 'Specifies the customer number.';
+                    Visible = false;
+                    ToolTip = 'Specifies the legacy customer number.';
                 }
 
                 field("Location Code"; Rec."Location Code")
                 {
                     ApplicationArea = All;
                     ToolTip = 'Specifies the location code used for the document.';
+                }
+
+                field("Sender Email Address"; Rec."Sender Email Address")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the email address that was expected to send the document.';
+                }
+
+                field("Sender User"; Rec."Sender User")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the Business Central user who initiated the delivery.';
+                }
+
+                field("Sender Policy"; Rec."Sender Policy")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies how the sender account was selected.';
+                }
+
+                field("Sender Account Name"; Rec."Sender Account Name")
+                {
+                    ApplicationArea = All;
+                    Visible = false;
+                    ToolTip = 'Specifies the Business Central email account name.';
+                }
+
+                field("Sender Connector"; Rec."Sender Connector")
+                {
+                    ApplicationArea = All;
+                    Visible = false;
+                    ToolTip = 'Specifies the Business Central email connector.';
                 }
 
                 field("Attachment Filename"; Rec."Attachment Filename")
@@ -69,10 +127,23 @@ page 70511 "GPI Document Delivery Log"
                     ToolTip = 'Specifies the final CC recipients from the email editor.';
                 }
 
+                field("BCC Recipients"; Rec."BCC Recipients")
+                {
+                    ApplicationArea = All;
+                    Visible = false;
+                    ToolTip = 'Specifies the final BCC recipients from the email editor.';
+                }
+
                 field(Subject; Rec.Subject)
                 {
                     ApplicationArea = All;
                     ToolTip = 'Specifies the final email subject.';
+                }
+
+                field("Routing Rule Entry Nos."; Rec."Routing Rule Entry Nos.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the routing rules that changed or added recipients.';
                 }
 
                 field("Created Date/Time"; Rec."Created Date/Time")
@@ -84,6 +155,7 @@ page 70511 "GPI Document Delivery Log"
                 field("Created By"; Rec."Created By")
                 {
                     ApplicationArea = All;
+                    Visible = false;
                     ToolTip = 'Specifies who created the document and email draft.';
                 }
 
@@ -96,6 +168,7 @@ page 70511 "GPI Document Delivery Log"
                 field("Completed By"; Rec."Completed By")
                 {
                     ApplicationArea = All;
+                    Visible = false;
                     ToolTip = 'Specifies who completed the email editor action.';
                 }
 
@@ -150,21 +223,31 @@ page 70511 "GPI Document Delivery Log"
                 end;
             }
 
-            action(OpenSalesOrder)
+            action(OpenSourceDocument)
             {
                 ApplicationArea = All;
-                Caption = 'Open Sales Order';
+                Caption = 'Open Source Document';
                 Image = Document;
-                ToolTip = 'Opens the sales order related to this delivery entry.';
+                ToolTip = 'Opens the Business Central source document related to this delivery entry.';
 
                 trigger OnAction()
                 var
                     SalesHeader: Record "Sales Header";
+                    SourceDocumentNo: Code[20];
                 begin
-                    if not SalesHeader.Get(SalesHeader."Document Type"::Order, Rec."Sales Order No.") then
-                        Error('Sales Order %1 could not be found.', Rec."Sales Order No.");
+                    SourceDocumentNo := Rec."Source Document No.";
+                    if SourceDocumentNo = '' then
+                        SourceDocumentNo := Rec."Sales Order No.";
 
-                    Page.Run(Page::"Sales Order", SalesHeader);
+                    if Rec."Source Table ID" in [0, Database::"Sales Header"] then begin
+                        if not SalesHeader.Get(SalesHeader."Document Type"::Order, SourceDocumentNo) then
+                            Error('Sales Order %1 could not be found.', SourceDocumentNo);
+
+                        Page.Run(Page::"Sales Order", SalesHeader);
+                        exit;
+                    end;
+
+                    Error('Opening source table %1 is not implemented yet.', Rec."Source Table ID");
                 end;
             }
 
@@ -173,17 +256,36 @@ page 70511 "GPI Document Delivery Log"
                 ApplicationArea = All;
                 Caption = 'Open Sent Email History';
                 Image = Email;
-                ToolTip = 'Opens native Business Central sent-email history for the related sales order.';
+                ToolTip = 'Opens native Business Central sent-email history for the related source document.';
 
                 trigger OnAction()
                 var
                     Email: Codeunit Email;
+                    SourceTableId: Integer;
+                    SourceSystemId: Guid;
                 begin
-                    if IsNullGuid(Rec."Sales Order SystemId") then
-                        Error('The delivery entry is not linked to a sales order system ID.');
+                    SourceTableId := Rec."Source Table ID";
+                    SourceSystemId := Rec."Source SystemId";
 
-                    Email.OpenSentEmails(Database::"Sales Header", Rec."Sales Order SystemId");
+                    if SourceTableId = 0 then begin
+                        SourceTableId := Database::"Sales Header";
+                        SourceSystemId := Rec."Sales Order SystemId";
+                    end;
+
+                    if IsNullGuid(SourceSystemId) then
+                        Error('The delivery entry is not linked to a source record system ID.');
+
+                    Email.OpenSentEmails(SourceTableId, SourceSystemId);
                 end;
+            }
+
+            action(OpenRoutingRules)
+            {
+                ApplicationArea = All;
+                Caption = 'Document Routing Rules';
+                Image = Setup;
+                RunObject = page "GPI Document Routing Rules";
+                ToolTip = 'Opens the configurable customer, vendor, location, and document recipient rules.';
             }
         }
     }

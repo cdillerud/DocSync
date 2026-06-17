@@ -4,124 +4,161 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
     {
         addlast(Processing)
         {
-            action(GPIEmailOrderConfirmation)
+            group(GPIDocuments)
             {
-                ApplicationArea = All;
-                Caption = 'Preview and Email Order Confirmation';
-                Image = Email;
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                ToolTip = 'Creates the Gamer-owned Sales Order Confirmation as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
+                Caption = 'Gamer Documents';
+                Image = Documents;
 
-                trigger OnAction()
-                var
-                    SalesOrderEmail: Codeunit "GPI Sales Order Email";
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesOrderEmail.OpenSalesOrderConfirmationDraft(SalesHeader);
-                end;
-            }
+                action(GPIEmailOrderConfirmation)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Email Order Confirmation';
+                    Image = Email;
+                    Promoted = true;
+                    PromotedCategory = Process;
+                    PromotedIsBig = true;
+                    ToolTip = 'Creates the Gamer-owned Order Confirmation PDF and opens an email for review.';
 
-            action(GPIEmailPrepaymentNotice)
-            {
-                ApplicationArea = All;
-                Caption = 'Preview and Email Prepayment Notice';
-                Image = Email;
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                ToolTip = 'Creates the Gamer-owned Prepayment Notice as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
+                    trigger OnAction()
+                    var
+                        SalesOrderEmail: Codeunit "GPI Sales Order Email";
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesOrderEmail.OpenSalesOrderConfirmationDraft(SalesHeader);
+                        CurrPage.Update(false);
+                    end;
+                }
 
-                trigger OnAction()
-                var
-                    SalesOrderEmail: Codeunit "GPI Sales Order Email";
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesOrderEmail.OpenPrepaymentNoticeDraft(SalesHeader);
-                end;
-            }
+                action(GPIEmailPrepaymentNotice)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Email Prepayment Notice';
+                    Image = Email;
+                    Promoted = true;
+                    PromotedCategory = Process;
+                    PromotedIsBig = true;
+                    ToolTip = 'Creates the Gamer-owned Prepayment Notice PDF and opens an email for review.';
 
-            action(GPIEmailPickTicket)
-            {
-                ApplicationArea = All;
-                Caption = 'Preview and Email Pick Ticket';
-                Image = Email;
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                ToolTip = 'Creates report 50013 as a PDF, sends it to the email addresses on the Sales Order location, and opens the native Business Central email for review. Nothing is sent automatically.';
+                    trigger OnAction()
+                    var
+                        SalesOrderEmail: Codeunit "GPI Sales Order Email";
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesOrderEmail.OpenPrepaymentNoticeDraft(SalesHeader);
+                        CurrPage.Update(false);
+                    end;
+                }
 
-                trigger OnAction()
-                var
-                    SalesOrderEmail: Codeunit "GPI Sales Order Email";
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesOrderEmail.OpenPickTicketDraft(SalesHeader);
-                end;
-            }
+                action(GPIEmailPickTicket)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Email Pick Ticket';
+                    Image = Email;
+                    Promoted = true;
+                    PromotedCategory = Process;
+                    PromotedIsBig = true;
+                    ToolTip = 'Creates the Gamer-owned Pick Ticket PDF and opens an email for review.';
 
-            action(GPIPreviewOwnedOrderConfirmation)
-            {
-                ApplicationArea = All;
-                Caption = 'Preview GPI-Owned Order Confirmation';
-                Image = Print;
-                Promoted = false;
-                ToolTip = 'Previews the Gamer-owned Sales Order Confirmation report 70520. It does not create or send an email.';
+                    trigger OnAction()
+                    var
+                        SalesOrderEmail: Codeunit "GPI Sales Order Email";
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesOrderEmail.OpenPickTicketDraft(SalesHeader);
+                        CurrPage.Update(false);
+                    end;
+                }
 
-                trigger OnAction()
-                var
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesHeader.SetRecFilter();
-                    Report.RunModal(Report::"GPI Sales Order Confirmation", true, false, SalesHeader);
-                end;
-            }
+                action(GPIPreviewOwnedOrderConfirmation)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Preview Order Confirmation';
+                    Image = Print;
+                    ToolTip = 'Previews the Gamer-owned Order Confirmation without creating an email or delivery record.';
 
-            action(GPIPreviewOwnedPrepaymentNotice)
-            {
-                ApplicationArea = All;
-                Caption = 'Preview GPI-Owned Prepayment Notice';
-                Image = Print;
-                Promoted = false;
-                ToolTip = 'Previews the Gamer-owned Prepayment Notice report 70521. It does not create or send an email.';
+                    trigger OnAction()
+                    var
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesHeader.SetRecFilter();
+                        Report.RunModal(Report::"GPI Sales Order Confirmation", true, false, SalesHeader);
+                    end;
+                }
 
-                trigger OnAction()
-                var
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesHeader.SetRecFilter();
-                    Report.RunModal(Report::"GPI Prepayment Notice", true, false, SalesHeader);
-                end;
-            }
+                action(GPIPreviewOwnedPrepaymentNotice)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Preview Prepayment Notice';
+                    Image = Print;
+                    ToolTip = 'Previews the Gamer-owned Prepayment Notice without creating an email or delivery record.';
 
-            action(GPIPreviewOwnedPickTicket)
-            {
-                ApplicationArea = All;
-                Caption = 'Preview GPI-Owned Pick Ticket';
-                Image = Print;
-                Promoted = false;
-                ToolTip = 'Previews the Gamer-owned Pick Ticket report 70522. It does not create or send an email.';
+                    trigger OnAction()
+                    var
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesHeader.SetRecFilter();
+                        Report.RunModal(Report::"GPI Prepayment Notice", true, false, SalesHeader);
+                    end;
+                }
 
-                trigger OnAction()
-                var
-                    SalesHeader: Record "Sales Header";
-                begin
-                    CurrPage.SaveRecord();
-                    SalesHeader.Get(Rec."Document Type", Rec."No.");
-                    SalesHeader.SetRecFilter();
-                    Report.RunModal(Report::"GPI Pick Ticket", true, false, SalesHeader);
-                end;
+                action(GPIPreviewOwnedPickTicket)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Preview Pick Ticket';
+                    Image = Print;
+                    ToolTip = 'Previews the Gamer-owned Pick Ticket without creating an email or delivery record.';
+
+                    trigger OnAction()
+                    var
+                        SalesHeader: Record "Sales Header";
+                    begin
+                        CurrPage.SaveRecord();
+                        SalesHeader.Get(Rec."Document Type", Rec."No.");
+                        SalesHeader.SetRecFilter();
+                        Report.RunModal(Report::"GPI Pick Ticket", true, false, SalesHeader);
+                    end;
+                }
+
+                action(GPIViewDeliveryLog)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Document Delivery Log';
+                    Image = Log;
+                    ToolTip = 'Shows Gamer document delivery records for this Sales Order.';
+
+                    trigger OnAction()
+                    var
+                        DeliveryLog: Record "GPI Document Delivery Log";
+                    begin
+                        DeliveryLog.SetRange("Sales Order No.", Rec."No.");
+                        Page.Run(Page::"GPI Document Delivery Log", DeliveryLog);
+                    end;
+                }
+
+                action(GPIViewNativeSentEmails)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Sent Email History';
+                    Image = Email;
+                    ToolTip = 'Shows native Business Central sent emails related to this Sales Order.';
+
+                    trigger OnAction()
+                    var
+                        Email: Codeunit Email;
+                    begin
+                        Email.OpenSentEmails(Rec);
+                    end;
+                }
             }
         }
     }

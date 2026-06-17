@@ -33,7 +33,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;
-                ToolTip = 'Creates report 50003 as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
+                ToolTip = 'Creates the Gamer-owned Prepayment Notice as a PDF, attaches it to a native Business Central email, and opens the email for review. Nothing is sent automatically.';
 
                 trigger OnAction()
                 var

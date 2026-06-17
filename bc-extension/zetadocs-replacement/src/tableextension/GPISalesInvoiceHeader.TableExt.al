@@ -42,7 +42,7 @@ tableextension 70510 "GPI Sales Invoice Header Ext" extends "Sales Invoice Heade
 
     keys
     {
-        key(GPIDeliveryStatus; "GPI Invoice Delivery Status", "Posting Date")
+        key(GPIDeliveryStatus; "GPI Invoice Delivery Status")
         {
         }
     }

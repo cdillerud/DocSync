@@ -17,4 +17,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Pick Ticket';
     }
+
+    value(3; Invoice)
+    {
+        Caption = 'Invoice';
+    }
 }

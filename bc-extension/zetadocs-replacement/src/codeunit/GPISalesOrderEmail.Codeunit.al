@@ -176,8 +176,8 @@ codeunit 70510 "GPI Sales Order Email"
         FinalToRecipients: List of [Text];
         FinalCCRecipients: List of [Text];
     begin
-        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::To, FinalToRecipients);
-        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::Cc, FinalCCRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"To", FinalToRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Cc", FinalCCRecipients);
 
         DeliveryLog."To Recipients" := CopyStr(JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));

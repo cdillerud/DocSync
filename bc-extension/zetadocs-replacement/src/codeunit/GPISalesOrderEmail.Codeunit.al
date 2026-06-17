@@ -280,9 +280,9 @@ codeunit 70510 "GPI Sales Order Email"
 
         repeat
             if RoutingRuleMatchesSalesOrder(RoutingRule, SalesHeader) and
-               RoutingRuleIsActive(RoutingRule, Today())
+               RoutingRuleIsActive(RoutingRule, Today)
             then begin
-                if RoutingRule.Action = RoutingRule.Action::Replace then begin
+                if RoutingRule."Recipient Action" = RoutingRule."Recipient Action"::Replace then begin
                     Clear(ToRecipients);
                     Clear(CCRecipients);
                     Clear(BCCRecipients);
@@ -417,13 +417,8 @@ codeunit 70510 "GPI Sales Order Email"
         RecipientText: Text;
     begin
         RecipientText := GetCustomerRecipientText(SalesHeader);
-        if RecipientText = '' then
-            Error(
-                'Sales Order %1 does not have a recipient email address. Add an email to the Sell-to Contact, the Sales Order, or customer %2.',
-                SalesHeader."No.",
-                SalesHeader."Sell-to Customer No.");
-
-        AddRecipientsFromText(ToRecipients, RecipientText);
+        if RecipientText <> '' then
+            AddRecipientsFromText(ToRecipients, RecipientText);
     end;
 
     local procedure BuildLocationRecipients(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text])
@@ -435,10 +430,8 @@ codeunit 70510 "GPI Sales Order Email"
         if not Location.Get(SalesHeader."Location Code") then
             Error('Location %1 could not be found for Sales Order %2.', SalesHeader."Location Code", SalesHeader."No.");
 
-        if Location."E-Mail" = '' then
-            Error('Location %1 does not have an email address for Sales Order %2.', SalesHeader."Location Code", SalesHeader."No.");
-
-        AddRecipientsFromText(ToRecipients, Location."E-Mail");
+        if Location."E-Mail" <> '' then
+            AddRecipientsFromText(ToRecipients, Location."E-Mail");
     end;
 
     local procedure GetCustomerRecipientText(SalesHeader: Record "Sales Header"): Text

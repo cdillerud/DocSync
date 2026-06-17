@@ -233,6 +233,7 @@ page 70511 "GPI Document Delivery Log"
                 trigger OnAction()
                 var
                     SalesHeader: Record "Sales Header";
+                    SalesInvoiceHeader: Record "Sales Invoice Header";
                     SourceDocumentNo: Code[20];
                 begin
                     SourceDocumentNo := Rec."Source Document No.";
@@ -244,6 +245,14 @@ page 70511 "GPI Document Delivery Log"
                             Error('Sales Order %1 could not be found.', SourceDocumentNo);
 
                         Page.Run(Page::"Sales Order", SalesHeader);
+                        exit;
+                    end;
+
+                    if Rec."Source Table ID" = Database::"Sales Invoice Header" then begin
+                        if not SalesInvoiceHeader.Get(SourceDocumentNo) then
+                            Error('Posted Sales Invoice %1 could not be found.', SourceDocumentNo);
+
+                        Page.Run(Page::"Posted Sales Invoice", SalesInvoiceHeader);
                         exit;
                     end;
 

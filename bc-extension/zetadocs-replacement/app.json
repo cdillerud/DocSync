@@ -2,9 +2,9 @@
   "id": "b6eb6cc8-d984-4ab0-bb15-d3569db41171",
   "name": "GPI Sales Document Email",
   "publisher": "Gamer Packaging",
-  "version": "0.5.4.1",
-  "platform": "27.0.0.0",
-  "application": "27.4.0.0",
+  "version": "0.5.4.2",
+  "platform": "28.1.0.0",
+  "application": "28.1.0.0",
   "idRanges": [
     {
       "from": 70510,
@@ -16,7 +16,7 @@
     "allowDownloadingSource": true,
     "includeSourceInSymbolFile": true
   },
-  "runtime": "16.0",
+  "runtime": "17.0",
   "features": [
     "NoImplicitWith"
   ]

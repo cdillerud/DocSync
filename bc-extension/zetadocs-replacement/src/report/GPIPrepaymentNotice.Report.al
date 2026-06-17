@@ -118,10 +118,10 @@ report 70521 "GPI Prepayment Notice"
                     CurrencyCode := GeneralLedgerSetup."LCY Code";
 
                 TaxAmount := "Amount Including VAT" - Amount;
-                PrepaymentPercent := "Prepayment %";
-                if (PrepaymentPercent = 0) and IsAdvancePaymentTerms("Payment Terms Code", PaymentTermsDescription) then
-                    PrepaymentPercent := 100;
-
+                PrepaymentPercent := ResolvePrepaymentPercent(
+                    "Prepayment %",
+                    "Payment Terms Code",
+                    PaymentTermsDescription);
                 PrepaymentAmountDue := Round("Amount Including VAT" * PrepaymentPercent / 100, 0.01);
             end;
         }
@@ -268,6 +268,54 @@ report 70521 "GPI Prepayment Notice"
                 exit(Format(CandidateField.Value));
         end;
         exit('');
+    end;
+
+    local procedure ResolvePrepaymentPercent(SalesHeaderPrepaymentPercent: Decimal; PaymentTermsCode: Code[10]; PaymentTermsDescriptionText: Text): Decimal
+    var
+        ParsedPercent: Decimal;
+        PaymentTermsText: Text;
+    begin
+        if SalesHeaderPrepaymentPercent > 0 then
+            exit(SalesHeaderPrepaymentPercent);
+
+        PaymentTermsText := PaymentTermsCode + ' ' + PaymentTermsDescriptionText;
+        if TryExtractPercentage(PaymentTermsText, ParsedPercent) then
+            exit(ParsedPercent);
+
+        if IsAdvancePaymentTerms(PaymentTermsCode, PaymentTermsDescriptionText) then
+            exit(100);
+
+        exit(0);
+    end;
+
+    local procedure TryExtractPercentage(SourceText: Text; var ParsedPercent: Decimal): Boolean
+    var
+        PercentPosition: Integer;
+        StartPosition: Integer;
+        NumberText: Text;
+    begin
+        PercentPosition := StrPos(SourceText, '%');
+        if PercentPosition = 0 then
+            exit(false);
+
+        StartPosition := PercentPosition - 1;
+        while (StartPosition > 0) and IsPercentageNumberCharacter(CopyStr(SourceText, StartPosition, 1)) do
+            StartPosition -= 1;
+
+        NumberText := CopyStr(SourceText, StartPosition + 1, PercentPosition - StartPosition - 1);
+        NumberText := DelChr(NumberText, '<>', ' ');
+        if NumberText = '' then
+            exit(false);
+
+        if not Evaluate(ParsedPercent, NumberText) then
+            exit(false);
+
+        exit((ParsedPercent > 0) and (ParsedPercent <= 100));
+    end;
+
+    local procedure IsPercentageNumberCharacter(Character: Text[1]): Boolean
+    begin
+        exit((StrPos('0123456789.,', Character) > 0) or (Character = ' '));
     end;
 
     local procedure IsAdvancePaymentTerms(PaymentTermsCode: Code[10]; PaymentTermsDescriptionText: Text): Boolean

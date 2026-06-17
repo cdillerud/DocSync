@@ -116,11 +116,11 @@ page 70513 "GPI Posted Invoice Queue"
             action(RefreshRecipients)
             {
                 ApplicationArea = All;
-                Caption = 'Refresh Recipients';
+                Caption = 'Refresh Filtered Recipients';
                 Image = Refresh;
                 Promoted = true;
                 PromotedCategory = Process;
-                ToolTip = 'Recalculates invoice recipients and queue readiness for the invoices in the current filtered view.';
+                ToolTip = 'Recalculates invoice recipients and queue readiness for the invoices in the current filtered view. Interactive refresh is limited to 250 invoices.';
 
                 trigger OnAction()
                 var
@@ -128,6 +128,7 @@ page 70513 "GPI Posted Invoice Queue"
                     FilteredInvoices: Record "Sales Invoice Header";
                 begin
                     FilteredInvoices.CopyFilters(Rec);
+                    EnsureSafeInteractiveBatch(FilteredInvoices, 'refresh recipients');
                     InvoiceBatchEmail.RefreshQueue(FilteredInvoices);
                     CurrPage.Update(false);
                 end;
@@ -160,7 +161,7 @@ page 70513 "GPI Posted Invoice Queue"
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;
-                ToolTip = 'Sends the selected ready invoices through the GPI Invoice Batch email scenario.';
+                ToolTip = 'Sends the selected ready invoices through the GPI Invoice Batch email scenario. Interactive batches are limited to 250 invoices.';
 
                 trigger OnAction()
                 var
@@ -168,6 +169,7 @@ page 70513 "GPI Posted Invoice Queue"
                     SelectedInvoices: Record "Sales Invoice Header";
                 begin
                     CurrPage.SetSelectionFilter(SelectedInvoices);
+                    EnsureSafeInteractiveBatch(SelectedInvoices, 'send selected invoices');
                     InvoiceBatchEmail.SendInvoices(SelectedInvoices);
                     CurrPage.Update(false);
                 end;
@@ -181,7 +183,7 @@ page 70513 "GPI Posted Invoice Queue"
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;
-                ToolTip = 'Sends every ready invoice included in the current filters. Missing-recipient and previously sent invoices are skipped.';
+                ToolTip = 'Sends every ready invoice included in the current filters. Missing-recipient and previously sent invoices are skipped. Interactive batches are limited to 250 invoices.';
 
                 trigger OnAction()
                 var
@@ -189,6 +191,7 @@ page 70513 "GPI Posted Invoice Queue"
                     FilteredInvoices: Record "Sales Invoice Header";
                 begin
                     FilteredInvoices.CopyFilters(Rec);
+                    EnsureSafeInteractiveBatch(FilteredInvoices, 'send all filtered invoices');
                     InvoiceBatchEmail.SendInvoices(FilteredInvoices);
                     CurrPage.Update(false);
                 end;
@@ -257,7 +260,7 @@ page 70513 "GPI Posted Invoice Queue"
                 ApplicationArea = All;
                 Caption = 'Show All Invoices';
                 Image = ClearFilter;
-                ToolTip = 'Clears the default posting date and delivery status filters.';
+                ToolTip = 'Clears the default posting date and delivery status filters. Filter the list before refreshing or sending.';
 
                 trigger OnAction()
                 begin
@@ -280,7 +283,8 @@ page 70513 "GPI Posted Invoice Queue"
             Rec.SetFilter("GPI Invoice Delivery Status", '<>%1', Rec."GPI Invoice Delivery Status"::Sent);
 
         FilteredInvoices.CopyFilters(Rec);
-        InvoiceBatchEmail.RefreshQueue(FilteredInvoices);
+        if FilteredInvoices.Count() <= MaxInteractiveBatchSize() then
+            InvoiceBatchEmail.RefreshQueue(FilteredInvoices);
     end;
 
     trigger OnAfterGetRecord()
@@ -296,6 +300,27 @@ page 70513 "GPI Posted Invoice Queue"
             else
                 StatusStyle := 'Standard';
         end;
+    end;
+
+    local procedure EnsureSafeInteractiveBatch(var InvoiceSet: Record "Sales Invoice Header"; OperationName: Text)
+    var
+        InvoiceCount: Integer;
+    begin
+        InvoiceCount := InvoiceSet.Count();
+        if InvoiceCount = 0 then
+            Error('No posted sales invoices are included in the current selection or filter.');
+
+        if InvoiceCount > MaxInteractiveBatchSize() then
+            Error(
+                'The current selection contains %1 invoices. To %2, first filter or select %3 invoices or fewer. Large historical refreshes are intentionally blocked to avoid long-running locks.',
+                InvoiceCount,
+                OperationName,
+                MaxInteractiveBatchSize());
+    end;
+
+    local procedure MaxInteractiveBatchSize(): Integer
+    begin
+        exit(250);
     end;
 
     var

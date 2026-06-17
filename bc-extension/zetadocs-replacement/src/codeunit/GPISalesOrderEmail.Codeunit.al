@@ -60,7 +60,13 @@ codeunit 70510 "GPI Sales Order Email"
             SalesHeader."No.");
         AttachmentName := CopyStr(StrSubstNo('Pick-Ticket - Order %1.pdf', SalesHeader."No."), 1, MaxStrLen(AttachmentName));
 
-        OpenSalesDocumentDraft(SalesHeader, 50013, Subject, Body, AttachmentName, ToRecipients);
+        OpenSalesDocumentDraft(
+            SalesHeader,
+            Report::"GPI Pick Ticket",
+            Subject,
+            Body,
+            AttachmentName,
+            ToRecipients);
     end;
 
     local procedure OpenSalesDocumentDraft(var SalesHeader: Record "Sales Header"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250]; var ToRecipients: List of [Text])

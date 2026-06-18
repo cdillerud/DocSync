@@ -41,7 +41,7 @@ The project follows four-part Business Central app versioning:
   - Warehouse Purchase Order
   - Warehouse Receiving Notice
 - Preview remains available while those documents are Open.
-- Prepayment Notice sending is blocked unless the installed prepayment-status field resolves to **Pending Prepayment**. Preview remains available in other statuses.
+- Prepayment Notice sending is blocked unless the Sales Header **Status** displays **Pending Prepayment**. Preview remains available in other statuses.
 - Pick Ticket and Warehouse Receiving Notice now display the Item Card **Whse Unit of Measure Code** and calculate quantity from base quantity divided by the matching Item Unit of Measure **Qty. per Unit of Measure**.
 - Warehouse Purchase Order sender selection now resolves the ISR on the Purchase Header, reads the ISR email from Salespeople/Purchasers, and requires a registered Business Central Email Account with the same address.
 - Warehouse Purchase Order delivery logs now record sender policy **Purchase Header ISR** and the selected ISR Email Account.

@@ -406,4 +406,11 @@ codeunit 70511 "GPI Invoice Batch Email"
         end;
         exit(JoinedRecipients);
     end;
+
+    local procedure EmptyGuid(): Guid
+    var
+        Result: Guid;
+    begin
+        exit(Result);
+    end;
 }

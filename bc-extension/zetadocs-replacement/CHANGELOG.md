@@ -11,39 +11,47 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
-## Unreleased - Planned 0.16.0.0
+## 0.16.0.0
 
-### Rhonda review follow-up still awaiting clarification
+### Added
 
-- Make Pick Ticket UOM use the Item Card warehouse unit of measure.
-- Make Warehouse Receiving Notice UOM use the Item Card warehouse unit of measure.
-- Change sales-document customer recipient selection to the customer's primary contact.
-- Update Purchase Order sent indicators only after the corresponding email is actually sent.
-- Update Warehouse Receiving Notice sent indicator only after the email is actually sent.
-- Require Released status before sending:
+- Added a **Gamer Documents > Gamer Document Routing Rules** action to the Vendor Card, filtered to the current vendor.
+- Added shared document-policy management for send-status validation, recipient resolution, ISR sender-account resolution, and warehouse UOM conversion.
+- Added execute permissions for the supported sales, purchasing, warehouse, and shared-policy objects to the `GPI DOC EMAIL` permission set.
+
+### Changed
+
+- Customer Card **Gamer Documents** now contains only **Gamer Document Routing Rules**, filtered to the current customer.
+- Removed Customer Card Delivery Log and Sent Email History actions. Documents are not sent from Customer or Vendor Cards.
+- Customer-specific routing rules are evaluated before standard recipients for:
+  - Sales Order Confirmation
+  - Blanket Sales Order
+  - Prepayment Notice
+  - Pick Ticket
+  - Posted Sales Invoice
+- When no customer-specific rule supplies a recipient:
+  - Sales Order Confirmation uses the contact selected on the Sales Order.
+  - Blanket Sales Order uses the contact selected on the Blanket Sales Order.
+  - Prepayment Notice uses the contact selected on the Sales Order.
+  - Pick Ticket uses the Location Card email.
+  - Posted Sales Invoice uses the Customer Card primary contact email.
+- Sending is blocked unless the source document is **Released** for:
   - Sales Order Confirmation
   - Pick Ticket
   - Warehouse Purchase Order
   - Warehouse Receiving Notice
-- Require Pending Prepayment status before sending a Prepayment Notice.
-- Send Warehouse Purchase Orders from the ISR associated with the Purchase Header.
-- Add an option to omit selected document lines from generated documents.
+- Preview remains available while those documents are Open.
+- Prepayment Notice sending is blocked unless the installed prepayment-status field resolves to **Pending Prepayment**. Preview remains available in other statuses.
+- Pick Ticket and Warehouse Receiving Notice now display the Item Card **Whse Unit of Measure Code** and calculate quantity from base quantity divided by the matching Item Unit of Measure **Qty. per Unit of Measure**.
+- Warehouse Purchase Order sender selection now resolves the ISR on the Purchase Header, reads the ISR email from Salespeople/Purchasers, and requires a registered Business Central Email Account with the same address.
+- Warehouse Purchase Order delivery logs now record sender policy **Purchase Header ISR** and the selected ISR Email Account.
 
-### Clarification required
+### Not implemented in this version
 
-- Exact field captions for the Purchase Order and Warehouse Receiving Notice sent indicators.
-- Exact source field for the Purchase Header ISR.
-- Exact Business Central field/value representing Pending Prepayment.
-- Whether primary-contact routing applies only to customer-facing sales documents or literally every document type.
-- Required behavior for omitting document lines.
-- Exact Item Card field to use as the warehouse unit of measure.
-- Whether previews remain available while documents are not in the required status.
-
-### Already confirmed in the current build
-
-- Pick Tickets resolve the primary recipient from the Location Card email.
-- Warehouse Receiving Notices resolve the primary recipient from the Location Card email.
-- The Warehouse Receiving Notice layout does not contain terms-and-conditions language.
+- Existing Purchase Order and Warehouse Receiving Notice sent-indicator updates are intentionally unchanged. Their exact field IDs and captions are not present in this repository or its source symbols. The fields must be identified from the Gamer sandbox metadata before implementing send-only toggles and reopen reset behavior.
+- Warehouse Receiving Notice sender remains unchanged because the sender rule is still TBD.
+- Line-exclusion behavior remains unimplemented pending business clarification.
+- Posted Sales Credit Memo email workflow is not currently present in this extension; this version changes primary-contact routing for the existing Posted Sales Invoice workflow only.
 
 ## 0.15.1.2
 

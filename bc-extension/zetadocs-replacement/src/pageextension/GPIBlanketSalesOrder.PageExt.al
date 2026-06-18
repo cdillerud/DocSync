@@ -12,7 +12,7 @@ pageextension 70512 "GPI Blanket Sales Order Ext" extends "Blanket Sales Order"
                 action(GPIEmailBlanketSalesOrder)
                 {
                     ApplicationArea = All;
-                    Caption = 'Email Blanket Sales Order';
+                    Caption = 'Gamer Email Blanket Sales Order';
                     Image = Email;
                     Promoted = true;
                     PromotedCategory = Process;
@@ -34,7 +34,7 @@ pageextension 70512 "GPI Blanket Sales Order Ext" extends "Blanket Sales Order"
                 action(GPIPreviewBlanketSalesOrder)
                 {
                     ApplicationArea = All;
-                    Caption = 'Preview Blanket Sales Order';
+                    Caption = 'Gamer Preview Blanket Sales Order';
                     Image = Print;
                     Promoted = true;
                     PromotedCategory = Process;
@@ -54,7 +54,7 @@ pageextension 70512 "GPI Blanket Sales Order Ext" extends "Blanket Sales Order"
                 action(GPIBlanketDeliveryLog)
                 {
                     ApplicationArea = All;
-                    Caption = 'Document Delivery Log';
+                    Caption = 'Gamer Document Delivery Log';
                     Image = Log;
                     ToolTip = 'Shows Gamer document delivery records for this Blanket Sales Order.';
 
@@ -72,7 +72,7 @@ pageextension 70512 "GPI Blanket Sales Order Ext" extends "Blanket Sales Order"
                 action(GPIBlanketRoutingRules)
                 {
                     ApplicationArea = All;
-                    Caption = 'Document Routing Rules';
+                    Caption = 'Gamer Document Routing Rules';
                     Image = Setup;
                     RunObject = page "GPI Document Routing Rules";
                     ToolTip = 'Opens customer, location, and document-specific recipient rules.';
@@ -81,7 +81,7 @@ pageextension 70512 "GPI Blanket Sales Order Ext" extends "Blanket Sales Order"
                 action(GPIBlanketSentEmailHistory)
                 {
                     ApplicationArea = All;
-                    Caption = 'Sent Email History';
+                    Caption = 'Gamer Sent Email History';
                     Image = Email;
                     ToolTip = 'Shows native Business Central sent emails related to this Blanket Sales Order.';
 

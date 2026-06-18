@@ -32,4 +32,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Purchase Order - Drop Ship';
     }
+
+    value(6; "Purchase Order - Warehouse")
+    {
+        Caption = 'Purchase Order - Warehouse';
+    }
 }

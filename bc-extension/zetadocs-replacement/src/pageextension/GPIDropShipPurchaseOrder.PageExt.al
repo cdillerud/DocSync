@@ -1,95 +1,215 @@
-pageextension 70514 "GPI Drop Ship PO Ext" extends "Purchase Order"
+pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
 {
     actions
     {
         addfirst(Processing)
         {
-            action(GPIPreviewDropShipPO)
+            group(GPIGamerDocuments)
             {
-                ApplicationArea = All;
-                Caption = 'Preview Drop Ship Purchase Order';
-                Image = Print;
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                ToolTip = 'Previews the Gamer-owned drop-ship Purchase Order without creating an email or delivery record.';
+                Caption = 'Gamer Documents';
 
-                trigger OnAction()
-                var
-                    DropShipPOEmail: Codeunit "GPI Drop Ship PO Email";
-                    PurchaseHeader: Record "Purchase Header";
-                begin
-                    CurrPage.SaveRecord();
-                    Commit();
-                    PurchaseHeader.Get(Rec."Document Type", Rec."No.");
-                    DropShipPOEmail.Preview(PurchaseHeader);
-                end;
-            }
+                group(GPIDropShipDocuments)
+                {
+                    Caption = 'Drop Ship Purchase Order';
+                    Enabled = IsDropShipPurchaseOrder;
 
-            action(GPIEmailDropShipPO)
-            {
-                ApplicationArea = All;
-                Caption = 'Email Drop Ship Purchase Order';
-                Image = Email;
-                Promoted = true;
-                PromotedCategory = Process;
-                PromotedIsBig = true;
-                ToolTip = 'Creates the Gamer-owned drop-ship Purchase Order PDF and opens an email from the current Business Central user for review.';
+                    action(GPIPreviewDropShipPO)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Preview';
+                        Image = Print;
+                        ToolTip = 'Previews the Gamer-owned drop-ship Purchase Order without creating an email or delivery record.';
 
-                trigger OnAction()
-                var
-                    DropShipPOEmail: Codeunit "GPI Drop Ship PO Email";
-                    PurchaseHeader: Record "Purchase Header";
-                begin
-                    CurrPage.SaveRecord();
-                    Commit();
-                    PurchaseHeader.Get(Rec."Document Type", Rec."No.");
-                    DropShipPOEmail.OpenDraft(PurchaseHeader);
-                    CurrPage.Update(false);
-                end;
-            }
+                        trigger OnAction()
+                        var
+                            DropShipPOEmail: Codeunit "GPI Drop Ship PO Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            DropShipPOEmail.Preview(PurchaseHeader);
+                        end;
+                    }
 
-            action(GPIDropShipPODeliveryLog)
-            {
-                ApplicationArea = All;
-                Caption = 'Drop Ship PO Delivery Log';
-                Image = Log;
-                ToolTip = 'Shows Gamer document delivery records for this Purchase Order.';
+                    action(GPIEmailDropShipPO)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Email';
+                        Image = Email;
+                        ToolTip = 'Creates the Gamer-owned drop-ship Purchase Order PDF and opens an email from the current Business Central user for review.';
 
-                trigger OnAction()
-                var
-                    DeliveryLog: Record "GPI Document Delivery Log";
-                begin
-                    DeliveryLog.SetRange("Source Table ID", Database::"Purchase Header");
-                    DeliveryLog.SetRange("Source Document Type", Format(Rec."Document Type"));
-                    DeliveryLog.SetRange("Source Document No.", Rec."No.");
-                    Page.Run(Page::"GPI Document Delivery Log", DeliveryLog);
-                end;
-            }
+                        trigger OnAction()
+                        var
+                            DropShipPOEmail: Codeunit "GPI Drop Ship PO Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            DropShipPOEmail.OpenDraft(PurchaseHeader);
+                            CurrPage.Update(false);
+                        end;
+                    }
+                }
 
-            action(GPIDropShipPORoutingRules)
-            {
-                ApplicationArea = All;
-                Caption = 'Drop Ship PO Routing Rules';
-                Image = Setup;
-                RunObject = page "GPI Document Routing Rules";
-                ToolTip = 'Opens vendor, location, and document-specific recipient rules.';
-            }
+                group(GPIWarehousePurchaseDocuments)
+                {
+                    Caption = 'Warehouse Purchase Order';
+                    Enabled = IsWarehousePurchaseOrder;
 
-            action(GPIDropShipPOSentHistory)
-            {
-                ApplicationArea = All;
-                Caption = 'Drop Ship PO Sent Email History';
-                Image = Email;
-                ToolTip = 'Shows native Business Central sent emails related to this Purchase Order.';
+                    action(GPIPreviewWarehousePO)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Preview';
+                        Image = Print;
+                        ToolTip = 'Previews the Gamer-owned warehouse Purchase Order without creating an email or delivery record.';
 
-                trigger OnAction()
-                var
-                    Email: Codeunit Email;
-                begin
-                    Email.OpenSentEmails(Rec);
-                end;
+                        trigger OnAction()
+                        var
+                            WarehousePOEmail: Codeunit "GPI Warehouse PO Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            WarehousePOEmail.Preview(PurchaseHeader);
+                        end;
+                    }
+
+                    action(GPIEmailWarehousePO)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Email';
+                        Image = Email;
+                        ToolTip = 'Creates the Gamer-owned warehouse Purchase Order PDF and opens an email from the current Business Central user for review.';
+
+                        trigger OnAction()
+                        var
+                            WarehousePOEmail: Codeunit "GPI Warehouse PO Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            WarehousePOEmail.OpenDraft(PurchaseHeader);
+                            CurrPage.Update(false);
+                        end;
+                    }
+                }
+
+                group(GPIWarehouseReceivingDocuments)
+                {
+                    Caption = 'Warehouse Receiving Notice';
+                    Enabled = IsWarehousePurchaseOrder;
+
+                    action(GPIPreviewWarehouseReceiving)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Preview';
+                        Image = Print;
+                        ToolTip = 'Previews the Gamer-owned warehouse receiving notice without creating an email or delivery record.';
+
+                        trigger OnAction()
+                        var
+                            ReceivingEmail: Codeunit "GPI WH Receiving Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            ReceivingEmail.Preview(PurchaseHeader);
+                        end;
+                    }
+
+                    action(GPIEmailWarehouseReceiving)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Email';
+                        Image = Email;
+                        ToolTip = 'Creates the warehouse receiving notice PDF and opens an email from the current Business Central user for review.';
+
+                        trigger OnAction()
+                        var
+                            ReceivingEmail: Codeunit "GPI WH Receiving Email";
+                            PurchaseHeader: Record "Purchase Header";
+                        begin
+                            CurrPage.SaveRecord();
+                            Commit();
+                            PurchaseHeader.Get(Rec."Document Type", Rec."No.");
+                            ReceivingEmail.OpenDraft(PurchaseHeader);
+                            CurrPage.Update(false);
+                        end;
+                    }
+                }
+
+                group(GPIDocumentHistoryAndSetup)
+                {
+                    Caption = 'History and Setup';
+
+                    action(GPIPurchaseOrderDeliveryLog)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Delivery Log';
+                        Image = Log;
+                        ToolTip = 'Shows all Gamer document delivery records for this Purchase Order.';
+
+                        trigger OnAction()
+                        var
+                            DeliveryLog: Record "GPI Document Delivery Log";
+                        begin
+                            DeliveryLog.SetRange("Source Table ID", Database::"Purchase Header");
+                            DeliveryLog.SetRange("Source Document Type", Format(Rec."Document Type"));
+                            DeliveryLog.SetRange("Source Document No.", Rec."No.");
+                            Page.Run(Page::"GPI Document Delivery Log", DeliveryLog);
+                        end;
+                    }
+
+                    action(GPIPurchaseOrderRoutingRules)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Routing Rules';
+                        Image = Setup;
+                        RunObject = page "GPI Document Routing Rules";
+                        ToolTip = 'Opens vendor, location, and document-specific recipient rules.';
+                    }
+
+                    action(GPIPurchaseOrderSentHistory)
+                    {
+                        ApplicationArea = All;
+                        Caption = 'Sent Email History';
+                        Image = Email;
+                        ToolTip = 'Shows native Business Central sent emails related to this Purchase Order.';
+
+                        trigger OnAction()
+                        var
+                            Email: Codeunit Email;
+                        begin
+                            Email.OpenSentEmails(Rec);
+                        end;
+                    }
+                }
             }
         }
     }
+
+    trigger OnAfterGetRecord()
+    begin
+        SetDocumentActionState();
+    end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        SetDocumentActionState();
+    end;
+
+    local procedure SetDocumentActionState()
+    begin
+        IsDropShipPurchaseOrder := Rec."Location Code" = '00';
+        IsWarehousePurchaseOrder := (Rec."Location Code" <> '') and (Rec."Location Code" <> '00');
+    end;
+
+    var
+        IsDropShipPurchaseOrder: Boolean;
+        IsWarehousePurchaseOrder: Boolean;
 }

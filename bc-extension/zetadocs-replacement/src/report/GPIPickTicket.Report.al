@@ -45,8 +45,16 @@ report 70522 "GPI Pick Ticket"
                 column(LineDescription; Description) { }
                 column(LineDescription2; "Description 2") { }
                 column(LineLocationCode; "Location Code") { }
-                column(Quantity; Quantity) { }
-                column(UnitOfMeasureCode; "Unit of Measure Code") { }
+                column(Quantity; WarehouseQuantity) { }
+                column(UnitOfMeasureCode; WarehouseUnitOfMeasureCode) { }
+
+                trigger OnAfterGetRecord()
+                begin
+                    DocumentPolicy.GetSalesLineWarehouseDisplay(
+                        SalesLine,
+                        WarehouseQuantity,
+                        WarehouseUnitOfMeasureCode);
+                end;
             }
 
             trigger OnAfterGetRecord()
@@ -141,9 +149,12 @@ report 70522 "GPI Pick Ticket"
 
     var
         CompanyInfo: Record "Company Information";
+        DocumentPolicy: Codeunit "GPI Document Policy Mgt.";
         WarehouseDisplayName: Text[150];
         SalespersonName: Text[100];
         InsideSalespersonName: Text[100];
         BackupInsideSalespersonName: Text[100];
         ContactLine: Text[250];
+        WarehouseQuantity: Decimal;
+        WarehouseUnitOfMeasureCode: Code[10];
 }

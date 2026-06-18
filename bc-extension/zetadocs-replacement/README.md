@@ -11,7 +11,7 @@ A Business Central replacement for selected Zetadocs document-generation, email,
 - Pick Ticket
 - Blanket Sales Order
 
-Sales Order Confirmation and Pick Ticket can be previewed while Open, but sending requires a Released Sales Order. Prepayment Notice can be previewed in any status, but sending requires the installed prepayment-status field to be Pending Prepayment.
+Sales Order Confirmation and Pick Ticket can be previewed while Open, but sending requires a Released Sales Order. Prepayment Notice can be previewed in any status, but sending requires the Sales Header Status to display Pending Prepayment.
 
 Customer-specific routing rules are evaluated first. When no customer-specific rule supplies the recipient, Sales Order Confirmation, Blanket Sales Order, and Prepayment Notice use the contact selected on the source order. Pick Ticket uses the Location Card email.
 

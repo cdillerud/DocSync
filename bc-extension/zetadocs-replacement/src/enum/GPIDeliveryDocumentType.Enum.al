@@ -42,4 +42,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Warehouse Receiving Notice';
     }
+
+    value(8; "Credit Memo")
+    {
+        Caption = 'Credit Memo';
+    }
 }

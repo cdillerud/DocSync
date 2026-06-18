@@ -45,13 +45,21 @@ report 70527 "GPI Warehouse Receiving Notice"
 
                 column(ItemNo; "No.") { }
                 column(LineDescription; Description) { }
-                column(Quantity; Quantity) { }
-                column(UnitOfMeasureCode; "Unit of Measure Code") { }
+                column(Quantity; WarehouseQuantity) { }
+                column(UnitOfMeasureCode; WarehouseUnitOfMeasureCode) { }
                 column(LineExpectedReceiptDate; "Expected Receipt Date") { }
 
                 trigger OnPreDataItem()
                 begin
                     SetFilter("No.", '<>%1', '');
+                end;
+
+                trigger OnAfterGetRecord()
+                begin
+                    DocumentPolicy.GetPurchaseLineWarehouseDisplay(
+                        PurchaseLine,
+                        WarehouseQuantity,
+                        WarehouseUnitOfMeasureCode);
                 end;
             }
 
@@ -115,6 +123,7 @@ report 70527 "GPI Warehouse Receiving Notice"
 
     var
         CompanyInfo: Record "Company Information";
+        DocumentPolicy: Codeunit "GPI Document Policy Mgt.";
         LocationName: Text[100];
         LocationAddress: Text[100];
         LocationCityStateZip: Text[150];
@@ -122,4 +131,6 @@ report 70527 "GPI Warehouse Receiving Notice"
         ShipmentMethodDescription: Text[100];
         PurchaserName: Text[100];
         ContactLine: Text[250];
+        WarehouseQuantity: Decimal;
+        WarehouseUnitOfMeasureCode: Code[10];
 }

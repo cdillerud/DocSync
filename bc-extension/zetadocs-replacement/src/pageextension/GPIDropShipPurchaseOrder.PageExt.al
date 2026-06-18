@@ -16,7 +16,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPreviewDropShipPO)
                     {
                         ApplicationArea = All;
-                        Caption = 'Preview';
+                        Caption = 'Gamer Preview Drop Ship PO';
                         Image = Print;
                         ToolTip = 'Previews the Gamer-owned drop-ship Purchase Order without creating an email or delivery record.';
 
@@ -35,7 +35,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIEmailDropShipPO)
                     {
                         ApplicationArea = All;
-                        Caption = 'Email';
+                        Caption = 'Gamer Email Drop Ship PO';
                         Image = Email;
                         ToolTip = 'Creates the Gamer-owned drop-ship Purchase Order PDF and opens an email from the current Business Central user for review.';
 
@@ -61,7 +61,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPreviewWarehousePO)
                     {
                         ApplicationArea = All;
-                        Caption = 'Preview';
+                        Caption = 'Gamer Preview Warehouse PO';
                         Image = Print;
                         ToolTip = 'Previews the Gamer-owned warehouse Purchase Order without creating an email or delivery record.';
 
@@ -80,7 +80,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIEmailWarehousePO)
                     {
                         ApplicationArea = All;
-                        Caption = 'Email';
+                        Caption = 'Gamer Email Warehouse PO';
                         Image = Email;
                         ToolTip = 'Creates the Gamer-owned warehouse Purchase Order PDF and opens an email from the current Business Central user for review.';
 
@@ -106,7 +106,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPreviewWarehouseReceiving)
                     {
                         ApplicationArea = All;
-                        Caption = 'Preview';
+                        Caption = 'Gamer Preview WRN';
                         Image = Print;
                         ToolTip = 'Previews the Gamer-owned warehouse receiving notice without creating an email or delivery record.';
 
@@ -125,9 +125,9 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIEmailWarehouseReceiving)
                     {
                         ApplicationArea = All;
-                        Caption = 'Email';
+                        Caption = 'Gamer Email WRN';
                         Image = Email;
-                        ToolTip = 'Creates the warehouse receiving notice PDF and opens an email from the current Business Central user for review.';
+                        ToolTip = 'Creates the Gamer-owned warehouse receiving notice PDF and opens an email from the current Business Central user for review.';
 
                         trigger OnAction()
                         var
@@ -150,7 +150,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPurchaseOrderDeliveryLog)
                     {
                         ApplicationArea = All;
-                        Caption = 'Delivery Log';
+                        Caption = 'Gamer Document Delivery Log';
                         Image = Log;
                         ToolTip = 'Shows all Gamer document delivery records for this Purchase Order.';
 
@@ -168,7 +168,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPurchaseOrderRoutingRules)
                     {
                         ApplicationArea = All;
-                        Caption = 'Routing Rules';
+                        Caption = 'Gamer Document Routing Rules';
                         Image = Setup;
                         RunObject = page "GPI Document Routing Rules";
                         ToolTip = 'Opens vendor, location, and document-specific recipient rules.';
@@ -177,7 +177,7 @@ pageextension 70514 "GPI Purchase Order Docs Ext" extends "Purchase Order"
                     action(GPIPurchaseOrderSentHistory)
                     {
                         ApplicationArea = All;
-                        Caption = 'Sent Email History';
+                        Caption = 'Gamer Sent Email History';
                         Image = Email;
                         ToolTip = 'Shows native Business Central sent emails related to this Purchase Order.';
 

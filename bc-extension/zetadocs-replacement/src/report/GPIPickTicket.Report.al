@@ -36,7 +36,6 @@ report 70522 "GPI Pick Ticket"
             column(ContactLine; ContactLine) { }
             column(CustomerNo; "Sell-to Customer No.") { }
             column(CustomerPONo; "External Document No.") { }
-            column(ShippingAgentDescription; ShippingAgentDescription) { }
 
             dataitem(SalesLine; "Sales Line")
             {
@@ -53,7 +52,6 @@ report 70522 "GPI Pick Ticket"
             trigger OnAfterGetRecord()
             var
                 Location: Record Location;
-                ShippingAgent: Record "Shipping Agent";
                 Salesperson: Record "Salesperson/Purchaser";
                 PrimaryCode: Code[20];
                 BackupCode: Code[20];
@@ -64,10 +62,6 @@ report 70522 "GPI Pick Ticket"
                     if Location."Name 2" <> '' then
                         WarehouseDisplayName := WarehouseDisplayName + ' ' + Location."Name 2";
                 end;
-
-                Clear(ShippingAgentDescription);
-                if ShippingAgent.Get("Shipping Agent Code") then
-                    ShippingAgentDescription := ShippingAgent.Name;
 
                 Clear(SalespersonName);
                 if Salesperson.Get("Salesperson Code") then
@@ -148,7 +142,6 @@ report 70522 "GPI Pick Ticket"
     var
         CompanyInfo: Record "Company Information";
         WarehouseDisplayName: Text[150];
-        ShippingAgentDescription: Text[100];
         SalespersonName: Text[100];
         InsideSalespersonName: Text[100];
         BackupInsideSalespersonName: Text[100];

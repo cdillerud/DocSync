@@ -98,7 +98,7 @@ The invoice batch is blocked when the scenario is not assigned.
 
 - Name: `GPI Sales Document Email`
 - Publisher: `Gamer Packaging`
-- Version: `0.15.1.1`
+- Version: `0.15.1.2`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
 - Platform: Business Central 28.0

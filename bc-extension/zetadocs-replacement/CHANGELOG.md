@@ -13,15 +13,11 @@ The project follows four-part Business Central app versioning:
 
 ## Unreleased - Planned 0.16.0.0
 
-### Rhonda review follow-up
+### Rhonda review follow-up still awaiting clarification
 
-- Add a **Gamer Documents** menu to the Customer Card.
-- Add a **Gamer Documents** menu to the Sales Orders list page.
 - Make Pick Ticket UOM use the Item Card warehouse unit of measure.
 - Make Warehouse Receiving Notice UOM use the Item Card warehouse unit of measure.
 - Change sales-document customer recipient selection to the customer's primary contact.
-- Remove Shipping Agent from the Pick Ticket.
-- Clearly label Gamer-owned report actions.
 - Update Purchase Order sent indicators only after the corresponding email is actually sent.
 - Update Warehouse Receiving Notice sent indicator only after the email is actually sent.
 - Require Released status before sending:
@@ -31,11 +27,7 @@ The project follows four-part Business Central app versioning:
   - Warehouse Receiving Notice
 - Require Pending Prepayment status before sending a Prepayment Notice.
 - Send Warehouse Purchase Orders from the ISR associated with the Purchase Header.
-- Send Warehouse Receiving Notices to the Location Card email.
-- Send Pick Tickets to the Location Card email.
 - Add an option to omit selected document lines from generated documents.
-- Remove terms-and-conditions language from the Pick Ticket.
-- Remove terms-and-conditions language from the Warehouse Receiving Notice.
 
 ### Clarification required
 
@@ -44,7 +36,39 @@ The project follows four-part Business Central app versioning:
 - Exact Business Central field/value representing Pending Prepayment.
 - Whether primary-contact routing applies only to customer-facing sales documents or literally every document type.
 - Required behavior for omitting document lines.
-- Desired wording for Gamer-owned action labels.
+- Exact Item Card field to use as the warehouse unit of measure.
+- Whether previews remain available while documents are not in the required status.
+
+### Already confirmed in the current build
+
+- Pick Tickets resolve the primary recipient from the Location Card email.
+- Warehouse Receiving Notices resolve the primary recipient from the Location Card email.
+- The Warehouse Receiving Notice layout does not contain terms-and-conditions language.
+
+## 0.15.1.0
+
+### Added
+
+- Added a **Gamer Documents** menu to the Customer Card.
+- Added a **Gamer Documents** menu to the Sales Orders list page.
+- Added customer-filtered Gamer Delivery Log and Routing Rules navigation from the Customer Card.
+- Added Sales Order Confirmation, Prepayment Notice, and Pick Ticket preview and email actions to the Sales Orders list page.
+
+### Changed
+
+- Labeled Gamer-owned preview, email, delivery-log, routing-rule, and sent-history actions consistently on:
+  - Sales Order
+  - Sales Orders list
+  - Blanket Sales Order
+  - Purchase Order
+  - Posted Sales Invoice queue
+  - Posted Sales Invoices list
+- Removed Shipping Agent from the Pick Ticket report and dataset.
+- Removed Gamer terms-and-conditions language and URL from the Pick Ticket while retaining the FIFO warehouse instruction and company footer.
+
+### Verified
+
+- Warehouse Receiving Notices already contained no Gamer terms-and-conditions language, so no report change was required.
 
 ## 0.15.0.0
 

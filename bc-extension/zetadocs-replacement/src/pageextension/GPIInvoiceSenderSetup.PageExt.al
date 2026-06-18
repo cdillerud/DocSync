@@ -59,7 +59,7 @@ pageextension 70520 "GPI Invoice Sender Setup" extends "GPI Posted Invoice Queue
 
                 trigger OnAction()
                 begin
-                    Page.RunModal(Page::"Email Scenario Assignment");
+                    Page.RunModal(Page::"Email Scenario Setup");
                     RefreshAccountingSender();
                     CurrPage.Update(false);
                 end;

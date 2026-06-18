@@ -20,6 +20,7 @@ pageextension 70514 "GPI Drop Ship PO Ext" extends "Purchase Order"
                     PurchaseHeader: Record "Purchase Header";
                 begin
                     CurrPage.SaveRecord();
+                    Commit();
                     PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                     DropShipPOEmail.Preview(PurchaseHeader);
                 end;
@@ -41,6 +42,7 @@ pageextension 70514 "GPI Drop Ship PO Ext" extends "Purchase Order"
                     PurchaseHeader: Record "Purchase Header";
                 begin
                     CurrPage.SaveRecord();
+                    Commit();
                     PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                     DropShipPOEmail.OpenDraft(PurchaseHeader);
                     CurrPage.Update(false);

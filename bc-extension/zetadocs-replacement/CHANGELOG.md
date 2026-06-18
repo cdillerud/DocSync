@@ -11,6 +11,15 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.2.1
+
+### Fixed
+
+- Replaced direct references to internal `Email Outbox` fields with Microsoft-supported public APIs.
+- Draft lookup now uses the public `GetMessageId()`, `GetAccountId()`, and `GetConnector()` record methods.
+- Draft status validation now uses `Email.GetOutboxEmailRecordStatus()`.
+- Resolved compiler errors `AL0118` and `AL0161` for the internal Message Id, Status, Account Id, and Connector fields.
+
 ## 0.16.2.0
 
 ### Added
@@ -162,7 +171,7 @@ The project follows four-part Business Central app versioning:
 ### Changed
 
 - Manual document uploads use Business Central's native Document Attachment framework rather than a custom browser control.
-- GPI-generated PDFs continue using the Zetadocs-compatible archive structure.
+- GPI-generated PDFs continue using the Zetadocs-compatible date/customer structure.
 
 ## 0.14.x
 

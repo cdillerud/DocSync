@@ -99,7 +99,19 @@ pageextension 70514 "GPI Drop Ship PO Ext" extends "Purchase Order"
 
     trigger OnAfterGetRecord()
     begin
-        IsDropShipPurchaseOrder := Rec."Location Code" = '00';
+        SetDropShipVisibility();
+    end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        SetDropShipVisibility();
+    end;
+
+    local procedure SetDropShipVisibility()
+    begin
+        IsDropShipPurchaseOrder :=
+            (Rec."Document Type" = Rec."Document Type"::Order) and
+            (Rec."Location Code" = '00');
     end;
 
     var

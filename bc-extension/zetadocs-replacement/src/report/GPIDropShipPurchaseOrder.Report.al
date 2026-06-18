@@ -76,7 +76,6 @@ report 70525 "GPI Drop Ship Purchase Order"
             var
                 PaymentTerms: Record "Payment Terms";
                 ShipmentMethod: Record "Shipment Method";
-                Purchaser: Record "Salesperson/Purchaser";
             begin
                 TestField("Location Code", '00');
                 CalcFields(Amount, "Amount Including VAT");
@@ -89,9 +88,7 @@ report 70525 "GPI Drop Ship Purchase Order"
                 if ShipmentMethod.Get("Shipment Method Code") then
                     ShipmentMethodDescription := ShipmentMethod.Description;
 
-                Clear(PurchaserName);
-                if Purchaser.Get("Purchaser Code") then
-                    PurchaserName := Purchaser.Name;
+                ResolvePurchaserName(PurchaseHeader);
 
                 CurrencyCode := "Currency Code";
                 if CurrencyCode = '' then
@@ -124,6 +121,62 @@ report 70525 "GPI Drop Ship Purchase Order"
         CompanyInfo.Get();
         CompanyInfo.CalcFields(Picture);
         GeneralLedgerSetup.Get();
+    end;
+
+    local procedure ResolvePurchaserName(PurchaseHeader: Record "Purchase Header")
+    var
+        Salesperson: Record "Salesperson/Purchaser";
+        SalespersonCode: Code[20];
+    begin
+        Clear(PurchaserName);
+
+        if (PurchaseHeader."Purchaser Code" <> '') and Salesperson.Get(PurchaseHeader."Purchaser Code") then begin
+            PurchaserName := Salesperson.Name;
+            exit;
+        end;
+
+        SalespersonCode := FindSalespersonCode(PurchaseHeader, false);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then begin
+            PurchaserName := Salesperson.Name;
+            exit;
+        end;
+
+        SalespersonCode := FindSalespersonCode(PurchaseHeader, true);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
+            PurchaserName := Salesperson.Name;
+    end;
+
+    local procedure FindSalespersonCode(PurchaseHeader: Record "Purchase Header"; InsideSales: Boolean): Code[20]
+    var
+        PurchaseHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateIdentity: Text;
+        CandidateValue: Text;
+        IsInsideSalesField: Boolean;
+    begin
+        PurchaseHeaderRef.GetTable(PurchaseHeader);
+
+        for FieldIndex := 1 to PurchaseHeaderRef.FieldCount do begin
+            CandidateField := PurchaseHeaderRef.FieldIndex(FieldIndex);
+            CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            IsInsideSalesField :=
+                (StrPos(CandidateIdentity, 'inside salesperson') > 0) or
+                (StrPos(CandidateIdentity, 'inside sales') > 0) or
+                (StrPos(CandidateIdentity, 'isr') > 0);
+
+            if (StrPos(CandidateIdentity, 'salesperson') > 0) and
+               (StrPos(CandidateIdentity, 'backup') = 0) and
+               (StrPos(CandidateIdentity, 'purchaser') = 0) and
+               (IsInsideSalesField = InsideSales)
+            then begin
+                CandidateValue := DelChr(Format(CandidateField.Value), '<>', ' ');
+                if CandidateValue <> '' then
+                    exit(CopyStr(CandidateValue, 1, 20));
+            end;
+        end;
+
+        exit('');
     end;
 
     local procedure BuildContactLine()

@@ -151,14 +151,14 @@ codeunit 70520 "GPI Document Policy Mgt."
         FieldIndex: Integer;
         FieldIdentity: Text;
         CurrentStatus: Text;
-        PrepaymentStatusFieldFound: Boolean;
     begin
         SalesHeaderRef.GetTable(SalesHeader);
         for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
             CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
             FieldIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
-            if (StrPos(FieldIdentity, 'prepayment') > 0) and (StrPos(FieldIdentity, 'status') > 0) then begin
-                PrepaymentStatusFieldFound := true;
+            if (StrPos(FieldIdentity, 'prepayment') > 0) and
+               (StrPos(FieldIdentity, 'status') > 0)
+            then begin
                 CurrentStatus := DelChr(Format(CandidateField.Value), '<>', ' ');
                 if LowerCase(CurrentStatus) <> 'pending prepayment' then
                     Error(
@@ -170,10 +170,9 @@ codeunit 70520 "GPI Document Policy Mgt."
             end;
         end;
 
-        if not PrepaymentStatusFieldFound then
-            Error(
-                'The Prepayment Status field could not be identified on Sales Order %1. Confirm the installed field caption or ID before sending.',
-                SalesHeader."No.");
+        Error(
+            'The Prepayment Status field could not be identified on Sales Order %1. Confirm the installed field caption or ID before sending.',
+            SalesHeader."No.");
     end;
 
     local procedure ResolveSalesRecipients(SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRoutingRuleEntries: Text[250])
@@ -365,10 +364,7 @@ codeunit 70520 "GPI Document Policy Mgt."
     var
         Location: Record Location;
     begin
-        if LocationCode = '' then
-            exit('');
-
-        if Location.Get(LocationCode) then
+        if (LocationCode <> '') and Location.Get(LocationCode) then
             exit(Location."E-Mail");
 
         exit('');
@@ -398,14 +394,28 @@ codeunit 70520 "GPI Document Policy Mgt."
         exit('');
     end;
 
-    local procedure GetInsideSalespersonCode(SourceRecord: Variant): Code[20]
+    local procedure GetInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
     var
         SourceRecordRef: RecordRef;
+    begin
+        SourceRecordRef.GetTable(SalesHeader);
+        exit(FindInsideSalespersonCode(SourceRecordRef));
+    end;
+
+    local procedure GetInsideSalespersonCode(PurchaseHeader: Record "Purchase Header"): Code[20]
+    var
+        SourceRecordRef: RecordRef;
+    begin
+        SourceRecordRef.GetTable(PurchaseHeader);
+        exit(FindInsideSalespersonCode(SourceRecordRef));
+    end;
+
+    local procedure FindInsideSalespersonCode(SourceRecordRef: RecordRef): Code[20]
+    var
         CandidateField: FieldRef;
         FieldIndex: Integer;
         CandidateIdentity: Text;
     begin
-        SourceRecordRef.GetTable(SourceRecord);
         for FieldIndex := 1 to SourceRecordRef.FieldCount do begin
             CandidateField := SourceRecordRef.FieldIndex(FieldIndex);
             CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);

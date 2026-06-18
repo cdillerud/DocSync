@@ -38,6 +38,15 @@ Warehouse Purchase Orders and Warehouse Receiving Notices can be previewed while
 
 The extension reuses the existing Boyer Purchase Header sent indicators. **PO Sent** is set only after a Drop Ship or Warehouse Purchase Order email is actually sent. **Whse. Receiving Notice Sent** is set only after a Warehouse Receiving Notice is actually sent. Preview, draft, discard, and failed outcomes do not change either field. Reopening a Purchase Order resets **PO Sent** to No, while manual edits remain available.
 
+## Saved email drafts
+
+The GPI Document Delivery Log includes two draft-management actions:
+
+- **Open Draft Email** reopens the exact native Business Central draft associated with the selected **Saved As Draft** delivery entry.
+- **Email Outbox** opens the native Business Central outbox so the current user can review all drafts, queued messages, and failed emails available under the configured email view policy.
+
+When a reopened draft is sent, saved again, or discarded, the existing delivery log entry is updated rather than creating a duplicate. Sending a reopened Purchase Order or Warehouse Receiving Notice draft also triggers the existing sent-indicator update.
+
 ## Warehouse unit of measure
 
 Pick Ticket and Warehouse Receiving Notice line quantities use the Item Card **Whse Unit of Measure Code**. The displayed quantity is calculated as:
@@ -128,7 +137,7 @@ Business Central requires a registered Email Account, including Account ID and c
 
 - Name: `GPI Sales Document Email`
 - Publisher: `Gamer Packaging`
-- Version: `0.16.1.1`
+- Version: `0.16.2.0`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
 - Platform: Business Central 28.0
@@ -147,6 +156,8 @@ For each document type, confirm:
 6. Delivery Log status and metadata
 7. SharePoint archive status and link
 8. Native Sent Email History resolves correctly
+
+For saved drafts, select a **Saved As Draft** entry in the GPI Document Delivery Log, choose **Open Draft Email**, and confirm that the original recipients, subject, body, PDF attachment, and sender account are preserved. Test Save As Draft again, Discard, and Send; confirm the same delivery log entry changes status appropriately and no duplicate entry is created.
 
 For Purchase Orders, verify **PO Sent** remains unchanged for preview, draft, discard, and failure; changes to Yes only after an actual send; and resets to No when the order is reopened. For Warehouse Receiving Notices, verify **Whse. Receiving Notice Sent** changes to Yes only after an actual send. Manual toggling of the existing fields must remain available.
 

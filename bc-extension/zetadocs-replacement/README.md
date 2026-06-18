@@ -128,7 +128,7 @@ Business Central requires a registered Email Account, including Account ID and c
 
 - Name: `GPI Sales Document Email`
 - Publisher: `Gamer Packaging`
-- Version: `0.16.1.0`
+- Version: `0.16.1.1`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
 - Platform: Business Central 28.0

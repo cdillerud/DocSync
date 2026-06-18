@@ -11,6 +11,20 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.2.0
+
+### Added
+
+- Added **Open Draft Email** to the GPI Document Delivery Log for entries whose status is **Saved As Draft**.
+- Added **Email Outbox** navigation from the GPI Document Delivery Log to review all native Business Central drafts, queued messages, and failed emails available to the current user.
+- Added draft email management that reopens the exact native Business Central email message and preserves its existing email account and connector.
+
+### Changed
+
+- Reopening a draft updates the existing GPI Delivery Log entry rather than creating a duplicate.
+- Sending a reopened draft changes the existing delivery log status to **Sent**, records the external delivery ID, and triggers the existing Purchase Order or Warehouse Receiving Notice sent-indicator synchronization.
+- Re-saving or discarding a reopened draft updates the same delivery log entry to **Saved As Draft** or **Discarded**.
+
 ## 0.16.1.1
 
 ### Fixed

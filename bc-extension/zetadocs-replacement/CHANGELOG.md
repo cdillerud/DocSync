@@ -11,6 +11,24 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.1.0
+
+### Added
+
+- Added sent-indicator synchronization for the existing Boyer Purchase Header fields identified in the Gamer sandbox:
+  - **PO Sent** (field `50006`)
+  - **Whse. Receiving Notice Sent** (field `50007`)
+- Added execute permission for the new purchase sent-status synchronization codeunit.
+
+### Changed
+
+- **PO Sent** is set to `true` only when a Drop Ship or Warehouse Purchase Order delivery log transitions to **Sent**.
+- **Whse. Receiving Notice Sent** is set to `true` only when a Warehouse Receiving Notice delivery log transitions to **Sent**.
+- Preview, Saved As Draft, Discarded, and Failed outcomes do not change either sent indicator.
+- Reopening a Purchase Order resets **PO Sent** to `false`.
+- Manual edits remain possible; changing **PO Sent** while an order is already Open is not overridden.
+- The Boyer fields are accessed by confirmed field number through `RecordRef`/`FieldRef`, avoiding a hard extension dependency.
+
 ## 0.16.0.2
 
 ### Fixed

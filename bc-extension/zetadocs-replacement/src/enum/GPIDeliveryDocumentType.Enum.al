@@ -37,4 +37,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Purchase Order - Warehouse';
     }
+
+    value(7; "Warehouse Receiving Notice")
+    {
+        Caption = 'Warehouse Receiving Notice';
+    }
 }

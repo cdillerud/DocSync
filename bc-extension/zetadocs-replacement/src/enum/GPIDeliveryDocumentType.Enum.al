@@ -22,4 +22,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Invoice';
     }
+
+    value(4; "Blanket Sales Order")
+    {
+        Caption = 'Blanket Sales Order';
+    }
 }

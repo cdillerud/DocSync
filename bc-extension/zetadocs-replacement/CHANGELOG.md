@@ -45,6 +45,13 @@ The project follows four-part Business Central app versioning:
 - Warehouse Receiving Notices resolve the primary recipient from the Location Card email.
 - The Warehouse Receiving Notice layout does not contain terms-and-conditions language.
 
+## 0.15.1.2
+
+### Fixed
+
+- Restored equal heights for the two Pick Ticket detail boxes after removing Shipping Agent.
+- Corrected the uneven red-border alignment above the line table.
+
 ## 0.15.1.1
 
 ### Fixed

@@ -4,8 +4,12 @@ codeunit 70519 "GPI Archive Path Mgt."
     var
         ParentPath: Text;
     begin
-        EnsureDirectory(Storage, Setup."Root Folder");
-        ParentPath := Storage.CombinePath(Setup."Root Folder", GetDateFolder(LogEntry));
+        if Setup."Root Folder" <> '' then begin
+            EnsureDirectory(Storage, Setup."Root Folder");
+            ParentPath := Storage.CombinePath(Setup."Root Folder", GetDateFolder(LogEntry));
+        end else
+            ParentPath := GetDateFolder(LogEntry);
+
         EnsureDirectory(Storage, ParentPath);
         ParentPath := Storage.CombinePath(ParentPath, SanitizeSegment(GetPartyName(LogEntry)));
         EnsureDirectory(Storage, ParentPath);
@@ -49,7 +53,7 @@ codeunit 70519 "GPI Archive Path Mgt."
     procedure EnsureDirectory(var Storage: Codeunit "External File Storage"; Path: Text)
     begin
         if Path = '' then
-            Error('An archive folder path is blank.');
+            exit;
         if Storage.DirectoryExists(Path) then
             exit;
         if not Storage.CreateDirectory(Path) then

@@ -36,6 +36,8 @@ Purchase Order actions are consolidated under **Actions > Gamer Documents**.
 
 Warehouse Purchase Orders and Warehouse Receiving Notices can be previewed while Open, but sending requires a Released Purchase Order. Warehouse Purchase Orders are composed from the Business Central Email Account whose address matches the ISR email on the Purchase Header. Each ISR sender address must therefore be registered in **Email Accounts**.
 
+The extension reuses the existing Boyer Purchase Header sent indicators. **PO Sent** is set only after a Drop Ship or Warehouse Purchase Order email is actually sent. **Whse. Receiving Notice Sent** is set only after a Warehouse Receiving Notice is actually sent. Preview, draft, discard, and failed outcomes do not change either field. Reopening a Purchase Order resets **PO Sent** to No, while manual edits remain available.
+
 ## Warehouse unit of measure
 
 Pick Ticket and Warehouse Receiving Notice line quantities use the Item Card **Whse Unit of Measure Code**. The displayed quantity is calculated as:
@@ -126,7 +128,7 @@ Business Central requires a registered Email Account, including Account ID and c
 
 - Name: `GPI Sales Document Email`
 - Publisher: `Gamer Packaging`
-- Version: `0.16.0.0`
+- Version: `0.16.1.0`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
 - Platform: Business Central 28.0
@@ -146,11 +148,12 @@ For each document type, confirm:
 7. SharePoint archive status and link
 8. Native Sent Email History resolves correctly
 
+For Purchase Orders, verify **PO Sent** remains unchanged for preview, draft, discard, and failure; changes to Yes only after an actual send; and resets to No when the order is reopened. For Warehouse Receiving Notices, verify **Whse. Receiving Notice Sent** changes to Yes only after an actual send. Manual toggling of the existing fields must remain available.
+
 For Pick Ticket and Warehouse Receiving Notice, test both pallet and case Item UOM conversions. For manual attachments, confirm multiple files can be added from the standard Documents factbox and that the external-storage fields show the files as stored externally.
 
 ## Deferred items
 
-- Purchase Order and Warehouse Receiving Notice sent-indicator integration requires the exact existing field IDs and captions from the Gamer sandbox metadata.
 - Warehouse Receiving Notice sender policy is still TBD.
 - Line exclusion remains pending business clarification.
 - Posted Sales Credit Memo email workflow is not currently implemented.

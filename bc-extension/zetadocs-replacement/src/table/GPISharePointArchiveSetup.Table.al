@@ -1,4 +1,4 @@
-table 70512 "GPI SharePoint Archive Setup"
+table 70513 "GPI SharePoint Archive Setup"
 {
     Caption = 'GPI SharePoint Archive Setup';
     DataClassification = SystemMetadata;

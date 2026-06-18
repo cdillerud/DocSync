@@ -1,4 +1,4 @@
-pageextension 70514 "GPI Drop Ship Purchase Order Ext" extends "Purchase Order"
+pageextension 70514 "GPI Drop Ship PO Ext" extends "Purchase Order"
 {
     actions
     {

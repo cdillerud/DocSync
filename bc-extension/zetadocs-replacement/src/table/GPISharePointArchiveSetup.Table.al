@@ -16,26 +16,11 @@ table 70512 "GPI SharePoint Archive Setup"
             Caption = 'Enabled';
             DataClassification = SystemMetadata;
         }
-        field(3; "Tenant ID"; Text[100])
+        field(5; "SharePoint Web Base URL"; Text[250])
         {
-            Caption = 'Tenant ID';
-            DataClassification = OrganizationIdentifiableInformation;
-        }
-        field(4; "Client ID"; Text[100])
-        {
-            Caption = 'Client ID';
-            DataClassification = OrganizationIdentifiableInformation;
-        }
-        field(5; "SharePoint Site URL"; Text[250])
-        {
-            Caption = 'SharePoint Site URL';
+            Caption = 'SharePoint Web Base URL';
             DataClassification = OrganizationIdentifiableInformation;
             ExtendedDatatype = URL;
-        }
-        field(6; "Drive ID"; Text[250])
-        {
-            Caption = 'Drive ID';
-            DataClassification = OrganizationIdentifiableInformation;
         }
         field(7; "Root Folder"; Text[250])
         {
@@ -81,12 +66,8 @@ table 70512 "GPI SharePoint Archive Setup"
     begin
         if "Primary Key" = '' then
             "Primary Key" := 'SETUP';
-        if "Tenant ID" = '' then
-            "Tenant ID" := 'c7b2de14-71d9-4c49-a0b9-2bec103a6fdc';
-        if "SharePoint Site URL" = '' then
-            "SharePoint Site URL" := 'https://gamerpackaging1.sharepoint.com/sites/DocsNAV';
-        if "Drive ID" = '' then
-            "Drive ID" := 'b!sGwtDnGpU0SknFYQW3UCWWUMVN5OAqNNqrsMXnSKBw-YAHZMq-H6QZCZOp4jgXfD';
+        if "SharePoint Web Base URL" = '' then
+            "SharePoint Web Base URL" := 'https://gamerpackaging1.sharepoint.com/sites/DocsNAV';
         if "Root Folder" = '' then
             "Root Folder" := 'Zetadocs';
         if "Sales Folder" = '' then

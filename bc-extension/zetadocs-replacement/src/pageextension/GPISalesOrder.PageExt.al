@@ -12,7 +12,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIEmailOrderConfirmation)
                 {
                     ApplicationArea = All;
-                    Caption = 'Email Order Confirmation';
+                    Caption = 'Gamer Email Order Confirmation';
                     Image = Email;
                     Promoted = true;
                     PromotedCategory = Process;
@@ -34,7 +34,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIEmailPrepaymentNotice)
                 {
                     ApplicationArea = All;
-                    Caption = 'Email Prepayment Notice';
+                    Caption = 'Gamer Email Prepayment Notice';
                     Image = Email;
                     Promoted = true;
                     PromotedCategory = Process;
@@ -56,7 +56,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIEmailPickTicket)
                 {
                     ApplicationArea = All;
-                    Caption = 'Email Pick Ticket';
+                    Caption = 'Gamer Email Pick Ticket';
                     Image = Email;
                     Promoted = true;
                     PromotedCategory = Process;
@@ -78,7 +78,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIPreviewOwnedOrderConfirmation)
                 {
                     ApplicationArea = All;
-                    Caption = 'Preview Order Confirmation';
+                    Caption = 'Gamer Preview Order Confirmation';
                     Image = Print;
                     ToolTip = 'Previews the Gamer-owned Order Confirmation without creating an email or delivery record.';
 
@@ -96,7 +96,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIPreviewOwnedPrepaymentNotice)
                 {
                     ApplicationArea = All;
-                    Caption = 'Preview Prepayment Notice';
+                    Caption = 'Gamer Preview Prepayment Notice';
                     Image = Print;
                     ToolTip = 'Previews the Gamer-owned Prepayment Notice without creating an email or delivery record.';
 
@@ -114,7 +114,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIPreviewOwnedPickTicket)
                 {
                     ApplicationArea = All;
-                    Caption = 'Preview Pick Ticket';
+                    Caption = 'Gamer Preview Pick Ticket';
                     Image = Print;
                     ToolTip = 'Previews the Gamer-owned Pick Ticket without creating an email or delivery record.';
 
@@ -132,7 +132,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIViewDeliveryLog)
                 {
                     ApplicationArea = All;
-                    Caption = 'Document Delivery Log';
+                    Caption = 'Gamer Document Delivery Log';
                     Image = Log;
                     ToolTip = 'Shows Gamer document delivery records for this Sales Order.';
 
@@ -148,7 +148,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIViewRoutingRules)
                 {
                     ApplicationArea = All;
-                    Caption = 'Document Routing Rules';
+                    Caption = 'Gamer Document Routing Rules';
                     Image = Setup;
                     RunObject = page "GPI Document Routing Rules";
                     ToolTip = 'Opens customer, vendor, location, and document-specific email recipient rules.';
@@ -157,7 +157,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                 action(GPIViewNativeSentEmails)
                 {
                     ApplicationArea = All;
-                    Caption = 'Sent Email History';
+                    Caption = 'Gamer Sent Email History';
                     Image = Email;
                     ToolTip = 'Shows native Business Central sent emails related to this Sales Order.';
 

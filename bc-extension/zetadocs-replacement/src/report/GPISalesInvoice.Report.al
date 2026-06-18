@@ -71,6 +71,11 @@ report 70523 "GPI Sales Invoice"
                 column(UnitPrice; "Unit Price") { }
                 column(LineDiscountPercent; "Line Discount %") { }
                 column(LineAmount; "Line Amount") { }
+
+                trigger OnPreDataItem()
+                begin
+                    SetFilter("No.", '<>%1', '');
+                end;
             }
 
             trigger OnAfterGetRecord()

@@ -2,6 +2,7 @@ codeunit 70512 "GPI Blanket Sales Order Email"
 {
     procedure OpenDraft(var SalesHeader: Record "Sales Header")
     var
+        DocumentPolicy: Codeunit "GPI Document Policy Mgt.";
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -25,14 +26,16 @@ codeunit 70512 "GPI Blanket Sales Order Email"
         SalesHeader.TestField("No.");
         SalesHeader.TestField("Sell-to Customer No.");
 
-        BuildCustomerRecipients(SalesHeader, ToRecipients);
-        AddDefaultCcRecipients(SalesHeader, ToRecipients, CCRecipients);
-        ApplyRoutingRules(SalesHeader, ToRecipients, CCRecipients, BCCRecipients, AppliedRoutingRuleEntries);
-        NormalizeRecipientLists(ToRecipients, CCRecipients, BCCRecipients);
+        DocumentPolicy.ResolveBlanketSalesOrderRecipients(
+            SalesHeader,
+            ToRecipients,
+            CCRecipients,
+            BCCRecipients,
+            AppliedRoutingRuleEntries);
 
         if ToRecipients.Count() = 0 then
             Error(
-                'No email recipients were resolved for Blanket Sales Order %1. Add an email to the designated contact, the document, the customer, or a Blanket Sales Order routing rule.',
+                'No email recipient was resolved for Blanket Sales Order %1. Add a matching customer routing rule or an email to the contact selected on the Blanket Sales Order.',
                 SalesHeader."No.");
 
         Subject := StrSubstNo('Blanket Sales Order %1', SalesHeader."No.");
@@ -156,7 +159,6 @@ codeunit 70512 "GPI Blanket Sales Order Email"
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"To", FinalToRecipients);
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Cc", FinalCCRecipients);
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Bcc", FinalBCCRecipients);
-
         DeliveryLog."To Recipients" := CopyStr(JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
         DeliveryLog."BCC Recipients" := CopyStr(JoinRecipients(FinalBCCRecipients), 1, MaxStrLen(DeliveryLog."BCC Recipients"));
@@ -187,214 +189,6 @@ codeunit 70512 "GPI Blanket Sales Order Email"
         DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
         DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
         DeliveryLog.Modify(true);
-    end;
-
-    local procedure BuildCustomerRecipients(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text])
-    var
-        Contact: Record Contact;
-        Customer: Record Customer;
-    begin
-        if SalesHeader."Sell-to Contact No." <> '' then
-            if Contact.Get(SalesHeader."Sell-to Contact No.") then
-                AddRecipientsFromText(ToRecipients, Contact."E-Mail");
-
-        if ToRecipients.Count() = 0 then
-            AddRecipientsFromText(ToRecipients, SalesHeader."Sell-to E-Mail");
-
-        if (ToRecipients.Count() = 0) and Customer.Get(SalesHeader."Sell-to Customer No.") then
-            AddRecipientsFromText(ToRecipients, Customer."E-Mail");
-    end;
-
-    local procedure AddDefaultCcRecipients(SalesHeader: Record "Sales Header"; ToRecipients: List of [Text]; var CCRecipients: List of [Text])
-    var
-        SalespersonEmail: Text;
-        InsideSalespersonEmail: Text;
-    begin
-        SalespersonEmail := GetSalespersonEmail(SalesHeader."Salesperson Code");
-        AddCcRecipient(CCRecipients, SalespersonEmail, ToRecipients, UserId());
-
-        InsideSalespersonEmail := GetSalespersonEmail(GetInsideSalespersonCode(SalesHeader));
-        AddCcRecipient(CCRecipients, InsideSalespersonEmail, ToRecipients, UserId());
-    end;
-
-    local procedure ApplyRoutingRules(SalesHeader: Record "Sales Header"; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRoutingRuleEntries: Text[250])
-    var
-        RoutingRule: Record "GPI Document Routing Rule";
-    begin
-        RoutingRule.SetCurrentKey(Enabled, "Delivery Document Type", Priority, "Entry No.");
-        RoutingRule.SetRange(Enabled, true);
-        RoutingRule.SetRange("Delivery Document Type", Enum::"GPI Delivery Document Type"::"Blanket Sales Order");
-
-        if not RoutingRule.FindSet() then
-            exit;
-
-        repeat
-            if RoutingRuleMatches(RoutingRule, SalesHeader) and RoutingRuleIsActive(RoutingRule, Today) then begin
-                if RoutingRule."Recipient Action" = RoutingRule."Recipient Action"::Replace then begin
-                    Clear(ToRecipients);
-                    Clear(CCRecipients);
-                    Clear(BCCRecipients);
-                end;
-
-                AddRecipientsFromText(ToRecipients, RoutingRule."To Addresses");
-                AddRecipientsFromText(CCRecipients, RoutingRule."CC Addresses");
-                AddRecipientsFromText(BCCRecipients, RoutingRule."BCC Addresses");
-                AppendRoutingRuleEntry(AppliedRoutingRuleEntries, RoutingRule."Entry No.");
-            end;
-        until RoutingRule.Next() = 0;
-    end;
-
-    local procedure RoutingRuleMatches(RoutingRule: Record "GPI Document Routing Rule"; SalesHeader: Record "Sales Header"): Boolean
-    begin
-        if RoutingRule."Vendor No." <> '' then
-            exit(false);
-        if (RoutingRule."Customer No." <> '') and (RoutingRule."Customer No." <> SalesHeader."Sell-to Customer No.") then
-            exit(false);
-        if (RoutingRule."Location Code" <> '') and (RoutingRule."Location Code" <> SalesHeader."Location Code") then
-            exit(false);
-        exit(true);
-    end;
-
-    local procedure RoutingRuleIsActive(RoutingRule: Record "GPI Document Routing Rule"; EvaluationDate: Date): Boolean
-    begin
-        if (RoutingRule."Effective Start Date" <> 0D) and (RoutingRule."Effective Start Date" > EvaluationDate) then
-            exit(false);
-        if (RoutingRule."Effective End Date" <> 0D) and (RoutingRule."Effective End Date" < EvaluationDate) then
-            exit(false);
-        exit(true);
-    end;
-
-    local procedure AppendRoutingRuleEntry(var AppliedRoutingRuleEntries: Text[250]; EntryNo: Integer)
-    begin
-        if AppliedRoutingRuleEntries = '' then
-            AppliedRoutingRuleEntries := CopyStr(Format(EntryNo), 1, MaxStrLen(AppliedRoutingRuleEntries))
-        else
-            AppliedRoutingRuleEntries := CopyStr(StrSubstNo('%1, %2', AppliedRoutingRuleEntries, EntryNo), 1, MaxStrLen(AppliedRoutingRuleEntries));
-    end;
-
-    local procedure GetSalespersonEmail(SalespersonCode: Code[20]): Text
-    var
-        Salesperson: Record "Salesperson/Purchaser";
-    begin
-        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
-            exit(Salesperson."E-Mail");
-        exit('');
-    end;
-
-    local procedure GetInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
-    var
-        SalesHeaderRef: RecordRef;
-        CandidateField: FieldRef;
-        FieldIndex: Integer;
-        CandidateName: Text;
-        CandidateCaption: Text;
-    begin
-        SalesHeaderRef.GetTable(SalesHeader);
-        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
-            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
-            CandidateName := LowerCase(CandidateField.Name);
-            CandidateCaption := LowerCase(CandidateField.Caption);
-            if ((StrPos(CandidateName, 'inside salesperson') > 0) or
-                (StrPos(CandidateCaption, 'inside salesperson') > 0) or
-                (StrPos(CandidateName, 'inside sales') > 0) or
-                (StrPos(CandidateCaption, 'inside sales') > 0) or
-                (CandidateName = 'isr') or
-                (CandidateCaption = 'isr')) and
-               (StrPos(CandidateName, 'backup') = 0) and
-               (StrPos(CandidateCaption, 'backup') = 0)
-            then
-                exit(CopyStr(Format(CandidateField.Value), 1, 20));
-        end;
-        exit('');
-    end;
-
-    local procedure AddRecipientsFromText(var Recipients: List of [Text]; RecipientText: Text)
-    var
-        RemainingText: Text;
-        Recipient: Text;
-        SeparatorPosition: Integer;
-    begin
-        RemainingText := ConvertStr(RecipientText, ',', ';');
-        while RemainingText <> '' do begin
-            SeparatorPosition := StrPos(RemainingText, ';');
-            if SeparatorPosition = 0 then begin
-                Recipient := RemainingText;
-                RemainingText := '';
-            end else begin
-                Recipient := CopyStr(RemainingText, 1, SeparatorPosition - 1);
-                RemainingText := CopyStr(RemainingText, SeparatorPosition + 1);
-            end;
-
-            Recipient := DelChr(Recipient, '<>', ' ');
-            AddUniqueRecipient(Recipients, Recipient);
-        end;
-    end;
-
-    local procedure AddUniqueRecipient(var Recipients: List of [Text]; EmailAddress: Text)
-    var
-        ExistingRecipient: Text;
-        NormalizedEmail: Text;
-    begin
-        NormalizedEmail := LowerCase(EmailAddress);
-        if NormalizedEmail = '' then
-            exit;
-        foreach ExistingRecipient in Recipients do
-            if NormalizedEmail = LowerCase(ExistingRecipient) then
-                exit;
-        Recipients.Add(EmailAddress);
-    end;
-
-    local procedure AddCcRecipient(var CCRecipients: List of [Text]; EmailAddress: Text; ToRecipients: List of [Text]; SenderAddress: Text)
-    begin
-        if EmailAddress = '' then
-            exit;
-        if IsRecipientInList(ToRecipients, LowerCase(EmailAddress)) then
-            exit;
-        if LowerCase(EmailAddress) = LowerCase(SenderAddress) then
-            exit;
-        AddUniqueRecipient(CCRecipients, EmailAddress);
-    end;
-
-    local procedure NormalizeRecipientLists(var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text])
-    var
-        NewToRecipients: List of [Text];
-        NewCCRecipients: List of [Text];
-        NewBCCRecipients: List of [Text];
-        Recipient: Text;
-    begin
-        foreach Recipient in ToRecipients do
-            AddUniqueRecipient(NewToRecipients, Recipient);
-        foreach Recipient in CCRecipients do
-            if not IsRecipientInList(NewToRecipients, LowerCase(Recipient)) then
-                AddUniqueRecipient(NewCCRecipients, Recipient);
-        foreach Recipient in BCCRecipients do
-            if not IsRecipientInList(NewToRecipients, LowerCase(Recipient)) and
-               not IsRecipientInList(NewCCRecipients, LowerCase(Recipient))
-            then
-                AddUniqueRecipient(NewBCCRecipients, Recipient);
-
-        ReplaceRecipientList(ToRecipients, NewToRecipients);
-        ReplaceRecipientList(CCRecipients, NewCCRecipients);
-        ReplaceRecipientList(BCCRecipients, NewBCCRecipients);
-    end;
-
-    local procedure ReplaceRecipientList(var TargetRecipients: List of [Text]; SourceRecipients: List of [Text])
-    var
-        Recipient: Text;
-    begin
-        Clear(TargetRecipients);
-        foreach Recipient in SourceRecipients do
-            TargetRecipients.Add(Recipient);
-    end;
-
-    local procedure IsRecipientInList(Recipients: List of [Text]; NormalizedEmail: Text): Boolean
-    var
-        ExistingRecipient: Text;
-    begin
-        foreach ExistingRecipient in Recipients do
-            if NormalizedEmail = LowerCase(ExistingRecipient) then
-                exit(true);
-        exit(false);
     end;
 
     local procedure JoinRecipients(Recipients: List of [Text]): Text

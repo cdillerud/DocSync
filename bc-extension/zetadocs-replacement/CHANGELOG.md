@@ -11,6 +11,13 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.0.2
+
+### Fixed
+
+- Added an explicit local empty-GUID helper for the posted invoice batch failure-log path.
+- Resolved compiler error `AL0118` where `EmptyGuid` was referenced but not defined.
+
 ## 0.16.0.1
 
 ### Fixed

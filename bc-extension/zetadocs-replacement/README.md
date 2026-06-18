@@ -1,86 +1,95 @@
 # GPI Sales Document Email
 
-A small Business Central-only replacement for selected Zetadocs document-email workflows.
+A Business Central-only replacement for selected Zetadocs sales, invoice, and purchasing document-email workflows.
 
-## Supported document actions
+## Supported documents
 
-The extension adds these actions to the standard Sales Order page:
+### Sales
 
-- **Preview and Email Order Confirmation**
-  - Report 50020
-  - Customer/contact recipient logic
-  - Attachment: `Sales-Order <order no>.pdf`
+- Sales Order Confirmation
+- Prepayment Notice
+- Pick Ticket
+- Blanket Sales Order
 
-- **Preview and Email Prepayment Notice**
-  - Report 50003
-  - Customer/contact recipient logic
-  - Attachment: `Pre-Payment - Order <order no>.pdf`
+These documents are reviewed and sent by the current Business Central user.
 
-- **Preview and Email Pick Ticket**
-  - Report 50013
-  - Recipient comes from the Sales Order Location Card email field
-  - Supports multiple location recipients separated by semicolons or commas
-  - Attachment: `Pick-Ticket - Order <order no>.pdf`
+### Accounts receivable
 
-## Shared behavior
+- Posted Sales Invoice
+- Filterable posted-invoice queue
+- Refresh recipients and readiness
+- Send selected invoices
+- Send all filtered ready invoices
+- Skip missing-recipient and previously sent invoices
 
-Each action:
+Invoice batches use the dedicated **GPI Invoice Batch** email scenario rather than the current user's mailbox.
 
-1. Validates that the record is a Sales Order.
-2. Resolves the appropriate To recipient or recipients.
-3. Adds the Salesperson email to CC.
-4. Attempts to locate the existing custom Inside Salesperson or ISR field dynamically and adds that salesperson's email to CC.
-5. Excludes duplicates, To recipients, and the initiating user from CC.
-6. Generates the selected report as a PDF.
-7. Opens the native Business Central Email Editor modally.
-8. Requires the user to review and send the message manually.
+### Purchasing and logistics
 
-## Customer recipient order
+- Drop Ship Purchase Order for Location Code `00`
+- Warehouse Purchase Order for populated Location Codes other than `00`
+- Warehouse Receiving Notice with a required Warehouse Receipt Date
 
-For Order Confirmations and Prepayment Notices, the recipient is resolved in this order:
+Purchase Order actions are consolidated under **Actions > Gamer Documents**.
 
-1. Sell-to Contact email
-2. Sales Order Sell-to Email
-3. Customer email
+## Delivery logging
 
-## Pick Ticket routing
+Each email workflow can record:
 
-For Pick Tickets, the Sales Order must have a Location Code. The extension reads the email field from that Location Card and adds each semicolon- or comma-separated address as a separate To recipient.
+- Document type and source record
+- Customer, vendor, or location
+- To, CC, and BCC recipients
+- Subject and attachment filename
+- Sender user, sender account, connector, and sender policy
+- Applied routing rules
+- Email and external delivery IDs
+- Sent, failed, draft, or discarded status
+- Stored PDF content
 
-Example for Location 012:
+Preview actions do not create delivery-log entries.
 
-- `KLOGILGamerPkg@kochlogistics.com`
-- `egonzalez@kochlogistics.com`
+## Routing rules
 
-## Explicitly not included
+Routing rules can target a document type and optionally narrow by:
 
-- Automatic sending
-- GPI Hub
-- API keys
-- Cloudflare tunnels
-- SharePoint archiving
-- Batch invoice delivery
+- Customer No.
+- Vendor No.
+- Location Code
+- Effective dates
+- Priority
+- Replace or Add recipient behavior
+
+## Accounting invoice sender setup
+
+1. Add or confirm the Accounting invoice mailbox in **Email Accounts**.
+2. Open **GPI Posted Sales Invoice Queue**.
+3. Choose **Configure Accounting Sender**.
+4. Assign the **GPI Invoice Batch** scenario to the Accounting mailbox.
+5. Return to the queue and confirm the Accounting Invoice Sender status shows **Configured** with the expected account name, address, and connector.
+
+The invoice batch is blocked when the scenario is not assigned.
 
 ## Extension details
 
 - Name: `GPI Sales Document Email`
-- Version: `0.3.0.0`
+- Publisher: `Gamer Packaging`
+- Version: `0.13.0.0`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
-- Target: Business Central 27.4 or later, runtime 16.0
+- Platform: Business Central 28.0
+- Application: 28.1
+- Runtime: 17.0
 
-## Publish
+## Sandbox validation checklist
 
-Open this folder as the VS Code workspace, use the existing Business Central symbol cache, package, and upload the generated `.app` through Extension Management. Assign `GPI DOC EMAIL` to pilot users.
+For each document type, confirm:
 
-## Validation checklist
+1. Correct source document and branded PDF
+2. Correct default and rule-based recipients
+3. Correct sender account or current-user sender policy
+4. Successful send through native Business Central email
+5. Delivery Log status and metadata
+6. Stored PDF opens correctly
+7. Native Sent Email History resolves correctly
 
-- Report 50020 generates the correct Sales Order Confirmation.
-- Report 50003 generates the correct Prepayment Notice.
-- Report 50013 generates the correct Pick Ticket.
-- Customer recipients resolve correctly for customer-facing documents.
-- Pick Ticket recipients come from the Sales Order Location Card.
-- OSR email is populated from Salesperson/Purchaser.
-- ISR email is found from the existing custom Sales Header field.
-- User can edit To, CC, subject, body, sender account, and attachment before sending.
-- Canceling the editor sends nothing.
+Invoice batches should additionally confirm that the Delivery Log and posted invoice fields show the configured Accounting sender address.

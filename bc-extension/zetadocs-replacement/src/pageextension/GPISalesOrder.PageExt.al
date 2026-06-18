@@ -25,6 +25,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesOrderEmail.OpenSalesOrderConfirmationDraft(SalesHeader);
                         CurrPage.Update(false);
@@ -47,6 +48,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesOrderEmail.OpenPrepaymentNoticeDraft(SalesHeader);
                         CurrPage.Update(false);
@@ -69,6 +71,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesOrderEmail.OpenPickTicketDraft(SalesHeader);
                         CurrPage.Update(false);
@@ -87,6 +90,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesHeader.SetRecFilter();
                         Report.RunModal(Report::"GPI Sales Order Confirmation", true, false, SalesHeader);
@@ -105,6 +109,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesHeader.SetRecFilter();
                         Report.RunModal(Report::"GPI Prepayment Notice", true, false, SalesHeader);
@@ -123,6 +128,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
+                        Commit();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesHeader.SetRecFilter();
                         Report.RunModal(Report::"GPI Pick Ticket", true, false, SalesHeader);

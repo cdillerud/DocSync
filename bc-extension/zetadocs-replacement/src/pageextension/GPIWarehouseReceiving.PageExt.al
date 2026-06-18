@@ -2,12 +2,13 @@ pageextension 70518 "GPI WH Receiving PO Ext" extends "Purchase Order"
 {
     layout
     {
-        addlast(General)
+        addafter("Expected Receipt Date")
         {
             field(GPIWarehouseReceiptDate; Rec."GPI WH Receipt Date")
             {
                 ApplicationArea = All;
                 Caption = 'Warehouse Receipt Date';
+                Importance = Promoted;
                 ToolTip = 'Specifies the date the warehouse should expect to receive this purchase order.';
             }
         }
@@ -32,6 +33,9 @@ pageextension 70518 "GPI WH Receiving PO Ext" extends "Purchase Order"
                     ReceivingEmail: Codeunit "GPI WH Receiving Email";
                     PurchaseHeader: Record "Purchase Header";
                 begin
+                    if Rec."Location Code" = '00' then
+                        Error('Purchase Order %1 is a drop-ship order. Choose a Purchase Order with a warehouse Location Code other than 00.', Rec."No.");
+
                     CurrPage.SaveRecord();
                     Commit();
                     PurchaseHeader.Get(Rec."Document Type", Rec."No.");
@@ -54,6 +58,9 @@ pageextension 70518 "GPI WH Receiving PO Ext" extends "Purchase Order"
                     ReceivingEmail: Codeunit "GPI WH Receiving Email";
                     PurchaseHeader: Record "Purchase Header";
                 begin
+                    if Rec."Location Code" = '00' then
+                        Error('Purchase Order %1 is a drop-ship order. Choose a Purchase Order with a warehouse Location Code other than 00.', Rec."No.");
+
                     CurrPage.SaveRecord();
                     Commit();
                     PurchaseHeader.Get(Rec."Document Type", Rec."No.");

@@ -11,6 +11,15 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.1.1
+
+### Fixed
+
+- Removed the unreliable `xRec` status comparison from the Delivery Log sent-indicator subscriber.
+- Prevented a successful `PO Sent = true` update from being immediately reset on Purchase Orders that were already Open.
+- Reworked the reopen reset to compare the incoming Purchase Header status against the currently stored database record during `OnBeforeModifyEvent`.
+- A Purchase Order now resets **PO Sent** only on a genuine non-Open to Open status transition; manual edits on an already-open order remain intact.
+
 ## 0.16.1.0
 
 ### Added

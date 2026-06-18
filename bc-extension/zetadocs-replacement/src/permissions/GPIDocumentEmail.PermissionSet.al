@@ -18,6 +18,7 @@ permissionset 70510 "GPI DOC EMAIL"
         codeunit "GPI Warehouse PO Email" = X,
         codeunit "GPI WH Receiving Email" = X,
         codeunit "GPI Document Policy Mgt." = X,
+        codeunit "GPI Purchase Sent Status" = X,
         report "GPI Sales Order Confirmation" = X,
         report "GPI Prepayment Notice" = X,
         report "GPI Pick Ticket" = X,

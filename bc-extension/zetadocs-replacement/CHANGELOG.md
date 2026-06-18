@@ -45,6 +45,17 @@ The project follows four-part Business Central app versioning:
 - Warehouse Receiving Notices resolve the primary recipient from the Location Card email.
 - The Warehouse Receiving Notice layout does not contain terms-and-conditions language.
 
+## 0.15.1.1
+
+### Fixed
+
+- Committed pending Sales Order page writes before opening Gamer report previews.
+- Prevented `Report.RunModal` from running inside a write transaction for:
+  - Gamer Preview Order Confirmation
+  - Gamer Preview Prepayment Notice
+  - Gamer Preview Pick Ticket
+- Applied the same transaction boundary before opening Sales Order email editors to avoid equivalent `Form.RunModal` errors.
+
 ## 0.15.1.0
 
 ### Added

@@ -2,6 +2,7 @@ codeunit 70515 "GPI WH Receiving Email"
 {
     procedure OpenDraft(var PurchaseHeader: Record "Purchase Header")
     var
+        DocumentPolicy: Codeunit "GPI Document Policy Mgt.";
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -22,6 +23,8 @@ codeunit 70515 "GPI WH Receiving Email"
         EmailErrorText: Text;
     begin
         ValidatePurchaseOrder(PurchaseHeader);
+        DocumentPolicy.EnsurePurchaseOrderReleased(PurchaseHeader, 'Warehouse Receiving Notice');
+
         AddRecipientsFromText(ToRecipients, GetLocationEmail(PurchaseHeader."Location Code"));
         AddDefaultCcRecipients(PurchaseHeader, ToRecipients, CCRecipients);
         ApplyRoutingRules(PurchaseHeader, ToRecipients, CCRecipients, BCCRecipients, AppliedRoutingRuleEntries);
@@ -163,7 +166,6 @@ codeunit 70515 "GPI WH Receiving Email"
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"To", FinalToRecipients);
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Cc", FinalCCRecipients);
         EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Bcc", FinalBCCRecipients);
-
         DeliveryLog."To Recipients" := CopyStr(JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
         DeliveryLog."BCC Recipients" := CopyStr(JoinRecipients(FinalBCCRecipients), 1, MaxStrLen(DeliveryLog."BCC Recipients"));
@@ -199,26 +201,9 @@ codeunit 70515 "GPI WH Receiving Email"
     local procedure GetLocationEmail(LocationCode: Code[10]): Text
     var
         Location: Record Location;
-        LocationRef: RecordRef;
-        CandidateField: FieldRef;
-        FieldIndex: Integer;
-        CandidateIdentity: Text;
-        CandidateValue: Text;
     begin
-        if not Location.Get(LocationCode) then
-            exit('');
-
-        LocationRef.GetTable(Location);
-        for FieldIndex := 1 to LocationRef.FieldCount do begin
-            CandidateField := LocationRef.FieldIndex(FieldIndex);
-            CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
-            if (StrPos(CandidateIdentity, 'e-mail') > 0) or (StrPos(CandidateIdentity, 'email') > 0) then begin
-                CandidateValue := DelChr(Format(CandidateField.Value), '<>', ' ');
-                if CandidateValue <> '' then
-                    exit(CandidateValue);
-            end;
-        end;
-
+        if Location.Get(LocationCode) then
+            exit(Location."E-Mail");
         exit('');
     end;
 
@@ -235,7 +220,6 @@ codeunit 70515 "GPI WH Receiving Email"
         RoutingRule.SetCurrentKey(Enabled, "Delivery Document Type", Priority, "Entry No.");
         RoutingRule.SetRange(Enabled, true);
         RoutingRule.SetRange("Delivery Document Type", Enum::"GPI Delivery Document Type"::"Warehouse Receiving Notice");
-
         if not RoutingRule.FindSet() then
             exit;
 
@@ -246,7 +230,6 @@ codeunit 70515 "GPI WH Receiving Email"
                     Clear(CCRecipients);
                     Clear(BCCRecipients);
                 end;
-
                 AddRecipientsFromText(ToRecipients, RoutingRule."To Addresses");
                 AddRecipientsFromText(CCRecipients, RoutingRule."CC Addresses");
                 AddRecipientsFromText(BCCRecipients, RoutingRule."BCC Addresses");
@@ -305,7 +288,7 @@ codeunit 70515 "GPI WH Receiving Email"
             CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
             if ((StrPos(CandidateIdentity, 'inside salesperson') > 0) or
                 (StrPos(CandidateIdentity, 'inside sales') > 0) or
-                (CandidateIdentity = 'isr') or
+                (DelChr(CandidateIdentity, '<>', ' ') = 'isr') or
                 (StrPos(CandidateIdentity, 'isr code') > 0)) and
                (StrPos(CandidateIdentity, 'backup') = 0)
             then
@@ -330,7 +313,6 @@ codeunit 70515 "GPI WH Receiving Email"
                 Recipient := CopyStr(RemainingText, 1, SeparatorPosition - 1);
                 RemainingText := CopyStr(RemainingText, SeparatorPosition + 1);
             end;
-
             Recipient := DelChr(Recipient, '<>', ' ');
             AddUniqueRecipient(Recipients, Recipient);
         end;

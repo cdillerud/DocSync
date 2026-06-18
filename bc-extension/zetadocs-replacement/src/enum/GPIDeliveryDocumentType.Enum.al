@@ -27,4 +27,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Blanket Sales Order';
     }
+
+    value(5; "Purchase Order - Drop Ship")
+    {
+        Caption = 'Purchase Order - Drop Ship';
+    }
 }

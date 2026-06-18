@@ -85,7 +85,11 @@ codeunit 70510 "GPI Sales Order Email"
         SalesHeader.TestField("Document Type", SalesHeader."Document Type"::Order);
         SalesHeader.TestField("No.");
         SalesHeader.TestField("Sell-to Customer No.");
-        DocumentPolicy.EnsureSalesSendAllowed(SalesHeader, DeliveryDocumentType);
+
+        if DeliveryDocumentType = DeliveryDocumentType::"Prepayment Notice" then
+            EnsurePendingPrepaymentStatus(SalesHeader)
+        else
+            DocumentPolicy.EnsureSalesSendAllowed(SalesHeader, DeliveryDocumentType);
 
         DocumentPolicy.ResolveSalesDocumentRecipients(
             SalesHeader,
@@ -147,6 +151,18 @@ codeunit 70510 "GPI Sales Order Email"
         UpdateDeliveryLogAfterEditor(DeliveryLog, EmailMessage, EmailAction);
         if EmailAction = Enum::"Email Action"::Sent then
             MarkSalesDocumentSent(SalesHeader, DeliveryDocumentType);
+    end;
+
+    local procedure EnsurePendingPrepaymentStatus(SalesHeader: Record "Sales Header")
+    var
+        CurrentStatus: Text;
+    begin
+        CurrentStatus := Format(SalesHeader.Status);
+        if LowerCase(CurrentStatus) <> 'pending prepayment' then
+            Error(
+                'Prepayment Notice for Sales Order %1 can be previewed, but it cannot be sent until Status is Pending Prepayment. Current Status: %2.',
+                SalesHeader."No.",
+                CurrentStatus);
     end;
 
     [TryFunction]

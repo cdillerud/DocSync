@@ -60,7 +60,7 @@ codeunit 70516 "GPI SharePoint Archive"
         Setup."Last Connection Test" := CurrentDateTime;
         ClearLastError();
         if TryConnection(Setup, AccountName) then begin
-            Setup."Last Connection Result" := CopyStr(StrSubstNo('Success. %1 can access %2.', AccountName, Setup."Root Folder"), 1, MaxStrLen(Setup."Last Connection Result"));
+            Setup."Last Connection Result" := CopyStr(StrSubstNo('Success. %1 can access the configured SharePoint archive.', AccountName), 1, MaxStrLen(Setup."Last Connection Result"));
             Setup.Modify(true);
             Message('%1', Setup."Last Connection Result");
             exit;
@@ -158,7 +158,8 @@ codeunit 70516 "GPI SharePoint Archive"
             Error('Assign GPI Document Archive to a SharePoint External File Account before testing.');
         AccountName := TempAccount.Name;
         Storage.Initialize(TempAccount);
-        PathMgt.EnsureDirectory(Storage, Setup."Root Folder");
+        if not Storage.DirectoryExists('') then
+            Error('The SharePoint archive root could not be accessed.');
     end;
 
     var

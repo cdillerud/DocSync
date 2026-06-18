@@ -1,6 +1,6 @@
 # GPI Sales Document Email
 
-A Business Central-only replacement for selected Zetadocs sales, invoice, and purchasing document-email workflows.
+A Business Central replacement for selected Zetadocs document-generation, email, delivery-log, and SharePoint archival workflows.
 
 ## Supported documents
 
@@ -32,6 +32,30 @@ Invoice batches use the dedicated **GPI Invoice Batch** email scenario rather th
 
 Purchase Order actions are consolidated under **Actions > Gamer Documents**.
 
+## SharePoint archival
+
+Successfully sent GPI-generated documents can be archived through the **GPI Document Archive** External File Storage scenario.
+
+The archive uses the existing Zetadocs document library and preserves the familiar structure:
+
+`MM-DD-YYYY / Customer or Vendor / Sales or Purchase / Document`
+
+The Delivery Log records archive status, path, URL, attempts, and errors. The Business Central PDF BLOB can be cleared only after SharePoint confirms that the file was created.
+
+## Drag-and-drop and manual documents
+
+Business Central 28 includes the standard **Doc. Attachment List Factbox**, which supports native multiple-file upload and drag-and-drop on document and master-data pages.
+
+To store those attachments in SharePoint:
+
+1. Open **GPI SharePoint Archive Setup**.
+2. Choose **Configure Drag-and-Drop Storage**.
+3. Assign **Doc. Attach. - External Storage** to the same SharePoint file account used for **GPI Document Archive**.
+4. Complete **External Storage Setup** and choose a root folder such as `Manual Documents`.
+5. Enable external attachment storage.
+
+GPI-generated outbound PDFs continue to use the Zetadocs-compatible date/customer structure. Manually uploaded attachments use Microsoft's standard external-attachment folder structure beneath the selected manual-document root.
+
 ## Delivery logging
 
 Each email workflow can record:
@@ -44,7 +68,8 @@ Each email workflow can record:
 - Applied routing rules
 - Email and external delivery IDs
 - Sent, failed, draft, or discarded status
-- Stored PDF content
+- Temporary stored PDF content
+- SharePoint archival status and location
 
 Preview actions do not create delivery-log entries.
 
@@ -73,7 +98,7 @@ The invoice batch is blocked when the scenario is not assigned.
 
 - Name: `GPI Sales Document Email`
 - Publisher: `Gamer Packaging`
-- Version: `0.13.0.0`
+- Version: `0.15.0.0`
 - Object range: `70510..70549`
 - Permission set: `GPI DOC EMAIL`
 - Platform: Business Central 28.0
@@ -89,7 +114,7 @@ For each document type, confirm:
 3. Correct sender account or current-user sender policy
 4. Successful send through native Business Central email
 5. Delivery Log status and metadata
-6. Stored PDF opens correctly
+6. SharePoint archive status and link
 7. Native Sent Email History resolves correctly
 
-Invoice batches should additionally confirm that the Delivery Log and posted invoice fields show the configured Accounting sender address.
+For manual attachments, confirm multiple files can be added from the standard Documents factbox and that the external-storage fields show the files as stored externally.

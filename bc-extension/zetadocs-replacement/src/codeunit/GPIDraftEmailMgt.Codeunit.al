@@ -10,29 +10,48 @@ codeunit 70522 "GPI Draft Email Mgt."
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
         EmailAction: Enum "Email Action";
+        EmailMessageId: Guid;
+        EmailAccountId: Guid;
+        EmailConnector: Enum "Email Connector";
     begin
         if DeliveryLog.Status <> DeliveryLog.Status::"Saved As Draft" then
             Error('Delivery log entry %1 is not a saved draft.', DeliveryLog."Entry No.");
 
-        if IsNullGuid(DeliveryLog."Email Message ID") then
+        EmailMessageId := DeliveryLog."Email Message ID";
+        if IsNullGuid(EmailMessageId) then
             Error('Delivery log entry %1 does not contain an Email Message ID.', DeliveryLog."Entry No.");
 
-        EmailOutbox.SetRange("Message Id", DeliveryLog."Email Message ID");
-        EmailOutbox.SetRange(Status, EmailOutbox.Status::Draft);
-        if not EmailOutbox.FindFirst() then
+        if not FindEmailOutboxByMessageId(EmailOutbox, EmailMessageId) then
             Error(
                 'The native Business Central draft for delivery log entry %1 could not be found. It may have already been sent or discarded from Email Outbox.',
                 DeliveryLog."Entry No.");
 
-        if not EmailMessage.Get(DeliveryLog."Email Message ID") then
+        if Email.GetOutboxEmailRecordStatus(EmailMessageId) <> Enum::"Email Status"::Draft then
+            Error(
+                'The native Business Central email for delivery log entry %1 is no longer a draft.',
+                DeliveryLog."Entry No.");
+
+        if not EmailMessage.Get(EmailMessageId) then
             Error('The email message for delivery log entry %1 no longer exists.', DeliveryLog."Entry No.");
 
-        EmailAction := Email.OpenInEditorModally(
-            EmailMessage,
-            EmailOutbox."Account Id",
-            EmailOutbox.Connector);
+        EmailAccountId := EmailOutbox.GetAccountId();
+        EmailConnector := EmailOutbox.GetConnector();
+        EmailAction := Email.OpenInEditorModally(EmailMessage, EmailAccountId, EmailConnector);
 
         UpdateDeliveryLogAfterEditor(DeliveryLog, EmailMessage, EmailAction);
+    end;
+
+    local procedure FindEmailOutboxByMessageId(var EmailOutbox: Record "Email Outbox"; EmailMessageId: Guid): Boolean
+    begin
+        if not EmailOutbox.FindSet() then
+            exit(false);
+
+        repeat
+            if EmailOutbox.GetMessageId() = EmailMessageId then
+                exit(true);
+        until EmailOutbox.Next() = 0;
+
+        exit(false);
     end;
 
     local procedure UpdateDeliveryLogAfterEditor(var DeliveryLog: Record "GPI Document Delivery Log"; EmailMessage: Codeunit "Email Message"; EmailAction: Enum "Email Action")

@@ -1,8 +1,8 @@
 controladdin "GPI Document Drop Zone"
 {
-    Scripts = 'GPIDocumentDropZone.js';
-    StartupScript = 'GPIDocumentDropZoneStartup.js';
-    StyleSheets = 'GPIDocumentDropZone.css';
+    Scripts = 'src/controladdin/GPIDocumentDropZone.js';
+    StartupScript = 'src/controladdin/GPIDocumentDropZoneStartup.js';
+    StyleSheets = 'src/controladdin/GPIDocumentDropZone.css';
 
     RequestedHeight = 135;
     MinimumHeight = 110;

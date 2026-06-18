@@ -67,9 +67,7 @@ table 70513 "GPI SharePoint Archive Setup"
         if "Primary Key" = '' then
             "Primary Key" := 'SETUP';
         if "SharePoint Web Base URL" = '' then
-            "SharePoint Web Base URL" := 'https://gamerpackaging1.sharepoint.com/sites/DocsNAV';
-        if "Root Folder" = '' then
-            "Root Folder" := 'Zetadocs';
+            "SharePoint Web Base URL" := 'https://gamerpackaging1.sharepoint.com/sites/DocsNAV/Zetadocs';
         if "Sales Folder" = '' then
             "Sales Folder" := 'Sales';
         if "Purchase Folder" = '' then

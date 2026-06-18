@@ -11,6 +11,13 @@ The project follows four-part Business Central app versioning:
 - **Feature**: grouped functional enhancement
 - **Fix**: corrective build or compile-only revision
 
+## 0.16.0.1
+
+### Fixed
+
+- Corrected the duplicate PageExtension object ID by moving **GPI Vendor Card Docs Ext** from `70525` to `70526`.
+- Retained **GPI Invoice Queue Labels** as PageExtension `70525` and resolved compiler error `AL0264`.
+
 ## 0.16.0.0
 
 ### Added

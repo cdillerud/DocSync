@@ -25,6 +25,15 @@ New Phase 2 objects must not reuse Phase 1 IDs.
 | Page Extension | 70560 | GPI Purchase Return Docs | Purchase Return Order email, preview, history, and routing actions |
 | Page Extension | 70561 | GPI Purchase Return Visibility | Document Visibility on Purchase Return Order lines |
 | Permission Set Extension | 70560 | GPI PURCHASE RETURN DOCS | Adds Purchase Return workflow and report permissions |
+| Enum | 70570 | GPI Transfer Visibility | Controls Transfer Pick List and Receipt Notification line visibility |
+| Table Extension | 70570 | GPI Transfer Line | Adds Transfer document visibility to Transfer Lines |
+| Codeunit | 70570 | GPI Transfer Email | Transfer Pick List and Receipt Notification email workflows |
+| Codeunit | 70571 | GPI Transfer Visibility Mgt. | Applies independent pick-list and receipt-notification visibility |
+| Report | 70570 | GPI Transfer Pick List | Transfer-from warehouse pick document |
+| Report | 70571 | GPI Transfer Receipt Notice | Transfer-to warehouse receipt notification |
+| Page Extension | 70570 | GPI Transfer Documents | Transfer Order email, preview, history, and routing actions |
+| Page Extension | 70571 | GPI Transfer Visibility | Transfer document visibility on Transfer Order lines |
+| Permission Set Extension | 70570 | GPI TRANSFER DOCS | Adds Transfer workflow, visibility, and report permissions |
 
 ## Reserved Phase 2 blocks
 
@@ -32,7 +41,7 @@ New Phase 2 objects must not reuse Phase 1 IDs.
 |---|---|
 | 70553..70559 | Remaining Sales Return support objects and corrections |
 | 70562..70569 | Remaining Purchase Return support objects and corrections |
-| 70570..70579 | Transfer reports, email workflow, page extensions, visibility, and support objects |
+| 70572..70579 | Remaining Transfer support objects and corrections |
 | 70580..70589 | Customer Open Order Status report, batch workflow, pages, and support objects |
 | 70590..70609 | Shared routing, archive, and Delivery Log support |
 | 70610..70649 | Reserved for corrections, tests, and later Phase 2 expansion |

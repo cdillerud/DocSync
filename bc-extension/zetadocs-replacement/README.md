@@ -4,7 +4,7 @@ Business Central replacement for selected Zetadocs document generation, email, d
 
 ## Supported documents
 
-Sales: Sales Order Confirmation, Prepayment Notice, Pick Ticket, Blanket Sales Order, and Customer Statement.
+Sales: Sales Order Confirmation, Prepayment Notice, Pick Ticket, Blanket Sales Order, Customer Statement, Sales Return Authorization, and Sales Return Warehouse Notification.
 
 Accounts receivable: Posted Sales Invoice, filtered invoice queue, and Posted Sales Credit Memo.
 
@@ -12,27 +12,32 @@ Purchasing and accounts payable: Drop Ship Purchase Order, Warehouse Purchase Or
 
 ## Phase 2 infrastructure
 
-Version 0.19.0.0 starts the shared infrastructure for these planned documents:
+The shared Phase 2 email service resolves the initiating user's email address, requires a matching Business Central Email Account, removes duplicate recipients, and excludes the sender from default To, CC, and BCC recipients. A dedicated Warehouse archive folder setting is available for transfer and warehouse-owned documents.
 
-- Sales Return Authorization
-- Sales Return Warehouse Notification
-- Purchase Return Order
-- Purchase Return Pick Ticket
-- Transfer Pick List
-- Transfer Receipt Notification
-- Customer Open Order Status
+Planned later Phase 2 documents are Purchase Return Order, Purchase Return Pick Ticket, Transfer Pick List, Transfer Receipt Notification, and Customer Open Order Status.
 
-The Phase 2 email service resolves the initiating user's email address, requires a matching Business Central Email Account, removes duplicate recipients, and excludes the sender from default To, CC, and BCC recipients. A dedicated Warehouse archive folder setting is available for transfer and warehouse-owned documents.
+## Sales Return documents
 
-The Phase 2 document reports, page actions, email workflows, and Delivery Log creation are not included in the infrastructure release. They will be added in document-specific releases after this shared layer compiles and is validated in the sandbox.
+Sales Return Orders include Gamer actions to email and preview two dedicated branded documents:
+
+- Sales Return Authorization, sent to the customer to authorize the physical return
+- Sales Return Warehouse Notification, sent to the return location to prepare for receipt and inspection
+
+Sales Return Authorization recipient priority is customer-specific routing, Sales Return Order contact, customer primary contact, and Customer Card E-Mail. The OSR and ISR are added to CC when available unless already the sender or a To recipient. A routing rule using Replace can intentionally replace the defaults.
+
+Sales Return Warehouse Notification defaults to the Location Card E-Mail value. Location-specific and generic warehouse routing rules may add or replace recipients. No sales-team CC recipients are added automatically; the sender may add CC recipients in the native Email Editor.
+
+Both workflows use the initiating user's matching Business Central Email Account, support Send, Save As Draft, Discard, draft reopening, native sent-email history, Delivery Log tracking, and SharePoint archival under Sales. Sending requires a Released Sales Return Order, while preview remains available before release.
+
+The customer authorization does not display pricing or promise a final credit value. It states that final credit is subject to receipt and inspection.
 
 ## Document line visibility
 
-Sales Order, Blanket Sales Order, and Purchase Order lines include Document Visibility with four options: All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
+Sales Order, Blanket Sales Order, Sales Return Order, and Purchase Order lines include Document Visibility with four options: All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
 
-Sales Order Confirmations, Prepayment Notices, Blanket Sales Orders, Drop Ship Purchase Orders, and Warehouse Purchase Orders are customer/vendor-facing documents. Pick Tickets and Warehouse Receiving Notices are warehouse documents.
+Sales Order Confirmations, Prepayment Notices, Blanket Sales Orders, Drop Ship Purchase Orders, Warehouse Purchase Orders, and Sales Return Authorizations are customer/vendor-facing documents. Pick Tickets, Warehouse Receiving Notices, and Sales Return Warehouse Notifications are warehouse documents.
 
-Customer/vendor-facing reports stop with a clear error when a nonzero financial line is configured as Warehouse Documents Only or Do Not Print. This prevents a document total from including financial detail that is hidden from the recipient. Posted invoices and posted credit memos continue to show all posted lines in this release. The visibility value is retained on posted lines for traceability.
+Customer/vendor-facing reports stop with a clear error when a nonzero financial line is configured as Warehouse Documents Only or Do Not Print. This prevents financial return lines from being silently omitted from the customer authorization. Posted invoices and posted credit memos continue to show all posted lines. The visibility value is retained on posted lines for traceability.
 
 Existing lines default to All Documents, so the feature does not require data migration.
 
@@ -74,7 +79,7 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.19.0.0
+- Version: 0.19.1.0
 - Object ranges: 70510..70549 and 70550..70649
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -83,11 +88,13 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 ## Sandbox validation
 
-For Phase 2 infrastructure, confirm the extension compiles, the Warehouse Folder field appears in SharePoint Archive Setup, and GPI Phase 2 Email Mgt. can resolve the initiating user's configured Business Central Email Account.
+For Sales Return Authorization, test customer-specific routing, contact and Customer Card fallback, OSR and ISR CC, sender exclusion, routing-rule Replace behavior, preview, Send, Save As Draft, Discard, draft reopening, Delivery Log history, native sent history, line visibility, and Sales-folder archival.
 
-Test all four Document Visibility values on Sales Order, Blanket Sales Order, and Purchase Order lines. Confirm each line appears only in its intended document category.
+For Sales Return Warehouse Notification, test Location Card fallback, location-specific and generic routing, manual CC entry, preview, Send, Save As Draft, Discard, draft reopening, Delivery Log history, native sent history, warehouse line visibility, and Sales-folder archival.
 
-Confirm a nonzero line configured as Warehouse Documents Only or Do Not Print blocks customer/vendor document preview and email with the line number, amount, and visibility in the error. Confirm zero-value instruction lines can use those settings.
+Confirm both send actions block an Open Sales Return Order while both preview actions remain available. Confirm the authorization blocks a nonzero line configured as Warehouse Documents Only or Do Not Print.
+
+Test all four Document Visibility values on Sales Order, Blanket Sales Order, Sales Return Order, and Purchase Order lines. Confirm each line appears only in its intended document category.
 
 Post representative sales invoices, sales credit memos, and purchase credit memos. Confirm the visibility value transfers to posted lines while all posted report lines remain visible.
 
@@ -95,11 +102,9 @@ For Warehouse Receiving Notices, confirm that preview remains available without 
 
 Assign GPI Customer Statement to the Accounting email account. Test individual preview, Send, Save As Draft, Discard, reopened draft, customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, generic routing, native sent history, Delivery Log history, and automatic Sales-folder archival.
 
-Test the Customer List batch action with a customer selection and with filters. Confirm the batch skips no-activity, missing-recipient, and exact-period already-sent customers and reports accurate totals.
-
 ## Remaining work
 
-- Compile and validate Phase 2 shared infrastructure in Sandbox_5_5_2026.
+- Compile and validate version 0.19.1.0 in Sandbox_5_5_2026.
 - Connect Transfer Header archive entries to the Warehouse folder.
-- Implement the Phase 2 document-specific reports, actions, routing, Delivery Log entries, and archive filenames.
+- Implement Purchase Return documents, Transfer documents, and Customer Open Order Status.
 - Complete the production-readiness review and sandbox regression checklist before any Production publication.

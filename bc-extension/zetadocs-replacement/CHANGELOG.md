@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.19.2.0
+
+### Added
+- Added a vendor-facing Purchase Return Order for Purchase Return Orders.
+- Added a warehouse-facing Purchase Return Pick Ticket for items being shipped back to the supplier.
+- Added email and preview actions to the Purchase Return Order page.
+- Added Delivery Log, native sent-email history, and routing-rule actions to Purchase Return Orders.
+- Added Document Visibility to Purchase Return Order lines.
+- Added dedicated branded RDLC layouts for both Purchase Return documents without modifying any Phase 1 report layouts.
+- Added current-user sender account selection, recipient de-duplication, draft handling, Delivery Log tracking, native email relations, and SharePoint archival through the existing framework.
+
+### Recipient policy
+- Purchase Return Order defaults to the document contact, vendor primary contact, or Vendor Card email and CCs the OSR and ISR when those fields can be identified, excluding the sender.
+- Purchase Return Pick Ticket defaults to the return Location Card email and uses location-specific routing rules. CC recipients are entered by the sender in the Email Editor.
+- Routing rules can add or replace default recipients.
+
+### Safeguards
+- Sending requires the Purchase Return Order to be Released; preview remains available before release.
+- Purchase Return Order validates that nonzero financial lines are not hidden from the vendor-facing document.
+- Warehouse and vendor line visibility follow the existing Document Visibility policy.
+- The vendor document does not display pricing and asks the supplier for any additional authorization or shipping instructions.
+
+### Pending validation
+- Compile against Business Central 28.1 symbols.
+- Validate the Purchase Return Order and Purchase Return Order Subform page-extension targets.
+- Validate both new RDLC layouts in Sandbox_5_5_2026.
+
 ## 0.19.1.0
 
 ### Added
@@ -78,7 +105,7 @@
 ### Added
 - Gamer-branded Customer Statement PDF generation with statement-period, opening-balance, transaction, ending-balance, and outstanding-balance detail.
 - Customer Card actions for preview, email, delivery history, native sent-email history, routing rules, and sender setup.
-- Customer List batch delivery with customer filters and a selectable statement date range.
+- Customer List batch delivery with customer filters and a selectable date range.
 - Customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, and generic statement routing fallback.
 - Dedicated GPI Customer Statement email scenario for the Accounting mailbox.
 - Native draft, discard, direct batch send, Delivery Log tracking, customer tracking, and automatic SharePoint archival under the Sales folder.

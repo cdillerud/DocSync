@@ -10,6 +10,16 @@ Accounts receivable: Posted Sales Invoice, filtered invoice queue, and Posted Sa
 
 Purchasing and accounts payable: Drop Ship Purchase Order, Warehouse Purchase Order, Warehouse Receiving Notice, and Posted Purchase Credit Memo.
 
+## Document line visibility
+
+Sales Order, Blanket Sales Order, and Purchase Order lines include Document Visibility with four options: All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
+
+Sales Order Confirmations, Prepayment Notices, Blanket Sales Orders, Drop Ship Purchase Orders, and Warehouse Purchase Orders are customer/vendor-facing documents. Pick Tickets and Warehouse Receiving Notices are warehouse documents.
+
+Customer/vendor-facing reports stop with a clear error when a nonzero financial line is configured as Warehouse Documents Only or Do Not Print. This prevents a document total from including financial detail that is hidden from the recipient. Posted invoices and posted credit memos continue to show all posted lines in this release. The visibility value is retained on posted lines for traceability.
+
+Existing lines default to All Documents, so the feature does not require data migration.
+
 ## Customer Statements
 
 Customer Card actions create an individual statement for a selected date range, preview the branded PDF, open the native Business Central email editor, show Delivery Log history, show native sent-email history, and configure routing and sender setup.
@@ -48,7 +58,7 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.17.1.0
+- Version: 0.18.0.0
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -57,12 +67,18 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 ## Sandbox validation
 
+Test all four Document Visibility values on Sales Order, Blanket Sales Order, and Purchase Order lines. Confirm each line appears only in its intended document category.
+
+Confirm a nonzero line configured as Warehouse Documents Only or Do Not Print blocks customer/vendor document preview and email with the line number, amount, and visibility in the error. Confirm zero-value instruction lines can use those settings.
+
+Post representative sales invoices, sales credit memos, and purchase credit memos. Confirm the visibility value transfers to posted lines while all posted report lines remain visible.
+
+For Warehouse Receiving Notices, confirm that preview remains available without sender validation, sending fails clearly when the Purchase Header ISR is missing or lacks a registered email account, the editor opens from the ISR account when configured, the ISR is not duplicated in CC, saved drafts reopen with the same sender, and sent documents archive under Purchase.
+
 Assign GPI Customer Statement to the Accounting email account. Test individual preview, Send, Save As Draft, Discard, reopened draft, customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, generic routing, native sent history, Delivery Log history, and automatic Sales-folder archival.
 
 Test the Customer List batch action with a customer selection and with filters. Confirm the batch skips no-activity, missing-recipient, and exact-period already-sent customers and reports accurate totals.
 
-For Warehouse Receiving Notices, confirm that preview remains available without sender validation, sending fails clearly when the Purchase Header ISR is missing or lacks a registered email account, the editor opens from the ISR account when configured, the ISR is not duplicated in CC, saved drafts reopen with the same sender, and sent documents archive under Purchase.
+## Remaining work
 
-## Deferred
-
-- Line-exclusion behavior is pending business clarification.
+- Complete the production-readiness review and sandbox regression checklist before any Production publication.

@@ -6,8 +6,7 @@ codeunit 70515 "GPI WH Receiving Email"
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
-        EmailScenario: Codeunit "Email Scenario";
-        DefaultEmailAccount: Record "Email Account";
+        SenderEmailAccount: Record "Email Account" temporary;
         DeliveryLog: Record "GPI Document Delivery Log";
         PurchaseHeaderRef: RecordRef;
         AttachmentOutStream: OutStream;
@@ -19,14 +18,16 @@ codeunit 70515 "GPI WH Receiving Email"
         AttachmentName: Text[250];
         Subject: Text;
         Body: Text;
+        SenderEmailAddress: Text;
         EmailAction: Enum "Email Action";
         EmailErrorText: Text;
     begin
         ValidatePurchaseOrder(PurchaseHeader);
         DocumentPolicy.EnsurePurchaseOrderReleased(PurchaseHeader, 'Warehouse Receiving Notice');
+        SenderEmailAddress := ResolveSenderAccount(PurchaseHeader, SenderEmailAccount);
 
         AddRecipientsFromText(ToRecipients, GetLocationEmail(PurchaseHeader."Location Code"));
-        AddDefaultCcRecipients(PurchaseHeader, ToRecipients, CCRecipients);
+        AddDefaultCcRecipients(PurchaseHeader, ToRecipients, CCRecipients, SenderEmailAddress);
         ApplyRoutingRules(PurchaseHeader, ToRecipients, CCRecipients, BCCRecipients, AppliedRoutingRuleEntries);
         NormalizeRecipientLists(ToRecipients, CCRecipients, BCCRecipients);
 
@@ -61,8 +62,6 @@ codeunit 70515 "GPI WH Receiving Email"
             Enum::"Email Relation Type"::"Primary Source",
             Enum::"Email Relation Origin"::"Compose Context");
 
-        Clear(DefaultEmailAccount);
-        EmailScenario.GetDefaultEmailAccount(DefaultEmailAccount);
         CreateDeliveryLog(
             DeliveryLog,
             PurchaseHeader,
@@ -73,11 +72,11 @@ codeunit 70515 "GPI WH Receiving Email"
             BCCRecipients,
             AppliedRoutingRuleEntries,
             EmailMessage,
-            DefaultEmailAccount,
+            SenderEmailAccount,
             TempBlob);
 
         Commit();
-        if not TryOpenEmailEditor(EmailMessage, EmailAction) then begin
+        if not TryOpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction) then begin
             EmailErrorText := GetLastErrorText();
             if EmailErrorText = '' then
                 EmailErrorText := 'The Business Central email editor returned an unexpected error.';
@@ -105,24 +104,58 @@ codeunit 70515 "GPI WH Receiving Email"
         PurchaseHeader.TestField("GPI WH Receipt Date");
     end;
 
+    local procedure ResolveSenderAccount(PurchaseHeader: Record "Purchase Header"; var TempEmailAccount: Record "Email Account" temporary): Text
+    var
+        EmailAccountMgt: Codeunit "Email Account";
+        Salesperson: Record "Salesperson/Purchaser";
+        InsideSalespersonCode: Code[20];
+        SenderEmailAddress: Text;
+    begin
+        InsideSalespersonCode := GetInsideSalespersonCode(PurchaseHeader);
+        if InsideSalespersonCode = '' then
+            Error(
+                'Purchase Order %1 does not have an identifiable ISR on the Purchase Header. Populate the ISR before sending the Warehouse Receiving Notice.',
+                PurchaseHeader."No.");
+
+        if not Salesperson.Get(InsideSalespersonCode) then
+            Error(
+                'ISR %1 on Purchase Order %2 does not exist in Salespeople/Purchasers.',
+                InsideSalespersonCode,
+                PurchaseHeader."No.");
+
+        SenderEmailAddress := DelChr(Salesperson."E-Mail", '<>', ' ');
+        if SenderEmailAddress = '' then
+            Error(
+                'ISR %1 does not have an email address on the Salesperson/Purchaser Card.',
+                InsideSalespersonCode);
+
+        Clear(TempEmailAccount);
+        EmailAccountMgt.GetAllAccounts(TempEmailAccount);
+        if TempEmailAccount.FindSet() then
+            repeat
+                if LowerCase(DelChr(TempEmailAccount."Email Address", '<>', ' ')) = LowerCase(SenderEmailAddress) then
+                    exit(SenderEmailAddress);
+            until TempEmailAccount.Next() = 0;
+
+        Error(
+            'No Business Central Email Account is registered for ISR %1 (%2). Add that mailbox in Email Accounts before sending Warehouse Receiving Notices from the ISR.',
+            InsideSalespersonCode,
+            SenderEmailAddress);
+    end;
+
     [TryFunction]
-    local procedure TryOpenEmailEditor(EmailMessage: Codeunit "Email Message"; var EmailAction: Enum "Email Action")
+    local procedure TryOpenEmailEditor(EmailMessage: Codeunit "Email Message"; SenderEmailAccount: Record "Email Account" temporary; var EmailAction: Enum "Email Action")
     var
         Email: Codeunit Email;
     begin
-        EmailAction := Email.OpenInEditorModally(EmailMessage);
+        EmailAction := Email.OpenInEditorModally(EmailMessage, SenderEmailAccount);
     end;
 
-    local procedure CreateDeliveryLog(var DeliveryLog: Record "GPI Document Delivery Log"; PurchaseHeader: Record "Purchase Header"; AttachmentName: Text[250]; Subject: Text; ToRecipients: List of [Text]; CCRecipients: List of [Text]; BCCRecipients: List of [Text]; AppliedRoutingRuleEntries: Text[250]; EmailMessage: Codeunit "Email Message"; DefaultEmailAccount: Record "Email Account"; TempBlob: Codeunit "Temp Blob")
+    local procedure CreateDeliveryLog(var DeliveryLog: Record "GPI Document Delivery Log"; PurchaseHeader: Record "Purchase Header"; AttachmentName: Text[250]; Subject: Text; ToRecipients: List of [Text]; CCRecipients: List of [Text]; BCCRecipients: List of [Text]; AppliedRoutingRuleEntries: Text[250]; EmailMessage: Codeunit "Email Message"; SenderEmailAccount: Record "Email Account" temporary; TempBlob: Codeunit "Temp Blob")
     var
         DocumentInStream: InStream;
         DocumentOutStream: OutStream;
-        SenderEmailAddress: Text;
     begin
-        SenderEmailAddress := DefaultEmailAccount."Email Address";
-        if SenderEmailAddress = '' then
-            SenderEmailAddress := UserId();
-
         DeliveryLog.Init();
         DeliveryLog."Delivery Document Type" := DeliveryLog."Delivery Document Type"::"Warehouse Receiving Notice";
         DeliveryLog.Status := DeliveryLog.Status::Created;
@@ -143,12 +176,12 @@ codeunit 70515 "GPI WH Receiving Email"
         DeliveryLog."Source Party Type" := 'Location';
         DeliveryLog."Source Party No." := PurchaseHeader."Location Code";
         DeliveryLog."Sender User" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Sender User"));
-        DeliveryLog."Sender Email Address" := CopyStr(SenderEmailAddress, 1, MaxStrLen(DeliveryLog."Sender Email Address"));
-        DeliveryLog."Sender Policy" := 'Current User';
+        DeliveryLog."Sender Email Address" := CopyStr(SenderEmailAccount."Email Address", 1, MaxStrLen(DeliveryLog."Sender Email Address"));
+        DeliveryLog."Sender Policy" := 'Purchase Header ISR';
         DeliveryLog."Routing Rule Entry Nos." := AppliedRoutingRuleEntries;
-        DeliveryLog."Sender Account Name" := CopyStr(DefaultEmailAccount.Name, 1, MaxStrLen(DeliveryLog."Sender Account Name"));
-        DeliveryLog."Sender Connector" := CopyStr(Format(DefaultEmailAccount.Connector), 1, MaxStrLen(DeliveryLog."Sender Connector"));
-        DeliveryLog."Sender Account ID" := DefaultEmailAccount."Account Id";
+        DeliveryLog."Sender Account Name" := CopyStr(SenderEmailAccount.Name, 1, MaxStrLen(DeliveryLog."Sender Account Name"));
+        DeliveryLog."Sender Connector" := CopyStr(Format(SenderEmailAccount.Connector), 1, MaxStrLen(DeliveryLog."Sender Connector"));
+        DeliveryLog."Sender Account ID" := SenderEmailAccount."Account Id";
         DeliveryLog.Insert(true);
 
         TempBlob.CreateInStream(DocumentInStream);
@@ -207,10 +240,10 @@ codeunit 70515 "GPI WH Receiving Email"
         exit('');
     end;
 
-    local procedure AddDefaultCcRecipients(PurchaseHeader: Record "Purchase Header"; ToRecipients: List of [Text]; var CCRecipients: List of [Text])
+    local procedure AddDefaultCcRecipients(PurchaseHeader: Record "Purchase Header"; ToRecipients: List of [Text]; var CCRecipients: List of [Text]; SenderEmailAddress: Text)
     begin
-        AddCcRecipient(CCRecipients, GetSalespersonEmail(PurchaseHeader."Purchaser Code"), ToRecipients, UserId());
-        AddCcRecipient(CCRecipients, GetSalespersonEmail(GetInsideSalespersonCode(PurchaseHeader)), ToRecipients, UserId());
+        AddCcRecipient(CCRecipients, GetSalespersonEmail(PurchaseHeader."Purchaser Code"), ToRecipients, SenderEmailAddress);
+        AddCcRecipient(CCRecipients, GetSalespersonEmail(GetInsideSalespersonCode(PurchaseHeader)), ToRecipients, SenderEmailAddress);
     end;
 
     local procedure ApplyRoutingRules(PurchaseHeader: Record "Purchase Header"; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRoutingRuleEntries: Text[250])

@@ -22,6 +22,7 @@ permissionset 70510 "GPI DOC EMAIL"
         codeunit "GPI Draft Email Mgt." = X,
         codeunit "GPI Sales Credit Memo Email" = X,
         codeunit "GPI Credit Memo Email Mgt." = X,
+        codeunit "GPI Purchase Credit Memo Email" = X,
         report "GPI Sales Order Confirmation" = X,
         report "GPI Prepayment Notice" = X,
         report "GPI Pick Ticket" = X,
@@ -29,5 +30,6 @@ permissionset 70510 "GPI DOC EMAIL"
         report "GPI Drop Ship Purchase Order" = X,
         report "GPI Warehouse Purchase Order" = X,
         report "GPI Warehouse Receiving Notice" = X,
-        report "GPI Sales Credit Memo" = X;
+        report "GPI Sales Credit Memo" = X,
+        report "GPI Purchase Credit Memo" = X;
 }

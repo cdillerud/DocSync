@@ -14,7 +14,7 @@ Purchasing: Drop Ship Purchase Order, Warehouse Purchase Order, and Warehouse Re
 
 Posted Sales Credit Memo card and list pages include Gamer actions to preview, email, open delivery history, and open native sent-email history.
 
-Recipient selection is customer-specific Credit Memo routing rules, then the Customer Card primary contact, then generic Credit Memo routing rules when no customer-specific rule applies.
+Recipient selection is customer-specific Credit Memo routing rules, then the Customer Card primary-contact email, then the Customer Card E-Mail field, and finally generic Credit Memo routing rules when no customer-specific rule applies.
 
 Credit memos use the existing GPI Invoice Batch email scenario and Accounting mailbox. They support Send, Save As Draft, Discard, reopening from the GPI Document Delivery Log, and updating the same log entry when the reopened draft is completed.
 
@@ -28,7 +28,7 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.16.3.2
+- Version: 0.16.3.3
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -37,7 +37,7 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 ## Sandbox validation
 
-Validate PDF, routing, Accounting sender, Delivery Log, draft reopening, native Sent Email History, and SharePoint archive URL. For credit memos, test primary-contact fallback, customer-specific and generic routing rules, Save As Draft, Discard, Send, and Missing Recipient behavior.
+Validate PDF, routing, Accounting sender, Delivery Log, draft reopening, native Sent Email History, and SharePoint archive URL. For credit memos, test customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, generic routing, Save As Draft, Discard, Send, and Missing Recipient behavior.
 
 ## Deferred
 

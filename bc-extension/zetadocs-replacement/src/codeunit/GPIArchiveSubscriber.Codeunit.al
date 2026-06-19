@@ -6,6 +6,7 @@ codeunit 70517 "GPI Archive Subscriber"
     local procedure DeliveryLogOnAfterModify(var Rec: Record "GPI Document Delivery Log"; var xRec: Record "GPI Document Delivery Log"; RunTrigger: Boolean)
     var
         ArchiveMgt: Codeunit "GPI SharePoint Archive";
+        CommittedLogEntry: Record "GPI Document Delivery Log";
     begin
         if ArchiveInProgress then
             exit;
@@ -15,7 +16,17 @@ codeunit 70517 "GPI Archive Subscriber"
             exit;
 
         ArchiveInProgress := true;
-        ArchiveMgt.ArchiveDeliveryLog(Rec);
+
+        // Commit the completed email delivery before starting external file storage.
+        // This prevents the SharePoint upload from being left in Pending while the
+        // email editor transaction is still finishing.
+        Commit();
+
+        if CommittedLogEntry.Get(Rec."Entry No.") then begin
+            ArchiveMgt.ArchiveDeliveryLog(CommittedLogEntry);
+            Commit();
+        end;
+
         ArchiveInProgress := false;
     end;
 

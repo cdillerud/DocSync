@@ -9,23 +9,33 @@
 - Tracking: use the existing Delivery Log, native email relation, draft reopening, sent-email history, and SharePoint archival framework.
 - Validation target: Sandbox_5_5_2026.
 
-## Planned documents
+## Implemented documents
 
 ### Sales Return Authorization
 
+- Version: 0.19.1.0.
 - Source: Sales Return Order.
-- Purpose: authorize a customer return.
-- Default To: customer-specific routing, return-order contact, then Customer Card email.
-- Default CC: OSR and ISR, excluding the sender.
+- Purpose: authorize a customer return without promising a final credit amount.
+- Default To: customer-specific routing, return-order contact, customer primary contact, then Customer Card email.
+- Default CC: OSR and ISR, excluding the sender and existing To recipients.
 - Customer-facing document.
+- Pricing is not displayed.
+- Final credit is stated as subject to receipt and inspection.
+- Sending requires Released status; preview does not.
 
 ### Sales Return Warehouse Notification
 
+- Version: 0.19.1.0.
 - Source: Sales Return Order.
 - Purpose: notify the receiving warehouse of an incoming return.
-- Default To: location-specific routing, then Location Card email.
+- Default To: Location Card email with location-specific and generic routing-rule support.
 - Default CC: entered by the sender in the Email Editor.
 - Warehouse document.
+- Sending requires Released status; preview does not.
+
+Both Sales Return documents support dedicated branded PDFs, Document Visibility, explicit current-user sender account selection, recipient de-duplication, native draft and sent history, Delivery Log tracking, routing rules, and SharePoint archival under Sales.
+
+## Planned documents
 
 ### Purchase Return Order
 
@@ -69,19 +79,19 @@
 - Show: order number, customer PO, order date, requested date, promised or expected date, item, description, ordered quantity, shipped quantity, outstanding quantity, supply type, purchase order number, and customer-facing status.
 - Do not show: vendor cost, margin, internal purchasing notes, vendor contacts, or internal escalation notes.
 
-## Recommended implementation order
+## Implementation order
 
-1. Shared Phase 2 infrastructure, version 0.19.0.0.
-2. Sales return documents, version 0.19.1.0.
-3. Purchase return documents, version 0.19.2.0.
+1. Shared Phase 2 infrastructure, version 0.19.0.0: implemented, pending sandbox validation.
+2. Sales return documents, version 0.19.1.0: implemented, pending compile and sandbox validation.
+3. Purchase return documents, version 0.19.2.0: next sprint.
 4. Transfer documents, version 0.19.3.0.
 5. Customer Open Order Status, version 0.20.0.0.
 
-## Current infrastructure status
+## Shared infrastructure status
 
 - New object range added: 70550..70649.
 - New delivery document type values added.
 - Current-user sender-account resolution service added.
 - Recipient parsing, de-duplication, and sender exclusion added.
 - Warehouse archive folder setup added.
-- Transfer Header archive routing hook remains to be connected after the shared infrastructure compiles successfully.
+- Transfer Header archive routing hook remains to be connected before the Transfer document sprint is complete.

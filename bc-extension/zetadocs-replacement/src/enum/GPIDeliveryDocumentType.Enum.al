@@ -52,4 +52,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Purchase Credit Memo';
     }
+
+    value(10; "Customer Statement")
+    {
+        Caption = 'Customer Statement';
+    }
 }

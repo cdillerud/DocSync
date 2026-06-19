@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.18.0.0
+
+### Added
+- Added Document Visibility to Sales Lines and Purchase Lines with options for All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
+- Added Document Visibility fields to Sales Order, Blanket Sales Order, and Purchase Order lines.
+- Added centralized line-visibility policy and report extensions for Sales Order Confirmations, Prepayment Notices, Pick Tickets, Blanket Sales Orders, Drop Ship Purchase Orders, Warehouse Purchase Orders, and Warehouse Receiving Notices.
+- Preserved Document Visibility on posted sales invoice, posted sales credit memo, and posted purchase credit memo lines for traceability.
+
+### Safeguards
+- Customer/vendor-facing reports block generation when a nonzero financial line is configured to be hidden from the external document.
+- Posted invoice and credit memo reports continue to show all posted financial lines in this release.
+
 ## 0.17.1.0
 
 ### Changed

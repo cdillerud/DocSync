@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.19.1.0
+
+### Added
+- Added a customer-facing Sales Return Authorization for Sales Return Orders.
+- Added a Sales Return Warehouse Notification for the return location.
+- Added email and preview actions to the Sales Return Order page.
+- Added Delivery Log, native sent-email history, and routing-rule actions to Sales Return Orders.
+- Added Document Visibility to Sales Return Order lines.
+- Added dedicated branded RDLC layouts for both Sales Return documents without modifying any Phase 1 report layouts.
+- Added current-user sender account selection, recipient de-duplication, draft handling, Delivery Log tracking, native email relations, and SharePoint archival through the existing framework.
+
+### Recipient policy
+- Sales Return Authorization defaults to the customer contact or Customer Card email and CCs the OSR and ISR when available, excluding the sender.
+- Sales Return Warehouse Notification defaults to the return Location Card email and uses location-specific routing rules. CC recipients are entered by the sender in the Email Editor.
+- Routing rules can add or replace default recipients.
+
+### Safeguards
+- Sending requires the Sales Return Order to be Released; preview remains available before release.
+- Sales Return Authorization validates that nonzero financial lines are not hidden from the customer-facing document.
+- Warehouse and customer line visibility follow the existing Document Visibility policy.
+- The authorization states that final credit remains subject to receipt and inspection.
+
+### Pending validation
+- Compile against Business Central 28.1 symbols.
+- Validate the Sales Return Order and Sales Return Order Subform page-extension targets.
+- Validate both new RDLC layouts in Sandbox_5_5_2026.
+
 ## 0.19.0.0
 
 ### Added

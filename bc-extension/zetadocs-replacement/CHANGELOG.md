@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.3.3
+
+### Fixed
+- Added Customer Card **E-Mail** as a credit memo recipient fallback when no customer-specific routing rule or primary-contact email is available.
+- Updated both Posted Sales Credit Memo card and list actions to use the corrected recipient resolver.
+- Updated missing-recipient guidance to mention the Customer Card E-Mail field.
+
 ## 0.16.3.2
 
 ### Fixed

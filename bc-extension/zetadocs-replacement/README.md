@@ -36,13 +36,13 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 ## SharePoint archival
 
-When a Delivery Log entry is modified with email status Sent, the extension commits the completed delivery, re-reads the committed entry, and archives it whenever its archive status is not already Archived. The trigger does not depend on the prior-record status because Business Central modal email completion can surface that prior value as Sent.
+When a Delivery Log entry is completed with email status Sent, the extension queues a one-time scheduled task. The task starts in a separate background session after the email transaction commits and performs the SharePoint upload. Archive status changes made by the background task do not queue duplicate tasks.
 
 ## Extension details
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.16.4.2
+- Version: 0.16.4.3
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0

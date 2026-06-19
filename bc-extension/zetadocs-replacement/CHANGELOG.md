@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.16.4.0
+
+### Added
+- Added Gamer-branded Posted Purchase Credit Memo PDF generation.
+- Added preview, email, delivery log, sent-email history, routing rule, and sender-setup actions to Posted Purchase Credit Memo card and list pages.
+- Added vendor-specific Purchase Credit Memo routing rules, document-contact fallback, Vendor Card E-Mail fallback, and generic routing fallback.
+- Added a dedicated GPI Purchase Credit Memo email scenario for assignment to the Accounts Payable mailbox.
+- Added draft, discard, send, reopened-draft tracking, Delivery Log history, and automatic SharePoint archival under the Purchase folder.
+
+### Fixed
+- Corrected SharePoint Retry Archive messaging so a disabled or skipped archive no longer reports a blank-path success.
+
 ## 0.16.3.3
 
 ### Fixed

@@ -47,4 +47,9 @@ enum 70510 "GPI Delivery Document Type"
     {
         Caption = 'Credit Memo';
     }
+
+    value(9; "Purchase Credit Memo")
+    {
+        Caption = 'Purchase Credit Memo';
+    }
 }

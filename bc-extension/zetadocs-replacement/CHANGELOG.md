@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.4.2
+
+### Fixed
+- Removed the automatic archive subscriber's dependency on the prior-record `xRec.Status` value.
+- The subscriber now archives any sent Delivery Log entry that is not already Archived, which addresses modal email completion cases where `xRec` can already surface as Sent and incorrectly skip the automatic upload.
+
 ## 0.16.4.1
 
 ### Fixed

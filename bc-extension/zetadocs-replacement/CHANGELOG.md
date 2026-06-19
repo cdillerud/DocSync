@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.3.1
+
+### Fixed
+- Changed the Credit Memo permission set extension object ID from `70512` to `70513`.
+- Resolved compiler error `AL0264` caused by the existing Blanket Sales Order permission set extension already using ID `70512`.
+
 ## 0.16.3.0
 
 ### Added

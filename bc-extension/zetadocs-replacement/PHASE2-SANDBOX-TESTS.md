@@ -14,79 +14,22 @@ Target environment: Sandbox_5_5_2026
 
 - Confirm a user whose User ID is an email address resolves to the matching Business Central Email Account.
 - Confirm a user whose User ID is not an email can resolve through the User Setup email field.
-- Confirm a clear error appears when the user has no usable email address.
-- Confirm a clear error appears when the email address has no matching Business Central Email Account.
+- Confirm clear errors when the user has no usable email address or matching Business Central Email Account.
 
 ## Recipient normalization
 
 - Confirm comma-separated and semicolon-separated addresses are accepted.
 - Confirm duplicate addresses are removed case-insensitively.
 - Confirm To recipients take priority over duplicate CC and BCC recipients.
-- Confirm CC recipients take priority over duplicate BCC recipients.
 - Confirm the sender is removed from default To, CC, and BCC recipients.
 
-## Sales Return Authorization
+## Return documents
 
-- Open a Sales Return Order and confirm the Gamer Documents actions appear.
-- Preview while the return order is Open and confirm no sender-account validation occurs.
-- Attempt to email while Open and confirm sending is blocked until Released.
-- Release the return order and confirm the email editor opens from the initiating user's matching Email Account.
-- Confirm recipient fallback order: customer-specific routing, return-order contact, customer primary contact, Customer Card email.
-- Confirm OSR and ISR are added to CC when available.
-- Confirm the sender and To recipients are not duplicated in CC.
-- Confirm Add and Replace routing-rule behavior.
-- Confirm the PDF contains no pricing and states that final credit is subject to receipt and inspection.
-- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Sales-folder archival.
-
-## Sales Return Warehouse Notification
-
-- Preview while the return order is Open.
-- Attempt to email while Open and confirm sending is blocked until Released.
-- Confirm Location Code is required for sending.
-- Confirm the Location Card email is the default To recipient.
-- Confirm location-specific and generic routing rules can add or replace recipients.
-- Confirm OSR and ISR are not added automatically.
-- Add a manual CC recipient in the Email Editor and confirm it is recorded in the Delivery Log.
-- Confirm warehouse quantities use the warehouse display policy.
-- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Sales-folder archival.
-
-## Sales Return line visibility
-
-- All Documents appears on both Sales Return documents.
-- Customer/Vendor Documents Only appears only on the Sales Return Authorization.
-- Warehouse Documents Only appears only on the Warehouse Notification.
-- Do Not Print appears on neither document.
-- A nonzero line using Warehouse Documents Only or Do Not Print blocks the customer authorization.
-
-## Purchase Return Order
-
-- Open a Purchase Return Order and confirm the Gamer Documents actions appear.
-- Preview while the return order is Open and confirm no sender-account validation occurs.
-- Attempt to email while Open and confirm sending is blocked until Released.
-- Confirm recipient fallback order: vendor-specific routing, document contact, vendor primary contact, Vendor Card email.
-- Confirm OSR and ISR are added to CC when identifiable on the Purchase Header.
-- Confirm Add and Replace routing-rule behavior.
-- Confirm the PDF contains no pricing.
-- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Purchase-folder archival.
-
-## Purchase Return Pick Ticket
-
-- Preview while the return order is Open.
-- Attempt to email while Open and confirm sending is blocked until Released.
-- Confirm Location Code is required for sending.
-- Confirm the Location Card email is the default To recipient.
-- Confirm location-specific and generic routing rules can add or replace recipients.
-- Confirm OSR and ISR are not added automatically.
-- Confirm warehouse quantities and units of measure use the warehouse display policy.
-- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Purchase-folder archival.
-
-## Purchase Return line visibility
-
-- All Documents appears on both Purchase Return documents.
-- Customer/Vendor Documents Only appears only on the vendor Purchase Return Order.
-- Warehouse Documents Only appears only on the Purchase Return Pick Ticket.
-- Do Not Print appears on neither document.
-- A nonzero line using Warehouse Documents Only or Do Not Print blocks the vendor Purchase Return Order.
+- Confirm Sales Return and Purchase Return Gamer Documents actions appear on their card pages.
+- Confirm preview works while Open and send is blocked until Released.
+- Confirm customer/vendor/contact fallback, routing-rule Add and Replace behavior, sender exclusion, OSR and ISR CC policy, native draft and sent history, Delivery Log tracking, and Sales/Purchase archival.
+- Confirm warehouse return documents use Location Card routing, manual CC, warehouse quantity display, and warehouse-only visibility.
+- Confirm external return documents contain no pricing and block nonzero lines hidden from the customer/vendor document.
 
 ## Transfer Pick List
 
@@ -122,16 +65,10 @@ Target environment: Sandbox_5_5_2026
 - Receipt Notification Only appears only on the Transfer Receipt Notification.
 - Do Not Print appears on neither document.
 
-## Archive setup
+## Archive and regression
 
-- Open GPI SharePoint Archive Setup.
-- Confirm Warehouse Folder appears.
-- Confirm new setup records default Warehouse Folder to Warehouse.
-- For existing setup records, enter Warehouse manually if the field is blank.
+- Confirm Warehouse Folder appears in GPI SharePoint Archive Setup and defaults to Warehouse for new setup records.
 - Confirm Sales and Purchase documents continue using their existing folders.
-
-## Regression
-
 - Confirm Phase 1 document preview and email actions still open.
 - Confirm Warehouse Receiving Notice continues to use Purchase Header ISR as sender.
 - Confirm no existing Phase 1 RDLC layout was modified by the Phase 2 sprints.

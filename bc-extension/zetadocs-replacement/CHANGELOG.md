@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.0.1
+
+### Fixed
+- Replaced the unsupported EmptyGuid() call with an uninitialized Guid variable when logging a PDF-rendering failure in the Customer Open Order Status batch.
+
+
 ## 0.20.0.0
 
 ### Added

@@ -224,6 +224,7 @@ codeunit 70580 "GPI Customer Open Order Email"
         OrderCount: Integer;
         LineCount: Integer;
         IncludedOrderNos: Text[2048];
+        EmptyEmailMessageId: Guid;
     begin
         ResolveRecipients(
             Customer,
@@ -257,7 +258,7 @@ codeunit 70580 "GPI Customer Open Order Email"
                 BCCRecipients,
                 AppliedRuleEntries,
                 SenderEmailAccount,
-                EmptyGuid(),
+                EmptyEmailMessageId,
                 TempBlob,
                 OrderCount,
                 LineCount,

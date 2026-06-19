@@ -1,4 +1,4 @@
-permissionsetextension 70512 "GPI DOC EMAIL CREDIT" extends "GPI DOC EMAIL"
+permissionsetextension 70513 "GPI DOC EMAIL CREDIT" extends "GPI DOC EMAIL"
 {
     Permissions =
         report "GPI Sales Credit Memo" = X,

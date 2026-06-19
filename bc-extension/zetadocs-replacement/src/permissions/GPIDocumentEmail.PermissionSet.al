@@ -11,6 +11,7 @@ permissionset 70510 "GPI DOC EMAIL"
         table "GPI Document Routing Rule" = X,
         page "GPI Document Routing Rules" = X,
         page "GPI Posted Invoice Queue" = X,
+        page "GPI Statement Options" = X,
         codeunit "GPI Sales Order Email" = X,
         codeunit "GPI Invoice Batch Email" = X,
         codeunit "GPI Blanket Sales Order Email" = X,
@@ -23,6 +24,7 @@ permissionset 70510 "GPI DOC EMAIL"
         codeunit "GPI Sales Credit Memo Email" = X,
         codeunit "GPI Credit Memo Email Mgt." = X,
         codeunit "GPI Purchase Credit Memo Email" = X,
+        codeunit "GPI Customer Statement Email" = X,
         report "GPI Sales Order Confirmation" = X,
         report "GPI Prepayment Notice" = X,
         report "GPI Pick Ticket" = X,
@@ -31,5 +33,7 @@ permissionset 70510 "GPI DOC EMAIL"
         report "GPI Warehouse Purchase Order" = X,
         report "GPI Warehouse Receiving Notice" = X,
         report "GPI Sales Credit Memo" = X,
-        report "GPI Purchase Credit Memo" = X;
+        report "GPI Purchase Credit Memo" = X,
+        report "GPI Customer Statement" = X,
+        report "GPI Email Customer Statements" = X;
 }

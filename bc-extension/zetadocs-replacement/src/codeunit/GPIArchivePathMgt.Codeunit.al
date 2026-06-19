@@ -73,7 +73,7 @@ codeunit 70519 "GPI Archive Path Mgt."
 
     local procedure GetAreaFolder(LogEntry: Record "GPI Document Delivery Log"; Setup: Record "GPI SharePoint Archive Setup"): Text
     begin
-        if LogEntry."Source Table ID" = Database::"Purchase Header" then
+        if LogEntry."Source Table ID" in [Database::"Purchase Header", Database::"Purch. Cr. Memo Hdr."] then
             exit(SanitizeSegment(Setup."Purchase Folder"));
         exit(SanitizeSegment(Setup."Sales Folder"));
     end;

@@ -498,9 +498,9 @@ codeunit 70551 "GPI Sales Return Email"
         FinalCCRecipients: List of [Text];
         FinalBCCRecipients: List of [Text];
     begin
-        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::To, FinalToRecipients);
-        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::Cc, FinalCCRecipients);
-        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::Bcc, FinalBCCRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"To", FinalToRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Cc", FinalCCRecipients);
+        EmailMessage.GetRecipients(Enum::"Email Recipient Type"::"Bcc", FinalBCCRecipients);
         DeliveryLog."To Recipients" := CopyStr(Phase2EmailMgt.JoinRecipients(FinalToRecipients), 1, MaxStrLen(DeliveryLog."To Recipients"));
         DeliveryLog."CC Recipients" := CopyStr(Phase2EmailMgt.JoinRecipients(FinalCCRecipients), 1, MaxStrLen(DeliveryLog."CC Recipients"));
         DeliveryLog."BCC Recipients" := CopyStr(Phase2EmailMgt.JoinRecipients(FinalBCCRecipients), 1, MaxStrLen(DeliveryLog."BCC Recipients"));
@@ -533,3 +533,4 @@ codeunit 70551 "GPI Sales Return Email"
         DeliveryLog.Modify(true);
     end;
 }
+

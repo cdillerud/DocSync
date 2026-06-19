@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.19.3.0
+
+### Added
+- Added a warehouse-facing Transfer Pick List for the transfer-from location.
+- Added a warehouse-facing Transfer Receipt Notification for the transfer-to location.
+- Added email and preview actions to the Transfer Order page.
+- Added Delivery Log, native sent-email history, and routing-rule actions to Transfer Orders.
+- Added a dedicated Transfer Line visibility field with Both Transfer Documents, Pick List Only, Receipt Notification Only, and Do Not Print options.
+- Added dedicated branded RDLC layouts for both Transfer documents without modifying any Phase 1 report layouts.
+- Added current-user sender account selection, recipient de-duplication, draft handling, Delivery Log tracking, native email relations, and SharePoint archival through the existing framework.
+- Connected Transfer Header Delivery Log entries to the Warehouse archive folder.
+
+### Recipient policy
+- Transfer Pick List defaults to the transfer-from Location Card email and supports location-specific or generic Transfer Pick List routing rules.
+- Transfer Receipt Notification defaults to the transfer-to Location Card email and supports location-specific or generic Transfer Receipt Notification routing rules.
+- No sales-team CC recipients are added automatically. CC recipients are entered by the sender in the Email Editor or supplied by routing rules.
+- Routing rules can add or replace default recipients.
+
+### Safeguards
+- Sending requires the Transfer Order to be Released; preview remains available before release.
+- Transfer-from and transfer-to locations must both be populated and must be different.
+- Pick-list and receipt-notification line visibility are controlled independently.
+- Transfer documents contain no pricing or cost information.
+
+### Pending validation
+- Compile against Business Central 28.1 symbols.
+- Validate the Transfer Order and Transfer Order Subform page-extension targets.
+- Validate Transfer Header status and standard field names against the downloaded symbols.
+- Validate both new RDLC layouts and Warehouse-folder archival in Sandbox_5_5_2026.
+
 ## 0.19.2.0
 
 ### Added

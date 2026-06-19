@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.4.3
+
+### Fixed
+- Replaced inline automatic SharePoint upload from the Delivery Log table event with a scheduled background task.
+- Automatic archival now runs after the email delivery transaction commits, which prevents newly sent documents from remaining in Pending while manual retry succeeds.
+- Added execute permission for the scheduled archive task.
+
 ## 0.16.4.2
 
 ### Fixed

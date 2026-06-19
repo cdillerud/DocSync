@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.20.0.0
+
+### Added
+- Added a customer-facing Customer Open Order Status report that combines outstanding warehouse and drop-ship Sales Order item lines.
+- Added Customer Card actions for preview, email, Delivery Log history, routing rules, and native sent-email history.
+- Added a Customer List batch action that sends one report per selected or filtered customer.
+- Added current-user sender-account selection for individual and batch delivery.
+- Added customer-specific routing, primary-contact fallback, Customer Card email fallback, and generic routing support.
+- Added OSR and ISR CC handling with sender and duplicate-recipient exclusion.
+- Added a dedicated landscape RDLC layout showing Sales Order number, customer PO, order date, item, description, outstanding quantity, unit of measure, supply type, linked Purchase Order number, expected date, and customer-facing status.
+- Added Delivery Log fields for as-of date, included order count, included line count, and included Sales Order numbers.
+- Added repeatable batch delivery with preflight counts for ready, missing-recipient, and no-open-order customers.
+
+### Customer-facing policy
+- Includes only live Sales Order item lines with Outstanding Quantity greater than zero.
+- Combines warehouse and drop-ship lines in one report per customer.
+- Shows linked Purchase Order number but does not expose vendor identity, vendor contact information, cost, margin, or internal notes.
+- Chooses the best available expected date from the linked Purchase Line or Sales Line dates.
+- Labels lines as Overdue, Partially Shipped, Awaiting Supplier, On Purchase Order, Scheduled, or Open.
+- Expected dates are identified as estimates that may change.
+
+### Batch behavior
+- Repeat sends are allowed and create a new Delivery Log entry each time.
+- Customers with no outstanding item lines are skipped.
+- Customers with no resolved recipient are skipped and counted.
+- Ready recipients are confirmed before direct batch send.
+- Batch results report sent, failed, missing-recipient, and no-open-line totals.
+
+### Pending validation
+- Compile against Business Central 28.1 symbols.
+- Validate the explicit Email.Send overload that uses the current user's Email Account.
+- Validate the linked Purchase Order and Purchase Line field discovery against downloaded symbols.
+- Validate the Customer Card, Customer List, and Delivery Log page-extension targets.
+- Validate the landscape RDLC layout, single-customer draft workflow, repeat batch delivery, Delivery Log detail fields, and Sales-folder archival in Sandbox_5_5_2026.
+
 ## 0.19.3.0
 
 ### Added

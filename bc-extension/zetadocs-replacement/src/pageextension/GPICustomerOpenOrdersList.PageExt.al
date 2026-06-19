@@ -8,7 +8,7 @@ pageextension 70581 "GPI Customer Open Order List" extends "Customer List"
             {
                 ApplicationArea = All;
                 Caption = 'Gamer Send Open Order Status Batch';
-                Image = SendToMultiple;
+                Image = Email;
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;

@@ -35,9 +35,9 @@ pageextension 70528 "GPI Credit Memo Card Ext" extends "Posted Sales Credit Memo
 
                     trigger OnAction()
                     var
-                        CreditMemoEmail: Codeunit "GPI Sales Credit Memo Email";
+                        CreditMemoEmailMgt: Codeunit "GPI Credit Memo Email Mgt.";
                     begin
-                        CreditMemoEmail.OpenCreditMemoDraft(Rec);
+                        CreditMemoEmailMgt.OpenCreditMemoDraft(Rec);
                         CurrPage.Update(false);
                     end;
                 }

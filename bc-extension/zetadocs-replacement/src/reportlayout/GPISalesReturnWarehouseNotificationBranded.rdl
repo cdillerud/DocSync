@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties><DataProvider>SQL</DataProvider><ConnectString /></ConnectionProperties>
+      <rd:DataSourceID>b58c7e12-c615-4fa2-9b2e-cc4f3b158635</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Query><DataSourceName>DataSource</DataSourceName><CommandText /></Query>
+      <Fields>
+        <Field Name="CompanyLogo"><DataField>CompanyLogo</DataField><rd:TypeName>System.Byte[]</rd:TypeName></Field>
+        <Field Name="CompanyName"><DataField>CompanyName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyAddressLine"><DataField>CompanyAddressLine</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyPhone"><DataField>CompanyPhone</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ReturnOrderNo"><DataField>ReturnOrderNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerNo"><DataField>CustomerNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerName"><DataField>CustomerName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerAddressLine"><DataField>CustomerAddressLine</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ContactName"><DataField>ContactName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LocationCode"><DataField>LocationCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ExpectedReturnDate"><DataField>ExpectedReturnDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="CustomerReference"><DataField>CustomerReference</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ItemNo"><DataField>ItemNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDescription"><DataField>LineDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDescription2"><DataField>LineDescription2</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineLocationCode"><DataField>LineLocationCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="Quantity"><DataField>Quantity</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="UnitOfMeasureCode"><DataField>UnitOfMeasureCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ReturnReasonCode"><DataField>ReturnReasonCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Image Name="CompanyLogoImage">
+            <Source>Database</Source><Value>=First(Fields!CompanyLogo.Value,"DataSet_Result")</Value><MIMEType>image/jpeg</MIMEType><Sizing>FitProportional</Sizing>
+            <Top>0in</Top><Left>0in</Left><Height>0.65in</Height><Width>2.8in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Image>
+          <Textbox Name="DocumentTitle">
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>SALES RETURN WAREHOUSE NOTIFICATION</Value><Style><FontFamily>Arial</FontFamily><FontSize>14pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Top>0.12in</Top><Left>3.25in</Left><Height>0.52in</Height><Width>4.25in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="CompanyLine">
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CompanyName.Value,"DataSet_Result") &amp; " | " &amp; First(Fields!CompanyAddressLine.Value,"DataSet_Result") &amp; " | " &amp; First(Fields!CompanyPhone.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize><Color>#444444</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>0.78in</Top><Left>0in</Left><Height>0.25in</Height><Width>7.5in</Width>
+            <Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="CustomerBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>RETURNING CUSTOMER</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>=First(Fields!CustomerName.Value,"DataSet_Result") &amp; " (" &amp; First(Fields!CustomerNo.Value,"DataSet_Result") &amp; ")" &amp; vbCrLf &amp; First(Fields!CustomerAddressLine.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ContactName.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>1.18in</Top><Left>0in</Left><Height>0.95in</Height><Width>3.7in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>7pt</PaddingLeft><PaddingTop>5pt</PaddingTop><BackgroundColor>#FAFAFA</BackgroundColor></Style>
+          </Textbox>
+          <Textbox Name="ReturnDetailsBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph><TextRuns><TextRun><Value>Return Order: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!ReturnOrderNo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Receive At: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!LocationCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Expected Return Date: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=IIF(Year(First(Fields!ExpectedReturnDate.Value,"DataSet_Result"))=1,"",Format(First(Fields!ExpectedReturnDate.Value,"DataSet_Result"),"MM/dd/yyyy"))</Value></TextRun></TextRuns></Paragraph>
+              <Paragraph><TextRuns><TextRun><Value>Customer Reference: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CustomerReference.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph>
+            </Paragraphs>
+            <Top>1.18in</Top><Left>3.9in</Left><Height>0.95in</Height><Width>3.6in</Width>
+            <Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>7pt</PaddingLeft><PaddingTop>5pt</PaddingTop></Style>
+          </Textbox>
+          <Textbox Name="InstructionBox">
+            <CanGrow>true</CanGrow>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>Prepare to receive and inspect the items listed below. Confirm quantities, condition, and return reason during receipt.</Value><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>2.32in</Top><Left>0in</Left><Height>0.48in</Height><Width>7.5in</Width>
+            <Style><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop><BackgroundColor>#FFF8F7</BackgroundColor></Style>
+          </Textbox>
+          <Tablix Name="ReturnLines">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>2.8in</Width></TablixColumn>
+                <TablixColumn><Width>0.65in</Width></TablixColumn>
+                <TablixColumn><Width>0.75in</Width></TablixColumn>
+                <TablixColumn><Width>0.7in</Width></TablixColumn>
+                <TablixColumn><Width>1.65in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow><Height>0.3in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="HItem"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Item</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="HDescription"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="HWhse"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Whse</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="HQuantity"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Quantity</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="HUOM"><Paragraphs><Paragraph><TextRuns><TextRun><Value>U/M</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><TextAlign>Center</TextAlign></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="HReason"><Paragraphs><Paragraph><TextRuns><TextRun><Value>Return Reason</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+                <TablixRow><Height>0.32in</Height><TablixCells>
+                  <TablixCell><CellContents><Textbox Name="DItem"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ItemNo.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="DDescription"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDescription.Value &amp; IIF(Fields!LineDescription2.Value="","",vbCrLf &amp; Fields!LineDescription2.Value)</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="DWhse"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineLocationCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="DQuantity"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Trim(CStr(Fields!ItemNo.Value))="",Nothing,Format(Fields!Quantity.Value,"0.##"))</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Right</TextAlign><PaddingRight>3pt</PaddingRight><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="DUOM"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Trim(CStr(Fields!ItemNo.Value))="",Nothing,Fields!UnitOfMeasureCode.Value)</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><TextAlign>Center</TextAlign><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  <TablixCell><CellContents><Textbox Name="DReason"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ReturnReasonCode.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><PaddingLeft>3pt</PaddingLeft><Border><Color>#D7D7D7</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                </TablixCells></TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/><TablixMember/></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup></TablixMember><TablixMember><Group Name="ReturnLineDetails" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <DataSetName>DataSet_Result</DataSetName>
+            <Top>2.98in</Top><Left>0in</Left><Height>0.62in</Height><Width>7.5in</Width>
+            <Style><Border><Style>None</Style></Border><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize></Style>
+          </Tablix>
+        </ReportItems>
+        <Height>8.35in</Height>
+        <Style />
+      </Body>
+      <Width>7.5in</Width>
+      <Page>
+        <PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth>
+        <LeftMargin>0.5in</LeftMargin><RightMargin>0.5in</RightMargin><TopMargin>0.4in</TopMargin><BottomMargin>0.4in</BottomMargin>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>f62f4382-3ecb-4d60-85e0-fba44e5d344e</rd:ReportID>
+</Report>

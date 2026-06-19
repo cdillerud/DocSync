@@ -10,6 +10,22 @@ Accounts receivable: Posted Sales Invoice, filtered invoice queue, and Posted Sa
 
 Purchasing and accounts payable: Drop Ship Purchase Order, Warehouse Purchase Order, Warehouse Receiving Notice, and Posted Purchase Credit Memo.
 
+## Phase 2 infrastructure
+
+Version 0.19.0.0 starts the shared infrastructure for these planned documents:
+
+- Sales Return Authorization
+- Sales Return Warehouse Notification
+- Purchase Return Order
+- Purchase Return Pick Ticket
+- Transfer Pick List
+- Transfer Receipt Notification
+- Customer Open Order Status
+
+The Phase 2 email service resolves the initiating user's email address, requires a matching Business Central Email Account, removes duplicate recipients, and excludes the sender from default To, CC, and BCC recipients. A dedicated Warehouse archive folder setting is available for transfer and warehouse-owned documents.
+
+The Phase 2 document reports, page actions, email workflows, and Delivery Log creation are not included in the infrastructure release. They will be added in document-specific releases after this shared layer compiles and is validated in the sandbox.
+
 ## Document line visibility
 
 Sales Order, Blanket Sales Order, and Purchase Order lines include Document Visibility with four options: All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
@@ -58,14 +74,16 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.18.0.1
-- Object range: 70510..70549
+- Version: 0.19.0.0
+- Object ranges: 70510..70549 and 70550..70649
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
 - Application: 28.1
 - Runtime: 17.0
 
 ## Sandbox validation
+
+For Phase 2 infrastructure, confirm the extension compiles, the Warehouse Folder field appears in SharePoint Archive Setup, and GPI Phase 2 Email Mgt. can resolve the initiating user's configured Business Central Email Account.
 
 Test all four Document Visibility values on Sales Order, Blanket Sales Order, and Purchase Order lines. Confirm each line appears only in its intended document category.
 
@@ -81,4 +99,7 @@ Test the Customer List batch action with a customer selection and with filters. 
 
 ## Remaining work
 
+- Compile and validate Phase 2 shared infrastructure in Sandbox_5_5_2026.
+- Connect Transfer Header archive entries to the Warehouse folder.
+- Implement the Phase 2 document-specific reports, actions, routing, Delivery Log entries, and archive filenames.
 - Complete the production-readiness review and sandbox regression checklist before any Production publication.

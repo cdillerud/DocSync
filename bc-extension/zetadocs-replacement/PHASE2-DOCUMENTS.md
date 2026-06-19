@@ -35,23 +35,31 @@
 
 Both Sales Return documents support dedicated branded PDFs, Document Visibility, explicit current-user sender account selection, recipient de-duplication, native draft and sent history, Delivery Log tracking, routing rules, and SharePoint archival under Sales.
 
-## Planned documents
-
 ### Purchase Return Order
 
+- Version: 0.19.2.0.
 - Source: Purchase Return Order.
-- Purpose: notify a supplier of items being returned and request or record return authorization.
-- Default To: vendor-specific routing, return-order contact, then Vendor Card email.
-- Default CC: OSR and ISR when reliably available, excluding the sender.
+- Purpose: notify a supplier of items being returned and request or record return authorization and shipping instructions.
+- Default To: vendor-specific routing, return-order contact, vendor primary contact, then Vendor Card email.
+- Default CC: OSR and ISR when those fields can be identified, excluding the sender and existing To recipients.
 - Vendor-facing document.
+- Pricing is not displayed.
+- Sending requires Released status; preview does not.
 
 ### Purchase Return Pick Ticket
 
+- Version: 0.19.2.0.
 - Source: Purchase Return Order.
 - Purpose: notify the warehouse to pick and ship items back to the supplier.
-- Default To: location-specific routing, then Location Card email.
+- Default To: Location Card email with location-specific and generic routing-rule support.
 - Default CC: entered by the sender in the Email Editor.
 - Warehouse document.
+- Uses the warehouse quantity and unit-of-measure display policy.
+- Sending requires Released status; preview does not.
+
+Both Purchase Return documents support dedicated branded PDFs, Document Visibility, explicit current-user sender account selection, recipient de-duplication, native draft and sent history, Delivery Log tracking, routing rules, and SharePoint archival under Purchase.
+
+## Planned documents
 
 ### Transfer Pick List
 
@@ -83,8 +91,8 @@ Both Sales Return documents support dedicated branded PDFs, Document Visibility,
 
 1. Shared Phase 2 infrastructure, version 0.19.0.0: implemented, pending sandbox validation.
 2. Sales return documents, version 0.19.1.0: implemented, pending compile and sandbox validation.
-3. Purchase return documents, version 0.19.2.0: next sprint.
-4. Transfer documents, version 0.19.3.0.
+3. Purchase return documents, version 0.19.2.0: implemented, pending compile and sandbox validation.
+4. Transfer documents, version 0.19.3.0: next sprint.
 5. Customer Open Order Status, version 0.20.0.0.
 
 ## Shared infrastructure status

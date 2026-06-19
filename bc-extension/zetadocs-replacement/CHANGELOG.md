@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.4.1
+
+### Fixed
+- Changed automatic SharePoint archival to commit the completed delivery first, re-read the Delivery Log entry, and then run the external file upload in a clean transaction.
+- Prevented successfully sent document attachments from remaining indefinitely in Pending archive status when manual Retry SharePoint Archive succeeds.
+
 ## 0.16.4.0
 
 ### Added

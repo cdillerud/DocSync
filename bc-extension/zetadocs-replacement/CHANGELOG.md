@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.1.0
+
+### Changed
+- Finalized the Warehouse Receiving Notice sender policy to use the ISR identified on the Purchase Header.
+- The workflow now requires a matching Business Central Email Account for the ISR and opens the native email editor with that account explicitly selected.
+- The ISR sender is excluded from default CC recipients, and the Delivery Log records the actual sender account with policy `Purchase Header ISR`.
+
 ## 0.17.0.1
 
 ### Fixed

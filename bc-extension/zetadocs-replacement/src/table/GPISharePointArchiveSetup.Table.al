@@ -52,6 +52,11 @@ table 70513 "GPI SharePoint Archive Setup"
             Caption = 'Last Connection Result';
             DataClassification = SystemMetadata;
         }
+        field(13; "Warehouse Folder"; Text[50])
+        {
+            Caption = 'Warehouse Folder';
+            DataClassification = OrganizationIdentifiableInformation;
+        }
     }
 
     keys
@@ -72,6 +77,8 @@ table 70513 "GPI SharePoint Archive Setup"
             "Sales Folder" := 'Sales';
         if "Purchase Folder" = '' then
             "Purchase Folder" := 'Purchase';
+        if "Warehouse Folder" = '' then
+            "Warehouse Folder" := 'Warehouse';
         "Clear Local PDF After Archive" := true;
     end;
 }

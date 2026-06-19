@@ -52,5 +52,15 @@ tableextension 70516 "GPI Delivery Log Archive" extends "GPI Document Delivery L
             Caption = 'Archive File Name';
             DataClassification = CustomerContent;
         }
+        field(70520; "Statement Start Date"; Date)
+        {
+            Caption = 'Statement Start Date';
+            DataClassification = CustomerContent;
+        }
+        field(70521; "Statement End Date"; Date)
+        {
+            Caption = 'Statement End Date';
+            DataClassification = CustomerContent;
+        }
     }
 }

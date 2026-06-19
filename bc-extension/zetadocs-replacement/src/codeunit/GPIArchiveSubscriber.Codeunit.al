@@ -12,19 +12,24 @@ codeunit 70517 "GPI Archive Subscriber"
             exit;
         if Rec.Status <> Rec.Status::Sent then
             exit;
-        if xRec.Status = xRec.Status::Sent then
+        if Rec."Archive Status" = Rec."Archive Status"::Archived then
             exit;
 
         ArchiveInProgress := true;
 
         // Commit the completed email delivery before starting external file storage.
-        // This prevents the SharePoint upload from being left in Pending while the
-        // email editor transaction is still finishing.
+        // Re-read the committed entry and archive any sent document that has not yet
+        // reached Archived status. Do not depend on xRec because Business Central can
+        // surface the current status there during modal email completion.
         Commit();
 
         if CommittedLogEntry.Get(Rec."Entry No.") then begin
-            ArchiveMgt.ArchiveDeliveryLog(CommittedLogEntry);
-            Commit();
+            if (CommittedLogEntry.Status = CommittedLogEntry.Status::Sent) and
+               (CommittedLogEntry."Archive Status" <> CommittedLogEntry."Archive Status"::Archived)
+            then begin
+                ArchiveMgt.ArchiveDeliveryLog(CommittedLogEntry);
+                Commit();
+            end;
         end;
 
         ArchiveInProgress := false;

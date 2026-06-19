@@ -28,7 +28,7 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.16.3.0
+- Version: 0.16.3.2
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0

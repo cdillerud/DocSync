@@ -74,10 +74,15 @@ pageextension 70521 "GPI Delivery Log Archive" extends "GPI Document Delivery Lo
                 begin
                     ArchiveMgt.ArchiveDeliveryLog(Rec);
                     CurrPage.Update(false);
-                    if Rec."Archive Status" = Rec."Archive Status"::Failed then
-                        Message('Archival failed: %1', Rec."Last Archive Error")
-                    else
-                        Message('Document archived to %1.', Rec."Archive Path");
+
+                    case Rec."Archive Status" of
+                        Rec."Archive Status"::Archived:
+                            Message('Document archived to %1.', Rec."Archive Path");
+                        Rec."Archive Status"::Failed:
+                            Message('Archival failed: %1', Rec."Last Archive Error");
+                        else
+                            Message('The document was not archived. Confirm SharePoint Archive Setup is enabled, the email status is Sent, and an archive file account is assigned.');
+                    end;
                 end;
             }
             action(OpenSharePointArchiveSetup)

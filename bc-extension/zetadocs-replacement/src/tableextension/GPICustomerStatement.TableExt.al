@@ -1,4 +1,4 @@
-tableextension 70515 "GPI Customer Statement Ext" extends Customer
+tableextension 70517 "GPI Customer Statement Ext" extends Customer
 {
     fields
     {

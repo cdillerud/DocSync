@@ -63,6 +63,10 @@ report 70580 "GPI Customer Open Orders"
                         PurchaseOrderLineNo: Integer;
                         DropShipment: Boolean;
                     begin
+                        LineVisibilityMgt.ValidateFinancialLineVisibility(
+                            "Line Amount",
+                            "GPI Document Visibility");
+
                         if not LineVisibilityMgt.ShouldPrintSalesLine(SalesLine, false) then
                             CurrReport.Skip();
 
@@ -78,11 +82,6 @@ report 70580 "GPI Customer Open Orders"
                         StatusText := BuildStatusText(SalesLine, PurchaseOrderNo, ExpectedDate, DropShipment);
                     end;
                 }
-
-                trigger OnAfterGetRecord()
-                begin
-                    LineVisibilityMgt.ValidateSalesExternalDocument(SalesHeader);
-                end;
             }
 
             trigger OnAfterGetRecord()

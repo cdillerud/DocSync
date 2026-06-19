@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.0.1
+
+### Fixed
+- Moved the Customer Statement table extension from object ID 70515 to 70517.
+- Resolved compiler error AL0264 caused by the existing Purchase Header table extension already using ID 70515.
+
 ## 0.17.0.0
 
 ### Added

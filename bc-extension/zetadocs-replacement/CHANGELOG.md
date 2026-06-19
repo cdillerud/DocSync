@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.19.0.0
+
+### Added
+- Started Phase 2 shared infrastructure on branch `feature/phase-2-documents`.
+- Expanded the extension object range with 70550..70649.
+- Added delivery document types for Sales Return Authorization, Sales Return Warehouse Notification, Purchase Return Order, Purchase Return Pick Ticket, Transfer Pick List, Transfer Receipt Notification, and Customer Open Order Status.
+- Added a shared Phase 2 email management codeunit for current-user sender account resolution, recipient parsing, recipient de-duplication, sender exclusion, and recipient logging.
+- Added Warehouse Folder to SharePoint Archive Setup for transfer and other warehouse-owned documents.
+- Added a permission-set extension for the Phase 2 email management service.
+
+### Pending validation
+- Compile against Business Central 28.1 symbols.
+- Confirm current-user email resolution against User Setup and configured Business Central Email Accounts.
+- Connect Transfer Header archive entries to the Warehouse folder after compile validation.
+
+## 0.18.0.1
+
+### Fixed
+- Moved GPI Line Visibility Mgt. from codeunit 70521 to 70549 to resolve compiler error AL0264.
+- Updated the extension package version after the object-ID correction.
+
 ## 0.18.0.0
 
 ### Added

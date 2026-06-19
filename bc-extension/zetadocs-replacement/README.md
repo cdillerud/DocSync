@@ -8,7 +8,7 @@ Sales: Sales Order Confirmation, Prepayment Notice, Pick Ticket, and Blanket Sal
 
 Accounts receivable: Posted Sales Invoice, filtered invoice queue, and Posted Sales Credit Memo.
 
-Purchasing: Drop Ship Purchase Order, Warehouse Purchase Order, and Warehouse Receiving Notice.
+Purchasing and accounts payable: Drop Ship Purchase Order, Warehouse Purchase Order, Warehouse Receiving Notice, and Posted Purchase Credit Memo.
 
 ## Posted Sales Credit Memos
 
@@ -20,6 +20,16 @@ Credit memos use the existing GPI Invoice Batch email scenario and Accounting ma
 
 Successfully sent credit memo PDFs use the existing GPI SharePoint archive process and Sales folder structure.
 
+## Posted Purchase Credit Memos
+
+Posted Purchase Credit Memo card and list pages include Gamer actions to preview, email, open delivery history, open native sent-email history, and configure routing and sender setup.
+
+Recipient selection is vendor-specific Purchase Credit Memo routing rules, then the document Buy-from Contact email, then the Vendor Card E-Mail field, and finally generic Purchase Credit Memo routing rules when no vendor-specific rule applies.
+
+Purchase credit memos use the GPI Purchase Credit Memo email scenario, which should be assigned to the Accounts Payable mailbox. They support Send, Save As Draft, Discard, reopening from the GPI Document Delivery Log, and updating the same log entry when the reopened draft is completed.
+
+Successfully sent purchase credit memo PDFs automatically archive through the GPI SharePoint archive process under the Purchase folder structure.
+
 ## Saved drafts
 
 The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopened drafts preserve the native Business Central message, sender account, recipients, body, and attachment.
@@ -28,7 +38,7 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.16.3.3
+- Version: 0.16.4.0
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -37,7 +47,11 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 ## Sandbox validation
 
-Validate PDF, routing, Accounting sender, Delivery Log, draft reopening, native Sent Email History, and SharePoint archive URL. For credit memos, test customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, generic routing, Save As Draft, Discard, Send, and Missing Recipient behavior.
+Validate PDF, routing, sender selection, Delivery Log, draft reopening, native Sent Email History, and SharePoint archive URL.
+
+For sales credit memos, test customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, generic routing, Save As Draft, Discard, Send, Missing Recipient behavior, and automatic Sales-folder archival.
+
+For purchase credit memos, assign GPI Purchase Credit Memo to the Accounts Payable email account, then test vendor-specific routing, document-contact fallback, Vendor Card E-Mail fallback, generic routing, Save As Draft, Discard, Send, Missing Recipient behavior, and automatic Purchase-folder archival.
 
 ## Deferred
 

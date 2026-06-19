@@ -34,11 +34,15 @@ Successfully sent purchase credit memo PDFs automatically archive through the GP
 
 The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopened drafts preserve the native Business Central message, sender account, recipients, body, and attachment.
 
+## SharePoint archival
+
+When a Delivery Log entry transitions to Sent, the extension commits the completed delivery, re-reads the committed entry, and then performs the SharePoint upload. This keeps external file storage separate from the email editor transaction and prevents sent documents from remaining in Pending status when the archive connection is healthy.
+
 ## Extension details
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.16.4.0
+- Version: 0.16.4.1
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0

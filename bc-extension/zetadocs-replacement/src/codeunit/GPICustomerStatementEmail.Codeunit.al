@@ -66,7 +66,7 @@ codeunit 70527 "GPI Customer Statement Email"
         GenerateStatementPdf(Customer, StartDate, EndDate, TempBlob);
 
         AttachmentName := CopyStr(BuildAttachmentName(Customer."No.", EndDate), 1, MaxStrLen(AttachmentName));
-        Subject := BuildSubject(Customer, StartDate, EndDate);
+        Subject := BuildSubject(StartDate, EndDate);
         Body := BuildBody(Customer, StartDate, EndDate);
 
         EmailMessage.Create(ToRecipients, Subject, Body, true, CCRecipients, BCCRecipients);
@@ -228,7 +228,7 @@ codeunit 70527 "GPI Customer Statement Email"
 
         EmailScenario.GetEmailAccount(Enum::"Email Scenario"::"GPI Customer Statement", EmailAccount);
         AttachmentName := CopyStr(BuildAttachmentName(Customer."No.", EndDate), 1, MaxStrLen(AttachmentName));
-        Subject := BuildSubject(Customer, StartDate, EndDate);
+        Subject := BuildSubject(StartDate, EndDate);
         Body := BuildBody(Customer, StartDate, EndDate);
 
         ClearLastError();
@@ -352,8 +352,7 @@ codeunit 70527 "GPI Customer Statement Email"
         CustomerRef: RecordRef;
         AttachmentOutStream: OutStream;
     begin
-        CustomerCopy.Get(Customer."No.");
-        CustomerCopy.SetRecFilter();
+        CustomerCopy.SetRange("No.", Customer."No.");
         CustomerCopy.SetRange("Date Filter", StartDate, EndDate);
         CustomerRef.GetTable(CustomerCopy);
         TempBlob.CreateOutStream(AttachmentOutStream);
@@ -533,7 +532,7 @@ codeunit 70527 "GPI Customer Statement Email"
             Format(EndDate, 0, '<Year4>-<Month,2>-<Day,2>')));
     end;
 
-    local procedure BuildSubject(Customer: Record Customer; StartDate: Date; EndDate: Date): Text
+    local procedure BuildSubject(StartDate: Date; EndDate: Date): Text
     begin
         exit(StrSubstNo(
             'Customer Statement %1 through %2',

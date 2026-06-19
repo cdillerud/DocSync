@@ -30,6 +30,12 @@ Posted Sales Credit Memo card and list pages include Gamer actions to preview, e
 
 Posted Purchase Credit Memo card and list pages include Gamer actions to preview, email, open delivery history, open native sent-email history, and configure routing and sender setup. Recipient selection uses vendor-specific rules, document-contact email, Vendor Card E-Mail, and generic routing. Purchase credit memos use the GPI Purchase Credit Memo scenario and automatically archive under Purchase.
 
+## Warehouse Receiving Notices
+
+Warehouse Receiving Notices are addressed to the Location Card E-Mail value, with Warehouse Receiving Notice routing rules available to add or replace recipients. The Purchase Header purchaser and ISR are added to CC when applicable.
+
+The sender is the ISR identified on the Purchase Header. That ISR must have an email address on the Salesperson/Purchaser Card and a matching Business Central Email Account. The native email editor opens with that account explicitly selected, the sender is excluded from CC, and the Delivery Log records the sender policy as `Purchase Header ISR`.
+
 ## Saved drafts
 
 The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopened drafts preserve the native Business Central message, sender account, recipients, body, and attachment.
@@ -42,7 +48,7 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.17.0.1
+- Version: 0.17.1.0
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -55,7 +61,8 @@ Assign GPI Customer Statement to the Accounting email account. Test individual p
 
 Test the Customer List batch action with a customer selection and with filters. Confirm the batch skips no-activity, missing-recipient, and exact-period already-sent customers and reports accurate totals.
 
+For Warehouse Receiving Notices, confirm that preview remains available without sender validation, sending fails clearly when the Purchase Header ISR is missing or lacks a registered email account, the editor opens from the ISR account when configured, the ISR is not duplicated in CC, saved drafts reopen with the same sender, and sent documents archive under Purchase.
+
 ## Deferred
 
-- Warehouse Receiving Notice sender policy is TBD.
 - Line-exclusion behavior is pending business clarification.

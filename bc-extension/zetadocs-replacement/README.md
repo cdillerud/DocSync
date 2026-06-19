@@ -4,7 +4,7 @@ Business Central replacement for selected Zetadocs document generation, email, d
 
 ## Supported documents
 
-Sales: Sales Order Confirmation, Prepayment Notice, Pick Ticket, Blanket Sales Order, Customer Statement, Sales Return Authorization, and Sales Return Warehouse Notification.
+Sales: Sales Order Confirmation, Prepayment Notice, Pick Ticket, Blanket Sales Order, Customer Statement, Customer Open Order Status, Sales Return Authorization, and Sales Return Warehouse Notification.
 
 Accounts receivable: Posted Sales Invoice, filtered invoice queue, and Posted Sales Credit Memo.
 
@@ -16,72 +16,49 @@ Warehouse transfers: Transfer Pick List and Transfer Receipt Notification.
 
 The shared Phase 2 email service resolves the initiating user's email address, requires a matching Business Central Email Account, removes duplicate recipients, and excludes the sender from default To, CC, and BCC recipients. A dedicated Warehouse archive folder setting is available for transfer and warehouse-owned documents.
 
-The remaining planned Phase 2 document is Customer Open Order Status.
+## Customer Open Order Status
 
-## Sales Return documents
+Customer Cards include actions to preview and email one current Open Order Status report. Customer List includes a batch action for selected or filtered customers.
 
-Sales Return Orders include Gamer actions to email and preview two dedicated branded documents:
+The report combines live warehouse and drop-ship Sales Order item lines with Outstanding Quantity greater than zero. It includes Sales Order number, customer PO, order date, item, description, outstanding quantity, unit of measure, supply type, linked Purchase Order number, expected date, and customer-facing status.
 
-- Sales Return Authorization, sent to the customer to authorize the physical return
-- Sales Return Warehouse Notification, sent to the return location to prepare for receipt and inspection
+The report does not expose vendor identity, vendor contacts, vendor cost, margin, internal purchasing notes, or escalation notes. Expected dates are identified as estimates that may change.
 
-Sales Return Authorization recipient priority is customer-specific routing, Sales Return Order contact, customer primary contact, and Customer Card E-Mail. The OSR and ISR are added to CC when available unless already the sender or a To recipient. A routing rule using Replace can intentionally replace the defaults.
+Recipient priority is customer-specific routing, primary contact, Customer Card E-Mail, and generic routing. OSR and ISR are added to CC when available, excluding the sender and existing To recipients.
 
-Sales Return Warehouse Notification defaults to the Location Card E-Mail value. Location-specific and generic warehouse routing rules may add or replace recipients. No sales-team CC recipients are added automatically; the sender may add CC recipients in the native Email Editor.
+Individual delivery uses the initiating user's matching Business Central Email Account and supports the native Email Editor, Send, Save As Draft, Discard, draft reopening, Delivery Log tracking, native sent-email history, and Sales-folder archival.
 
-Both workflows use the initiating user's matching Business Central Email Account, support Send, Save As Draft, Discard, draft reopening, native sent-email history, Delivery Log tracking, and SharePoint archival under Sales. Sending requires a Released Sales Return Order, while preview remains available before release.
+Batch delivery performs a preflight, sends directly from the initiating user's matching Email Account, skips customers with no outstanding item lines or no resolved recipient, allows repeat sends, and reports sent, failed, missing-recipient, and no-open-line totals.
 
-The customer authorization does not display pricing or promise a final credit value. It states that final credit is subject to receipt and inspection.
+Delivery Log entries record the report as-of date, included order count, included line count, and Sales Order numbers.
 
-## Purchase Return documents
+## Return documents
 
-Purchase Return Orders include Gamer actions to email and preview two dedicated branded documents:
+Sales Return Orders include a customer-facing Sales Return Authorization and a warehouse-facing Sales Return Warehouse Notification. Purchase Return Orders include a vendor-facing Purchase Return Order and a warehouse-facing Purchase Return Pick Ticket.
 
-- Purchase Return Order, sent to the supplier with the return items and return reasons
-- Purchase Return Pick Ticket, sent to the return location to pick and prepare the items for shipment back to the supplier
+External return documents use customer or vendor routing and contact fallback, add OSR and ISR to CC when available, exclude the sender, display no pricing, and require Released status for sending. Warehouse return documents use location routing, manual CC, warehouse quantity display, and warehouse-only line visibility.
 
-Purchase Return Order recipient priority is vendor-specific routing, Purchase Return Order contact, vendor primary contact, and Vendor Card E-Mail. The OSR and ISR are added to CC when those fields can be identified, unless already the sender or a To recipient. A routing rule using Replace can intentionally replace the defaults.
-
-Purchase Return Pick Ticket defaults to the Location Card E-Mail value. Location-specific and generic routing rules may add or replace recipients. No sales-team CC recipients are added automatically; the sender may add CC recipients in the native Email Editor.
-
-Both workflows use the initiating user's matching Business Central Email Account, support Send, Save As Draft, Discard, draft reopening, native sent-email history, Delivery Log tracking, and SharePoint archival under Purchase. Sending requires a Released Purchase Return Order, while preview remains available before release.
-
-The vendor Purchase Return Order does not display pricing. It asks the supplier to provide any additional return authorization, labeling, or shipping instructions.
+All return workflows support preview, Send, Save As Draft, Discard, draft reopening, native sent-email history, Delivery Log tracking, and SharePoint archival under Sales or Purchase.
 
 ## Transfer documents
 
-Transfer Orders include Gamer actions to email and preview two dedicated branded warehouse documents:
+Transfer Orders include a Transfer Pick List for the transfer-from location and a Transfer Receipt Notification for the transfer-to location.
 
-- Transfer Pick List, sent to the transfer-from location
-- Transfer Receipt Notification, sent to the transfer-to location
+Each document defaults to the applicable Location Card E-Mail and supports location-specific or generic routing rules. No sales-team recipients are added automatically.
 
-The Transfer Pick List defaults to the transfer-from Location Card E-Mail. The Transfer Receipt Notification defaults to the transfer-to Location Card E-Mail. Each document supports location-specific and generic routing rules that can add or replace recipients.
-
-No sales-team recipients are added automatically. The sender may add CC recipients in the native Email Editor or configure them through routing rules.
-
-Transfer lines use a dedicated Document Visibility field with four values: Both Transfer Documents, Pick List Only, Receipt Notification Only, and Do Not Print.
-
-Both workflows use the initiating user's matching Business Central Email Account, support Send, Save As Draft, Discard, draft reopening, native sent-email history, and Delivery Log tracking. Sending requires a Released Transfer Order, while preview remains available before release.
-
-Sent transfer PDFs archive under the SharePoint Warehouse folder. Pick Lists use the transfer-from location as the archive party; Receipt Notifications use the transfer-to location.
+Transfer lines use Both Transfer Documents, Pick List Only, Receipt Notification Only, and Do Not Print. Sent transfer PDFs archive under Warehouse using the applicable location as the archive party.
 
 ## Document line visibility
 
-Sales Order, Blanket Sales Order, Sales Return Order, Purchase Order, and Purchase Return Order lines include Document Visibility with four options: All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
+Sales Order, Blanket Sales Order, Sales Return Order, Purchase Order, and Purchase Return Order lines use All Documents, Customer/Vendor Documents Only, Warehouse Documents Only, and Do Not Print.
 
 Transfer Lines use a separate visibility field because outbound and inbound transfer documents need independent control.
 
-Customer/vendor-facing reports stop with a clear error when a nonzero financial line is configured as Warehouse Documents Only or Do Not Print. Posted invoices and posted credit memos continue to show all posted lines. The visibility value is retained on posted lines for traceability.
-
-Existing lines default to the option that prints on both applicable documents, so the feature does not require data migration.
+Customer/vendor-facing reports stop with a clear error when a nonzero financial line is hidden from the external document. Existing lines default to the option that prints on both applicable documents.
 
 ## Customer Statements
 
-Customer Card actions create an individual statement for a selected date range, preview the branded PDF, open the native Business Central email editor, show Delivery Log history, show native sent-email history, and configure routing and sender setup.
-
-The Customer List includes a batch statement action with customer filters and a selectable date range. The batch skips customers with no activity or balance, customers missing a recipient, and customers already sent for the exact period. It reports sent, failed, missing-recipient, no-activity, and already-sent totals.
-
-Statements use the dedicated GPI Customer Statement email scenario, which should be assigned to the Accounting mailbox. Successfully sent statement PDFs automatically archive under the SharePoint Sales folder structure.
+Customer Card actions create an individual statement for a selected date range. Customer List includes batch statement delivery. Statements use the dedicated GPI Customer Statement email scenario and archive under Sales.
 
 ## Saved drafts
 
@@ -89,15 +66,13 @@ The GPI Document Delivery Log includes Open Draft Email and Email Outbox. Reopen
 
 ## SharePoint archival
 
-When a Delivery Log entry is completed with email status Sent, the extension queues a one-time scheduled task. The task starts in a separate background session after the email transaction commits and performs the SharePoint upload.
-
-Sales documents archive under Sales, purchasing documents archive under Purchase, and Transfer Header documents archive under Warehouse.
+Sent Sales documents archive under Sales, purchasing documents archive under Purchase, and Transfer Header documents archive under Warehouse through a scheduled background task after the email transaction commits.
 
 ## Extension details
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.19.3.0
+- Version: 0.20.0.0
 - Object ranges: 70510..70549 and 70550..70649
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0
@@ -106,10 +81,10 @@ Sales documents archive under Sales, purchasing documents archive under Purchase
 
 ## Sandbox validation
 
-Use `PHASE2-SANDBOX-TESTS.md` for the complete infrastructure, return-document, transfer-document, routing, draft, visibility, and archive validation checklist.
+Use `PHASE2-SANDBOX-TESTS.md` for the complete infrastructure, return, transfer, Customer Open Order, routing, draft, visibility, archive, regression, and production-gate checklist.
 
 ## Remaining work
 
-- Compile and validate version 0.19.3.0 in Sandbox_5_5_2026.
-- Implement Customer Open Order Status in version 0.20.0.0.
+- Compile and validate version 0.20.0.0 in Sandbox_5_5_2026.
+- Correct any Business Central 28.1 symbol-specific compiler issues.
 - Complete the production-readiness review and sandbox regression checklist before any Production publication.

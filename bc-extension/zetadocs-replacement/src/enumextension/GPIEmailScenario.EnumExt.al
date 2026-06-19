@@ -9,4 +9,9 @@ enumextension 70510 "GPI Email Scenario" extends "Email Scenario"
     {
         Caption = 'GPI Purchase Credit Memo';
     }
+
+    value(70512; "GPI Customer Statement")
+    {
+        Caption = 'GPI Customer Statement';
+    }
 }

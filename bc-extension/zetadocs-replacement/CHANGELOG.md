@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.3.2
+
+### Fixed
+- Moved the Credit Memo permission set extension to object ID `70549`.
+- Resolved compiler error `AL0264` caused by the Purchase Order permission set extension already using ID `70513`.
+
 ## 0.16.3.1
 
 ### Fixed

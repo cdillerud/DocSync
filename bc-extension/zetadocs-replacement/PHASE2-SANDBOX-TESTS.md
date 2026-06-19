@@ -5,10 +5,10 @@ Target environment: Sandbox_5_5_2026
 ## Build
 
 - Download Business Central 28.1 symbols.
-- Compile version 0.19.1.0.
+- Compile version 0.19.2.0.
 - Confirm no duplicate object IDs in ranges 70510..70549 and 70550..70649.
-- Confirm the GPI PH2 DOC EMAIL and GPI SALES RETURN DOCS permission-set extensions compile.
-- Confirm both new RDLC layouts compile without schema or dataset errors.
+- Confirm the GPI PH2 DOC EMAIL, GPI SALES RETURN DOCS, and GPI PURCHASE RETURN DOCS permission-set extensions compile.
+- Confirm all four Phase 2 RDLC layouts compile without schema or dataset errors.
 
 ## Sender resolution
 
@@ -63,6 +63,43 @@ Test all four values on Sales Return Order lines:
 - A nonzero line using Warehouse Documents Only or Do Not Print blocks the customer authorization.
 - A zero-value instruction line may be hidden from the customer authorization.
 
+## Purchase Return Order
+
+- Open a Purchase Return Order and confirm the Gamer Documents actions appear.
+- Preview while the return order is Open and confirm no sender-account validation occurs.
+- Attempt to email while Open and confirm sending is blocked until Released.
+- Release the return order and confirm the email editor opens from the initiating user's matching Email Account.
+- Confirm recipient fallback order: vendor-specific routing, document contact, vendor primary contact, Vendor Card email.
+- Confirm OSR and ISR are added to CC when identifiable on the Purchase Header.
+- Confirm the sender and To recipients are not duplicated in CC.
+- Confirm Add and Replace routing-rule behavior.
+- Confirm the PDF displays return order details, vendor item numbers, quantities, units of measure, and return reason codes without pricing.
+- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Purchase-folder archival.
+
+## Purchase Return Pick Ticket
+
+- Preview while the return order is Open.
+- Attempt to email while Open and confirm sending is blocked until Released.
+- Confirm Location Code is required for sending.
+- Confirm the Location Card email is the default To recipient.
+- Confirm location-specific and generic routing rules can add or replace recipients.
+- Confirm OSR and ISR are not added automatically.
+- Add a manual CC recipient in the Email Editor and confirm it is recorded in the Delivery Log.
+- Confirm warehouse quantities and units of measure use the warehouse display policy.
+- Confirm the PDF shows the vendor return address, item and vendor item numbers, return reason, location, and planned return date.
+- Confirm Send, Save As Draft, Discard, draft reopening, Delivery Log, native sent-email history, and Purchase-folder archival.
+
+## Purchase Return line visibility
+
+Test all four values on Purchase Return Order lines:
+
+- All Documents appears on both Purchase Return documents.
+- Customer/Vendor Documents Only appears only on the vendor Purchase Return Order.
+- Warehouse Documents Only appears only on the Purchase Return Pick Ticket.
+- Do Not Print appears on neither document.
+- A nonzero line using Warehouse Documents Only or Do Not Print blocks the vendor Purchase Return Order.
+- A zero-value instruction line may be hidden from the vendor document.
+
 ## Archive setup
 
 - Open GPI SharePoint Archive Setup.
@@ -75,6 +112,6 @@ Test all four values on Sales Return Order lines:
 - Confirm Phase 1 document preview and email actions still open.
 - Confirm Warehouse Receiving Notice continues to use Purchase Header ISR as sender.
 - Confirm existing Sales and Purchase archive folders are unchanged.
-- Confirm no existing Phase 1 RDLC layout was modified by the Sales Return sprint.
+- Confirm no existing Phase 1 RDLC layout was modified by either return sprint.
 
 Do not publish to Production until the complete sandbox checklist passes and Production deployment is explicitly approved.

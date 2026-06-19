@@ -58,7 +58,7 @@ When a Delivery Log entry is completed with email status Sent, the extension que
 
 - Name: GPI Sales Document Email
 - Publisher: Gamer Packaging
-- Version: 0.18.0.0
+- Version: 0.18.0.1
 - Object range: 70510..70549
 - Permission set: GPI DOC EMAIL
 - Platform: Business Central 28.0

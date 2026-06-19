@@ -1,4 +1,4 @@
-codeunit 70521 "GPI Line Visibility Mgt."
+codeunit 70549 "GPI Line Visibility Mgt."
 {
     procedure ShouldPrintSalesLine(SalesLine: Record "Sales Line"; WarehouseDocument: Boolean): Boolean
     begin

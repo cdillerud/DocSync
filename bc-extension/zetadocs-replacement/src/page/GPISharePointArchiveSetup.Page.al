@@ -59,6 +59,11 @@ page 70516 "GPI SharePoint Archive Setup"
                 {
                     ApplicationArea = All;
                 }
+                field("Warehouse Folder"; Rec."Warehouse Folder")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the archive folder used for transfer and other warehouse-owned documents.';
+                }
                 field("Clear Local PDF After Archive"; Rec."Clear Local PDF After Archive")
                 {
                     ApplicationArea = All;

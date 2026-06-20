@@ -2,9 +2,9 @@
   "id": "fd650b42-d9a4-4aaf-8a3b-82d9e6969aa2",
   "name": "GPI Sales Document Email Tests",
   "publisher": "Gamer Packaging",
-  "version": "0.4.0.0",
+  "version": "0.5.0.0",
   "brief": "Automated tests for GPI Sales Document Email.",
-  "description": "Sandbox-only AL tests for recipients, visibility, workflow validation, report rendering, routing precedence, transport mocks, workflow Delivery Logs, archive paths, and Delivery Log behavior.",
+  "description": "Sandbox-only AL tests for recipients, visibility, workflow validation, report rendering, routing precedence, transport mocks, workflow Delivery Logs, archive paths, archive outcomes, and Delivery Log behavior.",
   "privacyStatement": "",
   "EULA": "",
   "help": "",
@@ -15,7 +15,7 @@
       "id": "b6eb6cc8-d984-4ab0-bb15-d3569db41171",
       "name": "GPI Sales Document Email",
       "publisher": "Gamer Packaging",
-      "version": "0.23.0.0"
+      "version": "0.24.0.0"
     }
   ],
   "screenshots": [],

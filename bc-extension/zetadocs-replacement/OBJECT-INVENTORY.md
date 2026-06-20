@@ -41,6 +41,8 @@ New Phase 2 objects must not reuse Phase 1 IDs.
 | Page Extension | 70581 | GPI Customer Open Order List | Customer List filtered or selected batch action |
 | Page Extension | 70582 | GPI Delivery Log Open Orders | Displays Open Order Status delivery details |
 | Permission Set Extension | 70580 | GPI CUSTOMER OPEN ORDERS | Adds Open Order Status workflow and report permissions |
+| Codeunit | 70590 | GPI Routing Rule Resolver | Shared customer, vendor, and location rule matching, precedence, date validation, and audit ordering |
+| Codeunit | 70591 | GPI Delivery Transport Mgt. | Mockable email editor, email send, and archive upload transport boundary |
 
 ## Reserved Phase 2 blocks
 
@@ -50,7 +52,7 @@ New Phase 2 objects must not reuse Phase 1 IDs.
 | 70562..70569 | Remaining Purchase Return support objects and corrections |
 | 70572..70579 | Remaining Transfer support objects and corrections |
 | 70583..70589 | Remaining Customer Open Order support objects and corrections |
-| 70590..70609 | Shared routing, archive, and Delivery Log support |
+| 70592..70609 | Remaining shared routing, archive, transport, and Delivery Log support |
 | 70610..70649 | Reserved for corrections, tests, and later expansion |
 
 Object IDs are unique within each AL object type. The same numeric ID may be used for different object types when documented here.

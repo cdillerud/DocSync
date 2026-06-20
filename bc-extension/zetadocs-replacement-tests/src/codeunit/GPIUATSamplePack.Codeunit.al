@@ -5,6 +5,7 @@ codeunit 70716 "GPI UAT Sample Pack"
         tabledata Vendor = rimd,
         tabledata Item = rimd,
         tabledata Location = rimd,
+        tabledata "Salesperson/Purchaser" = rimd,
         tabledata "Sales Header" = rimd,
         tabledata "Sales Line" = rimd,
         tabledata "Purchase Header" = rimd,
@@ -18,8 +19,10 @@ codeunit 70716 "GPI UAT Sample Pack"
         Customer: Record Customer;
         Vendor: Record Vendor;
         Item: Record Item;
+        Salesperson: Record "Salesperson/Purchaser";
         FromLocation: Record Location;
         ToLocation: Record Location;
+        InTransitLocation: Record Location;
         SalesReturnHeader: Record "Sales Header";
         PurchaseReturnHeader: Record "Purchase Header";
         TransferHeader: Record "Transfer Header";
@@ -33,11 +36,11 @@ codeunit 70716 "GPI UAT Sample Pack"
         PackCode := NewPackCode();
         PackId := CopyStr('UATPACK-' + PackCode, 1, MaxStrLen(PackId));
 
-        CreateMasterData(PackCode, Customer, Vendor, Item, FromLocation, ToLocation);
-        CreateSalesReturn(PackCode, Customer, Item, FromLocation, SalesReturnHeader);
+        CreateMasterData(PackCode, Customer, Vendor, Item, Salesperson, FromLocation, ToLocation, InTransitLocation);
+        CreateSalesReturn(PackCode, Customer, Item, Salesperson, FromLocation, SalesReturnHeader);
         CreatePurchaseReturn(PackCode, Vendor, Item, FromLocation, PurchaseReturnHeader);
-        CreateTransfer(PackCode, Item, FromLocation, ToLocation, TransferHeader);
-        CreateOpenSalesOrder(PackCode, Customer, Item, SalesOrderHeader);
+        CreateTransfer(PackCode, Item, FromLocation, ToLocation, InTransitLocation, TransferHeader);
+        CreateOpenSalesOrder(PackCode, Customer, Vendor, Item, Salesperson, SalesOrderHeader);
 
         SalesReturnHeader.SetRecFilter();
         SourceRef.GetTable(SalesReturnHeader);
@@ -197,8 +200,13 @@ codeunit 70716 "GPI UAT Sample Pack"
         exit(PackId);
     end;
 
-    local procedure CreateMasterData(PackCode: Code[8]; var Customer: Record Customer; var Vendor: Record Vendor; var Item: Record Item; var FromLocation: Record Location; var ToLocation: Record Location)
+    local procedure CreateMasterData(PackCode: Code[8]; var Customer: Record Customer; var Vendor: Record Vendor; var Item: Record Item; var Salesperson: Record "Salesperson/Purchaser"; var FromLocation: Record Location; var ToLocation: Record Location; var InTransitLocation: Record Location)
     begin
+        Salesperson.Init();
+        Salesperson.Code := BuildNo('UAT-SP-', PackCode);
+        Salesperson.Name := CopyStr('UAT Outside Sales Reviewer', 1, MaxStrLen(Salesperson.Name));
+        Salesperson.Insert(false);
+
         Customer.Init();
         Customer."No." := BuildNo('UAT-C-', PackCode);
         Customer.Name := CopyStr('UAT Sample Customer ' + PackCode, 1, MaxStrLen(Customer.Name));
@@ -206,6 +214,8 @@ codeunit 70716 "GPI UAT Sample Pack"
         Customer.City := 'Minneapolis';
         Customer.County := 'MN';
         Customer."Post Code" := '55402';
+        Customer.Contact := 'UAT Customer Contact';
+        Customer."Salesperson Code" := Salesperson.Code;
         Customer.Insert(false);
 
         Vendor.Init();
@@ -215,11 +225,13 @@ codeunit 70716 "GPI UAT Sample Pack"
         Vendor.City := 'Minneapolis';
         Vendor.County := 'MN';
         Vendor."Post Code" := '55402';
+        Vendor.Contact := 'UAT Vendor Contact';
         Vendor.Insert(false);
 
         Item.Init();
         Item."No." := BuildNo('UAT-I-', PackCode);
         Item.Description := CopyStr('UAT Sample Packaging Item ' + PackCode, 1, MaxStrLen(Item.Description));
+        Item."Description 2" := 'Visual review sample';
         Item.Insert(false);
 
         FromLocation.Init();
@@ -239,9 +251,15 @@ codeunit 70716 "GPI UAT Sample Pack"
         ToLocation.County := 'MN';
         ToLocation."Post Code" := '55402';
         ToLocation.Insert(false);
+
+        InTransitLocation.Init();
+        InTransitLocation.Code := BuildLocationCode('UI', PackCode);
+        InTransitLocation.Name := CopyStr('UAT In-Transit Location', 1, MaxStrLen(InTransitLocation.Name));
+        InTransitLocation."Use As In-Transit" := true;
+        InTransitLocation.Insert(false);
     end;
 
-    local procedure CreateSalesReturn(PackCode: Code[8]; Customer: Record Customer; Item: Record Item; Location: Record Location; var Header: Record "Sales Header")
+    local procedure CreateSalesReturn(PackCode: Code[8]; Customer: Record Customer; Item: Record Item; Salesperson: Record "Salesperson/Purchaser"; Location: Record Location; var Header: Record "Sales Header")
     var
         Line: Record "Sales Line";
     begin
@@ -255,9 +273,14 @@ codeunit 70716 "GPI UAT Sample Pack"
         Header."Sell-to City" := Customer.City;
         Header."Sell-to County" := Customer.County;
         Header."Sell-to Post Code" := Customer."Post Code";
+        Header."Sell-to Contact" := Customer.Contact;
+        Header."External Document No." := BuildNo('CUST-REF-', PackCode);
+        Header."Salesperson Code" := Salesperson.Code;
         Header."Location Code" := Location.Code;
         Header."Order Date" := WorkDate();
         Header."Document Date" := WorkDate();
+        Header."Shipment Date" := WorkDate() + 2;
+        Header."Requested Delivery Date" := WorkDate() + 5;
         Header.Status := Header.Status::Released;
         Header.Insert(false);
 
@@ -268,10 +291,13 @@ codeunit 70716 "GPI UAT Sample Pack"
         Line.Type := Line.Type::Item;
         Line."No." := Item."No.";
         Line.Description := Item.Description;
+        Line."Description 2" := Item."Description 2";
         Line.Quantity := 5;
         Line."Unit of Measure Code" := 'EA';
         Line."Unit Price" := 25;
         Line."Line Amount" := 125;
+        Line."Location Code" := Location.Code;
+        Line."Return Reason Code" := 'DAMAGED';
         Line."GPI Document Visibility" := Enum::"GPI Document Visibility"::"All Documents";
         Line.Insert(false);
     end;
@@ -290,6 +316,8 @@ codeunit 70716 "GPI UAT Sample Pack"
         Header."Buy-from City" := Vendor.City;
         Header."Buy-from County" := Vendor.County;
         Header."Buy-from Post Code" := Vendor."Post Code";
+        Header."Buy-from Contact" := Vendor.Contact;
+        Header."Your Reference" := BuildNo('VEND-REF-', PackCode);
         Header."Location Code" := Location.Code;
         Header."Order Date" := WorkDate();
         Header."Posting Date" := WorkDate();
@@ -303,16 +331,20 @@ codeunit 70716 "GPI UAT Sample Pack"
         Line."Line No." := 10000;
         Line.Type := Line.Type::Item;
         Line."No." := Item."No.";
+        Line."Vendor Item No." := BuildNo('VITEM-', PackCode);
         Line.Description := Item.Description;
+        Line."Description 2" := Item."Description 2";
         Line.Quantity := 4;
         Line."Unit of Measure Code" := 'EA';
         Line."Direct Unit Cost" := 18.50;
         Line."Line Amount" := 74;
+        Line."Location Code" := Location.Code;
+        Line."Return Reason Code" := 'OVERSTOCK';
         Line."GPI Document Visibility" := Enum::"GPI Document Visibility"::"All Documents";
         Line.Insert(false);
     end;
 
-    local procedure CreateTransfer(PackCode: Code[8]; Item: Record Item; FromLocation: Record Location; ToLocation: Record Location; var Header: Record "Transfer Header")
+    local procedure CreateTransfer(PackCode: Code[8]; Item: Record Item; FromLocation: Record Location; ToLocation: Record Location; InTransitLocation: Record Location; var Header: Record "Transfer Header")
     var
         Line: Record "Transfer Line";
     begin
@@ -320,6 +352,8 @@ codeunit 70716 "GPI UAT Sample Pack"
         Header."No." := BuildNo('UAT-TR-', PackCode);
         Header."Transfer-from Code" := FromLocation.Code;
         Header."Transfer-to Code" := ToLocation.Code;
+        Header."In-Transit Code" := InTransitLocation.Code;
+        Header."External Document No." := BuildNo('EXT-REF-', PackCode);
         Header."Shipment Date" := WorkDate();
         Header."Receipt Date" := WorkDate() + 2;
         Header.Status := Header.Status::Released;
@@ -332,14 +366,42 @@ codeunit 70716 "GPI UAT Sample Pack"
         Line.Description := Item.Description;
         Line.Quantity := 12;
         Line."Unit of Measure Code" := 'EA';
+        Line."Shipment Date" := Header."Shipment Date";
+        Line."Receipt Date" := Header."Receipt Date";
         Line."GPI Transfer Visibility" := Enum::"GPI Transfer Visibility"::"Both Transfer Documents";
         Line.Insert(false);
     end;
 
-    local procedure CreateOpenSalesOrder(PackCode: Code[8]; Customer: Record Customer; Item: Record Item; var Header: Record "Sales Header")
+    local procedure CreateOpenSalesOrder(PackCode: Code[8]; Customer: Record Customer; Vendor: Record Vendor; Item: Record Item; Salesperson: Record "Salesperson/Purchaser"; var Header: Record "Sales Header")
     var
         Line: Record "Sales Line";
+        PurchaseHeader: Record "Purchase Header";
+        PurchaseLine: Record "Purchase Line";
     begin
+        PurchaseHeader.Init();
+        PurchaseHeader."Document Type" := PurchaseHeader."Document Type"::Order;
+        PurchaseHeader."No." := BuildNo('UAT-PO-', PackCode);
+        PurchaseHeader."Buy-from Vendor No." := Vendor."No.";
+        PurchaseHeader."Pay-to Vendor No." := Vendor."No.";
+        PurchaseHeader."Buy-from Vendor Name" := Vendor.Name;
+        PurchaseHeader."Order Date" := WorkDate();
+        PurchaseHeader."Posting Date" := WorkDate();
+        PurchaseHeader."Document Date" := WorkDate();
+        PurchaseHeader.Insert(false);
+
+        PurchaseLine.Init();
+        PurchaseLine."Document Type" := PurchaseLine."Document Type"::Order;
+        PurchaseLine."Document No." := PurchaseHeader."No.";
+        PurchaseLine."Line No." := 10000;
+        PurchaseLine.Type := PurchaseLine.Type::Item;
+        PurchaseLine."No." := Item."No.";
+        PurchaseLine.Description := Item.Description;
+        PurchaseLine.Quantity := 20;
+        PurchaseLine."Unit of Measure Code" := 'EA';
+        PurchaseLine."Direct Unit Cost" := 6;
+        PurchaseLine."Expected Receipt Date" := WorkDate() + 7;
+        PurchaseLine.Insert(false);
+
         Header.Init();
         Header."Document Type" := Header."Document Type"::Order;
         Header."No." := BuildNo('UAT-SO-', PackCode);
@@ -350,8 +412,12 @@ codeunit 70716 "GPI UAT Sample Pack"
         Header."Sell-to City" := Customer.City;
         Header."Sell-to County" := Customer.County;
         Header."Sell-to Post Code" := Customer."Post Code";
+        Header."Sell-to Contact" := Customer.Contact;
+        Header."External Document No." := BuildNo('UAT-CUST-PO-', PackCode);
+        Header."Salesperson Code" := Salesperson.Code;
         Header."Order Date" := WorkDate();
         Header."Document Date" := WorkDate();
+        Header."Requested Delivery Date" := WorkDate() + 7;
         Header.Insert(false);
 
         Line.Init();
@@ -362,12 +428,17 @@ codeunit 70716 "GPI UAT Sample Pack"
         Line.Type := Line.Type::Item;
         Line."No." := Item."No.";
         Line.Description := Item.Description;
+        Line."Description 2" := Item."Description 2";
         Line.Quantity := 20;
-        Line."Quantity Shipped" := 5;
-        Line."Outstanding Quantity" := 15;
+        Line."Quantity Shipped" := 0;
+        Line."Outstanding Quantity" := 20;
         Line."Unit of Measure Code" := 'EA';
         Line."Unit Price" := 8;
         Line."Line Amount" := 160;
+        Line."Purchase Order No." := PurchaseHeader."No.";
+        Line."Purch. Order Line No." := PurchaseLine."Line No.";
+        Line."Drop Shipment" := true;
+        Line."Promised Delivery Date" := WorkDate() + 7;
         Line."Planned Delivery Date" := WorkDate() + 7;
         Line."GPI Document Visibility" := Enum::"GPI Document Visibility"::"All Documents";
         Line.Insert(false);

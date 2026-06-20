@@ -1,5 +1,7 @@
 codeunit 70711 "GPI Workflow Test Helper"
 {
+    Permissions = tabledata Item = rimd;
+
     procedure ConfigureMock(var Mock: Codeunit "GPI Transport Mock"; Action: Enum "Email Action")
     begin
         Mock.ConfigureSenderAccount('workflow.sender@example.com', 'Workflow Test Sender');
@@ -47,8 +49,10 @@ codeunit 70711 "GPI Workflow Test Helper"
     procedure CreatePurchaseReturn(var Header: Record "Purchase Header"; var RuleEntryNo: Integer)
     var
         Vendor: Record Vendor;
+        Item: Record Item;
         Line: Record "Purchase Line";
         VendorNo: Code[20];
+        ItemNo: Code[20];
     begin
         VendorNo := NewCode('V');
         Vendor.Init();
@@ -67,13 +71,19 @@ codeunit 70711 "GPI Workflow Test Helper"
         Header.Status := Header.Status::Released;
         Header.Insert(false);
 
+        ItemNo := NewCode('I');
+        Item.Init();
+        Item."No." := ItemNo;
+        Item.Description := 'Workflow Item';
+        Item.Insert(false);
+
         Line.Init();
         Line."Document Type" := Line."Document Type"::"Return Order";
         Line."Document No." := Header."No.";
         Line."Line No." := 10000;
         Line.Type := Line.Type::Item;
-        Line."No." := NewCode('I');
-        Line.Description := 'Workflow Item';
+        Line."No." := ItemNo;
+        Line.Description := Item.Description;
         Line.Quantity := 1;
         Line."Unit of Measure Code" := 'EA';
         Line."GPI Document Visibility" := Enum::"GPI Document Visibility"::"All Documents";

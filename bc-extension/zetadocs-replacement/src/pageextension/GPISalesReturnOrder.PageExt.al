@@ -25,7 +25,7 @@ pageextension 70551 "GPI Sales Return Documents" extends "Sales Return Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesReturnEmail.OpenAuthorizationDraft(SalesHeader);
                         CurrPage.Update(false);
@@ -48,7 +48,7 @@ pageextension 70551 "GPI Sales Return Documents" extends "Sales Return Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesReturnEmail.OpenWarehouseNotificationDraft(SalesHeader);
                         CurrPage.Update(false);
@@ -68,7 +68,7 @@ pageextension 70551 "GPI Sales Return Documents" extends "Sales Return Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesReturnEmail.PreviewAuthorization(SalesHeader);
                     end;
@@ -87,7 +87,7 @@ pageextension 70551 "GPI Sales Return Documents" extends "Sales Return Order"
                         SalesHeader: Record "Sales Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         SalesHeader.Get(Rec."Document Type", Rec."No.");
                         SalesReturnEmail.PreviewWarehouseNotification(SalesHeader);
                     end;
@@ -136,4 +136,11 @@ pageextension 70551 "GPI Sales Return Documents" extends "Sales Return Order"
             }
         }
     }
+
+    local procedure CommitPageChanges()
+    var
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
+    begin
+        DeliveryTransportMgt.CommitChanges();
+    end;
 }

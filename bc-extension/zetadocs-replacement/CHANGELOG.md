@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.21.0.0
+
+### Added
+- Added a shared routing-rule resolver for customer, vendor, and location scopes.
+- Added deterministic priority ordering, Add and Replace handling, effective-date filtering, optional location constraints, and applied-rule audit sequencing.
+- Added a delivery transport boundary with integration events for email editor, direct email send, and archive upload operations.
+- Added manual sandbox mocks so transport behavior can be validated without sending email or uploading files to SharePoint.
+- Expanded the automated suite from 32 to 44 tests.
+
+### Safety
+- Existing document workflows are not yet redirected through the new transport boundary in this release.
+- The archive transport fails safely when no handler is registered.
+- The new test suites perform no real email send, email-editor launch, SharePoint upload, or archive task creation.
+
 ## 0.20.0.3
 
 ### Fixed
@@ -25,7 +39,6 @@
 
 ### Fixed
 - Replaced the unsupported EmptyGuid() call with an uninitialized Guid variable when logging a PDF-rendering failure in the Customer Open Order Status batch.
-
 
 ## 0.20.0.0
 
@@ -176,15 +189,15 @@
 - Preserved Document Visibility on posted sales invoice, posted sales credit memo, and posted purchase credit memo lines for traceability.
 
 ### Safeguards
-- Customer/vendor-facing reports block generation when a nonzero financial line is configured to be hidden from the external document.
-- Posted invoice and credit memo reports continue to show all posted financial lines in this release.
+- Customer/vendor-facing reports block generation when a nonzero financial line is configured as Warehouse Documents Only or Do Not Print.
+- Posted invoice and credit memo reports continue to show all posted lines in this release.
 
 ## 0.17.1.0
 
 ### Changed
 - Finalized the Warehouse Receiving Notice sender policy to use the ISR identified on the Purchase Header.
 - The workflow now requires a matching Business Central Email Account for the ISR and opens the native email editor with that account explicitly selected.
-- The ISR sender is excluded from default CC recipients, and the Delivery Log records the actual sender account with policy `Purchase Header ISR`.
+- The ISR sender is excluded from default CC recipients, and the Delivery Log records the sender policy as `Purchase Header ISR`.
 
 ## 0.17.0.1
 

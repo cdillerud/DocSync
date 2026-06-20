@@ -25,7 +25,7 @@ pageextension 70570 "GPI Transfer Documents" extends "Transfer Order"
                         TransferHeader: Record "Transfer Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         TransferHeader.Get(Rec."No.");
                         TransferEmail.OpenPickListDraft(TransferHeader);
                         CurrPage.Update(false);
@@ -48,7 +48,7 @@ pageextension 70570 "GPI Transfer Documents" extends "Transfer Order"
                         TransferHeader: Record "Transfer Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         TransferHeader.Get(Rec."No.");
                         TransferEmail.OpenReceiptNoticeDraft(TransferHeader);
                         CurrPage.Update(false);
@@ -68,7 +68,7 @@ pageextension 70570 "GPI Transfer Documents" extends "Transfer Order"
                         TransferHeader: Record "Transfer Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         TransferHeader.Get(Rec."No.");
                         TransferEmail.PreviewPickList(TransferHeader);
                     end;
@@ -87,7 +87,7 @@ pageextension 70570 "GPI Transfer Documents" extends "Transfer Order"
                         TransferHeader: Record "Transfer Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         TransferHeader.Get(Rec."No.");
                         TransferEmail.PreviewReceiptNotice(TransferHeader);
                     end;
@@ -136,4 +136,11 @@ pageextension 70570 "GPI Transfer Documents" extends "Transfer Order"
             }
         }
     }
+
+    local procedure CommitPageChanges()
+    var
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
+    begin
+        DeliveryTransportMgt.CommitChanges();
+    end;
 }

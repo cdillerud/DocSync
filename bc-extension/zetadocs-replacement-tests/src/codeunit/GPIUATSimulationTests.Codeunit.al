@@ -348,13 +348,13 @@ codeunit 70714 "GPI UAT Simulation Tests"
     end;
 
     [ConfirmHandler]
-    local procedure UATConfirmHandler(Question: Text[1024]; var Reply: Boolean)
+    procedure UATConfirmHandler(Question: Text[1024]; var Reply: Boolean)
     begin
         Reply := true;
     end;
 
     [MessageHandler]
-    local procedure UATMessageHandler(MessageText: Text[1024])
+    procedure UATMessageHandler(MessageText: Text[1024])
     begin
         LastBatchMessage := MessageText;
     end;

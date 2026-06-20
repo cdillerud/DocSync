@@ -4,7 +4,18 @@ codeunit 70550 "GPI Phase 2 Email Mgt."
     var
         EmailAccountMgt: Codeunit "Email Account";
         SenderEmailAddress: Text;
+        IsHandled: Boolean;
     begin
+        OnBeforeResolveCurrentUserAccount(TempEmailAccount, SenderEmailAddress, IsHandled);
+        if IsHandled then begin
+            SenderEmailAddress := NormalizeAddress(SenderEmailAddress);
+            if not LooksLikeEmail(SenderEmailAddress) then
+                Error('The mocked or overridden sender email address %1 is not usable.', SenderEmailAddress);
+            if TempEmailAccount."Email Address" = '' then
+                TempEmailAccount."Email Address" := CopyStr(SenderEmailAddress, 1, MaxStrLen(TempEmailAccount."Email Address"));
+            exit(SenderEmailAddress);
+        end;
+
         SenderEmailAddress := NormalizeAddress(UserId());
         if not LooksLikeEmail(SenderEmailAddress) then
             SenderEmailAddress := FindCurrentUserSetupEmail();
@@ -174,5 +185,10 @@ codeunit 70550 "GPI Phase 2 Email Mgt."
     local procedure LooksLikeEmail(Address: Text): Boolean
     begin
         exit((Address <> '') and (StrPos(Address, '@') > 1));
+    end;
+
+    [IntegrationEvent(false, false)]
+    local procedure OnBeforeResolveCurrentUserAccount(var TempEmailAccount: Record "Email Account" temporary; var SenderEmailAddress: Text; var IsHandled: Boolean)
+    begin
     end;
 }

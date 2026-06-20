@@ -54,6 +54,8 @@ codeunit 70590 "GPI Routing Rule Resolver"
     end;
 
     procedure ApplyCustomerRuleSet(var RoutingRule: Record "GPI Document Routing Rule"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; CustomerNo: Code[20]; LocationCode: Code[10]; SpecificCustomerOnly: Boolean; EvaluationDate: Date; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRuleEntries: Text[250]; var ReplaceApplied: Boolean): Boolean
+    var
+        RuleApplied: Boolean;
     begin
         PrepareRuleSet(RoutingRule, DeliveryDocumentType);
         if not RoutingRule.FindSet() then
@@ -62,7 +64,7 @@ codeunit 70590 "GPI Routing Rule Resolver"
         repeat
             if CustomerRuleMatches(RoutingRule, CustomerNo, LocationCode, SpecificCustomerOnly) and
                RuleIsActive(RoutingRule, EvaluationDate)
-            then
+            then begin
                 ApplyMatchedRule(
                     RoutingRule,
                     ToRecipients,
@@ -70,12 +72,16 @@ codeunit 70590 "GPI Routing Rule Resolver"
                     BCCRecipients,
                     AppliedRuleEntries,
                     ReplaceApplied);
+                RuleApplied := true;
+            end;
         until RoutingRule.Next() = 0;
 
-        exit(AppliedRuleEntries <> '');
+        exit(RuleApplied);
     end;
 
     procedure ApplyVendorRuleSet(var RoutingRule: Record "GPI Document Routing Rule"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; VendorNo: Code[20]; LocationCode: Code[10]; SpecificVendorOnly: Boolean; EvaluationDate: Date; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRuleEntries: Text[250]; var ReplaceApplied: Boolean): Boolean
+    var
+        RuleApplied: Boolean;
     begin
         PrepareRuleSet(RoutingRule, DeliveryDocumentType);
         if not RoutingRule.FindSet() then
@@ -84,7 +90,7 @@ codeunit 70590 "GPI Routing Rule Resolver"
         repeat
             if VendorRuleMatches(RoutingRule, VendorNo, LocationCode, SpecificVendorOnly) and
                RuleIsActive(RoutingRule, EvaluationDate)
-            then
+            then begin
                 ApplyMatchedRule(
                     RoutingRule,
                     ToRecipients,
@@ -92,12 +98,16 @@ codeunit 70590 "GPI Routing Rule Resolver"
                     BCCRecipients,
                     AppliedRuleEntries,
                     ReplaceApplied);
+                RuleApplied := true;
+            end;
         until RoutingRule.Next() = 0;
 
-        exit(AppliedRuleEntries <> '');
+        exit(RuleApplied);
     end;
 
     procedure ApplyLocationRuleSet(var RoutingRule: Record "GPI Document Routing Rule"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; LocationCode: Code[10]; SpecificLocationOnly: Boolean; EvaluationDate: Date; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRuleEntries: Text[250]; var ReplaceApplied: Boolean): Boolean
+    var
+        RuleApplied: Boolean;
     begin
         PrepareRuleSet(RoutingRule, DeliveryDocumentType);
         if not RoutingRule.FindSet() then
@@ -106,7 +116,7 @@ codeunit 70590 "GPI Routing Rule Resolver"
         repeat
             if LocationRuleMatches(RoutingRule, LocationCode, SpecificLocationOnly) and
                RuleIsActive(RoutingRule, EvaluationDate)
-            then
+            then begin
                 ApplyMatchedRule(
                     RoutingRule,
                     ToRecipients,
@@ -114,9 +124,11 @@ codeunit 70590 "GPI Routing Rule Resolver"
                     BCCRecipients,
                     AppliedRuleEntries,
                     ReplaceApplied);
+                RuleApplied := true;
+            end;
         until RoutingRule.Next() = 0;
 
-        exit(AppliedRuleEntries <> '');
+        exit(RuleApplied);
     end;
 
     local procedure PrepareRuleSet(var RoutingRule: Record "GPI Document Routing Rule"; DeliveryDocumentType: Enum "GPI Delivery Document Type")

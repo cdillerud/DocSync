@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.20.0.3
+
+### Fixed
+- Bumped the production package version so Sandbox_5_5_2026 receives a clean dependency upgrade before the Sprint 2 test app is published.
+- Updated the sandbox test app dependency to require production version 0.20.0.3.
+
+### Deployment order
+- Publish `GPI Sales Document Email` 0.20.0.3 to Sandbox_5_5_2026 first.
+- Publish `GPI Sales Document Email Tests` 0.2.0.1 second.
+
 ## 0.20.0.2
 
 ### Changed

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.21.0.1
+
+### Fixed
+- Bumped the production package version so Sandbox_5_5_2026 receives a clean dependency upgrade before the Sprint 3 test app is published.
+- Updated the sandbox test app dependency to require production version 0.21.0.1.
+
+### Deployment order
+- Publish `GPI Sales Document Email` 0.21.0.1 to Sandbox_5_5_2026 first.
+- Publish `GPI Sales Document Email Tests` 0.3.0.1 second.
+
 ## 0.21.0.0
 
 ### Added
@@ -209,7 +219,7 @@
 
 ### Added
 - Gamer-branded Customer Statement PDF generation with statement-period, opening-balance, transaction, ending-balance, and outstanding-balance detail.
-- Customer Card actions for preview, email, delivery history, native sent-email history, routing rules, and sender setup.
+- Customer Card actions create an individual statement for a selected date range, preview the branded PDF, open the native Business Central email editor, show Delivery Log history, show native sent-email history, and configure routing and sender setup.
 - Customer List batch delivery with customer filters and a selectable date range.
 - Customer-specific routing, primary-contact fallback, Customer Card E-Mail fallback, and generic statement routing fallback.
 - Dedicated GPI Customer Statement email scenario for the Accounting mailbox.

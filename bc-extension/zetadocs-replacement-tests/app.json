@@ -2,7 +2,7 @@
   "id": "fd650b42-d9a4-4aaf-8a3b-82d9e6969aa2",
   "name": "GPI Sales Document Email Tests",
   "publisher": "Gamer Packaging",
-  "version": "0.7.0.0",
+  "version": "0.7.0.1",
   "brief": "Automated tests for GPI Sales Document Email.",
   "description": "Sandbox-only AL tests and UAT sample-pack tools for the Business Central Zetadocs Replacement.",
   "privacyStatement": "",

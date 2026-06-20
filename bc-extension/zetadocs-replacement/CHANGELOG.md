@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.20.0.2
+
+### Changed
+- Exposed the pure archive date, area-folder, party-name, and path-segment calculations so they can be validated independently by the sandbox AL test extension.
+- Added Sprint 2 automated integration coverage for Customer Open Order PDF/XML rendering, line inclusion and exclusion, archive routing, SharePoint URL construction, and Delivery Log persistence.
+- Increased the sandbox AL test suite from 19 to 32 tests.
+
+### Safety
+- No production email, email-editor, SharePoint upload, or archive-task behavior was changed.
+- The new tests remain sandbox-only and use controlled test records that are rolled back by the AL test runner.
+
 ## 0.20.0.1
 
 ### Fixed

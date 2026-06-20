@@ -6,14 +6,14 @@ codeunit 70519 "GPI Archive Path Mgt."
     begin
         if Setup."Root Folder" <> '' then begin
             EnsureDirectory(Storage, Setup."Root Folder");
-            ParentPath := Storage.CombinePath(Setup."Root Folder", GetDateFolder(LogEntry));
+            ParentPath := Storage.CombinePath(Setup."Root Folder", GetArchiveDateFolder(LogEntry));
         end else
-            ParentPath := GetDateFolder(LogEntry);
+            ParentPath := GetArchiveDateFolder(LogEntry);
 
         EnsureDirectory(Storage, ParentPath);
-        ParentPath := Storage.CombinePath(ParentPath, SanitizeSegment(GetPartyName(LogEntry)));
+        ParentPath := Storage.CombinePath(ParentPath, SanitizePathSegment(GetArchivePartyName(LogEntry)));
         EnsureDirectory(Storage, ParentPath);
-        ParentPath := Storage.CombinePath(ParentPath, GetAreaFolder(LogEntry, Setup));
+        ParentPath := Storage.CombinePath(ParentPath, GetArchiveAreaFolder(LogEntry, Setup));
         EnsureDirectory(Storage, ParentPath);
         exit(ParentPath);
     end;
@@ -25,7 +25,7 @@ codeunit 70519 "GPI Archive Path Mgt."
         Extension: Text;
         Counter: Integer;
     begin
-        Candidate := CopyStr(SanitizeSegment(RequestedName), 1, MaxStrLen(Candidate));
+        Candidate := CopyStr(SanitizePathSegment(RequestedName), 1, MaxStrLen(Candidate));
         if Candidate = '' then
             Candidate := CopyStr(StrSubstNo('GPI-Document-%1.pdf', EntryNo), 1, MaxStrLen(Candidate));
         if not Storage.FileExists(Storage.CombinePath(ParentPath, Candidate)) then
@@ -60,7 +60,7 @@ codeunit 70519 "GPI Archive Path Mgt."
             Error('%1', GetLastErrorText());
     end;
 
-    local procedure GetDateFolder(LogEntry: Record "GPI Document Delivery Log"): Text
+    procedure GetArchiveDateFolder(LogEntry: Record "GPI Document Delivery Log"): Text
     var
         ArchiveDate: Date;
     begin
@@ -71,14 +71,23 @@ codeunit 70519 "GPI Archive Path Mgt."
         exit(Format(ArchiveDate, 0, '<Month,2>-<Day,2>-<Year4>'));
     end;
 
-    local procedure GetAreaFolder(LogEntry: Record "GPI Document Delivery Log"; Setup: Record "GPI SharePoint Archive Setup"): Text
+    procedure GetArchiveAreaFolder(LogEntry: Record "GPI Document Delivery Log"; Setup: Record "GPI SharePoint Archive Setup"): Text
+    var
+        WarehouseFolder: Text;
     begin
+        if LogEntry."Source Table ID" = Database::"Transfer Header" then begin
+            WarehouseFolder := Setup."Warehouse Folder";
+            if WarehouseFolder = '' then
+                WarehouseFolder := 'Warehouse';
+            exit(SanitizePathSegment(WarehouseFolder));
+        end;
+
         if LogEntry."Source Table ID" in [Database::"Purchase Header", Database::"Purch. Cr. Memo Hdr."] then
-            exit(SanitizeSegment(Setup."Purchase Folder"));
-        exit(SanitizeSegment(Setup."Sales Folder"));
+            exit(SanitizePathSegment(Setup."Purchase Folder"));
+        exit(SanitizePathSegment(Setup."Sales Folder"));
     end;
 
-    local procedure GetPartyName(LogEntry: Record "GPI Document Delivery Log"): Text
+    procedure GetArchivePartyName(LogEntry: Record "GPI Document Delivery Log"): Text
     var
         Customer: Record Customer;
         Vendor: Record Vendor;
@@ -100,7 +109,7 @@ codeunit 70519 "GPI Archive Path Mgt."
         exit(LogEntry."Source Document No.");
     end;
 
-    local procedure SanitizeSegment(Value: Text): Text
+    procedure SanitizePathSegment(Value: Text): Text
     var
         Result: Text;
     begin

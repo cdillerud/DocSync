@@ -7,9 +7,14 @@ codeunit 70516 "GPI SharePoint Archive"
     procedure ArchiveDeliveryLog(var LogEntry: Record "GPI Document Delivery Log")
     var
         Setup: Record "GPI SharePoint Archive Setup";
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
         ArchivePath: Text;
         ArchiveFileName: Text[250];
+        SharePointItemId: Text[250];
+        SharePointUrl: Text[2048];
         ErrorText: Text;
+        IsHandled: Boolean;
+        OperationSucceeded: Boolean;
     begin
         GetSetup(Setup);
         if not Setup.Enabled then
@@ -19,35 +24,49 @@ codeunit 70516 "GPI SharePoint Archive"
         if LogEntry."Archive Status" = LogEntry."Archive Status"::Archived then
             exit;
 
-        LogEntry."Archive Attempt Count" += 1;
-        LogEntry."Last Archive Attempt" := CurrentDateTime;
-        LogEntry."Archive Status" := LogEntry."Archive Status"::Pending;
-        Clear(LogEntry."Last Archive Error");
-        LogEntry.Modify(false);
+        BeginArchiveAttempt(LogEntry);
+
+        DeliveryTransportMgt.TryHandleDeliveryLogArchive(
+            LogEntry."Entry No.",
+            LogEntry."Attachment Filename",
+            IsHandled,
+            OperationSucceeded,
+            ArchivePath,
+            ArchiveFileName,
+            SharePointItemId,
+            SharePointUrl,
+            ErrorText);
+
+        if IsHandled then begin
+            if not OperationSucceeded then begin
+                CompleteArchiveFailure(LogEntry, ErrorText);
+                exit;
+            end;
+
+            CompleteArchiveSuccess(
+                LogEntry,
+                Setup,
+                ArchivePath,
+                ArchiveFileName,
+                SharePointItemId,
+                SharePointUrl);
+            exit;
+        end;
 
         ClearLastError();
         if not TryArchive(LogEntry, Setup, ArchivePath, ArchiveFileName) then begin
             ErrorText := GetLastErrorText();
-            if ErrorText = '' then
-                ErrorText := 'The document could not be archived to SharePoint.';
-            LogEntry."Archive Status" := LogEntry."Archive Status"::Failed;
-            LogEntry."Last Archive Error" := CopyStr(ErrorText, 1, MaxStrLen(LogEntry."Last Archive Error"));
-            LogEntry.Modify(false);
+            CompleteArchiveFailure(LogEntry, ErrorText);
             exit;
         end;
 
-        LogEntry."Archive Status" := LogEntry."Archive Status"::Archived;
-        LogEntry."Archived Date/Time" := CurrentDateTime;
-        LogEntry."Archive Path" := CopyStr(ArchivePath, 1, MaxStrLen(LogEntry."Archive Path"));
-        LogEntry."Archive File Name" := ArchiveFileName;
-        LogEntry."SharePoint URL" := CopyStr(PathMgt.BuildWebUrl(Setup, ArchivePath), 1, MaxStrLen(LogEntry."SharePoint URL"));
-        Clear(LogEntry."Last Archive Error");
-
-        if Setup."Clear Local PDF After Archive" then begin
-            Clear(LogEntry."Document Content");
-            LogEntry."Local PDF Cleared" := true;
-        end;
-        LogEntry.Modify(false);
+        CompleteArchiveSuccess(
+            LogEntry,
+            Setup,
+            ArchivePath,
+            ArchiveFileName,
+            '',
+            '');
     end;
 
     procedure TestConnection()
@@ -120,6 +139,46 @@ codeunit 70516 "GPI SharePoint Archive"
         Setup.Init();
         Setup."Primary Key" := 'SETUP';
         Setup.Insert(true);
+    end;
+
+    local procedure BeginArchiveAttempt(var LogEntry: Record "GPI Document Delivery Log")
+    begin
+        LogEntry."Archive Attempt Count" += 1;
+        LogEntry."Last Archive Attempt" := CurrentDateTime;
+        LogEntry."Archive Status" := LogEntry."Archive Status"::Pending;
+        Clear(LogEntry."Last Archive Error");
+        LogEntry.Modify(false);
+    end;
+
+    local procedure CompleteArchiveFailure(var LogEntry: Record "GPI Document Delivery Log"; ErrorText: Text)
+    begin
+        if ErrorText = '' then
+            ErrorText := 'The document could not be archived to SharePoint.';
+        LogEntry."Archive Status" := LogEntry."Archive Status"::Failed;
+        LogEntry."Last Archive Error" := CopyStr(ErrorText, 1, MaxStrLen(LogEntry."Last Archive Error"));
+        LogEntry.Modify(false);
+    end;
+
+    local procedure CompleteArchiveSuccess(var LogEntry: Record "GPI Document Delivery Log"; Setup: Record "GPI SharePoint Archive Setup"; ArchivePath: Text; ArchiveFileName: Text[250]; SharePointItemId: Text[250]; SharePointUrl: Text[2048])
+    begin
+        if ArchiveFileName = '' then
+            ArchiveFileName := CopyStr(LogEntry."Attachment Filename", 1, MaxStrLen(ArchiveFileName));
+
+        LogEntry."Archive Status" := LogEntry."Archive Status"::Archived;
+        LogEntry."Archived Date/Time" := CurrentDateTime;
+        LogEntry."Archive Path" := CopyStr(ArchivePath, 1, MaxStrLen(LogEntry."Archive Path"));
+        LogEntry."Archive File Name" := ArchiveFileName;
+        LogEntry."SharePoint Item ID" := SharePointItemId;
+        if SharePointUrl = '' then
+            SharePointUrl := CopyStr(PathMgt.BuildWebUrl(Setup, ArchivePath), 1, MaxStrLen(SharePointUrl));
+        LogEntry."SharePoint URL" := CopyStr(SharePointUrl, 1, MaxStrLen(LogEntry."SharePoint URL"));
+        Clear(LogEntry."Last Archive Error");
+
+        if Setup."Clear Local PDF After Archive" then begin
+            Clear(LogEntry."Document Content");
+            LogEntry."Local PDF Cleared" := true;
+        end;
+        LogEntry.Modify(false);
     end;
 
     [TryFunction]

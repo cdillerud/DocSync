@@ -60,12 +60,10 @@ codeunit 70706 "GPI Delivery Log Tests"
         Clear(DeliveryLog);
         DeliveryLog.Get(EntryNo);
         DeliveryLog.CalcFields("Document Content");
-        if not DeliveryLog."Document Content".HasValue() then
-            Error('The Delivery Log document Blob did not persist.');
         DeliveryLog."Document Content".CreateInStream(DocumentInStream, TextEncoding::UTF8);
         DocumentInStream.ReadText(StoredText);
 
-        AssertEqualText('GPI-TEST-PDF-CONTENT', StoredText, 'The Delivery Log document Blob content changed.');
+        AssertEqualText('GPI-TEST-PDF-CONTENT', StoredText, 'The Delivery Log document Blob content changed or did not persist.');
     end;
 
     [Test]

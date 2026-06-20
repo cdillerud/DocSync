@@ -133,7 +133,7 @@ Write-Host "Production package: $productionOutput"
 Write-Host "Test package:       $testOutput"
 Write-Host ""
 Write-Host "Publish both packages only to Sandbox_5_5_2026."
-Write-Host "Then use AL Test Tool/Test Tool to run codeunits 70700 through 70703."
+Write-Host "Then refresh the VS Code Testing panel and run the complete test suite."
 Write-Host ""
 
 if ($OpenInCode) {

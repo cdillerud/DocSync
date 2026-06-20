@@ -7,13 +7,14 @@ Sandbox-only AL tests for the production `GPI Sales Document Email` extension.
 - Recipient parsing, de-duplication, sender exclusion, and recipient precedence
 - Sales, Purchase, and Transfer document visibility
 - Released-status and transfer-location validation
-- Customer Open Order Status no-data validation
-- Customer Open Order PDF rendering
-- Open Order XML dataset inclusion and exclusion rules
-- Hidden nonzero financial-line blocking during report generation
-- Sales, Purchase, and Warehouse archive routing
-- Archive date formatting, path sanitization, and SharePoint web URL generation
-- Open Order Delivery Log metadata, document Blob, and Source-key persistence
+- Customer Open Order Status validation and PDF/XML rendering
+- Archive routing, date formatting, path sanitization, and SharePoint URL generation
+- Delivery Log metadata, Blob, and Source-key persistence
+- Customer, vendor, and location routing scope isolation
+- Routing priority, audit order, Add and Replace behavior, date filtering, and location constraints
+- Mocked email send success and failure
+- Mocked email editor actions
+- Mocked archive success, returned identifiers, and safe unhandled failure
 
 The suite does not send real email, open the email editor, upload to SharePoint, or create archive tasks.
 
@@ -30,7 +31,11 @@ Run `scripts/Prepare-GPIALTests.ps1`. Publish both apps only to `Sandbox_5_5_202
 - 70704 GPI Open Order Report Tests
 - 70705 GPI Archive Path Tests
 - 70706 GPI Delivery Log Tests
+- 70707 GPI Routing Resolver Tests
+- 70709 GPI Delivery Transport Tests
 
-Current total: 32 tests.
+Codeunit 70708 is the manual transport mock subscriber.
+
+Current total: 44 tests.
 
 Do not install this test extension in Production.

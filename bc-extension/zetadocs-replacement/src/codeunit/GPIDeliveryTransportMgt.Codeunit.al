@@ -82,6 +82,28 @@ codeunit 70591 "GPI Delivery Transport Mgt."
         exit(false);
     end;
 
+    procedure TryHandleDeliveryLogArchive(DeliveryLogEntryNo: Integer; RequestedFileName: Text[250]; var IsHandled: Boolean; var OperationSucceeded: Boolean; var ArchivePath: Text; var ArchiveFileName: Text[250]; var SharePointItemId: Text[250]; var SharePointUrl: Text[2048]; var ErrorText: Text)
+    begin
+        Clear(IsHandled);
+        Clear(OperationSucceeded);
+        Clear(ArchivePath);
+        Clear(ArchiveFileName);
+        Clear(SharePointItemId);
+        Clear(SharePointUrl);
+        Clear(ErrorText);
+
+        OnBeforeArchiveDeliveryLog(
+            DeliveryLogEntryNo,
+            RequestedFileName,
+            IsHandled,
+            OperationSucceeded,
+            ArchivePath,
+            ArchiveFileName,
+            SharePointItemId,
+            SharePointUrl,
+            ErrorText);
+    end;
+
     procedure CommitChanges()
     var
         IsHandled: Boolean;
@@ -120,6 +142,11 @@ codeunit 70591 "GPI Delivery Transport Mgt."
 
     [IntegrationEvent(false, false)]
     local procedure OnBeforeArchiveUpload(ArchivePath: Text; FileName: Text[250]; var IsHandled: Boolean; var OperationSucceeded: Boolean; var ExternalDeliveryId: Text[2048]; var SharePointUrl: Text[2048]; var ErrorText: Text)
+    begin
+    end;
+
+    [IntegrationEvent(false, false)]
+    local procedure OnBeforeArchiveDeliveryLog(DeliveryLogEntryNo: Integer; RequestedFileName: Text[250]; var IsHandled: Boolean; var OperationSucceeded: Boolean; var ArchivePath: Text; var ArchiveFileName: Text[250]; var SharePointItemId: Text[250]; var SharePointUrl: Text[2048]; var ErrorText: Text)
     begin
     end;
 

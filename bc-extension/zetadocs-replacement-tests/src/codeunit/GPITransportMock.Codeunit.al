@@ -39,6 +39,17 @@ codeunit 70708 "GPI Transport Mock"
         ArchiveErrorText := ErrorText;
     end;
 
+    procedure ConfigureDeliveryLogArchive(OperationSucceeded: Boolean; ArchivePath: Text; ArchiveFileName: Text[250]; SharePointItemId: Text[250]; SharePointUrl: Text[2048]; ErrorText: Text)
+    begin
+        HandleDeliveryLogArchive := true;
+        DeliveryLogArchiveSucceeded := OperationSucceeded;
+        ConfiguredDeliveryLogArchivePath := ArchivePath;
+        ConfiguredDeliveryLogArchiveFileName := ArchiveFileName;
+        ConfiguredSharePointItemId := SharePointItemId;
+        ConfiguredDeliveryLogSharePointUrl := SharePointUrl;
+        DeliveryLogArchiveErrorText := ErrorText;
+    end;
+
     procedure GetCapturedSenderEmail(): Text
     begin
         exit(CapturedSenderEmail);
@@ -57,6 +68,11 @@ codeunit 70708 "GPI Transport Mock"
     procedure GetCapturedArchiveFileName(): Text
     begin
         exit(CapturedArchiveFileName);
+    end;
+
+    procedure GetCapturedDeliveryLogEntryNo(): Integer
+    begin
+        exit(CapturedDeliveryLogEntryNo);
     end;
 
     [EventSubscriber(ObjectType::Codeunit, Codeunit::"GPI Phase 2 Email Mgt.", 'OnBeforeResolveCurrentUserAccount', '', false, false)]
@@ -123,26 +139,51 @@ codeunit 70708 "GPI Transport Mock"
         ErrorText := ArchiveErrorText;
     end;
 
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"GPI Delivery Transport Mgt.", 'OnBeforeArchiveDeliveryLog', '', false, false)]
+    local procedure HandleArchiveDeliveryLog(DeliveryLogEntryNo: Integer; RequestedFileName: Text[250]; var IsHandled: Boolean; var OperationSucceeded: Boolean; var ArchivePath: Text; var ArchiveFileName: Text[250]; var SharePointItemId: Text[250]; var SharePointUrl: Text[2048]; var ErrorText: Text)
+    begin
+        if not HandleDeliveryLogArchive then
+            exit;
+
+        CapturedDeliveryLogEntryNo := DeliveryLogEntryNo;
+        CapturedArchiveFileName := RequestedFileName;
+        IsHandled := true;
+        OperationSucceeded := DeliveryLogArchiveSucceeded;
+        ArchivePath := ConfiguredDeliveryLogArchivePath;
+        ArchiveFileName := ConfiguredDeliveryLogArchiveFileName;
+        SharePointItemId := ConfiguredSharePointItemId;
+        SharePointUrl := ConfiguredDeliveryLogSharePointUrl;
+        ErrorText := DeliveryLogArchiveErrorText;
+    end;
+
     var
         HandleSenderAccount: Boolean;
         SuppressCommits: Boolean;
         HandleEmailSend: Boolean;
         HandleEmailEditor: Boolean;
         HandleArchive: Boolean;
+        HandleDeliveryLogArchive: Boolean;
         EmailSendOperationSucceeded: Boolean;
         EmailWasSent: Boolean;
         EmailEditorOperationSucceeded: Boolean;
         ArchiveOperationSucceeded: Boolean;
+        DeliveryLogArchiveSucceeded: Boolean;
         ConfiguredEmailAction: Enum "Email Action";
         ConfiguredSenderEmail: Text;
         ConfiguredSenderName: Text;
         EmailSendErrorText: Text;
         EmailEditorErrorText: Text;
         ArchiveErrorText: Text;
+        DeliveryLogArchiveErrorText: Text;
         ConfiguredExternalDeliveryId: Text;
         ConfiguredSharePointUrl: Text;
+        ConfiguredDeliveryLogArchivePath: Text;
+        ConfiguredDeliveryLogArchiveFileName: Text[250];
+        ConfiguredSharePointItemId: Text[250];
+        ConfiguredDeliveryLogSharePointUrl: Text[2048];
         CapturedSenderEmail: Text;
         CapturedEmailMessageId: Guid;
         CapturedArchivePath: Text;
         CapturedArchiveFileName: Text;
+        CapturedDeliveryLogEntryNo: Integer;
 }

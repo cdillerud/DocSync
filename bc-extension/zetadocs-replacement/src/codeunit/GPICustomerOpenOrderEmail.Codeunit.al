@@ -100,14 +100,14 @@ codeunit 70580 "GPI Customer Open Order Email"
             IncludedOrderNos,
             '',
             false);
-        Commit();
+        DeliveryTransportMgt.CommitChanges();
 
         if not DeliveryTransportMgt.OpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction, ErrorText) then begin
             if ErrorText = '' then
                 ErrorText := 'The Business Central email editor returned an unexpected error.';
 
             UpdateDeliveryLogFailed(DeliveryLog, ErrorText);
-            Commit();
+            DeliveryTransportMgt.CommitChanges();
             Error('%1', ErrorText);
         end;
 
@@ -266,7 +266,7 @@ codeunit 70580 "GPI Customer Open Order Email"
                 IncludedOrderNos,
                 ErrorText,
                 true);
-            Commit();
+            DeliveryTransportMgt.CommitChanges();
             exit(false);
         end;
 
@@ -298,25 +298,25 @@ codeunit 70580 "GPI Customer Open Order Email"
             IncludedOrderNos,
             '',
             false);
-        Commit();
+        DeliveryTransportMgt.CommitChanges();
 
         if not DeliveryTransportMgt.SendEmail(EmailMessage, SenderEmailAccount, SentSuccessfully, ErrorText) then begin
             if ErrorText = '' then
                 ErrorText := 'Business Central returned an error while sending the Customer Open Order Status email.';
             UpdateDeliveryLogFailed(DeliveryLog, ErrorText);
-            Commit();
+            DeliveryTransportMgt.CommitChanges();
             exit(false);
         end;
 
         if not SentSuccessfully then begin
             ErrorText := 'Business Central did not confirm that the Customer Open Order Status email was sent.';
             UpdateDeliveryLogFailed(DeliveryLog, ErrorText);
-            Commit();
+            DeliveryTransportMgt.CommitChanges();
             exit(false);
         end;
 
         UpdateDeliveryLogSent(DeliveryLog, EmailMessage);
-        Commit();
+        DeliveryTransportMgt.CommitChanges();
         exit(true);
     end;
 

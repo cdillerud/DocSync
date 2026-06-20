@@ -141,13 +141,13 @@ codeunit 70570 "GPI Transfer Email"
             TempBlob,
             RecipientLocationCode);
 
-        Commit();
+        DeliveryTransportMgt.CommitChanges();
         if not DeliveryTransportMgt.OpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction, EmailErrorText) then begin
             if EmailErrorText = '' then
                 EmailErrorText := 'The Business Central email editor returned an unexpected error.';
 
             UpdateDeliveryLogFailed(DeliveryLog, EmailErrorText);
-            Commit();
+            DeliveryTransportMgt.CommitChanges();
             Error('%1', EmailErrorText);
         end;
 

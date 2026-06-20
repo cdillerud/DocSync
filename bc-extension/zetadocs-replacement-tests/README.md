@@ -1,6 +1,6 @@
 # GPI Sales Document Email Tests
 
-Sandbox-only AL tests for the production `GPI Sales Document Email` extension.
+Sandbox-only AL tests and UAT utilities for the production `GPI Sales Document Email` extension, which is part of the Business Central Zetadocs Replacement.
 
 ## Coverage
 
@@ -19,8 +19,28 @@ Sandbox-only AL tests for the production `GPI Sales Document Email` extension.
 - End-to-end mocked SharePoint archive success, failure, PDF retention, and retry protection
 - TestPage-driven UAT simulations for the eight Phase 2 user actions
 - UAT Replace-rule recipient isolation and page-level Send simulation
+- Persistent sandbox UAT sample-pack generation for visual PDF review
 
-The suite does not send real email, open the email editor, upload to SharePoint, or create archive tasks.
+The automated suite does not send real email, open the email editor, upload to SharePoint, or create archive tasks.
+
+## UAT sample pack
+
+The test extension adds two actions to the GPI Document Delivery Log:
+
+- `Generate UAT Sample Pack`
+- `Open UAT Sample Packs`
+
+The generator creates persistent sandbox source records and seven reviewable PDFs:
+
+- Sales Return Authorization
+- Sales Return Warehouse Notification
+- Purchase Return Order
+- Purchase Return Pick Ticket
+- Transfer Pick List
+- Transfer Receipt Notification
+- Customer Open Order Status
+
+The PDFs are stored in the Delivery Log with status `Ready`, sender policy `UAT Sample Pack`, and a shared pack identifier. The generator does not send email or upload files to SharePoint.
 
 ## Build
 
@@ -41,9 +61,10 @@ Run `scripts/Prepare-GPIALTests.ps1`. Publish both apps only to `Sandbox_5_5_202
 - 70712 GPI Workflow Warehouse Tests
 - 70713 GPI Archive Workflow Tests
 - 70714 GPI UAT Simulation Tests
+- 70718 GPI UAT Sample Pack Tests
 
-Codeunit 70708 is the manual transport mock subscriber. Codeunit 70711 contains shared workflow test data and assertions. Codeunit 70715 contains UAT simulation setup and assertions.
+Codeunit 70708 is the manual transport mock subscriber. Codeunit 70711 contains shared workflow test data and assertions. Codeunit 70715 contains UAT simulation setup and assertions. Codeunit 70716 generates the manual UAT sample pack. Page extension 70717 exposes the sample-pack actions.
 
-Current total: 59 tests.
+Current total: 60 tests.
 
 Do not install this test extension in Production.

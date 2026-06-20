@@ -385,6 +385,7 @@ codeunit 70716 "GPI UAT Sample Pack"
         if not TempBlob.HasValue() then
             Error('The UAT sample report %1 did not generate a PDF.', ReportId);
 
+        Clear(DeliveryLog);
         DeliveryLog.Init();
         DeliveryLog."Delivery Document Type" := DocumentType;
         DeliveryLog.Status := DeliveryLog.Status::Ready;

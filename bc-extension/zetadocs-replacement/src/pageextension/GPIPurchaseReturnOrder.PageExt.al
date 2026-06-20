@@ -25,7 +25,7 @@ pageextension 70560 "GPI Purchase Return Docs" extends "Purchase Return Order"
                         PurchaseHeader: Record "Purchase Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                         PurchaseReturnEmail.OpenVendorReturnDraft(PurchaseHeader);
                         CurrPage.Update(false);
@@ -48,7 +48,7 @@ pageextension 70560 "GPI Purchase Return Docs" extends "Purchase Return Order"
                         PurchaseHeader: Record "Purchase Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                         PurchaseReturnEmail.OpenPickTicketDraft(PurchaseHeader);
                         CurrPage.Update(false);
@@ -68,7 +68,7 @@ pageextension 70560 "GPI Purchase Return Docs" extends "Purchase Return Order"
                         PurchaseHeader: Record "Purchase Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                         PurchaseReturnEmail.PreviewVendorReturn(PurchaseHeader);
                     end;
@@ -87,7 +87,7 @@ pageextension 70560 "GPI Purchase Return Docs" extends "Purchase Return Order"
                         PurchaseHeader: Record "Purchase Header";
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         PurchaseHeader.Get(Rec."Document Type", Rec."No.");
                         PurchaseReturnEmail.PreviewPickTicket(PurchaseHeader);
                     end;
@@ -136,4 +136,11 @@ pageextension 70560 "GPI Purchase Return Docs" extends "Purchase Return Order"
             }
         }
     }
+
+    local procedure CommitPageChanges()
+    var
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
+    begin
+        DeliveryTransportMgt.CommitChanges();
+    end;
 }

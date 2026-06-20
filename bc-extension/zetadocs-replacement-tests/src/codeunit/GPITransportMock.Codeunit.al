@@ -2,6 +2,18 @@ codeunit 70708 "GPI Transport Mock"
 {
     EventSubscriberInstance = Manual;
 
+    procedure ConfigureSenderAccount(SenderEmailAddress: Text; SenderAccountName: Text)
+    begin
+        HandleSenderAccount := true;
+        ConfiguredSenderEmail := SenderEmailAddress;
+        ConfiguredSenderName := SenderAccountName;
+    end;
+
+    procedure ConfigureCommitSuppression()
+    begin
+        SuppressCommits := true;
+    end;
+
     procedure ConfigureEmailSend(OperationSucceeded: Boolean; SentSuccessfully: Boolean; ErrorText: Text)
     begin
         HandleEmailSend := true;
@@ -45,6 +57,27 @@ codeunit 70708 "GPI Transport Mock"
     procedure GetCapturedArchiveFileName(): Text
     begin
         exit(CapturedArchiveFileName);
+    end;
+
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"GPI Phase 2 Email Mgt.", 'OnBeforeResolveCurrentUserAccount', '', false, false)]
+    local procedure HandleResolveCurrentUserAccount(var TempEmailAccount: Record "Email Account" temporary; var SenderEmailAddress: Text; var IsHandled: Boolean)
+    begin
+        if not HandleSenderAccount then
+            exit;
+
+        Clear(TempEmailAccount);
+        TempEmailAccount."Account Id" := CreateGuid();
+        TempEmailAccount.Name := CopyStr(ConfiguredSenderName, 1, MaxStrLen(TempEmailAccount.Name));
+        TempEmailAccount."Email Address" := CopyStr(ConfiguredSenderEmail, 1, MaxStrLen(TempEmailAccount."Email Address"));
+        SenderEmailAddress := ConfiguredSenderEmail;
+        IsHandled := true;
+    end;
+
+    [EventSubscriber(ObjectType::Codeunit, Codeunit::"GPI Delivery Transport Mgt.", 'OnBeforeCommitChanges', '', false, false)]
+    local procedure HandleCommitChanges(var IsHandled: Boolean)
+    begin
+        if SuppressCommits then
+            IsHandled := true;
     end;
 
     [EventSubscriber(ObjectType::Codeunit, Codeunit::"GPI Delivery Transport Mgt.", 'OnBeforeSendEmail', '', false, false)]
@@ -91,6 +124,8 @@ codeunit 70708 "GPI Transport Mock"
     end;
 
     var
+        HandleSenderAccount: Boolean;
+        SuppressCommits: Boolean;
         HandleEmailSend: Boolean;
         HandleEmailEditor: Boolean;
         HandleArchive: Boolean;
@@ -99,6 +134,8 @@ codeunit 70708 "GPI Transport Mock"
         EmailEditorOperationSucceeded: Boolean;
         ArchiveOperationSucceeded: Boolean;
         ConfiguredEmailAction: Enum "Email Action";
+        ConfiguredSenderEmail: Text;
+        ConfiguredSenderName: Text;
         EmailSendErrorText: Text;
         EmailEditorErrorText: Text;
         ArchiveErrorText: Text;

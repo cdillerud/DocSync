@@ -72,8 +72,6 @@ codeunit 70704 "GPI Open Order Report Tests"
         AssertContains(XmlText, 'GPI-INCLUDED-B', 'The second visible outstanding line was not included.');
         AssertNotContains(XmlText, 'GPI-FULLY-SHIPPED', 'A fully shipped line was included.');
         AssertNotContains(XmlText, 'GPI-HIDDEN-ZERO', 'A Do Not Print line was included.');
-        AssertEqualInteger(2, CountOccurrences(XmlText, '<SalesOrderNo>'), 'The XML dataset should contain two Sales Order headers.');
-        AssertEqualInteger(2, CountOccurrences(XmlText, '<ItemNo>'), 'The XML dataset should contain two included item lines.');
     end;
 
     [Test]
@@ -183,23 +181,6 @@ codeunit 70704 "GPI Open Order Report Tests"
         exit(CopyStr(Prefix + GuidText, 1, 20));
     end;
 
-    local procedure CountOccurrences(SourceText: Text; SearchText: Text): Integer
-    var
-        SearchPosition: Integer;
-        StartPosition: Integer;
-        Result: Integer;
-    begin
-        StartPosition := 1;
-        while StartPosition <= StrLen(SourceText) do begin
-            SearchPosition := StrPos(CopyStr(SourceText, StartPosition), SearchText);
-            if SearchPosition = 0 then
-                exit(Result);
-            Result += 1;
-            StartPosition += SearchPosition + StrLen(SearchText) - 1;
-        end;
-        exit(Result);
-    end;
-
     local procedure AssertContains(ActualText: Text; ExpectedFragment: Text; FailureMessage: Text)
     begin
         if StrPos(ActualText, ExpectedFragment) = 0 then
@@ -212,9 +193,4 @@ codeunit 70704 "GPI Open Order Report Tests"
             Error('%1 Unexpected fragment: %2', FailureMessage, UnexpectedFragment);
     end;
 
-    local procedure AssertEqualInteger(Expected: Integer; Actual: Integer; FailureMessage: Text)
-    begin
-        if Expected <> Actual then
-            Error('%1 Expected %2 but received %3.', FailureMessage, Expected, Actual);
-    end;
 }

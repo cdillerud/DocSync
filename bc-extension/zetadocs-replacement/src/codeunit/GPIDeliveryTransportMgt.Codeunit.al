@@ -82,6 +82,16 @@ codeunit 70591 "GPI Delivery Transport Mgt."
         exit(false);
     end;
 
+    procedure CommitChanges()
+    var
+        IsHandled: Boolean;
+    begin
+        OnBeforeCommitChanges(IsHandled);
+        if IsHandled then
+            exit;
+        Commit();
+    end;
+
     [TryFunction]
     local procedure TryOpenEmailEditor(EmailMessage: Codeunit "Email Message"; SenderEmailAccount: Record "Email Account" temporary; var EmailAction: Enum "Email Action")
     var
@@ -110,6 +120,11 @@ codeunit 70591 "GPI Delivery Transport Mgt."
 
     [IntegrationEvent(false, false)]
     local procedure OnBeforeArchiveUpload(ArchivePath: Text; FileName: Text[250]; var IsHandled: Boolean; var OperationSucceeded: Boolean; var ExternalDeliveryId: Text[2048]; var SharePointUrl: Text[2048]; var ErrorText: Text)
+    begin
+    end;
+
+    [IntegrationEvent(false, false)]
+    local procedure OnBeforeCommitChanges(var IsHandled: Boolean)
     begin
     end;
 }

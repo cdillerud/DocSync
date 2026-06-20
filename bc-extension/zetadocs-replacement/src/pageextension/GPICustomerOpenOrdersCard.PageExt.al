@@ -25,7 +25,7 @@ pageextension 70580 "GPI Customer Open Orders" extends "Customer Card"
                         Customer: Record Customer;
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         Customer.Get(Rec."No.");
                         OpenOrderEmail.OpenOpenOrderDraft(Customer);
                         CurrPage.Update(false);
@@ -45,7 +45,7 @@ pageextension 70580 "GPI Customer Open Orders" extends "Customer Card"
                         Customer: Record Customer;
                     begin
                         CurrPage.SaveRecord();
-                        Commit();
+                        CommitPageChanges();
                         Customer.Get(Rec."No.");
                         OpenOrderEmail.PreviewOpenOrderStatus(Customer);
                     end;
@@ -95,4 +95,11 @@ pageextension 70580 "GPI Customer Open Orders" extends "Customer Card"
             }
         }
     }
+
+    local procedure CommitPageChanges()
+    var
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
+    begin
+        DeliveryTransportMgt.CommitChanges();
+    end;
 }

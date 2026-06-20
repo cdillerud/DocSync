@@ -71,6 +71,7 @@ codeunit 70570 "GPI Transfer Email"
     local procedure OpenDraft(var TransferHeader: Record "Transfer Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type"; ReportId: Integer; Subject: Text; Body: Text; AttachmentName: Text[250]; RecipientLocationCode: Code[10])
     var
         Phase2EmailMgt: Codeunit "GPI Phase 2 Email Mgt.";
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -141,8 +142,7 @@ codeunit 70570 "GPI Transfer Email"
             RecipientLocationCode);
 
         Commit();
-        if not TryOpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction) then begin
-            EmailErrorText := GetLastErrorText();
+        if not DeliveryTransportMgt.OpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction, EmailErrorText) then begin
             if EmailErrorText = '' then
                 EmailErrorText := 'The Business Central email editor returned an unexpected error.';
 
@@ -207,26 +207,18 @@ codeunit 70570 "GPI Transfer Email"
 
     local procedure ApplyLocationRoutingRules(LocationCode: Code[10]; DeliveryDocumentType: Enum "GPI Delivery Document Type"; SpecificLocationOnly: Boolean; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRoutingRuleEntries: Text[250]; var ReplaceApplied: Boolean): Boolean
     var
-        RoutingRule: Record "GPI Document Routing Rule";
-        RuleApplied: Boolean;
+        RoutingResolver: Codeunit "GPI Routing Rule Resolver";
     begin
-        RoutingRule.SetCurrentKey(Enabled, "Delivery Document Type", Priority, "Entry No.");
-        RoutingRule.SetRange(Enabled, true);
-        RoutingRule.SetRange("Delivery Document Type", DeliveryDocumentType);
-        if not RoutingRule.FindSet() then
-            exit(false);
-
-        repeat
-            if LocationRuleMatches(RoutingRule, LocationCode, SpecificLocationOnly) and RoutingRuleIsActive(RoutingRule) then begin
-                ApplyRoutingRule(RoutingRule, ToRecipients, CCRecipients, BCCRecipients);
-                AppendRoutingRuleEntry(AppliedRoutingRuleEntries, RoutingRule."Entry No.");
-                if RoutingRule."Recipient Action" = RoutingRule."Recipient Action"::Replace then
-                    ReplaceApplied := true;
-                RuleApplied := true;
-            end;
-        until RoutingRule.Next() = 0;
-
-        exit(RuleApplied);
+        exit(RoutingResolver.ApplyLocationRules(
+            DeliveryDocumentType,
+            LocationCode,
+            SpecificLocationOnly,
+            Today,
+            ToRecipients,
+            CCRecipients,
+            BCCRecipients,
+            AppliedRoutingRuleEntries,
+            ReplaceApplied));
     end;
 
     local procedure LocationRuleMatches(RoutingRule: Record "GPI Document Routing Rule"; LocationCode: Code[10]; SpecificLocationOnly: Boolean): Boolean

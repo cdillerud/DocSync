@@ -30,6 +30,7 @@ codeunit 70580 "GPI Customer Open Order Email"
     procedure OpenOpenOrderDraft(var Customer: Record Customer)
     var
         Phase2EmailMgt: Codeunit "GPI Phase 2 Email Mgt.";
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -101,8 +102,7 @@ codeunit 70580 "GPI Customer Open Order Email"
             false);
         Commit();
 
-        if not TryOpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction) then begin
-            ErrorText := GetLastErrorText();
+        if not DeliveryTransportMgt.OpenEmailEditor(EmailMessage, SenderEmailAccount, EmailAction, ErrorText) then begin
             if ErrorText = '' then
                 ErrorText := 'The Business Central email editor returned an unexpected error.';
 
@@ -207,6 +207,7 @@ codeunit 70580 "GPI Customer Open Order Email"
 
     local procedure SendOneOpenOrderStatus(var Customer: Record Customer; SenderEmailAccount: Record "Email Account" temporary; SenderEmailAddress: Text): Boolean
     var
+        DeliveryTransportMgt: Codeunit "GPI Delivery Transport Mgt.";
         TempBlob: Codeunit "Temp Blob";
         EmailMessage: Codeunit "Email Message";
         Email: Codeunit Email;
@@ -299,9 +300,7 @@ codeunit 70580 "GPI Customer Open Order Email"
             false);
         Commit();
 
-        ClearLastError();
-        if not TrySendOpenOrderEmail(EmailMessage, SenderEmailAccount, SentSuccessfully) then begin
-            ErrorText := GetLastErrorText();
+        if not DeliveryTransportMgt.SendEmail(EmailMessage, SenderEmailAccount, SentSuccessfully, ErrorText) then begin
             if ErrorText = '' then
                 ErrorText := 'Business Central returned an error while sending the Customer Open Order Status email.';
             UpdateDeliveryLogFailed(DeliveryLog, ErrorText);
@@ -461,26 +460,19 @@ codeunit 70580 "GPI Customer Open Order Email"
 
     local procedure ApplyRoutingRules(Customer: Record Customer; SpecificCustomerOnly: Boolean; var ToRecipients: List of [Text]; var CCRecipients: List of [Text]; var BCCRecipients: List of [Text]; var AppliedRuleEntries: Text[250]; var ReplaceApplied: Boolean): Boolean
     var
-        RoutingRule: Record "GPI Document Routing Rule";
-        RuleApplied: Boolean;
+        RoutingResolver: Codeunit "GPI Routing Rule Resolver";
     begin
-        RoutingRule.SetCurrentKey(Enabled, "Delivery Document Type", Priority, "Entry No.");
-        RoutingRule.SetRange(Enabled, true);
-        RoutingRule.SetRange("Delivery Document Type", Enum::"GPI Delivery Document Type"::"Customer Open Order Status");
-        if not RoutingRule.FindSet() then
-            exit(false);
-
-        repeat
-            if RoutingRuleMatches(RoutingRule, Customer, SpecificCustomerOnly) and RoutingRuleIsActive(RoutingRule) then begin
-                ApplyRoutingRule(RoutingRule, ToRecipients, CCRecipients, BCCRecipients);
-                AppendRoutingRuleEntry(AppliedRuleEntries, RoutingRule."Entry No.");
-                if RoutingRule."Recipient Action" = RoutingRule."Recipient Action"::Replace then
-                    ReplaceApplied := true;
-                RuleApplied := true;
-            end;
-        until RoutingRule.Next() = 0;
-
-        exit(RuleApplied);
+        exit(RoutingResolver.ApplyCustomerRules(
+            Enum::"GPI Delivery Document Type"::"Customer Open Order Status",
+            Customer."No.",
+            '',
+            SpecificCustomerOnly,
+            Today,
+            ToRecipients,
+            CCRecipients,
+            BCCRecipients,
+            AppliedRuleEntries,
+            ReplaceApplied));
     end;
 
     local procedure RoutingRuleMatches(RoutingRule: Record "GPI Document Routing Rule"; Customer: Record Customer; SpecificCustomerOnly: Boolean): Boolean

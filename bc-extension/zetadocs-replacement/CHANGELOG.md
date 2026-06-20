@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.22.0.0
+
+### Changed
+- Routed Sales Return, Purchase Return, Transfer, and Customer Open Order recipient resolution through the shared GPI Routing Rule Resolver.
+- Routed all four Phase 2 draft-editor workflows through GPI Delivery Transport Mgt.
+- Routed Customer Open Order direct batch sends through GPI Delivery Transport Mgt.
+- Preserved existing recipient fallback, sender normalization, Delivery Log, report generation, and live email behavior when no test subscriber is bound.
+
+### Safety
+- No report layout files were changed.
+- No SharePoint upload implementation was changed in this wiring pass.
+- Existing local TryFunction procedures remain temporarily in place but are no longer used by the wired workflows.
 ## 0.21.0.1
 
 ### Fixed

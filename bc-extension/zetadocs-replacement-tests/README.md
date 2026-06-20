@@ -17,6 +17,8 @@ Sandbox-only AL tests for the production `GPI Sales Document Email` extension.
 - Mocked archive success, returned identifiers, and safe unhandled failure
 - End-to-end mocked Sales Return, Purchase Return, Transfer, and Open Order workflow Delivery Logs
 - End-to-end mocked SharePoint archive success, failure, PDF retention, and retry protection
+- TestPage-driven UAT simulations for the eight Phase 2 user actions
+- UAT Replace-rule recipient isolation and page-level Send simulation
 
 The suite does not send real email, open the email editor, upload to SharePoint, or create archive tasks.
 
@@ -38,9 +40,10 @@ Run `scripts/Prepare-GPIALTests.ps1`. Publish both apps only to `Sandbox_5_5_202
 - 70710 GPI Workflow Return Tests
 - 70712 GPI Workflow Warehouse Tests
 - 70713 GPI Archive Workflow Tests
+- 70714 GPI UAT Simulation Tests
 
-Codeunit 70708 is the manual transport mock subscriber. Codeunit 70711 contains shared workflow test data and assertions.
+Codeunit 70708 is the manual transport mock subscriber. Codeunit 70711 contains shared workflow test data and assertions. Codeunit 70715 contains UAT simulation setup and assertions.
 
-Current total: 51 tests.
+Current total: 59 tests.
 
 Do not install this test extension in Production.

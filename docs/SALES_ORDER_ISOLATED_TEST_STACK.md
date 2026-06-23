@@ -5,6 +5,7 @@ containers, database, ports, network, volumes, or Business Central write flags.
 
 ## Safety defaults
 
+- Review UI binds only to `127.0.0.1:18080`.
 - Backend binds only to `127.0.0.1:18001`.
 - MongoDB binds only to `127.0.0.1:27028`.
 - Database: `gpi_sales_order_test`.
@@ -28,13 +29,39 @@ bash tools/run_sales_order_test_stack.sh
 The runner will:
 
 1. Validate the Compose file.
-2. Build and start isolated MongoDB and backend containers.
-3. Wait for the backend health check.
+2. Build and start isolated MongoDB, backend, and frontend containers.
+3. Wait for backend and frontend health checks.
 4. Seed nine deterministic customer-order scenarios.
 5. Run API smoke tests.
 6. Confirm that create-draft remains blocked in shadow mode.
+7. Confirm that the browser review route is served.
 
-## Manual inspection
+## Open the review UI from your workstation
+
+The UI is intentionally bound to the VM loopback interface. Create an SSH tunnel
+from a local terminal or PowerShell window:
+
+```bash
+ssh -L 18080:127.0.0.1:18080 azureuser@VM_IP_OR_HOSTNAME
+```
+
+Leave that SSH session open, then browse to:
+
+```text
+http://localhost:18080/sales/order-review
+```
+
+Use the isolated test login:
+
+```text
+Username: admin
+Password: admin
+```
+
+The browser uses the frontend container's `/api` proxy, so a separate backend
+port tunnel is not required.
+
+## Manual API inspection
 
 ```bash
 curl -s http://127.0.0.1:18001/api/sales/order-intake/status | python -m json.tool
@@ -47,6 +74,8 @@ curl -s \
 ## Logs
 
 ```bash
+docker logs --tail 200 gpi-sales-order-test-frontend
+
 docker logs --tail 200 gpi-sales-order-test-backend
 
 docker logs --tail 200 gpi-sales-order-test-mongodb

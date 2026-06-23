@@ -36,14 +36,12 @@ class FakeClient:
 class FakeBCService:
     use_mock = False
 
-    async def _get_company_id(self):
-        return "company-id"
 
-
-def test_production_environment_takes_precedence(monkeypatch):
-    monkeypatch.setenv("BC_PROD_ENVIRONMENT", "Production")
-    monkeypatch.setenv("BC_ENVIRONMENT", "Sandbox")
-    monkeypatch.setenv("BC_SANDBOX_ENVIRONMENT", "Sandbox_Copy")
+def test_history_environment_isolated_from_write_sandbox(monkeypatch):
+    monkeypatch.setenv("BC_HISTORY_ENVIRONMENT", "Production")
+    monkeypatch.setenv("BC_PROD_ENVIRONMENT", "ProductionFallback")
+    monkeypatch.setenv("BC_ENVIRONMENT", "Sandox_5_5_2026")
+    monkeypatch.setenv("BC_SANDBOX_ENVIRONMENT", "Sandox_5_5_2026")
 
     assert lookup_module.resolve_bc_environment() == "Production"
 
@@ -66,7 +64,9 @@ async def test_live_lookup_can_search_by_external_reference_without_customer(
     async def fake_token():
         return "token"
 
-    monkeypatch.setenv("BC_PROD_ENVIRONMENT", "Production")
+    monkeypatch.setenv("BC_HISTORY_ENVIRONMENT", "Production")
+    monkeypatch.setenv("BC_HISTORY_COMPANY_ID", "company-id")
+    monkeypatch.setenv("BC_ENVIRONMENT", "Sandox_5_5_2026")
     monkeypatch.setattr(lookup_module, "get_bc_token", fake_token)
     monkeypatch.setattr(
         lookup_module.httpx,
@@ -81,6 +81,7 @@ async def test_live_lookup_can_search_by_external_reference_without_customer(
     )
 
     assert "/Production/api/v2.0/" in captured["url"]
+    assert "Sandox_5_5_2026" not in captured["url"]
     assert captured["params"]["$filter"] == (
         "externalDocumentNumber eq '111169'"
     )

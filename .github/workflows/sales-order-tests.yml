@@ -9,6 +9,9 @@ on:
       - "backend/scripts/*sales_order*.py"
       - "backend/tests/test_sales_order_*.py"
       - "backend/setup.cfg"
+      - "frontend/src/pages/SalesOrderReviewPage.js"
+      - "frontend/src/App.js"
+      - "frontend/src/components/Layout.js"
       - "docker-compose.sales-order-test.yml"
       - ".github/workflows/sales-order-tests.yml"
   push:
@@ -21,11 +24,14 @@ on:
       - "backend/scripts/*sales_order*.py"
       - "backend/tests/test_sales_order_*.py"
       - "backend/setup.cfg"
+      - "frontend/src/pages/SalesOrderReviewPage.js"
+      - "frontend/src/App.js"
+      - "frontend/src/components/Layout.js"
       - "docker-compose.sales-order-test.yml"
       - ".github/workflows/sales-order-tests.yml"
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -85,3 +91,29 @@ jobs:
             scripts/seed_sales_order_test_data.py \
             scripts/smoke_sales_order_review.py \
             tests/test_sales_order_*.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    env:
+      CI: "false"
+      REACT_APP_BACKEND_URL: ""
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install frontend dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Build sales-order review UI
+        run: yarn build

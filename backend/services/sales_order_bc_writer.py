@@ -1,14 +1,14 @@
 """Business Central writer for validated draft sales orders.
 
-This module keeps sales-order creation separate from the AP-oriented
-BusinessCentralService. It sends the official salesOrderLine fields, includes
-unitOfMeasureCode, retries transient responses, and rolls back the header if a
-line cannot be created.
+The standard API path creates a header and lines, retries transient failures,
+and rolls the header back if any line fails. A custom AL import endpoint can be
+configured for atomic creation and native Ship-to Code handling.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -23,19 +23,30 @@ from services.business_central_service import (
 )
 
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = int(os.environ.get("SALES_ORDER_BC_MAX_ATTEMPTS", "3"))
+
+# Customer PO prices are comparison data by default. BC should calculate the
+# actual sales price unless an authorized workflow explicitly enables override.
+ALLOW_PO_PRICE_OVERRIDE = os.environ.get(
+    "SALES_ORDER_ALLOW_PO_PRICE_OVERRIDE", "false"
+).lower() in ("true", "1", "yes")
+
+# Optional custom AL API. This endpoint can accept the full order atomically and
+# apply Gamer-specific fields such as Ship-to Code.
+CUSTOM_IMPORT_URL = os.environ.get("BC_SALES_ORDER_IMPORT_API_URL", "").strip()
 
 
 async def create_sales_order_draft(
     bc_service,
     order_data: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Create a complete draft order or roll back the header on line failure."""
+    """Create a complete draft order or return a structured failure."""
 
     lines = order_data.get("lines") or []
     if not lines:
         return {
             "success": False,
+            "errorCode": "ORDER_LINES_REQUIRED",
             "error": "Sales order requires at least one line",
             "linesAdded": 0,
             "linesTotal": 0,
@@ -58,6 +69,31 @@ async def create_sales_order_draft(
 
     token = await get_bc_token()
     company_id = await bc_service._get_company_id()
+
+    if CUSTOM_IMPORT_URL:
+        return await _create_with_custom_import_api(
+            token=token,
+            company_id=company_id,
+            order_data=order_data,
+        )
+
+    # Ship-to Code is not part of the standard salesOrders v2.0 header contract.
+    # Refuse to silently discard it. Configure the custom AL API or resolve the
+    # code to explicit address fields before calling this writer.
+    if order_data.get("shipToCode"):
+        return {
+            "success": False,
+            "errorCode": "SHIP_TO_CODE_REQUIRES_CUSTOM_API",
+            "error": (
+                "A BC Ship-to Code was supplied, but the standard salesOrders "
+                "API cannot apply it. Configure BC_SALES_ORDER_IMPORT_API_URL "
+                "or resolve the code to explicit ship-to address fields."
+            ),
+            "linesAdded": 0,
+            "linesTotal": len(lines),
+            "lineErrors": [],
+        }
+
     base_url = (
         f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/"
         f"companies({company_id})"
@@ -79,6 +115,7 @@ async def create_sales_order_draft(
         if response.status_code not in (200, 201):
             return {
                 "success": False,
+                "errorCode": "BC_HEADER_CREATE_FAILED",
                 "error": f"BC sales-order header failed: HTTP {response.status_code}",
                 "details": response.text[:1000],
                 "linesAdded": 0,
@@ -123,6 +160,7 @@ async def create_sales_order_draft(
             )
             return {
                 "success": False,
+                "errorCode": "BC_LINE_CREATE_FAILED",
                 "error": (
                     f"BC rejected sales-order line {line_errors[0]['line']}; "
                     + (
@@ -143,6 +181,33 @@ async def create_sales_order_draft(
                 "mock": False,
             }
 
+        if added != len(lines):
+            rollback = await _rollback_sales_order(
+                client=client,
+                url=f"{base_url}/salesOrders({order_id})",
+                token=token,
+                etag=order_etag,
+            )
+            return {
+                "success": False,
+                "errorCode": "BC_LINE_COUNT_MISMATCH",
+                "error": (
+                    f"Expected {len(lines)} lines but created {added}; "
+                    + (
+                        "header was rolled back"
+                        if rollback["success"]
+                        else "manual cleanup is required"
+                    )
+                ),
+                "bcDocumentId": order_id,
+                "bcDocumentNumber": order_number,
+                "linesAdded": added,
+                "linesTotal": len(lines),
+                "lineErrors": [],
+                "rolledBack": rollback["success"],
+                "manualCleanupRequired": not rollback["success"],
+            }
+
         return {
             "success": True,
             "bcDocumentId": order_id,
@@ -157,7 +222,62 @@ async def create_sales_order_draft(
             "lineErrors": [],
             "rolledBack": False,
             "manualCleanupRequired": False,
+            "poPriceOverrideApplied": ALLOW_PO_PRICE_OVERRIDE,
         }
+
+
+async def _create_with_custom_import_api(
+    *,
+    token: str,
+    company_id: str,
+    order_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Submit the full candidate to a custom AL import API atomically."""
+
+    url = CUSTOM_IMPORT_URL.format(company_id=company_id)
+    payload = dict(order_data)
+    payload["allowPoPriceOverride"] = ALLOW_PO_PRICE_OVERRIDE
+
+    async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+        response = await _request_with_retry(
+            client,
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+
+    if response.status_code not in (200, 201):
+        return {
+            "success": False,
+            "errorCode": "BC_CUSTOM_IMPORT_FAILED",
+            "error": f"Custom BC import API failed: HTTP {response.status_code}",
+            "details": response.text[:1000],
+            "linesAdded": 0,
+            "linesTotal": len(order_data.get("lines") or []),
+            "lineErrors": [],
+        }
+
+    data = response.json()
+    return {
+        "success": True,
+        "bcDocumentId": data.get("salesOrderId") or data.get("id"),
+        "bcDocumentNumber": data.get("salesOrderNumber") or data.get("number"),
+        "status": data.get("status", "Draft"),
+        "message": "Sales order created through custom BC import API",
+        "mock": False,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "bcResponse": data,
+        "linesAdded": data.get("linesCreated", len(order_data.get("lines") or [])),
+        "linesTotal": len(order_data.get("lines") or []),
+        "lineErrors": [],
+        "rolledBack": False,
+        "manualCleanupRequired": False,
+        "poPriceOverrideApplied": ALLOW_PO_PRICE_OVERRIDE,
+    }
 
 
 def _build_header_payload(order_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,10 +313,12 @@ def _build_line_payload(line: Dict[str, Any]) -> Dict[str, Any]:
 
     if line.get("description"):
         payload["description"] = str(line["description"])[:100]
-    if line.get("unitPrice") is not None:
+    if ALLOW_PO_PRICE_OVERRIDE and line.get("unitPrice") is not None:
         payload["unitPrice"] = line["unitPrice"]
     if line.get("shipmentDate"):
         payload["shipmentDate"] = line["shipmentDate"]
+    if line.get("locationId"):
+        payload["locationId"] = line["locationId"]
 
     return payload
 

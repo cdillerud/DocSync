@@ -24,15 +24,25 @@ def _odata_literal(value: str) -> str:
 async def find_existing_bc_sales_order(
     bc_service,
     *,
-    customer_number: str,
+    customer_number: str = "",
     external_document_number: str,
 ) -> Optional[Dict[str, Any]]:
     """Return an existing BC sales order for the customer PO, when present.
 
-    This is a read-only guard. The custom AL import endpoint should still enforce
-    the same uniqueness rule transactionally because another process could create
-    an order after this lookup and before the write occurs.
+    When a customer number is available, both customer and external document
+    number are required to match. Historical shell records may not have a resolved
+    customer yet; for those records, this read-only lookup can search by external
+    document number alone and use the returned header to establish the customer.
+
+    The custom AL import endpoint should still enforce the same uniqueness rule
+    transactionally because another process could create an order after this lookup
+    and before the write occurs.
     """
+
+    external_document_number = str(external_document_number or "").strip()
+    customer_number = str(customer_number or "").strip()
+    if not external_document_number:
+        return None
 
     if getattr(bc_service, "use_mock", False):
         return None
@@ -44,15 +54,16 @@ async def find_existing_bc_sales_order(
         f"companies({company_id})/salesOrders"
     )
 
-    customer = _odata_literal(customer_number)
     external_number = _odata_literal(external_document_number)
+    filters = [f"externalDocumentNumber eq '{external_number}'"]
+    if customer_number:
+        customer = _odata_literal(customer_number)
+        filters.insert(0, f"customerNumber eq '{customer}'")
+
     params = {
-        "$filter": (
-            f"customerNumber eq '{customer}' and "
-            f"externalDocumentNumber eq '{external_number}'"
-        ),
+        "$filter": " and ".join(filters),
         "$select": "id,number,customerNumber,externalDocumentNumber,status",
-        "$top": "1",
+        "$top": "2",
     }
 
     async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
@@ -69,4 +80,11 @@ async def find_existing_bc_sales_order(
         )
 
     values = response.json().get("value") or []
-    return values[0] if values else None
+    if not values:
+        return None
+
+    result = dict(values[0])
+    result["lookupSource"] = "bc_api"
+    result["lookupMatchedCustomer"] = bool(customer_number)
+    result["multipleMatches"] = len(values) > 1
+    return result

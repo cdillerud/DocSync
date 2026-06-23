@@ -7,7 +7,7 @@ legacy records before deterministic preflight runs.
 from __future__ import annotations
 
 import copy
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, List
 
 _TRUE_VALUES = {"true", "1", "yes", "y", "on", "approved"}
 _FALSE_VALUES = {"false", "0", "no", "n", "off", "", "none", "null"}

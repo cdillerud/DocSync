@@ -105,7 +105,7 @@ export default function SalesOrderReviewPage() {
     setLoadingQueue(true);
     try {
       const data = await apiRequest(
-        '/api/sales/order-intake/review?limit=200&refresh_missing=true'
+        '/api/sales/order-intake/review?limit=200&refresh_missing=false'
       );
       const nextDocuments = data.documents || [];
       setMode({ mode: data.mode, write_enabled: data.write_enabled });
@@ -258,119 +258,128 @@ export default function SalesOrderReviewPage() {
         { method: 'POST' }
       );
       toast.success(
-        `BC draft ${result.bcDocumentNumber || result.bcDocumentId} created`
+        result.bcDocumentNumber
+          ? `Business Central draft ${result.bcDocumentNumber} created`
+          : 'Business Central draft created'
       );
       await refreshCurrent();
     } catch (error) {
-      if (error.detail?.status === 'shadow_mode') {
-        toast.info('Candidate passed preflight, but BC writes are disabled');
-      } else {
-        toast.error(`Draft creation blocked: ${error.message}`);
-      }
+      toast.error(`Draft creation blocked: ${error.message}`);
     } finally {
       setActionLoading(false);
     }
   };
 
+  const sourceUrl =
+    sourceDocument.sharepoint_url ||
+    sourceDocument.web_url ||
+    sourceDocument.source_url;
+
   return (
-    <div className="mx-auto max-w-[1600px] space-y-6" data-testid="sales-order-review-page">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+    <div className="space-y-5 p-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
-          <h2 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
-            <ClipboardCheck className="h-6 w-6 text-primary" />
-            Sales Order Review
-          </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Review extracted customer purchase orders before creating Business Central drafts.
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="h-7 w-7 text-blue-500" />
+            <h1 className="text-3xl font-bold tracking-tight">Sales Order Review</h1>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+            Review extracted customer purchase orders before creating Business Central
+            drafts.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge
-            variant="outline"
             className={
               mode.write_enabled
-                ? 'border-red-300 bg-red-100 text-red-800'
-                : 'border-amber-300 bg-amber-100 text-amber-800'
+                ? 'bg-red-100 text-red-800'
+                : 'bg-amber-100 text-amber-800'
             }
           >
-            <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-            {mode.write_enabled ? 'BC Write Mode' : 'Shadow Mode'}
+            <ShieldCheck className="mr-1 h-4 w-4" />
+            {mode.write_enabled ? 'Write Mode' : 'Shadow Mode'}
           </Badge>
           <Button
             variant="outline"
             onClick={() => loadQueue(true)}
             disabled={loadingQueue || actionLoading}
           >
-            <RefreshCw className={`mr-2 h-4 w-4 ${loadingQueue ? 'animate-spin' : ''}`} />
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${loadingQueue ? 'animate-spin' : ''}`}
+            />
             Refresh Queue
           </Button>
         </div>
       </div>
 
-      <Card className="border-amber-300/60 bg-amber-50/40 dark:bg-amber-950/10">
-        <CardContent className="flex items-start gap-3 p-4">
-          <ShieldCheck className="mt-0.5 h-5 w-5 text-amber-600" />
-          <div>
-            <p className="text-sm font-medium">
-              {mode.write_enabled
-                ? 'Business Central draft creation is enabled.'
-                : 'Business Central writes are disabled.'}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Preflight, approval, rejection, and queue persistence remain active. A draft cannot be created unless every deterministic validation passes.
-            </p>
+      {!mode.write_enabled && (
+        <div className="rounded-lg border border-amber-400/70 bg-amber-50/5 p-4">
+          <div className="flex gap-3">
+            <ShieldCheck className="mt-0.5 h-5 w-5 text-amber-500" />
+            <div>
+              <p className="font-semibold">Business Central writes are disabled.</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Preflight, approval, rejection, and queue persistence remain active. A
+                draft cannot be created unless every deterministic validation passes.
+              </p>
+            </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      )}
 
-      <div className="grid min-h-[650px] gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-        <Card className="overflow-hidden">
-          <CardHeader className="border-b pb-4">
-            <CardTitle className="text-lg">Review Queue</CardTitle>
-            <CardDescription>{documents.length} customer-order documents</CardDescription>
+      <div className="grid gap-5 xl:grid-cols-[minmax(320px,0.95fr)_minmax(0,1.65fr)]">
+        <Card className="min-h-[640px]">
+          <CardHeader>
+            <CardTitle>Review Queue</CardTitle>
+            <CardDescription>
+              {documents.length} customer-order document
+              {documents.length === 1 ? '' : 's'}
+            </CardDescription>
             <div className="relative pt-2">
-              <Search className="absolute left-3 top-1/2 mt-1 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Search className="absolute left-3 top-5 h-4 w-4 text-muted-foreground" />
               <Input
+                className="pl-9"
+                placeholder="Search customer, PO, or file"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search customer, PO, or file"
-                className="pl-9"
               />
             </div>
           </CardHeader>
-          <CardContent className="max-h-[730px] overflow-y-auto p-0">
+          <CardContent className="space-y-2">
             {loadingQueue ? (
-              <div className="flex items-center justify-center py-16">
-                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <div className="flex h-32 items-center justify-center">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
               </div>
             ) : filteredDocuments.length === 0 ? (
-              <div className="p-8 text-center text-sm text-muted-foreground">
-                No matching sales orders.
+              <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+                No sales-order documents matched this queue.
               </div>
             ) : (
               filteredDocuments.map((item) => (
                 <button
-                  type="button"
                   key={item.document_id}
+                  type="button"
                   onClick={() => setSelectedId(item.document_id)}
-                  className={`w-full border-b p-4 text-left transition-colors hover:bg-muted/50 ${
-                    selectedId === item.document_id ? 'bg-primary/5' : ''
+                  className={`w-full rounded-lg border p-3 text-left transition ${
+                    selectedId === item.document_id
+                      ? 'border-blue-500 bg-blue-500/10'
+                      : 'border-border hover:border-blue-400/70 hover:bg-muted/40'
                   }`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">
-                        {item.customer_name || 'Unresolved customer'}
+                      <p className="truncate font-medium">
+                        {item.customer_name || item.file_name || item.document_id}
                       </p>
-                      <p className="truncate text-xs text-muted-foreground">
-                        {item.customer_po_number || 'No customer PO'}
+                      <p className="mt-1 truncate text-xs text-muted-foreground">
+                        {item.file_name || 'Unnamed document'}
                       </p>
                     </div>
                     {statusBadge(item)}
                   </div>
-                  <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="truncate">{item.file_name || item.document_id}</span>
-                    <span className="shrink-0">{formatDate(item.created_utc)}</span>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <span>PO: {item.customer_po_number || '-'}</span>
+                    <span className="text-right">{formatDate(item.created_utc)}</span>
                   </div>
                 </button>
               ))
@@ -378,235 +387,219 @@ export default function SalesOrderReviewPage() {
           </CardContent>
         </Card>
 
-        <div className="space-y-6">
-          {loadingDetail ? (
-            <Card>
-              <CardContent className="flex min-h-[400px] items-center justify-center">
-                <Loader2 className="h-7 w-7 animate-spin text-primary" />
-              </CardContent>
-            </Card>
+        <Card className="min-h-[640px]">
+          {!selectedId ? (
+            <CardContent className="flex h-[640px] flex-col items-center justify-center text-muted-foreground">
+              <FileText className="mb-4 h-10 w-10" />
+              <p>Select a document from the review queue.</p>
+            </CardContent>
+          ) : loadingDetail ? (
+            <CardContent className="flex h-[640px] items-center justify-center">
+              <Loader2 className="h-7 w-7 animate-spin text-blue-500" />
+            </CardContent>
           ) : !detail ? (
-            <Card>
-              <CardContent className="flex min-h-[400px] flex-col items-center justify-center text-muted-foreground">
-                <FileText className="mb-3 h-12 w-12 opacity-30" />
-                Select a document from the review queue.
-              </CardContent>
-            </Card>
+            <CardContent className="flex h-[640px] flex-col items-center justify-center text-muted-foreground">
+              <AlertTriangle className="mb-4 h-10 w-10 text-amber-500" />
+              <p>The selected order could not be loaded.</p>
+            </CardContent>
           ) : (
             <>
-              <Card>
-                <CardHeader>
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <CardTitle className="flex items-center gap-2">
-                        {preflight.can_create ? (
-                          <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                        ) : (
-                          <AlertTriangle className="h-5 w-5 text-amber-600" />
-                        )}
-                        {candidate.customerName || 'Unresolved customer'}
-                      </CardTitle>
-                      <CardDescription className="mt-1">
-                        {sourceDocument.file_name || selectedId}
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        variant="outline"
-                        onClick={rerunPreflight}
-                        disabled={actionLoading}
-                      >
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Rerun Preflight
-                      </Button>
-                      <Button
-                        variant="outline"
-                        onClick={() => setRejectOpen(true)}
-                        disabled={actionLoading}
-                        className="border-red-300 text-red-700 hover:bg-red-50"
-                      >
-                        <XCircle className="mr-2 h-4 w-4" />
-                        Reject
-                      </Button>
-                      <Button
-                        onClick={() => setApproveOpen(true)}
-                        disabled={actionLoading}
-                      >
-                        <CheckCircle2 className="mr-2 h-4 w-4" />
-                        Approve
-                      </Button>
-                    </div>
+              <CardHeader>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <CardTitle>
+                      {candidate.customerName ||
+                        sourceDocument.customer_name_extracted ||
+                        sourceDocument.file_name ||
+                        'Customer Order'}
+                    </CardTitle>
+                    <CardDescription className="mt-1">
+                      {sourceDocument.file_name || selectedId}
+                    </CardDescription>
                   </div>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">BC Customer</p>
-                      <p className="mt-1 font-mono text-sm font-semibold">
-                        {candidate.customerNumber || 'Not resolved'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Customer PO</p>
-                      <p className="mt-1 text-sm font-semibold">
-                        {candidate.externalDocumentNumber || 'Missing'}
-                      </p>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Confidence</p>
-                      <p className="mt-1 text-sm font-semibold">
-                        {Math.round((candidate.classificationConfidence || 0) * 100)}%
-                      </p>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <p className="text-xs text-muted-foreground">Review Status</p>
-                      <p className="mt-1 text-sm font-semibold capitalize">
-                        {candidate.reviewStatus || sourceDocument.review_status || 'Not reviewed'}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3 text-sm">
-                    <span className="text-muted-foreground">Source:</span>
-                    {candidate.sharepointUrl ? (
-                      <a
-                        href={candidate.sharepointUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
-                      >
-                        Open SharePoint document
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    ) : (
-                      <span className="font-medium text-red-600">Not archived in SharePoint</span>
+                  <div className="flex flex-wrap gap-2">
+                    {statusBadge({
+                      ...sourceDocument,
+                      ...preflight,
+                      bc_create_ready: preflight.can_create,
+                    })}
+                    {sourceUrl && (
+                      <Button asChild size="sm" variant="outline">
+                        <a href={sourceUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Source
+                        </a>
+                      </Button>
                     )}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Customer No.
+                    </p>
+                    <p className="mt-1 font-medium">{candidate.customerNumber || '-'}</p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Customer PO
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {candidate.externalDocumentNumber || '-'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Confidence
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {preflight.confidence == null
+                        ? '-'
+                        : `${Math.round(preflight.confidence * 100)}%`}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border p-3">
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Review Status
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {sourceDocument.review_status || 'needs_review'}
+                    </p>
+                  </div>
+                </div>
 
-              {(errors.length > 0 || warnings.length > 0) && (
-                <Card className="border-amber-300/70">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Preflight Findings</CardTitle>
-                    <CardDescription>
-                      Resolve every error before Business Central draft creation.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {errors.map((issue, index) => (
-                      <div
-                        key={`${issue.code}-${index}`}
-                        className="flex items-start gap-3 rounded-md border border-red-200 bg-red-50 p-3 dark:bg-red-950/20"
-                      >
-                        <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-                        <div>
-                          <p className="text-sm font-medium text-red-800 dark:text-red-300">
-                            {issue.code}
-                          </p>
-                          <p className="text-xs text-red-700 dark:text-red-400">
-                            {issue.message}
-                          </p>
+                {errors.length > 0 && (
+                  <div className="rounded-lg border border-red-500/50 bg-red-500/5 p-4">
+                    <div className="mb-3 flex items-center gap-2 font-semibold text-red-500">
+                      <XCircle className="h-5 w-5" />
+                      Blocking validation errors
+                    </div>
+                    <div className="space-y-2">
+                      {errors.map((error, index) => (
+                        <div key={`${error.code}-${index}`} className="text-sm">
+                          <span className="font-medium">{error.code}</span>
+                          <span className="text-muted-foreground">: {error.message}</span>
                         </div>
-                      </div>
-                    ))}
-                    {warnings.map((issue, index) => (
-                      <div
-                        key={`${issue.code}-${index}`}
-                        className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:bg-amber-950/20"
-                      >
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                        <div>
-                          <p className="text-sm font-medium">{issue.code}</p>
-                          <p className="text-xs text-muted-foreground">{issue.message}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              )}
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Order Lines</CardTitle>
-                  <CardDescription>{lines.length} extracted line items</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b text-left text-muted-foreground">
-                          <th className="pb-3 font-medium">Line</th>
-                          <th className="pb-3 font-medium">Customer SKU</th>
-                          <th className="pb-3 font-medium">BC Item</th>
-                          <th className="pb-3 font-medium">Description</th>
-                          <th className="pb-3 text-right font-medium">Quantity</th>
-                          <th className="pb-3 font-medium">UOM</th>
-                          <th className="pb-3 font-medium">Mapping</th>
+                {warnings.length > 0 && (
+                  <div className="rounded-lg border border-amber-500/50 bg-amber-500/5 p-4">
+                    <div className="mb-3 flex items-center gap-2 font-semibold text-amber-500">
+                      <AlertTriangle className="h-5 w-5" />
+                      Warnings
+                    </div>
+                    <div className="space-y-2">
+                      {warnings.map((warning, index) => (
+                        <div key={`${warning.code}-${index}`} className="text-sm">
+                          <span className="font-medium">{warning.code}</span>
+                          <span className="text-muted-foreground">
+                            : {warning.message}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="mb-3 flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold">Order Lines</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Deterministic item mappings prepared for Business Central.
+                      </p>
+                    </div>
+                    <Badge variant="outline">{lines.length} lines</Badge>
+                  </div>
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full min-w-[720px] text-sm">
+                      <thead className="bg-muted/50 text-left">
+                        <tr>
+                          <th className="px-3 py-2">Line</th>
+                          <th className="px-3 py-2">Item</th>
+                          <th className="px-3 py-2">Description</th>
+                          <th className="px-3 py-2 text-right">Quantity</th>
+                          <th className="px-3 py-2">UOM</th>
+                          <th className="px-3 py-2 text-right">Unit Price</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {lines.map((line, index) => (
-                          <tr key={`${line.source_line_number || index}`} className="border-b">
-                            <td className="py-3">{line.source_line_number || index + 1}</td>
-                            <td className="py-3 font-mono text-xs">
-                              {line.customerItemNumber || '-'}
-                            </td>
-                            <td className="py-3 font-mono text-xs font-semibold">
-                              {line.itemNumber || <span className="text-red-600">Unresolved</span>}
-                            </td>
-                            <td className="max-w-[240px] truncate py-3">
-                              {line.description || '-'}
-                            </td>
-                            <td className="py-3 text-right font-mono">
-                              {line.quantity ?? '-'}
-                            </td>
-                            <td className="py-3">{line.unitOfMeasureCode || '-'}</td>
-                            <td className="py-3">
-                              <Badge
-                                variant="outline"
-                                className={
-                                  line.mappingStatus === 'approved'
-                                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                                    : 'border-amber-300 bg-amber-50 text-amber-800'
-                                }
-                              >
-                                {line.mappingStatus || 'Not set'}
-                              </Badge>
-                            </td>
-                          </tr>
-                        ))}
-                        {lines.length === 0 && (
+                        {lines.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="py-10 text-center text-muted-foreground">
-                              No order lines were extracted.
+                            <td
+                              colSpan={6}
+                              className="px-3 py-8 text-center text-muted-foreground"
+                            >
+                              No mapped order lines are available.
                             </td>
                           </tr>
+                        ) : (
+                          lines.map((line, index) => (
+                            <tr key={`${line.lineNumber || index}`} className="border-t">
+                              <td className="px-3 py-2">{line.lineNumber || index + 1}</td>
+                              <td className="px-3 py-2 font-medium">
+                                {line.itemNumber || '-'}
+                              </td>
+                              <td className="px-3 py-2">
+                                {line.description || line.sourceDescription || '-'}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                {line.quantity ?? '-'}
+                              </td>
+                              <td className="px-3 py-2">{line.unitOfMeasure || '-'}</td>
+                              <td className="px-3 py-2 text-right">
+                                {line.unitPrice == null ? '-' : line.unitPrice}
+                              </td>
+                            </tr>
+                          ))
                         )}
                       </tbody>
                     </table>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
 
-              <Card className={preflight.can_create ? 'border-emerald-300/70' : ''}>
-                <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <p className="font-medium">
-                      {preflight.can_create
-                        ? 'Candidate passed deterministic preflight.'
-                        : 'Candidate is blocked by preflight errors.'}
-                    </p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {mode.write_enabled
-                        ? 'BC draft creation is available after approval.'
-                        : 'Shadow mode is active, so no BC document can be created.'}
-                    </p>
-                  </div>
+                <div className="flex flex-wrap gap-2 border-t pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={rerunPreflight}
+                    disabled={actionLoading}
+                  >
+                    {actionLoading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Rerun Preflight
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setApproveOpen(true)}
+                    disabled={actionLoading}
+                  >
+                    <CheckCircle2 className="mr-2 h-4 w-4" />
+                    Approve
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => setRejectOpen(true)}
+                    disabled={actionLoading}
+                  >
+                    <XCircle className="mr-2 h-4 w-4" />
+                    Reject
+                  </Button>
                   <Button
                     onClick={createDraft}
-                    disabled={!preflight.can_create || !mode.write_enabled || actionLoading}
-                    className="min-w-44"
+                    disabled={
+                      actionLoading ||
+                      !mode.write_enabled ||
+                      !preflight.can_create ||
+                      sourceDocument.review_status === 'rejected'
+                    }
                   >
                     {actionLoading ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -615,11 +608,11 @@ export default function SalesOrderReviewPage() {
                     )}
                     Create BC Draft
                   </Button>
-                </CardContent>
-              </Card>
+                </div>
+              </CardContent>
             </>
           )}
-        </div>
+        </Card>
       </div>
 
       <Dialog open={approveOpen} onOpenChange={setApproveOpen}>
@@ -627,14 +620,14 @@ export default function SalesOrderReviewPage() {
           <DialogHeader>
             <DialogTitle>Approve sales-order candidate</DialogTitle>
             <DialogDescription>
-              Approval is recorded as {reviewerName}. Preflight will rerun immediately.
+              Approval is persisted and deterministic preflight is rerun. Shadow mode
+              will still prevent any Business Central write.
             </DialogDescription>
           </DialogHeader>
           <Textarea
+            placeholder="Optional approval note"
             value={approvalNote}
             onChange={(event) => setApprovalNote(event.target.value)}
-            placeholder="Optional review note"
-            rows={4}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setApproveOpen(false)}>
@@ -652,14 +645,13 @@ export default function SalesOrderReviewPage() {
           <DialogHeader>
             <DialogTitle>Reject sales-order candidate</DialogTitle>
             <DialogDescription>
-              Explain why this document cannot proceed. The reason is retained with the document.
+              Record why this order must not proceed to Business Central.
             </DialogDescription>
           </DialogHeader>
           <Textarea
+            placeholder="Rejection reason"
             value={rejectionReason}
             onChange={(event) => setRejectionReason(event.target.value)}
-            placeholder="Rejection reason"
-            rows={4}
           />
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectOpen(false)}>

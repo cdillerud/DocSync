@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional
 
 import httpx
@@ -19,6 +20,24 @@ def _odata_literal(value: str) -> str:
     """Escape a string for use as an OData single-quoted literal."""
 
     return str(value).replace("'", "''")
+
+
+def resolve_bc_environment() -> str:
+    """Return the environment used by production BC read services.
+
+    The existing GPI Hub has both legacy sandbox-oriented configuration and newer
+    production cache configuration. Read-only sales-order lookup must prefer the
+    production environment when it is configured rather than silently falling back
+    to ``Sandbox`` through the legacy service constant.
+    """
+
+    return str(
+        os.environ.get("BC_PROD_ENVIRONMENT")
+        or os.environ.get("BC_ENVIRONMENT")
+        or os.environ.get("BC_SANDBOX_ENVIRONMENT")
+        or BC_ENVIRONMENT
+        or "Sandbox"
+    ).strip()
 
 
 async def find_existing_bc_sales_order(
@@ -49,8 +68,9 @@ async def find_existing_bc_sales_order(
 
     token = await get_bc_token()
     company_id = await bc_service._get_company_id()
+    environment = resolve_bc_environment()
     base_url = (
-        f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/"
+        f"{BC_API_BASE}/{BC_TENANT_ID}/{environment}/api/v2.0/"
         f"companies({company_id})/salesOrders"
     )
 
@@ -75,8 +95,9 @@ async def find_existing_bc_sales_order(
 
     if response.status_code != 200:
         raise RuntimeError(
-            "Business Central duplicate lookup failed: "
-            f"HTTP {response.status_code}: {response.text[:500]}"
+            "Business Central duplicate lookup failed in environment "
+            f"'{environment}': HTTP {response.status_code}: "
+            f"{response.text[:500]}"
         )
 
     values = response.json().get("value") or []
@@ -85,6 +106,7 @@ async def find_existing_bc_sales_order(
 
     result = dict(values[0])
     result["lookupSource"] = "bc_api"
+    result["lookupEnvironment"] = environment
     result["lookupMatchedCustomer"] = bool(customer_number)
     result["multipleMatches"] = len(values) > 1
     return result

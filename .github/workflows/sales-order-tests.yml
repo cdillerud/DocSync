@@ -11,7 +11,7 @@ on:
       - "backend/setup.cfg"
       - "frontend/src/pages/SalesOrderReviewPage.js"
       - "frontend/src/App.js"
-      - "frontend/src/components/Layout.js"
+      - "frontend/src/components/AppLayout.js"
       - "docker-compose.sales-order-test.yml"
       - ".github/workflows/sales-order-tests.yml"
   push:
@@ -26,7 +26,7 @@ on:
       - "backend/setup.cfg"
       - "frontend/src/pages/SalesOrderReviewPage.js"
       - "frontend/src/App.js"
-      - "frontend/src/components/Layout.js"
+      - "frontend/src/components/AppLayout.js"
       - "docker-compose.sales-order-test.yml"
       - ".github/workflows/sales-order-tests.yml"
 

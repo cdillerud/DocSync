@@ -40,6 +40,14 @@ class FakeBCService:
         return "company-id"
 
 
+def test_production_environment_takes_precedence(monkeypatch):
+    monkeypatch.setenv("BC_PROD_ENVIRONMENT", "Production")
+    monkeypatch.setenv("BC_ENVIRONMENT", "Sandbox")
+    monkeypatch.setenv("BC_SANDBOX_ENVIRONMENT", "Sandbox_Copy")
+
+    assert lookup_module.resolve_bc_environment() == "Production"
+
+
 @pytest.mark.asyncio
 async def test_live_lookup_can_search_by_external_reference_without_customer(
     monkeypatch,
@@ -58,6 +66,7 @@ async def test_live_lookup_can_search_by_external_reference_without_customer(
     async def fake_token():
         return "token"
 
+    monkeypatch.setenv("BC_PROD_ENVIRONMENT", "Production")
     monkeypatch.setattr(lookup_module, "get_bc_token", fake_token)
     monkeypatch.setattr(
         lookup_module.httpx,
@@ -71,10 +80,12 @@ async def test_live_lookup_can_search_by_external_reference_without_customer(
         external_document_number="111169",
     )
 
+    assert "/Production/api/v2.0/" in captured["url"]
     assert captured["params"]["$filter"] == (
         "externalDocumentNumber eq '111169'"
     )
     assert result["number"] == "SO-12345"
+    assert result["lookupEnvironment"] == "Production"
     assert result["lookupMatchedCustomer"] is False
     assert result["multipleMatches"] is False
 

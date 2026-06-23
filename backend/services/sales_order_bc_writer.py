@@ -158,6 +158,7 @@ async def create_sales_order_draft(
                 token=token,
                 etag=order_etag,
             )
+            rolled_back = rollback["success"]
             return {
                 "success": False,
                 "errorCode": "BC_LINE_CREATE_FAILED",
@@ -165,19 +166,19 @@ async def create_sales_order_draft(
                     f"BC rejected sales-order line {line_errors[0]['line']}; "
                     + (
                         "header was rolled back"
-                        if rollback["success"]
+                        if rolled_back
                         else "header rollback failed and manual cleanup is required"
                     )
                 ),
-                "bcDocumentId": order_id,
-                "bcDocumentNumber": order_number,
-                "status": "RolledBack" if rollback["success"] else "Partial",
+                "bcDocumentId": None if rolled_back else order_id,
+                "bcDocumentNumber": None if rolled_back else order_number,
+                "status": "RolledBack" if rolled_back else "Partial",
                 "linesAdded": added,
                 "linesTotal": len(lines),
                 "lineErrors": line_errors,
-                "rolledBack": rollback["success"],
+                "rolledBack": rolled_back,
                 "rollbackError": rollback.get("error"),
-                "manualCleanupRequired": not rollback["success"],
+                "manualCleanupRequired": not rolled_back,
                 "mock": False,
             }
 
@@ -188,6 +189,7 @@ async def create_sales_order_draft(
                 token=token,
                 etag=order_etag,
             )
+            rolled_back = rollback["success"]
             return {
                 "success": False,
                 "errorCode": "BC_LINE_COUNT_MISMATCH",
@@ -195,17 +197,17 @@ async def create_sales_order_draft(
                     f"Expected {len(lines)} lines but created {added}; "
                     + (
                         "header was rolled back"
-                        if rollback["success"]
+                        if rolled_back
                         else "manual cleanup is required"
                     )
                 ),
-                "bcDocumentId": order_id,
-                "bcDocumentNumber": order_number,
+                "bcDocumentId": None if rolled_back else order_id,
+                "bcDocumentNumber": None if rolled_back else order_number,
                 "linesAdded": added,
                 "linesTotal": len(lines),
                 "lineErrors": [],
-                "rolledBack": rollback["success"],
-                "manualCleanupRequired": not rollback["success"],
+                "rolledBack": rolled_back,
+                "manualCleanupRequired": not rolled_back,
             }
 
         return {

@@ -10,6 +10,10 @@ from .workflows import router as workflows_router, set_dependencies as set_workf
 from .config import router as config_router, set_db as set_config_db
 from .dashboard import router as dashboard_router, set_db as set_dashboard_db
 
+# Import for side effects. The module registers reviewer endpoints on the
+# existing sales_module.sales_router, which server.py already mounts.
+from . import sales_order_review as _sales_order_review
+
 __all__ = [
     'auth_router',
     'documents_router', 'set_documents_db',

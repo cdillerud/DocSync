@@ -12,7 +12,7 @@ from .dashboard import router as dashboard_router, set_db as set_dashboard_db
 
 # Import for side effects. The module registers reviewer endpoints on the
 # existing sales_module.sales_router, which server.py already mounts.
-from . import sales_order_review as _sales_order_review
+from . import sales_order_review as _sales_order_review  # noqa: F401
 
 __all__ = [
     'auth_router',

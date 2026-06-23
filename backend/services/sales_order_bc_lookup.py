@@ -9,9 +9,7 @@ import httpx
 
 from services.business_central_service import (
     BC_API_BASE,
-    BC_COMPANY_ID,
     BC_COMPANY_NAME,
-    BC_ENVIRONMENT,
     BC_REQUEST_TIMEOUT,
     BC_TENANT_ID,
     get_bc_token,
@@ -25,20 +23,17 @@ def _odata_literal(value: str) -> str:
 
 
 def resolve_bc_environment() -> str:
-    """Return the environment used by production BC read services.
+    """Return the production environment used for historical read lookups.
 
-    The existing GPI Hub has both legacy sandbox-oriented configuration and newer
-    production cache configuration. Read-only sales-order lookup must prefer the
-    production environment when it is configured rather than silently falling back
-    to ``Sandbox`` through the legacy service constant.
+    New sales-order writes are validated against a separate sandbox. Historical
+    duplicate detection and order hydration must therefore never inherit the write
+    environment from ``BC_ENVIRONMENT`` or ``BC_SANDBOX_ENVIRONMENT``.
     """
 
     return str(
-        os.environ.get("BC_PROD_ENVIRONMENT")
-        or os.environ.get("BC_ENVIRONMENT")
-        or os.environ.get("BC_SANDBOX_ENVIRONMENT")
-        or BC_ENVIRONMENT
-        or "Sandbox"
+        os.environ.get("BC_HISTORY_ENVIRONMENT")
+        or os.environ.get("BC_PROD_ENVIRONMENT")
+        or "Production"
     ).strip()
 
 
@@ -48,20 +43,20 @@ async def resolve_bc_company_id(
     token: str,
     environment: str,
 ) -> str:
-    """Resolve the company through the same environment used by this lookup."""
+    """Resolve the company inside the production history environment."""
 
-    cached_company_id = getattr(bc_service, "_company_id", None)
+    history_cache_key = "_history_company_id"
+    cached_company_id = getattr(bc_service, history_cache_key, None)
     if cached_company_id:
         return str(cached_company_id)
 
     configured_company_id = str(
-        os.environ.get("BC_PROD_COMPANY_ID")
-        or os.environ.get("BC_COMPANY_ID")
-        or BC_COMPANY_ID
+        os.environ.get("BC_HISTORY_COMPANY_ID")
+        or os.environ.get("BC_PROD_COMPANY_ID")
         or ""
     ).strip()
     if configured_company_id:
-        setattr(bc_service, "_company_id", configured_company_id)
+        setattr(bc_service, history_cache_key, configured_company_id)
         return configured_company_id
 
     companies_url = (
@@ -75,7 +70,7 @@ async def resolve_bc_company_id(
 
     if response.status_code != 200:
         raise RuntimeError(
-            "Business Central company lookup failed in environment "
+            "Business Central company lookup failed in history environment "
             f"'{environment}': HTTP {response.status_code}: "
             f"{response.text[:500]}"
         )
@@ -87,7 +82,8 @@ async def resolve_bc_company_id(
         )
 
     company_name = str(
-        os.environ.get("BC_PROD_COMPANY_NAME")
+        os.environ.get("BC_HISTORY_COMPANY_NAME")
+        or os.environ.get("BC_PROD_COMPANY_NAME")
         or os.environ.get("BC_COMPANY_NAME")
         or BC_COMPANY_NAME
         or ""
@@ -110,7 +106,7 @@ async def resolve_bc_company_id(
             f"Business Central company in '{environment}' had no ID"
         )
 
-    setattr(bc_service, "_company_id", company_id)
+    setattr(bc_service, history_cache_key, company_id)
     return company_id
 
 
@@ -120,16 +116,15 @@ async def find_existing_bc_sales_order(
     customer_number: str = "",
     external_document_number: str,
 ) -> Optional[Dict[str, Any]]:
-    """Return an existing BC sales order for the customer PO, when present.
+    """Return an existing production BC sales order for a customer PO.
 
     When a customer number is available, both customer and external document
     number are required to match. Historical shell records may not have a resolved
     customer yet; for those records, this read-only lookup can search by external
     document number alone and use the returned header to establish the customer.
 
-    The custom AL import endpoint should still enforce the same uniqueness rule
-    transactionally because another process could create an order after this lookup
-    and before the write occurs.
+    This function is read-only. The separate sales-order writer remains configured
+    for the validation sandbox and retains its own final duplicate guard.
     """
 
     external_document_number = str(external_document_number or "").strip()
@@ -173,7 +168,7 @@ async def find_existing_bc_sales_order(
 
     if response.status_code != 200:
         raise RuntimeError(
-            "Business Central duplicate lookup failed in environment "
+            "Business Central duplicate lookup failed in history environment "
             f"'{environment}': HTTP {response.status_code}: "
             f"{response.text[:500]}"
         )

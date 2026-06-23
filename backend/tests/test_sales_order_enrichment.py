@@ -70,7 +70,7 @@ async def test_existing_resolvers_enrich_customer_item_and_uom(monkeypatch):
     async def resolve_customer(doc):
         return FakeResolution()
 
-    async def map_line_to_item(**kwargs):
+    async def map_line_to_item(db, **kwargs):
         return {
             "matched": True,
             "target_type": "item",

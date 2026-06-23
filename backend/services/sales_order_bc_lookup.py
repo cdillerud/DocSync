@@ -9,6 +9,8 @@ import httpx
 
 from services.business_central_service import (
     BC_API_BASE,
+    BC_COMPANY_ID,
+    BC_COMPANY_NAME,
     BC_ENVIRONMENT,
     BC_REQUEST_TIMEOUT,
     BC_TENANT_ID,
@@ -40,6 +42,78 @@ def resolve_bc_environment() -> str:
     ).strip()
 
 
+async def resolve_bc_company_id(
+    bc_service,
+    *,
+    token: str,
+    environment: str,
+) -> str:
+    """Resolve the company through the same environment used by this lookup."""
+
+    cached_company_id = getattr(bc_service, "_company_id", None)
+    if cached_company_id:
+        return str(cached_company_id)
+
+    configured_company_id = str(
+        os.environ.get("BC_PROD_COMPANY_ID")
+        or os.environ.get("BC_COMPANY_ID")
+        or BC_COMPANY_ID
+        or ""
+    ).strip()
+    if configured_company_id:
+        setattr(bc_service, "_company_id", configured_company_id)
+        return configured_company_id
+
+    companies_url = (
+        f"{BC_API_BASE}/{BC_TENANT_ID}/{environment}/api/v2.0/companies"
+    )
+    async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+        response = await client.get(
+            companies_url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    if response.status_code != 200:
+        raise RuntimeError(
+            "Business Central company lookup failed in environment "
+            f"'{environment}': HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    companies = response.json().get("value") or []
+    if not companies:
+        raise RuntimeError(
+            f"No Business Central companies were found in '{environment}'"
+        )
+
+    company_name = str(
+        os.environ.get("BC_PROD_COMPANY_NAME")
+        or os.environ.get("BC_COMPANY_NAME")
+        or BC_COMPANY_NAME
+        or ""
+    ).strip().lower()
+
+    selected = None
+    if company_name:
+        for company in companies:
+            candidate_name = str(
+                company.get("displayName") or company.get("name") or ""
+            ).strip().lower()
+            if candidate_name == company_name:
+                selected = company
+                break
+
+    selected = selected or companies[0]
+    company_id = str(selected.get("id") or "").strip()
+    if not company_id:
+        raise RuntimeError(
+            f"Business Central company in '{environment}' had no ID"
+        )
+
+    setattr(bc_service, "_company_id", company_id)
+    return company_id
+
+
 async def find_existing_bc_sales_order(
     bc_service,
     *,
@@ -67,8 +141,12 @@ async def find_existing_bc_sales_order(
         return None
 
     token = await get_bc_token()
-    company_id = await bc_service._get_company_id()
     environment = resolve_bc_environment()
+    company_id = await resolve_bc_company_id(
+        bc_service,
+        token=token,
+        environment=environment,
+    )
     base_url = (
         f"{BC_API_BASE}/{BC_TENANT_ID}/{environment}/api/v2.0/"
         f"companies({company_id})/salesOrders"

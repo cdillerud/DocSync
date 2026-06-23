@@ -31,16 +31,24 @@ class FakeCollection:
 
     async def find_one(self, query, projection=None):
         for document in self.documents:
-            if any(document.get(key) == value for key, value in query.items()):
+            if self._matches(document, query):
                 return dict(document)
         return None
 
     async def update_one(self, selector, update):
         for document in self.documents:
-            if all(document.get(key) == value for key, value in selector.items()):
+            if self._matches(document, selector):
                 document.update(update.get("$set") or {})
                 return FakeUpdateResult()
         return FakeUpdateResult()
+
+    @classmethod
+    def _matches(cls, document, query):
+        if "$or" in query:
+            return any(cls._matches(document, clause) for clause in query["$or"])
+        if "$and" in query:
+            return all(cls._matches(document, clause) for clause in query["$and"])
+        return all(document.get(key) == value for key, value in query.items())
 
 
 class FakeDatabase:
@@ -173,6 +181,65 @@ async def test_existing_bc_order_supplies_customer_and_line_mapping(monkeypatch)
     assert enriched["sales_order_lines"][0]["itemMatchConfidence"] == 0.99
     assert evidence["existing_order"]["bc_order_number"] == "SO-12345"
     assert evidence["existing_order_lines_checked"] == 1
+
+
+def test_shell_record_is_filled_from_rich_hub_companion():
+    shell = {
+        "document_id": "sales-doc-1",
+        "file_hash": "hash-1",
+        "review_status": "approved",
+        "sales_order_approved": True,
+        "extracted_fields": {},
+        "sales_order_lines": [],
+    }
+    companion = {
+        "id": "hub-doc-1",
+        "file_hash": "hash-1",
+        "review_status": "needs_review",
+        "sales_order_approved": False,
+        "extracted_fields": {
+            "customer_name": "Example Customer",
+            "customer_po_no": "PO-100",
+            "lines": [{"description": "Mapped Item", "quantity": 12}],
+        },
+    }
+
+    merged = runtime._merge_document_records(shell, companion)
+
+    assert merged["document_id"] == "sales-doc-1"
+    assert merged["review_status"] == "approved"
+    assert merged["sales_order_approved"] is True
+    assert merged["extracted_fields"]["customer_po_no"] == "PO-100"
+    assert merged["extracted_fields"]["lines"][0]["quantity"] == 12
+
+
+@pytest.mark.asyncio
+async def test_companion_document_is_found_by_file_hash():
+    shell = {
+        "document_id": "sales-doc-1",
+        "file_hash": "hash-1",
+        "file_name": "Purchase-Order 111169.pdf",
+    }
+    companion = {
+        "id": "hub-doc-1",
+        "file_hash": "hash-1",
+        "file_name": "Purchase-Order 111169.pdf",
+        "extracted_fields": {"customer_po_no": "PO-100"},
+    }
+    db = FakeDatabase(
+        sales_documents=[shell],
+        hub_documents=[companion],
+    )
+
+    found, collection_name, method = await runtime._find_companion_document(
+        db,
+        "sales_documents",
+        shell,
+    )
+
+    assert found["id"] == "hub-doc-1"
+    assert collection_name == "hub_documents"
+    assert method == "file_hash"
 
 
 @pytest.mark.asyncio

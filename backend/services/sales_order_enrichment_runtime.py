@@ -7,10 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.sales_order_enrichment import (
+    _apply_customer,
+    _existing_order_summary,
     _fetch_bc_order_lines,
     _optional_attr,
     enrich_sales_order_document,
 )
+from services.sales_order_preflight import build_sales_order_candidate
 from services.sales_order_source_inference import infer_sales_order_reference
 
 _EXISTING_ORDER_ERROR_PREFIX = (
@@ -135,6 +138,102 @@ async def _find_companion_document(
     return None, other_collection_name, None
 
 
+async def _lookup_live_existing_order(
+    enriched: Dict[str, Any],
+    evidence: Dict[str, Any],
+) -> None:
+    """Use the live BC sales-order API only after the local cache misses."""
+
+    if evidence.get("existing_order"):
+        evidence["live_bc_lookup"] = {
+            "attempted": False,
+            "matched": False,
+            "reason": "cache_match_present",
+        }
+        return
+
+    candidate = build_sales_order_candidate(enriched)
+    external_number = str(candidate.get("externalDocumentNumber") or "").strip()
+    customer_number = str(candidate.get("customerNumber") or "").strip()
+    if not external_number:
+        evidence["live_bc_lookup"] = {
+            "attempted": False,
+            "matched": False,
+            "reason": "external_reference_missing",
+        }
+        return
+
+    lookup = _optional_attr(
+        "services.sales_order_bc_lookup",
+        "find_existing_bc_sales_order",
+    )
+    get_service = _optional_attr(
+        "services.business_central_service",
+        "get_bc_service",
+    )
+    if lookup is None or get_service is None:
+        evidence["live_bc_lookup"] = {
+            "attempted": False,
+            "matched": False,
+            "reason": "bc_lookup_unavailable",
+        }
+        return
+
+    try:
+        result = await lookup(
+            get_service(),
+            customer_number=customer_number,
+            external_document_number=external_number,
+        )
+    except Exception as exc:
+        evidence.setdefault("warnings", []).append(
+            f"Live BC sales-order lookup failed: {exc}"
+        )
+        evidence["live_bc_lookup"] = {
+            "attempted": True,
+            "matched": False,
+            "reference": external_number,
+            "customer_number": customer_number,
+            "error": str(exc),
+        }
+        return
+
+    evidence["live_bc_lookup"] = {
+        "attempted": True,
+        "matched": bool(result),
+        "reference": external_number,
+        "customer_number": customer_number,
+    }
+    if not result:
+        return
+
+    summary = _existing_order_summary(result)
+    summary["source"] = "bc_api"
+    summary["multiple_matches"] = bool(result.get("multipleMatches"))
+    summary["lookup_matched_customer"] = bool(
+        result.get("lookupMatchedCustomer")
+    )
+    evidence["existing_order"] = summary
+
+    if result.get("multipleMatches") and not customer_number:
+        evidence["ambiguous_existing_order"] = True
+        evidence.setdefault("warnings", []).append(
+            "Multiple live Business Central sales orders use this external "
+            "reference. Customer and lines were not hydrated automatically."
+        )
+        return
+
+    if summary.get("customer_number"):
+        _apply_customer(
+            enriched,
+            customer_number=summary.get("customer_number") or "",
+            customer_name=summary.get("customer_name") or "",
+            method="existing_bc_order_live",
+            confidence=1.0,
+            source="bc_api",
+        )
+
+
 async def _hydrate_lines_from_existing_order(
     db,
     enriched: Dict[str, Any],
@@ -143,6 +242,8 @@ async def _hydrate_lines_from_existing_order(
     """Use existing BC order lines when a historical shell has no OCR lines."""
 
     if enriched.get("sales_order_lines"):
+        return
+    if evidence.get("ambiguous_existing_order"):
         return
 
     existing = evidence.get("existing_order") or {}
@@ -246,6 +347,7 @@ async def enrich_and_persist_sales_order_document(
         db,
         source_document,
     )
+    await _lookup_live_existing_order(enriched, evidence)
     await _hydrate_lines_from_existing_order(db, enriched, evidence)
 
     evidence["source_reference"] = reference_evidence

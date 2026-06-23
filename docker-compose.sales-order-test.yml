@@ -73,6 +73,33 @@ services:
       retries: 24
       start_period: 15s
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ""
+    container_name: gpi-sales-order-test-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18080:3000"
+    networks:
+      - sales-order-test-network
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - -q
+        - --spider
+        - http://localhost:3000/sales/order-review
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+
 volumes:
   sales_order_test_mongodb_data:
     name: gpi_sales_order_test_mongodb_data

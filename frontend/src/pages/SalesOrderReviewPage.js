@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -82,6 +82,7 @@ function formatDate(value) {
 export default function SalesOrderReviewPage() {
   const { user } = useAuth();
   const reviewerName = user?.display_name || user?.username || 'Reviewer';
+  const detailRequestRef = useRef(0);
 
   const [mode, setMode] = useState({ mode: 'shadow', write_enabled: false });
   const [documents, setDocuments] = useState([]);
@@ -128,21 +129,34 @@ export default function SalesOrderReviewPage() {
   }, []);
 
   const loadDetail = useCallback(async (documentId) => {
+    const requestId = ++detailRequestRef.current;
+
     if (!documentId) {
       setDetail(null);
+      setLoadingDetail(false);
       return;
     }
+
+    setDetail(null);
     setLoadingDetail(true);
+
     try {
       const data = await apiRequest(
         `/api/sales/order-intake/${encodeURIComponent(documentId)}`
       );
-      setDetail(data);
+
+      if (requestId === detailRequestRef.current) {
+        setDetail(data);
+      }
     } catch (error) {
-      toast.error(`Could not load order candidate: ${error.message}`);
-      setDetail(null);
+      if (requestId === detailRequestRef.current) {
+        toast.error(`Could not load order candidate: ${error.message}`);
+        setDetail(null);
+      }
     } finally {
-      setLoadingDetail(false);
+      if (requestId === detailRequestRef.current) {
+        setLoadingDetail(false);
+      }
     }
   }, []);
 

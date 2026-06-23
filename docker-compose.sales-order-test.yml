@@ -1,0 +1,85 @@
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: gpi-sales-order-test-mongodb
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27028:27017"
+    volumes:
+      - sales_order_test_mongodb_data:/data/db
+    networks:
+      - sales-order-test-network
+    healthcheck:
+      test: >-
+        echo 'db.runCommand("ping").ok' |
+        mongosh localhost:27017/test --quiet
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gpi-sales-order-test-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:18001:8001"
+    environment:
+      MONGO_URL: mongodb://mongodb:27017
+      DB_NAME: gpi_sales_order_test
+      DEMO_MODE: "true"
+      JWT_SECRET: sales-order-test-only-secret
+      CORS_ORIGINS: http://localhost:18080,http://127.0.0.1:18080
+
+      # No mailbox, SharePoint, or summary workers may contact external systems.
+      EMAIL_POLLING_ENABLED: "false"
+      SALES_EMAIL_POLLING_ENABLED: "false"
+      SALES_EMAIL_POLLING_USER: ""
+      DAILY_PILOT_EMAIL_ENABLED: "false"
+      GRAPH_CLIENT_ID: ""
+      GRAPH_CLIENT_SECRET: ""
+      EMAIL_CLIENT_ID: ""
+      EMAIL_CLIENT_SECRET: ""
+
+      # Business Central remains mock/read-only for this stack.
+      BC_MOCK_MODE: "true"
+      BC_CLIENT_ID: ""
+      BC_CLIENT_SECRET: ""
+      BC_SALES_ORDER_IMPORT_API_URL: ""
+      AUTO_POST_ENABLED: "false"
+      AUTO_CREATE_SALES_ORDER_ENABLED: "false"
+      SALES_ORDER_ALLOW_PO_PRICE_OVERRIDE: "false"
+      SALES_ORDER_CONFIDENCE_THRESHOLD: "0.90"
+      SALES_ORDER_ITEM_MATCH_THRESHOLD: "0.95"
+
+      # Retain shadow-pilot protections but disable outbound summaries.
+      PILOT_MODE_ENABLED: "true"
+    volumes:
+      - sales_order_test_uploads:/app/uploads
+    networks:
+      - sales-order-test-network
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8001/api/health
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 15s
+
+volumes:
+  sales_order_test_mongodb_data:
+    name: gpi_sales_order_test_mongodb_data
+  sales_order_test_uploads:
+    name: gpi_sales_order_test_uploads
+
+networks:
+  sales-order-test-network:
+    name: gpi_sales_order_test_network
+    driver: bridge

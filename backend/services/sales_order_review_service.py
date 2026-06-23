@@ -30,6 +30,37 @@ SALES_ORDER_TYPES = [
     "CUSTOMER_PURCHASE_ORDER",
 ]
 
+_NORMALIZED_SALES_ORDER_TYPES = {
+    "SALES_ORDER",
+    "SALESORDER",
+    "CUSTOMER_PO",
+    "CUSTOMER_PURCHASE_ORDER",
+}
+
+
+def _normalize_document_type(value: Any) -> str:
+    if not value:
+        return ""
+    return str(value).strip().upper().replace("-", "_").replace(" ", "_")
+
+
+def _effective_document_type(doc: Dict[str, Any]) -> str:
+    """Return the first populated classification using current-field precedence."""
+
+    classification = doc.get("classification") or {}
+    values = [
+        doc.get("doc_type"),
+        doc.get("document_type"),
+        doc.get("suggested_job_type"),
+        classification.get("suggested_type")
+        if isinstance(classification, dict)
+        else None,
+    ]
+    for value in values:
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
 
 @dataclass
 class LocatedDocument:
@@ -173,6 +204,13 @@ async def list_review_queue(
     combined: List[Tuple[str, Dict[str, Any]]] = [
         ("sales_documents", doc) for doc in sales_docs
     ] + [("hub_documents", doc) for doc in hub_docs]
+
+    combined = [
+        (collection_name, doc)
+        for collection_name, doc in combined
+        if _normalize_document_type(_effective_document_type(doc))
+        in _NORMALIZED_SALES_ORDER_TYPES
+    ]
 
     combined.sort(
         key=lambda item: item[1].get("created_utc") or "",
@@ -531,11 +569,7 @@ def _queue_item(
         "collection": collection_name,
         "file_name": doc.get("file_name") or doc.get("filename"),
         "created_utc": doc.get("created_utc"),
-        "document_type": (
-            doc.get("document_type")
-            or doc.get("doc_type")
-            or doc.get("suggested_job_type")
-        ),
+        "document_type": _effective_document_type(doc),
         "customer_name": candidate.get("customerName") or doc.get(
             "customer_name_extracted"
         ),

@@ -6,7 +6,12 @@ import copy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from services.sales_order_enrichment import enrich_sales_order_document
+from services.sales_order_enrichment import (
+    _fetch_bc_order_lines,
+    _optional_attr,
+    enrich_sales_order_document,
+)
+from services.sales_order_source_inference import infer_sales_order_reference
 
 _EXISTING_ORDER_ERROR_PREFIX = (
     "[Sales Order Intake] Existing Business Central sales order"
@@ -39,7 +44,7 @@ def _merge_document_records(
 ) -> Dict[str, Any]:
     """Deep-merge records while preserving every populated primary value.
 
-    ``sales_documents`` remains authoritative for workflow/review state.  Empty
+    ``sales_documents`` remains authoritative for workflow/review state. Empty
     fields are filled from the richer ``hub_documents`` companion record.
     """
 
@@ -130,6 +135,89 @@ async def _find_companion_document(
     return None, other_collection_name, None
 
 
+async def _hydrate_lines_from_existing_order(
+    db,
+    enriched: Dict[str, Any],
+    evidence: Dict[str, Any],
+) -> None:
+    """Use existing BC order lines when a historical shell has no OCR lines."""
+
+    if enriched.get("sales_order_lines"):
+        return
+
+    existing = evidence.get("existing_order") or {}
+    record_id = existing.get("bc_record_id")
+    if not record_id:
+        return
+
+    cache_class = _optional_attr(
+        "services.bc_reference_cache_service",
+        "BCReferenceCacheService",
+    )
+    if cache_class is None:
+        evidence.setdefault("warnings", []).append(
+            "BC cache service was unavailable for historical line hydration"
+        )
+        return
+
+    try:
+        cache = cache_class(db)
+        bc_lines, warning = await _fetch_bc_order_lines(
+            cache,
+            {"bc_record_id": record_id},
+        )
+    except Exception as exc:
+        evidence.setdefault("warnings", []).append(
+            f"Historical BC line hydration failed: {exc}"
+        )
+        return
+
+    if warning:
+        evidence.setdefault("warnings", []).append(warning)
+    evidence["existing_order_lines_checked"] = len(bc_lines)
+
+    hydrated_lines: List[Dict[str, Any]] = []
+    hydrated_mappings: List[Dict[str, Any]] = []
+    for source_index, bc_line in enumerate(bc_lines, start=1):
+        item_number = str(bc_line.get("lineObjectNumber") or "").strip()
+        if not item_number:
+            continue
+
+        hydrated_lines.append(
+            {
+                "source_line_number": source_index,
+                "itemNumber": item_number,
+                "customerItemNumber": None,
+                "description": bc_line.get("description"),
+                "quantity": bc_line.get("quantity"),
+                "unitOfMeasureCode": bc_line.get("unitOfMeasureCode"),
+                "unitPrice": bc_line.get("unitPrice"),
+                "mappingStatus": "existing_bc_order",
+                "mappingApproved": False,
+                "itemMatchConfidence": 1.0,
+                "mappingMethod": "existing_bc_order_line_hydration",
+                "catalogValidated": True,
+            }
+        )
+        hydrated_mappings.append(
+            {
+                "line": len(hydrated_lines),
+                "matched": True,
+                "method": "existing_bc_order_line_hydration",
+                "confidence": 1.0,
+                "item_number": item_number,
+                "uom": bc_line.get("unitOfMeasureCode"),
+                "source": "existing_bc_order",
+            }
+        )
+
+    if hydrated_lines:
+        enriched["sales_order_lines"] = hydrated_lines
+        evidence["line_mappings"] = hydrated_mappings
+        evidence["hydrated_from_existing_order"] = True
+        evidence["hydrated_line_count"] = len(hydrated_lines)
+
+
 async def enrich_and_persist_sales_order_document(
     db,
     document_id: str,
@@ -150,18 +238,24 @@ async def enrich_and_persist_sales_order_document(
         located.document,
         companion or {},
     )
+    source_document, reference_evidence = infer_sales_order_reference(
+        source_document
+    )
 
     enriched, evidence = await enrich_sales_order_document(
         db,
         source_document,
     )
+    await _hydrate_lines_from_existing_order(db, enriched, evidence)
+
+    evidence["source_reference"] = reference_evidence
     evidence["source_merge"] = {
         "primary_collection": located.collection_name,
         "companion_collection": companion_collection if companion else None,
         "companion_found": bool(companion),
         "match_method": companion_match,
         "companion_document_id": (
-            companion.get("document_id") or companion.get("id")
+            (companion.get("document_id") or companion.get("id"))
             if companion
             else None
         ),
@@ -180,10 +274,11 @@ async def enrich_and_persist_sales_order_document(
     existing_order = evidence.get("existing_order") or {}
     if existing_order:
         order_number = existing_order.get("bc_order_number") or "unknown"
+        reference = reference_evidence.get("reference") or "the source reference"
         validation_errors.append(
-            f"{_EXISTING_ORDER_ERROR_PREFIX} {order_number} already uses "
-            "this customer PO. Review the existing order instead of creating "
-            "a duplicate."
+            f"{_EXISTING_ORDER_ERROR_PREFIX} {order_number} matches "
+            f"reference {reference}. Review the existing order instead of "
+            "creating a duplicate."
         )
 
     now = datetime.now(timezone.utc).isoformat()
@@ -197,6 +292,10 @@ async def enrich_and_persist_sales_order_document(
         "customer_name_extracted": enriched.get(
             "customer_name_extracted"
         ),
+        "customer_po_number": enriched.get("customer_po_number"),
+        "order_number_extracted": enriched.get("order_number_extracted"),
+        "extracted_fields": enriched.get("extracted_fields") or {},
+        "normalized_fields": enriched.get("normalized_fields") or {},
         "resolved_customer": enriched.get("resolved_customer"),
         "sales_order_lines": enriched.get("sales_order_lines") or [],
         "sales_order_enrichment": evidence,

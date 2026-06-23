@@ -55,6 +55,21 @@ if [[ "${APPLY}" != "--apply" ]]; then
   exit 0
 fi
 
+if ! docker inspect gpi-mongodb >/dev/null 2>&1; then
+  echo "gpi-mongodb does not exist" >&2
+  exit 1
+fi
+
+if [[ "$(docker inspect gpi-mongodb --format '{{.State.Running}}')" != "true" ]]; then
+  echo "gpi-mongodb is not running" >&2
+  exit 1
+fi
+
+if ! docker exec gpi-mongodb mongosh --quiet --eval 'quit(db.adminCommand({ping:1}).ok === 1 ? 0 : 1)' >/dev/null; then
+  echo "gpi-mongodb did not answer a ping" >&2
+  exit 1
+fi
+
 mkdir -p "${BACKUP_ROOT}"
 
 backup_file() {
@@ -156,17 +171,16 @@ set_env_false() {
 set_env_false "AUTO_CREATE_SALES_ORDER_ENABLED"
 set_env_false "SALES_ORDER_ALLOW_PO_PRICE_OVERRIDE"
 
-cd "${TARGET_ROOT}"
-
 echo "Compiling the deployed sales-order backend modules..."
-docker compose run --rm --no-deps backend \
-  python -m py_compile \
-    services/sales_order_preflight.py \
-    services/sales_order_runtime.py \
-    services/sales_order_bc_lookup.py \
-    services/sales_order_bc_writer.py \
-    services/sales_order_review_service.py \
-    routes/sales_order_review.py
+python3 -m py_compile \
+  "${TARGET_ROOT}/backend/services/sales_order_preflight.py" \
+  "${TARGET_ROOT}/backend/services/sales_order_runtime.py" \
+  "${TARGET_ROOT}/backend/services/sales_order_bc_lookup.py" \
+  "${TARGET_ROOT}/backend/services/sales_order_bc_writer.py" \
+  "${TARGET_ROOT}/backend/services/sales_order_review_service.py" \
+  "${TARGET_ROOT}/backend/routes/sales_order_review.py"
+
+cd "${TARGET_ROOT}"
 
 echo "Building existing GPI Hub backend and frontend..."
 docker compose build backend frontend
@@ -174,9 +188,10 @@ docker compose build backend frontend
 echo "Restarting only the existing backend and frontend containers..."
 docker compose up -d --no-deps backend frontend
 
-echo "Waiting for the existing frontend..."
+echo "Waiting for the existing application..."
 for attempt in $(seq 1 60); do
-  if curl -fsS http://127.0.0.1:8080/api/sales/order-intake/status >/dev/null; then
+  if curl -fsS http://127.0.0.1:8080/api/health >/dev/null 2>&1 && \
+     curl -fsS http://127.0.0.1:8080/api/sales/order-intake/status >/dev/null 2>&1; then
     break
   fi
   if [[ "${attempt}" == "60" ]]; then

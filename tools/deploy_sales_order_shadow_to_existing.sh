@@ -25,7 +25,6 @@ FILES_TO_COPY=(
   "backend/services/sales_order_review_service.py"
   "backend/routes/sales_order_review.py"
   "frontend/src/pages/SalesOrderReviewPage.js"
-  "frontend/src/components/AppLayout.js"
 )
 
 PATCH_TARGETS=(
@@ -38,6 +37,7 @@ echo "Existing stack target: ${TARGET_ROOT}"
 echo "Source feature worktree: ${SOURCE_ROOT}"
 echo "Existing database remains: gpi_document_hub"
 echo "Existing user-facing frontend remains on port 8080"
+echo "Existing application layout remains unchanged"
 echo "Business Central writes will remain disabled"
 echo
 
@@ -98,60 +98,69 @@ done
 
 python3 - "${TARGET_ROOT}" <<'PY'
 from pathlib import Path
+import re
 import sys
 
 root = Path(sys.argv[1])
 
+# Register the backend endpoints by import side effect. Appending is intentional:
+# production routes/__init__.py may contain local imports or formatting that do not
+# match the repository version exactly.
 routes_init = root / "backend/routes/__init__.py"
 text = routes_init.read_text(encoding="utf-8")
-registration = (
-    "\n# Register sales-order review endpoints on the existing sales router.\n"
-    "from . import sales_order_review as _sales_order_review  # noqa: F401\n"
-)
 if "sales_order_review as _sales_order_review" not in text:
-    marker = "from .dashboard import router as dashboard_router, set_db as set_dashboard_db\n"
-    if marker not in text:
-        raise SystemExit(f"Could not find route insertion marker in {routes_init}")
-    text = text.replace(marker, marker + registration, 1)
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += (
+        "\n# Register sales-order review endpoints on the existing sales router.\n"
+        "from . import sales_order_review as _sales_order_review  # noqa: F401\n"
+    )
     routes_init.write_text(text, encoding="utf-8")
 
+# Preserve the existing Layout and navigation. Only import the page and add its
+# child route under the already protected application shell.
 app = root / "frontend/src/App.js"
 text = app.read_text(encoding="utf-8")
 
-if 'import AppLayout from "@/components/AppLayout";' not in text:
-    old_import = 'import Layout from "@/components/Layout";'
-    if old_import not in text:
-        raise SystemExit(f"Could not find Layout import in {app}")
-    text = text.replace(
-        old_import,
-        'import AppLayout from "@/components/AppLayout";',
-        1,
-    )
+page_import = 'import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";'
+if page_import not in text:
+    function_match = re.search(r"^function\s+", text, flags=re.MULTILINE)
+    if not function_match:
+        raise SystemExit(f"Could not locate the first function in {app}")
+    import_region = text[:function_match.start()]
+    last_import = list(re.finditer(r"^import\b[^\n]*;\s*$", import_region, flags=re.MULTILINE))
+    if not last_import:
+        raise SystemExit(f"Could not locate imports in {app}")
+    insert_at = last_import[-1].end()
+    text = text[:insert_at] + "\n" + page_import + text[insert_at:]
 
-if 'import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";' not in text:
-    marker = 'import SharePointMigrationPage from "@/pages/SharePointMigrationPage";\n'
-    if marker not in text:
-        raise SystemExit(f"Could not find page import marker in {app}")
-    text = text.replace(
-        marker,
-        marker + 'import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";\n',
-        1,
-    )
+if re.search(r'path\s*=\s*["\']sales/order-review["\']', text) is None:
+    route_line = '        <Route path="sales/order-review" element={<SalesOrderReviewPage />} />\n'
+    markers = [
+        r'(?m)^(\s*<Route\s+path=["\']settings["\'][^\n]*/>\s*)$',
+        r'(?m)^(\s*<Route\s+path=["\']email-parser["\'][^\n]*/>\s*)$',
+        r'(?m)^(\s*<Route\s+path=["\']queue["\'][^\n]*/>\s*)$',
+    ]
+    inserted = False
+    for pattern in markers:
+        match = re.search(pattern, text)
+        if match:
+            text = text[:match.start()] + route_line + text[match.start():]
+            inserted = True
+            break
+    if not inserted:
+        # Fall back to inserting before the first closing Route after the protected
+        # parent route. This keeps the route inside the authenticated application.
+        protected = re.search(r'<Route\b[^>]*element=\{<ProtectedRoute>', text)
+        if not protected:
+            raise SystemExit(f"Could not locate the protected parent route in {app}")
+        closing = text.find("</Route>", protected.end())
+        if closing < 0:
+            raise SystemExit(f"Could not locate the protected route closing tag in {app}")
+        text = text[:closing] + route_line + text[closing:]
 
-text = text.replace(
-    '<ProtectedRoute><Layout /></ProtectedRoute>',
-    '<ProtectedRoute><AppLayout /></ProtectedRoute>',
-)
-
-if 'path="sales/order-review"' not in text:
-    marker = '        <Route path="email-parser" element={<EmailParserPage />} />\n'
-    if marker not in text:
-        raise SystemExit(f"Could not find route insertion marker in {app}")
-    text = text.replace(
-        marker,
-        marker + '        <Route path="sales/order-review" element={<SalesOrderReviewPage />} />\n',
-        1,
-    )
+if page_import not in text or 'sales/order-review' not in text:
+    raise SystemExit(f"Sales-order page was not registered in {app}")
 
 app.write_text(text, encoding="utf-8")
 PY

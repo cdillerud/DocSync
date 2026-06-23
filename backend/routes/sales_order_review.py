@@ -72,12 +72,14 @@ async def get_order_intake_status():
 @router.get("/order-intake/review")
 async def get_order_intake_review_queue(
     limit: int = Query(default=50, ge=1, le=200),
-    refresh_missing: bool = Query(default=True),
+    refresh_missing: bool = Query(default=False),
 ):
     """List customer sales orders requiring review.
 
-    When ``refresh_missing`` is true, documents without a stored preflight are
-    evaluated and persisted before the queue is returned.
+    Queue reads are nonblocking by default. When ``refresh_missing`` is explicitly
+    true, documents without a stored preflight are evaluated and persisted before
+    the queue is returned. Bulk preflight should normally use the dedicated
+    ``preflight-pending`` endpoint instead.
     """
 
     return {

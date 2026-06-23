@@ -45,6 +45,11 @@ def _document(
 ) -> Dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
     po_number = customer_po or f"PO-{document_id.upper()}"
+    archived_url = (
+        f"https://example.sharepoint.com/{document_id}.pdf"
+        if sharepoint_url is None
+        else sharepoint_url
+    )
     return {
         "document_id": document_id,
         "file_name": f"{document_id}.pdf",
@@ -63,8 +68,7 @@ def _document(
             "requested_delivery_date": "2026-07-15",
             "lines": lines if lines is not None else [_line()],
         },
-        "sharepoint_web_url": sharepoint_url
-        or f"https://example.sharepoint.com/{document_id}.pdf",
+        "sharepoint_web_url": archived_url,
         "email_message_id": f"seed-message-{document_id}",
         "status": "NeedsReview",
         "workflow_state": "Classified",

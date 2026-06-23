@@ -1,0 +1,19 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Publish to Sandbox_5_5_2026",
+      "type": "al",
+      "request": "launch",
+      "environmentType": "Sandbox",
+      "environmentName": "Sandbox_5_5_2026",
+      "startupObjectType": "Page",
+      "startupObjectId": 42,
+      "startupCompany": "Gamer Packaging",
+      "breakOnError": "All",
+      "breakOnRecordWrite": "None",
+      "launchBrowser": true,
+      "schemaUpdateMode": "Synchronize"
+    }
+  ]
+}

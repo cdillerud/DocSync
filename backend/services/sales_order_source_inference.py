@@ -206,10 +206,12 @@ def _recursive_split_evidence(document: Dict[str, Any]) -> Dict[str, Any]:
     fingerprints = {_line_fingerprint(line) for line in lines}
     all_lines_identical = len(lines) > 1 and len(fingerprints) == 1
 
+    # Repeated line descriptions, quantities, and prices are valid when one item is
+    # scheduled across multiple delivery dates. Recursive splitting therefore
+    # requires repeated split metadata, not line similarity by itself.
     recursive = source == "auto_split" and (
         split_suffix_count >= 2
         or page_range_count >= 2
-        or all_lines_identical
     )
 
     return {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from services.sales_order_preflight import build_sales_order_candidate
 
@@ -37,6 +37,12 @@ _VENDOR_PO_DOCUMENT_TYPES = {
     "PURCHASEORDER",
     "VENDOR_PURCHASE_ORDER",
 }
+
+_SPLIT_SUFFIX_PATTERN = re.compile(r"_doc\d+", re.IGNORECASE)
+_PAGE_RANGE_PATTERN = re.compile(
+    r"\[pages?\s+\d+(?:-\d+)?/\d+\]",
+    re.IGNORECASE,
+)
 
 
 def _clean_reference(value: Any) -> str:
@@ -131,8 +137,92 @@ def _has_customer_context(document: Dict[str, Any]) -> bool:
     )
 
 
+def _line_candidates(document: Dict[str, Any]) -> List[Dict[str, Any]]:
+    extracted = document.get("extracted_fields") or {}
+    normalized = document.get("normalized_fields") or {}
+    validation = document.get("validation_results") or {}
+    validation_normalized = (
+        validation.get("normalized_fields")
+        if isinstance(validation, dict)
+        else {}
+    ) or {}
+
+    for value in (
+        document.get("sales_order_lines"),
+        document.get("line_items"),
+        normalized.get("line_items") if isinstance(normalized, dict) else None,
+        normalized.get("lines") if isinstance(normalized, dict) else None,
+        extracted.get("line_items") if isinstance(extracted, dict) else None,
+        extracted.get("lines") if isinstance(extracted, dict) else None,
+        validation_normalized.get("line_items")
+        if isinstance(validation_normalized, dict)
+        else None,
+    ):
+        if isinstance(value, list):
+            return [line for line in value if isinstance(line, dict)]
+    return []
+
+
+def _line_fingerprint(line: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    description = str(
+        line.get("description")
+        or line.get("source_description")
+        or line.get("sourceDescription")
+        or ""
+    ).strip().upper()
+    quantity = str(line.get("quantity") or line.get("qty") or "").strip()
+    unit_price = str(
+        line.get("unit_price")
+        or line.get("unitPrice")
+        or line.get("price")
+        or ""
+    ).strip()
+    item_number = str(
+        line.get("item_number")
+        or line.get("itemNumber")
+        or line.get("customer_item_number")
+        or line.get("customerItemNumber")
+        or ""
+    ).strip().upper()
+    return description, quantity, unit_price, item_number
+
+
+def _recursive_split_evidence(document: Dict[str, Any]) -> Dict[str, Any]:
+    source = str(document.get("source") or "").strip().lower()
+    file_name = str(
+        document.get("file_name")
+        or document.get("filename")
+        or ""
+    )
+    subject = str(
+        document.get("email_subject")
+        or document.get("subject")
+        or ""
+    )
+
+    split_suffix_count = len(_SPLIT_SUFFIX_PATTERN.findall(Path(file_name).stem))
+    page_range_count = len(_PAGE_RANGE_PATTERN.findall(subject))
+    lines = _line_candidates(document)
+    fingerprints = {_line_fingerprint(line) for line in lines}
+    all_lines_identical = len(lines) > 1 and len(fingerprints) == 1
+
+    recursive = source == "auto_split" and (
+        split_suffix_count >= 2
+        or page_range_count >= 2
+        or all_lines_identical
+    )
+
+    return {
+        "recursive": recursive,
+        "split_suffix_count": split_suffix_count,
+        "page_range_count": page_range_count,
+        "line_count": len(lines),
+        "all_lines_identical": all_lines_identical,
+    }
+
+
 def assess_sales_order_source(document: Dict[str, Any]) -> Dict[str, Any]:
-    """Identify strong evidence that a record is a vendor PO, not customer intake."""
+    """Identify strong evidence that a record is not valid customer intake."""
 
     if document.get("sales_order_excluded") is True:
         return {
@@ -141,6 +231,21 @@ def assess_sales_order_source(document: Dict[str, Any]) -> Dict[str, Any]:
             "reason": str(
                 document.get("sales_order_exclusion_reason")
                 or "The document is explicitly excluded from sales-order intake."
+            ),
+        }
+
+    split_evidence = _recursive_split_evidence(document)
+    if split_evidence["recursive"]:
+        return {
+            "excluded": True,
+            "reason_code": "RECURSIVE_SPLIT_ARTIFACT",
+            "reason": (
+                "The document is a recursively generated split artifact and must be "
+                "recovered from its original unsplit source before sales-order review. "
+                f"Split suffixes: {split_evidence['split_suffix_count']}; "
+                f"page markers: {split_evidence['page_range_count']}; "
+                f"lines: {split_evidence['line_count']}; "
+                f"all lines identical: {split_evidence['all_lines_identical']}."
             ),
         }
 

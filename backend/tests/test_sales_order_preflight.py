@@ -25,6 +25,7 @@ def valid_doc():
                 "quantity": "12",
                 "uom": "CASE",
                 "unit_price": "14.25",
+                "shipment_date": "2026-08-03",
                 "mapping_status": "approved",
                 "item_match_confidence": 0.99,
             }
@@ -161,6 +162,7 @@ def test_payload_is_built_only_from_normalized_candidate():
             "quantity": 12.0,
             "unitOfMeasureCode": "CASE",
             "unitPrice": 14.25,
+            "shipmentDate": "2026-08-03",
         }
     ]
 
@@ -172,3 +174,49 @@ def test_upstream_validation_errors_block_creation():
     result = preflight_sales_order(doc)
 
     assert "UPSTREAM_VALIDATION_ERROR" in issue_codes(result)
+
+
+
+def test_scheduled_lines_preserve_distinct_shipment_dates():
+    doc = valid_doc()
+
+    shipment_dates = [
+        "2026-08-03",
+        "2026-08-06",
+        "2026-08-08",
+        "2026-08-10",
+        "2026-08-14",
+        "2026-08-17",
+    ]
+
+    doc["sales_order_lines"] = [
+        {
+            "source_line_number": index,
+            "itemNumber": "CN000113A",
+            "description": (
+                "CAN UNIVERSAL - 12oz Ball Printed Can - "
+                "Coffee UF - NURRI"
+            ),
+            "quantity": 202400,
+            "unitOfMeasureCode": "EA",
+            "unitPrice": 0.15206,
+            "shipmentDate": shipment_date,
+            "mappingStatus": "approved",
+            "mappingApproved": True,
+            "itemMatchConfidence": 1.0,
+        }
+        for index, shipment_date in enumerate(
+            shipment_dates,
+            start=1,
+        )
+    ]
+
+    candidate = build_sales_order_candidate(doc)
+    payload = build_bc_sales_order_payload(candidate)
+
+    assert len(candidate["lines"]) == 6
+    assert len(payload["lines"]) == 6
+    assert [
+        line["shipmentDate"]
+        for line in payload["lines"]
+    ] == shipment_dates

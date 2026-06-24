@@ -171,6 +171,8 @@ def _normalize_lines(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "quantity": None,
                     "unitOfMeasureCode": None,
                     "unitPrice": None,
+                    "shipmentDate": None,
+                    "locationId": None,
                     "mappingStatus": None,
                     "mappingApproved": False,
                     "itemMatchConfidence": None,
@@ -220,6 +222,19 @@ def _normalize_lines(doc: Dict[str, Any]) -> List[Dict[str, Any]]:
                     raw.get("unitPrice"),
                     raw.get("unit_price"),
                     raw.get("price"),
+                ),
+                "shipmentDate": _first_value(
+                    raw.get("shipmentDate"),
+                    raw.get("shipment_date"),
+                    raw.get("deliveryDate"),
+                    raw.get("delivery_date"),
+                    raw.get("requestedDeliveryDate"),
+                    raw.get("requested_delivery_date"),
+                ),
+                "locationId": _first_value(
+                    raw.get("locationId"),
+                    raw.get("location_id"),
+                    raw.get("bc_location_id"),
                 ),
                 "mappingStatus": _first_value(
                     raw.get("mappingStatus"),
@@ -571,6 +586,12 @@ def build_bc_sales_order_payload(candidate: Dict[str, Any]) -> Dict[str, Any]:
         unit_price = _to_decimal(line.get("unitPrice"))
         if unit_price is not None:
             bc_line["unitPrice"] = float(unit_price)
+
+        if line.get("shipmentDate"):
+            bc_line["shipmentDate"] = line["shipmentDate"]
+
+        if line.get("locationId"):
+            bc_line["locationId"] = line["locationId"]
 
         payload["lines"].append(bc_line)
 

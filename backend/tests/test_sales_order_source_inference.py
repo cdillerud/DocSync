@@ -171,7 +171,7 @@ def test_single_valid_split_is_not_excluded():
     assert assessment["reason_code"] is None
 
 
-def test_identical_lines_on_auto_split_are_excluded():
+def test_repeated_scheduled_lines_alone_do_not_imply_recursive_split():
     document = {
         "document_id": "doc-1",
         "document_type": "Sales_Order",
@@ -183,16 +183,18 @@ def test_identical_lines_on_auto_split_are_excluded():
                 "description": "CAN UNIVERSAL",
                 "quantity": 202400,
                 "unitPrice": 0.15206,
+                "requestedDeliveryDate": "2026-08-03",
             },
             {
                 "description": "CAN UNIVERSAL",
                 "quantity": 202400,
                 "unitPrice": 0.15206,
+                "requestedDeliveryDate": "2026-08-06",
             },
         ],
     }
 
     assessment = assess_sales_order_source(document)
 
-    assert assessment["excluded"] is True
-    assert assessment["reason_code"] == "RECURSIVE_SPLIT_ARTIFACT"
+    assert assessment["excluded"] is False
+    assert assessment["reason_code"] is None

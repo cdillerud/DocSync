@@ -69,9 +69,12 @@ jobs:
           python -m py_compile \
             services/sales_order_preflight.py \
             services/sales_order_runtime.py \
+            services/sales_order_source_inference.py \
             services/sales_order_bc_lookup.py \
             services/sales_order_bc_writer.py \
             services/sales_order_review_service.py \
+            services/sales_order_enrichment.py \
+            services/sales_order_enrichment_runtime.py \
             services/auto_post_service.py \
             routes/sales_order_review.py \
             scripts/seed_sales_order_test_data.py \
@@ -82,9 +85,12 @@ jobs:
           flake8 \
             services/sales_order_preflight.py \
             services/sales_order_runtime.py \
+            services/sales_order_source_inference.py \
             services/sales_order_bc_lookup.py \
             services/sales_order_bc_writer.py \
             services/sales_order_review_service.py \
+            services/sales_order_enrichment.py \
+            services/sales_order_enrichment_runtime.py \
             services/auto_post_service.py \
             routes/sales_order_review.py \
             routes/__init__.py \
@@ -99,6 +105,7 @@ jobs:
         working-directory: frontend
     env:
       CI: "false"
+      NODE_ENV: development
       REACT_APP_BACKEND_URL: ""
 
     steps:
@@ -109,11 +116,9 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: yarn
-          cache-dependency-path: frontend/yarn.lock
 
       - name: Install frontend dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --production=false --non-interactive
 
       - name: Build sales-order review UI
         run: yarn build

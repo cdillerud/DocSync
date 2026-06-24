@@ -106,6 +106,27 @@ async def test_string_false_mapping_approval_does_not_become_truthy():
 
 
 @pytest.mark.asyncio
+async def test_gamer_vendor_purchase_order_is_hard_blocked():
+    document = valid_sales_document()
+    document.update(
+        {
+            "source": "backfill",
+            "email_subject": "FW: Gamer Packaging Purchase Order Number: 111169",
+            "file_name": "Purchase-Order 111169.pdf",
+        }
+    )
+    db = FakeDatabase(sales_documents=[document])
+
+    result = await run_shadow_preflight(db, "sales-doc-1")
+    codes = {issue["code"] for issue in result["errors"]}
+
+    assert result["can_create"] is False
+    assert "UNSUPPORTED_DOCUMENT_TYPE" in codes
+    assert "UPSTREAM_VALIDATION_ERROR" in codes
+    assert document["bc_create_ready"] is False
+
+
+@pytest.mark.asyncio
 async def test_approval_is_recorded_and_preflight_is_rerun():
     document = valid_sales_document(review_status="needs_review")
     db = FakeDatabase(sales_documents=[document])

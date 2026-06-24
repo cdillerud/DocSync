@@ -9,6 +9,8 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List
 
+from services.sales_order_source_inference import assess_sales_order_source
+
 _TRUE_VALUES = {"true", "1", "yes", "y", "on", "approved"}
 _FALSE_VALUES = {"false", "0", "no", "n", "off", "", "none", "null"}
 _SUPPORTED_SALES_ORDER_TYPES = {
@@ -53,12 +55,39 @@ def prepare_sales_order_document(doc: Dict[str, Any]) -> Dict[str, Any]:
     ``"false"``. Older AP-oriented validation also attached vendor and invoice
     errors to documents later classified as customer sales orders. Those AP-only
     messages must not block sales-order preflight.
+
+    Strong evidence that the source is a Gamer-issued vendor purchase order is a
+    hard safety block. The in-memory type is changed to ``PURCHASE_ORDER`` so the
+    deterministic preflight rejects it even when a stale Mongo record still says
+    ``Sales_Order``.
     """
 
     prepared = copy.deepcopy(doc)
     prepared["sales_order_approved"] = parse_bool(
         prepared.get("sales_order_approved")
     )
+
+    source_assessment = assess_sales_order_source(prepared)
+    if source_assessment.get("excluded"):
+        prepared["sales_order_excluded"] = True
+        prepared["sales_order_source_assessment"] = source_assessment
+        prepared["doc_type"] = "PURCHASE_ORDER"
+
+        validation_errors = prepared.get("validation_errors")
+        if isinstance(validation_errors, list):
+            errors = list(validation_errors)
+        elif validation_errors:
+            errors = [validation_errors]
+        else:
+            errors = []
+
+        exclusion_message = str(
+            source_assessment.get("reason")
+            or "The source is not a customer sales-order intake document."
+        )
+        if exclusion_message not in [_message_text(value) for value in errors]:
+            errors.append(exclusion_message)
+        prepared["validation_errors"] = errors
 
     for container_name in (
         "sales_order_lines",

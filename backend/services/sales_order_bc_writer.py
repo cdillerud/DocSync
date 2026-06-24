@@ -16,7 +16,6 @@ import httpx
 
 from services.business_central_service import (
     BC_API_BASE,
-    BC_ENVIRONMENT,
     BC_REQUEST_TIMEOUT,
     BC_TENANT_ID,
     get_bc_token,
@@ -34,6 +33,120 @@ ALLOW_PO_PRICE_OVERRIDE = os.environ.get(
 # Optional custom AL API. This endpoint can accept the full order atomically and
 # apply Gamer-specific fields such as Ship-to Code.
 CUSTOM_IMPORT_URL = os.environ.get("BC_SALES_ORDER_IMPORT_API_URL", "").strip()
+
+WRITE_ENVIRONMENT_VARIABLE = "SALES_ORDER_BC_WRITE_ENVIRONMENT"
+WRITE_COMPANY_ID_VARIABLE = "SALES_ORDER_BC_WRITE_COMPANY_ID"
+WRITE_COMPANY_NAME_VARIABLE = "SALES_ORDER_BC_WRITE_COMPANY_NAME"
+DEFAULT_WRITE_COMPANY_NAME = "Gamer Packaging"
+
+
+def _configured_write_environment() -> str:
+    environment = os.environ.get(
+        WRITE_ENVIRONMENT_VARIABLE,
+        "",
+    ).strip()
+
+    if not environment:
+        raise ValueError(
+            f"{WRITE_ENVIRONMENT_VARIABLE} must be explicitly configured "
+            "before sales-order writes are enabled."
+        )
+
+    return environment
+
+
+def _select_write_company_id(
+    companies: List[Dict[str, Any]],
+    company_name: str,
+) -> str:
+    expected = company_name.strip().casefold()
+
+    matches = [
+        company
+        for company in companies
+        if expected
+        in {
+            str(company.get("name") or "").strip().casefold(),
+            str(company.get("displayName") or "").strip().casefold(),
+        }
+    ]
+
+    if len(matches) != 1:
+        raise ValueError(
+            "Could not uniquely resolve the sales-order write company "
+            f"'{company_name}'. Matches found: {len(matches)}."
+        )
+
+    company_id = str(matches[0].get("id") or "").strip()
+
+    if not company_id:
+        raise ValueError(
+            "The resolved sales-order write company has no company ID."
+        )
+
+    return company_id
+
+
+async def _resolve_write_target(token: str) -> tuple[str, str]:
+    environment = _configured_write_environment()
+
+    configured_company_id = os.environ.get(
+        WRITE_COMPANY_ID_VARIABLE,
+        "",
+    ).strip()
+
+    if configured_company_id:
+        return environment, configured_company_id
+
+    company_name = os.environ.get(
+        WRITE_COMPANY_NAME_VARIABLE,
+        DEFAULT_WRITE_COMPANY_NAME,
+    ).strip()
+
+    if not company_name:
+        raise ValueError(
+            f"{WRITE_COMPANY_NAME_VARIABLE} cannot be blank when "
+            f"{WRITE_COMPANY_ID_VARIABLE} is not configured."
+        )
+
+    url = (
+        f"{BC_API_BASE}/{BC_TENANT_ID}/{environment}"
+        "/api/v2.0/companies"
+    )
+
+    async with httpx.AsyncClient(
+        timeout=BC_REQUEST_TIMEOUT
+    ) as client:
+        response = await _request_with_retry(
+            client,
+            "GET",
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json",
+            },
+            params={
+                "$select": "id,name,displayName",
+                "$top": "100",
+            },
+        )
+
+    if response.status_code != 200:
+        raise ValueError(
+            "Could not validate the sales-order write environment "
+            f"'{environment}': HTTP {response.status_code}: "
+            f"{response.text[:500]}"
+        )
+
+    companies = response.json().get("value", [])
+
+    return (
+        environment,
+        _select_write_company_id(
+            companies,
+            company_name,
+        ),
+    )
 
 
 async def create_sales_order_draft(
@@ -68,11 +181,25 @@ async def create_sales_order_draft(
         }
 
     token = await get_bc_token()
-    company_id = await bc_service._get_company_id()
+
+    try:
+        write_environment, company_id = await _resolve_write_target(
+            token
+        )
+    except ValueError as exc:
+        return {
+            "success": False,
+            "errorCode": "BC_WRITE_TARGET_INVALID",
+            "error": str(exc),
+            "linesAdded": 0,
+            "linesTotal": len(lines),
+            "lineErrors": [],
+        }
 
     if CUSTOM_IMPORT_URL:
         return await _create_with_custom_import_api(
             token=token,
+            environment=write_environment,
             company_id=company_id,
             order_data=order_data,
         )
@@ -95,7 +222,7 @@ async def create_sales_order_draft(
         }
 
     base_url = (
-        f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/"
+        f"{BC_API_BASE}/{BC_TENANT_ID}/{write_environment}/api/v2.0/"
         f"companies({company_id})"
     )
     headers = {
@@ -231,12 +358,16 @@ async def create_sales_order_draft(
 async def _create_with_custom_import_api(
     *,
     token: str,
+    environment: str,
     company_id: str,
     order_data: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Submit the full candidate to a custom AL import API atomically."""
 
-    url = CUSTOM_IMPORT_URL.format(company_id=company_id)
+    url = CUSTOM_IMPORT_URL.format(
+        company_id=company_id,
+        environment=environment,
+    )
     payload = dict(order_data)
     payload["allowPoPriceOverride"] = ALLOW_PO_PRICE_OVERRIDE
 

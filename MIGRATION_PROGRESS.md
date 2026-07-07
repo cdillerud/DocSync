@@ -28,7 +28,7 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 5 | Documents core + Square9 | `routes/documents.py` | 13 | ✅ verified |
 | 6 | Dashboard (stats/doc-types) | `routes/dashboard.py` | 3 | ✅ verified |
 | 7 | BC company/sales-order lookups | `routes/bc.py` | 2 | ✅ verified |
-| 8 | Settings/config core | `routes/config.py` | 6 | ⚠️ **BLOCKED - moved to end of order, see Decisions Log** |
+| 8 | Settings/config core | `routes/config.py` | 6 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes), AND a direct cross-module hot-reload test confirming `get_bc_token()` in `core/legacy_hub_helpers.py` sees a live config mutation made after import - the exact mechanism this whole migration was protecting. Simplified during the move: `core.config` is now the sole source of truth (no more dual-write - that was a transitional shim only needed while these routes still lived in server.py). |
 | 9 | Ingestion/classification engine | `core/job_config.py`, `services/ingestion_engine.py`, `routes/ingestion.py` | 4 routes + ~20 shared functions | ✅ verified |
 | 10 | Graph webhook + email polling + AP mailbox backfill | `services/email_polling_engine.py`, `routes/email_ingestion.py` | 6 | ✅ verified |
 | 11 | Sales backfill/migrate/polling | `services/sales_polling_engine.py`, `routes/sales_admin.py` | 2 | ✅ verified |

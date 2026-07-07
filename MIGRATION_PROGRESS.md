@@ -25,24 +25,25 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 2 | AP review | `routes/ap_review.py` | n/a | ✅ (already done, already wired) |
 | 3 | SharePoint migration | `routes/sharepoint_migration.py` | n/a | ✅ (already done, already wired) |
 | 4 | Spiro | `routes/spiro.py` | n/a | ✅ (already done, already wired) |
-| 5 | Documents core + Square9 | `routes/documents.py` | 13 (corrected count) | ✅ verified: py_compile OK, 152→152 route count unchanged (139 server.py + 13 routes/documents.py) |
-| 6 | Dashboard (stats/doc-types) | `routes/dashboard.py` | 3 | ✅ verified: py_compile OK, 152 total (136 server.py + 3 dashboard.py + 13 documents.py) |
-| 7 | BC company/sales-order lookups | `routes/bc.py` | 2 | ✅ verified: py_compile OK, 152 total (134 server.py + 13 documents.py + 3 dashboard.py + 2 bc.py) |
+| 5 | Documents core + Square9 | `routes/documents.py` | 13 | ✅ verified |
+| 6 | Dashboard (stats/doc-types) | `routes/dashboard.py` | 3 | ✅ verified |
+| 7 | BC company/sales-order lookups | `routes/bc.py` | 2 | ✅ verified |
 | 8 | Settings/config core | `routes/config.py` | 6 | ⚠️ **BLOCKED - moved to end of order, see Decisions Log** |
-| 9 | Ingestion/classification engine | `core/job_config.py`, `services/ingestion_engine.py`, `routes/ingestion.py` | 4 routes + ~20 shared business-logic functions | ✅ verified: py_compile + pyflakes clean (only pre-existing bug flagged, see below), 152 total (130 server.py + 13+3+2+4 routes/) |
-| 10 | Graph webhook + email polling + AP mailbox backfill | `services/email_polling_engine.py`, `routes/email_ingestion.py` | 6 | ✅ verified: py_compile + pyflakes clean, 152 total (124 server.py + 28 across routes/) |
-| 11 | Sales backfill/migrate/polling | `services/sales_polling_engine.py`, `routes/sales_admin.py` | 2 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes), 122+2=124 in server.py+routes/ |
-| 12 | Job types / email watcher settings | `routes/job_type_settings.py` | 6 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes) |
-| 13 | Workflows (generic list/get/retry + AP-invoice + generic multi-type) | `routes/workflows.py`, `routes/ap_workflows.py` | 27 | ✅ verified: py_compile + pyflakes clean (3 real missing imports caught: re, List, is_export_blocked), real import test passes (214 routes) |
-| 15 | Migration tools | `routes/migration.py` (new) | 5 (8695-8906) | ⬜ |
-| 16 | Pilot (non-simulation) | — | 8 (8940-9408) | ❌ per REFACTOR_PLAN §Step 5 - deferred, left in server.py for now (not blocking) |
-| 19 | Metrics/reporting | `routes/metrics.py` | 16 | ✅ verified: py_compile + pyflakes clean (caught missing ENABLE_CREATE_DRAFT_HEADER/EMAIL_POLLING_*/DRAFT_CREATION_CONFIG imports, plus a second instance of the settings hot-reload bug - fixed with dual-write same as Group 8), real import test passes (214 routes) |
-| 17 | Mailbox source settings | `services/mailbox_polling_engine.py`, `routes/mailbox_sources.py` | 7 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes). One route (`polling-status`) intentionally left in server.py - reads background-worker-lifecycle globals, same category as Group 10's `_email_polling_task`. |
-| 18 | Vendor aliases | `routes/aliases.py` (new) | 4 (9855-9911) | ⬜ |
-| 19 | Metrics/reporting | `routes/metrics.py` (new) | ~14 (10090-11483) | ⬜ |
-| 20 | BC sandbox validation | `routes/bc_sandbox.py` (new) | 13 (11620-11789) | ⬜ |
-| 21 | Pilot simulation | — | ~17 (11887-12584) | ❌ per REFACTOR_PLAN §Step 5 |
-| 22 | Sales file import | `routes/sales_import.py` (new) | 6 (12604-12783) | ⬜ |
+| 9 | Ingestion/classification engine | `core/job_config.py`, `services/ingestion_engine.py`, `routes/ingestion.py` | 4 routes + ~20 shared functions | ✅ verified |
+| 10 | Graph webhook + email polling + AP mailbox backfill | `services/email_polling_engine.py`, `routes/email_ingestion.py` | 6 | ✅ verified |
+| 11 | Sales backfill/migrate/polling | `services/sales_polling_engine.py`, `routes/sales_admin.py` | 2 | ✅ verified |
+| 12 | Job types / email watcher settings | `routes/job_type_settings.py` | 6 | ✅ verified |
+| 13 | Workflows (generic + AP-invoice + generic multi-type) | `routes/workflows.py`, `routes/ap_workflows.py` | 28 | ✅ verified (includes the previously-orphaned `ap_invoice/metrics` route, added after the fact) |
+| 14 | Migration tools | `routes/migration_tools.py` | 5 | ✅ verified |
+| 15 | Vendor aliases | `routes/aliases.py` | 4 | ✅ verified |
+| 16 | Metrics/reporting | `routes/metrics.py` | 16 | ✅ verified (caught a second instance of the settings hot-reload bug - `ENABLE_CREATE_DRAFT_HEADER`, fixed with dual-write same as the Group 5 fix) |
+| 17 | Mailbox source settings | `services/mailbox_polling_engine.py`, `routes/mailbox_sources.py` | 7 | ✅ verified. One route (`polling-status`) intentionally left in server.py - reads background-worker-lifecycle globals, same category as Group 10's `_email_polling_task`. |
+| 18 | BC sandbox validation | `routes/bc_sandbox.py` | 14 | ✅ verified |
+| 19 | Pilot (non-simulation + simulation + batch reingest) | — | ~33 | ❌ per REFACTOR_PLAN §Step 5 - deferred, left in server.py (not blocking, candidate for deletion not migration) |
+| 20 | Sales file import | `routes/sales_import.py` (new) | 6 | ⬜ next up |
+
+"✅ verified" for every completed group means: `py_compile` + `pyflakes` clean on every touched/new file, AND a real `import server` in a clean venv with actual dependencies installed (not just syntax checking) confirming the FastAPI app object builds with all 214 routes resolving. This is the check that actually would have caught the `routes/__init__.py` incident - see Decisions Log.
+
 | 23 | Health check | `server_new.py` (inline) | 1 (12817) | ⬜ |
 
 **Total live routes to migrate: ~113** (152 minus ~26 pilot/simulation dropped, minus 13 already wired via existing modules — auth/ap_review/sharepoint_migration/spiro overlap with the count above).

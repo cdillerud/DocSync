@@ -40,7 +40,7 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 17 | Mailbox source settings | `services/mailbox_polling_engine.py`, `routes/mailbox_sources.py` | 7 | ✅ verified. One route (`polling-status`) intentionally left in server.py - reads background-worker-lifecycle globals, same category as Group 10's `_email_polling_task`. |
 | 18 | BC sandbox validation | `routes/bc_sandbox.py` | 14 | ✅ verified |
 | 19 | Pilot (non-simulation + simulation + batch reingest) | — | ~33 | ❌ per REFACTOR_PLAN §Step 5 - deferred, left in server.py (not blocking, candidate for deletion not migration) |
-| 20 | Sales file import | `routes/sales_import.py` (new) | 6 | ⬜ next up |
+| 20 | Sales file import | `routes/sales_file_import.py` | 6 | ✅ verified |
 
 "✅ verified" for every completed group means: `py_compile` + `pyflakes` clean on every touched/new file, AND a real `import server` in a clean venv with actual dependencies installed (not just syntax checking) confirming the FastAPI app object builds with all 214 routes resolving. This is the check that actually would have caught the `routes/__init__.py` incident - see Decisions Log.
 
@@ -238,3 +238,23 @@ migrated group is verified by:
 4. Full integration/DB-backed test run is **your responsibility** before
    flipping the Dockerfile — the existing `backend/tests/` suite needs a real
    Mongo instance this sandbox doesn't have network access to provision.
+
+## Current status (2026-07-07, end of session)
+
+All functional groups migrated and verified (Groups 1-7, 9-18, 20). Only
+two things remain:
+1. **Group 8 (Settings/config core)** - deliberately last, per the
+   Decisions Log constraint. Every other group's config references now go
+   through `config.X` attribute access, so this is close to safe to do -
+   worth a final grep sweep of remaining `server.py` for any bare
+   `TENANT_ID`/`BC_CLIENT_ID`/etc. references before moving it.
+2. **Group 19 (Pilot: non-simulation + simulation + batch reingest, ~33
+   routes)** - intentionally NOT migrated. Per `REFACTOR_PLAN.md`'s own
+   already-confirmed decision, this is a deletion candidate, not a
+   migration candidate. Left in place in `server.py`, fully untouched,
+   still working exactly as before. Confirm with the user before deleting.
+
+`server.py`: 13,054 lines originally -> see current line count in repo.
+Every migrated group verified via py_compile + pyflakes + a real
+`import server` test in a clean venv (214 routes resolve cleanly
+throughout).

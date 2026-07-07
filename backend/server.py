@@ -231,6 +231,11 @@ from routes.email_ingestion import router as email_ingestion_router
 from services.sales_polling_engine import run_sales_email_poll, _sales_email_polling_worker
 from routes.sales_admin import router as sales_admin_router
 
+# ==================== JOB TYPE + EMAIL WATCHER SETTINGS ====================
+# MOVED to routes/job_type_settings.py during routes/ migration (see
+# MIGRATION_PROGRESS.md, Group 12). 6 endpoints.
+from routes.job_type_settings import router as job_type_settings_router
+
 # ==================== DOCUMENT + SQUARE9 ENDPOINTS ====================
 # MOVED to routes/documents.py during routes/ migration (see
 # MIGRATION_PROGRESS.md, Group 5). 15 endpoints: /documents/upload,
@@ -599,86 +604,6 @@ async def get_draft_creation_feature_status():
 
 
 # ==================== SALES EMAIL BACKFILL ====================
-@api_router.get("/settings/job-types")
-async def get_job_types():
-    """Get all job type configurations."""
-    job_types = await db.hub_job_types.find({}, {"_id": 0}).to_list(100)
-    
-    # Merge with defaults for any missing types
-    result = dict(DEFAULT_JOB_TYPES)
-    for jt in job_types:
-        result[jt["job_type"]] = jt
-    
-    return {"job_types": list(result.values())}
-
-@api_router.get("/settings/job-types/{job_type}")
-async def get_job_type(job_type: str):
-    """Get a specific job type configuration."""
-    jt = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
-    if not jt:
-        jt = DEFAULT_JOB_TYPES.get(job_type)
-        if not jt:
-            raise HTTPException(status_code=404, detail="Job type not found")
-    return jt
-
-@api_router.put("/settings/job-types/{job_type}")
-async def update_job_type(job_type: str, config: JobTypeConfig):
-    """Update a job type configuration."""
-    update_data = config.model_dump()
-    update_data["job_type"] = job_type
-    
-    await db.hub_job_types.update_one(
-        {"job_type": job_type},
-        {"$set": update_data},
-        upsert=True
-    )
-    
-    return await get_job_type(job_type)
-
-@api_router.get("/settings/email-watcher")
-async def get_email_watcher_settings():
-    """Get email watcher configuration."""
-    return await get_email_watcher_config()
-
-@api_router.put("/settings/email-watcher")
-async def update_email_watcher_settings(config: EmailWatchConfig):
-    """Update email watcher configuration."""
-    update_data = config.model_dump()
-    update_data["_key"] = "email_watcher"
-    
-    logger.info("Saving email watcher config: %s", update_data)
-    
-    result = await db.hub_config.update_one(
-        {"_key": "email_watcher"},
-        {"$set": update_data},
-        upsert=True
-    )
-    
-    logger.info("MongoDB update result: matched=%s, modified=%s", result.matched_count, result.modified_count)
-    
-    return await get_email_watcher_config()
-
-@api_router.post("/settings/email-watcher/subscribe")
-async def subscribe_email_watcher(webhook_url: str = Query(...)):
-    """Create Graph subscription for email notifications."""
-    config = await get_email_watcher_config()
-    
-    if not config.get("mailbox_address"):
-        raise HTTPException(status_code=400, detail="Mailbox address not configured")
-    
-    result = await subscribe_to_mailbox_notifications(config["mailbox_address"], webhook_url)
-    
-    if result.get("status") == "ok":
-        await db.hub_config.update_one(
-            {"_key": "email_watcher"},
-            {"$set": {
-                "webhook_subscription_id": result.get("subscription_id"),
-                "webhook_expiration": result.get("expiration")
-            }}
-        )
-    
-    return result
-
 # ==================== AP INVOICE WORKFLOW QUEUES ====================
 
 class SetVendorRequest(BaseModel):
@@ -6118,6 +6043,7 @@ app.include_router(bc_router)
 app.include_router(ingestion_router)
 app.include_router(email_ingestion_router)
 app.include_router(sales_admin_router)
+app.include_router(job_type_settings_router)
 # Sales Module (Phase 0 - BC disconnected)
 app.include_router(sales_router)
 # AP Review Module

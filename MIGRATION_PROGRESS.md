@@ -32,7 +32,7 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 9 | Ingestion/classification engine | `core/job_config.py`, `services/ingestion_engine.py`, `routes/ingestion.py` | 4 routes + ~20 shared business-logic functions | ✅ verified: py_compile + pyflakes clean (only pre-existing bug flagged, see below), 152 total (130 server.py + 13+3+2+4 routes/) |
 | 10 | Graph webhook + email polling + AP mailbox backfill | `services/email_polling_engine.py`, `routes/email_ingestion.py` | 6 | ✅ verified: py_compile + pyflakes clean, 152 total (124 server.py + 28 across routes/) |
 | 11 | Sales backfill/migrate/polling | `services/sales_polling_engine.py`, `routes/sales_admin.py` | 2 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes), 122+2=124 in server.py+routes/ |
-| 12 | Job types / email watcher settings | `routes/config.py` | 5 (7295-7354) | ⬜ |
+| 12 | Job types / email watcher settings | `routes/job_type_settings.py` | 6 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes) |
 | 13 | Workflows — ap_invoice specific | `routes/workflows.py` | 12 (7404-8097, 9472) | ⬜ |
 | 14 | Workflows — generic multi-type | `routes/workflows.py` | 12 (7589-8695) | ⬜ |
 | 15 | Migration tools | `routes/migration.py` (new) | 5 (8695-8906) | ⬜ |

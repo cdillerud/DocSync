@@ -37,7 +37,7 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 15 | Migration tools | `routes/migration.py` (new) | 5 (8695-8906) | ⬜ |
 | 16 | Pilot (non-simulation) | — | 8 (8940-9408) | ❌ per REFACTOR_PLAN §Step 5 - deferred, left in server.py for now (not blocking) |
 | 19 | Metrics/reporting | `routes/metrics.py` | 16 | ✅ verified: py_compile + pyflakes clean (caught missing ENABLE_CREATE_DRAFT_HEADER/EMAIL_POLLING_*/DRAFT_CREATION_CONFIG imports, plus a second instance of the settings hot-reload bug - fixed with dual-write same as Group 8), real import test passes (214 routes) |
-| 17 | Mailbox source settings | `routes/config.py` | 8 (9528-9674) | ⬜ |
+| 17 | Mailbox source settings | `services/mailbox_polling_engine.py`, `routes/mailbox_sources.py` | 7 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes). One route (`polling-status`) intentionally left in server.py - reads background-worker-lifecycle globals, same category as Group 10's `_email_polling_task`. |
 | 18 | Vendor aliases | `routes/aliases.py` (new) | 4 (9855-9911) | ⬜ |
 | 19 | Metrics/reporting | `routes/metrics.py` (new) | ~14 (10090-11483) | ⬜ |
 | 20 | BC sandbox validation | `routes/bc_sandbox.py` (new) | 13 (11620-11789) | ⬜ |

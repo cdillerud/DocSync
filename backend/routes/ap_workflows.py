@@ -17,6 +17,57 @@ from services.pilot_config import is_export_blocked
 
 router = APIRouter(prefix="/api")
 
+
+@router.get("/workflows/ap_invoice/metrics")
+async def get_ap_workflow_metrics(days: int = Query(30)):
+    """
+    Get workflow metrics for AP_Invoice documents.
+    Includes counts per status and time-in-status averages.
+    """
+    cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    status_pipeline = [
+        {"$match": {"document_type": "AP_Invoice", "created_utc": {"$gte": cutoff_date}}},
+        {"$group": {"_id": "$workflow_status", "count": {"$sum": 1}}},
+        {"$sort": {"_id": 1}}
+    ]
+    status_results = await db.hub_documents.aggregate(status_pipeline).to_list(100)
+    status_counts = {r["_id"] or "none": r["count"] for r in status_results}
+
+    daily_pipeline = [
+        {"$match": {"document_type": "AP_Invoice", "created_utc": {"$gte": cutoff_date}}},
+        {"$unwind": {"path": "$workflow_history", "preserveNullAndEmptyArrays": True}},
+        {"$addFields": {
+            "history_date": {"$substr": ["$workflow_history.timestamp", 0, 10]}
+        }},
+        {"$group": {
+            "_id": {"date": "$history_date", "to_status": "$workflow_history.to_status"},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.date": -1}}
+    ]
+    daily_results = await db.hub_documents.aggregate(daily_pipeline).to_list(1000)
+
+    daily_by_date = {}
+    for r in daily_results:
+        date = r["_id"]["date"]
+        status = r["_id"]["to_status"]
+        if date and status:
+            if date not in daily_by_date:
+                daily_by_date[date] = {}
+            daily_by_date[date][status] = r["count"]
+
+    return {
+        "period_days": days,
+        "status_counts": status_counts,
+        "total_documents": sum(status_counts.values()),
+        "exception_queue_count": sum(
+            status_counts.get(s, 0) for s in WorkflowEngine.get_exception_statuses()
+        ),
+        "daily_transitions": daily_by_date,
+        "all_statuses": WorkflowEngine.get_all_statuses()
+    }
+
 class SetVendorRequest(BaseModel):
     """Request body for manual vendor resolution."""
     vendor_id: str

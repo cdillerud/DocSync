@@ -197,6 +197,30 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
   be overwritten with a faithful extraction when Group 13/14 (workflows) is
   actually done, same as documents.py/dashboard.py were.
 
+## IMPORTANT: Branch base correction (2026-07-07)
+This refactor was originally built on top of `main` (commit `9976b53a`).
+It turned out `main` was stale - the actively-developed branch is
+`feature/sales-order-intake-preflight`, which forked directly from that
+same `main` commit (6 minutes after its last commit) and added 78 more
+commits through 2026-06-24 that `main` never got. Verified this branch's
+changes don't overlap with anything in this refactor except
+`backend/routes/__init__.py` (they added a `sales_order_review` side-effect
+import; this refactor removed stale eager imports - both changes coexist
+fine, resolved via cherry-pick). `backend/server.py` was byte-identical
+between the two branches at the fork point, so this refactor's diffs applied
+directly with no other conflicts.
+
+Current state: local branch `refactor-on-sales-order-branch`, built as
+`origin/feature/sales-order-intake-preflight` + the two refactor commits
+(cherry-picked, one conflict resolved in `routes/__init__.py`). Verified via
+py_compile + pyflakes + a real `import server` test: clean, 214 routes
+(206 from the refactor + 8 sales-order-review endpoints from this branch).
+
+**Before any further group migrations continue, confirm with the user which
+branch this should ultimately land on** (push as a new branch? replace
+`feature/sales-order-intake-preflight`? merge to `main` first?) - that's a
+repo-workflow decision, not a technical one.
+
 ## Next up
 Group 5 (Documents core + Square9, 15 routes) is next: extract into
 `routes/documents.py`, remove from `server.py`, wire into `server_new.py`,

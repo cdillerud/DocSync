@@ -33,8 +33,7 @@ deleted (see Decisions Log). We're rebuilding them as faithful extractions.
 | 10 | Graph webhook + email polling + AP mailbox backfill | `services/email_polling_engine.py`, `routes/email_ingestion.py` | 6 | ✅ verified: py_compile + pyflakes clean, 152 total (124 server.py + 28 across routes/) |
 | 11 | Sales backfill/migrate/polling | `services/sales_polling_engine.py`, `routes/sales_admin.py` | 2 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes), 122+2=124 in server.py+routes/ |
 | 12 | Job types / email watcher settings | `routes/job_type_settings.py` | 6 | ✅ verified: py_compile + pyflakes clean, real import test passes (214 routes) |
-| 13 | Workflows — ap_invoice specific | `routes/workflows.py` | 12 (7404-8097, 9472) | ⬜ |
-| 14 | Workflows — generic multi-type | `routes/workflows.py` | 12 (7589-8695) | ⬜ |
+| 13 | Workflows (generic list/get/retry + AP-invoice + generic multi-type) | `routes/workflows.py`, `routes/ap_workflows.py` | 27 | ✅ verified: py_compile + pyflakes clean (3 real missing imports caught: re, List, is_export_blocked), real import test passes (214 routes) |
 | 15 | Migration tools | `routes/migration.py` (new) | 5 (8695-8906) | ⬜ |
 | 16 | Pilot (non-simulation) | — | 8 (8940-9408) | ❌ per REFACTOR_PLAN §Step 5 |
 | 17 | Mailbox source settings | `routes/config.py` | 8 (9528-9674) | ⬜ |

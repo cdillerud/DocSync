@@ -180,6 +180,7 @@ async def split_and_ingest_batch(
             "vendor_name": 1,
             "customer_canonical": 1,
             "customer_id": 1,
+            "mailbox_category": 1,
         },
     ) or {}
 
@@ -237,7 +238,7 @@ async def split_and_ingest_batch(
                 sender=sender,
                 subject=child_subject,
                 email_id=f"batch-{parent_doc_id[:8]}-{label}",
-                mailbox_category=None,
+                mailbox_category=parent_doc.get("mailbox_category"),
             )
 
             child_doc_id = (

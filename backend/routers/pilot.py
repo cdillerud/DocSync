@@ -916,6 +916,8 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         
                         # Ingest through unified pipeline
                         from services.document_handlers import intake_document_from_bytes
+                        from services.email_polling_service import normalize_mailbox_category
+                        resolved_category = normalize_mailbox_category(default_category)
                         result = await intake_document_from_bytes(
                             file_content=content_bytes,
                             filename=filename,
@@ -923,7 +925,8 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             sender=sender,
                             subject=subject,
                             email_id=internet_msg_id,
-                            content_type=content_type
+                            content_type=content_type,
+                            mailbox_category=resolved_category
                         )
                         
                         # Log the intake

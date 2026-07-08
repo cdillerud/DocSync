@@ -25,18 +25,55 @@ logger = logging.getLogger(__name__)
 # ── SharePoint / Graph Config ──
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
 GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')
-SHAREPOINT_SITE_HOSTNAME = os.environ.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
-SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
-SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Shared Documents')
-# Base folder within the library that every routed document path nests
-# under. Confirmed against the live Square9 GlobalCapture "Office 365
-# Connect" node configs during the SharePoint site cutover (2026-07-08):
-# every real release node uses this exact TargetPath. Every path returned
-# by folder_routing_service.py is relative to this base - it gets applied
-# once, here, rather than baked into individual folder-routing constants.
-SHAREPOINT_BASE_FOLDER = os.environ.get(
-    'SHAREPOINT_BASE_FOLDER',
-    'General/Accounting/Accounts Payable/Temp Folder'
+
+# Single, safe toggle between the test and real production SharePoint
+# targets. Defaults to "test" if unset or unrecognized - this is
+# deliberate: an accidental blank/typo'd value must never silently fall
+# through to writing real documents into the real site. Set explicitly
+# via SHAREPOINT_TARGET=production in the environment to go live.
+#
+# Each individual SHAREPOINT_* var below can still be set explicitly to
+# override a single piece (backward compatible), but the normal way to
+# flip between test and prod is this one variable.
+SHAREPOINT_TARGET = os.environ.get('SHAREPOINT_TARGET', 'test').strip().lower()
+
+_SHAREPOINT_TARGETS = {
+    'test': {
+        'hostname': 'gamerpackaging.sharepoint.com',
+        'site_path': '/sites/GPI-DocumentHub-Test',
+        'library_name': 'Shared Documents',
+        'base_folder': '',
+    },
+    'production': {
+        # Confirmed 2026-07-08 against live Square9 GlobalCapture "Office
+        # 365 Connect" node configs (3 separate nodes checked).
+        'hostname': 'gamerpackaging1.sharepoint.com',
+        'site_path': '/sites/GamerAccounting',
+        'library_name': 'Shared Documents',
+        'base_folder': 'General/Accounting/Accounts Payable/Temp Folder',
+    },
+}
+
+if SHAREPOINT_TARGET not in _SHAREPOINT_TARGETS:
+    logger.warning(
+        "[SharePoint] Unrecognized SHAREPOINT_TARGET=%r - falling back to 'test' for safety. "
+        "Valid values: %s", SHAREPOINT_TARGET, list(_SHAREPOINT_TARGETS.keys())
+    )
+    SHAREPOINT_TARGET = 'test'
+
+_target_config = _SHAREPOINT_TARGETS[SHAREPOINT_TARGET]
+
+SHAREPOINT_SITE_HOSTNAME = os.environ.get('SHAREPOINT_SITE_HOSTNAME') or _target_config['hostname']
+SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH') or _target_config['site_path']
+SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME') or _target_config['library_name']
+SHAREPOINT_BASE_FOLDER = os.environ.get('SHAREPOINT_BASE_FOLDER')
+if SHAREPOINT_BASE_FOLDER is None:
+    SHAREPOINT_BASE_FOLDER = _target_config['base_folder']
+
+logger.warning(
+    "[SharePoint] ACTIVE TARGET: %s -> %s%s (base folder: %r)",
+    SHAREPOINT_TARGET.upper(), SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH,
+    SHAREPOINT_BASE_FOLDER,
 )
 
 

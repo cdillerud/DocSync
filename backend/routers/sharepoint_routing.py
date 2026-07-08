@@ -370,6 +370,14 @@ async def move_document_to_sharepoint(doc_id: str):
     if not folder_path:
         folder_path, reason, _ = determine_folder_path(doc=doc)
 
+    # Apply the locked production base path (see sharepoint_service.py's
+    # SHAREPOINT_BASE_FOLDER for the source of truth / full rationale).
+    # doc.get("sharepoint_folder") may already be a full path from a
+    # previous run - only prefix if it doesn't already start with the base.
+    from services.sharepoint_service import SHAREPOINT_BASE_FOLDER
+    if not folder_path.startswith(SHAREPOINT_BASE_FOLDER):
+        folder_path = f"{SHAREPOINT_BASE_FOLDER}/{folder_path}" if folder_path else SHAREPOINT_BASE_FOLDER
+
     if DEMO_MODE:
         # In demo mode, simulate the move
         await db.hub_documents.update_one(

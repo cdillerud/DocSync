@@ -28,6 +28,16 @@ GRAPH_CLIENT_ID = os.environ.get('GRAPH_CLIENT_ID', '')
 SHAREPOINT_SITE_HOSTNAME = os.environ.get('SHAREPOINT_SITE_HOSTNAME', 'gamerpackaging.sharepoint.com')
 SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-DocumentHub-Test')
 SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Shared Documents')
+# Base folder within the library that every routed document path nests
+# under. Confirmed against the live Square9 GlobalCapture "Office 365
+# Connect" node configs during the SharePoint site cutover (2026-07-08):
+# every real release node uses this exact TargetPath. Every path returned
+# by folder_routing_service.py is relative to this base - it gets applied
+# once, here, rather than baked into individual folder-routing constants.
+SHAREPOINT_BASE_FOLDER = os.environ.get(
+    'SHAREPOINT_BASE_FOLDER',
+    'General/Accounting/Accounts Payable/Temp Folder'
+)
 
 
 async def _get_graph_token():
@@ -211,14 +221,23 @@ async def upload_to_sharepoint_with_routing(
         is_international=is_international
     )
 
+    # Apply the locked production base path once, here. folder_path from
+    # the routing service is always relative to this base (see
+    # SHAREPOINT_BASE_FOLDER above and folder_routing_service.py's
+    # AP_STAGING_FOLDER/AP_LANE_REVIEW_FOLDER comments).
+    full_folder_path = (
+        f"{SHAREPOINT_BASE_FOLDER}/{folder_path}" if folder_path
+        else SHAREPOINT_BASE_FOLDER
+    )
+
     logger.info("[Folder Routing] Doc %s -> %s (reason: %s)",
-                doc.get("id", "unknown"), folder_path, routing_reason)
+                doc.get("id", "unknown"), full_folder_path, routing_reason)
 
-    await ensure_sharepoint_folder_exists(folder_path)
+    await ensure_sharepoint_folder_exists(full_folder_path)
 
-    result = await upload_to_sharepoint(file_content, file_name, folder_path)
+    result = await upload_to_sharepoint(file_content, file_name, full_folder_path)
 
-    result["folder_path"] = folder_path
+    result["folder_path"] = full_folder_path
     result["routing_reason"] = routing_reason
     result["routing_details"] = routing_details
 

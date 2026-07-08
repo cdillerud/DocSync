@@ -68,17 +68,17 @@ VENDOR_FOLDER_MAPPING = {
 
 FOLDER_STRUCTURE = {
     "DO_NOT_PAY": {
-        "path": "DO NOT PAY Documents",
+        "path": "DO NOT PAY",
         "description": "Vendor invoices authorized not to pay",
         "subfolders": ["by_year"],
     },
     "DROPSHIP_INTERNATIONAL": {
-        "path": "Dropship International Documents",
+        "path": "Dropship International",
         "description": "International vendor invoices for drop ship orders",
         "subfolders": ["by_order"],
     },
     "DROPSHIP_DOMESTIC": {
-        "path": "Dropship Not International Documents",
+        "path": "Dropship Not International",
         "description": "Domestic vendor invoices for drop ship orders",
         "subfolders": {
             "Canpack": "All Canpack shipment documents",
@@ -103,7 +103,7 @@ FOLDER_STRUCTURE = {
         "subfolders": {},
     },
     "MISCELLANEOUS": {
-        "path": "Miscellaneous Documents",
+        "path": "Miscellaneous",
         "description": "Miscellaneous office invoices",
         "subfolders": {
             "Misc Invoices - approved": "Approved miscellaneous invoices",
@@ -116,7 +116,7 @@ FOLDER_STRUCTURE = {
         "subfolders": {},
     },
     "SH_APPROVED": {
-        "path": "S&H Invoices Approved Documents",
+        "path": "S&H Invoices Approved",
         "description": "Warehouse S&H invoices ready to process as cost only",
         "subfolders": {
             "Andy to Process": "S&H approved - Andy to process",
@@ -124,7 +124,7 @@ FOLDER_STRUCTURE = {
         },
     },
     "SH_WAITING_APPROVAL": {
-        "path": "S&H Invoices waiting for approval Documents",
+        "path": "S&H Invoices waiting for approval",
         "description": "Warehouse S&H invoices needing approval",
         "subfolders": {
             "Andy to Process": "S&H waiting approval - Andy to process",
@@ -153,12 +153,12 @@ FOLDER_STRUCTURE = {
         },
     },
     "WAREHOUSE_INTERNATIONAL": {
-        "path": "Warehouse International Documents",
+        "path": "Warehouse International",
         "description": "International vendor invoices for warehouse orders",
         "subfolders": ["by_order"],
     },
     "WAREHOUSE_DOMESTIC": {
-        "path": "Warehouse Not International Documents",
+        "path": "Warehouse Not International",
         "description": "Domestic vendor invoices for warehouse orders",
         "subfolders": {
             "Assembly": "Assembly paperwork and invoices",
@@ -193,11 +193,18 @@ DUNNAGE_INDICATORS = [
 # =============================================================================
 # The locked production AP destination per cutover readiness lock-in:
 #   /sites/GamerAccounting/Shared Documents/General/Accounting/Accounts Payable/Temp Folder
-# In folder-routing terms this is `Accounts Payable/Temp Folder`.
+# This is now applied ONCE, as SHAREPOINT_BASE_FOLDER in sharepoint_service.py,
+# at the point where a routed path is handed off to the actual upload call.
+# Every path in this file (including these two) is relative to that base -
+# do not bake any part of the locked path into folder strings here, or it
+# will be double-prefixed. See MIGRATION_PROGRESS-equivalent notes: this was
+# fixed alongside the SharePoint site switch from the /GPI-DocumentHub-Test
+# site to the real /GamerAccounting site.
 #
 # Hub's job is to *automate* AP routing, not to dump every AP invoice into
-# the Temp Folder for accountants to manually re-route. Temp Folder is a
-# **fallback** destination used only when:
+# the Temp Folder for accountants to manually re-route. Temp Folder (the
+# base itself, i.e. AP_STAGING_FOLDER = "") is a **fallback** destination
+# used only when:
 #   (a) automation cannot determine a final folder with sufficient evidence
 #       (weak / ambiguous / contradictory signals), OR
 #   (b) the document was flagged `mailbox_lane_needs_review=True` by
@@ -205,8 +212,8 @@ DUNNAGE_INDICATORS = [
 # High-confidence AP invoices route directly to their final accounting
 # folder (Canpack / Dropship / Warehouse / Vendor Credit Memos / Freight
 # / etc.) via the deterministic rule chain below — no override needed.
-AP_STAGING_FOLDER = "Accounts Payable/Temp Folder"
-AP_LANE_REVIEW_FOLDER = "Accounts Payable/Temp Folder/_NeedsReview"
+AP_STAGING_FOLDER = ""
+AP_LANE_REVIEW_FOLDER = "_NeedsReview"
 
 # Doc-type strings that count as AP-lane invoices (uppercase from
 # DocType.AP_INVOICE.value, plus the suggested_job_type variants).
@@ -285,13 +292,13 @@ def _is_weak_fallback_routing(path: str, reason: str) -> bool:
 # unless the routing reason matches a known strong-AP signal.
 _OPERATIONS_FOLDER_ROOTS = (
     "Warehouse Reports",
-    "Dropship Not International Documents",
-    "Dropship International Documents",
-    "Warehouse Not International Documents",
-    "Warehouse International Documents",
+    "Dropship Not International",
+    "Dropship International",
+    "Warehouse Not International",
+    "Warehouse International",
     "Freight Issues",
     "Vendor Credit Memos",
-    "Miscellaneous Documents",
+    "Miscellaneous",
 )
 
 # Reason-string fragments that mark an AP-lane Operations-folder landing
@@ -583,7 +590,7 @@ def _determine_folder_path_core(
     # RULE -1: LocationCode = MSC → Miscellaneous (matches S9 workflow)
     if location_code and location_code.upper() == "MSC":
         return (
-            "Miscellaneous Documents/Misc Invoices - need approval",
+            "Miscellaneous/Misc Invoices - need approval",
             f"LocationCode=MSC → Miscellaneous (vendor={vendor_name})",
             routing_details,
         )
@@ -601,12 +608,12 @@ def _determine_folder_path_core(
     if _is_canpack_vendor(vendor_name):
         if _is_dunnage_related(invoice_description):
             return (
-                "Dropship Not International Documents/Canpack/Dunnage return freight",
+                "Dropship Not International/Canpack/Dunnage return freight",
                 "Canpack dunnage return freight",
                 routing_details,
             )
         return (
-            "Dropship Not International Documents/Canpack",
+            "Dropship Not International/Canpack",
             "All Canpack shipment documents route here",
             routing_details,
         )
@@ -646,12 +653,12 @@ def _determine_folder_path_core(
     if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
-                "S&H Invoices Approved Documents",
+                "S&H Invoices Approved",
                 "Approved S&H invoice",
                 routing_details,
             )
         return (
-            "S&H Invoices Approved Documents",
+            "S&H Invoices Approved",
             "S&H invoice",
             routing_details,
         )
@@ -670,7 +677,7 @@ def _determine_folder_path_core(
         bc_po_resolved = doc.get("bc_po_resolved")
         if order_number and bc_po_resolved is False:
             return (
-                "Miscellaneous Documents/Misc Invoices - need approval",
+                "Miscellaneous/Misc Invoices - need approval",
                 f"PO {order_number} not found as BC purchase order — shipping doc → Misc (S9)",
                 routing_details,
             )
@@ -680,16 +687,16 @@ def _determine_folder_path_core(
 
         if is_international or doc.get("is_international"):
             if freight_direction == "outbound":
-                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
                 return (path, "Outbound international shipment", routing_details)
-            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
             return (path, "International shipment document", routing_details)
 
         # Domestic
         if freight_direction == "outbound":
             subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
             return (
-                f"Warehouse Not International Documents/{subfolder}",
+                f"Warehouse Not International/{subfolder}",
                 f"Outbound domestic → {subfolder}",
                 routing_details,
             )
@@ -697,7 +704,7 @@ def _determine_folder_path_core(
         if freight_direction == "inbound":
             vendor_folder = _get_vendor_subfolder(vendor_name)
             return (
-                f"Dropship Not International Documents/{order_number}" if order_number else f"Dropship Not International Documents",
+                f"Dropship Not International/{order_number}" if order_number else f"Dropship Not International",
                 f"Inbound domestic from {vendor_folder}",
                 routing_details,
             )
@@ -707,7 +714,7 @@ def _determine_folder_path_core(
         if vendor_folder == "Freight":
             return ("Freight Issues", "Freight document (direction unknown)", routing_details)
         return (
-            f"Dropship Not International Documents/{order_number}" if order_number else "Dropship Not International Documents",
+            f"Dropship Not International/{order_number}" if order_number else "Dropship Not International",
             "Shipping document (domestic default)",
             routing_details,
         )
@@ -719,7 +726,7 @@ def _determine_folder_path_core(
         bc_po_resolved = doc.get("bc_po_resolved")
         if order_number and bc_po_resolved is False:
             return (
-                "Miscellaneous Documents/Misc Invoices - need approval",
+                "Miscellaneous/Misc Invoices - need approval",
                 f"PO {order_number} not found as internal BC purchase order (S9 workflow)",
                 routing_details,
             )
@@ -731,16 +738,16 @@ def _determine_folder_path_core(
         # International
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
-                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
                 return (path, "International warehouse invoice", routing_details)
-            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
             return (path, "International vendor invoice", routing_details)
 
         # Domestic warehouse
         if _is_warehouse_order(doc):
             subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
             return (
-                f"Warehouse Not International Documents/{subfolder}",
+                f"Warehouse Not International/{subfolder}",
                 f"Domestic warehouse invoice → {subfolder}",
                 routing_details,
             )
@@ -749,12 +756,12 @@ def _determine_folder_path_core(
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if order_number:
             return (
-                f"Dropship Not International Documents/{order_number}",
+                f"Dropship Not International/{order_number}",
                 f"Domestic vendor invoice ({vendor_folder}) → order {order_number}",
                 routing_details,
             )
         return (
-            "Dropship Not International Documents",
+            "Dropship Not International",
             f"Domestic vendor invoice ({vendor_folder})",
             routing_details,
         )
@@ -763,27 +770,27 @@ def _determine_folder_path_core(
     if doc_type in ("Sales_Order", "Order_Confirmation", "Sales_Quote"):
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
-                path = f"Warehouse International Documents/{order_number}" if order_number else "Warehouse International Documents"
+                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
                 return (path, "International warehouse sales doc", routing_details)
-            path = f"Dropship International Documents/{order_number}" if order_number else "Dropship International Documents"
+            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
             return (path, "International sales document", routing_details)
 
         if _is_warehouse_order(doc):
             subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
             return (
-                f"Warehouse Not International Documents/{subfolder}",
+                f"Warehouse Not International/{subfolder}",
                 f"Domestic warehouse sales doc → {subfolder}",
                 routing_details,
             )
 
         if order_number:
             return (
-                f"Dropship Not International Documents/{order_number}",
+                f"Dropship Not International/{order_number}",
                 "Domestic sales document with order",
                 routing_details,
             )
         return (
-            "Dropship Not International Documents",
+            "Dropship Not International",
             "Domestic sales document",
             routing_details,
         )
@@ -810,12 +817,12 @@ def _determine_folder_path_core(
     if doc_type in ("Bill_of_Lading", "BOL"):
         if order_number:
             return (
-                f"Dropship Not International Documents/{order_number}",
+                f"Dropship Not International/{order_number}",
                 f"Bill of Lading for order {order_number}",
                 routing_details,
             )
         return (
-            "Miscellaneous Documents/Shipping Documents - Unmatched",
+            "Miscellaneous/Shipping Documents - Unmatched",
             "Bill of Lading with no order reference",
             routing_details,
         )
@@ -824,12 +831,12 @@ def _determine_folder_path_core(
     if doc_type in ("OTHER", "Unknown", "Unknown_Document"):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
-                "Miscellaneous Documents/Misc Invoices - approved",
+                "Miscellaneous/Misc Invoices - approved",
                 "Approved miscellaneous document",
                 routing_details,
             )
         return (
-            "Miscellaneous Documents/Misc Invoices - need approval",
+            "Miscellaneous/Misc Invoices - need approval",
             "Miscellaneous document needing approval",
             routing_details,
         )
@@ -838,7 +845,7 @@ def _determine_folder_path_core(
     if doc.get("do_not_pay") or doc.get("status") == "DO_NOT_PAY":
         year = datetime.now().year
         return (
-            f"DO NOT PAY Documents/{year}",
+            f"DO NOT PAY/{year}",
             "Document marked Do Not Pay",
             routing_details,
         )
@@ -846,7 +853,7 @@ def _determine_folder_path_core(
     # FALLBACK
     current_year = datetime.now().year
     return (
-        f"Miscellaneous Documents/Misc Invoices - need approval",
+        f"Miscellaneous/Misc Invoices - need approval",
         f"Default routing for {doc_type}",
         routing_details,
     )

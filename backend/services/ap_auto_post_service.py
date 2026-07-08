@@ -74,7 +74,7 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str =
     vendor_no = (
         doc.get("bc_vendor_number")
         or doc.get("vendor_no")
-        or (doc.get("validation_results") or {}).get("bc_record_info", {}).get("number")
+        or ((doc.get("validation_results") or {}).get("bc_record_info") or {}).get("number")
         or ""
     )
     if not vendor_no:

@@ -687,9 +687,9 @@ def _determine_folder_path_core(
 
         if is_international or doc.get("is_international"):
             if freight_direction == "outbound":
-                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
+                path = "Warehouse International"
                 return (path, "Outbound international shipment", routing_details)
-            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
+            path = "Dropship International"
             return (path, "International shipment document", routing_details)
 
         # Domestic
@@ -704,7 +704,7 @@ def _determine_folder_path_core(
         if freight_direction == "inbound":
             vendor_folder = _get_vendor_subfolder(vendor_name)
             return (
-                f"Dropship Not International/{order_number}" if order_number else f"Dropship Not International",
+                "Dropship Not International",
                 f"Inbound domestic from {vendor_folder}",
                 routing_details,
             )
@@ -714,7 +714,7 @@ def _determine_folder_path_core(
         if vendor_folder == "Freight":
             return ("Freight Issues", "Freight document (direction unknown)", routing_details)
         return (
-            f"Dropship Not International/{order_number}" if order_number else "Dropship Not International",
+            "Dropship Not International",
             "Shipping document (domestic default)",
             routing_details,
         )
@@ -738,9 +738,9 @@ def _determine_folder_path_core(
         # International
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
-                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
+                path = "Warehouse International"
                 return (path, "International warehouse invoice", routing_details)
-            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
+            path = "Dropship International"
             return (path, "International vendor invoice", routing_details)
 
         # Domestic warehouse
@@ -756,7 +756,7 @@ def _determine_folder_path_core(
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if order_number:
             return (
-                f"Dropship Not International/{order_number}",
+                "Dropship Not International",
                 f"Domestic vendor invoice ({vendor_folder}) → order {order_number}",
                 routing_details,
             )
@@ -770,9 +770,9 @@ def _determine_folder_path_core(
     if doc_type in ("Sales_Order", "Order_Confirmation", "Sales_Quote"):
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
-                path = f"Warehouse International/{order_number}" if order_number else "Warehouse International"
+                path = "Warehouse International"
                 return (path, "International warehouse sales doc", routing_details)
-            path = f"Dropship International/{order_number}" if order_number else "Dropship International"
+            path = "Dropship International"
             return (path, "International sales document", routing_details)
 
         if _is_warehouse_order(doc):
@@ -785,7 +785,7 @@ def _determine_folder_path_core(
 
         if order_number:
             return (
-                f"Dropship Not International/{order_number}",
+                "Dropship Not International",
                 "Domestic sales document with order",
                 routing_details,
             )
@@ -817,7 +817,7 @@ def _determine_folder_path_core(
     if doc_type in ("Bill_of_Lading", "BOL"):
         if order_number:
             return (
-                f"Dropship Not International/{order_number}",
+                "Dropship Not International",
                 f"Bill of Lading for order {order_number}",
                 routing_details,
             )

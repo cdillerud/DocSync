@@ -12,10 +12,12 @@ is not configured.
 """
 
 import os
+import re
 import uuid
 import logging
 import httpx
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -242,6 +244,113 @@ async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
         return True
 
 
+def _sanitize_filename_part(value: Optional[str], max_len: int = 40) -> str:
+    """Clean a value for safe inclusion in a filename: strip filesystem/SharePoint-illegal
+    characters, collapse whitespace, and truncate to keep the overall name reasonable."""
+    if not value:
+        return ""
+    value = str(value).strip()
+    value = re.sub(r'[<>:"/\\|?*\n\r\t]', '', value)
+    value = re.sub(r'\s+', ' ', value).strip()
+    return value[:max_len].strip()
+
+
+def _extract_reference_number(doc: Dict[str, Any]) -> str:
+    """Pick the best available reference number for the filename — prefers
+    invoice-relevant fields (since AP invoices are Hub's primary Square9-replacement
+    workload) and falls back to shipping-relevant ones."""
+    extracted = doc.get("extracted_fields") or {}
+    candidates = [
+        doc.get("invoice_number_clean"),
+        doc.get("invoice_number_raw"),
+        doc.get("po_number_clean"),
+        doc.get("po_number_raw"),
+        extracted.get("order_number"),
+        extracted.get("tracking_number"),
+        extracted.get("bol_number"),
+    ]
+    for c in candidates:
+        if c:
+            return _sanitize_filename_part(str(c), max_len=20)
+    return ""
+
+
+def _extract_vendor_name(doc: Dict[str, Any]) -> str:
+    """Pick the best available vendor/shipper name for the filename."""
+    extracted = doc.get("extracted_fields") or {}
+    candidates = [
+        doc.get("vendor_canonical"),
+        doc.get("bc_vendor_number"),
+        extracted.get("vendor"),
+        extracted.get("shipper"),
+        doc.get("vendor_raw"),
+    ]
+    for c in candidates:
+        if c:
+            return _sanitize_filename_part(str(c), max_len=25)
+    return "Unknown"
+
+
+def _extract_document_date(doc: Dict[str, Any]) -> str:
+    """Pick the best available date and format it MMDDYYYY, matching Square9's most
+    common real-world convention. Falls back to created_utc, which is always present."""
+    extracted = doc.get("extracted_fields") or {}
+    candidates = [
+        doc.get("invoice_date_iso"),
+        doc.get("invoice_date"),
+        extracted.get("invoice_date"),
+        extracted.get("ship_date"),
+        extracted.get("order_date"),
+        doc.get("created_utc"),
+    ]
+    for c in candidates:
+        if not c:
+            continue
+        try:
+            date_str = str(c)[:10]  # handles both bare dates and full ISO datetimes
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.strftime("%m%d%Y")
+        except (ValueError, TypeError):
+            continue
+    return ""
+
+
+def generate_square9_style_filename(doc: Dict[str, Any], original_filename: str) -> str:
+    """Build an AP-recognizable filename matching the convention AP is used to from
+    Square9: '[Reference#] [Vendor] [MMDDYYYY].ext' — built from data Hub has already
+    extracted during classification, no new extraction needed.
+
+    Falls back to the original filename if we don't have at least 2 of the 3 real
+    (non-fallback) signals — a sparse or misleading name is worse than the original.
+
+    For batch-split children (multiple pages of one source document), appends a page
+    marker to preserve uniqueness: sibling pages very often share the same vendor and
+    reference number, and without this they'd compute to an identical filename and
+    collide on upload.
+    """
+    ext = ""
+    if "." in original_filename:
+        ext = "." + original_filename.rsplit(".", 1)[-1]
+
+    ref = _extract_reference_number(doc)
+    vendor = _extract_vendor_name(doc)
+    date_str = _extract_document_date(doc)
+
+    meaningful_count = sum([bool(ref), vendor != "Unknown", bool(date_str)])
+    if meaningful_count < 2:
+        return original_filename
+
+    parts = [p for p in [ref, vendor, date_str] if p]
+    base_name = " ".join(parts)
+
+    batch_pages = doc.get("batch_pages")
+    if batch_pages:
+        page_label = "-".join(str(p) for p in batch_pages)
+        base_name = f"{base_name} p{page_label}"
+
+    return base_name + ext
+
+
 async def upload_to_sharepoint_with_routing(
     file_content: bytes,
     file_name: str,
@@ -272,10 +381,17 @@ async def upload_to_sharepoint_with_routing(
 
     await ensure_sharepoint_folder_exists(full_folder_path)
 
-    result = await upload_to_sharepoint(file_content, file_name, full_folder_path)
+    upload_file_name = generate_square9_style_filename(doc, file_name)
+    if upload_file_name != file_name:
+        logger.info("[Filename] Doc %s: %r -> %r (Square9-style convention)",
+                     doc.get("id", "unknown"), file_name, upload_file_name)
+
+    result = await upload_to_sharepoint(file_content, upload_file_name, full_folder_path)
 
     result["folder_path"] = full_folder_path
     result["routing_reason"] = routing_reason
     result["routing_details"] = routing_details
+    result["uploaded_file_name"] = upload_file_name
+    result["original_file_name"] = file_name
 
     return result

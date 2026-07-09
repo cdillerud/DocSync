@@ -2155,6 +2155,12 @@ async def intake_document_from_bytes(
         update_data["folder_routing_reason"] = sp_result.get("routing_reason")
         update_data["folder_routing_details"] = sp_result.get("routing_details")
         update_data["freight_direction"] = freight_direction
+        # Square9-style filename convention: what actually got uploaded, and what
+        # the original ingested filename was (for traceability — the ingest-time
+        # "file_name" field is left untouched; this is upload-specific).
+        if sp_result.get("uploaded_file_name"):
+            update_data["sharepoint_file_name"] = sp_result["uploaded_file_name"]
+            update_data["original_file_name"] = sp_result.get("original_file_name")
     else:
         update_data["last_error"] = f"SharePoint upload failed: {sp_error}"
 

@@ -41,7 +41,12 @@ SHAREPOINT_TARGET = os.environ.get('SHAREPOINT_TARGET', 'test').strip().lower()
 
 _SHAREPOINT_TARGETS = {
     'test': {
-        'hostname': 'gamerpackaging.sharepoint.com',
+        # Corrected 2026-07-09: this was wrongly hardcoded as
+        # 'gamerpackaging.sharepoint.com' (missing the '1') - the actual test
+        # site lives under the SAME tenant as production, just a different
+        # site path. Verified directly via Graph API (GET /v1.0/sites/...
+        # returned HTTP 200 with real site metadata, description="Testing").
+        'hostname': 'gamerpackaging1.sharepoint.com',
         'site_path': '/sites/GPI-DocumentHub-Test',
         'library_name': 'Shared Documents',
         'base_folder': '',

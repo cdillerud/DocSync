@@ -260,16 +260,32 @@ def _sanitize_filename_part(value: Optional[str], max_len: int = 40) -> str:
     return value[:max_len].strip()
 
 
+def _best_of_clean_and_raw(raw: Optional[str], clean: Optional[str]) -> Optional[str]:
+    """Pick between a 'clean' and 'raw' version of a reference-number field.
+
+    If raw contains a comma, that signals multiple distinct values were found
+    upstream (e.g. "W117981, P0025312") - in that case prefer splitting raw and
+    taking the first value, since the corresponding 'clean' field may have
+    silently merged multiple values together with no separator at all (a known
+    upstream normalization issue, e.g. "W117981P0025312"). Otherwise prefer
+    clean, since a properly-normalized single value is typically more
+    consistent than raw.
+    """
+    if raw and "," in raw:
+        first = raw.split(",")[0].strip()
+        if first:
+            return first
+    return clean or raw
+
+
 def _extract_reference_number(doc: Dict[str, Any]) -> str:
     """Pick the best available reference number for the filename — prefers
     invoice-relevant fields (since AP invoices are Hub's primary Square9-replacement
     workload) and falls back to shipping-relevant ones."""
     extracted = doc.get("extracted_fields") or {}
     candidates = [
-        doc.get("invoice_number_clean"),
-        doc.get("invoice_number_raw"),
-        doc.get("po_number_clean"),
-        doc.get("po_number_raw"),
+        _best_of_clean_and_raw(doc.get("invoice_number_raw"), doc.get("invoice_number_clean")),
+        _best_of_clean_and_raw(doc.get("po_number_raw"), doc.get("po_number_clean")),
         extracted.get("order_number"),
         extracted.get("tracking_number"),
         extracted.get("bol_number"),

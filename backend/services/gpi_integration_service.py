@@ -52,7 +52,7 @@ BC_SO_FALLBACK_ITEM_CODE = os.environ.get('BC_SO_FALLBACK_ITEM_CODE', os.environ
 _token_cache = {"access_token": None, "expires_at": 0}
 
 # Company ID cache (auto-detected from BC when BC_COMPANY_ID env var is empty)
-_company_id_cache = {"id": None}
+_company_id_cache = {}  # keyed by environment string, since company GUIDs can differ across BC environments
 
 # Check if real BC credentials are available
 HAS_CREDENTIALS = bool(BC_TENANT_ID and BC_CLIENT_ID and BC_CLIENT_SECRET)
@@ -91,15 +91,22 @@ def _check_write_protection(operation: str):
         )
 
 
-async def _resolve_company_id() -> str:
-    """Resolve BC company ID — use env var if set, otherwise auto-detect via standard API and cache."""
+async def _resolve_company_id(environment: str = None) -> str:
+    """Resolve BC company ID — use env var if set, otherwise auto-detect via standard API and cache.
+
+    Args:
+        environment: which BC environment to auto-detect against (falls through to
+            BC_WRITE_ENVIRONMENT if not given, preserving prior default behavior).
+            Ignored if BC_COMPANY_ID is set, since that's environment-agnostic override.
+    """
     if BC_COMPANY_ID:
         return BC_COMPANY_ID
-    if _company_id_cache["id"]:
-        return _company_id_cache["id"]
-    cid = await _get_company_id_standard_api()
-    _company_id_cache["id"] = cid
-    logger.info("Auto-detected BC company ID: %s", cid)
+    env = environment or BC_WRITE_ENVIRONMENT
+    if env in _company_id_cache:
+        return _company_id_cache[env]
+    cid = await _get_company_id_standard_api(environment=env)
+    _company_id_cache[env] = cid
+    logger.info("Auto-detected BC company ID for %s: %s", env, cid)
     return cid
 
 
@@ -120,7 +127,7 @@ async def _api_request(method: str, entity_set: str, payload: Optional[Dict] = N
         raise ValueError("BC credentials not configured. Set BC_TENANT_ID, BC_CLIENT_ID, BC_CLIENT_SECRET in .env")
 
     token = await _get_token()
-    company_id = await _resolve_company_id()
+    company_id = await _resolve_company_id(environment=environment)
     url = _build_url(entity_set, environment=environment, company_id=company_id)
     headers = {
         "Authorization": f"Bearer {token}",
@@ -267,10 +274,17 @@ async def create_purchase_order(
     }
 
 
-async def _get_company_id_standard_api() -> str:
-    """Get the BC company ID using the standard API (for line creation)."""
+async def _get_company_id_standard_api(environment: str = None) -> str:
+    """Get the BC company ID using the standard API.
+
+    Args:
+        environment: which BC environment to query (falls through to
+            BC_WRITE_ENVIRONMENT if not given, preserving prior default behavior
+            for existing callers that don't specify one).
+    """
+    env = environment or BC_WRITE_ENVIRONMENT
     token = await _get_token()
-    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies"
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{BC_STANDARD_API}/companies"
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
         resp = await client.get(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/json"})
         resp.raise_for_status()

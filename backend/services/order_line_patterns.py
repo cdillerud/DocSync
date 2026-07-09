@@ -39,6 +39,7 @@ Pattern structure:
 import logging
 import math
 import re
+import httpx
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -232,23 +233,32 @@ async def learn_from_bc_posted_orders(
     if not demo_mode:
         try:
             from services.gpi_integration_service import (
-                _api_request, BC_READ_ENVIRONMENT, HAS_CREDENTIALS,
+                _get_token, _resolve_company_id, GPI_API_BASE, BC_TENANT_ID,
+                BC_READ_ENVIRONMENT, HAS_CREDENTIALS,
             )
             if not HAS_CREDENTIALS:
                 logger.info("[BCLearn] No BC credentials — skipping live query for %s", customer_no)
             else:
-                # Query posted sales invoices for this customer (READ environment)
-                result = await _api_request(
-                    "GET",
-                    "salesInvoices",
-                    params={
-                        "$filter": f"customerNumber eq '{customer_no}'",
-                        "$orderby": "invoiceDate desc",
-                        "$top": str(order_limit),
-                        "$expand": "salesInvoiceLines",
-                    },
-                    environment=BC_READ_ENVIRONMENT,
-                )
+                # salesInvoices is a raw BC entity, only available on BC's standard API
+                # (api/v2.0/...) — NOT on the custom GPI integration API (api/gpi/integration/v1.0/...),
+                # which only exposes purpose-built "*Requests" staging entities and integrationLogs.
+                # See bc_reference_cache_service.py for the same standard-API read pattern.
+                token = await _get_token()
+                company_id = await _resolve_company_id(environment=BC_READ_ENVIRONMENT)
+                url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/salesInvoices"
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.get(
+                        url,
+                        headers={"Authorization": f"Bearer {token}"},
+                        params={
+                            "$filter": f"customerNumber eq '{customer_no}'",
+                            "$orderby": "invoiceDate desc",
+                            "$top": str(order_limit),
+                            "$expand": "salesInvoiceLines",
+                        },
+                    )
+                    resp.raise_for_status()
+                    result = resp.json()
                 invoices = result.get("value", [])
                 logger.info("[BCLearn] Fetched %d posted invoices for %s", len(invoices), customer_no)
 

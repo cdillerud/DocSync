@@ -87,5 +87,11 @@ async def main():
             if m["computed_category"] == "Dropship Not International" and m["real_category"] == "Warehouse Not International":
                 print(f"  {m['doc_id']}  {m['file_name']}")
 
+        print()
+        print("=== doc_ids for Warehouse-computed / Dropship-real (reverse pattern) ===")
+        for m in mismatches:
+            if m["computed_category"] == "Warehouse Not International" and m["real_category"] == "Dropship Not International":
+                print(f"  {m['doc_id']}  {m['file_name']}")
+
 
 asyncio.run(main())

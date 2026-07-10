@@ -122,8 +122,8 @@ async def fetch_vendor_invoices_from_bc(
     env = environment or BC_READ_ENVIRONMENT
     url = f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/companies({company_id})/purchaseInvoices"
     params = {
-        "$filter": f"buyFromVendorNumber eq '{vendor_no}'",
-        "$select": "id,number,vendorInvoiceNumber,buyFromVendorNumber,buyFromVendorName,postingDate,dueDate,currencyCode,totalAmountIncludingTax,totalAmountExcludingTax,status,paymentTermsId",
+        "$filter": f"vendorNumber eq '{vendor_no}'",
+        "$select": "id,number,vendorInvoiceNumber,vendorNumber,vendorName,postingDate,dueDate,currencyCode,totalAmountIncludingTax,totalAmountExcludingTax,status,paymentTermsId",
         "$expand": "purchaseInvoiceLines($select=id,lineType,lineObjectNumber,description,quantity,unitCost,amountExcludingTax)",
         "$top": str(max_invoices),
         "$orderby": "postingDate desc",

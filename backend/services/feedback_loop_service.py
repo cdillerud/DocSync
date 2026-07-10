@@ -262,6 +262,7 @@ async def _learn_folder_routing(db, event: Dict):
     if not before_folder or not after_folder or before_folder == after_folder:
         return False
     
+    metadata = event.get("metadata") or {}
     await db.routing_feedback.update_one(
         {"document_id": event.get("document_id", "")},
         {"$set": {
@@ -270,6 +271,8 @@ async def _learn_folder_routing(db, event: Dict):
             "vendor_id": event.get("vendor_id", ""),
             "ai_routed_to": before_folder,
             "human_moved_to": after_folder,
+            "extracted_fields": metadata.get("extracted_fields", {}),
+            "file_name": metadata.get("file_name", ""),
             "learned_at": datetime.now(timezone.utc).isoformat(),
         }},
         upsert=True,

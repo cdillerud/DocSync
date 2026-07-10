@@ -57,6 +57,8 @@ async def main():
 
         if real_category.lower() == computed_category.lower():
             agree += 1
+            if any(v in (doc.get("vendor_canonical") or "").lower() for v in ("ball", "o-i", "owens")):
+                print(f"  AGREEING Ball/O-I case: {doc.get('file_name')} -> {computed_category} (real={real_category})")
         else:
             disagree += 1
             mismatches.append({

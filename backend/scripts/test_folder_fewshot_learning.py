@@ -11,9 +11,7 @@ TRAINING = {
     "507240_6319336_2026-07-09.pdf": "WH NOT International",
 }
 TEST = {
-    "507240_6319020_2026-07-09.pdf": "DS NOT International",
-    "507240_6319026_2026-07-09.pdf": "Vendor Credit memo",
-    "507240_6319610_2026-07-09.pdf": "WH NOT International",
+    "4222_001.pdf": "DS NOT International",
 }
 
 
@@ -72,12 +70,13 @@ async def main():
 
     for fname, d in test_data.items():
         prompt = f"""You are helping file AP documents into the correct SharePoint folder.
-Here are real examples of documents from the same vendor and their CORRECT folder,
+Here are real examples of documents and their CORRECT folder,
 as determined by an experienced AP team member:
 
 {examples_text}
 
-Now, based on these examples, predict the correct folder for this NEW document:
+Now, based on these examples, predict the correct folder for this NEW document
+(which may be from a different vendor than the examples above):
 
 Extracted fields: {json.dumps(d['fields'], default=str)}
 

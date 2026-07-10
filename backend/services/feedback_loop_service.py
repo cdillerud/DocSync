@@ -255,6 +255,18 @@ async def _learn_folder_routing(db, event: Dict):
     """
     When a user moves a document to a different folder, record this
     as a routing correction.
+
+    IMPORTANT (found 2026-07-10): this writes into the SAME MongoDB
+    collection ("routing_feedback") as services/routing_feedback_service.py,
+    but with a COMPLETELY DIFFERENT, INCOMPATIBLE schema. That other
+    service is the REAL, LIVE learning layer - it's actually consulted by
+    folder_routing_service.py's route_with_feedback() before falling
+    through to rule-based routing. THIS function's records (keyed by
+    document_id) are never looked up by anything and have no effect on
+    live routing. If you need routing corrections to actually influence
+    future document routing, use routing_feedback_service.record_correction()
+    instead - this function appears to currently have no real caller
+    besides the generic record_feedback() dispatcher.
     """
     before_folder = (event.get("before") or {}).get("folder", "")
     after_folder = (event.get("after") or {}).get("folder", "")

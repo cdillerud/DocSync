@@ -143,12 +143,17 @@ async def main():
         print()
 
         # Discover real production folder structure under the base folder
-        prod_folders = await list_all_folders(client, token, prod_drive_id, PROD_BASE_FOLDER)
-        print(f"Found {len(prod_folders)} folders under production's base folder.")
-        for f in prod_folders[:20]:
+        all_prod_folders = await list_all_folders(client, token, prod_drive_id, PROD_BASE_FOLDER)
+        # Only replicate top-level category folders (no "/" in the relative path) -
+        # skip deep historical/one-off subfolders (e.g. "DO NOT PAY/2019",
+        # "Dropship International/111781") that Hub's current logic doesn't
+        # generate and that would just clutter the test site with structure
+        # that'll never actually get used.
+        prod_folders = [f for f in all_prod_folders if "/" not in f]
+        print(f"Found {len(all_prod_folders)} total folders under production's base folder; "
+              f"replicating {len(prod_folders)} top-level category folders only.")
+        for f in prod_folders:
             print(f"  {f}")
-        if len(prod_folders) > 20:
-            print(f"  ... and {len(prod_folders) - 20} more")
         print()
 
         # Discover what's currently on the test site root

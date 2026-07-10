@@ -103,9 +103,16 @@ async def main():
             skipped_no_vendor += 1
             continue
 
-        # What Hub's CURRENT rule-based logic would compute, for comparison
+        # What Hub's CURRENT rule-based logic would compute, for comparison -
+        # use the FRESH classification result too, not just fresh extracted
+        # fields. Without this, doc_for_routing still carries the stale
+        # document_type from whenever this document was originally processed
+        # (often "Unknown" from yesterday's model-retirement outage), which
+        # forces every comparison into the generic Miscellaneous fallback
+        # regardless of what the fresh extraction actually found.
         doc_for_routing = dict(doc)
         doc_for_routing["extracted_fields"] = extracted_fields
+        doc_for_routing["document_type"] = extraction.get("suggested_job_type") or doc.get("document_type")
         original_path, reason, details = await route_with_feedback(
             doc_for_routing,
             freight_direction=extracted_fields.get("freight_direction"),

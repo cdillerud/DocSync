@@ -643,6 +643,8 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
     Returns:
         {resolved: bool, vendor_no: str, vendor_name: str, method: str, score: float}
     """
+    import time as _time
+    _t0 = _time.monotonic()
     from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_score
 
     extracted = doc.get("extracted_fields") or {}
@@ -766,6 +768,12 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
                             best_score = abbrev_score
                             best_match = {"vendor_no": vno, "vendor_name": vname,
                                           "method": f"abbreviation ({vno}≈{word})"}
+
+    _elapsed = _time.monotonic() - _t0
+    logger.info(
+        "[GapCloser:VendorResolve:TIMING] doc=%s profiles_checked=%d elapsed=%.2fs best_score=%.2f",
+        doc.get("id", "")[:12], len(profiles), _elapsed, best_score,
+    )
 
     if not best_match or best_score < min_score:
         return {

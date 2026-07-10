@@ -79,5 +79,11 @@ async def main():
         for (computed, real), count in pair_counts.most_common(30):
             print(f"  {count:3d}x  computed={computed!r:35s} real={real!r}")
 
+        print()
+        print("=== doc_ids for Dropship-computed / Warehouse-real specifically ===")
+        for m in mismatches:
+            if m["computed_category"] == "Dropship Not International" and m["real_category"] == "Warehouse Not International":
+                print(f"  {m['doc_id']}  {m['file_name']}")
+
 
 asyncio.run(main())

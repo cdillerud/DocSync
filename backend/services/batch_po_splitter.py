@@ -61,20 +61,28 @@ def detect_batch_po(file_content: bytes, document_type: str) -> dict:
     if page_count < AUTO_SPLIT_MIN_PAGES:
         return {"should_split": False, "page_count": page_count, "reason": "single_page"}
 
-    # For known splittable types, always split multi-page docs
+    # For known splittable types, use intelligent boundary detection to decide
+    # whether this is genuinely multiple distinct documents or one cohesive
+    # multi-page document that just happens to span several pages.
     if document_type in SPLITTABLE_TYPES:
-        # Use intelligent boundary detection
         from services.document_boundary_service import analyze_document_boundaries
         analysis = analyze_document_boundaries(file_content)
 
+        if analysis.get("should_split"):
+            return {
+                "should_split": True,
+                "page_count": page_count,
+                "document_count": analysis.get("document_count", page_count),
+                "groups": analysis.get("groups", []),
+                "boundaries": analysis.get("boundaries", []),
+                "reason": analysis.get("analysis", f"multi_page ({page_count} pages)"),
+                "split_mode": "boundary_aware",
+            }
         return {
-            "should_split": True,
+            "should_split": False,
             "page_count": page_count,
-            "document_count": analysis.get("document_count", page_count),
-            "groups": analysis.get("groups", []),
-            "boundaries": analysis.get("boundaries", []),
-            "reason": analysis.get("analysis", f"multi_page ({page_count} pages)"),
-            "split_mode": "boundary_aware" if analysis.get("document_count", 0) > 1 else "per_page",
+            "document_count": 1,
+            "reason": analysis.get("analysis", f"single_cohesive_document ({page_count} pages)"),
         }
 
     # For unknown types, still split if multi-page (classify each page independently)

@@ -17,7 +17,10 @@ async def main():
 
     cursor = db.hub_documents.find({
         "created_utc": {"$regex": f"^{TODAY_PREFIX}"},
-        "status": {"$ne": "batch_parent"},
+        "$or": [
+            {"batch_children_ids": {"$exists": False}},
+            {"batch_children_ids": {"$size": 0}},
+        ],
     })
     docs = await cursor.to_list(length=None)
     total = len(docs)

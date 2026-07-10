@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import re
+import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, BackgroundTasks, Body
 from typing import Optional
@@ -4517,12 +4518,13 @@ async def run_intelligence_backfill():
     return results
 
 
-@router.post("/system/run-full-cycle")
-async def run_full_cycle():
+async def _run_full_cycle_work(run_id: str):
     """
-    ONE BUTTON TO RULE THEM ALL.
+    Runs the complete intelligence cycle in the correct order, writing
+    incremental progress to db.full_cycle_runs after EVERY step (not just
+    at the end) so callers can poll for live status instead of holding
+    an HTTP request open for the whole multi-minute duration.
 
-    Runs the complete intelligence cycle in the correct order:
     1. Force Cleanup — sync stuck readiness→status mismatches
     2. Intelligence Backfill — 14-step gap closer + vendor maturity + duplicate clearing
     3. Re-evaluate Readiness — batch readiness evaluation for all open docs
@@ -4530,34 +4532,43 @@ async def run_full_cycle():
     5. Recalibrate Confidence — rebuild confidence accuracy bands
     6. Learning Pulse Backfill — update per-document learning outcomes
     7. Deep Learning — self-correction audit + vendor scoring
-
-    This replaces the need to manually press 10+ buttons in the correct order.
     """
     from deps import get_db
     db = get_db()
     results = {"steps_completed": 0, "steps_total": 10, "details": {}}
     step = 0
 
+    async def _persist(current_step_key: str, current_step_status: dict):
+        results["details"][current_step_key] = current_step_status
+        await db.full_cycle_runs.update_one(
+            {"run_id": run_id},
+            {"$set": {
+                "steps_completed": results["steps_completed"],
+                "details": results["details"],
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
     # ── Step 1: Force Cleanup Inbox ──
     step += 1
     try:
         from routers.readiness import sync_readiness_to_status
         cleanup = await sync_readiness_to_status()
-        results["details"]["1_cleanup"] = {
+        await_result = {
             "status": "ok",
             "total_fixed": cleanup.get("total_fixed", 0),
             "remaining": cleanup.get("remaining_stuck", 0),
         }
     except Exception as e:
-        results["details"]["1_cleanup"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("1_cleanup", await_result)
 
     # ── Step 2: Intelligence Backfill (14 sub-steps) ──
     step += 1
     try:
         backfill = await run_intelligence_backfill()
-        # Summarize the 14 sub-steps into key numbers
-        results["details"]["2_intelligence"] = {
+        await_result = {
             "status": "ok",
             "escalation_tracked": (backfill.get("escalation_backfill") or {}).get("tracked", 0),
             "duplicates_cleared": (backfill.get("duplicate_clear") or {}).get("cleared", 0),
@@ -4568,38 +4579,41 @@ async def run_full_cycle():
             "so_gaps_resolved": (backfill.get("so_revalidation") or {}).get("resolved", 0),
         }
     except Exception as e:
-        results["details"]["2_intelligence"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("2_intelligence", await_result)
 
     # ── Step 2.5: Fix Validation Gaps (PO Learning + Vendor Auto-Resolution) ──
     step += 1
     try:
         from services.gap_closer_service import fix_all_validation_gaps
         gap_fix = await fix_all_validation_gaps(db, limit=500)
-        results["details"]["2b_validation_gaps"] = {
+        await_result = {
             "status": "ok",
             "po_vendors_learned": gap_fix.get("po_learning", {}).get("vendors_learned", 0),
             "vendors_resolved": gap_fix.get("vendor_resolution", {}).get("resolved", 0),
             "docs_upgraded": gap_fix.get("reevaluation", {}).get("upgraded", 0),
         }
     except Exception as e:
-        results["details"]["2b_validation_gaps"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("2b_validation_gaps", await_result)
 
     # ── Step 3: Re-evaluate Readiness ──
     step += 1
     try:
         from services.document_readiness_service import batch_reevaluate_all
         reeval = await batch_reevaluate_all(limit=5000)
-        results["details"]["3_readiness"] = {
+        await_result = {
             "status": "ok",
             "processed": reeval.get("total_processed", 0),
             "corrections": reeval.get("total_corrections", 0),
             "auto_acted": reeval.get("auto_acted", 0),
         }
     except Exception as e:
-        results["details"]["3_readiness"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("3_readiness", await_result)
 
     # ── Step 4: Auto-Approve Proven Drafts ──
     step += 1
@@ -4609,55 +4623,55 @@ async def run_full_cycle():
             require_stable_vendor=True, require_bc_link=False,
             min_routing_score=0, force=False,
         )
-        results["details"]["4_auto_approve"] = {
+        await_result = {
             "status": "ok",
             "approved": approve.get("approved", 0),
             "skipped": approve.get("skipped", 0),
         }
     except Exception as e:
-        results["details"]["4_auto_approve"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("4_auto_approve", await_result)
 
     # ── Step 5: Recalibrate Confidence ──
     step += 1
     try:
         recal = await recalibrate_confidence_bands()
-        results["details"]["5_recalibrate"] = {
-            "status": "ok",
-            "documents_processed": recal.get("documents_processed", 0),
-        }
+        await_result = {"status": "ok", "documents_processed": recal.get("documents_processed", 0)}
     except Exception as e:
-        results["details"]["5_recalibrate"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("5_recalibrate", await_result)
 
     # ── Step 5b: Recalibrate Escalation Intelligence ──
-    # Rebuild escalation data from actual document outcomes (not inflated re-evaluation counts)
     step += 1
     try:
         from services.escalation_intelligence_service import recalibrate_escalation_intelligence
         esc_recal = await recalibrate_escalation_intelligence(db, limit=5000)
-        results["details"]["5b_escalation_recal"] = {
+        await_result = {
             "status": "ok",
             "combos_recalibrated": esc_recal.get("combos_recalibrated", 0),
             "combos_escalated": esc_recal.get("combos_escalated", 0),
             "combos_automated": esc_recal.get("combos_automated", 0),
         }
     except Exception as e:
-        results["details"]["5b_escalation_recal"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("5b_escalation_recal", await_result)
 
     # ── Step 6: Learning Pulse Backfill ──
     step += 1
     try:
         pulse = await backfill_per_document_learning(limit=500, background_tasks=None)
-        results["details"]["6_learning_pulse"] = {
+        await_result = {
             "status": "ok",
             "processed": pulse.get("processed", 0),
             "new_outcomes": pulse.get("new_outcomes", 0),
         }
     except Exception as e:
-        results["details"]["6_learning_pulse"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("6_learning_pulse", await_result)
 
     # ── Step 7: Deep Learning (Self-Correct + Score) ──
     step += 1
@@ -4665,35 +4679,82 @@ async def run_full_cycle():
         from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
         audit = await run_self_correction_audit(db)
         maturity = await compute_all_vendor_maturity(db)
-        results["details"]["7_deep_learning"] = {
+        await_result = {
             "status": "ok",
             "self_correction_audited": audit.get("audited", 0),
             "drifts_found": audit.get("drift_count", 0),
             "vendors_scored": maturity.get("computed", 0),
         }
     except Exception as e:
-        results["details"]["7_deep_learning"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("7_deep_learning", await_result)
 
     # ── Step 8: Final Cleanup — sync readiness→status for all docs upgraded during this cycle ──
     step += 1
     try:
         from routers.readiness import sync_readiness_to_status
         final_cleanup = await sync_readiness_to_status()
-        results["details"]["8_final_cleanup"] = {
+        await_result = {
             "status": "ok",
             "total_fixed": final_cleanup.get("total_fixed", 0),
             "remaining": final_cleanup.get("remaining_stuck", 0),
         }
     except Exception as e:
-        results["details"]["8_final_cleanup"] = {"status": "error", "error": str(e)}
+        await_result = {"status": "error", "error": str(e)}
     results["steps_completed"] = step
+    await _persist("8_final_cleanup", await_result)
 
-    # ── Summary ──
+    # ── Summary + mark complete ──
     ok_count = sum(1 for d in results["details"].values() if d.get("status") == "ok")
-    results["summary"] = f"{ok_count}/{results['steps_total']} steps completed successfully"
+    summary = f"{ok_count}/{results['steps_total']} steps completed successfully"
+    await db.full_cycle_runs.update_one(
+        {"run_id": run_id},
+        {"$set": {
+            "status": "completed",
+            "summary": summary,
+            "completed_utc": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
 
-    return results
+
+@router.post("/system/run-full-cycle")
+async def run_full_cycle():
+    """
+    ONE BUTTON TO RULE THEM ALL.
+
+    Returns immediately with a run_id and launches the actual multi-minute
+    cycle as a background task, rather than holding the HTTP connection
+    open for the whole duration (previously several minutes, during which
+    the single-worker backend could not serve any other request promptly).
+    Poll GET /system/run-full-cycle/status/{run_id} for live progress.
+    """
+    from deps import get_db
+    db = get_db()
+    run_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    await db.full_cycle_runs.insert_one({
+        "run_id": run_id,
+        "status": "running",
+        "steps_completed": 0,
+        "steps_total": 10,
+        "details": {},
+        "started_utc": now,
+        "updated_utc": now,
+    })
+    asyncio.create_task(_run_full_cycle_work(run_id))
+    return {"run_id": run_id, "status": "running"}
+
+
+@router.get("/system/run-full-cycle/status/{run_id}")
+async def get_run_full_cycle_status(run_id: str):
+    """Poll for live progress of a run-full-cycle background run."""
+    from deps import get_db
+    db = get_db()
+    doc = await db.full_cycle_runs.find_one({"run_id": run_id}, {"_id": 0})
+    if not doc:
+        return {"status": "not_found", "run_id": run_id}
+    return doc
 
 
 async def _batch_revalidate_po_gaps(db, limit: int = 200) -> dict:

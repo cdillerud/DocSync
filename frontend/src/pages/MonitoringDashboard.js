@@ -78,12 +78,33 @@ export default function MonitoringDashboard() {
     setBackfillRunning(true);
     setBackfillResult(null);
     try {
-      const res = await fetch(`${API}/api/posting-patterns/system/run-full-cycle`, { method: 'POST' });
-      if (res.ok) {
-        const result = await res.json();
-        setBackfillResult(result);
-        await fetchAll();
+      const startRes = await fetch(`${API}/api/posting-patterns/system/run-full-cycle`, { method: 'POST' });
+      if (!startRes.ok) {
+        setBackfillRunning(false);
+        return;
       }
+      const { run_id } = await startRes.json();
+
+      // Poll for live progress instead of holding one long request open -
+      // the backend now returns immediately and runs the actual multi-minute
+      // cycle in the background. Safety cap: stop after ~30 min (600 polls
+      // at 3s each) in case a run never completes.
+      const maxPolls = 600;
+      let pollCount = 0;
+      let done = false;
+      while (!done && pollCount < maxPolls) {
+        const statusRes = await fetch(`${API}/api/posting-patterns/system/run-full-cycle/status/${run_id}`);
+        if (statusRes.ok) {
+          const status = await statusRes.json();
+          setBackfillResult(status);
+          done = status.status === 'completed';
+        }
+        pollCount += 1;
+        if (!done) {
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+      }
+      await fetchAll();
     } catch (e) {
       console.error('[Monitor] full cycle failed', e);
     }

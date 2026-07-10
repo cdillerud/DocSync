@@ -73,12 +73,11 @@ async def main():
     print()
 
     if mismatches:
-        print("=== MISMATCHES ===")
-        for m in mismatches:
-            print(f"  {m['file_name']}")
-            print(f"    real (Square9):     {m['real_category']}")
-            print(f"    computed (current): {m['computed_category']}")
-            print(f"    doc_id: {m['doc_id']}")
+        from collections import Counter
+        pair_counts = Counter((m["computed_category"], m["real_category"]) for m in mismatches)
+        print("=== MISMATCH PATTERNS (computed -> real), most common first ===")
+        for (computed, real), count in pair_counts.most_common(30):
+            print(f"  {count:3d}x  computed={computed!r:35s} real={real!r}")
 
 
 asyncio.run(main())

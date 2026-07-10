@@ -358,7 +358,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
                 "confidence": heuristic_confidence,
                 "extracted_fields": merged_fields,
                 "reasoning": f"Heuristic classification ({heuristic_result.get('model', 'heuristic')}), LLM extraction",
-                "model": heuristic_result.get("model", "heuristic") + "+gemini-3-pro-preview",
+                "model": heuristic_result.get("model", "heuristic") + "+gemini-2.5-pro",
                 "page_count": llm_result.get("page_count", 1),
                 "classified_from_page": llm_result.get("classified_from_page"),
             }
@@ -532,7 +532,7 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-3-pro-preview")
+        ).with_model("gemini", "gemini-2.5-pro")
 
         file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)
 
@@ -596,7 +596,7 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             "confidence": float(result.get("confidence", 0.0)),
             "extracted_fields": extracted,
             "reasoning": result.get("reasoning", ""),
-            "model": "gemini-3-pro-preview",
+            "model": "gemini-2.5-pro",
             "page_count": page_count,
             "classified_from_page": 1 if page_count > 1 else None,
         }

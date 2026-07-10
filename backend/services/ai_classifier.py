@@ -37,8 +37,13 @@ VALID_DOC_TYPES = [
 ]
 
 # AI Model configuration
+# 2026-07-10: gemini-3-pro-preview was retired by Google (confirmed live,
+# HTTP 404 "This model models/gemini-3-pro-preview is no longer available"
+# from the provider itself, not a bug in our code). Switched to
+# gemini-2.5-pro, confirmed working in real production traffic throughout
+# the prior session (2026-07-09).
 AI_MODEL_PROVIDER = "gemini"
-AI_MODEL_NAME = "gemini-3-pro-preview"
+AI_MODEL_NAME = "gemini-2.5-pro"
 
 # Default confidence threshold for accepting AI classification
 DEFAULT_CONFIDENCE_THRESHOLD = 0.8

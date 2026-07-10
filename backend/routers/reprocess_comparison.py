@@ -364,7 +364,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
                 "invoice_number": llm_ef.get("invoice_number") or "",
                 "total_amount": llm_ef.get("total_amount") or llm_ef.get("amount") or "",
                 "line_items_count": len(llm_ef.get("line_items") or []),
-                "model": llm_data.get("method", "gemini-3-pro-preview"),
+                "model": llm_data.get("method", "gemini-2.5-pro"),
                 "routing_flags": {
                     "is_international": llm_ef.get("is_international"),
                     "is_credit_memo": llm_ef.get("is_credit_memo"),

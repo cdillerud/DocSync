@@ -522,7 +522,7 @@ async def stage_classify_llm(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-3-pro-preview")
+        ).with_model("gemini", "gemini-2.5-pro")
 
         file_content = FileContentWithMimeType(
             file_path=actual_path, mime_type=mime_type
@@ -590,7 +590,7 @@ async def stage_classify_llm(
             data={
                 "document_type": doc_type,
                 "confidence": confidence,
-                "method": "llm:gemini-3-pro-preview",
+                "method": "llm:gemini-2.5-pro",
                 "reasoning": result.get("reasoning", ""),
                 "llm_extracted_fields": extracted,
                 "page_count": page_count,

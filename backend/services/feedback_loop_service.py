@@ -266,6 +266,7 @@ async def _learn_folder_routing(db, event: Dict):
         {"document_id": event.get("document_id", "")},
         {"$set": {
             "document_id": event.get("document_id", ""),
+            "routing_key": event.get("document_id", ""),
             "vendor_id": event.get("vendor_id", ""),
             "ai_routed_to": before_folder,
             "human_moved_to": after_folder,

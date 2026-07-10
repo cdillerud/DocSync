@@ -999,37 +999,6 @@ def _is_warehouse_order(doc: Dict) -> bool:
     desc = ((doc.get("extracted_fields") or {}).get("description") or "").lower()
     tags = doc.get("tags", [])
 
-    # Known warehouse-relationship vendors — confirmed via real Square9 ground
-    # truth (2026-07-10): 13 real Ball/O-I invoices all filed to Warehouse Not
-    # International, not Dropship, regardless of filename/description content
-    # (their filenames are opaque system-generated references with no keyword
-    # signal at all, e.g. "507240_6308357_2026-07-01.pdf"). Checked against
-    # every confidently-matched document in today's parity data first: zero
-    # counter-examples of a Ball/O-I document correctly landing in Dropship.
-    #
-    # Checks each candidate vendor-name field independently (not just the
-    # first non-empty one via `or`) - confirmed via a real case that
-    # vendor_canonical can be wrong/defaulted (e.g. to our own company name,
-    # after upstream vendor-alias matching fails to recognize a formal legal
-    # name like "O-I PACKAGING SOLUTIONS LLC") while the correct name is still
-    # sitting correctly in extracted_fields/normalized_fields/ai_extraction.
-    # A single `or`-combined value would let the wrong vendor_canonical shadow
-    # the correct one and never reach it.
-    vendor_name_candidates = [
-        doc.get("vendor_canonical"),
-        (doc.get("normalized_fields") or {}).get("vendor"),
-        (doc.get("extracted_fields") or {}).get("vendor"),
-        (doc.get("ai_extraction") or {}).get("vendor"),
-        doc.get("vendor_raw"),
-    ]
-    for candidate in vendor_name_candidates:
-        if not candidate:
-            continue
-        candidate_lower = candidate.lower()
-        for key, folder in VENDOR_FOLDER_MAPPING.items():
-            if folder in ("Ball", "OI") and key in candidate_lower:
-                return True
-
     warehouse_keywords = ["warehouse", "wh_", "wh-", "wh ", "assembly", "storage", "inventory"]
     if any(kw in file_name for kw in warehouse_keywords):
         return True

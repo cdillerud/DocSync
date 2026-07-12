@@ -24,6 +24,12 @@ sys.path.insert(0, 'scripts')
 
 MATCH_BUCKETS_TRUSTED = {"exact_match", "strong_evidence_match"}
 
+# Square9's own intake/staging folder - a document sitting here hasn't
+# actually been filed by AP yet, so it's not a genuine ground-truth
+# filing decision. Found live: caught via a within-run conflict where
+# one candidate answer was literally "temp folder".
+NON_FINAL_FOLDERS = {"temp folder"}
+
 
 async def main():
     p = argparse.ArgumentParser()
@@ -82,6 +88,10 @@ async def main():
         real_folder = _hub_folder_root(sq.raw.get("parent_path", ""))
 
         if not vendor or not real_folder:
+            skipped_no_data += 1
+            continue
+
+        if real_folder.lower() in NON_FINAL_FOLDERS:
             skipped_no_data += 1
             continue
 

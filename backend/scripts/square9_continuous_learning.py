@@ -67,6 +67,7 @@ async def main():
     conflicts = []
     skipped_low_confidence = 0
     skipped_no_data = 0
+    proposed_this_run = {}  # key -> folder, to catch within-run disagreements dry-run mode would otherwise miss
 
     for sq in sq_docs:
         hub_doc, result = best_match(sq, hub_docs)
@@ -95,6 +96,20 @@ async def main():
                 "square9_file": sq.name, "hub_file": hub_doc.file_name,
             })
             continue
+
+        # Catch disagreements WITHIN this same run, which dry-run mode would
+        # otherwise miss (nothing is actually written yet, so the "existing"
+        # check above can't see other candidates proposed earlier in this
+        # same pass).
+        if key in proposed_this_run and proposed_this_run[key].lower() != real_folder.lower():
+            conflicts.append({
+                "key": key, "vendor": vendor, "doc_type": doc_type,
+                "existing_folder": f"{proposed_this_run[key]!r} (proposed earlier this same run)",
+                "new_folder": real_folder,
+                "square9_file": sq.name, "hub_file": hub_doc.file_name,
+            })
+            continue
+        proposed_this_run[key] = real_folder
 
         action = "STRENGTHEN" if existing else "CREATE"
         print(f"  {action}: {key} -> {real_folder!r} (square9={sq.name}, hub={hub_doc.file_name})")

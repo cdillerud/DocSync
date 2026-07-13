@@ -63,8 +63,8 @@ async def main():
     sq_docs = pull_expanded_ap_corpus(
         token=token, host=host, site_path=PROD_DEFAULT_SITE_PATH, library=PROD_DEFAULT_LIBRARY,
     )
-    print("Pulling Hub AP documents (last 7 days)...")
-    hub_docs = load_hub_ap_docs(since_hours=168, limit=5000)
+    print("Pulling Hub AP documents (full history)...")
+    hub_docs = load_hub_ap_docs(since_hours=8760, limit=6000)
     print(f"Square9 docs: {len(sq_docs)}  Hub docs: {len(hub_docs)}")
     print()
 

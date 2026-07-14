@@ -1111,6 +1111,21 @@ async def auto_split_document(doc_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    # Guard against re-splitting an already-split document - found live
+    # 2026-07-14: this endpoint had no such check (unlike the sibling
+    # split-by-page-count endpoint just below it), which allowed repeated
+    # calls to compound the child filename suffix (e.g. "_doc1_doc1_doc1..."
+    # hundreds of times over), corrupting the resulting document and
+    # inflating Square9/Hub parity gap counts with unresolvable "ghost"
+    # records for documents that already had a correctly-processed child.
+    if doc.get("batch_split"):
+        existing_children = doc.get("batch_children_ids", [])
+        return {
+            "success": False,
+            "message": f"Document already split into {len(existing_children)} children",
+            "children_ids": existing_children,
+        }
+
     file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found on disk")

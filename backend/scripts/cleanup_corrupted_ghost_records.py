@@ -24,7 +24,14 @@ async def main():
     client = AsyncIOMotorClient(os.environ['MONGO_URL'])
     db = client[os.environ['DB_NAME']]
 
-    query = {"email_id": {"$regex": "^batch-.*-doc1$"}, "vendor_canonical": None}
+    # Require the REPEATED pattern specifically (_doc1_doc1, two or more
+    # times) - a single "_doc1" suffix is normal, legitimate naming for a
+    # real split child. Found live: the original looser filter also
+    # matched real, correctly-named documents like "0304867_doc1.pdf"
+    # (16 chars, one legitimate suffix) alongside genuinely corrupted
+    # records (hundreds of chars, "_doc1" repeated many times over).
+    query = {"email_id": {"$regex": "^batch-.*-doc1$"}, "vendor_canonical": None,
+             "file_name": {"$regex": "(_doc1){2,}"}}
     count = await db.hub_documents.count_documents(query)
     print(f"Corrupted ghost records found: {count}")
     print()

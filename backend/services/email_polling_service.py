@@ -728,18 +728,27 @@ async def _email_polling_worker_inner():
     logger.info("Email polling worker started (interval: %d minutes)", EMAIL_POLLING_INTERVAL_MINUTES)
     while True:
         try:
+            logger.info("[EmailPollDiag] step=1_before_get_config")
             config = await get_email_watcher_config()
+            logger.info("[EmailPollDiag] step=2_after_get_config enabled=%s", config.get("enabled"))
             interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
+            logger.info("[EmailPollDiag] step=3_before_lock_acquire")
             async with _email_polling_lock:
+                logger.info("[EmailPollDiag] step=4_after_lock_acquire")
                 if config.get("enabled", True) and EMAIL_POLLING_ENABLED:
+                    logger.info("[EmailPollDiag] step=5_before_poll_mailbox")
                     await poll_mailbox_for_attachments()
+                    logger.info("[EmailPollDiag] step=6_after_poll_mailbox")
+                else:
+                    logger.info("[EmailPollDiag] step=5b_skipped_disabled")
         except Exception as e:
-            logger.error("Email polling worker error: %s", str(e))
+            logger.error("[EmailPollDiag] step=ERROR Email polling worker error: %s", str(e), exc_info=True)
         try:
             config = await get_email_watcher_config()
             interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
         except Exception:
             interval = EMAIL_POLLING_INTERVAL_MINUTES
+        logger.info("[EmailPollDiag] step=7_before_sleep interval_min=%s", interval)
         await asyncio.sleep(interval * 60)
 
 

@@ -686,6 +686,44 @@ async def poll_mailbox_for_attachments():
 
 
 async def email_polling_worker():
+    """
+    Resilient wrapper around the actual polling loop.
+
+    Found live 2026-07-15: hub-ap-intake@ polling silently died within
+    seconds of every restart, with zero error ever logged - not even a
+    single successful poll cycle, for at least 19 hours. The inner loop's
+    own error handling only catches `Exception`, and asyncio.CancelledError
+    does NOT inherit from Exception in modern Python - so if anything ever
+    cancels this task's current await for a reason OTHER than a genuine,
+    intentional app shutdown, the whole worker terminates permanently and
+    completely silently, with no trace in the logs at all.
+
+    This wrapper can't fix the (still unconfirmed) root cause of whatever
+    is triggering that cancellation, but it makes the failure mode
+    impossible to repeat silently: any unexpected exit gets logged clearly
+    and the worker restarts automatically, while a genuine, deliberate
+    shutdown-triggered cancellation is still respected and allowed to
+    actually stop the task.
+    """
+    while True:
+        try:
+            await _email_polling_worker_inner()
+            logger.error(
+                "Email polling worker inner loop exited unexpectedly with no exception "
+                "(should be impossible - it's a `while True` loop) - restarting in 30s"
+            )
+        except asyncio.CancelledError:
+            logger.info("Email polling worker received a genuine cancellation request - stopping")
+            raise
+        except Exception as e:
+            logger.error(
+                "Email polling worker crashed with an unexpected exception: %s - restarting in 30s",
+                e, exc_info=True,
+            )
+        await asyncio.sleep(30)
+
+
+async def _email_polling_worker_inner():
     """Background worker that polls mailbox at configured interval."""
     logger.info("Email polling worker started (interval: %d minutes)", EMAIL_POLLING_INTERVAL_MINUTES)
     while True:

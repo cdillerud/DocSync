@@ -425,8 +425,13 @@ async def poll_mailbox_for_attachments():
         return {"skipped": True, "reason": "EMAIL_POLLING_ENABLED is false"}
     if not EMAIL_POLLING_USER:
         return {"skipped": True, "reason": "EMAIL_POLLING_USER not configured"}
-    if DEMO_MODE:
-        return {"skipped": True, "reason": "Demo mode - no real polling"}
+    # Deliberately NOT gated on DEMO_MODE (found live 2026-07-15): DEMO_MODE
+    # is meant to pause SharePoint UPLOAD specifically (see
+    # sharepoint_service.py), not mail intake/classification/storage. This
+    # function used to also skip itself entirely whenever DEMO_MODE was on,
+    # meaning turning off SharePoint output silently and completely stopped
+    # hub-ap-intake@ ingestion too - the two are conceptually separate
+    # pipeline stages and shouldn't be coupled through the same flag.
 
     db = get_db()
     run_id = str(uuid.uuid4())[:8]

@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Defaults matching the existing codebase convention
 DEFAULT_PROVIDER = "gemini"
-DEFAULT_MODEL = "gemini-2.0-flash"
+DEFAULT_MODEL = "gemini-2.5-pro"
 
 
 class EmergentProvider(BaseLLMProvider):

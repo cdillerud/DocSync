@@ -204,12 +204,12 @@ async def compare_extraction(
             if not api_key:
                 raise LLMProviderError("EMERGENT_LLM_KEY not configured")
             result = await _extract_with_emergent(
-                api_key, "gemini-2.0-flash", str(file_path), mime_type, f"compare_baseline_{doc_id}"
+                api_key, "gemini-2.5-pro", str(file_path), mime_type, f"compare_baseline_{doc_id}"
             )
-            return {"provider": "emergent", "model": "gemini-2.0-flash", "result": result,
+            return {"provider": "emergent", "model": "gemini-2.5-pro", "result": result,
                     "elapsed_ms": round((time.monotonic() - t0) * 1000), "error": None}
         except Exception as exc:
-            return {"provider": "emergent", "model": "gemini-2.0-flash", "result": {},
+            return {"provider": "emergent", "model": "gemini-2.5-pro", "result": {},
                     "elapsed_ms": round((time.monotonic() - t0) * 1000), "error": str(exc)}
 
     async def run_candidate() -> Dict[str, Any]:

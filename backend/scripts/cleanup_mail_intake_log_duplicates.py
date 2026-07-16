@@ -12,9 +12,16 @@ application-level dedup check has been working correctly; this index
 was meant as an additional backstop specifically against race
 conditions, which aren't occurring given sequential, locked polling.
 
-Strategy: for each duplicate group, keep exactly one record - prefer
-the one with status='Processed' (the real one) if present, otherwise
-keep the oldest by _id. Delete the rest.
+Strategy: only ever delete records explicitly marked status='SkippedDuplicate'
+(or 'Skipped_Duplicate') - these are confirmed-safe, purely redundant log
+entries. Everything else is kept, regardless of its specific status. Found
+live while building this: a group can legitimately contain BOTH a
+'Processed' AND a separate 'Ingested' record - two different real
+statuses, not just one - so an earlier version of this script that only
+special-cased 'Processed' would have incorrectly deleted genuine
+'Ingested' records. If a group somehow has no real record at all (only
+SkippedDuplicate entries), keeps the oldest one as a safety fallback
+rather than deleting every record for that group.
 
 Defaults to dry run: reports what would be deleted, changes nothing.
 Requires --confirm DELETE to actually remove records and rebuild the
@@ -50,24 +57,27 @@ async def main():
     print(f"Duplicate groups found: {len(groups)}")
 
     to_delete = []
-    kept_processed = 0
-    kept_oldest = 0
+    groups_with_only_skipped = 0
 
     for g in groups:
-        docs = g["docs"]  # already in insertion order (oldest first) from $push
-        processed = [d for d in docs if d.get("status") == "Processed"]
-        if processed:
-            keep_id = processed[0]["id"]
-            kept_processed += 1
+        docs = g["docs"]
+        # Only ever delete records explicitly marked as redundant
+        # duplicate-detection log entries. Found live: a group can
+        # legitimately contain BOTH a 'Processed' AND a separate
+        # 'Ingested' record - two different real statuses, not just one -
+        # so keep everything except the specifically-redundant status,
+        # rather than trying to guess which single "good" status to keep.
+        skipped = [d for d in docs if d.get("status") in ("SkippedDuplicate", "Skipped_Duplicate")]
+        real = [d for d in docs if d.get("status") not in ("SkippedDuplicate", "Skipped_Duplicate")]
+        if not real:
+            # No real record at all in this group - keep the oldest
+            # skipped one as a safety fallback, delete the rest.
+            groups_with_only_skipped += 1
+            to_delete.extend(d["id"] for d in skipped[1:])
         else:
-            keep_id = docs[0]["id"]
-            kept_oldest += 1
-        for d in docs:
-            if d["id"] != keep_id:
-                to_delete.append(d["id"])
+            to_delete.extend(d["id"] for d in skipped)
 
-    print(f"Groups keeping a real Processed record: {kept_processed}")
-    print(f"Groups with no Processed record (kept oldest instead): {kept_oldest}")
+    print(f"Groups with no real (non-skipped) record at all: {groups_with_only_skipped}")
     print(f"Total records that would be deleted: {len(to_delete)}")
 
     if args.confirm != "DELETE":

@@ -282,28 +282,34 @@ async def ensure_mail_intake_indexes():
     The unique `(internet_message_id, attachment_hash)` index is the
     ultimate backstop against concurrent-poller dup inserts — writes that
     collide raise DuplicateKeyError which callers treat as "already seen".
-    The partial filter skips rows missing either field so legacy/skipped
-    entries don't fight the index, and also skips status='Error' and
-    status='Processed' rows.
 
-    status='Error' exclusion: found live 2026-07-15 - a legitimate
-    failed-attempt-then-successful-retry pair (same email/attachment,
-    first try errors out, a later retry succeeds) is a real, valid
-    pattern that would otherwise collide with this index.
-
-    status='Processed' exclusion: found live 2026-07-15 - the vast
-    majority (394 of 399) of remaining collisions after cleaning up
-    SkippedDuplicate noise were NOT error/retry pairs at all, but
-    ['Processed', 'Ingested'] pairs for the same email/attachment, with
-    each record following a DIFFERENT schema (Processed records carry
-    id/message_id/attachment_id/sharepoint_doc_id; Ingested records
-    carry document_id/mailbox_source/source_id) - strongly suggesting
-    two separate code paths both log the same successful ingestion
-    event under different status labels. NOT fully root-caused (worth
-    a dedicated follow-up), but treating 'Ingested' as the canonical
-    status and excluding 'Processed' from the unique constraint
-    unblocks the actual backstop this index exists for without more
-    investigation right now.
+    Only enforced for status='Ingested' - the one canonical "this
+    genuinely happened, for real" outcome. Found live 2026-07-15/16, in
+    order:
+      1. MongoDB partial indexes don't support $nin/$ne/$not at all
+         (confirmed via a live CannotCreateIndex error) - an earlier
+         attempt at "$nin: [Error, Processed]" is not a valid partial
+         filter expression, only $eq/$exists/$gt/$gte/$lt/$lte/$type/$and
+         are supported.
+      2. A legitimate failed-attempt-then-successful-retry pair (status
+         Error, then a later Ingested) is a real, valid pattern that
+         would collide under a broader constraint.
+      3. The vast majority of leftover collisions (394 of 399, after a
+         one-time cleanup of ~309k SkippedDuplicate log-noise records)
+         were ['Processed', 'Ingested'] pairs with genuinely different
+         schemas per status - strongly suggesting two separate code
+         paths log the same successful event under different labels.
+         Not fully root-caused; worth a dedicated follow-up.
+      4. SkippedDuplicate/SkippedInline entries are EXPECTED to repeat
+         many times per (message, attachment) pair (confirmed live: a
+         single Tumalo Creek email was legitimately re-detected and
+         correctly skipped 7,316 times) - including them in the unique
+         constraint would immediately recreate the exact problem this
+         index exists to prevent.
+    Restricting the constraint to status='Ingested' only sidesteps all
+    four issues at once, while still providing the real backstop this
+    index is meant to be: two genuinely-successful ingestions of the
+    same email/attachment can never coexist.
     """
     db = get_db()
     try:
@@ -313,7 +319,7 @@ async def ensure_mail_intake_indexes():
             partialFilterExpression={
                 "internet_message_id": {"$type": "string", "$gt": ""},
                 "attachment_hash": {"$type": "string", "$gt": ""},
-                "status": {"$nin": ["Error", "Processed"]},
+                "status": {"$in": ["Ingested"]},
             },
             name="uniq_msgid_hash",
         )

@@ -530,20 +530,6 @@ async def poll_mailbox_for_attachments():
 
             messages = messages_resp.json().get("value", [])
 
-            # TEMP DIAGNOSTIC (2026-07-16): log every raw message this poll
-            # returned, to determine definitively whether specific missing
-            # senders (fevisa.com, straitlink.ca) ever appear in Graph's
-            # response at all, vs. being filtered out somewhere in our own
-            # processing. Remove once resolved.
-            for _m in messages:
-                logger.info(
-                    "[EmailPollRawMsg] received=%s from=%s subject=%s hasAttachments=%s",
-                    _m.get("receivedDateTime"),
-                    _m.get("from", {}).get("emailAddress", {}).get("address"),
-                    _m.get("subject"),
-                    _m.get("hasAttachments"),
-                )
-
             # B2 tie-breaker: drop boundary-equal messages we've already
             # processed at the previous watermark second. Without this, Graph
             # returns sub-second-precision messages whose JSON serialization
@@ -774,27 +760,18 @@ async def _email_polling_worker_inner():
     logger.info("Email polling worker started (interval: %d minutes)", EMAIL_POLLING_INTERVAL_MINUTES)
     while True:
         try:
-            logger.info("[EmailPollDiag] step=1_before_get_config")
             config = await get_email_watcher_config()
-            logger.info("[EmailPollDiag] step=2_after_get_config enabled=%s", config.get("enabled"))
             interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
-            logger.info("[EmailPollDiag] step=3_before_lock_acquire")
             async with _email_polling_lock:
-                logger.info("[EmailPollDiag] step=4_after_lock_acquire")
                 if config.get("enabled", True) and EMAIL_POLLING_ENABLED:
-                    logger.info("[EmailPollDiag] step=5_before_poll_mailbox")
                     await poll_mailbox_for_attachments()
-                    logger.info("[EmailPollDiag] step=6_after_poll_mailbox")
-                else:
-                    logger.info("[EmailPollDiag] step=5b_skipped_disabled")
         except Exception as e:
-            logger.error("[EmailPollDiag] step=ERROR Email polling worker error: %s", str(e), exc_info=True)
+            logger.error("Email polling worker error: %s", str(e), exc_info=True)
         try:
             config = await get_email_watcher_config()
             interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
         except Exception:
             interval = EMAIL_POLLING_INTERVAL_MINUTES
-        logger.info("[EmailPollDiag] step=7_before_sleep interval_min=%s", interval)
         await asyncio.sleep(interval * 60)
 
 

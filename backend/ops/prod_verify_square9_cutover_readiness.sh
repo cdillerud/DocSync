@@ -51,6 +51,13 @@ MIN_MATCH_RATE="${MIN_MATCH_RATE:-85.0}"
 # actually have rows to process, and is overridable via env:
 #   docker compose exec -e PROOF_SINCE_HOURS=720 backend bash ops/...
 PROOF_SINCE_HOURS="${PROOF_SINCE_HOURS:-168}"
+# Hub-side doc limit for the parity report. Found live 2026-07-16: this
+# was never exposed here at all (hardcoded to the script's own default
+# of 500), so widening PROOF_SINCE_HOURS to cover Square9's expanded,
+# 30-day corpus without also raising this would still truncate Hub's
+# candidate pool - a real month of Hub AP volume can exceed 500 docs.
+# Overridable the same way: -e PROOF_HUB_LIMIT=3000
+PROOF_HUB_LIMIT="${PROOF_HUB_LIMIT:-2000}"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 PROOF_DIR="prod_reports/cutover_proof_${TIMESTAMP}"
 LOG_DIR="${PROOF_DIR}/logs"
@@ -166,6 +173,7 @@ run_step square9_hub_ap_parity_report \
     "Square9 Hub-AP parity report" \
     python scripts/square9_hub_ap_parity_report.py --json \
         --since-hours "${PROOF_SINCE_HOURS}" \
+        --limit "${PROOF_HUB_LIMIT}" \
         --expanded-ap-corpus \
         --prod-modified-since-hours 720 \
         --triage-square9-only

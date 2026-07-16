@@ -58,6 +58,27 @@ NOT_HUB_EXPECTED_PATTERNS = (
     # other context - the folder segment is the reliable tell here.
     (re.compile(r"\bInt'?l\s*Reports\b", re.IGNORECASE),
      "internal_ops_report"),
+    # Found live 2026-07-16, while reviewing the further-cleaned Bucket C
+    # list: these three are also confirmed non-invoice document types
+    # sitting in AP-adjacent Square9 folders. "US Customs"/"Entry
+    # Summary" documents are government/regulatory paperwork, not
+    # vendor bills - confirmed by the same document type already
+    # showing up in Bucket A tonight, independently classified non-AP
+    # by Hub's own routing logic (square9_ap_folder_contains_non_ap_
+    # document). "Dunnage Rtn" documents sit in a folder literally
+    # named "Dunnage Return BOLs & Tracking Spreadsheets" - packing-
+    # material return logistics, not an invoice. "Amortization"
+    # spreadsheets are internal accounting worksheets tracking a
+    # vendor's charges over time, distinct from that vendor's actual
+    # invoices (confirmed: Fevisa's real invoices, the F-MO*.pdf/.xml
+    # files, are already processing correctly through email - this is
+    # a separate, internal document).
+    (re.compile(r"\bUS\s*Customs\b|\bEntry\s*Summary\b", re.IGNORECASE),
+     "customs_entry_summary"),
+    (re.compile(r"\bDunnage\s*R(?:e|t)?tn?\b", re.IGNORECASE),
+     "dunnage_return_tracking"),
+    (re.compile(r"\bAmortization\b", re.IGNORECASE),
+     "amortization_schedule"),
     (re.compile(r"\bAllocation\s*-\s*EM\b", re.IGNORECASE),
      "allocation_sheet"),
     (re.compile(r"\bDO\s*NOT\s*PAY\b", re.IGNORECASE),

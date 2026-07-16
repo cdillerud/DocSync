@@ -165,6 +165,16 @@ _INVOICE_PO_PATTERNS = [
     # catch this shape, plus the common single-letter "W" prefix used
     # throughout the system's own PO/document numbers (e.g. "W118314").
     re.compile(r"\b([a-z]{1,4}-?\d{4,})\b", re.I),  # vendor-prefixed alphanumeric
+    # Reverse shape: digits-then-short-letters, e.g. H3Plastics' "8028-UT".
+    # Found live 2026-07-16: the hyphen-stripping normalization below (which
+    # runs before any pattern sees the string) turns "8028-UT" into
+    # "8028 UT" - two separate space-joined tokens - by the time any pattern
+    # runs, so this needs to match the SPACE-separated form directly, with a
+    # single capture group (findall() returns tuples, not strings, for
+    # multi-group patterns, which would break the loop below). The space
+    # gets normalized back to a hyphen after matching, to line up with how
+    # Hub's own invoice_number_clean field actually stores this shape.
+    re.compile(r"\b(\d{2,}\s+[a-z]{1,4})\b", re.I),
 ]
 
 
@@ -203,8 +213,16 @@ def extract_invoice_po_tokens(name: str) -> List[str]:
     for pat in _INVOICE_PO_PATTERNS:
         for m in pat.findall(base):
             tok = m.strip().upper()
+            # Normalize the space-separated digit/letter shape (e.g. "8028
+            # UT") back to a hyphenated form ("8028-UT"), matching how
+            # invoice_number_clean actually stores it. No other pattern
+            # can produce a token containing whitespace, so this is safe
+            # to apply unconditionally.
+            tok = re.sub(r"\s+", "-", tok)
             # skip pure-keyword captures like "OICE" left over from broken matches
             if not tok or tok.lower() in {"oice", "voice", "rder", "bol", "inv", "po", "so"}:
+                continue
+            if tok.split("-")[-1].lower() in {"inv", "po", "so", "doc", "ea", "cp"}:
                 continue
             stripped = tok.lstrip("0") or tok
             if len(stripped) >= 4 and stripped not in found:

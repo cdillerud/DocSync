@@ -53,11 +53,28 @@ MIN_MATCH_RATE="${MIN_MATCH_RATE:-85.0}"
 PROOF_SINCE_HOURS="${PROOF_SINCE_HOURS:-168}"
 # Hub-side doc limit for the parity report. Found live 2026-07-16: this
 # was never exposed here at all (hardcoded to the script's own default
-# of 500), so widening PROOF_SINCE_HOURS to cover Square9's expanded,
-# 30-day corpus without also raising this would still truncate Hub's
-# candidate pool - a real month of Hub AP volume can exceed 500 docs.
-# Overridable the same way: -e PROOF_HUB_LIMIT=3000
-PROOF_HUB_LIMIT="${PROOF_HUB_LIMIT:-2000}"
+# of 500). Only relevant when PROOF_EXPANDED_CORPUS=true below - a
+# real month of Hub AP volume can exceed 500 docs, so raising this
+# alongside the wider window avoids truncating the candidate pool.
+# Overridable: -e PROOF_HUB_LIMIT=3000
+PROOF_HUB_LIMIT="${PROOF_HUB_LIMIT:-500}"
+# Whether to pull Square9's full, expanded 30-day AP corpus instead of
+# the narrow, hardcoded "last 24h modified" window. Found live
+# 2026-07-16: tried this as the new default, reasoning that AP staff
+# taking a day or two to manually file documents would make a narrow
+# window miss real, recent matches. Tested directly against real data
+# with both sides properly widened (not just one): the result was
+# WORSE, not better (69.43% -> 57.22%, real match rate genuinely
+# checked before and after). Root cause: Hub's own AP-lane candidate
+# pool scales roughly 4x faster than Square9's over a 30-day window
+# (500->2000 vs 229->374 docs), meaning the wider window mostly pulls
+# in more historical backlog - real, older gaps that predate tonight's
+# fixes - not hidden recent matches. The narrow window is a more
+# honest day-to-day quality signal for current processing; the wide
+# window is a separate, occasional "how big is the total backlog"
+# check, not the number to track by default. Off by default; opt in
+# with: -e PROOF_EXPANDED_CORPUS=true
+PROOF_EXPANDED_CORPUS="${PROOF_EXPANDED_CORPUS:-false}"
 TIMESTAMP="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
 PROOF_DIR="prod_reports/cutover_proof_${TIMESTAMP}"
 LOG_DIR="${PROOF_DIR}/logs"
@@ -160,22 +177,18 @@ run_step billing_intake_routing_probe \
 # --- 3. Square9 Hub-AP parity report ---------------------------------------
 # `--triage-square9-only` produces prod_reports/square9_only_triage.csv,
 # which stage 4 (and transitively stages 5-8) consume.
-# `--expanded-ap-corpus`: found live 2026-07-16 - without this, Square9's
-# side is limited to a narrow, hardcoded "last 24h modified" window,
-# independent of --since-hours (which only controls Hub's side). Given
-# real AP staff can take a day or two to manually move documents out of
-# Square9's staging folder into their final destination (confirmed
-# directly), a narrow recent-modified window systematically misses real
-# matches purely from this timing gap, not genuine intake problems -
-# inflating the apparent "square9-only miss" count with false positives.
-# This pulls Square9's full, recursive AP folder structure instead.
+# See PROOF_EXPANDED_CORPUS comment above for why this defaults to off.
+if [ "${PROOF_EXPANDED_CORPUS}" = "true" ]; then
+    EXPANDED_CORPUS_ARGS=(--expanded-ap-corpus --prod-modified-since-hours 720)
+else
+    EXPANDED_CORPUS_ARGS=()
+fi
 run_step square9_hub_ap_parity_report \
     "Square9 Hub-AP parity report" \
     python scripts/square9_hub_ap_parity_report.py --json \
         --since-hours "${PROOF_SINCE_HOURS}" \
         --limit "${PROOF_HUB_LIMIT}" \
-        --expanded-ap-corpus \
-        --prod-modified-since-hours 720 \
+        "${EXPANDED_CORPUS_ARGS[@]}" \
         --triage-square9-only
 
 # --- 4. Square9-only triage resolver ---------------------------------------

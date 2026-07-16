@@ -30,6 +30,7 @@ import LearningDashboard from "@/pages/LearningDashboard";
 import LearningOpsPage from "@/pages/LearningOpsPage";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
+import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
 import GovernanceDashboard from "@/pages/GovernanceDashboard";
 import RoadmapGanttPage from "@/pages/RoadmapGanttPage";
 import ContractIntelligencePage from "@/pages/ContractIntelligencePage";
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="ai-learning" element={<LearningDashboard />} />
         <Route path="learning/ops" element={<LearningOpsPage />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
+        <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="governance" element={<GovernanceDashboard />} />
         <Route path="roadmap" element={<RoadmapGanttPage />} />
         <Route path="contracts" element={<ContractIntelligencePage />} />

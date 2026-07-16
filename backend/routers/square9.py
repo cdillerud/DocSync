@@ -193,5 +193,55 @@ async def restore_stage_data(body: Dict = Body(...)):
     }
 
 
+# =============================================================================
+# Cutover Readiness Dashboard
+# =============================================================================
+# Backed by square9_readiness_history, populated by
+# backend/scripts/record_square9_readiness_snapshot.py after each run of
+# ops/prod_verify_square9_cutover_readiness.sh. Read-only reporting on top
+# of that history - doesn't run the (expensive) readiness check itself.
+
+@router.get("/readiness/latest")
+async def get_latest_readiness_snapshot():
+    """Most recent Square9 cutover readiness snapshot."""
+    db = get_db()
+    latest = await db.square9_readiness_history.find_one(
+        {}, {"_id": 0}, sort=[("recorded_utc", -1)]
+    )
+    if not latest:
+        raise HTTPException(
+            status_code=404,
+            detail="No readiness snapshots recorded yet. Run "
+                   "backend/scripts/record_square9_readiness_snapshot.py "
+                   "after a readiness check.",
+        )
+    return latest
+
+
+@router.get("/readiness/history")
+async def get_readiness_history(limit: int = Query(200, ge=1, le=1000)):
+    """
+    Chronological history of readiness snapshots, oldest first, for
+    trend charting. Returns a lightweight projection (not the full
+    bucket_C detail) to keep the payload small for a trend line.
+    """
+    db = get_db()
+    cursor = db.square9_readiness_history.find(
+        {},
+        {
+            "_id": 0,
+            "recorded_utc": 1,
+            "match_rate_pct": 1,
+            "decision": 1,
+            "square_count": 1,
+            "matched_count": 1,
+            "projected_match_rate_pct": 1,
+        },
+    ).sort("recorded_utc", 1).limit(limit)
+    history = await cursor.to_list(length=limit)
+    return {"count": len(history), "history": history}
+
+
+
 
 

@@ -43,6 +43,21 @@ NOT_HUB_EXPECTED_PATTERNS = (
     # intake gaps.
     (re.compile(r"\b\w+\s+to\s+[Pp]rocess\b"),
      "manual_accounting_exception_queue"),
+    # Found live 2026-07-16: these four are internal administrative/
+    # reporting documents, not vendor invoices - same reasoning as the
+    # exclusions above, they were never emails Hub could have caught.
+    (re.compile(r"\bManager\s*[Mm]eeting\b"),
+     "internal_meeting_notes"),
+    (re.compile(r"\bVendor\s*Cleanup\b", re.IGNORECASE),
+     "internal_admin_spreadsheet"),
+    (re.compile(r"\bValuation\s*by\s*Location\b", re.IGNORECASE),
+     "inventory_valuation_report"),
+    # Matches the parent-folder signal ("Int'l Reports" / "Intl Reports")
+    # rather than the filename itself, since a filename like "Cargo
+    # Modules" alone could plausibly be a real vendor name in some
+    # other context - the folder segment is the reliable tell here.
+    (re.compile(r"\bInt'?l\s*Reports\b", re.IGNORECASE),
+     "internal_ops_report"),
     (re.compile(r"\bAllocation\s*-\s*EM\b", re.IGNORECASE),
      "allocation_sheet"),
     (re.compile(r"\bDO\s*NOT\s*PAY\b", re.IGNORECASE),

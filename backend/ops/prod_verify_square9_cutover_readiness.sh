@@ -153,10 +153,21 @@ run_step billing_intake_routing_probe \
 # --- 3. Square9 Hub-AP parity report ---------------------------------------
 # `--triage-square9-only` produces prod_reports/square9_only_triage.csv,
 # which stage 4 (and transitively stages 5-8) consume.
+# `--expanded-ap-corpus`: found live 2026-07-16 - without this, Square9's
+# side is limited to a narrow, hardcoded "last 24h modified" window,
+# independent of --since-hours (which only controls Hub's side). Given
+# real AP staff can take a day or two to manually move documents out of
+# Square9's staging folder into their final destination (confirmed
+# directly), a narrow recent-modified window systematically misses real
+# matches purely from this timing gap, not genuine intake problems -
+# inflating the apparent "square9-only miss" count with false positives.
+# This pulls Square9's full, recursive AP folder structure instead.
 run_step square9_hub_ap_parity_report \
     "Square9 Hub-AP parity report" \
     python scripts/square9_hub_ap_parity_report.py --json \
         --since-hours "${PROOF_SINCE_HOURS}" \
+        --expanded-ap-corpus \
+        --prod-modified-since-hours 720 \
         --triage-square9-only
 
 # --- 4. Square9-only triage resolver ---------------------------------------

@@ -530,6 +530,20 @@ async def poll_mailbox_for_attachments():
 
             messages = messages_resp.json().get("value", [])
 
+            # TEMP DIAGNOSTIC (2026-07-16): log every raw message this poll
+            # returned, to determine definitively whether specific missing
+            # senders (fevisa.com, straitlink.ca) ever appear in Graph's
+            # response at all, vs. being filtered out somewhere in our own
+            # processing. Remove once resolved.
+            for _m in messages:
+                logger.info(
+                    "[EmailPollRawMsg] received=%s from=%s subject=%s hasAttachments=%s",
+                    _m.get("receivedDateTime"),
+                    _m.get("from", {}).get("emailAddress", {}).get("address"),
+                    _m.get("subject"),
+                    _m.get("hasAttachments"),
+                )
+
             # B2 tie-breaker: drop boundary-equal messages we've already
             # processed at the previous watermark second. Without this, Graph
             # returns sub-second-precision messages whose JSON serialization

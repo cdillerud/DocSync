@@ -30,6 +30,19 @@ from typing import Any, Dict, List, Optional, Tuple
 NOT_HUB_EXPECTED_PATTERNS = (
     (re.compile(r"\.pst\b", re.IGNORECASE),
      "outlook_export"),
+    # Found live 2026-07-16: "Meg to Process", "Brandy to process",
+    # "Amanda to process" etc. are a manual accounting-exception queue -
+    # confirmed directly (Chad): a document landing in one of these
+    # folders means something already went wrong upstream (e.g. no
+    # email ever existed for Hub to catch - the item was scanned in or
+    # handed to accounting directly) and a staff member manually placed
+    # it there for a specific person to review. These were never
+    # capturable by email polling in the first place, through no fault
+    # of Hub's, so they belong in the same excluded category as
+    # reconciliation sheets and templates rather than counting as real
+    # intake gaps.
+    (re.compile(r"\b\w+\s+to\s+[Pp]rocess\b"),
+     "manual_accounting_exception_queue"),
     (re.compile(r"\bAllocation\s*-\s*EM\b", re.IGNORECASE),
      "allocation_sheet"),
     (re.compile(r"\bDO\s*NOT\s*PAY\b", re.IGNORECASE),

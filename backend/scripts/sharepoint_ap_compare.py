@@ -155,7 +155,16 @@ _INVOICE_PO_PATTERNS = [
     # Keyword + reference where reference contains at least one digit and >=4 chars total.
     re.compile(r"\b(?:invoice|inv|order|ref|bol|po|so)\b[\s\-#:]*([a-z0-9](?=[a-z0-9\-]*\d)[a-z0-9\-]{3,})", re.I),
     re.compile(r"\b(\d{5,})\b"),                 # bare numeric refs >=5 digits
-    re.compile(r"\b([a-z]{2,4}-?\d{4,})\b", re.I),  # vendor-prefixed alphanumeric
+    # Vendor-prefixed alphanumeric. Was {2,4} letters - found live 2026-07-16:
+    # this missed real invoice numbers with a single-letter prefix, like
+    # Celtic's "L546467" format (confirmed: none of the three patterns
+    # matched it at all, meaning every Celtic invoice was systematically
+    # invisible to invoice-number-based parity matching, misclassified as
+    # "genuinely missing from Hub" when the document was actually present
+    # and correctly processed the whole time). Widened to {1,4} to also
+    # catch this shape, plus the common single-letter "W" prefix used
+    # throughout the system's own PO/document numbers (e.g. "W118314").
+    re.compile(r"\b([a-z]{1,4}-?\d{4,})\b", re.I),  # vendor-prefixed alphanumeric
 ]
 
 

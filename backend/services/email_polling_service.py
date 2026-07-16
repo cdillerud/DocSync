@@ -283,7 +283,27 @@ async def ensure_mail_intake_indexes():
     ultimate backstop against concurrent-poller dup inserts — writes that
     collide raise DuplicateKeyError which callers treat as "already seen".
     The partial filter skips rows missing either field so legacy/skipped
-    entries don't fight the index.
+    entries don't fight the index, and also skips status='Error' and
+    status='Processed' rows.
+
+    status='Error' exclusion: found live 2026-07-15 - a legitimate
+    failed-attempt-then-successful-retry pair (same email/attachment,
+    first try errors out, a later retry succeeds) is a real, valid
+    pattern that would otherwise collide with this index.
+
+    status='Processed' exclusion: found live 2026-07-15 - the vast
+    majority (394 of 399) of remaining collisions after cleaning up
+    SkippedDuplicate noise were NOT error/retry pairs at all, but
+    ['Processed', 'Ingested'] pairs for the same email/attachment, with
+    each record following a DIFFERENT schema (Processed records carry
+    id/message_id/attachment_id/sharepoint_doc_id; Ingested records
+    carry document_id/mailbox_source/source_id) - strongly suggesting
+    two separate code paths both log the same successful ingestion
+    event under different status labels. NOT fully root-caused (worth
+    a dedicated follow-up), but treating 'Ingested' as the canonical
+    status and excluding 'Processed' from the unique constraint
+    unblocks the actual backstop this index exists for without more
+    investigation right now.
     """
     db = get_db()
     try:
@@ -293,6 +313,7 @@ async def ensure_mail_intake_indexes():
             partialFilterExpression={
                 "internet_message_id": {"$type": "string", "$gt": ""},
                 "attachment_hash": {"$type": "string", "$gt": ""},
+                "status": {"$nin": ["Error", "Processed"]},
             },
             name="uniq_msgid_hash",
         )

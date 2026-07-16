@@ -96,6 +96,7 @@ async def main():
             partialFilterExpression={
                 "internet_message_id": {"$type": "string", "$gt": ""},
                 "attachment_hash": {"$type": "string", "$gt": ""},
+                "status": {"$nin": ["Error", "Processed"]},
             },
             name="uniq_msgid_hash",
         )

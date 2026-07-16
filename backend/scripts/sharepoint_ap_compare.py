@@ -218,9 +218,19 @@ def extract_vendor_tokens(name: str) -> List[str]:
     base = _strip_diacritics(name).lower()
     base = base.rsplit(".", 1)[0] if "." in base else base
     base = re.sub(r"[_\-\.\,\(\)\[\]\{\}]", " ", base)
+    # Was t.isalpha() - found live 2026-07-16: this silently excluded any
+    # vendor name containing a digit, e.g. "H3Plastics" (confirmed: this
+    # exact vendor's real filename produced zero vendor tokens at all,
+    # nothing else in the filename being pure alphabetic either). Real
+    # company names with digits (H3Plastics, 3M, etc.) are common enough
+    # that this was a genuine, real matcher blind spot, same shape as the
+    # single-letter invoice-prefix fix. Widened to alphanumeric with at
+    # least one alpha character, which still correctly excludes pure
+    # numeric tokens (invoice numbers, dates) from being treated as
+    # vendor names.
     tokens = [
         t for t in base.split()
-        if t.isalpha() and len(t) >= 3 and t not in _STOPWORDS
+        if t.isalnum() and any(c.isalpha() for c in t) and len(t) >= 3 and t not in _STOPWORDS
     ]
     # de-dupe preserving order
     seen, out = set(), []

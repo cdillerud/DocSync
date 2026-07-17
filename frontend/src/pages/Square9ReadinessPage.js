@@ -1,13 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Progress } from '../components/ui/progress';
-import { RefreshCw, TrendingUp, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { RefreshCw, TrendingUp, CheckCircle2, XCircle, AlertTriangle, Play, Loader2 } from 'lucide-react';
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine,
 } from 'recharts';
 
 const API = process.env.REACT_APP_BACKEND_URL;
+const RUN_POLL_INTERVAL_MS = 3000;
 
 function formatTimestamp(iso) {
   if (!iso) return '';
@@ -18,6 +19,15 @@ function formatTimestamp(iso) {
   } catch {
     return iso;
   }
+}
+
+function formatElapsed(iso) {
+  if (!iso) return '';
+  const startMs = new Date(iso).getTime();
+  if (Number.isNaN(startMs)) return '';
+  const seconds = Math.max(0, Math.round((Date.now() - startMs) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
 function StatBlock({ label, value, sublabel }) {
@@ -35,6 +45,14 @@ export default function Square9ReadinessPage() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  const [runState, setRunState] = useState({ status: 'idle' });
+  // Never read directly - just forces a re-render once a second while a
+  // run is in progress so the "running for Xs" display (computed fresh
+  // from Date.now() on every render) actually advances visually, since
+  // React has no reason to re-render on its own just because time passes.
+  const [, setRunElapsedTick] = useState(0);
+  const pollTimeoutRef = useRef(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -68,7 +86,94 @@ export default function Square9ReadinessPage() {
     }
   }, []);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  const pollRunStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/square9/readiness/run-status`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setRunState(data);
+
+      if (data.status === 'running') {
+        pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
+      } else if (data.status === 'completed') {
+        // Pull the fresh snapshot + trend into the main dashboard view.
+        fetchAll();
+      }
+      // 'failed' and 'idle' just stop polling - the error/idle state
+      // renders from runState directly, nothing else to refresh.
+    } catch {
+      // Transient fetch failure while polling - try again on the next
+      // tick rather than giving up and leaving the button stuck.
+      pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
+    }
+  }, [fetchAll]);
+
+  const resumeIfAlreadyRunning = useCallback(async () => {
+    // Mount-time check only: if a run is genuinely still in progress
+    // (e.g. the page was navigated away from and back to), resume
+    // polling it. Deliberately does NOT surface 'completed' or
+    // 'failed' from this check - that would show a stale failure
+    // banner from some past run every time the page loads, even
+    // though the person viewing it hasn't triggered anything this
+    // session. Failures/completions only render after a run this
+    // session's triggerRun() actually started.
+    try {
+      const res = await fetch(`${API}/api/square9/readiness/run-status`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.status === 'running') {
+        setRunState(data);
+        pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
+      }
+    } catch {
+      // Nothing to resume if we can't even check - stay idle, the
+      // person can just click the button.
+    }
+  }, [pollRunStatus]);
+
+  useEffect(() => {
+    fetchAll();
+    // Resume polling on mount only if a run is genuinely still in
+    // progress - see resumeIfAlreadyRunning's own comment for why this
+    // must not surface a stale completed/failed status from some past
+    // run nobody triggered this session.
+    resumeIfAlreadyRunning();
+    return () => {
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Ticks the "running for Xs" display once a second while a run is in
+  // progress, independent of the 3s poll interval, so the elapsed time
+  // doesn't visibly stall between polls.
+  useEffect(() => {
+    if (runState.status !== 'running') return undefined;
+    const tick = setInterval(() => setRunElapsedTick(t => t + 1), 1000);
+    return () => clearInterval(tick);
+  }, [runState.status]);
+
+  const triggerRun = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/api/square9/readiness/run`, { method: 'POST' });
+      if (res.status === 409) {
+        // Someone else already started one (or a stray double-click) -
+        // just start tracking it rather than erroring.
+        const body = await res.json().catch(() => ({}));
+        setRunState({ status: 'running', started_at: body?.detail?.started_at });
+      } else if (res.ok) {
+        const body = await res.json();
+        setRunState({ status: 'running', started_at: body.started_at });
+      } else {
+        setRunState({ status: 'failed', error: `Failed to start (HTTP ${res.status}).` });
+        return;
+      }
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
+    } catch {
+      setRunState({ status: 'failed', error: 'Could not reach the server.' });
+    }
+  }, [pollRunStatus]);
 
   if (loading && !latest) {
     return (
@@ -80,13 +185,36 @@ export default function Square9ReadinessPage() {
 
   if (error && !latest) {
     return (
-      <div className="p-6">
+      <div className="p-6 space-y-4 max-w-2xl">
         <Card className="border-l-4 border-l-amber-500 bg-amber-500/5">
           <CardContent className="p-5 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-600" />
             <span>{error}</span>
           </CardContent>
         </Card>
+        <button
+          onClick={triggerRun}
+          disabled={runState.status === 'running'}
+          className={`flex items-center gap-2 text-sm rounded-md px-3 py-1.5 font-medium ${
+            runState.status === 'running'
+              ? 'bg-muted text-muted-foreground cursor-not-allowed'
+              : 'bg-primary text-primary-foreground hover:opacity-90'
+          }`}
+        >
+          {runState.status === 'running' ? (
+            <>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              Running… {formatElapsed(runState.started_at) && `(${formatElapsed(runState.started_at)})`}
+            </>
+          ) : (
+            <>
+              <Play className="w-3.5 h-3.5" /> Run Readiness Check
+            </>
+          )}
+        </button>
+        {runState.status === 'failed' && (
+          <p className="text-sm text-red-600 whitespace-pre-wrap">{runState.error}</p>
+        )}
       </div>
     );
   }
@@ -106,13 +234,59 @@ export default function Square9ReadinessPage() {
             Last checked {formatTimestamp(latest?.recorded_utc)}
           </p>
         </div>
-        <button
-          onClick={fetchAll}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground border rounded-md px-3 py-1.5"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={triggerRun}
+            disabled={runState.status === 'running'}
+            className={`flex items-center gap-2 text-sm rounded-md px-3 py-1.5 font-medium ${
+              runState.status === 'running'
+                ? 'bg-muted text-muted-foreground cursor-not-allowed'
+                : 'bg-primary text-primary-foreground hover:opacity-90'
+            }`}
+          >
+            {runState.status === 'running' ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Running… {formatElapsed(runState.started_at) && `(${formatElapsed(runState.started_at)})`}
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5" /> Run Readiness Check
+              </>
+            )}
+          </button>
+          <button
+            onClick={fetchAll}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground border rounded-md px-3 py-1.5"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </button>
+        </div>
       </div>
+
+      {runState.status === 'running' && (
+        <Card className="border-l-4 border-l-blue-500 bg-blue-500/5">
+          <CardContent className="p-4 flex items-center gap-2 text-sm">
+            <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+            <span>
+              Pulling the current Square9/Hub comparison — this typically takes 45–90 seconds.
+              The dashboard below will refresh automatically when it's done.
+            </span>
+          </CardContent>
+        </Card>
+      )}
+
+      {runState.status === 'failed' && (
+        <Card className="border-l-4 border-l-red-500 bg-red-500/5">
+          <CardContent className="p-4 flex items-start gap-2 text-sm">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-medium">Readiness check failed to complete.</p>
+              <p className="text-muted-foreground mt-1 whitespace-pre-wrap">{runState.error || 'Unknown error.'}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Headline */}
       <Card className={`border-l-4 ${isGo ? 'border-l-emerald-500 bg-emerald-500/5' : 'border-l-red-500 bg-red-500/5'}`}>

@@ -1,6 +1,8 @@
 """GPI Document Hub - Square9 Router"""
 
+import asyncio
 import logging
+import os
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Query, Body
 from typing import Dict
@@ -13,6 +15,24 @@ from services.square9_workflow import (
 logger = logging.getLogger("square9")
 
 router = APIRouter(prefix="/square9", tags=["Square9"])
+
+# Backend runs from /app inside the container (same as `docker compose
+# exec backend ...`, which is where this script has been run and
+# verified all night). Set explicitly rather than relying on the
+# running process's inherited cwd.
+READINESS_APP_DIR = "/app"
+READINESS_SCRIPT = "ops/prod_verify_square9_cutover_readiness.sh"
+READINESS_SNAPSHOT_SCRIPT = "scripts/record_square9_readiness_snapshot.py"
+READINESS_RUN_STATUS_KEY = "readiness_run_status"
+
+# A run stuck at "running" past this age is treated as crashed/
+# abandoned (e.g. a backend restart mid-run) rather than genuinely
+# still in progress, so a new run isn't blocked forever by a status
+# document nothing will ever update again.
+READINESS_STALE_MINUTES = 15
+# Hard ceiling on the subprocess itself - the check has taken 45-90s
+# all night; this is a generous multiple, not a tuned expectation.
+READINESS_SUBPROCESS_TIMEOUT_SECONDS = 600
 
 
 @router.get("/config")
@@ -240,6 +260,185 @@ async def get_readiness_history(limit: int = Query(200, ge=1, le=1000)):
     ).sort("recorded_utc", 1).limit(limit)
     history = await cursor.to_list(length=limit)
     return {"count": len(history), "history": history}
+
+
+async def _get_run_status_doc(db) -> Dict:
+    doc = await db.hub_config.find_one(
+        {"_key": READINESS_RUN_STATUS_KEY}, {"_id": 0}
+    )
+    return doc or {"_key": READINESS_RUN_STATUS_KEY, "status": "idle"}
+
+
+async def _set_run_status(db, **fields) -> None:
+    await db.hub_config.update_one(
+        {"_key": READINESS_RUN_STATUS_KEY},
+        {"$set": fields},
+        upsert=True,
+    )
+
+
+def _run_is_stale(status_doc: Dict) -> bool:
+    if status_doc.get("status") != "running":
+        return False
+    started_at = status_doc.get("started_at")
+    if not started_at:
+        return True
+    try:
+        started_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return True
+    age_minutes = (datetime.now(timezone.utc) - started_dt).total_seconds() / 60
+    return age_minutes > READINESS_STALE_MINUTES
+
+
+async def _execute_readiness_check(db, triggered_by: str) -> None:
+    """Runs the readiness check + snapshot-recording as a subprocess,
+    entirely independent of any HTTP request/response cycle (the
+    endpoint that schedules this returns immediately). Every exit path
+    - success, script failure, timeout, unexpected exception - updates
+    the shared status document so a stuck 'running' state is never left
+    behind for the frontend to poll forever."""
+    started_at = datetime.now(timezone.utc).isoformat()
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bash", READINESS_SCRIPT,
+            cwd=READINESS_APP_DIR,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        try:
+            stdout_bytes, _ = await asyncio.wait_for(
+                proc.communicate(), timeout=READINESS_SUBPROCESS_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            await _set_run_status(
+                db, status="failed", finished_at=datetime.now(timezone.utc).isoformat(),
+                error=f"Readiness check exceeded {READINESS_SUBPROCESS_TIMEOUT_SECONDS}s "
+                      f"timeout and was killed.",
+            )
+            return
+
+        output_tail = stdout_bytes.decode("utf-8", errors="replace")[-4000:]
+        logger.info(
+            "[readiness-check] subprocess finished rc=%s (triggered_by=%s)",
+            proc.returncode, triggered_by,
+        )
+
+        # rc up to 2 is an expected workflow signal in this script
+        # family (e.g. NO-GO), not a failure - mirrors the `step()`
+        # helper's own convention inside the shell scripts themselves.
+        if proc.returncode is not None and proc.returncode >= 3:
+            await _set_run_status(
+                db, status="failed",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                error=f"Script exited rc={proc.returncode}. Last output:\n{output_tail}",
+            )
+            return
+
+        # Persist this run into square9_readiness_history - the same
+        # collection /readiness/latest and /readiness/history already
+        # read from, so the dashboard picks it up automatically.
+        snapshot_proc = await asyncio.create_subprocess_exec(
+            "python3", READINESS_SNAPSHOT_SCRIPT,
+            cwd=READINESS_APP_DIR,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        snapshot_out, _ = await asyncio.wait_for(
+            snapshot_proc.communicate(), timeout=60,
+        )
+        if snapshot_proc.returncode != 0:
+            await _set_run_status(
+                db, status="failed",
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                error=(
+                    "Readiness check completed but snapshot recording failed "
+                    f"(rc={snapshot_proc.returncode}): "
+                    f"{snapshot_out.decode('utf-8', errors='replace')[-2000:]}"
+                ),
+            )
+            return
+
+        latest = await db.square9_readiness_history.find_one(
+            {}, {"_id": 0, "match_rate_pct": 1, "decision": 1, "recorded_utc": 1},
+            sort=[("recorded_utc", -1)],
+        )
+        await _set_run_status(
+            db, status="completed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            error=None,
+            last_result=latest or {},
+        )
+    except Exception as e:
+        logger.exception("[readiness-check] unexpected failure")
+        await _set_run_status(
+            db, status="failed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            error=f"Unexpected error: {e}",
+        )
+    finally:
+        # started_at is set by the caller before scheduling this task;
+        # re-affirm it here only if somehow missing, so run-status
+        # always has a start time to compute duration/staleness from.
+        current = await _get_run_status_doc(db)
+        if not current.get("started_at"):
+            await _set_run_status(db, started_at=started_at)
+
+
+@router.post("/readiness/run")
+async def trigger_readiness_check():
+    """Kicks off the Square9 cutover readiness check as a background
+    subprocess and returns immediately - the check itself takes
+    45-90s (observed range over many runs), too long for a normal
+    request/response cycle. Poll GET /readiness/run-status for
+    progress; GET /readiness/latest picks up the result automatically
+    once complete, since this feeds the same square9_readiness_history
+    collection that endpoint already reads."""
+    db = get_db()
+    current = await _get_run_status_doc(db)
+
+    if current.get("status") == "running" and not _run_is_stale(current):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "A readiness check is already running.",
+                "started_at": current.get("started_at"),
+            },
+        )
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    await _set_run_status(
+        db, status="running", started_at=started_at, finished_at=None, error=None,
+    )
+
+    # Fire-and-forget: this task keeps running after this request
+    # returns. Deliberately not FastAPI's BackgroundTasks - the
+    # subprocess genuinely outlives the request/response cycle by
+    # roughly a minute, and this makes that explicit.
+    asyncio.create_task(_execute_readiness_check(db, triggered_by="manual_ui"))
+
+    return {"status": "running", "started_at": started_at}
+
+
+@router.get("/readiness/run-status")
+async def get_readiness_run_status():
+    """Poll this after POST /readiness/run. Returns status: idle |
+    running | completed | failed, plus started_at/finished_at and,
+    once completed, the resulting snapshot summary."""
+    db = get_db()
+    status_doc = await _get_run_status_doc(db)
+    if _run_is_stale(status_doc):
+        status_doc = dict(status_doc)
+        status_doc["status"] = "failed"
+        status_doc["error"] = (
+            status_doc.get("error")
+            or "Run appears abandoned (no update in "
+               f"{READINESS_STALE_MINUTES}+ minutes) - likely a backend "
+               "restart mid-run. Safe to start a new run."
+        )
+    return status_doc
 
 
 

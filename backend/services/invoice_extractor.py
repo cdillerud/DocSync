@@ -181,6 +181,118 @@ JSON Response format:
 If you cannot extract a field, set it to null. Always provide a confidence score."""
 
 
+def _try_extract_cfdi_invoice(file_path: str) -> Optional["InvoiceExtractionResult"]:
+    """
+    Attempts to parse a Mexican CFDI (Comprobante Fiscal Digital por
+    Internet) e-invoice XML directly, with no LLM call at all.
+
+    Why this exists (2026-07-17): confirmed live that XML e-invoices
+    (Fevisa's F-ML*.xml files, among others) were silently skipping the
+    entire invoice_number_clean/vendor_canonical extraction pipeline -
+    extract_invoice_data() below only ever supported
+    ['.pdf', '.png', '.jpg', '.jpeg', '.tiff', '.tif'], .xml was never
+    in that list, so these documents fell straight through to
+    "Unsupported file type" and never got a real invoice number, even
+    though the number (Serie+Folio) was sitting in plain sight in the
+    filename itself.
+
+    Pulled a real example directly from SharePoint to confirm the
+    actual shape before writing this: it's CFDI 4.0, the SAT-regulated
+    (Mexican tax authority) e-invoicing standard - a rigid, versioned,
+    government-mandated XML schema, not a freeform vendor format. That
+    makes a direct, deterministic parser the right tool here, not
+    another LLM call: invoice number, vendor name, vendor tax ID
+    (Rfc), total, date, and line items are all in fixed, known XML
+    attributes (Comprobante/@Folio, @Serie, @Total, @Fecha,
+    Comprobante/Emisor/@Nombre, Comprobante/Conceptos/Concepto/...) -
+    there's no layout variation for an LLM to handle, and a schema
+    this rigid deserves a parser that can't hallucinate a number that
+    isn't there.
+
+    Returns None (not an error result) if the file isn't a
+    recognizable CFDI document - malformed XML, or valid XML that
+    isn't a Comprobante root - so the caller falls through to the
+    existing unsupported-file-type handling for any other XML format
+    rather than reporting a false CFDI-parsing failure.
+    """
+    import xml.etree.ElementTree as ET
+
+    try:
+        tree = ET.parse(file_path)
+        root = tree.getroot()
+    except (ET.ParseError, OSError):
+        return None
+
+    # CFDI's root element is always literally named "Comprobante"
+    # regardless of the namespace URI, which has changed across CFDI
+    # versions (3.3 vs 4.0). Check the local tag name rather than a
+    # hardcoded namespace, so a future CFDI version with a different
+    # xmlns still matches without needing a code change here.
+    tag_local = root.tag.rsplit("}", 1)[-1]
+    if tag_local != "Comprobante":
+        return None
+
+    ns_uri = root.tag.split("}")[0].strip("{") if "}" in root.tag else ""
+    ns = {"cfdi": ns_uri} if ns_uri else {}
+
+    def _find(parent, child_tag: str):
+        return parent.find(f"cfdi:{child_tag}", ns) if ns else parent.find(child_tag)
+
+    def _findall(parent, child_tag: str):
+        return parent.findall(f"cfdi:{child_tag}", ns) if ns else parent.findall(child_tag)
+
+    def _to_float(raw: Optional[str]) -> Optional[float]:
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    folio = (root.get("Folio") or "").strip()
+    serie = (root.get("Serie") or "").strip()
+    invoice_number = f"{serie}{folio}" if serie else folio
+    if not invoice_number:
+        # No Folio at all - not enough to identify this invoice as a
+        # usable CFDI result. Treat as unparseable rather than return
+        # a "success" with no invoice number.
+        return None
+
+    emisor = _find(root, "Emisor")
+    vendor_name = (emisor.get("Nombre") or "").strip() if emisor is not None else ""
+    vendor_rfc = (emisor.get("Rfc") or "").strip() if emisor is not None else ""
+
+    line_items: List[Dict[str, Any]] = []
+    conceptos_parent = _find(root, "Conceptos")
+    if conceptos_parent is not None:
+        for concepto in _findall(conceptos_parent, "Concepto"):
+            line_items.append({
+                "description": (concepto.get("Descripcion") or "").strip(),
+                "quantity": _to_float(concepto.get("Cantidad")) or 1.0,
+                "unit_price": _to_float(concepto.get("ValorUnitario")) or 0.0,
+                "total": _to_float(concepto.get("Importe")) or 0.0,
+            })
+
+    return InvoiceExtractionResult(
+        success=True,
+        # Deterministic parse of a fixed, government-regulated,
+        # digitally-signed schema - high confidence is warranted, but
+        # matches the scale used elsewhere in this codebase for other
+        # high-trust, non-visual-inference sources (0.90-0.95) rather
+        # than claiming a full 1.0.
+        confidence=0.95,
+        invoice_number=invoice_number,
+        invoice_date=(root.get("Fecha") or "").strip() or None,
+        vendor_name=vendor_name or None,
+        vendor_number=vendor_rfc or None,  # Rfc is the closest analog to a vendor id in CFDI
+        total_amount=_to_float(root.get("Total")),
+        tax_amount=_to_float(root.get("TotalImpuestosTrasladados")),
+        currency=(root.get("Moneda") or "USD").strip(),
+        line_items=line_items,
+        raw_response=f"cfdi_xml_direct_parse:Serie={serie!r},Folio={folio!r},Rfc={vendor_rfc!r}",
+    )
+
+
 async def extract_invoice_data(file_path: str, vendor_context: str = "") -> InvoiceExtractionResult:
     """
     Extract structured data from an invoice PDF using Gemini AI.
@@ -192,18 +304,32 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
     Returns:
         InvoiceExtractionResult with extracted data
     """
-    if not EMERGENT_LLM_KEY:
-        logger.warning("EMERGENT_LLM_KEY not configured, skipping invoice extraction")
-        return InvoiceExtractionResult(
-            success=False,
-            error="EMERGENT_LLM_KEY not configured"
-        )
-    
     # Verify file exists
     if not os.path.exists(file_path):
         return InvoiceExtractionResult(
             success=False,
             error=f"File not found: {file_path}"
+        )
+
+    # XML e-invoices (e.g. Mexican CFDI) get a direct, deterministic
+    # parse attempt before anything else in this function, including
+    # the EMERGENT_LLM_KEY check below - this path never calls Gemini
+    # at all, so it must not be gated behind an LLM-specific
+    # precondition. See _try_extract_cfdi_invoice's docstring for why
+    # a direct parser is the right tool for this fixed schema.
+    if Path(file_path).suffix.lower() == ".xml":
+        cfdi_result = _try_extract_cfdi_invoice(file_path)
+        if cfdi_result is not None:
+            return cfdi_result
+        # Not a recognizable CFDI document - fall through to the
+        # normal Gemini-based path below, same as any other
+        # unsupported extension.
+
+    if not EMERGENT_LLM_KEY:
+        logger.warning("EMERGENT_LLM_KEY not configured, skipping invoice extraction")
+        return InvoiceExtractionResult(
+            success=False,
+            error="EMERGENT_LLM_KEY not configured"
         )
     
     # Check file extension or detect by magic bytes

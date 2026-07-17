@@ -995,6 +995,20 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
         logger.info("Re-running AI classification for document %s", doc_id)
         classification = await _classify_with_ai(str(file_path), doc["file_name"])
         await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            # doc_type added 2026-07-17: confirmed live this was
+            # missing entirely - document_type/suggested_job_type/
+            # extracted_fields all correctly updated to a real,
+            # high-confidence classification (e.g. AP_Invoice, conf
+            # 1.0, 34 extracted fields), but doc_type itself silently
+            # stayed at its stale prior value (OTHER) forever after.
+            # Every part of the system built tonight (parity matching,
+            # bucket_A reports, bulk-classify) treats doc_type as the
+            # authoritative field, so any document reprocessed via
+            # this path - including the manual "Reprocess" UI action,
+            # not just scripts - kept showing as misclassified
+            # downstream despite having actually been reclassified
+            # correctly right here.
+            "doc_type": classification.get("suggested_job_type", "Unknown"),
             "document_type": classification.get("suggested_job_type", "Unknown"),
             "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
             "ai_confidence": classification.get("confidence", 0.0),

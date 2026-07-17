@@ -58,11 +58,18 @@ async def find_candidates(db) -> List[Dict[str, Any]]:
     return await cursor.to_list(length=None)
 
 
-async def download_via_share_url(client, token: str, share_url: str) -> Optional[bytes]:
+async def download_via_share_url(client, token: str, share_url: str) -> tuple[Optional[bytes], Optional[str]]:
     """Resolves a SharePoint web URL to its driveItem via the Graph
-    shares API and downloads the raw content. Returns None on any
-    failure - a single document's download problem should not abort
-    the whole backfill run."""
+    shares API and downloads the raw content. Returns (content, None)
+    on success or (None, error_detail) on failure - a single
+    document's download problem should not abort the whole backfill
+    run, but the actual reason must be visible rather than collapsed
+    into a generic 'download_failed' label. Found live 2026-07-17:
+    39 of 42 documents failed with no diagnostic information at all
+    under the previous version of this function - fixed before
+    investigating further, since guessing at rate limiting vs moved
+    files vs something else without the real HTTP status/error body
+    would just be speculation."""
     headers = {"Authorization": f"Bearer {token}"}
     try:
         encoded = base64.urlsafe_b64encode(share_url.encode()).decode().rstrip("=")
@@ -71,16 +78,16 @@ async def download_via_share_url(client, token: str, share_url: str) -> Optional
             headers=headers,
         )
         if r.status_code != 200:
-            return None
+            return None, f"resolve_failed status={r.status_code} body={r.text[:300]!r}"
         download_url = r.json().get("@microsoft.graph.downloadUrl")
         if not download_url:
-            return None
+            return None, f"no_download_url_in_response keys={list(r.json().keys())}"
         content_resp = await client.get(download_url)
         if content_resp.status_code != 200:
-            return None
-        return content_resp.content
-    except Exception:
-        return None
+            return None, f"content_fetch_failed status={content_resp.status_code}"
+        return content_resp.content, None
+    except Exception as e:
+        return None, f"exception:{type(e).__name__}:{e}"
 
 
 async def run(confirm: bool) -> Dict[str, Any]:
@@ -118,10 +125,11 @@ async def run(confirm: bool) -> Dict[str, Any]:
                 results["details"].append(entry)
                 continue
 
-            content = await download_via_share_url(http_client, token, web_url)
+            content, download_error = await download_via_share_url(http_client, token, web_url)
             if content is None:
                 results["download_failed"] += 1
                 entry["status"] = "download_failed"
+                entry["error"] = download_error
                 results["details"].append(entry)
                 continue
             results["downloaded"] += 1

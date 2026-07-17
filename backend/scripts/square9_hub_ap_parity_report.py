@@ -819,6 +819,7 @@ def format_summary_text(
     rows_for_top: List[Dict[str, Any]],
     poll_health: Dict[str, Any],
     top_n: int,
+    llm_assist_enabled: bool = False,
 ) -> str:
     out: List[str] = []
     out.append("=== square9_hub_ap_parity ===")
@@ -828,6 +829,8 @@ def format_summary_text(
     out.append(f"  strong_evidence_match:     {bucket_counts.get('strong_evidence_match', 0)}")
     out.append(f"  likely_match:              {bucket_counts.get('likely_match', 0)}")
     out.append(f"  possible_match:            {bucket_counts.get('possible_match', 0)}")
+    if llm_assist_enabled:
+        out.append(f"  llm_assisted_match:        {bucket_counts.get('llm_assisted_match', 0)}")
     out.append(f"  square9_only (no_match):   {bucket_counts.get('no_match', 0)}")
     out.append(f"  hub_only:                  {bucket_counts.get('hub_only', 0)}")
     out.append(f"  match_rate:                {match_rate:.1%}")
@@ -847,6 +850,23 @@ def format_summary_text(
             f"{r['square9_name']!r}  ↔  {r['hub_file_name']!r}  "
             f"({r['match_reason']})"
         )
+
+    if llm_assist_enabled:
+        # Always shown as its own section, never merged into the
+        # deterministic matches above - these came from a model
+        # judgment call, not a regex/token rule, and deserve separate
+        # scrutiny. The reasoning string is the model's own, printed
+        # verbatim so a human can sanity-check each one.
+        llm_matches = [r for r in rows_for_top if r["match_bucket"] == "llm_assisted_match"]
+        llm_matches.sort(key=lambda r: -float(r["match_score"] or 0))
+        out.append("")
+        out.append(f"  LLM-ASSISTED MATCHES ({len(llm_matches)}) — review before trusting")
+        for r in llm_matches[:top_n]:
+            out.append(
+                f"    [confidence={r['match_score']}] "
+                f"{r['square9_name']!r}  ↔  {r['hub_file_name']!r}"
+            )
+            out.append(f"        reasoning: {r['match_reason']}")
 
     sq_only = [r for r in rows_for_top if r["match_bucket"] == "no_match"]
     out.append("")
@@ -927,22 +947,71 @@ def run_compare(
     excluded_subpaths: Optional[List[str]] = None,
     excluded_count: int = 0,
     triage_out_csv: Optional[str] = None,
+    llm_assist: bool = False,
 ) -> Dict[str, Any]:
     """Pure function — accepts loaded inputs, returns summary + rows."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
     rows: List[Dict[str, Any]] = []
     bucket_counts: Dict[str, int] = {b: 0 for b in BUCKET_ORDER}
     bucket_counts["hub_only"] = 0
+    bucket_counts["llm_assisted_match"] = 0
 
     inv_tol = invoice_date_tolerance_days if match_by_invoice_date else None
 
     matched_hub_ids: set = set()
+    # (square_doc, index into `rows`) for every row the deterministic
+    # matcher left as no_match — candidates for the optional LLM pass.
+    no_match_entries: List[Tuple[SquareDoc, int]] = []
     for sq in square_docs:
         hub, res = best_match(sq, hub_docs, invoice_date_tolerance_days=inv_tol)
         rows.append(_row_for(sq, hub if res.bucket != "no_match" else None, res))
         bucket_counts[res.bucket] = bucket_counts.get(res.bucket, 0) + 1
         if hub is not None and res.bucket != "no_match":
             matched_hub_ids.add(hub.doc_id)
+        elif res.bucket == "no_match":
+            no_match_entries.append((sq, len(rows) - 1))
+
+    llm_assist_count = 0
+    if llm_assist and no_match_entries:
+        # Local import: keeps the LLM/emergentintegrations dependency
+        # out of the hot path for every run that doesn't opt in, and
+        # keeps this script importable/testable even where that
+        # package isn't installed.
+        from llm_parity_assist import run_llm_assist, LLM_MATCH_CONFIDENCE_FLOOR
+
+        hub_by_id = {h.doc_id: h for h in hub_docs}
+        verdicts = run_llm_assist(
+            [sq for sq, _ in no_match_entries], hub_docs, matched_hub_ids,
+        )
+        for sq, row_idx in no_match_entries:
+            v = verdicts.get(sq.name)
+            if not v:
+                continue
+            # Defense in depth: re-check the confidence floor here too,
+            # rather than trusting run_llm_assist()'s internal filtering
+            # alone. This feeds a real business metric - a single point
+            # of enforcement isn't defensive enough. Caught by testing:
+            # a mocked/misbehaving run_llm_assist that skips its own
+            # filtering must still not be able to inflate match_rate.
+            if float(v.get("confidence") or 0.0) < LLM_MATCH_CONFIDENCE_FLOOR:
+                continue
+            matched_hub = hub_by_id.get(v["matched_hub_doc_id"])
+            if matched_hub is None or matched_hub.doc_id in matched_hub_ids:
+                # Already claimed by another row. Shouldn't normally
+                # happen since candidate generation excludes already-
+                # matched ids, but stay safe rather than double-count a
+                # single Hub doc against two Square9 rows.
+                continue
+            rows[row_idx] = _row_for(
+                sq, matched_hub,
+                MatchResult(
+                    "llm_assisted_match", v["confidence"], v["reasoning"], {},
+                ),
+            )
+            bucket_counts["no_match"] -= 1
+            bucket_counts["llm_assisted_match"] += 1
+            matched_hub_ids.add(matched_hub.doc_id)
+            llm_assist_count += 1
 
     for h in hub_docs:
         if h.doc_id in matched_hub_ids:
@@ -955,6 +1024,7 @@ def run_compare(
         + bucket_counts["strong_evidence_match"]
         + bucket_counts["likely_match"]
         + bucket_counts["possible_match"]
+        + bucket_counts["llm_assisted_match"]
     )
     match_rate = (matched / len(square_docs)) if square_docs else 0.0
 
@@ -992,6 +1062,8 @@ def run_compare(
         "excluded_count": excluded_count,
         "triage_out_csv": triage_out_csv if triage_out_csv else None,
         "triage_rows_written": triage_written,
+        "llm_assist_enabled": llm_assist,
+        "llm_assist_count": llm_assist_count,
     }
 
 
@@ -1071,6 +1143,18 @@ def main() -> int:
         help="Override the triage CSV output path. Only honored when "
              "--triage-square9-only is set.",
     )
+    ap.add_argument(
+        "--llm-assist", action="store_true",
+        help="Opt-in second pass: for Square9 docs the regex/token matcher "
+             "leaves as no_match, generate a small set of loose candidates "
+             "and ask Gemini to judge whether any is genuinely the same "
+             "document (different filename formatting, OCR variance, etc). "
+             "Accepted matches are labeled llm_assisted_match, always "
+             "distinct from deterministic matches in the output. Off by "
+             "default - new capability, opt in until validated across "
+             "several runs. Requires EMERGENT_LLM_KEY; degrades to "
+             "regex-only results (no crash) if unset or on any failure.",
+    )
     args = ap.parse_args()
 
     # Pull Square9 side via Graph
@@ -1141,6 +1225,7 @@ def main() -> int:
         excluded_subpaths=excluded_subpaths,
         excluded_count=excluded_count,
         triage_out_csv=triage_out,
+        llm_assist=args.llm_assist,
     )
 
     if args.json:
@@ -1188,6 +1273,7 @@ def main() -> int:
             rows_for_top=result["rows"],
             poll_health=poll_health,
             top_n=args.top,
+            llm_assist_enabled=result["llm_assist_enabled"],
         ))
         print(
             f"\n  proof_mode:                {result['proof_mode']}"

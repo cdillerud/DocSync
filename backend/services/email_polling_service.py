@@ -1078,6 +1078,33 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                 # Lazy import to avoid circular dependency
                                 from services.document_handlers import intake_document_from_bytes
                                 resolved_category = normalize_mailbox_category(default_category)
+                                # Learned sender override (2026-07-17): if a
+                                # specific sender has been identified as a
+                                # confirmed AP-invoice source despite landing
+                                # in a non-AP-configured mailbox, honor that
+                                # learned correction instead of the mailbox's
+                                # default category. See sender_routing_
+                                # overrides.py for how these rules get
+                                # created (bucket_A_routing_rule_addition_
+                                # apply.py) - this lookup is fail-safe by
+                                # design and falls through to the unchanged
+                                # existing behavior on any error.
+                                try:
+                                    from services.sender_routing_overrides import get_sender_routing_override
+                                    override_category = await get_sender_routing_override(db, sender)
+                                    if override_category and override_category != resolved_category:
+                                        logger.info(
+                                            "[Intake:dynamic] sender routing override applied: "
+                                            "sender=%s mailbox_default=%s -> override=%s filename=%s",
+                                            sender, resolved_category, override_category, filename,
+                                        )
+                                        resolved_category = normalize_mailbox_category(override_category)
+                                except Exception as override_err:
+                                    logger.warning(
+                                        "[Intake:dynamic] sender routing override lookup failed "
+                                        "for sender=%s, proceeding with mailbox default %s: %s",
+                                        sender, resolved_category, override_err,
+                                    )
                                 logger.info(
                                     "[Intake:dynamic] mailbox_id=%s mailbox=%s configured_category=%s resolved_category=%s filename=%s",
                                     source_id, mailbox_address, default_category, resolved_category, filename,

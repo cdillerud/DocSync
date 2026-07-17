@@ -52,6 +52,13 @@ import os
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
+# Parent of scripts/ (i.e. /app), not the script's own directory -
+# needed for `from services.sender_routing_overrides import ...`
+# below. Confirmed this exact distinction matters: earlier tonight
+# backfill_xml_invoice_extraction.py hit ModuleNotFoundError from
+# inserting the script's own directory instead of its parent.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 PATCH_SOURCE = "bucket_A_high_confidence_routing_fix"
 HUB_DOC_ID_FIELD = "id"
 MIN_SCORE = 0.90
@@ -136,18 +143,37 @@ def get_hub_documents_collection():
 
 
 def apply_routing_fix(
-    candidates: List[Dict[str, str]], collection, rollback_dir: str,
-    confirm: bool, applied_at: Optional[str] = None,
+    candidates: List[Dict[str, str]], collection, sender_overrides_collection,
+    rollback_dir: str, confirm: bool, applied_at: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Fixes mailbox_category on the matched documents AND writes a
+    sender routing override rule for each one - closing the learning
+    loop, not just the symptom. Without the override write, the very
+    next email from the same sender would be misrouted identically,
+    forever; this script exists specifically to prevent that, so the
+    override write is not optional/opt-in - it's the actual point.
+
+    sender_overrides_collection is required (not Optional) precisely
+    so this can't be silently skipped by a future caller forgetting
+    to pass it - discovered 2026-07-17 that a companion script
+    (bucket_A_routing_rule_addition_apply.py) existed for cohort-based
+    (2+ doc) senders but nothing wrote an override for the isolated,
+    single-document senders this script targets - the 3 real
+    documents fixed tonight had their mailbox_category corrected but
+    no override rule was ever created, meaning the fix was purely
+    retroactive despite the intent being to prevent recurrence."""
+    from services.sender_routing_overrides import normalize_sender_email
+
     applied_at = applied_at or utc_now_iso()
 
     rollback: List[Dict[str, Any]] = []
     skipped_missing_in_db = 0
     skipped_already_applied = 0
-    to_update: List[Tuple[str, Optional[str]]] = []  # (doc_id, prior_mailbox_category)
+    to_update: List[Tuple[str, Optional[str], str]] = []  # (doc_id, prior_mailbox_category, email_sender)
 
     for r in candidates:
         doc_id = (r.get("best_hub_doc_id") or "").strip()
+        email_sender = (r.get("email_sender") or "").strip()
         existing = collection.find_one({HUB_DOC_ID_FIELD: doc_id})
         if existing is None:
             skipped_missing_in_db += 1
@@ -161,7 +187,7 @@ def apply_routing_fix(
             "mailbox_category": prior_cat,
             "file_name": r.get("best_hub_file_name"),
         })
-        to_update.append((doc_id, prior_cat))
+        to_update.append((doc_id, prior_cat, email_sender))
 
     if confirm:
         os.makedirs(rollback_dir, exist_ok=True)
@@ -178,13 +204,32 @@ def apply_routing_fix(
         rollback_path = None
 
     modified = 0
+    sender_rules_written = 0
+    senders_missing_email = 0
     if confirm:
-        for doc_id, prior_cat in to_update:
+        for doc_id, prior_cat, email_sender in to_update:
             result = collection.update_one(
                 {HUB_DOC_ID_FIELD: doc_id},
                 {"$set": build_set_payload(applied_at, prior_cat)},
             )
             modified += int(getattr(result, "modified_count", 0) or 0)
+
+            sender_key = normalize_sender_email(email_sender)
+            if not sender_key:
+                senders_missing_email += 1
+                continue
+            sender_overrides_collection.update_one(
+                {"sender_email": sender_key},
+                {"$set": {
+                    "sender_email": sender_key,
+                    "target_mailbox_category": "AP",
+                    "source": PATCH_SOURCE,
+                    "source_doc_id": doc_id,
+                    "created_at": applied_at,
+                }},
+                upsert=True,
+            )
+            sender_rules_written += 1
 
     return {
         "confirm": confirm,
@@ -195,8 +240,11 @@ def apply_routing_fix(
         "skipped_already_applied": skipped_already_applied,
         "would_update": len(to_update) if not confirm else 0,
         "updated_count": modified if confirm else 0,
+        "sender_rules_written": sender_rules_written if confirm else 0,
+        "senders_missing_email": senders_missing_email if confirm else 0,
         "to_update_preview": [
-            {"doc_id": d, "prior_mailbox_category": p} for d, p in to_update
+            {"doc_id": d, "prior_mailbox_category": p, "email_sender": s}
+            for d, p, s in to_update
         ],
     }
 
@@ -239,14 +287,23 @@ def main() -> int:
         f"apply_bucket_A_routing_fix_{dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H-%M-%SZ')}",
     )
 
+    from services.sender_routing_overrides import COLLECTION_NAME as SENDER_OVERRIDES_COLLECTION
+
+    def get_sender_overrides_collection():
+        from pymongo import MongoClient
+        client = MongoClient(os.environ["MONGO_URL"])
+        return client[os.environ["DB_NAME"]][SENDER_OVERRIDES_COLLECTION]
+
     if confirm:
         coll = get_hub_documents_collection()
-        result = apply_routing_fix(candidates, coll, rollback_dir, confirm=True)
+        overrides_coll = get_sender_overrides_collection()
+        result = apply_routing_fix(candidates, coll, overrides_coll, rollback_dir, confirm=True)
     else:
         # Dry-run still needs Mongo read access to check idempotency/
         # existence, same as the apply path - only the write is gated.
         coll = get_hub_documents_collection()
-        result = apply_routing_fix(candidates, coll, rollback_dir, confirm=False)
+        overrides_coll = get_sender_overrides_collection()
+        result = apply_routing_fix(candidates, coll, overrides_coll, rollback_dir, confirm=False)
 
     if args.json:
         print(json.dumps(result, default=str, indent=2))
@@ -259,9 +316,13 @@ def main() -> int:
     print(f"  skipped_already_applied:{result['skipped_already_applied']}")
     key = "updated_count" if result["confirm"] else "would_update"
     print(f"  {key}:            {result[key]}")
+    if result["confirm"]:
+        print(f"  sender_rules_written:   {result['sender_rules_written']}")
+        if result["senders_missing_email"]:
+            print(f"  senders_missing_email:  {result['senders_missing_email']} (fixed doc, no override rule created - no sender on record)")
     print()
     for p in result["to_update_preview"]:
-        print(f"    doc_id={p['doc_id']}  prior_mailbox_category={p['prior_mailbox_category']!r} -> 'AP'")
+        print(f"    doc_id={p['doc_id']}  sender={p.get('email_sender')!r}  prior_mailbox_category={p['prior_mailbox_category']!r} -> 'AP'")
     if result["rollback_path"]:
         print()
         print(f"  rollback_path: {result['rollback_path']}")

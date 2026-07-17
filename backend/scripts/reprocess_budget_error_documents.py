@@ -88,9 +88,17 @@ def write_temp_file(upload_dir, doc_id: str, file_content_b64: str) -> str:
 async def run(limit: Optional[int], dry_run: bool, delay_seconds: float) -> Dict[str, Any]:
     from motor.motor_asyncio import AsyncIOMotorClient
     from services.document_handlers import reprocess_document, UPLOAD_DIR
+    from deps import set_db
 
     client = AsyncIOMotorClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
+    # reprocess_document() internally calls deps.get_db(), which only
+    # works after this explicit initialization - normally done once by
+    # server.py at FastAPI startup, never triggered by a standalone
+    # script otherwise. Confirmed live: every one of the first 10 real
+    # attempts failed identically with "Database not initialized. Call
+    # set_db() first." before this fix.
+    set_db(db)
 
     docs = await find_affected_documents(db, limit)
 
@@ -220,7 +228,8 @@ def main() -> int:
             print(f"    {d['file_name']}  sender={d.get('email_sender')!r}  created={d.get('created_utc')}")
         else:
             extra = f" -> {d.get('new_doc_type')}" if d.get("new_doc_type") else ""
-            print(f"    [{d['status']}] {d['file_name']}{extra}")
+            err = f"  error={d['error']!r}" if d.get("error") else ""
+            print(f"    [{d['status']}] {d['file_name']}{extra}{err}")
 
     if result["total_candidates"] > 20:
         print(f"    ... and {result['total_candidates'] - 20} more")

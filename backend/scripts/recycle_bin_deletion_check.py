@@ -152,6 +152,63 @@ def tokens_for_deleted_item(name: str) -> Dict[str, Set[str]]:
     }
 
 
+def find_strong_matches_for_hub_docs(
+    hub_docs: List[Any], deleted_items: List[Dict[str, Any]],
+) -> Dict[str, Dict[str, Any]]:
+    """HubDoc-object variant of the CSV-row matching above, built for
+    direct reuse inside square9_hub_ap_parity_report.py's run_compare()
+    rather than the standalone diagnostic CLI. Deliberately restricted
+    to strong (invoice-token) evidence only - real, confirmed false
+    positives were found in the weak vendor-only matches (e.g. two
+    different vendors both containing the word "packaging" wrongly
+    matched to each other), and this feeds an adjustment to the actual
+    published match_rate, not just a diagnostic report, so only the
+    reliable signal is used here.
+
+    Returns hub_doc_id -> {deleted_item_name, deleted_at, shared_tokens,
+    counted_toward_rate}. counted_toward_rate is True only for the
+    first Hub doc that claims a given deleted Square9 item and False
+    for every subsequent one - this is the dedup guard for the real,
+    observed pattern where Hub splits one Square9 document into
+    multiple sub-documents (_doc1, _doc2, ...) that would otherwise
+    all separately claim credit for the same single deleted item,
+    inflating the adjustment. Every matching row is still returned
+    (so every one gets labeled and explained), just with the flag
+    telling the caller which ones should actually move the number."""
+    deleted_tokenized = [
+        (it, tokens_for_deleted_item(it.get("name", "")))
+        for it in deleted_items
+    ]
+
+    claimed_deleted_names: Set[str] = set()
+    results: Dict[str, Dict[str, Any]] = {}
+
+    for hub in hub_docs:
+        inv_tokens = set(extract_invoice_po_tokens(hub.file_name))
+        if hub.invoice_number_clean:
+            inv_tokens.add(hub.invoice_number_clean.upper().lstrip("0"))
+        if not inv_tokens:
+            continue
+
+        for item, item_tokens in deleted_tokenized:
+            overlap = inv_tokens & item_tokens["invoice"]
+            if not overlap:
+                continue
+            item_name = item.get("name", "")
+            first_claim = item_name not in claimed_deleted_names
+            if first_claim:
+                claimed_deleted_names.add(item_name)
+            results[hub.doc_id] = {
+                "deleted_item_name": item_name,
+                "deleted_at": item.get("deletedDateTime"),
+                "shared_tokens": sorted(overlap),
+                "counted_toward_rate": first_claim,
+            }
+            break  # first strong match wins for this hub doc
+
+    return results
+
+
 def find_recycle_bin_evidence(
     hub_only_rows: List[Dict[str, str]], deleted_items: List[Dict[str, Any]],
 ) -> Dict[str, Any]:

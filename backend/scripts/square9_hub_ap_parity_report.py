@@ -820,6 +820,11 @@ def format_summary_text(
     poll_health: Dict[str, Any],
     top_n: int,
     llm_assist_enabled: bool = False,
+    recycle_bin_check_enabled: bool = False,
+    recycle_bin_check_succeeded: bool = False,
+    recycle_bin_check_error: Optional[str] = None,
+    recycle_bin_bonus: int = 0,
+    match_rate_before_recycle_bin_adjustment: Optional[float] = None,
 ) -> str:
     out: List[str] = []
     out.append("=== square9_hub_ap_parity ===")
@@ -833,7 +838,26 @@ def format_summary_text(
         out.append(f"  llm_assisted_match:        {bucket_counts.get('llm_assisted_match', 0)}")
     out.append(f"  square9_only (no_match):   {bucket_counts.get('no_match', 0)}")
     out.append(f"  hub_only:                  {bucket_counts.get('hub_only', 0)}")
-    out.append(f"  match_rate:                {match_rate:.1%}")
+    if recycle_bin_check_enabled:
+        out.append(f"  recently_deleted_match:    {bucket_counts.get('recently_deleted_match', 0)}  "
+                    f"(Hub docs matched to a Square9 item deleted during the window)")
+    out.append("")
+    if recycle_bin_check_enabled and recycle_bin_check_succeeded:
+        out.append(
+            f"  match_rate (raw, before recycle-bin adjustment): "
+            f"{(match_rate_before_recycle_bin_adjustment or 0.0):.1%}"
+        )
+        out.append(
+            f"  match_rate (adjusted - {recycle_bin_bonus} Square9 docs recovered "
+            f"from recycle bin, added to both sides of the ratio):"
+        )
+        out.append(f"  >>> {match_rate:.1%} <<<")
+    elif recycle_bin_check_enabled and not recycle_bin_check_succeeded:
+        out.append(f"  match_rate:                {match_rate:.1%}  "
+                    f"(RAW - recycle-bin adjustment was attempted but FAILED: "
+                    f"{recycle_bin_check_error})")
+    else:
+        out.append(f"  match_rate:                {match_rate:.1%}")
 
     matched = [
         r for r in rows_for_top
@@ -867,6 +891,23 @@ def format_summary_text(
                 f"{r['square9_name']!r}  ↔  {r['hub_file_name']!r}"
             )
             out.append(f"        reasoning: {r['match_reason']}")
+
+    if recycle_bin_check_enabled and recycle_bin_check_succeeded:
+        deleted_matches = [r for r in rows_for_top if r["match_bucket"] == "recently_deleted_match"]
+        if deleted_matches:
+            counted = [r for r in deleted_matches if float(r["match_score"] or 0) >= 1.0]
+            labeled_only = [r for r in deleted_matches if float(r["match_score"] or 0) < 1.0]
+            out.append("")
+            out.append(
+                f"  RECOVERED FROM RECYCLE BIN ({len(counted)} counted toward the "
+                f"adjusted rate, {len(labeled_only)} additional sub-doc matches "
+                f"explained but not double-counted)"
+            )
+            for r in counted[:top_n]:
+                out.append(f"    {r['hub_file_name']!r}  ↔  {r['match_reason']}")
+            if labeled_only:
+                out.append(f"    (+{len(labeled_only)} more Hub sub-documents matching "
+                            f"the same already-counted Square9 items)")
 
     sq_only = [r for r in rows_for_top if r["match_bucket"] == "no_match"]
     out.append("")
@@ -948,6 +989,9 @@ def run_compare(
     excluded_count: int = 0,
     triage_out_csv: Optional[str] = None,
     llm_assist: bool = False,
+    check_recycle_bin: bool = True,
+    recycle_bin_since_hours: int = 168,
+    recycle_bin_site_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Pure function — accepts loaded inputs, returns summary + rows."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
@@ -955,6 +999,7 @@ def run_compare(
     bucket_counts: Dict[str, int] = {b: 0 for b in BUCKET_ORDER}
     bucket_counts["hub_only"] = 0
     bucket_counts["llm_assisted_match"] = 0
+    bucket_counts["recently_deleted_match"] = 0
 
     inv_tol = invoice_date_tolerance_days if match_by_invoice_date else None
 
@@ -1013,20 +1058,101 @@ def run_compare(
             matched_hub_ids.add(matched_hub.doc_id)
             llm_assist_count += 1
 
+    # Recycle-bin adjustment: for Hub docs that still have no Square9
+    # counterpart, check whether the reason is that Square9 deleted
+    # the document (AP processed and cleared it) rather than Hub never
+    # having a real match. Confirmed live 2026-07-17 against real
+    # production data: 244 of 412 hub_only docs (strong, invoice-
+    # number-token evidence only) traced directly to something deleted
+    # from Square9 inside the same comparison window - the raw
+    # match_rate this script produced was silently penalizing Hub for
+    # Square9's own document lifecycle, not measuring a real gap.
+    # On by default (unlike llm_assist, which remains experimental) -
+    # this corrects a proven, large, confirmed distortion, not an
+    # unproven capability being trialed.
+    recycle_bin_bonus = 0
+    recycle_bin_checked = False
+    recycle_bin_error: Optional[str] = None
+    recycle_bin_items_scanned = 0
+    if check_recycle_bin:
+        try:
+            from recycle_bin_deletion_check import (
+                pull_recycle_bin_items, find_strong_matches_for_hub_docs,
+                PROD_SITE_PATH,
+            )
+            from sharepoint_ap_compare import acquire_graph_token
+
+            tenant = os.environ.get("TENANT_ID")
+            cid = os.environ.get("GRAPH_CLIENT_ID")
+            csec = os.environ.get("GRAPH_CLIENT_SECRET")
+            token = acquire_graph_token(tenant, cid, csec)
+            host = os.environ.get(
+                "SHAREPOINT_HOST",
+                f"{(os.environ.get('SHAREPOINT_TENANT_NAME') or 'gamerpackaging1')}.sharepoint.com",
+            )
+            site_path = recycle_bin_site_path or PROD_SITE_PATH
+
+            remaining_unmatched = [h for h in hub_docs if h.doc_id not in matched_hub_ids]
+            deleted_items = pull_recycle_bin_items(
+                token, host, site_path, recycle_bin_since_hours,
+            )
+            recycle_bin_items_scanned = len(deleted_items)
+            matches = find_strong_matches_for_hub_docs(remaining_unmatched, deleted_items)
+
+            hub_by_id = {h.doc_id: h for h in hub_docs}
+            for doc_id, info in matches.items():
+                hub = hub_by_id[doc_id]
+                rows.append({
+                    **_row_hub_only(hub),
+                    "match_bucket": "recently_deleted_match",
+                    "match_score": 1.0 if info["counted_toward_rate"] else 0.5,
+                    "match_reason": (
+                        f"square9_item_deleted:{info['deleted_item_name']}"
+                        f" (shared: {','.join(info['shared_tokens'])})"
+                    ),
+                    "square9_name": info["deleted_item_name"],
+                    "square9_modified": info["deleted_at"] or "",
+                })
+                bucket_counts["recently_deleted_match"] += 1
+                matched_hub_ids.add(doc_id)
+                if info["counted_toward_rate"]:
+                    recycle_bin_bonus += 1
+            recycle_bin_checked = True
+        except Exception as e:
+            # Never let this take down the readiness check - fall back
+            # to the unadjusted numbers and say clearly, in the output,
+            # that the adjustment was attempted but failed, rather than
+            # silently under-reporting with no explanation.
+            recycle_bin_error = str(e)
+
     for h in hub_docs:
         if h.doc_id in matched_hub_ids:
             continue
         rows.append(_row_hub_only(h))
         bucket_counts["hub_only"] += 1
 
-    matched = (
+    matched_before_recycle_bin = (
         bucket_counts["exact_match"]
         + bucket_counts["strong_evidence_match"]
         + bucket_counts["likely_match"]
         + bucket_counts["possible_match"]
         + bucket_counts["llm_assisted_match"]
     )
-    match_rate = (matched / len(square_docs)) if square_docs else 0.0
+    match_rate_before_recycle_bin = (
+        (matched_before_recycle_bin / len(square_docs)) if square_docs else 0.0
+    )
+
+    # The honest, adjusted numbers: each recycle-bin-recovered match
+    # adds one real Square9 document back into BOTH sides of the
+    # ratio, since it genuinely existed and was genuinely matched
+    # during the window - it just isn't sitting in Square9 any more by
+    # snapshot time. Only counted_toward_rate=True matches move this;
+    # duplicate sub-doc claims on the same deleted item are labeled in
+    # the rows above but never inflate the denominator twice for one
+    # underlying document.
+    matched = matched_before_recycle_bin + recycle_bin_bonus
+    square_count_adjusted = len(square_docs) + recycle_bin_bonus
+    match_rate = (matched / square_count_adjusted) if square_count_adjusted else 0.0
 
     findings = evaluate_findings(
         hub_docs=hub_docs,
@@ -1064,6 +1190,14 @@ def run_compare(
         "triage_rows_written": triage_written,
         "llm_assist_enabled": llm_assist,
         "llm_assist_count": llm_assist_count,
+        "recycle_bin_check_enabled": check_recycle_bin,
+        "recycle_bin_check_succeeded": recycle_bin_checked,
+        "recycle_bin_check_error": recycle_bin_error,
+        "recycle_bin_items_scanned": recycle_bin_items_scanned,
+        "recycle_bin_bonus": recycle_bin_bonus,
+        "match_rate_before_recycle_bin_adjustment": match_rate_before_recycle_bin,
+        "square_count_before_adjustment": len(square_docs),
+        "square_count_adjusted": square_count_adjusted,
     }
 
 
@@ -1155,6 +1289,27 @@ def main() -> int:
              "several runs. Requires EMERGENT_LLM_KEY; degrades to "
              "regex-only results (no crash) if unset or on any failure.",
     )
+    ap.add_argument(
+        "--no-recycle-bin-check", action="store_true",
+        help="Disable the recycle-bin match-rate adjustment (on by default). "
+             "Square9's prod side deletes documents as AP processes them - "
+             "confirmed live 2026-07-17 that a large share of hub_only docs "
+             "(244 of 412 in one real run, invoice-number-token evidence "
+             "only) trace directly to a Square9 item deleted during the "
+             "comparison window, meaning the raw match_rate was penalizing "
+             "Hub for Square9's own document lifecycle rather than "
+             "measuring a real gap. On by default because this corrects a "
+             "proven distortion, unlike --llm-assist which trials an "
+             "unproven capability. Degrades to the raw match_rate (no "
+             "crash) on any failure - checked via recycle_bin_check_"
+             "succeeded in the JSON output.",
+    )
+    ap.add_argument(
+        "--recycle-bin-site-path", default=None,
+        help="Override the SharePoint site path checked for deletions "
+             "(default: recycle_bin_deletion_check.PROD_SITE_PATH, "
+             "currently /sites/GamerAccounting).",
+    )
     args = ap.parse_args()
 
     # Pull Square9 side via Graph
@@ -1226,6 +1381,9 @@ def main() -> int:
         excluded_count=excluded_count,
         triage_out_csv=triage_out,
         llm_assist=args.llm_assist,
+        check_recycle_bin=not args.no_recycle_bin_check,
+        recycle_bin_since_hours=prod_window_hours,
+        recycle_bin_site_path=args.recycle_bin_site_path,
     )
 
     if args.json:
@@ -1251,6 +1409,16 @@ def main() -> int:
             "limit": args.limit,
             "bucket_counts": result["bucket_counts"],
             "match_rate": result["match_rate"],
+            "match_rate_before_recycle_bin_adjustment": result["match_rate_before_recycle_bin_adjustment"],
+            "recycle_bin_check_enabled": result["recycle_bin_check_enabled"],
+            "recycle_bin_check_succeeded": result["recycle_bin_check_succeeded"],
+            "recycle_bin_check_error": result["recycle_bin_check_error"],
+            "recycle_bin_items_scanned": result["recycle_bin_items_scanned"],
+            "recycle_bin_bonus": result["recycle_bin_bonus"],
+            "square_count_before_adjustment": result["square_count_before_adjustment"],
+            "square_count_adjusted": result["square_count_adjusted"],
+            "llm_assist_enabled": result["llm_assist_enabled"],
+            "llm_assist_count": result["llm_assist_count"],
             "blockers": result["findings"]["blockers"],
             "warnings": result["findings"]["warnings"],
             "findings": result["findings"],
@@ -1274,6 +1442,11 @@ def main() -> int:
             poll_health=poll_health,
             top_n=args.top,
             llm_assist_enabled=result["llm_assist_enabled"],
+            recycle_bin_check_enabled=result["recycle_bin_check_enabled"],
+            recycle_bin_check_succeeded=result["recycle_bin_check_succeeded"],
+            recycle_bin_check_error=result["recycle_bin_check_error"],
+            recycle_bin_bonus=result["recycle_bin_bonus"],
+            match_rate_before_recycle_bin_adjustment=result["match_rate_before_recycle_bin_adjustment"],
         ))
         print(
             f"\n  proof_mode:                {result['proof_mode']}"

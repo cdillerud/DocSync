@@ -2086,11 +2086,24 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
 async def bulk_classify_documents(
     doc_ids: List[str] = Query(..., description="Document IDs to classify"),
     doc_type: str = Query(..., description="Document type to assign (e.g. AP_Invoice, BOL, SHIPPING)"),
+    mailbox_category: Optional[str] = Query(
+        None, description="If provided, also corrects the document's "
+                           "mailbox/routing lane (e.g. AP, Operations, "
+                           "Sales) and teaches the system this sender's "
+                           "correct routing for future documents."),
     reclassify_by: str = Query("admin", description="Who is performing the reclassification"),
 ):
     """
     Bulk assign/change document type for multiple documents.
     Records classification corrections for AI learning feedback.
+
+    When mailbox_category is also provided, this additionally corrects
+    routing and writes a sender routing override rule - a human
+    correction is the highest-trust signal in the system, so this
+    happens unconditionally (no confidence score, no cohort-size
+    threshold) and unconditionally overwrites any existing rule for
+    that sender, since a direct human correction supersedes an earlier
+    automated inference.
     """
     from datetime import datetime, timezone
     db = get_db()
@@ -2098,6 +2111,8 @@ async def bulk_classify_documents(
 
     classified = 0
     failed = 0
+    routing_corrected = 0
+    sender_rules_written = 0
     details = []
 
     for doc_id in doc_ids:
@@ -2107,7 +2122,8 @@ async def bulk_classify_documents(
                 "suggested_job_type": 1, "file_name": 1, "vendor_canonical": 1,
                 "vendor_raw": 1, "raw_text": 1, "extracted_text": 1,
                 "extracted_fields": 1, "classification_method": 1,
-                "classification_confidence": 1,
+                "classification_confidence": 1, "mailbox_category": 1,
+                "email_sender": 1,
             })
             if not doc:
                 failed += 1
@@ -2162,9 +2178,23 @@ async def bulk_classify_documents(
                 except Exception as e:
                     logger.warning("[BulkClassify] Feedback recording failed for %s: %s", doc_id[:8], e)
 
+            routing_from = None
+            if mailbox_category:
+                from services.sender_routing_overrides import apply_manual_routing_correction
+                routing_result = await apply_manual_routing_correction(
+                    db, doc_id, doc, mailbox_category, reclassify_by, now,
+                )
+                routing_from = routing_result["prior_mailbox_category"]
+                if routing_result["routing_changed"]:
+                    routing_corrected += 1
+                if routing_result["sender_rule_written"]:
+                    sender_rules_written += 1
+
             classified += 1
             details.append({"doc_id": doc_id[:8], "action": "classified",
-                            "from": original_type, "to": doc_type})
+                            "from": original_type, "to": doc_type,
+                            **({"routing_from": routing_from, "routing_to": mailbox_category}
+                               if mailbox_category else {})})
 
         except Exception as e:
             failed += 1
@@ -2174,6 +2204,8 @@ async def bulk_classify_documents(
         "success": True,
         "classified": classified,
         "failed": failed,
+        "routing_corrected": routing_corrected,
+        "sender_rules_written": sender_rules_written,
         "doc_type": doc_type,
         "details": details[:20],
     }

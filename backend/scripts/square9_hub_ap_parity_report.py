@@ -1173,6 +1173,18 @@ def run_compare(
         "rows": rows,
         "bucket_counts": bucket_counts,
         "match_rate": match_rate,
+        # Authoritative, fully-adjusted matched count (includes
+        # llm_assisted_match and recently_deleted_match, not just the
+        # four deterministic buckets). Added 2026-07-17 after finding
+        # a downstream script (cutover_proof_summary.py) re-deriving
+        # this by summing a hardcoded list of bucket_counts keys that
+        # went stale the moment recently_deleted_match was introduced -
+        # its own "Projected match rate after Bucket A apply" line was
+        # silently using the pre-recycle-bin-adjustment numbers even
+        # though the headline match_rate above was already correct.
+        # Downstream consumers should read this field directly rather
+        # than re-summing bucket_counts themselves.
+        "matched_count": matched,
         "findings": findings,
         "square_count": len(square_docs),
         "hub_count": len(hub_docs),
@@ -1408,6 +1420,7 @@ def main() -> int:
             "prod_modified_since_hours": prod_window_hours,
             "limit": args.limit,
             "bucket_counts": result["bucket_counts"],
+            "matched_count": result["matched_count"],
             "match_rate": result["match_rate"],
             "match_rate_before_recycle_bin_adjustment": result["match_rate_before_recycle_bin_adjustment"],
             "recycle_bin_check_enabled": result["recycle_bin_check_enabled"],

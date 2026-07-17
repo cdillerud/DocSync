@@ -208,9 +208,21 @@ def build_key_counts(parity: Optional[Dict[str, Any]],
     bucket_counts = p.get("bucket_counts") or {}
     if not isinstance(bucket_counts, dict):
         bucket_counts = {}
-    square_count = p.get("square_count")
+    # Prefer the authoritative, fully-adjusted values the parity script
+    # itself computed (matched_count, square_count_adjusted) - added
+    # 2026-07-17. Falls back to the old re-derivation for snapshots
+    # recorded before this field existed, so historical entries in
+    # square9_readiness_history still render rather than showing
+    # "unknown". The old path is exactly what went stale: it summed a
+    # hardcoded bucket_counts key list that didn't know about
+    # recently_deleted_match, so the projection below quietly used
+    # pre-recycle-bin-adjustment numbers even after the headline
+    # match_rate had already been corrected.
+    square_count = p.get("square_count_adjusted", p.get("square_count"))
     hub_count = p.get("hub_count")
-    matched = _derive_matched_count(bucket_counts)
+    matched = p.get("matched_count")
+    if matched is None:
+        matched = _derive_matched_count(bucket_counts)
 
     a = bucket_a_plan or {}
     a_actionable_cohorts = a.get("cohort_count_actionable")

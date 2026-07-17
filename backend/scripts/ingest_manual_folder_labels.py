@@ -59,7 +59,7 @@ import os
 import sys
 from typing import Any, Dict, List, Optional
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 CORRECTION_SOURCE = "manual_folder_label"
 

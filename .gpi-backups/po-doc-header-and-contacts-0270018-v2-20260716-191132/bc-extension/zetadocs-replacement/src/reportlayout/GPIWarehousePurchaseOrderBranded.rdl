@@ -1,0 +1,1089 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:DataSourceID>654e4160-a973-4806-a870-068656521e95</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Image Name="Logo">
+            <Source>Database</Source>
+            <Value>=First(Fields!CompanyLogo.Value,"DataSet_Result")</Value>
+            <MIMEType>image/jpeg</MIMEType>
+            <Sizing>FitProportional</Sizing>
+            <Top>0in</Top>
+            <Left>0in</Left>
+            <Height>0.7in</Height>
+            <Width>3.2in</Width>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Image>
+          <Textbox Name="Title">
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>PURCHASE ORDER</Value>
+                    <Style>
+                      <FontFamily>Arial</FontFamily>
+                      <FontSize>14pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>WAREHOUSE</Value>
+                    <Style>
+                      <FontFamily>Arial</FontFamily>
+                      <FontSize>11pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#555555</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+            </Paragraphs>
+            <Top>0.18in</Top>
+            <Left>5in</Left>
+            <Height>0.55in</Height>
+            <Width>2.8in</Width>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Textbox>
+          <Textbox Name="GPIHeaderDocumentNumber">
+            <CanGrow>false</CanGrow>
+            <KeepTogether>true</KeepTogether>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>="PO #: " &amp; First(Fields!PurchaseOrderNo.Value,"DataSet_Result")</Value>
+                    <Style>
+                      <FontFamily>Arial</FontFamily>
+                      <FontSize>10pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#555555</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+            </Paragraphs>
+            <Top>0.76in</Top>
+            <Left>5in</Left>
+            <Height>0.22in</Height>
+            <Width>2.8in</Width>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Textbox>
+          <Textbox Name="PONo">
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>="#" &amp; First(Fields!PurchaseOrderNo.Value,"DataSet_Result")</Value>
+                    <Style>
+                      <FontFamily>Arial</FontFamily>
+                      <FontSize>10pt</FontSize>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#555555</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+            </Paragraphs>
+            <Top>0.77in</Top>
+            <Left>5in</Left>
+            <Height>0.2in</Height>
+            <Width>2.8in</Width>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Textbox>
+          <Textbox Name="Company">
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>=First(Fields!CompanyName.Value,"DataSet_Result") &amp; " | " &amp; First(Fields!CompanyAddress.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!CompanyPostCode.Value,"DataSet_Result")</Value>
+                    <Style>
+                      <FontFamily>Arial</FontFamily>
+                      <FontSize>7.5pt</FontSize>
+                      <Color>#444444</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+            </Paragraphs>
+            <Top>0.96in</Top>
+            <Left>0in</Left>
+            <Height>0.22in</Height>
+            <Width>5.5in</Width>
+            <Style>
+              <Border>
+                <Style>None</Style>
+              </Border>
+            </Style>
+          </Textbox>
+          <Textbox Name="Vendor">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>BUY FROM</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>=First(Fields!VendorName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!VendorAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!VendorCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!VendorState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!VendorPostCode.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+            </Paragraphs>
+            <Top>1.28in</Top>
+            <Left>0in</Left>
+            <Height>0.86in</Height>
+            <Width>3.75in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <BackgroundColor>#FAFAFA</BackgroundColor>
+              <Border>
+                <Color>#C8C8C8</Color>
+                <Style>Solid</Style>
+                <Width>0.6pt</Width>
+              </Border>
+              <PaddingLeft>8pt</PaddingLeft>
+              <PaddingTop>6pt</PaddingTop>
+            </Style>
+          </Textbox>
+          <Textbox Name="ShipTo">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>SHIP TO WAREHOUSE</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>=First(Fields!ShipToName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToAddress.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!ShipToCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!ShipToState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!ShipToPostCode.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+            </Paragraphs>
+            <Top>1.28in</Top>
+            <Left>4.05in</Left>
+            <Height>0.86in</Height>
+            <Width>3.75in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <BackgroundColor>#FAFAFA</BackgroundColor>
+              <Border>
+                <Color>#C8C8C8</Color>
+                <Style>Solid</Style>
+                <Width>0.6pt</Width>
+              </Border>
+              <PaddingLeft>8pt</PaddingLeft>
+              <PaddingTop>6pt</PaddingTop>
+            </Style>
+          </Textbox>
+          <Textbox Name="DetailsLeft">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Vendor No.: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=First(Fields!VendorNo.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Vendor Contact: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=First(Fields!VendorContact.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Terms: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=First(Fields!PaymentTermsDescription.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Shipment Method Code: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=First(Fields!ShipmentMethodCode.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>FOB: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=First(Fields!FOBText.Value,"DataSet_Result")</Value>
+                  </TextRun>
+                </TextRuns>
+              </Paragraph>
+            </Paragraphs>
+            <Top>2.34in</Top>
+            <Left>0in</Left>
+            <Height>1.12in</Height>
+            <Width>3.75in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>8pt</FontSize>
+              <Border>
+                <Color>#8C1D18</Color>
+                <Style>Solid</Style>
+                <Width>0.8pt</Width>
+              </Border>
+              <PaddingLeft>9pt</PaddingLeft>
+              <PaddingTop>7pt</PaddingTop>
+            </Style>
+          </Textbox>
+          <Textbox Name="DetailsRight">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Order Date: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=Format(First(Fields!OrderDate.Value,"DataSet_Result"),"MM/dd/yy")</Value>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Left</TextAlign>
+                </Style>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Expected Receipt Date: </Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=IIF(Year(First(Fields!ExpectedReceiptDate.Value,"DataSet_Result"))=1,"",Format(First(Fields!ExpectedReceiptDate.Value,"DataSet_Result"),"MM/dd/yy"))</Value>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Left</TextAlign>
+                </Style>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>Gamer Contacts:</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                  <TextRun>
+                    <Value>=vbCrLf &amp; Trim(IIF(Len(Trim(First(Fields!GamerContactName1.Value,"DataSet_Result"))) &gt; 0, vbCrLf &amp; First(Fields!GamerContactName1.Value,"DataSet_Result"), "") &amp; IIF(Len(Trim(First(Fields!GamerContactName2.Value,"DataSet_Result"))) &gt; 0, vbCrLf &amp; First(Fields!GamerContactName2.Value,"DataSet_Result"), ""))</Value>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Left</TextAlign>
+                </Style>
+              </Paragraph>
+            </Paragraphs>
+            <Top>2.34in</Top>
+            <Left>4.05in</Left>
+            <Height>1.12in</Height>
+            <Width>3.75in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>8pt</FontSize>
+              <Border>
+                <Color>#8C1D18</Color>
+                <Style>Solid</Style>
+                <Width>0.8pt</Width>
+              </Border>
+              <PaddingLeft>9pt</PaddingLeft>
+              <PaddingTop>7pt</PaddingTop>
+            </Style>
+          </Textbox>
+          <Tablix Name="Lines">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn>
+                  <Width>1.65in</Width>
+                </TablixColumn>
+                <TablixColumn>
+                  <Width>2.75in</Width>
+                </TablixColumn>
+                <TablixColumn>
+                  <Width>0.8in</Width>
+                </TablixColumn>
+                <TablixColumn>
+                  <Width>1.25in</Width>
+                </TablixColumn>
+                <TablixColumn>
+                  <Width>1.35in</Width>
+                </TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.3in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="H1">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>Item</Value>
+                                  <Style>
+                                    <FontWeight>Bold</FontWeight>
+                                    <Color>White</Color>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <BackgroundColor>#8C1D18</BackgroundColor>
+                            <PaddingLeft>3pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="H2">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>Description</Value>
+                                  <Style>
+                                    <FontWeight>Bold</FontWeight>
+                                    <Color>White</Color>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <BackgroundColor>#8C1D18</BackgroundColor>
+                            <PaddingLeft>3pt</PaddingLeft>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="H3">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>Qty.</Value>
+                                  <Style>
+                                    <FontWeight>Bold</FontWeight>
+                                    <Color>White</Color>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <BackgroundColor>#8C1D18</BackgroundColor>
+                            <TextAlign>Right</TextAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="H4">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>Unit Cost</Value>
+                                  <Style>
+                                    <FontWeight>Bold</FontWeight>
+                                    <Color>White</Color>
+                                    <Format>#,##0.00</Format>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Right</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <BackgroundColor>#8C1D18</BackgroundColor>
+                            <TextAlign>Right</TextAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="H5">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>Line Total</Value>
+                                  <Style>
+                                    <FontWeight>Bold</FontWeight>
+                                    <Color>White</Color>
+                                    <Format>#,##0.00</Format>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Right</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <BackgroundColor>#8C1D18</BackgroundColor>
+                            <TextAlign>Right</TextAlign>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <TablixRow>
+                  <Height>0.3in</Height>
+                  <TablixCells>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="D1">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>=Fields!ItemNo.Value</Value>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Left</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <FontSize>6.5pt</FontSize>
+                            <PaddingLeft>3pt</PaddingLeft>
+                            <Border>
+                              <Color>#D7D7D7</Color>
+                              <Style>Solid</Style>
+                              <Width>0.25pt</Width>
+                            </Border>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="D2">
+                          <CanGrow>true</CanGrow>
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>=Fields!LineDescription.Value &amp; IIF(Fields!LineExtendedText.Value="","",vbCrLf &amp; Fields!LineExtendedText.Value)</Value>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Left</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <PaddingLeft>3pt</PaddingLeft>
+                            <Border>
+                              <Color>#D7D7D7</Color>
+                              <Style>Solid</Style>
+                              <Width>0.25pt</Width>
+                            </Border>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="D3">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>=Format(Fields!Quantity.Value,"#,##0.##")</Value>
+                                  <Style>
+                                    <Format>#,##0.##</Format>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Right</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <TextAlign>Right</TextAlign>
+                            <PaddingRight>3pt</PaddingRight>
+                            <Border>
+                              <Color>#D7D7D7</Color>
+                              <Style>Solid</Style>
+                              <Width>0.25pt</Width>
+                            </Border>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="D4">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>=Format(Fields!DirectUnitCost.Value,"#,##0.00")</Value>
+                                  <Style>
+                                    <Format>#,##0.00</Format>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Right</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <TextAlign>Right</TextAlign>
+                            <PaddingRight>3pt</PaddingRight>
+                            <Border>
+                              <Color>#D7D7D7</Color>
+                              <Style>Solid</Style>
+                              <Width>0.25pt</Width>
+                            </Border>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                    <TablixCell>
+                      <CellContents>
+                        <Textbox Name="D5">
+                          <Paragraphs>
+                            <Paragraph>
+                              <TextRuns>
+                                <TextRun>
+                                  <Value>=Format(Fields!LineAmount.Value,"#,##0.00")</Value>
+                                  <Style>
+                                    <Format>#,##0.00</Format>
+                                  </Style>
+                                </TextRun>
+                              </TextRuns>
+                              <Style>
+                                <TextAlign>Right</TextAlign>
+                              </Style>
+                            </Paragraph>
+                          </Paragraphs>
+                          <Style>
+                            <TextAlign>Right</TextAlign>
+                            <PaddingRight>3pt</PaddingRight>
+                            <Border>
+                              <Color>#D7D7D7</Color>
+                              <Style>Solid</Style>
+                              <Width>0.25pt</Width>
+                            </Border>
+                          </Style>
+                        </Textbox>
+                      </CellContents>
+                    </TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy>
+              <TablixMembers>
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+                <TablixMember />
+              </TablixMembers>
+            </TablixColumnHierarchy>
+            <TablixRowHierarchy>
+              <TablixMembers>
+                <TablixMember>
+                  <KeepWithGroup>After</KeepWithGroup>
+                  <RepeatOnNewPage>true</RepeatOnNewPage>
+                </TablixMember>
+                <TablixMember>
+                  <Group Name="DetailsGroup" />
+                </TablixMember>
+              </TablixMembers>
+            </TablixRowHierarchy>
+            <DataSetName>DataSet_Result</DataSetName>
+            <Top>3.55in</Top>
+            <Left>0in</Left>
+            <Height>0.6in</Height>
+            <Width>7.8in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>7.5pt</FontSize>
+            </Style>
+          </Tablix>
+          <Textbox Name="Totals">
+            <CanGrow>true</CanGrow>
+            <Paragraphs>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>="Subtotal:     " &amp; Format(First(Fields!SubtotalAmount.Value,"DataSet_Result"),"N2")</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>="Tax:     " &amp; Format(First(Fields!TaxAmount.Value,"DataSet_Result"),"N2")</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+              <Paragraph>
+                <TextRuns>
+                  <TextRun>
+                    <Value>="PO Total (" &amp; First(Fields!CurrencyCode.Value,"DataSet_Result") &amp; "):     " &amp; Format(First(Fields!TotalAmount.Value,"DataSet_Result"),"N2")</Value>
+                    <Style>
+                      <FontWeight>Bold</FontWeight>
+                      <Color>#8C1D18</Color>
+                    </Style>
+                  </TextRun>
+                </TextRuns>
+                <Style>
+                  <TextAlign>Right</TextAlign>
+                </Style>
+              </Paragraph>
+            </Paragraphs>
+            <Top>4.65in</Top>
+            <Left>5.05in</Left>
+            <Height>0.82in</Height>
+            <Width>2.75in</Width>
+            <Style>
+              <FontFamily>Arial</FontFamily>
+              <FontSize>8.5pt</FontSize>
+              <Border>
+                <Color>#8C1D18</Color>
+                <Style>Solid</Style>
+                <Width>0.8pt</Width>
+              </Border>
+              <PaddingTop>6pt</PaddingTop>
+              <PaddingRight>7pt</PaddingRight>
+            </Style>
+          </Textbox>
+        </ReportItems>
+        <Height>8.05in</Height>
+        <Style />
+      </Body>
+      <Width>7.8in</Width>
+      <Page>
+        <PageFooter>
+          <Height>0.55in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="GPIProcurementTermsFooter">
+              <CanGrow>true</CanGrow>
+              <KeepTogether>true</KeepTogether>
+              <Paragraphs>
+                <Paragraph>
+                  <TextRuns>
+                    <TextRun>
+                      <Value>All orders placed by Gamer that are not governed by a valid contract executed by Gamer shall be subject to the 'Standard Terms and Conditions for Non-Contracted Procurement' as published on our website: https://www.gamerpackaging.com/standard-terms-and-conditions-for-non-contracted-procurement/</Value>
+                      <Style>
+                        <FontFamily>Arial</FontFamily>
+                        <FontSize>6.5pt</FontSize>
+                        <Color>#555555</Color>
+                      </Style>
+                    </TextRun>
+                  </TextRuns>
+                  <Style>
+                    <TextAlign>Center</TextAlign>
+                  </Style>
+                </Paragraph>
+              </Paragraphs>
+              <Top>0.02in</Top>
+              <Left>0in</Left>
+              <Height>0.34in</Height>
+              <Width>7.8in</Width>
+              <Style>
+                <Border>
+                  <Style>None</Style>
+                </Border>
+                <PaddingLeft>3pt</PaddingLeft>
+                <PaddingRight>3pt</PaddingRight>
+              </Style>
+            </Textbox>
+            <Textbox Name="GPIStandardAddressFooter">
+              <CanGrow>false</CanGrow>
+              <KeepTogether>true</KeepTogether>
+              <Paragraphs>
+                <Paragraph>
+                  <TextRuns>
+                    <TextRun>
+                      <Value>Gamer Packaging, Inc. | 100 S 5th Street, Suite 1900, Minneapolis, MN 55402</Value>
+                      <Style>
+                        <FontFamily>Arial</FontFamily>
+                        <FontSize>7pt</FontSize>
+                        <Color>#666666</Color>
+                      </Style>
+                    </TextRun>
+                  </TextRuns>
+                  <Style>
+                    <TextAlign>Center</TextAlign>
+                  </Style>
+                </Paragraph>
+              </Paragraphs>
+              <Top>0.39in</Top>
+              <Left>0in</Left>
+              <Height>0.14in</Height>
+              <Width>7.8in</Width>
+              <Style>
+                <Border>
+                  <Style>None</Style>
+                </Border>
+              </Style>
+            </Textbox>
+          </ReportItems>
+          <Style>
+            <Border>
+              <Style>None</Style>
+            </Border>
+          </Style>
+        </PageFooter>
+        <PageHeader>
+          <Height>0.2in</Height>
+          <PrintOnFirstPage>true</PrintOnFirstPage>
+          <PrintOnLastPage>true</PrintOnLastPage>
+          <ReportItems>
+            <Textbox Name="PageCount">
+              <Paragraphs>
+                <Paragraph>
+                  <TextRuns>
+                    <TextRun>
+                      <Value>="Page " &amp; Globals!PageNumber &amp; " of " &amp; Globals!TotalPages</Value>
+                      <Style>
+                        <FontFamily>Arial</FontFamily>
+                        <FontSize>7.5pt</FontSize>
+                        <Color>#555555</Color>
+                      </Style>
+                    </TextRun>
+                  </TextRuns>
+                  <Style>
+                    <TextAlign>Right</TextAlign>
+                  </Style>
+                </Paragraph>
+              </Paragraphs>
+              <Top>0in</Top>
+              <Left>6.65in</Left>
+              <Height>0.2in</Height>
+              <Width>1.15in</Width>
+              <Style>
+                <Border>
+                  <Style>None</Style>
+                </Border>
+              </Style>
+            </Textbox>
+          </ReportItems>
+          <Style />
+        </PageHeader>
+        <PageHeight>11in</PageHeight>
+        <PageWidth>8.5in</PageWidth>
+        <LeftMargin>0.35in</LeftMargin>
+        <RightMargin>0.35in</RightMargin>
+        <TopMargin>0.3in</TopMargin>
+        <BottomMargin>0.3in</BottomMargin>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>8aa98b12-f975-47c7-bce4-d7317a1f3f89</rd:ReportID>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Fields>
+        <Field Name="CompanyLogo">
+          <DataField>CompanyLogo</DataField>
+        </Field>
+        <Field Name="CompanyName">
+          <DataField>CompanyName</DataField>
+        </Field>
+        <Field Name="CompanyAddress">
+          <DataField>CompanyAddress</DataField>
+        </Field>
+        <Field Name="CompanyCity">
+          <DataField>CompanyCity</DataField>
+        </Field>
+        <Field Name="CompanyState">
+          <DataField>CompanyState</DataField>
+        </Field>
+        <Field Name="CompanyPostCode">
+          <DataField>CompanyPostCode</DataField>
+        </Field>
+        <Field Name="CompanyPhone">
+          <DataField>CompanyPhone</DataField>
+        </Field>
+        <Field Name="CompanyHomePage">
+          <DataField>CompanyHomePage</DataField>
+        </Field>
+        <Field Name="VendorName">
+          <DataField>VendorName</DataField>
+        </Field>
+        <Field Name="VendorAddress">
+          <DataField>VendorAddress</DataField>
+        </Field>
+        <Field Name="VendorCity">
+          <DataField>VendorCity</DataField>
+        </Field>
+        <Field Name="VendorState">
+          <DataField>VendorState</DataField>
+        </Field>
+        <Field Name="VendorPostCode">
+          <DataField>VendorPostCode</DataField>
+        </Field>
+        <Field Name="VendorContact">
+          <DataField>VendorContact</DataField>
+        </Field>
+        <Field Name="ShipToName">
+          <DataField>ShipToName</DataField>
+        </Field>
+        <Field Name="ShipToAddress">
+          <DataField>ShipToAddress</DataField>
+        </Field>
+        <Field Name="ShipToCity">
+          <DataField>ShipToCity</DataField>
+        </Field>
+        <Field Name="ShipToState">
+          <DataField>ShipToState</DataField>
+        </Field>
+        <Field Name="ShipToPostCode">
+          <DataField>ShipToPostCode</DataField>
+        </Field>
+        <Field Name="ShipToContact">
+          <DataField>ShipToContact</DataField>
+        </Field>
+        <Field Name="PurchaseOrderNo">
+          <DataField>PurchaseOrderNo</DataField>
+        </Field>
+        <Field Name="OrderDate">
+          <DataField>OrderDate</DataField>
+        </Field>
+        <Field Name="ExpectedReceiptDate">
+          <DataField>ExpectedReceiptDate</DataField>
+        </Field>
+        <Field Name="VendorNo">
+          <DataField>VendorNo</DataField>
+        </Field>
+        <Field Name="CustomerNo">
+          <DataField>CustomerNo</DataField>
+        </Field>
+        <Field Name="YourReference">
+          <DataField>YourReference</DataField>
+        </Field>
+        <Field Name="LocationCode">
+          <DataField>LocationCode</DataField>
+        </Field>
+        <Field Name="PaymentTermsDescription">
+          <DataField>PaymentTermsDescription</DataField>
+        </Field>
+        <Field Name="ShipmentMethodDescription">
+          <DataField>ShipmentMethodDescription</DataField>
+        </Field>
+        <Field Name="ShipmentMethodCode">
+          <DataField>ShipmentMethodCode</DataField>
+        </Field>
+        <Field Name="PurchaserName">
+          <DataField>PurchaserName</DataField>
+        </Field>
+        <Field Name="ContactLine">
+          <DataField>ContactLine</DataField>
+        </Field>
+        <Field Name="FOBText">
+          <DataField>FOBText</DataField>
+        </Field>
+        <Field Name="GamerContactName1">
+          <DataField>GamerContactName1</DataField>
+        </Field>
+        <Field Name="GamerContactName2">
+          <DataField>GamerContactName2</DataField>
+        </Field>
+        <Field Name="CurrencyCode">
+          <DataField>CurrencyCode</DataField>
+        </Field>
+        <Field Name="SubtotalAmount">
+          <DataField>SubtotalAmount</DataField>
+        </Field>
+        <Field Name="SubtotalAmountFormat">
+          <DataField>SubtotalAmountFormat</DataField>
+        </Field>
+        <Field Name="TaxAmount">
+          <DataField>TaxAmount</DataField>
+        </Field>
+        <Field Name="TaxAmountFormat">
+          <DataField>TaxAmountFormat</DataField>
+        </Field>
+        <Field Name="TotalAmount">
+          <DataField>TotalAmount</DataField>
+        </Field>
+        <Field Name="TotalAmountFormat">
+          <DataField>TotalAmountFormat</DataField>
+        </Field>
+        <Field Name="ItemNo">
+          <DataField>ItemNo</DataField>
+        </Field>
+        <Field Name="LineDescription">
+          <DataField>LineDescription</DataField>
+        </Field>
+        <Field Name="Quantity">
+          <DataField>Quantity</DataField>
+        </Field>
+        <Field Name="QuantityFormat">
+          <DataField>QuantityFormat</DataField>
+        </Field>
+        <Field Name="UnitOfMeasureCode">
+          <DataField>UnitOfMeasureCode</DataField>
+        </Field>
+        <Field Name="DirectUnitCost">
+          <DataField>DirectUnitCost</DataField>
+        </Field>
+        <Field Name="DirectUnitCostFormat">
+          <DataField>DirectUnitCostFormat</DataField>
+        </Field>
+        <Field Name="LineAmount">
+          <DataField>LineAmount</DataField>
+        </Field>
+        <Field Name="LineAmountFormat">
+          <DataField>LineAmountFormat</DataField>
+        </Field>
+        <Field Name="LineExpectedReceiptDate">
+          <DataField>LineExpectedReceiptDate</DataField>
+        </Field>
+        <Field Name="VendorItemNo">
+          <DataField>VendorItemNo</DataField>
+        </Field>
+        <Field Name="LineExtendedText">
+          <DataField>LineExtendedText</DataField>
+        </Field>
+      </Fields>
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+    </DataSet>
+  </DataSets>
+</Report>

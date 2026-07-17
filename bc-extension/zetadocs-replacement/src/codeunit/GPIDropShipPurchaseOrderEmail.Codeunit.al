@@ -215,7 +215,7 @@ codeunit 70513 "GPI Drop Ship PO Email"
 
     local procedure AddDefaultCcRecipients(PurchaseHeader: Record "Purchase Header"; ToRecipients: List of [Text]; var CCRecipients: List of [Text])
     begin
-        AddCcRecipient(CCRecipients, GetSalespersonEmail(PurchaseHeader."Purchaser Code"), ToRecipients, UserId());
+        AddCcRecipient(CCRecipients, GetSalespersonEmail(GetOutsideSalespersonCode(PurchaseHeader)), ToRecipients, UserId());
         AddCcRecipient(CCRecipients, GetSalespersonEmail(GetInsideSalespersonCode(PurchaseHeader)), ToRecipients, UserId());
     end;
 
@@ -281,6 +281,37 @@ codeunit 70513 "GPI Drop Ship PO Email"
         if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
             exit(Salesperson."E-Mail");
         exit('');
+    end;
+
+    local procedure GetOutsideSalespersonCode(PurchaseHeader: Record "Purchase Header"): Code[20]
+    var
+        PurchaseHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateIdentity: Text;
+        CandidateValue: Text;
+    begin
+        PurchaseHeaderRef.GetTable(PurchaseHeader);
+        for FieldIndex := 1 to PurchaseHeaderRef.FieldCount do begin
+            CandidateField := PurchaseHeaderRef.FieldIndex(FieldIndex);
+            CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            if IsOutsideSalespersonField(CandidateIdentity) then begin
+                CandidateValue := DelChr(Format(CandidateField.Value), '<>', ' ');
+                if CandidateValue <> '' then
+                    exit(CopyStr(CandidateValue, 1, 20));
+            end;
+        end;
+
+        exit(PurchaseHeader."Purchaser Code");
+    end;
+
+    local procedure IsOutsideSalespersonField(FieldIdentity: Text): Boolean
+    begin
+        exit(
+            (StrPos(FieldIdentity, 'salesperson') > 0) and
+            (StrPos(FieldIdentity, 'inside') = 0) and
+            (StrPos(FieldIdentity, 'backup') = 0) and
+            (StrPos(FieldIdentity, 'purchaser') = 0));
     end;
 
     local procedure GetInsideSalespersonCode(PurchaseHeader: Record "Purchase Header"): Code[20]

@@ -1,0 +1,482 @@
+Sales Order FactBox Discovery
+Generated: 2026-06-22 11:53:32
+Source: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIBlanketSalesOrderRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Sales Header",
+            Rec.SystemId,
+            'Blanket Sales Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPICustomerRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::Customer,
+            Rec.SystemId,
+            'Customer',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIManualDocumentStorageSetup.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addafter(ConnectionTest)
+        {
+            group(ManualDocumentStorage)
+            {
+                Caption = 'Drag-and-Drop Documents';
+
+            group(ManualDocumentStorage)
+            {
+>>                 Caption = 'Drag-and-Drop Documents';
+
+                field(ManualDocumentStorageInfo; ManualDocumentStorageInfo)
+                {
+                    ApplicationArea = All;
+
+    actions
+    {
+>>         addafter(AssignArchiveScenario)
+        {
+            action(ConfigureManualDocumentStorage)
+            {
+                ApplicationArea = All;
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPostedPurchaseCreditMemoRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Purch. Cr. Memo Hdr.",
+            Rec.SystemId,
+            'Posted Purchase Credit Memo',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPostedPurchaseInvoiceRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Purch. Inv. Header",
+            Rec.SystemId,
+            'Posted Purchase Invoice',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPostedSalesCreditMemoRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Sales Cr.Memo Header",
+            Rec.SystemId,
+            'Posted Sales Credit Memo',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPostedSalesInvoiceRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Sales Invoice Header",
+            Rec.SystemId,
+            'Posted Sales Invoice',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseOrderRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Purchase Header",
+            Rec.SystemId,
+            'Purchase Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseReturnRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Purchase Header",
+            Rec.SystemId,
+            'Purchase Return Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPISalesOrder.PageExt.al
+==========================================================================================
+>> pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
+{
+    actions
+    {
+        addfirst(Processing)
+
+    actions
+    {
+>>         addfirst(Processing)
+        {
+            group(GPIDocuments)
+            {
+                Caption = 'Gamer Documents';
+
+            group(GPIDocuments)
+            {
+>>                 Caption = 'Gamer Documents';
+                Image = Documents;
+
+                action(GPIEmailOrderConfirmation)
+                {
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPISalesOrderRecordDocuments.PageExt.al
+==========================================================================================
+>> pageextension 70623 "GPI Sales Order Record Docs" extends "Sales Order"
+{
+    layout
+    {
+        addlast(FactBoxes)
+
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Sales Header",
+            Rec.SystemId,
+            'Sales Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPISalesReturnRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Sales Header",
+            Rec.SystemId,
+            'Sales Return Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPITransferOrderRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::"Transfer Header",
+            Rec.SystemId,
+            'Transfer Order',
+            Rec."No.",
+
+==========================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPIVendorRecordDocuments.PageExt.al
+==========================================================================================
+    layout
+    {
+>>         addlast(FactBoxes)
+        {
+            part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+
+        addlast(FactBoxes)
+        {
+>>             part(GPIRecordDocuments; "GPI Record Documents FactBox")
+            {
+                ApplicationArea = All;
+                Caption = 'Documents';
+            }
+
+            {
+                ApplicationArea = All;
+>>                 Caption = 'Documents';
+            }
+        }
+    }
+
+
+    trigger OnAfterGetCurrRecord()
+    begin
+>>         CurrPage.GPIRecordDocuments.Page.SetSourceContext(
+            Database::Vendor,
+            Rec.SystemId,
+            'Vendor',
+            Rec."No.",
+

@@ -13,6 +13,20 @@
       "breakOnError": "All",
       "launchBrowser": true,
       "schemaUpdateMode": "Synchronize"
+    },
+    {
+      "name": "Publish to Sandbox_NoZetadocs_UAT",
+      "type": "al",
+      "request": "launch",
+      "environmentType": "Sandbox",
+      "environmentName": "Sandbox_NoZetadocs_UAT",
+      "startupObjectType": "Page",
+      "startupObjectId": 42,
+      "startupCompany": "Gamer Packaging",
+      "breakOnError": "All",
+      "breakOnRecordWrite": "None",
+      "launchBrowser": true,
+      "schemaUpdateMode": "Synchronize"
     }
   ]
 }

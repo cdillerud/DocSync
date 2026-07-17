@@ -347,17 +347,19 @@ codeunit 70520 "GPI Document Policy Mgt."
     var
         Customer: Record Customer;
         Contact: Record Contact;
+        RecipientEmail: Text;
     begin
         if not Customer.Get(CustomerNo) then
             exit('');
 
-        if Customer."Primary Contact No." = '' then
-            exit('');
+        if Customer."Primary Contact No." <> '' then
+            if Contact.Get(Customer."Primary Contact No.") then begin
+                RecipientEmail := DelChr(Contact."E-Mail", '<>', ' ');
+                if RecipientEmail <> '' then
+                    exit(RecipientEmail);
+            end;
 
-        if Contact.Get(Customer."Primary Contact No.") then
-            exit(Contact."E-Mail");
-
-        exit('');
+        exit(DelChr(Customer."E-Mail", '<>', ' '));
     end;
 
     local procedure GetLocationEmail(LocationCode: Code[10]): Text

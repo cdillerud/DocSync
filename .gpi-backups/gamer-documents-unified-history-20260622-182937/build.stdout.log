@@ -1,0 +1,39 @@
+
+============================================================
+ GPI AL Production and Test Build
+============================================================
+Compiler:           C:\Users\ChadDillerud\.vscode\extensions\ms-dynamics-smb.al-17.0.2273547\bin\win32\alc.exe
+Production project: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement
+Test project:       C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement-tests
+
+[BUILD] Production extension 0.27.0.0
+Microsoft (R) AL Compiler version 17.0.34.45391
+Copyright (C) Microsoft Corporation. All rights reserved
+
+Compilation started for project 'GPI Sales Document Email' containing '158' files at '18:29:38.416'.
+
+bc-extension\zetadocs-replacement\src\pageextension\GPICreditMemoPlaceholder.txt(1,1): warning AL1025: The file at location 'C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\pageextension\GPICreditMemoPlaceholder.txt' does not match any definition.
+
+Compilation ended at '18:29:44.179'.
+
+[COPY] Microsoft symbol packages
+[COPY] Production extension dependency
+[BUILD] Test extension 0.8.0.0
+Microsoft (R) AL Compiler version 17.0.34.45391
+Copyright (C) Microsoft Corporation. All rights reserved
+
+Compilation started for project 'GPI Sales Document Email Tests' containing '19' files at '18:29:44.423'.
+
+
+Compilation ended at '18:29:48.581'.
+
+
+============================================================
+ Production and test builds passed
+============================================================
+Production package: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\Gamer Packaging_GPI Sales Document Email_0.27.0.0.app
+Test package:       C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement-tests\Gamer Packaging_GPI Sales Document Email Tests_0.8.0.0.app
+
+Publish both packages only to Sandbox_5_5_2026.
+Then refresh the VS Code Testing panel and run the complete test suite.
+

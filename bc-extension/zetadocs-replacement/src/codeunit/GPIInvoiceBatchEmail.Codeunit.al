@@ -376,7 +376,7 @@ codeunit 70511 "GPI Invoice Batch Email"
         Clear(SalesInvoiceHeader."GPI Invoice Recipient");
         SalesInvoiceHeader."GPI Last Delivery Error" := CopyStr(
             StrSubstNo(
-                'No invoice recipient was found for customer %1. Add an email to the Customer Card primary contact or create a customer-specific Invoice routing rule.',
+                'No invoice recipient was found for customer %1. Add an email to the Customer Card primary contact, populate the Customer Card E-Mail field, or create a customer-specific Invoice routing rule.',
                 SalesInvoiceHeader."Bill-to Customer No."),
             1,
             MaxStrLen(SalesInvoiceHeader."GPI Last Delivery Error"));

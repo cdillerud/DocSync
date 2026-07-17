@@ -2,7 +2,7 @@ pageextension 70526 "GPI Vendor Card Docs Ext" extends "Vendor Card"
 {
     actions
     {
-        addlast(Processing)
+        addfirst(Processing)
         {
             group(GPIGamerDocuments)
             {
@@ -11,7 +11,7 @@ pageextension 70526 "GPI Vendor Card Docs Ext" extends "Vendor Card"
 
                 action(GPIVendorRoutingRules)
                 {
-                    ApplicationArea = All;
+ApplicationArea = All;
                     Caption = 'Gamer Document Routing Rules';
                     Image = Setup;
                     ToolTip = 'Shows Gamer document routing rules filtered to this vendor.';
@@ -28,3 +28,5 @@ pageextension 70526 "GPI Vendor Card Docs Ext" extends "Vendor Card"
         }
     }
 }
+
+

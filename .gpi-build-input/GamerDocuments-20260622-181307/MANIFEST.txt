@@ -1,0 +1,235 @@
+Gamer Documents Unified History Build Input
+Generated: 2026-06-22 18:13:10 -05:00
+Repository: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs
+Production project: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement
+Test project: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement-tests
+Selected files: 103
+
+App: GPI Sales Document Email | Publisher: Gamer Packaging | Version: 0.26.0.6 | ID: b6eb6cc8-d984-4ab0-bb15-d3569db41171
+App: GPI Sales Document Email Tests | Publisher: Gamer Packaging | Version: 0.7.1.8 | ID: fd650b42-d9a4-4aaf-8a3b-82d9e6969aa2
+
+Git status:
+   M bc-extension/zetadocs-replacement-tests/.vscode/launch.json
+   M bc-extension/zetadocs-replacement-tests/app.json
+   M bc-extension/zetadocs-replacement-tests/src/codeunit/GPIUATSimulationTests.Codeunit.al
+   M bc-extension/zetadocs-replacement/.vscode/launch.json
+   M bc-extension/zetadocs-replacement/CHANGELOG.md
+   M bc-extension/zetadocs-replacement/app.json
+   M bc-extension/zetadocs-replacement/src/codeunit/GPISharePointArchive.Codeunit.al
+   M bc-extension/zetadocs-replacement/src/page/GPISharePointArchiveSetup.Page.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIBlanketSalesOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPICreditMemoCard.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPICustomerCardDocuments.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPICustomerListStatements.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPICustomerOpenOrdersCard.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPICustomerOpenOrdersList.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIDeliveryLogDraftActions.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIDeliveryLogPurchaseCreditMemo.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIDeliveryLogStatement.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIDropShipPurchaseOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIInvoiceSenderSetup.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIPostedSalesInvoices.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIPurchaseCreditMemoCard.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIPurchaseCreditMemoList.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIPurchaseReturnOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPISalesOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPISalesOrdersListDocuments.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPISalesReturnOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPITransferOrder.PageExt.al
+   M bc-extension/zetadocs-replacement/src/pageextension/GPIVendorCardDocuments.PageExt.al
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIBlanketSalesOrderBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPICustomerOpenOrderStatusBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPICustomerStatementBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIDropShipPurchaseOrderBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIPickTicket.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIPrepaymentNotice.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIPurchaseCreditMemoBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIPurchaseReturnOrderBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIPurchaseReturnPickTicketBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPISalesCreditMemoBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPISalesInvoiceBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPISalesOrderConfirmationBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPISalesReturnAuthorizationBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPISalesReturnWarehouseNotificationBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPITransferPickListBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPITransferReceiptNotificationBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIWarehousePurchaseOrderBranded.rdl
+   M bc-extension/zetadocs-replacement/src/reportlayout/GPIWarehouseReceivingNoticeBranded.rdl
+  ?? .action-layout-backup-20260622-105642/
+  ?? .boyer-dependency-backup-20260622-124105/
+  ?? .gpi-backups/
+  ?? .sales-order-documents-placement-backup-20260622-125327/
+  ?? .secondary-action-backup-20260622-113520/
+  ?? Apply-GPIUATLayoutFixes.ps1
+  ?? Boyer-SalesOrder-FactBox-Symbols-v2.txt
+  ?? SalesOrder-DocumentsSent-SymbolDiscovery.txt
+  ?? SalesOrder-FactBox-Discovery.txt
+  ?? bc-extension/zetadocs-replacement-tests/app.json.20260621-192437.bak
+  ?? bc-extension/zetadocs-replacement-tests/app.json.20260622-112510.bak
+  ?? bc-extension/zetadocs-replacement-tests/src/codeunit/GPIUATSimulationTests.Codeunit.al.20260621-192437.bak
+  ?? bc-extension/zetadocs-replacement-tests/src/codeunit/GPIUATSimulationTests.Codeunit.al.20260622-112510.bak
+  ?? bc-extension/zetadocs-replacement/.uat-layout-backup-20260620-130133/
+  ?? bc-extension/zetadocs-replacement/Apply-GPIUATLayoutFixes.ps1
+  ?? bc-extension/zetadocs-replacement/src/codeunit/GPIRecordDocumentMgt.Codeunit.al
+  ?? bc-extension/zetadocs-replacement/src/codeunit/GPIRecordDocumentPathMgt.Codeunit.al
+  ?? bc-extension/zetadocs-replacement/src/controladdin/GPIRecordDocumentDropzone.ControlAddIn.al
+  ?? bc-extension/zetadocs-replacement/src/controladdin/recorddocuments/
+  ?? bc-extension/zetadocs-replacement/src/enum/GPIRecordDocumentStatus.Enum.al
+  ?? bc-extension/zetadocs-replacement/src/page/GPIRecordDocumentList.Page.al
+  ?? bc-extension/zetadocs-replacement/src/page/GPIRecordDocumentsFactBox.Page.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIBlanketSalesOrderRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPICustomerRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIHidePurchaseIncomingDocs.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIHideSalesIncomingDocs.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPostedPurchaseCreditMemoRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPostedPurchaseInvoiceRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPostedSalesCreditMemoRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPostedSalesInvoiceRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPurchaseOrderRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIPurchaseReturnRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPISalesOrderRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPISalesReturnRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPISharePointSetupRecordDocs.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPITransferOrderRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/pageextension/GPIVendorRecordDocuments.PageExt.al
+  ?? bc-extension/zetadocs-replacement/src/permissionset/
+  ?? bc-extension/zetadocs-replacement/src/table/GPIRecordDocument.Table.al
+  ?? bc-extension/zetadocs-replacement/src/tableextension/GPISharePointArchiveSetupRecordDocs.TableExt.al
+  ?? scripts/Add-BoyerDependency-v2.ps1
+  ?? scripts/Add-BoyerDependency.ps1
+  ?? scripts/Apply-GPIActionLayoutConsistency.ps1
+  ?? scripts/Apply-GPIArchiveStatusAndPurchaseFactBoxFix-v2.ps1
+  ?? scripts/Apply-GPIArchiveStatusAndPurchaseFactBoxFix-v3.ps1
+  ?? scripts/Apply-GPIArchiveStatusAndPurchaseFactBoxFix.ps1
+  ?? scripts/Apply-GPIUATLayoutFixes.ps1
+  ?? scripts/Capture-GamerDocumentsBuildInput-v2.ps1
+  ?? scripts/Capture-GamerDocumentsBuildInput.ps1
+  ?? scripts/Finalize-GPIPurchaseOrderFactBoxPlacement.ps1
+  ?? scripts/Find-ZetadocsHistoricalRecords-Quick.ps1
+  ?? scripts/Find-ZetadocsHistoricalRecords-v2.ps1
+  ?? scripts/Find-ZetadocsHistoricalRecords-v3.ps1
+  ?? scripts/Find-ZetadocsHistoricalRecords.ps1
+  ?? scripts/Fix-GPIOpenOrderCardTest-Direct-v2.ps1
+  ?? scripts/Fix-GPIOpenOrderCardTest-Direct.ps1
+  ?? scripts/Fix-GPIOpenOrderCardTest.ps1
+  ?? scripts/Hide-GPINativeIncomingDocumentFactBoxes.ps1
+  ?? scripts/Inspect-BoyerDocumentsSentAnchor-v2.ps1
+  ?? scripts/Inspect-BoyerDocumentsSentAnchor-v3.ps1
+  ?? scripts/Inspect-BoyerDocumentsSentAnchor.ps1
+  ?? scripts/Inspect-BoyerSalesOrderFactBoxSymbols-v2.ps1
+  ?? scripts/Inspect-GPISalesOrderFactBoxes.ps1
+  ?? scripts/Inspect-SalesOrderDocumentsSentSymbols.ps1
+  ?? scripts/Move-GPISalesOrderDocumentsFactBox-v2.ps1
+  ?? scripts/Move-GPISalesOrderDocumentsFactBox.ps1
+  ?? scripts/Remove-GPISecondaryHeaderActions.ps1
+  ?? scripts/Repair-GPIActionLayoutPatch.ps1
+  ?? scripts/Repair-GPISharePointArchiveSetupPage.ps1
+  ?? scripts/Resolve-BoyerPurchaseDocumentsSentAnchor-v2.ps1
+  ?? scripts/Resolve-BoyerPurchaseDocumentsSentAnchor-v3.ps1
+  ?? scripts/Resolve-BoyerPurchaseDocumentsSentAnchor.ps1
+  ?? scripts/Test-GPIStaticChecks.ps1
+
+Selected files:
+  bc-extension\zetadocs-replacement\app.json | SHA256=ACE2AAFDA151C7705E592D8BC780AB10A3931BD2265473E970AB9F36BC72B985
+  bc-extension\zetadocs-replacement\CHANGELOG.md | SHA256=9386F7D02B576EBCBDE071AEC5A4456C10087463636E5F55352F20F79DBB2FC1
+  bc-extension\zetadocs-replacement\src\codeunit\GPIArchivePathMgt.Codeunit.al | SHA256=0927BD7FAF82A851AA84C1B2D77FCF50526760C6EF027C7851D3842DE9AE8ED5
+  bc-extension\zetadocs-replacement\src\codeunit\GPIArchiveSubscriber.Codeunit.al | SHA256=E39BD6F27FFB0D0168A45C0453A6D0F2318D4711063DD35D424D65B14A94267C
+  bc-extension\zetadocs-replacement\src\codeunit\GPIArchiveTask.Codeunit.al | SHA256=150B1E5FC01216CF05B7F731EFAE371FBD8C09B4239EA41ACE68506112DF8093
+  bc-extension\zetadocs-replacement\src\codeunit\GPIBlanketSalesOrderEmail.Codeunit.al | SHA256=63FF303637E47FE15D5F0014875AA3ED548B68903D08882131E1318324188E1D
+  bc-extension\zetadocs-replacement\src\codeunit\GPICreditMemoEmailMgt.Codeunit.al | SHA256=D314E30751CCCB16C4CF7859A74429968953C2A3617E10596F742FE792B5E6D8
+  bc-extension\zetadocs-replacement\src\codeunit\GPICustomerOpenOrderEmail.Codeunit.al | SHA256=A2FE451578234F4A2F65EC137794B0B79564C85763C0D7817A56259EDCDFD486
+  bc-extension\zetadocs-replacement\src\codeunit\GPICustomerStatementEmail.Codeunit.al | SHA256=056ED36AE7FF7857AD2F3F6442EB7D65DDCEC3913F555A2DD4726FC5F6861AF3
+  bc-extension\zetadocs-replacement\src\codeunit\GPIDocumentPolicyMgt.Codeunit.al | SHA256=7A8B758601C7206409D04582DA390B298616F63BC105135ECBB5293A624CCB24
+  bc-extension\zetadocs-replacement\src\codeunit\GPIDraftEmailMgt.Codeunit.al | SHA256=154AA37FE7C5D6F9296B622ACA03C0E9B66906BA2854EC804829DB5255B838C8
+  bc-extension\zetadocs-replacement\src\codeunit\GPIDropShipPurchaseOrderEmail.Codeunit.al | SHA256=E650468978EA79AA21D717CE1CDDC70A9DE3CB86CAB97645CD641BBF85BD46DE
+  bc-extension\zetadocs-replacement\src\codeunit\GPIInvoiceBatchEmail.Codeunit.al | SHA256=8CA0D0CF91EF640D0DA5D5F394634F3B3366DD7B25BBB7AC14D97C8B7EB5F26E
+  bc-extension\zetadocs-replacement\src\codeunit\GPIPurchaseCreditMemoEmail.Codeunit.al | SHA256=72B41FFC29190DC3ACFAEA1BBCF78E72EA354D4A1CB6EF54AEE712A287490731
+  bc-extension\zetadocs-replacement\src\codeunit\GPIPurchaseReturnEmail.Codeunit.al | SHA256=3BCF9976EE2211622FC762772EC861A9A82554D1BFF98F188CB77AA41E2E51EB
+  bc-extension\zetadocs-replacement\src\codeunit\GPIPurchaseSentStatus.Codeunit.al | SHA256=E8B910AE633AC7313D5459F09F60D9DC4AE3CCA05BBEB052500502A71A04BCE7
+  bc-extension\zetadocs-replacement\src\codeunit\GPIRecordDocumentMgt.Codeunit.al | SHA256=C21CEC25FA629F9A7DE93C4DDC4010E1CC6F6F5BAFC581B203F4BB652B08237D
+  bc-extension\zetadocs-replacement\src\codeunit\GPIRecordDocumentPathMgt.Codeunit.al | SHA256=68756FB814547C9928C0AAB61F6052132A3609EB57831D7A793EF2E074382264
+  bc-extension\zetadocs-replacement\src\codeunit\GPIRoutingRuleResolver.Codeunit.al | SHA256=08EB6C797B1C62B00DD46CF8BBDC17E35CD9427714E6AB4C50E9EE5D328993E4
+  bc-extension\zetadocs-replacement\src\codeunit\GPISalesCreditMemoEmail.Codeunit.al | SHA256=98019856821C7C5DBFA10D2D496973F98EE8F3925BAD5DE89AE0CE622E31FAB6
+  bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | SHA256=83412314EF9580DC814B0C14B1910FF834183F9F75261A2E473B4E08275EF1FA
+  bc-extension\zetadocs-replacement\src\codeunit\GPISalesReturnEmail.Codeunit.al | SHA256=E8FDEDF448859DE536F94F1B7CA0E3F675755A5E0695C6ABFB9DE7209F86B674
+  bc-extension\zetadocs-replacement\src\codeunit\GPISharePointArchive.Codeunit.al | SHA256=F3F66DED73FFFB30467E2393FDFC5057EBA4C75301C47597879854FB31B9C3D0
+  bc-extension\zetadocs-replacement\src\codeunit\GPITransferEmail.Codeunit.al | SHA256=12592F4F3952814B53D4402B3519E3152133C66B86555D073D0961064737BC89
+  bc-extension\zetadocs-replacement\src\codeunit\GPIWarehousePurchaseOrderEmail.Codeunit.al | SHA256=5887282858F9B897C293FCBD9CD942A6A67F06EBA06303B9D763D2CEF9E07CB3
+  bc-extension\zetadocs-replacement\src\codeunit\GPIWarehouseReceivingEmail.Codeunit.al | SHA256=3C532AF5BB9697D9512114AC9080EE2163CC9B6407C15751C8C8D2F9057A3A0F
+  bc-extension\zetadocs-replacement\src\enum\GPIDeliveryDocumentType.Enum.al | SHA256=A3E3F854C796D2B55E636859F236A73F08B5A96824DB99C457F1A180F67FAD95
+  bc-extension\zetadocs-replacement\src\page\GPIDocumentDeliveryLog.Page.al | SHA256=F0998F124BAA8CB427E0B859B772F78730FD55F831E591D62E082413F068039E
+  bc-extension\zetadocs-replacement\src\page\GPIDocumentsFactBox.Page.al | SHA256=BDE08190C95DC7A4556FC4D97248B0CE9F53EF0DE070382EC10AEC0547749349
+  bc-extension\zetadocs-replacement\src\page\GPILinkedDocuments.Page.al | SHA256=866936D2852AD49F542E5B1011D0F6584216458BC5C667B1A6C3DBD3CDBFC048
+  bc-extension\zetadocs-replacement\src\page\GPIPostedInvoiceQueue.Page.al | SHA256=B1F931146D5866E12F456F5C42C381D6ED5ADBBE344BA5D8F501894E6BC86004
+  bc-extension\zetadocs-replacement\src\page\GPIRecordDocumentList.Page.al | SHA256=D7B2998EDCB4CBF079B49513585034A1F639E31CC66B88A31E070669B793B06D
+  bc-extension\zetadocs-replacement\src\page\GPIRecordDocumentsFactBox.Page.al | SHA256=1295882F0FA0AC2049D9E9313E0BBA74C9152228B317970BBD7F4097E37E7BEC
+  bc-extension\zetadocs-replacement\src\page\GPISharePointArchiveSetup.Page.al | SHA256=A4B472016C92BBB5D21F803CF400538F43949B32888112ED297CCE076E5CE76B
+  bc-extension\zetadocs-replacement\src\pageextension\GPIBlanketSalesOrder.PageExt.al | SHA256=8FADC862FF529036B14ADDBD2954F78DD5B80EB3E54B26AB2B0786ED8CF320C0
+  bc-extension\zetadocs-replacement\src\pageextension\GPIBlanketSalesOrderRecordDocuments.PageExt.al | SHA256=C9579E1EE4608B1AF84E96C0EBD96A909BDC79145E24B18B464E0A713BAE8101
+  bc-extension\zetadocs-replacement\src\pageextension\GPICreditMemoCard.PageExt.al | SHA256=F06466FC38B8ADA197935DBCD2AF6C887A831F1A32774E6894971F479C432494
+  bc-extension\zetadocs-replacement\src\pageextension\GPICustomerCardDocuments.PageExt.al | SHA256=980B6C47A649F83AD47F644A9A02040C5F66D1CE654980EFCCF8EE1C97F0BE13
+  bc-extension\zetadocs-replacement\src\pageextension\GPICustomerListStatements.PageExt.al | SHA256=57CA8AB337E8A73668BB2098AA77D947F72ACFEFCD9569939F4E3264F9F7D2F1
+  bc-extension\zetadocs-replacement\src\pageextension\GPICustomerOpenOrdersCard.PageExt.al | SHA256=B6DB45C180DDE0CF61BC182FC28236CDE38F8BDAE8CDFFC10FCF20634286E074
+  bc-extension\zetadocs-replacement\src\pageextension\GPICustomerRecordDocuments.PageExt.al | SHA256=F600AC9E5D392C3276F55700F3BAAD2861E618C2BA17DC1B0A0A15A9FD334AA7
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogArchive.PageExt.al | SHA256=3AAB2E38A0A6718478C9E25C5E0BE371FFE90E01F5794751194991CF8BFD80B4
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogBlanket.PageExt.al | SHA256=906A8222E9FE1798FAAC4D34925FE0C6121A9CCFCB568EC537C79E1E76E48914
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogDraftActions.PageExt.al | SHA256=EF957C293936815599ECF2BF07E6664FC03F1E9075889E7BC44776C11F9E00D6
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogDropShipPO.PageExt.al | SHA256=10730246747923E4442DFD9141585D8DA33CA025B5C793A41E77B34304EF8884
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogOpenOrders.PageExt.al | SHA256=56CC0238A59A5CE814BDA06FDBFC420EB195FBE71FAFC57DAB8FB5A403BA52B4
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogPurchaseCreditMemo.PageExt.al | SHA256=402105FC0BB46ECC2DE6C3FF3248140483F13F50F5AE4B32A5783B459CF313CA
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogReceiving.PageExt.al | SHA256=B7CB61860A774B609F8608CF0293400F90C69C8D45F2A60753E80AFDED7B7BC4
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogStatement.PageExt.al | SHA256=AC17327ADCFF3CD52D8F7111C22956AD0645D6B34E68B464D54EED0811C80A23
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDeliveryLogWarehousePO.PageExt.al | SHA256=6A5D58165A61EBC44912C13174E5200C5A7C9B55C02B0E8CEFF59E2A785D47A8
+  bc-extension\zetadocs-replacement\src\pageextension\GPIDropShipPurchaseOrder.PageExt.al | SHA256=16DC4BA5292C5DEACA35C87B5AAEA900DEAB590DE3E33DD421BECC8367510D06
+  bc-extension\zetadocs-replacement\src\pageextension\GPIHidePurchaseIncomingDocs.PageExt.al | SHA256=808A3B63B6BFE74CC06CB57DF2280694748D248152FADD2E661F070D8C5685C3
+  bc-extension\zetadocs-replacement\src\pageextension\GPIHideSalesIncomingDocs.PageExt.al | SHA256=A2D10330C410BB5E9FEA1D9CB5E0884B24E4DABE1A6B4D22A95CABFB0B0C2B89
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPostedPurchaseCreditMemoRecordDocuments.PageExt.al | SHA256=1C46A8BFBCE097177C2BC67914DAF91FEE3EEFC692948D5EBBA4CF5AD293B1F1
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPostedPurchaseInvoiceRecordDocuments.PageExt.al | SHA256=B2FD875EB272135AE643522926D5455C477C26A8E86AF6BD5C6FA9785249FCAE
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPostedSalesCreditMemoRecordDocuments.PageExt.al | SHA256=C4E448385C2BB9F0AC3C974E754A8CE9BB632989D670E87B83E01FE5DE6FED2C
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPostedSalesInvoiceRecordDocuments.PageExt.al | SHA256=F499D42FC75781491E9F78B30AF5105FD9F5E8BEB2965EE4000723BBBA278A20
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseCreditMemoCard.PageExt.al | SHA256=2DE517DF6985A3AABD42ABA303A748B1C4701FE0F90E640C07D301A790C62FE9
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseCreditMemoList.PageExt.al | SHA256=AC37986885E10DF3C9C751D49430C5E950A6331A8A2063DE0EAEA4B8F4769B53
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseOrderRecordDocuments.PageExt.al | SHA256=B3F2F06E05FEEDDAC4A055876D1AA07FB1EB332568E05F7D102AB99F78186170
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseReturnOrder.PageExt.al | SHA256=9BDED6154EA28BEE40D701EE2F6EDB4CC6F48E02D0FD1AA36298862B392BFCF1
+  bc-extension\zetadocs-replacement\src\pageextension\GPIPurchaseReturnRecordDocuments.PageExt.al | SHA256=AF88324D137B925522F1107561B0C0215A2BB29B1F22CE489BFCA19E372FA978
+  bc-extension\zetadocs-replacement\src\pageextension\GPISalesOrder.PageExt.al | SHA256=0C9D701EDA24B5F86CD9BB3FDBF7FEB5408E15BC9C65CCC7AFF6A46CE282D17D
+  bc-extension\zetadocs-replacement\src\pageextension\GPISalesOrderRecordDocuments.PageExt.al | SHA256=4F0C70D6CC937D61F003537DD1BCBF601B1B6E345ECD4A9DCB2CE6CCEE384BB9
+  bc-extension\zetadocs-replacement\src\pageextension\GPISalesOrdersListDocuments.PageExt.al | SHA256=A53D3AA86DDE9B08044CC013C856CDD6726258FFC83CE9DEA5B0D58D9C5E1E86
+  bc-extension\zetadocs-replacement\src\pageextension\GPISalesReturnOrder.PageExt.al | SHA256=D833B83D35C29F8E883EFFAAE49F128ED3E9D94A27A6C0BED28D6C590F9A0909
+  bc-extension\zetadocs-replacement\src\pageextension\GPISalesReturnRecordDocuments.PageExt.al | SHA256=AB2A5F61479FF447A719CE21A645DEE7A9DF9AB9776065948F35FD30B49C7C0A
+  bc-extension\zetadocs-replacement\src\pageextension\GPITransferOrder.PageExt.al | SHA256=0186640E19CB6676FA27A1DE97AF027F9DB569839E0A27451AF93ADEA52C314B
+  bc-extension\zetadocs-replacement\src\pageextension\GPITransferOrderRecordDocuments.PageExt.al | SHA256=F021EF44BB7B07778002AA12F369BEA1781822664573EC07F7E6A2C7407E7692
+  bc-extension\zetadocs-replacement\src\pageextension\GPIVendorRecordDocuments.PageExt.al | SHA256=E4F856D307B548FA8751BB0FE73CCD1729CCA7C6E1A22F88A1CEE44606CDD7CF
+  bc-extension\zetadocs-replacement\src\pageextension\GPIWarehouseReceiving.PageExt.al | SHA256=987447CD0308035B9DF6E80D09BDA3504455A29652DC13C284097D8C5308B8C3
+  bc-extension\zetadocs-replacement\src\permissions\GPIBlanketSalesOrder.PermissionSetExt.al | SHA256=75A96DE2AD6B5B545498B14AB292C9CBCA6C0B60CDB9A4B2BC71E1A0CFF3BF29
+  bc-extension\zetadocs-replacement\src\permissions\GPICustomerOpenOrders.PermissionSetExt.al | SHA256=87A998C9412FC1336FCA6BEF9C489EC22C797BF48B393455CFA4A5645796B210
+  bc-extension\zetadocs-replacement\src\permissions\GPIDocumentEmail.PermissionSet.al | SHA256=1278A74C168BE147C7F982FD37665ADE1D0D4CB6B53D37327A1C25AA984B6DCD
+  bc-extension\zetadocs-replacement\src\permissions\GPIDocumentEmailInvoice.PermissionSetExt.al | SHA256=757545497D56D7869749B7A960ADDB983DA3FBEB6DEE3956E17BF0B4FF97FC10
+  bc-extension\zetadocs-replacement\src\permissions\GPIPhase2.PermissionSetExt.al | SHA256=D1F0DD3E689F4CF28B789F95BA87154CDE91472034F6591D0FA4E7B297929BB9
+  bc-extension\zetadocs-replacement\src\permissions\GPIPurchaseOrder.PermissionSetExt.al | SHA256=74CDC8ED84B5497BDB1A0B47688FB89A1A7AB8F9F15AA8F2EA068CEE21C892CE
+  bc-extension\zetadocs-replacement\src\permissions\GPIPurchaseReturn.PermissionSetExt.al | SHA256=2E7AC9918F87582DA0B67776B7F16D0B32DF0773100FA88480A82AB7F81FF345
+  bc-extension\zetadocs-replacement\src\permissions\GPISalesReturn.PermissionSetExt.al | SHA256=9FF6315C25ED45FBDEDBC369DD5CF0CD5B5F257B3E80E1307C6A8674B75D9678
+  bc-extension\zetadocs-replacement\src\permissions\GPISharePointArchive.PermissionSetExt.al | SHA256=BCC7B532769F1EE3D3837361E77ABEFD65B070B67868BEC987C12369BEA2B89D
+  bc-extension\zetadocs-replacement\src\permissions\GPITransfer.PermissionSetExt.al | SHA256=24AE30D223786834209EBF1A222959E2F643C190CC3EAB16118E0469D0B36008
+  bc-extension\zetadocs-replacement\src\permissionset\GPIRecordDocuments.PermissionSet.al | SHA256=12BAB6E10B619515CEE0E3395670D926E6B5800118FC4C2F6FFB3BD45ADD732D
+  bc-extension\zetadocs-replacement\src\table\GPIDocumentDeliveryLog.Table.al | SHA256=39B7B36EADFD6F4B35F0E8761A24224CC0121112632A2853D888D614C3EEB2F0
+  bc-extension\zetadocs-replacement\src\table\GPIDocumentRoutingRule.Table.al | SHA256=D03C1CB69D4F52F2F707452CDAFBA4A9AD49B20FD34149E7F42D566B37412B97
+  bc-extension\zetadocs-replacement\src\table\GPIRecordDocument.Table.al | SHA256=F0072BB7C33C7FBCF8797B92172B81FB881831BD4DB8B5B12739645EC62C306D
+  bc-extension\zetadocs-replacement\src\tableextension\GPIDeliveryLogArchive.TableExt.al | SHA256=D445AC79465E62439470B1D362FC4161E44C9BC37022619BD81F80C9325954C8
+  bc-extension\zetadocs-replacement\src\tableextension\GPIDeliveryLogOpenOrders.TableExt.al | SHA256=240C97D1108B9F12807C74047A424B5FA7950E9871E63F5D54B9BF64AE83D019
+  bc-extension\zetadocs-replacement\src\tableextension\GPISalesCrMemoHeader.TableExt.al | SHA256=FF6799A38E53AF6A34D6EDA1186CB3BE89AD3BD5C28462539684DCC376F18064
+  bc-extension\zetadocs-replacement\src\tableextension\GPISalesInvoiceHeader.TableExt.al | SHA256=79ADC94C3AB0A99C2A90509A1E7CA1AF8C190749E113102D168EE3A0D2D6C9B2
+  bc-extension\zetadocs-replacement-tests\app.json | SHA256=6E9DD6FD3F330C530BFF5C0CF1F4E529DEE920176F3F89E8C20B3DCA9DCB1DCF
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIArchivePathTests.Codeunit.al | SHA256=2C5E2A8A9D854E83D5125C3285AE29BB98212D4142CF60FC231AC05C8F07521F
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIArchiveWorkflowTests.Codeunit.al | SHA256=8D09191F626D603C0454DAFB76FD5339357BE5511D3256B167678853E9E5BD77
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIDeliveryLogTests.Codeunit.al | SHA256=1AB5342A345FEBA85E864EC509A10EA2DF30C061B62D6A982D7D51E5A6B8DA07
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIRoutingRuleResolverTests.Codeunit.al | SHA256=AA7DAEB4B58E19678F6993CCFBD410A829558171EF315C826D115AF2E75DE1AB
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIUATSamplePack.Codeunit.al | SHA256=2E690EEFA8E005C4B1F1D6229DB12348452DE1104C6817470AF05A2A11193AF9
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIUATSamplePackTests.Codeunit.al | SHA256=56F036F8CBE81F96E66D28426A847F9473F2214860F27B351AB9E932BC2A450F
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIUATSimulationHelper.Codeunit.al | SHA256=F7096DC776BB58534B30FD1A9A9A6FC039AC13CAB070968A3F298826DB9AA042
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIUATSimulationTests.Codeunit.al | SHA256=FE6C42C1BAEAEE3DC3A2DB14D640D89A8BEDB3F34DAE72468184F1B0518F94BD
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIWorkflowReturnTests.Codeunit.al | SHA256=AAAF760A6A83F16AAC8A0DA5E2E6E7FA1942D38001B9F7542B3271C150584B2E
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIWorkflowTestHelper.Codeunit.al | SHA256=3AA8ADE699A1087C7CC18AA6016BE439BD4BE34CCC5B8E41056F81C64CB9F541
+  bc-extension\zetadocs-replacement-tests\src\codeunit\GPIWorkflowWarehouseTests.Codeunit.al | SHA256=0F5A02526CBCD595601A645A7A54828E50FA9BA985BF122608AE34A862E0DD58
+  bc-extension\zetadocs-replacement-tests\src\pageextension\GPIUATSamplePack.PageExt.al | SHA256=E9BD409628111A469520FA0BCC025A2B2CC58A8F4A15B32A1E494DB32373C938
+  scripts\Prepare-GPIALTests.ps1 | SHA256=4CDAE1D1B55E6EA9C2BF56C2F2267DE231E6ACF691349D6CD5CE3D9D38423537

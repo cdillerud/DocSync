@@ -1,0 +1,34 @@
+#controlAddIn {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 220px;
+    padding: 8px;
+    font-family: "Segoe UI", Arial, sans-serif;
+    color: #323130;
+    background: #ffffff;
+}
+.gpi-rd-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.gpi-rd-title { font-size: 15px; font-weight: 600; }
+.gpi-rd-refresh { border: 0; padding: 4px 8px; color: #605e5c; background: transparent; cursor: pointer; }
+.gpi-rd-refresh:hover { color: #8c1d18; text-decoration: underline; }
+.gpi-rd-dropzone { box-sizing: border-box; width: 100%; min-height: 104px; padding: 14px 10px; border: 2px dashed #8a8886; border-radius: 3px; text-align: center; background: #faf9f8; cursor: pointer; transition: border-color .15s ease, background-color .15s ease; }
+.gpi-rd-dropzone:hover, .gpi-rd-dropzone.dragging { border-color: #8c1d18; background: #fff7f5; }
+.gpi-rd-dropzone.disabled { color: #a19f9d; border-color: #c8c6c4; background: #f3f2f1; cursor: default; }
+.gpi-rd-drop-icon { color: #8c1d18; font-size: 25px; line-height: 25px; }
+.gpi-rd-dropzone.disabled .gpi-rd-drop-icon { color: #a19f9d; }
+.gpi-rd-drop-title { margin-top: 4px; font-size: 14px; font-weight: 600; }
+.gpi-rd-drop-help { margin-top: 2px; color: #605e5c; font-size: 12px; }
+.gpi-rd-file-input { display: none; }
+.gpi-rd-status { min-height: 18px; padding: 5px 1px 2px; color: #605e5c; font-size: 12px; }
+.gpi-rd-status.error { color: #a4262c; }
+.gpi-rd-list { margin-top: 4px; border-top: 1px solid #edebe9; }
+.gpi-rd-empty { padding: 12px 2px; color: #797775; font-size: 12px; }
+.gpi-rd-document-row { display: flex; align-items: stretch; width: 100%; border-bottom: 1px solid #edebe9; background: #fff; }
+.gpi-rd-document-row:hover { background: #f3f2f1; }
+.gpi-rd-document { display: block; box-sizing: border-box; flex: 1 1 auto; min-width: 0; padding: 8px 4px; border: 0; text-align: left; background: transparent; cursor: pointer; }
+.gpi-rd-document:hover { background: transparent; }
+.gpi-rd-document.unavailable { color: #a19f9d; cursor: default; }
+.gpi-rd-delete { flex: 0 0 auto; border: 0; padding: 0 8px; color: #605e5c; background: transparent; cursor: pointer; font-size: 11px; }
+.gpi-rd-delete:hover { color: #a4262c; text-decoration: underline; }
+.gpi-rd-document-name { overflow: hidden; font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.gpi-rd-document-meta { margin-top: 2px; overflow: hidden; color: #605e5c; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }

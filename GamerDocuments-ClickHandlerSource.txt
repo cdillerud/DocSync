@@ -1,0 +1,629 @@
+================================================================================
+.\bc-extension\zetadocs-replacement\src\controladdin\GPIRecordDocumentDropzone.ControlAddIn.al
+================================================================================
+controladdin "GPI Record Document Dropzone"
+{
+    RequestedHeight = 330;
+    MinimumHeight = 220;
+    MaximumHeight = 600;
+    RequestedWidth = 320;
+    MinimumWidth = 240;
+    HorizontalStretch = true;
+    VerticalStretch = true;
+    Scripts = 'src/controladdin/recorddocuments/recordDocuments.js';
+    StartupScript = 'src/controladdin/recorddocuments/startup.js';
+    StyleSheets = 'src/controladdin/recorddocuments/recordDocuments.css';
+
+    procedure InitializeRecordDocuments(CaptionText: Text; MaxFileSizeMB: Integer);
+    procedure SetRecordContext(ContextAvailable: Boolean);
+    procedure SetRecordDocuments(DocumentsJson: Text);
+    procedure SetRecordUploadStatus(StatusText: Text; IsError: Boolean);
+
+    event ControlReady();
+    event UploadStarted(UploadId: Text; FileName: Text; MimeType: Text; FileSize: Decimal; TotalChunks: Integer);
+    event UploadChunk(UploadId: Text; ChunkNo: Integer; ChunkData: Text);
+    event UploadCompleted(UploadId: Text);
+    event DocumentOpenRequested(EntryNo: Integer);
+    event RefreshRequested();
+}
+
+
+================================================================================
+.\bc-extension\zetadocs-replacement\src\controladdin\recorddocuments\recordDocuments.js
+================================================================================
+(function () {
+    "use strict";
+
+    var state = {
+        root: null,
+        contextAvailable: false,
+        maxFileSizeMB: 25,
+        documents: [],
+        queueBusy: false
+    };
+
+    function invoke(name, args) {
+        return new Promise(function (resolve, reject) {
+            Microsoft.Dynamics.NAV.InvokeExtensibilityMethod(name, args, false, resolve, reject);
+        });
+    }
+
+    function makeElement(tag, className, text) {
+        var element = document.createElement(tag);
+        if (className) {
+            element.className = className;
+        }
+        if (text !== undefined && text !== null) {
+            element.textContent = text;
+        }
+        return element;
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes) {
+            return "";
+        }
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        if (bytes < 1024 * 1024) {
+            return (bytes / 1024).toFixed(1) + " KB";
+        }
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    }
+
+    function setStatus(message, isError) {
+        var status = document.getElementById("gpi-rd-status");
+        if (!status) {
+            return;
+        }
+        status.textContent = message || "";
+        status.className = "gpi-rd-status" + (isError ? " error" : "");
+    }
+
+    function render() {
+        if (!state.root) {
+            return;
+        }
+
+        state.root.innerHTML = "";
+
+        var header = makeElement("div", "gpi-rd-header");
+        header.appendChild(makeElement("div", "gpi-rd-title", "Documents"));
+
+        var refresh = makeElement("button", "gpi-rd-refresh", "Refresh");
+        refresh.type = "button";
+        refresh.addEventListener("click", function () {
+            invoke("RefreshRequested", []);
+        });
+        header.appendChild(refresh);
+        state.root.appendChild(header);
+
+        var dropZone = makeElement(
+            "div",
+            "gpi-rd-dropzone" + (state.contextAvailable ? "" : " disabled")
+        );
+        dropZone.setAttribute("role", "button");
+        dropZone.setAttribute("tabindex", state.contextAvailable ? "0" : "-1");
+        dropZone.appendChild(makeElement("div", "gpi-rd-drop-icon", "⇩"));
+        dropZone.appendChild(makeElement("div", "gpi-rd-drop-title", "Drop files here"));
+        dropZone.appendChild(
+            makeElement(
+                "div",
+                "gpi-rd-drop-help",
+                state.contextAvailable
+                    ? "or click to choose files"
+                    : "Save the record before attaching documents"
+            )
+        );
+
+        var input = document.createElement("input");
+        input.type = "file";
+        input.multiple = true;
+        input.className = "gpi-rd-file-input";
+        input.addEventListener("change", function () {
+            processFiles(Array.prototype.slice.call(input.files || []));
+            input.value = "";
+        });
+
+        dropZone.appendChild(input);
+        dropZone.addEventListener("click", function () {
+            if (state.contextAvailable && !state.queueBusy) {
+                input.click();
+            }
+        });
+        dropZone.addEventListener("keydown", function (event) {
+            if ((event.key === "Enter" || event.key === " ") &&
+                state.contextAvailable &&
+                !state.queueBusy) {
+                event.preventDefault();
+                input.click();
+            }
+        });
+        dropZone.addEventListener("dragover", function (event) {
+            if (!state.contextAvailable || state.queueBusy) {
+                return;
+            }
+            event.preventDefault();
+            dropZone.classList.add("dragging");
+        });
+        dropZone.addEventListener("dragleave", function () {
+            dropZone.classList.remove("dragging");
+        });
+        dropZone.addEventListener("drop", function (event) {
+            dropZone.classList.remove("dragging");
+            if (!state.contextAvailable || state.queueBusy) {
+                return;
+            }
+            event.preventDefault();
+            processFiles(Array.prototype.slice.call(event.dataTransfer.files || []));
+        });
+
+        state.root.appendChild(dropZone);
+
+        var status = makeElement("div", "gpi-rd-status");
+        status.id = "gpi-rd-status";
+        state.root.appendChild(status);
+
+        var list = makeElement("div", "gpi-rd-list");
+        if (!state.documents.length) {
+            list.appendChild(makeElement("div", "gpi-rd-empty", "No documents are attached."));
+        } else {
+            state.documents.forEach(function (documentItem) {
+                var row = makeElement(
+                    "button",
+                    "gpi-rd-document" +
+                        (documentItem.status === "Uploaded" ? "" : " unavailable")
+                );
+                row.type = "button";
+                row.disabled = documentItem.status !== "Uploaded";
+                row.addEventListener("click", function () {
+                    invoke("DocumentOpenRequested", [documentItem.entryNo]);
+                });
+
+                row.appendChild(
+                    makeElement("div", "gpi-rd-document-name", documentItem.fileName)
+                );
+
+                var metaParts = [];
+                if (documentItem.category) {
+                    metaParts.push(documentItem.category);
+                }
+                if (documentItem.uploadedAt) {
+                    metaParts.push(documentItem.uploadedAt);
+                }
+                if (documentItem.size) {
+                    metaParts.push(formatBytes(documentItem.size));
+                }
+                if (documentItem.status && documentItem.status !== "Uploaded") {
+                    metaParts.push(documentItem.status);
+                }
+
+                row.appendChild(
+                    makeElement("div", "gpi-rd-document-meta", metaParts.join(" • "))
+                );
+                list.appendChild(row);
+            });
+        }
+
+        state.root.appendChild(list);
+    }
+
+    function readAsDataUrl(file) {
+        return new Promise(function (resolve, reject) {
+            var reader = new FileReader();
+            reader.onload = function () {
+                resolve(reader.result);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    async function uploadFile(file) {
+        if (file.size > state.maxFileSizeMB * 1024 * 1024) {
+            throw new Error(
+                file.name + " exceeds the " + state.maxFileSizeMB + " MB upload limit."
+            );
+        }
+
+        var uploadId =
+            Date.now().toString(36) + "-" + Math.random().toString(36).slice(2);
+        var dataUrl = await readAsDataUrl(file);
+        var comma = dataUrl.indexOf(",");
+        var base64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        var chunkSize = 60000;
+        var totalChunks = Math.ceil(base64.length / chunkSize);
+
+        await invoke("UploadStarted", [
+            uploadId,
+            file.name,
+            file.type || "",
+            file.size,
+            totalChunks
+        ]);
+
+        for (var index = 0; index < totalChunks; index += 1) {
+            setStatus(
+                "Uploading " + file.name + " (" + (index + 1) + " of " + totalChunks + ")",
+                false
+            );
+            await invoke("UploadChunk", [
+                uploadId,
+                index,
+                base64.slice(index * chunkSize, (index + 1) * chunkSize)
+            ]);
+        }
+
+        await invoke("UploadCompleted", [uploadId]);
+    }
+
+    async function processFiles(files) {
+        if (!files.length || state.queueBusy) {
+            return;
+        }
+
+        state.queueBusy = true;
+        render();
+
+        try {
+            for (var index = 0; index < files.length; index += 1) {
+                await uploadFile(files[index]);
+            }
+            setStatus(files.length + " document(s) uploaded.", false);
+        } catch (error) {
+            setStatus(
+                error && error.message ? error.message : "The document upload failed.",
+                true
+            );
+        } finally {
+            state.queueBusy = false;
+            render();
+        }
+    }
+
+    window.GPIRecordDocumentsStartup = function () {
+        state.root = document.getElementById("controlAddIn");
+        render();
+        invoke("ControlReady", []);
+    };
+
+    window.InitializeRecordDocuments = function (captionText, maxFileSizeMB) {
+        state.maxFileSizeMB = maxFileSizeMB || 25;
+        render();
+    };
+
+    window.SetRecordContext = function (contextAvailable) {
+        state.contextAvailable = !!contextAvailable;
+        render();
+    };
+
+    window.SetRecordDocuments = function (documentsJson) {
+        try {
+            state.documents = documentsJson ? JSON.parse(documentsJson) : [];
+        } catch (error) {
+            state.documents = [];
+            setStatus("The document list could not be displayed.", true);
+        }
+        render();
+    };
+
+    window.SetRecordUploadStatus = function (statusText, isError) {
+        setStatus(statusText, !!isError);
+    };
+})();
+
+
+================================================================================
+.\bc-extension\zetadocs-replacement\src\controladdin\recorddocuments\startup.js
+================================================================================
+GPIRecordDocumentsStartup();
+
+
+================================================================================
+.\bc-extension\zetadocs-replacement\src\page\GPIRecordDocumentsFactBox.Page.al
+================================================================================
+page 70620 "GPI Record Documents FactBox"
+{
+    Caption = 'Gamer Documents';
+    PageType = CardPart;
+    ApplicationArea = All;
+
+    layout
+    {
+        area(Content)
+        {
+            usercontrol(DocumentDropZone; "GPI Record Document Dropzone")
+            {
+                ApplicationArea = All;
+
+                trigger ControlReady()
+                begin
+                    ControlIsReady := true;
+                    InitializeControl();
+                    RefreshDocuments();
+                end;
+
+                trigger UploadStarted(UploadId: Text; FileName: Text; MimeType: Text; FileSize: Decimal; TotalChunks: Integer)
+                var
+                    FileSizeAsBigInteger: BigInteger;
+                begin
+                    FileSizeAsBigInteger := Round(FileSize, 1, '=');
+                    DocumentMgt.ValidateUpload(SourceSystemId, FileName, FileSizeAsBigInteger);
+
+                    CurrentUploadId := UploadId;
+                    CurrentFileName := CopyStr(FileName, 1, MaxStrLen(CurrentFileName));
+                    CurrentMimeType := CopyStr(MimeType, 1, MaxStrLen(CurrentMimeType));
+                    CurrentFileSize := FileSizeAsBigInteger;
+                    ExpectedChunkCount := TotalChunks;
+                    NextChunkNo := 0;
+                    Clear(UploadBase64);
+                end;
+
+                trigger UploadChunk(UploadId: Text; ChunkNo: Integer; ChunkData: Text)
+                begin
+                    if UploadId <> CurrentUploadId then
+                        Error('The upload session is no longer valid.');
+                    if ChunkNo <> NextChunkNo then
+                        Error('Upload chunk %1 was received out of sequence. Expected %2.', ChunkNo, NextChunkNo);
+
+                    UploadBase64 += ChunkData;
+                    NextChunkNo += 1;
+                end;
+
+                trigger UploadCompleted(UploadId: Text)
+                var
+                    TempBlob: Codeunit "Temp Blob";
+                    Base64Convert: Codeunit "Base64 Convert";
+                    BlobOutStream: OutStream;
+                    BlobInStream: InStream;
+                    EntryNo: Integer;
+                    UploadedFileName: Text[250];
+                begin
+                    if UploadId <> CurrentUploadId then
+                        Error('The upload session is no longer valid.');
+                    if NextChunkNo <> ExpectedChunkCount then
+                        Error('The upload is incomplete. Received %1 of %2 chunks.', NextChunkNo, ExpectedChunkCount);
+
+                    TempBlob.CreateOutStream(BlobOutStream);
+                    Base64Convert.FromBase64(UploadBase64, BlobOutStream);
+                    TempBlob.CreateInStream(BlobInStream);
+                    UploadedFileName := CurrentFileName;
+
+                    EntryNo := DocumentMgt.UploadDocument(
+                        SourceTableId,
+                        SourceSystemId,
+                        SourceDocumentType,
+                        SourceDocumentNo,
+                        SourcePartyType,
+                        SourcePartyNo,
+                        CustomerNo,
+                        VendorNo,
+                        LocationCode,
+                        CurrentFileName,
+                        CurrentMimeType,
+                        CurrentFileSize,
+                        BlobInStream);
+
+                    ClearUploadState();
+                    CurrPage.DocumentDropZone.SetRecordUploadStatus(
+                        StrSubstNo('%1 was uploaded.', UploadedFileName),
+                        false);
+                    RefreshDocuments();
+
+                    if EntryNo = 0 then
+                        Error('The document upload did not create a record.');
+                end;
+
+                trigger DocumentOpenRequested(EntryNo: Integer)
+                begin
+                    DocumentMgt.OpenDocumentReference(EntryNo);
+                end;
+
+                trigger RefreshRequested()
+                begin
+                    RefreshDocuments();
+                end;
+            }
+        }
+    }
+
+    actions
+    {
+        area(Processing)
+        {
+            action(UploadDocument)
+            {
+                ApplicationArea = All;
+                Caption = 'Upload Document';
+                Image = Import;
+                ToolTip = 'Selects a file and uploads it to the SharePoint folder for this Business Central record.';
+
+                trigger OnAction()
+                var
+                    TempBlob: Codeunit "Temp Blob";
+                    FileInStream: InStream;
+                    BlobOutStream: OutStream;
+                    BlobInStream: InStream;
+                    FileName: Text;
+                    FileSize: BigInteger;
+                begin
+                    EnsureContextAvailable();
+                    if not UploadIntoStream(
+                        'Select a document',
+                        '',
+                        'All Files (*.*)|*.*',
+                        FileName,
+                        FileInStream)
+                    then
+                        exit;
+
+                    TempBlob.CreateOutStream(BlobOutStream);
+                    CopyStream(BlobOutStream, FileInStream);
+                    FileSize := TempBlob.Length();
+                    DocumentMgt.ValidateUpload(SourceSystemId, FileName, FileSize);
+                    TempBlob.CreateInStream(BlobInStream);
+
+                    DocumentMgt.UploadDocument(
+                        SourceTableId,
+                        SourceSystemId,
+                        SourceDocumentType,
+                        SourceDocumentNo,
+                        SourcePartyType,
+                        SourcePartyNo,
+                        CustomerNo,
+                        VendorNo,
+                        LocationCode,
+                        FileName,
+                        '',
+                        FileSize,
+                        BlobInStream);
+
+                    RefreshDocuments();
+                end;
+            }
+
+            action(OpenAllDocuments)
+            {
+                ApplicationArea = All;
+                Caption = 'Open Uploaded Documents';
+                Image = View;
+                ToolTip = 'Opens the complete list of documents that users uploaded to this Business Central record.';
+
+                trigger OnAction()
+                var
+                    Document: Record "GPI Record Document";
+                begin
+                    EnsureContextAvailable();
+                    Document.SetRange("Source Table ID", SourceTableId);
+                    Document.SetRange("Source SystemId", SourceSystemId);
+                    Page.Run(Page::"GPI Record Document List", Document);
+                end;
+            }
+        }
+    }
+
+    procedure SetSourceContext(NewSourceTableId: Integer; NewSourceSystemId: Guid; NewSourceDocumentType: Text; NewSourceDocumentNo: Code[20]; NewSourcePartyType: Text; NewSourcePartyNo: Code[20]; NewCustomerNo: Code[20]; NewVendorNo: Code[20]; NewLocationCode: Code[10])
+    begin
+        SourceTableId := NewSourceTableId;
+        SourceSystemId := NewSourceSystemId;
+        SourceDocumentType := CopyStr(NewSourceDocumentType, 1, MaxStrLen(SourceDocumentType));
+        SourceDocumentNo := NewSourceDocumentNo;
+        SourcePartyType := CopyStr(NewSourcePartyType, 1, MaxStrLen(SourcePartyType));
+        SourcePartyNo := NewSourcePartyNo;
+        CustomerNo := NewCustomerNo;
+        VendorNo := NewVendorNo;
+        LocationCode := NewLocationCode;
+
+        if ControlIsReady then begin
+            InitializeControl();
+            RefreshDocuments();
+        end;
+    end;
+
+    local procedure InitializeControl()
+    begin
+        CurrPage.DocumentDropZone.InitializeRecordDocuments(
+            'Gamer Documents',
+            DocumentMgt.GetMaximumUploadSizeMB());
+        CurrPage.DocumentDropZone.SetRecordContext(not IsNullGuid(SourceSystemId));
+    end;
+
+    local procedure RefreshDocuments()
+    var
+        TempDocument: Record "GPI Record Document" temporary;
+        DocumentsArray: JsonArray;
+        DocumentObject: JsonObject;
+        DocumentsJson: Text;
+        DisplayStatus: Text;
+        DisplaySize: Text;
+    begin
+        if not ControlIsReady then
+            exit;
+
+        Clear(DocumentsArray);
+        if not IsNullGuid(SourceSystemId) then begin
+            DocumentMgt.BuildDocumentBuffer(
+                SourceTableId,
+                SourceSystemId,
+                TempDocument);
+
+            TempDocument.SetRange("Source Table ID", SourceTableId);
+            TempDocument.SetRange("Source SystemId", SourceSystemId);
+            TempDocument.SetCurrentKey(
+                "Source Table ID",
+                "Source SystemId",
+                "Uploaded Date/Time");
+            TempDocument.Ascending(false);
+
+            if TempDocument.FindSet() then
+                repeat
+                    Clear(DocumentObject);
+                    Clear(DisplayStatus);
+                    Clear(DisplaySize);
+
+                    if TempDocument."Entry No." < 0 then
+                        DisplayStatus := TempDocument.Description
+                    else
+                        DisplayStatus := Format(TempDocument.Status);
+
+                    if TempDocument."File Size" > 0 then
+                        DisplaySize := Format(TempDocument."File Size");
+
+                    DocumentObject.Add('entryNo', TempDocument."Entry No.");
+                    DocumentObject.Add('fileName', TempDocument."Original File Name");
+                    DocumentObject.Add('category', TempDocument.Category);
+                    DocumentObject.Add(
+                        'uploadedAt',
+                        Format(
+                            TempDocument."Uploaded Date/Time",
+                            0,
+                            '<Month,2>/<Day,2>/<Year4> <Hours24,2>:<Minutes,2>'));
+                    DocumentObject.Add('size', DisplaySize);
+                    DocumentObject.Add('status', DisplayStatus);
+                    DocumentsArray.Add(DocumentObject);
+                until TempDocument.Next() = 0;
+        end;
+
+        DocumentsArray.WriteTo(DocumentsJson);
+        CurrPage.DocumentDropZone.SetRecordDocuments(DocumentsJson);
+    end;
+
+    local procedure EnsureContextAvailable()
+    begin
+        if IsNullGuid(SourceSystemId) then
+            Error('Save the Business Central record before attaching documents.');
+    end;
+
+    local procedure ClearUploadState()
+    begin
+        Clear(CurrentUploadId);
+        Clear(CurrentFileName);
+        Clear(CurrentMimeType);
+        Clear(CurrentFileSize);
+        Clear(ExpectedChunkCount);
+        Clear(NextChunkNo);
+        Clear(UploadBase64);
+    end;
+
+    var
+        DocumentMgt: Codeunit "GPI Record Document Mgt.";
+        SourceTableId: Integer;
+        SourceSystemId: Guid;
+        SourceDocumentType: Text[50];
+        SourceDocumentNo: Code[20];
+        SourcePartyType: Text[20];
+        SourcePartyNo: Code[20];
+        CustomerNo: Code[20];
+        VendorNo: Code[20];
+        LocationCode: Code[10];
+        ControlIsReady: Boolean;
+        CurrentUploadId: Text;
+        CurrentFileName: Text[250];
+        CurrentMimeType: Text[100];
+        CurrentFileSize: BigInteger;
+        ExpectedChunkCount: Integer;
+        NextChunkNo: Integer;
+        UploadBase64: Text;
+}
+

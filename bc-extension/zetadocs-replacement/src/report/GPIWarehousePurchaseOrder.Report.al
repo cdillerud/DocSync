@@ -45,8 +45,12 @@ report 70526 "GPI Warehouse Purchase Order"
             column(LocationCode; "Location Code") { }
             column(PaymentTermsDescription; PaymentTermsDescription) { }
             column(ShipmentMethodDescription; ShipmentMethodDescription) { }
+            column(ShipmentMethodCode; "Shipment Method Code") { }
             column(PurchaserName; PurchaserName) { }
             column(ContactLine; ContactLine) { }
+            column(FOBText; FOBText) { }
+            column(GamerContactName1; GamerContactName1) { }
+            column(GamerContactName2; GamerContactName2) { }
             column(CurrencyCode; CurrencyCode) { }
             column(SubtotalAmount; Amount) { }
             column(TaxAmount; TaxAmount) { }
@@ -92,7 +96,11 @@ report 70526 "GPI Warehouse Purchase Order"
                     ShipmentMethodDescription := ShipmentMethod.Description;
 
                 ResolvePurchaserName(PurchaseHeader);
+
 
+                GPIBuildGamerContactNames(PurchaseHeader);
+
+                FOBText := GPIGetFieldValue(PurchaseHeader, 'fob');
                 CurrencyCode := "Currency Code";
                 if CurrencyCode = '' then
                     CurrencyCode := GeneralLedgerSetup."LCY Code";
@@ -182,6 +190,62 @@ report 70526 "GPI Warehouse Purchase Order"
         exit('');
     end;
 
+    local procedure GPIBuildGamerContactNames(PurchaseHeader: Record "Purchase Header")
+    var
+        Salesperson: Record "Salesperson/Purchaser";
+        SalespersonCode: Code[20];
+    begin
+        Clear(GamerContactName1);
+        Clear(GamerContactName2);
+
+        if (PurchaseHeader."Purchaser Code" <> '') and Salesperson.Get(PurchaseHeader."Purchaser Code") then
+            GPIAddGamerContactName(Salesperson.Name);
+
+        SalespersonCode := FindSalespersonCode(PurchaseHeader, false);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
+            GPIAddGamerContactName(Salesperson.Name);
+
+        SalespersonCode := FindSalespersonCode(PurchaseHeader, true);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
+            GPIAddGamerContactName(Salesperson.Name);
+    end;
+
+    local procedure GPIAddGamerContactName(ContactName: Text[100])
+    begin
+        ContactName := CopyStr(DelChr(ContactName, '<>', ' '), 1, MaxStrLen(ContactName));
+        if ContactName = '' then
+            exit;
+
+        if (GamerContactName1 = ContactName) or (GamerContactName2 = ContactName) then
+            exit;
+
+        if GamerContactName1 = '' then begin
+            GamerContactName1 := ContactName;
+            exit;
+        end;
+
+        if GamerContactName2 = '' then
+            GamerContactName2 := ContactName;
+    end;
+
+    local procedure GPIGetFieldValue(PurchaseHeader: Record "Purchase Header"; SearchText: Text): Text
+    var
+        PurchaseHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateName: Text;
+        CandidateCaption: Text;
+    begin
+        PurchaseHeaderRef.GetTable(PurchaseHeader);
+        for FieldIndex := 1 to PurchaseHeaderRef.FieldCount do begin
+            CandidateField := PurchaseHeaderRef.FieldIndex(FieldIndex);
+            CandidateName := LowerCase(CandidateField.Name);
+            CandidateCaption := LowerCase(CandidateField.Caption);
+            if (CandidateName = LowerCase(SearchText)) or (CandidateCaption = LowerCase(SearchText)) then
+                exit(Format(CandidateField.Value));
+        end;
+        exit('');
+    end;
     local procedure BuildContactLine()
     begin
         if PurchaserName <> '' then
@@ -200,7 +264,10 @@ report 70526 "GPI Warehouse Purchase Order"
         GeneralLedgerSetup: Record "General Ledger Setup";
         PaymentTermsDescription: Text[100];
         ShipmentMethodDescription: Text[100];
-        PurchaserName: Text[100];
+        PurchaserName: Text[100];
+        FOBText: Text[100];
+        GamerContactName1: Text[100];
+        GamerContactName2: Text[100];
         ContactLine: Text[250];
         CurrencyCode: Code[10];
         TaxAmount: Decimal;

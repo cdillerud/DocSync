@@ -2,7 +2,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 {
     actions
     {
-        addlast(Processing)
+        addfirst(Processing)
         {
             group(GPIDocuments)
             {
@@ -57,6 +57,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIEmailPickTicket)
                 {
+                    Enabled = IsPickTicketAvailable;
                     ApplicationArea = All;
                     Caption = 'Gamer Email Pick Ticket';
                     Image = Email;
@@ -80,6 +81,12 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIPreviewOwnedOrderConfirmation)
                 {
+
+                    PromotedIsBig = true;
+
+                    PromotedCategory = Process;
+
+                    Promoted = true;
                     ApplicationArea = All;
                     Caption = 'Gamer Preview Order Confirmation';
                     Image = Print;
@@ -99,6 +106,12 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIPreviewOwnedPrepaymentNotice)
                 {
+
+                    PromotedIsBig = true;
+
+                    PromotedCategory = Process;
+
+                    Promoted = true;
                     ApplicationArea = All;
                     Caption = 'Gamer Preview Prepayment Notice';
                     Image = Print;
@@ -118,6 +131,13 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIPreviewOwnedPickTicket)
                 {
+                    Enabled = IsPickTicketAvailable;
+
+                    PromotedIsBig = true;
+
+                    PromotedCategory = Process;
+
+                    Promoted = true;
                     ApplicationArea = All;
                     Caption = 'Gamer Preview Pick Ticket';
                     Image = Print;
@@ -137,7 +157,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIViewDeliveryLog)
                 {
-                    ApplicationArea = All;
+ApplicationArea = All;
                     Caption = 'Gamer Document Delivery Log';
                     Image = Log;
                     ToolTip = 'Shows Gamer document delivery records for this Sales Order.';
@@ -153,7 +173,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIViewRoutingRules)
                 {
-                    ApplicationArea = All;
+ApplicationArea = All;
                     Caption = 'Gamer Document Routing Rules';
                     Image = Setup;
                     RunObject = page "GPI Document Routing Rules";
@@ -162,7 +182,7 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
 
                 action(GPIViewNativeSentEmails)
                 {
-                    ApplicationArea = All;
+ApplicationArea = All;
                     Caption = 'Gamer Sent Email History';
                     Image = Email;
                     ToolTip = 'Shows native Business Central sent emails related to this Sales Order.';
@@ -177,4 +197,24 @@ pageextension 70510 "GPI Sales Order Email Ext" extends "Sales Order"
             }
         }
     }
+
+    trigger OnAfterGetRecord()
+    begin
+        SetPickTicketActionState();
+    end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        SetPickTicketActionState();
+    end;
+
+    local procedure SetPickTicketActionState()
+    begin
+        IsPickTicketAvailable := Rec."Location Code" <> '00';
+    end;
+
+    var
+        IsPickTicketAvailable: Boolean;
 }
+
+

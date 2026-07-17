@@ -50,6 +50,7 @@ pageextension 70520 "GPI Invoice Sender Setup" extends "GPI Posted Invoice Queue
         {
             action(GPIConfigureAccountingSender)
             {
+                PromotedIsBig = true;
                 ApplicationArea = All;
                 Caption = 'Configure Accounting Sender';
                 Image = Setup;
@@ -67,6 +68,12 @@ pageextension 70520 "GPI Invoice Sender Setup" extends "GPI Posted Invoice Queue
 
             action(GPIRefreshAccountingSender)
             {
+
+                PromotedIsBig = true;
+
+                PromotedCategory = Process;
+
+                Promoted = true;
                 ApplicationArea = All;
                 Caption = 'Refresh Accounting Sender';
                 Image = Refresh;
@@ -116,3 +123,4 @@ pageextension 70520 "GPI Invoice Sender Setup" extends "GPI Posted Invoice Queue
         AccountingSenderConnector: Text[100];
         AccountingSenderStyle: Text;
 }
+

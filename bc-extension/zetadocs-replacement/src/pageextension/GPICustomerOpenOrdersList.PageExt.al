@@ -2,7 +2,7 @@ pageextension 70581 "GPI Customer Open Order List" extends "Customer List"
 {
     actions
     {
-        addlast(Processing)
+        addfirst(Processing)
         {
             action(GPIBatchOpenOrderStatus)
             {
@@ -26,3 +26,4 @@ pageextension 70581 "GPI Customer Open Order List" extends "Customer List"
         }
     }
 }
+

@@ -1,7 +1,9 @@
 codeunit 70706 "GPI Delivery Log Tests"
 {
     Subtype = Test;
-    Permissions = tabledata "GPI Document Delivery Log" = rimd;
+    Permissions =
+        tabledata "GPI Document Delivery Log" = rimd,
+        tabledata "GPI Record Document" = r;
 
     [Test]
     procedure OpenOrderMetadataFieldsPersist()
@@ -87,6 +89,85 @@ codeunit 70706 "GPI Delivery Log Tests"
 
         if not DeliveryLog.FindFirst() then
             Error('The Delivery Log Source key could not locate the Customer Open Order Status entry.');
+    end;
+
+    [Test]
+    procedure SentDeliveryAppearsInGamerDocumentsBuffer()
+    var
+        DeliveryLog: Record "GPI Document Delivery Log";
+        TempDocument: Record "GPI Record Document" temporary;
+        DocumentMgt: Codeunit "GPI Record Document Mgt.";
+        SourceSystemId: Guid;
+        EntryNo: Integer;
+    begin
+        SourceSystemId := CreateGuid();
+
+        DeliveryLog.Init();
+        DeliveryLog."Delivery Document Type" := DeliveryLog."Delivery Document Type"::"Order Confirmation";
+        DeliveryLog.Status := DeliveryLog.Status::Sent;
+        DeliveryLog."Source Table ID" := Database::"Sales Header";
+        DeliveryLog."Source SystemId" := SourceSystemId;
+        DeliveryLog."Source Document Type" := 'Order';
+        DeliveryLog."Source Document No." := NewTestCode('GPISO');
+        DeliveryLog."Attachment Filename" := 'Order-Confirmation.pdf';
+        DeliveryLog."Created Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog.Insert(false);
+        EntryNo := DeliveryLog."Entry No.";
+
+        DocumentMgt.BuildDocumentBuffer(
+            Database::"Sales Header",
+            SourceSystemId,
+            TempDocument);
+
+        if not TempDocument.Get(-EntryNo) then
+            Error('The sent Delivery Log document was not added to the Gamer Documents buffer.');
+
+        AssertEqualText(
+            'Order-Confirmation.pdf',
+            TempDocument."Original File Name",
+            'The sent document filename is incorrect.');
+        AssertEqualText(
+            'Order Confirmation',
+            TempDocument.Category,
+            'The sent document category is incorrect.');
+        AssertEqualText(
+            'Sent',
+            TempDocument.Description,
+            'The sent document status is incorrect.');
+    end;
+
+    [Test]
+    procedure DraftDeliveryDoesNotAppearInGamerDocumentsBuffer()
+    var
+        DeliveryLog: Record "GPI Document Delivery Log";
+        TempDocument: Record "GPI Record Document" temporary;
+        DocumentMgt: Codeunit "GPI Record Document Mgt.";
+        SourceSystemId: Guid;
+        EntryNo: Integer;
+    begin
+        SourceSystemId := CreateGuid();
+
+        DeliveryLog.Init();
+        DeliveryLog."Delivery Document Type" := DeliveryLog."Delivery Document Type"::"Pick Ticket";
+        DeliveryLog.Status := DeliveryLog.Status::"Saved As Draft";
+        DeliveryLog."Source Table ID" := Database::"Sales Header";
+        DeliveryLog."Source SystemId" := SourceSystemId;
+        DeliveryLog."Source Document Type" := 'Order';
+        DeliveryLog."Source Document No." := NewTestCode('GPISO');
+        DeliveryLog."Attachment Filename" := 'Pick-Ticket.pdf';
+        DeliveryLog."Created Date/Time" := CurrentDateTime();
+        DeliveryLog.Insert(false);
+        EntryNo := DeliveryLog."Entry No.";
+
+        DocumentMgt.BuildDocumentBuffer(
+            Database::"Sales Header",
+            SourceSystemId,
+            TempDocument);
+
+        if TempDocument.Get(-EntryNo) then
+            Error('A saved draft was incorrectly added to the Gamer Documents buffer.');
     end;
 
     local procedure NewTestCode(Prefix: Text): Code[20]

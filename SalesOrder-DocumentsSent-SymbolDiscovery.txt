@@ -1,0 +1,614 @@
+Sales Order Documents Sent Symbol Discovery
+Generated: 2026-06-22 12:42:28
+Repository: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\CHANGELOG.md | Match: Sales Order Documents Sent
+====================================================================================================
+# Changelog
+
+## 0.26.0.3
+
+### Changed
+- Added the Boyer And Associates Custom Package as an explicit dependency so the Sales Order Documents Sent FactBox can be referenced safely.
+- Prepared the extension to place the GPI Documents drag-and-drop FactBox relative to the Boyer Sales Order FactBox after symbols are downloaded.
+
+### Dependency
+- App ID: 65994cd5-4d6f-497e-abc0-767b8c392608
+- Name: Boyer And Associates Custom Package
+- Publisher: Boyer And Associates
+- Version: 25.0.0.10
+
+### Safety
+- No RDLC or report layout files were changed.
+- No page placement was changed by this script.
+- No upload, routing, delivery, archive, or SharePoint behavior was changed.
+## 0.26.0.2
+
+### Changed
+- Kept Gamer Document Delivery Log, Gamer Document Routing Rules, and Gamer Sent Email History inside the Gamer Documents submenu.
+- Removed those secondary administration/history actions from the page header action bar.
+- Left Gamer email and preview actions promoted for one-click access.
+
+### Safety
+- No RDLC or report layout files were changed.
+- No document-generation, routing, delivery, archive, or SharePoint behavior was changed.
+## 0.26.0.1
+
+### Changed
+- Moved Gamer/GPI actions to the first position in the Processing group on supported standard Business Central pages.
+- Promoted Gamer/GPI actions to the page action bar using the Process category.
+- Preserved layout-only extensions and
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\CHANGELOG.md | Match: Documents Sent
+====================================================================================================
+# Changelog
+
+## 0.26.0.3
+
+### Changed
+- Added the Boyer And Associates Custom Package as an explicit dependency so the Sales Order Documents Sent FactBox can be referenced safely.
+- Prepared the extension to place the GPI Documents drag-and-drop FactBox relative to the Boyer Sales Order FactBox after symbols are downloaded.
+
+### Dependency
+- App ID: 65994cd5-4d6f-497e-abc0-767b8c392608
+- Name: Boyer And Associates Custom Package
+- Publisher: Boyer And Associates
+- Version: 25.0.0.10
+
+### Safety
+- No RDLC or report layout files were changed.
+- No page placement was changed by this script.
+- No upload, routing, delivery, archive, or SharePoint behavior was changed.
+## 0.26.0.2
+
+### Changed
+- Kept Gamer Document Delivery Log, Gamer Document Routing Rules, and Gamer Sent Email History inside the Gamer Documents submenu.
+- Removed those secondary administration/history actions from the page header action bar.
+- Left Gamer email and preview actions promoted for one-click access.
+
+### Safety
+- No RDLC or report layout files were changed.
+- No document-generation, routing, delivery, archive, or SharePoint behavior was changed.
+## 0.26.0.1
+
+### Changed
+- Moved Gamer/GPI actions to the first position in the Processing group on supported standard Business Central pages.
+- Promoted Gamer/GPI actions to the page action bar using the Process category.
+- Preserved layout-only extensions and
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Order Confirmation Sent
+====================================================================================================
+t: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            if (StrPos(FieldIdentity, PrimarySearchText) > 0) or
+           
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Prepayment Sent
+====================================================================================================
+ryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity 
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Sales Order Documents Sent
+====================================================================================================
+Sales Order Documents Sent Symbol Discovery
+Generated: 2026-06-22 11:56:27
+Repository: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Order Confirmation Sent
+====================================================================================================
+t: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Order Confirmation Sent
+====================================================================================================
+Sales Order Documents Sent Symbol Discovery
+Generated: 2026-06-22 11:56:27
+Repository: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Order Confirmation Sent
+====================================================================================================
+t: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Order Confirmation Sent
+====================================================================================================
+t: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Order Confirmation Sent
+====================================================================================================
+================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Order Confirmation Sent
+====================================================================================================
+GPISalesOrderEmail.Codeunit.al | Match: Prepayment Sent
+====================================================================================================
+ryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Picklist Sent
+==============================================
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Picklist Sent
+====================================================================================================
+ket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-paym
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            if (StrPos(FieldIdentity, PrimarySearchText) > 0) or
+           
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity 
+
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Prepayment Sent
+====================================================================================================
+ryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+    
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-e
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Prepayment Sent
+====================================================================================================
+Email.Codeunit.al | Match: Picklist Sent
+====================================================================================================
+ext, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity 
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Prepayment Sent
+====================================================================================================
+      CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            if (StrPos(FieldIdentity, PrimarySearchText) > 0) or
+           
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Prepayment Sent
+====================================================================================================
+ryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation 
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Prepayment Sent
+====================================================================================================
+ryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent');
+            DeliveryDocumentType::"Pick Ticket":
+                SetBooleanFieldBySearch(SalesHeader, 'picklist sent', 'pick list sent');
+        end;
+    end;
+
+    local procedure SetBooleanFieldBySearch(SalesHeader: Record "Sales Header"; PrimarySearchText: Text; AlternateSearchText: Text)
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        FieldIdentity: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            FieldIdentity 
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\SalesOrder-DocumentsSent-SymbolDiscovery.txt | Match: Documents Sent
+====================================================================================================
+Sales Order Documents Sent Symbol Discovery
+Generated: 2026-06-22 11:56:27
+Repository: C:\Users\ChadDillerud\Documents\DocSync-Zetadocs
+
+====================================================================================================
+C:\Users\ChadDillerud\Documents\DocSync-Zetadocs\bc-extension\zetadocs-replacement\src\codeunit\GPISalesOrderEmail.Codeunit.al | Match: Order Confirmation Sent
+====================================================================================================
+t: Text)
+    begin
+        DeliveryLog.Status := DeliveryLog.Status::Failed;
+        DeliveryLog."Completed Date/Time" := CurrentDateTime();
+        DeliveryLog."Completed By" := CopyStr(UserId(), 1, MaxStrLen(DeliveryLog."Completed By"));
+        DeliveryLog."Error Message" := CopyStr(EmailErrorText, 1, MaxStrLen(DeliveryLog."Error Message"));
+        DeliveryLog.Modify(true);
+    end;
+
+    local procedure MarkSalesDocumentSent(var SalesHeader: Record "Sales Header"; DeliveryDocumentType: Enum "GPI Delivery Document Type")
+    begin
+        case DeliveryDocumentType of
+            DeliveryDocumentType::"Order Confirmation":
+                SetBooleanFieldBySearch(SalesHeader, 'order confirmation sent', 'confirmation sent');
+            DeliveryDocumentType::"Prepayment Notice":
+                SetBooleanFieldBySearch(SalesHeader, 'prepayment sent', 'pre-payment sent

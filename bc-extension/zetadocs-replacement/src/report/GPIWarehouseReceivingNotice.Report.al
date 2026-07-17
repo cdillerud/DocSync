@@ -36,6 +36,8 @@ report 70527 "GPI Warehouse Receiving Notice"
             column(VendorContact; "Buy-from Contact") { }
             column(ShipmentMethodDescription; ShipmentMethodDescription) { }
             column(PurchaserName; PurchaserName) { }
+            column(GamerContactName1; GamerContactName1) { }
+            column(GamerContactName2; GamerContactName2) { }
             column(ContactLine; ContactLine) { }
 
             dataitem(PurchaseLine; "Purchase Line")
@@ -83,6 +85,9 @@ report 70527 "GPI Warehouse Receiving Notice"
                     LocationContact := Location.Contact;
                 end;
 
+                GPIBuildGamerContactNames(PurchaseHeader);
+
+
                 Clear(ShipmentMethodDescription);
                 if ShipmentMethod.Get("Shipment Method Code") then
                     ShipmentMethodDescription := ShipmentMethod.Description;
@@ -121,6 +126,74 @@ report 70527 "GPI Warehouse Receiving Notice"
         CompanyInfo.CalcFields(Picture);
     end;
 
+    local procedure GPIBuildGamerContactNames(PurchaseHeader: Record "Purchase Header")
+    var
+        Salesperson: Record "Salesperson/Purchaser";
+        SalespersonCode: Code[20];
+    begin
+        Clear(GamerContactName1);
+        Clear(GamerContactName2);
+
+        if (PurchaseHeader."Purchaser Code" <> '') and Salesperson.Get(PurchaseHeader."Purchaser Code") then
+            GPIAddGamerContactName(Salesperson.Name);
+
+        SalespersonCode := GPIFindSalespersonCode(PurchaseHeader, false);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
+            GPIAddGamerContactName(Salesperson.Name);
+
+        SalespersonCode := GPIFindSalespersonCode(PurchaseHeader, true);
+        if (SalespersonCode <> '') and Salesperson.Get(SalespersonCode) then
+            GPIAddGamerContactName(Salesperson.Name);
+    end;
+
+    local procedure GPIAddGamerContactName(ContactName: Text[100])
+    begin
+        ContactName := CopyStr(DelChr(ContactName, '<>', ' '), 1, MaxStrLen(ContactName));
+        if ContactName = '' then
+            exit;
+
+        if (GamerContactName1 = ContactName) or (GamerContactName2 = ContactName) then
+            exit;
+
+        if GamerContactName1 = '' then begin
+            GamerContactName1 := ContactName;
+            exit;
+        end;
+
+        if GamerContactName2 = '' then
+            GamerContactName2 := ContactName;
+    end;
+
+    local procedure GPIFindSalespersonCode(PurchaseHeader: Record "Purchase Header"; InsideSales: Boolean): Code[20]
+    var
+        PurchaseHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateIdentity: Text;
+        CandidateValue: Text;
+        IsInsideSalesField: Boolean;
+    begin
+        PurchaseHeaderRef.GetTable(PurchaseHeader);
+        for FieldIndex := 1 to PurchaseHeaderRef.FieldCount do begin
+            CandidateField := PurchaseHeaderRef.FieldIndex(FieldIndex);
+            CandidateIdentity := LowerCase(CandidateField.Name + ' ' + CandidateField.Caption);
+            IsInsideSalesField :=
+                (StrPos(CandidateIdentity, 'inside salesperson') > 0) or
+                (StrPos(CandidateIdentity, 'inside sales') > 0) or
+                (StrPos(CandidateIdentity, 'isr') > 0);
+
+            if (StrPos(CandidateIdentity, 'salesperson') > 0) and
+               (StrPos(CandidateIdentity, 'backup') = 0) and
+               (StrPos(CandidateIdentity, 'purchaser') = 0) and
+               (IsInsideSalesField = InsideSales)
+            then begin
+                CandidateValue := DelChr(Format(CandidateField.Value), '<>', ' ');
+                if CandidateValue <> '' then
+                    exit(CopyStr(CandidateValue, 1, 20));
+            end;
+        end;
+        exit('');
+    end;
     var
         CompanyInfo: Record "Company Information";
         DocumentPolicy: Codeunit "GPI Document Policy Mgt.";
@@ -129,7 +202,9 @@ report 70527 "GPI Warehouse Receiving Notice"
         LocationCityStateZip: Text[150];
         LocationContact: Text[100];
         ShipmentMethodDescription: Text[100];
-        PurchaserName: Text[100];
+        PurchaserName: Text[100];
+        GamerContactName1: Text[100];
+        GamerContactName2: Text[100];
         ContactLine: Text[250];
         WarehouseQuantity: Decimal;
         WarehouseUnitOfMeasureCode: Code[10];

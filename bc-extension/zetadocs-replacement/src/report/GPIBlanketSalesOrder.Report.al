@@ -41,6 +41,8 @@ report 70524 "GPI Blanket Sales Order"
             column(PaymentTermsDescription; PaymentTermsDescription) { }
             column(ShipmentMethodDescription; ShipmentMethodDescription) { }
             column(SalespersonName; SalespersonName) { }
+            column(InsideSalespersonName; InsideSalespersonName) { }
+            column(BackupInsideSalespersonName; BackupInsideSalespersonName) { }
             column(ContactLine; ContactLine) { }
             column(CurrencyCode; CurrencyCode) { }
             column(SubtotalAmount; Amount) { }
@@ -70,6 +72,8 @@ report 70524 "GPI Blanket Sales Order"
                 PaymentTerms: Record "Payment Terms";
                 ShipmentMethod: Record "Shipment Method";
                 Salesperson: Record "Salesperson/Purchaser";
+                InsideSalespersonCode: Code[20];
+                BackupInsideSalespersonCode: Code[20];
             begin
                 CalcFields(Amount, "Amount Including VAT");
                 Clear(PaymentTermsDescription);
@@ -81,6 +85,15 @@ report 70524 "GPI Blanket Sales Order"
                 Clear(SalespersonName);
                 if Salesperson.Get("Salesperson Code") then
                     SalespersonName := Salesperson.Name;
+                InsideSalespersonCode := GetInsideSalespersonCode(SalesHeader);
+                Clear(InsideSalespersonName);
+                if (InsideSalespersonCode <> '') and Salesperson.Get(InsideSalespersonCode) then
+                    InsideSalespersonName := Salesperson.Name;
+
+                BackupInsideSalespersonCode := GetBackupInsideSalespersonCode(SalesHeader);
+                Clear(BackupInsideSalespersonName);
+                if (BackupInsideSalespersonCode <> '') and Salesperson.Get(BackupInsideSalespersonCode) then
+                    BackupInsideSalespersonName := Salesperson.Name;
                 CurrencyCode := "Currency Code";
                 if CurrencyCode = '' then
                     CurrencyCode := GeneralLedgerSetup."LCY Code";
@@ -113,6 +126,59 @@ report 70524 "GPI Blanket Sales Order"
         GeneralLedgerSetup.Get();
     end;
 
+    local procedure GetInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateName: Text;
+        CandidateCaption: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            CandidateName := LowerCase(CandidateField.Name);
+            CandidateCaption := LowerCase(CandidateField.Caption);
+            if IsInsideSalespersonField(CandidateName, CandidateCaption) and
+               (StrPos(CandidateName, 'backup') = 0) and
+               (StrPos(CandidateCaption, 'backup') = 0)
+            then
+                exit(CopyStr(Format(CandidateField.Value), 1, 20));
+        end;
+        exit('');
+    end;
+
+    local procedure GetBackupInsideSalespersonCode(SalesHeader: Record "Sales Header"): Code[20]
+    var
+        SalesHeaderRef: RecordRef;
+        CandidateField: FieldRef;
+        FieldIndex: Integer;
+        CandidateName: Text;
+        CandidateCaption: Text;
+    begin
+        SalesHeaderRef.GetTable(SalesHeader);
+        for FieldIndex := 1 to SalesHeaderRef.FieldCount do begin
+            CandidateField := SalesHeaderRef.FieldIndex(FieldIndex);
+            CandidateName := LowerCase(CandidateField.Name);
+            CandidateCaption := LowerCase(CandidateField.Caption);
+            if IsInsideSalespersonField(CandidateName, CandidateCaption) and
+               ((StrPos(CandidateName, 'backup') > 0) or (StrPos(CandidateCaption, 'backup') > 0))
+            then
+                exit(CopyStr(Format(CandidateField.Value), 1, 20));
+        end;
+        exit('');
+    end;
+
+    local procedure IsInsideSalespersonField(FieldNameText: Text; FieldCaptionText: Text): Boolean
+    begin
+        exit(
+            (StrPos(FieldNameText, 'inside salesperson') > 0) or
+            (StrPos(FieldCaptionText, 'inside salesperson') > 0) or
+            (StrPos(FieldNameText, 'inside sales') > 0) or
+            (StrPos(FieldCaptionText, 'inside sales') > 0) or
+            (StrPos(FieldNameText, 'isr') > 0) or
+            (StrPos(FieldCaptionText, 'isr') > 0));
+    end;
     local procedure BuildContactLine()
     begin
         if SalespersonName <> '' then
@@ -127,6 +193,8 @@ report 70524 "GPI Blanket Sales Order"
         PaymentTermsDescription: Text[100];
         ShipmentMethodDescription: Text[100];
         SalespersonName: Text[100];
+        InsideSalespersonName: Text[100];
+        BackupInsideSalespersonName: Text[100];
         ContactLine: Text[250];
         CurrencyCode: Code[10];
         TaxAmount: Decimal;

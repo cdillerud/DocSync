@@ -70,14 +70,24 @@ def pull_recycle_bin_items(
     token: str, host: str, site_path: str, since_hours: int,
 ) -> List[Dict[str, Any]]:
     """Paginated pull of recently-deleted items from the Square9 prod
-    site's recycle bin, stopping once results age past the window -
-    results come back most-recent-first, so this avoids paging through
-    the full historical bin unnecessarily."""
+    site's recycle bin, filtered client-side to the comparison window.
+
+    Does NOT assume any sort order from the API and does NOT stop
+    early on the first out-of-window item - verified directly against
+    real data that results come back in no reliable date order at all
+    (a raw, unfiltered pull showed April/June/July timestamps
+    interleaved with no pattern), so an early-stop-on-first-old-item
+    approach silently returns near-zero results even when the target
+    window's items are present later in the same page. Instead this
+    pages through up to the safety cap and keeps every item inside the
+    window regardless of where in the result set it appears."""
     import httpx
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=since_hours)
     headers = {"Authorization": f"Bearer {token}"}
     items: List[Dict[str, Any]] = []
+    pages_scanned = 0
+    total_items_scanned = 0
 
     with httpx.Client(timeout=30.0) as c:
         site_resp = c.get(
@@ -89,14 +99,13 @@ def pull_recycle_bin_items(
 
         url = f"https://graph.microsoft.com/beta/sites/{site_id}/recycleBin/items"
         params = {"$top": 200}
-        page = 0
-        while url and page < 25:  # hard safety cap - never loop forever
-            page += 1
-            resp = c.get(url, headers=headers, params=params if page == 1 else None)
+        while url and pages_scanned < 25:  # hard safety cap - never loop forever
+            pages_scanned += 1
+            resp = c.get(url, headers=headers, params=params if pages_scanned == 1 else None)
             resp.raise_for_status()
             data = resp.json()
             batch = data.get("value", [])
-            stop = False
+            total_items_scanned += len(batch)
             for it in batch:
                 deleted_str = it.get("deletedDateTime")
                 if not deleted_str:
@@ -107,15 +116,17 @@ def pull_recycle_bin_items(
                     )
                 except ValueError:
                     continue
-                if deleted_dt < cutoff:
-                    stop = True
-                    break
-                items.append(it)
-            if stop:
-                break
+                if deleted_dt >= cutoff:
+                    items.append(it)
             url = data.get("@odata.nextLink")
             params = None  # nextLink already carries params
 
+    print(
+        f"[recycle_bin] scanned {pages_scanned} page(s), "
+        f"{total_items_scanned} item(s) total, "
+        f"{len(items)} within the last {since_hours}h window.",
+        file=sys.stderr,
+    )
     return items
 
 

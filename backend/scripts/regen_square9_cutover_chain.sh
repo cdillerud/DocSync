@@ -16,9 +16,20 @@
 #   9. bucket_A_one_shot_data_patch_dryrun.py        (NEW: read-only)
 #  10. bucket_A_routing_rule_addition_dryrun.py      (NEW: read-only)
 #  11. bucket_C_handoff_doc.py                       (NEW: read-only)
+#  12. ingest_bucket_A_corrections.py                (NEW: read-only preview)
+#      Feeds verified, high-confidence Bucket A misclassifications into
+#      the existing classification learning loop (classification_
+#      corrections) - the same collection the live classification
+#      pipeline already reads on every document via feedback_loop_
+#      service.py::build_feedback_context_for_prompt. Runs in dry-run
+#      preview mode here (matching every other step in this chain).
+#      To actually teach the classifier what this run found:
+#        docker compose exec backend python3 \
+#          scripts/ingest_bucket_A_corrections.py --confirm \
+#          --run-label "<proof_dir name>"
 #
 # Nothing in this chain mutates Mongo, the classifier, or routing rules.
-# The final three steps are read-only previews of what an apply step
+# The final four steps are read-only previews of what an apply step
 # WOULD do.
 #
 # Exit status:
@@ -56,39 +67,42 @@ step() {
 
 mkdir -p prod_reports
 
-step "1/11 square9_hub_ap_parity_report" \
+step "1/12 square9_hub_ap_parity_report" \
     python scripts/square9_hub_ap_parity_report.py
 
-step "2/11 square9_only_triage_resolver" \
+step "2/12 square9_only_triage_resolver" \
     python scripts/square9_only_triage_resolver.py \
         --triage-csv prod_reports/square9_only_triage.csv
 
-step "3/11 bucket_A_root_cause_report" \
+step "3/12 bucket_A_root_cause_report" \
     python scripts/bucket_A_root_cause_report.py
 
-step "4/11 bucket_C_intake_gap_report" \
+step "4/12 bucket_C_intake_gap_report" \
     python scripts/bucket_C_intake_gap_report.py
 
-step "5/11 investigate_blank_square9_metadata" \
+step "5/12 investigate_blank_square9_metadata" \
     python scripts/investigate_blank_square9_metadata.py
 
-step "6/11 investigate_low_confidence_bucket_A" \
+step "6/12 investigate_low_confidence_bucket_A" \
     python scripts/investigate_low_confidence_bucket_A.py
 
-step "7/11 bucket_A_misrouting_remediation_plan" \
+step "7/12 bucket_A_misrouting_remediation_plan" \
     python scripts/bucket_A_misrouting_remediation_plan.py
 
-step "8/11 bucket_C_intake_remediation_plan" \
+step "8/12 bucket_C_intake_remediation_plan" \
     python scripts/bucket_C_intake_remediation_plan.py
 
-step "9/11 bucket_A_one_shot_data_patch_dryrun (READ-ONLY)" \
+step "9/12 bucket_A_one_shot_data_patch_dryrun (READ-ONLY)" \
     python scripts/bucket_A_one_shot_data_patch_dryrun.py
 
-step "10/11 bucket_A_routing_rule_addition_dryrun (READ-ONLY)" \
+step "10/12 bucket_A_routing_rule_addition_dryrun (READ-ONLY)" \
     python scripts/bucket_A_routing_rule_addition_dryrun.py
 
-step "11/11 bucket_C_handoff_doc (READ-ONLY)" \
+step "11/12 bucket_C_handoff_doc (READ-ONLY)" \
     python scripts/bucket_C_handoff_doc.py
+
+step "12/12 ingest_bucket_A_corrections (READ-ONLY preview)" \
+    python scripts/ingest_bucket_A_corrections.py --run-label "regen_$(date -u +%Y%m%dT%H%M%SZ)"
 
 echo
 echo "=================================================================="
@@ -104,7 +118,8 @@ for f in \
     prod_reports/bucket_A_one_shot_data_patch_dryrun.csv \
     prod_reports/bucket_A_routing_rule_addition_dryrun.csv \
     prod_reports/bucket_C_handoff.md \
-    prod_reports/bucket_C_handoff.csv ; do
+    prod_reports/bucket_C_handoff.csv \
+    prod_reports/bucket_A_corrections_preview.json ; do
     if [ -f "$f" ]; then
         printf "  OK    %s  (%s bytes)\n" "$f" "$(stat -c%s "$f")"
     else

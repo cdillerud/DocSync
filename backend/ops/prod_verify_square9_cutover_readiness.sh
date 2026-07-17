@@ -230,6 +230,20 @@ run_step bucket_C_handoff_doc \
     "Bucket C handoff doc (IT/AP ticket pack)" \
     python scripts/bucket_C_handoff_doc.py
 
+# --- 11. Bucket A corrections learning-loop preview -------------------------
+# Read-only preview (no --confirm): shows which verified, high-confidence
+# Bucket A misclassifications from stage 5 WOULD be fed into
+# classification_corrections, the same collection the live classification
+# pipeline already reads on every document. Never writes as part of this
+# readiness check - review the preview, then apply deliberately with:
+#   docker compose exec backend python3 \
+#     scripts/ingest_bucket_A_corrections.py --confirm \
+#     --run-label "$(basename "${PROOF_DIR}")"
+run_step ingest_bucket_A_corrections \
+    "Bucket A corrections learning-loop preview (read-only)" \
+    python scripts/ingest_bucket_A_corrections.py \
+        --run-label "$(basename "${PROOF_DIR}")"
+
 # --- Manifest close ---------------------------------------------------------
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {
@@ -247,6 +261,9 @@ if [ -f prod_reports/bucket_C_handoff.md ]; then
 fi
 if [ -f prod_reports/bucket_C_handoff.csv ]; then
     cp -f prod_reports/bucket_C_handoff.csv "${PROOF_DIR}/bucket_C_handoff.csv"
+fi
+if [ -f prod_reports/bucket_A_corrections_preview.json ]; then
+    cp -f prod_reports/bucket_A_corrections_preview.json "${PROOF_DIR}/bucket_A_corrections_preview.json"
 fi
 
 # --- Final summary ---------------------------------------------------------

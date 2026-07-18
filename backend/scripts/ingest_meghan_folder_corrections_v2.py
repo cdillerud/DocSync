@@ -61,7 +61,7 @@ async def fetch_folder_tags(token: str) -> list:
 async def main():
     from services.sharepoint_service import _get_graph_token
     from services.document_intel_helpers import _call_llm_for_extraction
-    from services.routing_feedback_service import init_feedback_db, record_correction, lookup_feedback
+    from services.routing_feedback_service import init_feedback_db, record_correction, lookup_feedback, _make_routing_key
     from motor.motor_asyncio import AsyncIOMotorClient
 
     token = await _get_graph_token()
@@ -77,6 +77,23 @@ async def main():
     skipped_no_doc = 0
     skipped_unknown_tag = 0
     skipped_no_vendor = 0
+    conflicts = []
+    # Tracks what's been proposed earlier in THIS SAME run, keyed by
+    # routing_key - added 2026-07-18 after finding live that this
+    # script silently corrupted an existing rule: 6 Ball Metal Beverage
+    # Container Corp AP_Invoice documents processed in a single run
+    # produced 4 votes for "Dropship Not International" and 2 for
+    # "Warehouse Not International", and because nothing tracked
+    # earlier answers within the run, each call to record_correction()
+    # blindly overwrote the previous one - the final stored rule ended
+    # up being the LAST-processed answer (the 2-vote minority), not
+    # the 4-vote majority. record_correction() itself has no conflict
+    # detection at all (confirmed by reading routing_feedback_service.py
+    # directly), so this has to be caught here, before ever calling it -
+    # same two-layer check (existing DB rule, and within-run) already
+    # proven in square9_continuous_learning.py, applied here for the
+    # same reason.
+    proposed_this_run = {}
 
     for file_name, raw_tag in tags:
         canonical_folder = FOLDER_TAG_TO_CANONICAL.get(raw_tag)
@@ -109,6 +126,32 @@ async def main():
         has_po = bool(po)
         is_international = bool(extracted_fields.get("is_international", False))
 
+        key = _make_routing_key(vendor, doc_type, has_po, is_international)
+
+        existing = await db["routing_feedback"].find_one({"routing_key": key}, {"_id": 0})
+        if existing and existing.get("correct_folder", "").lower() != canonical_folder.lower():
+            print(f"  CONFLICT (existing rule disagrees, NOT applied): {file_name} :: "
+                  f"{key} -> existing={existing.get('correct_folder')!r} "
+                  f"new={canonical_folder!r}")
+            conflicts.append({
+                "key": key, "file_name": file_name,
+                "existing_folder": existing.get("correct_folder"),
+                "new_folder": canonical_folder,
+            })
+            continue
+
+        if key in proposed_this_run and proposed_this_run[key].lower() != canonical_folder.lower():
+            print(f"  CONFLICT (disagrees with an earlier doc THIS SAME RUN, NOT applied): "
+                  f"{file_name} :: {key} -> earlier={proposed_this_run[key]!r} "
+                  f"new={canonical_folder!r}")
+            conflicts.append({
+                "key": key, "file_name": file_name,
+                "existing_folder": f"{proposed_this_run[key]!r} (proposed earlier this run)",
+                "new_folder": canonical_folder,
+            })
+            continue
+        proposed_this_run[key] = canonical_folder
+
         result = await record_correction(
             vendor=vendor,
             doc_type=doc_type,
@@ -128,6 +171,13 @@ async def main():
     print(f"Skipped (unrecognized tag): {skipped_unknown_tag}")
     print(f"Skipped (not found in Hub): {skipped_no_doc}")
     print(f"Skipped (no vendor extracted): {skipped_no_vendor}")
+    print(f"CONFLICTS (existing rule or within-run disagreement - NOT auto-applied): {len(conflicts)}")
+    if conflicts:
+        print()
+        print("=== CONFLICTS REQUIRING HUMAN REVIEW ===")
+        for c in conflicts:
+            print(f"  {c['key']}  file={c['file_name']}  "
+                  f"existing/earlier={c['existing_folder']!r}  new={c['new_folder']!r}")
 
     print()
     print("=== Verifying: rules now live in the real feedback system ===")

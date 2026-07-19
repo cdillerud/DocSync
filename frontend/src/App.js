@@ -18,6 +18,7 @@ import InventoryHealthPage from "@/pages/InventoryHealthPage";
 import IntakeLearningPage from "@/pages/IntakeLearningPage";
 import SalespersonDashboardPage from "@/pages/SalespersonDashboardPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
+import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
 import InsightsPage from "@/pages/InsightsPage";
@@ -69,6 +70,7 @@ function AppRoutes() {
         <Route path="learning/ops" element={<LearningOpsPage />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
+        <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
         <Route path="governance" element={<GovernanceDashboard />} />
         <Route path="roadmap" element={<RoadmapGanttPage />} />
         <Route path="contracts" element={<ContractIntelligencePage />} />

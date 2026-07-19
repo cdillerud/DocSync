@@ -24,6 +24,7 @@ const navItems = [
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
+  { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
   { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
   { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
@@ -113,6 +114,7 @@ export default function Layout() {
     if (path === '/learning/ops') return 'Learning Ops';
     if (path === '/monitor') return 'System Monitor';
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
+    if (path === '/decision-queue') return 'Decision Queue';
     if (path === '/governance') return 'Governance';
     if (path === '/roadmap') return 'Build Roadmap';
     if (path === '/review-queue') return 'Draft Review Queue';

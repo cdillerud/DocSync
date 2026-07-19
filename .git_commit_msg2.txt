@@ -1,0 +1,27 @@
+Add a real, direct route for the Decision Queue - same pattern as square9-readiness
+
+Chad's direct correction: this needed to be reachable the same way
+square9-readiness already is - a real, top-level URL, not buried as a
+tab requiring extra clicks to find. Traced the exact existing pattern
+in App.js rather than guessing: Route path="square9-readiness" element
+={<Square9ReadinessPage />}, registered directly in the main Routes
+block, plus a nav entry and page-title mapping in Layout.js.
+
+Replicated all three pieces exactly:
+- App.js: imported HumanDecisionQueuePage, added
+  Route path="decision-queue" right next to square9-readiness
+- Layout.js: added a nav sidebar entry (ClipboardCheck icon, already
+  imported in the existing icon list, no new import needed) right
+  after Square9 Readiness, and the page-title mapping used by the
+  header
+- The tab added earlier inside IntelligenceHubPage still exists as a
+  secondary access point - harmless to leave, not worth extra churn
+  removing it right now, but the real, primary access point is now
+  this direct route: /decision-queue
+
+Verified both modified files with esbuild (JSX transform, no bundling
+needed since this is a pure syntax check, not import resolution) -
+both parse and transform cleanly with no errors.
+
+Needs a real frontend container rebuild to actually appear at
+http://<host>:8080/decision-queue.

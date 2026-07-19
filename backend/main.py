@@ -15,15 +15,10 @@ from starlette.middleware.cors import CORSMiddleware
 import logging
 import os
 
-# -- Load .env FIRST so the validator sees the right values -------------------
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# -- Startup secret validation (fail-fast) ------------------------------------
-# Runs at import time BEFORE anything else. If JWT_SECRET / ADMIN_EMAIL /
-# ADMIN_PASSWORD / MONGO_URL are missing or insecure defaults, the process
-# crashes with a clear checklist rather than booting silently insecure.
 from services.startup_validator import validate_startup_secrets
 
 validate_startup_secrets()
@@ -34,18 +29,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-# ---------------------------------------------------------------------------
-# Import server module (runs module-level code: DB connection, imports, etc.)
-# We treat server.py as a utility library, NOT as a served app or router.
-# ---------------------------------------------------------------------------
 import server
-
-# Sales module router (standalone)
 from sales_module import sales_router
 
-# ---------------------------------------------------------------------------
-# All routers live under /routers/ (single convention)
-# ---------------------------------------------------------------------------
 from routers.automation_rules import router as automation_rules_router
 from routers.freight_routing import router as freight_routing_router
 from routers.label_corrections import router as label_corrections_router
@@ -99,6 +85,7 @@ from routers.auto_clear_reprocess import router as auto_clear_reprocess_router
 from routers.file_integrity import router as file_integrity_router
 from routers.auto_approve import router as auto_approve_router
 from routers.sharepoint_routing import router as sharepoint_routing_router
+from routers.human_routing_review import router as human_routing_review_router
 from routers.po_resolution import router as po_resolution_router
 from routers.bakeoff import router as bakeoff_router
 from routers.feedback_health import router as feedback_health_router
@@ -117,7 +104,6 @@ from routers.cp_item_registry import router as cp_item_registry_router
 from routers.consigned_item_registry import router as consigned_item_registry_router
 from routers.admin_eod import router as admin_eod_router
 
-# ==================== APP ====================
 app = FastAPI(title="GPI Document Hub API")
 
 app.add_middleware(
@@ -128,7 +114,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==================== ALL ROUTERS (prefix /api) ====================
 app.include_router(automation_rules_router, prefix="/api")
 app.include_router(freight_routing_router, prefix="/api")
 app.include_router(label_corrections_router, prefix="/api")
@@ -182,6 +167,7 @@ app.include_router(auto_clear_reprocess_router, prefix="/api")
 app.include_router(file_integrity_router, prefix="/api")
 app.include_router(auto_approve_router, prefix="/api")
 app.include_router(sharepoint_routing_router, prefix="/api")
+app.include_router(human_routing_review_router, prefix="/api")
 app.include_router(po_resolution_router, prefix="/api")
 app.include_router(bakeoff_router, prefix="/api")
 app.include_router(feedback_health_router, prefix="/api")
@@ -201,35 +187,26 @@ app.include_router(cp_item_registry_router, prefix="/api")
 app.include_router(consigned_item_registry_router, prefix="/api")
 app.include_router(admin_eod_router, prefix="/api")
 
-# ==================== CONTRACT INTELLIGENCE (Phase 2) ====================
-# Read-only / advisory module. Webhook endpoint is unauthenticated but
-# HMAC-validated; all other endpoints require JWT auth. No BC writes.
 from routers.contracts import router as contracts_router  # noqa: E402
 app.include_router(contracts_router, prefix="/api")
 
-# ==================== SALES MODULE ====================
 app.include_router(sales_router)
 
 
-# ==================== HEALTH CHECK ====================
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "service": "gpi-document-hub"}
 
 
-# ==================== LIFECYCLE ====================
 @app.on_event("startup")
 async def startup():
     """Delegate to server.py's comprehensive startup initialization."""
     logger.info("main.py startup — delegating to server.startup()")
     await server.startup()
 
-    # ── Auth: expose DB on app.state and seed admin user ───────────────────
-    # ``services.auth_deps.get_current_user`` resolves the request user by
-    # pulling ``request.app.state.db``. Attach the Motor DB and then seed
-    # the admin account from ADMIN_EMAIL / ADMIN_PASSWORD env vars.
     from deps import get_db
     from services.auth_deps import seed_admin_user
+
     app.state.db = get_db()
     try:
         seed_result = await seed_admin_user(app.state.db)
@@ -238,43 +215,34 @@ async def startup():
         logger.error("[Auth] Admin seed FAILED: %s", e)
         raise
 
-    # Register server.py handler functions directly on app (deferred to avoid circular import)
     register_doc_routes(app)
     register_wf_routes(app)
     register_ri_routes(app)
-    # Inventory ledger indexes
+
     try:
         from workflows.inventory.ledger.service import ensure_indexes as inv_ensure_indexes
-        from deps import get_db
         await inv_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory ledger index creation failed: %s", e)
 
-    # Inventory XLS staging + learning indexes
     try:
         from workflows.inventory.planning.staging import ensure_indexes as inv_xls_ensure_indexes
-        from deps import get_db
         await inv_xls_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("Inventory XLS staging index creation failed: %s", e)
 
-    # Customer-Owned Ware (COW) CP-item registry indexes — Lane C Step 1
     try:
         from workflows.inventory.ownership import ensure_indexes as cow_ensure_indexes
-        from deps import get_db
         await cow_ensure_indexes(get_db())
     except Exception as e:
         logger.warning("CP-item registry index creation failed: %s", e)
 
-    # Vendor consignment registry indexes — Lane C Step 2
     try:
         from workflows.inventory.ownership import ensure_consignment_indexes
-        from deps import get_db
         await ensure_consignment_indexes(get_db())
     except Exception as e:
         logger.warning("Consigned-item registry index creation failed: %s", e)
 
-    # Vendor matching: backfill name_normalized on cached BC vendors
     try:
         from services.vendor_matching import backfill_bc_vendor_normalized
         backfilled = await backfill_bc_vendor_normalized()
@@ -283,21 +251,15 @@ async def startup():
     except Exception as e:
         logger.warning("Vendor normalized backfill failed: %s", e)
 
-    # Initialize classification feedback service
     try:
         from services.classification_feedback_service import init_classification_feedback
-        from deps import get_db
         init_classification_feedback(get_db())
         logger.info("Classification feedback service initialized")
     except Exception as e:
         logger.warning("Classification feedback init failed: %s", e)
 
-    # A1 (Lane A): one-time migration of legacy bc_posting_error strings into
-    # append-only bc_posting_attempts[] history. Idempotent — safe on every
-    # startup; does nothing after the first run converts the backlog.
     try:
         from services.bc_posting_attempts import migrate_legacy_bc_posting_error
-        from deps import get_db
         stats = await migrate_legacy_bc_posting_error(get_db())
         if stats["migrated"]:
             logger.info(
@@ -306,8 +268,6 @@ async def startup():
             )
     except Exception as e:
         logger.warning("bc_posting_attempts legacy migration failed: %s", e)
-
-    logger.info("main.py startup complete")
 
 
 @app.on_event("shutdown")

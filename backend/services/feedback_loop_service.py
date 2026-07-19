@@ -254,44 +254,77 @@ async def _learn_classification_pattern(db, event: Dict):
 async def _learn_folder_routing(db, event: Dict):
     """
     When a user moves a document to a different folder, record this
-    as a routing correction.
+    as a routing correction - feeding the REAL, live routing feedback
+    system (routing_feedback_service.record_correction()), which
+    folder_routing_service.py's route_with_feedback() actually
+    consults, rather than the dead write this function used to make.
 
-    IMPORTANT (found 2026-07-10): this writes into the SAME MongoDB
-    collection ("routing_feedback") as services/routing_feedback_service.py,
-    but with a COMPLETELY DIFFERENT, INCOMPATIBLE schema. That other
-    service is the REAL, LIVE learning layer - it's actually consulted by
-    folder_routing_service.py's route_with_feedback() before falling
-    through to rule-based routing. THIS function's records (keyed by
-    document_id) are never looked up by anything and have no effect on
-    live routing. If you need routing corrections to actually influence
-    future document routing, use routing_feedback_service.record_correction()
-    instead - this function appears to currently have no real caller
-    besides the generic record_feedback() dispatcher.
+    History: found 2026-07-10 that this wrote into the SAME MongoDB
+    collection ("routing_feedback") as routing_feedback_service.py but
+    with a completely different, incompatible schema (routing_key set
+    to the raw document_id instead of a vendor|doc_type|po|intl key),
+    so these records were never looked up by anything - correctly
+    diagnosed at the time but never actually fixed. Confirmed live
+    2026-07-18 via get_feedback_stats(): 42 of 50 pending feedback_
+    events were stuck as folder_correction type, silently accumulating
+    behind this dead write for over a week.
+
+    The event itself carries before/after folder names and vendor_id,
+    but not doc_type - looked up fresh from hub_documents by document_id
+    rather than trusting anything from the event's own creation time,
+    since a document's doc_type may have been corrected since (e.g. by
+    tonight's own budget-error reprocessing work). has_po and
+    is_international are derived from the event's stored extracted_
+    fields snapshot, which does carry them.
+
+    record_correction() itself now has its own conflict protection
+    (fixed in the same change) - a folder_correction event that
+    disagrees with an already-established rule is reported as a
+    conflict and left alone, never silently overwritten.
     """
     before_folder = (event.get("before") or {}).get("folder", "")
     after_folder = (event.get("after") or {}).get("folder", "")
-    
+
     if not before_folder or not after_folder or before_folder == after_folder:
         return False
-    
-    metadata = event.get("metadata") or {}
-    await db.routing_feedback.update_one(
-        {"document_id": event.get("document_id", "")},
-        {"$set": {
-            "document_id": event.get("document_id", ""),
-            "routing_key": event.get("document_id", ""),
-            "vendor_id": event.get("vendor_id", ""),
-            "ai_routed_to": before_folder,
-            "human_moved_to": after_folder,
-            "extracted_fields": metadata.get("extracted_fields", {}),
-            "file_name": metadata.get("file_name", ""),
-            "learned_at": datetime.now(timezone.utc).isoformat(),
-        }},
-        upsert=True,
+
+    vendor = (event.get("vendor_id") or "").strip()
+    if not vendor:
+        return False
+
+    doc_id = event.get("document_id", "")
+    doc = await db.hub_documents.find_one(
+        {"id": doc_id}, {"_id": 0, "doc_type": 1, "document_type": 1}
     )
-    
-    logger.info("[FeedbackLearn] Routing: '%s' -> '%s'", before_folder[:30], after_folder[:30])
-    return True
+    doc_type = (doc or {}).get("doc_type") or (doc or {}).get("document_type") or "Unknown"
+
+    metadata = event.get("metadata") or {}
+    extracted_fields = metadata.get("extracted_fields") or {}
+    po = str(extracted_fields.get("po_number") or extracted_fields.get("order_number") or "").strip()
+    has_po = bool(po)
+    is_international = bool(extracted_fields.get("is_international", False))
+    file_name = metadata.get("file_name", "")
+
+    from services.routing_feedback_service import record_correction
+    result = await record_correction(
+        vendor=vendor,
+        doc_type=doc_type,
+        has_po=has_po,
+        is_international=is_international,
+        correct_folder=after_folder,
+        file_name=file_name,
+        source="feedback_event_replay",
+    )
+
+    logger.info(
+        "[FeedbackLearn] Routing (real): vendor=%s doc_type=%s -> '%s' (status=%s)",
+        vendor, doc_type, after_folder[:40], result.get("status"),
+    )
+    # A conflict is still a genuine, successful application of this
+    # event - it was correctly evaluated, just correctly declined to
+    # overwrite disagreeing data. Only a hard failure (no_db) should
+    # leave the event unmarked for a future retry.
+    return result.get("status") != "no_db"
 
 
 async def _update_vendor_track_record(db, event: Dict):

@@ -55,8 +55,26 @@ async def record_correction(
     source: str = "benchmark_fix",
 ) -> dict:
     """
-    Record a routing correction. If a matching rule already exists,
-    increment its confidence. Otherwise create a new rule.
+    Record a routing correction. If a matching rule already exists
+    and agrees with correct_folder, strengthen it (increment
+    confidence). If no rule exists, create one. If a rule already
+    exists and DISAGREES, do not overwrite it - return status=
+    "conflict" instead.
+
+    Conflict protection added 2026-07-18 directly here, in the shared
+    function, rather than continuing to duplicate the same check in
+    every caller. Confirmed live the exact failure this prevents: 6
+    Ball Metal Beverage Container Corp documents processed in one pass
+    by ingest_meghan_folder_corrections_v2.py produced 4 votes for one
+    folder and 2 for another: since this function had no protection of
+    its own, the 2-vote minority silently overwrote the 4-vote
+    majority just by being processed last. That script now has its own
+    pre-check to avoid ever calling this function in a conflicting
+    case - but that only protects that one caller. Putting the
+    protection here too means every current and future caller
+    (including _learn_folder_routing(), fixed in the same change) is
+    protected automatically, without needing to remember to
+    re-implement the same check again next time.
     """
     if _db is None:
         return {"status": "no_db"}
@@ -68,6 +86,13 @@ async def record_correction(
         {"routing_key": key},
         {"_id": 0}
     )
+
+    if existing and existing.get("correct_folder", "").strip().lower() != correct_folder.strip().lower():
+        return {
+            "status": "conflict", "key": key,
+            "existing_folder": existing.get("correct_folder"),
+            "new_folder": correct_folder,
+        }
 
     if existing:
         # Strengthen existing rule

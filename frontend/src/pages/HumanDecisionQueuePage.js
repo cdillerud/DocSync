@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
   ScanSearch, RefreshCw, Loader2, CheckCircle2, HelpCircle, Building2, Info,
+  Eye, EyeOff, ExternalLink, FileWarning,
 } from 'lucide-react';
-import { getHumanDecisionQueue, bulkClassifyDocuments } from '@/lib/api';
+import api, { getHumanDecisionQueue, bulkClassifyDocuments } from '@/lib/api';
 
 // Documents needing a human decision, unified from Bucket A root-cause
 // analysis and Meghan's team's manual folder-tag review into one feed.
@@ -38,6 +39,44 @@ function groupItems(items) {
     byKey.get(key).push(it);
   }
   return [...byKey.values()];
+}
+
+function previewKind(contentType, fileName) {
+  const type = (contentType || '').toLowerCase();
+  const extension = (fileName || '').split('.').pop()?.toLowerCase();
+
+  if (type.includes('pdf') || extension === 'pdf') return 'pdf';
+
+  const browserImageExtensions = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+  if (
+    (type.startsWith('image/') && !type.includes('tiff')) ||
+    browserImageExtensions.has(extension)
+  ) {
+    return 'image';
+  }
+
+  return 'download';
+}
+
+async function previewErrorMessage(error) {
+  const responseData = error.response?.data;
+
+  if (responseData instanceof Blob) {
+    try {
+      const text = await responseData.text();
+      const parsed = JSON.parse(text);
+      return parsed.detail || parsed.message || 'The document could not be loaded.';
+    } catch {
+      // Fall through to the normal Axios error fields.
+    }
+  }
+
+  return (
+    responseData?.detail ||
+    responseData?.message ||
+    error.message ||
+    'The document could not be loaded.'
+  );
 }
 
 export default function HumanDecisionQueuePage() {
@@ -90,10 +129,10 @@ export default function HumanDecisionQueuePage() {
         mailboxCategory,
         reclassifyBy: 'human_decision_queue',
       });
-      toast.success(`Confirmed \u2014 ${primary.file_name}`);
+      toast.success(`Confirmed — ${primary.file_name}`);
       setResolvedKeys(prev => new Set(prev).add(key));
     } catch (err) {
-      toast.error(err.response?.data?.detail || 'That decision didn\u2019t save');
+      toast.error(err.response?.data?.detail || 'That decision didn’t save');
     } finally {
       setSubmittingKey(null);
     }
@@ -196,6 +235,90 @@ function DecisionCard({ group, submitting, onDecide }) {
   const Icon = meta.icon;
   const isActionable = !!primary.submit_via;
 
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [previewContentType, setPreviewContentType] = useState('');
+  const [previewError, setPreviewError] = useState('');
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const loadDocument = useCallback(async () => {
+    if (previewUrl) return previewUrl;
+
+    setPreviewLoading(true);
+    setPreviewError('');
+
+    try {
+      // Fetch through the shared Axios client instead of using a raw iframe URL.
+      // This preserves the app's Entra/legacy Authorization header and still
+      // loads documents lazily, one card at a time.
+      const response = await api.get(
+        `/documents/${encodeURIComponent(primary.doc_id)}/file`,
+        { responseType: 'blob' }
+      );
+      const contentType =
+        response.headers?.['content-type'] ||
+        response.data?.type ||
+        'application/octet-stream';
+      const blob = response.data instanceof Blob
+        ? response.data
+        : new Blob([response.data], { type: contentType });
+      const objectUrl = URL.createObjectURL(blob);
+
+      setPreviewContentType(contentType);
+      setPreviewUrl(objectUrl);
+      return objectUrl;
+    } catch (error) {
+      const message = await previewErrorMessage(error);
+      setPreviewError(message);
+      toast.error(message);
+      return '';
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [previewUrl, primary.doc_id]);
+
+  const handlePreviewToggle = async () => {
+    if (previewOpen) {
+      setPreviewOpen(false);
+      return;
+    }
+
+    setPreviewOpen(true);
+    await loadDocument();
+  };
+
+  const handleOpenInNewTab = async () => {
+    let popup = null;
+    try {
+      popup = window.open('about:blank', '_blank');
+      if (popup) {
+        popup.opener = null;
+        popup.document.title = 'Loading document...';
+        popup.document.body.textContent = 'Loading document...';
+      }
+    } catch {
+      popup = null;
+    }
+
+    const objectUrl = await loadDocument();
+
+    if (objectUrl && popup) {
+      popup.location.replace(objectUrl);
+    } else if (objectUrl) {
+      window.open(objectUrl, '_blank', 'noopener,noreferrer');
+    } else if (popup) {
+      popup.close();
+    }
+  };
+
+  const kind = previewKind(previewContentType, primary.file_name);
+
   return (
     <Card className="border border-border" data-testid="decision-card">
       <CardContent className="p-4">
@@ -208,7 +331,7 @@ function DecisionCard({ group, submitting, onDecide }) {
               {primary.file_name}
               {group.length > 1 && (
                 <span className="font-sans font-semibold text-amber-400 text-xs ml-2">
-                  {`\u2014 ${group.length} possible Square9 matches`}
+                  {`— ${group.length} possible Square9 matches`}
                 </span>
               )}
             </p>
@@ -234,6 +357,88 @@ function DecisionCard({ group, submitting, onDecide }) {
             <span><span className="text-foreground font-medium">Tagged</span> &quot;{primary.context.folder_label}&quot;</span>
           )}
         </div>
+
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handlePreviewToggle}
+            disabled={previewLoading}
+            data-testid={`toggle-document-preview-${primary.doc_id}`}
+          >
+            {previewLoading ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : previewOpen ? (
+              <EyeOff className="w-3.5 h-3.5 mr-1.5" />
+            ) : (
+              <Eye className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            {previewOpen ? 'Hide document' : 'Review document'}
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={handleOpenInNewTab}
+            disabled={previewLoading}
+            data-testid={`open-document-new-tab-${primary.doc_id}`}
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+            Open in new tab
+          </Button>
+        </div>
+
+        {previewOpen && (
+          <div
+            className="mb-4 overflow-hidden rounded-md border border-border bg-muted/20"
+            data-testid={`document-preview-${primary.doc_id}`}
+          >
+            {previewLoading && (
+              <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Loading document...
+              </div>
+            )}
+
+            {!previewLoading && previewError && (
+              <div className="flex min-h-40 items-center justify-center gap-2 p-6 text-sm text-destructive">
+                <FileWarning className="w-5 h-5 shrink-0" />
+                <span>{previewError}</span>
+              </div>
+            )}
+
+            {!previewLoading && !previewError && previewUrl && kind === 'pdf' && (
+              <iframe
+                src={previewUrl}
+                title={`Document preview: ${primary.file_name}`}
+                className="h-[70vh] min-h-[520px] w-full bg-white"
+              />
+            )}
+
+            {!previewLoading && !previewError && previewUrl && kind === 'image' && (
+              <div className="flex max-h-[70vh] min-h-64 items-start justify-center overflow-auto bg-white p-3">
+                <img
+                  src={previewUrl}
+                  alt={`Document preview: ${primary.file_name}`}
+                  className="max-w-full object-contain"
+                />
+              </div>
+            )}
+
+            {!previewLoading && !previewError && previewUrl && kind === 'download' && (
+              <div className="flex min-h-40 flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
+                <FileWarning className="w-6 h-6" />
+                <p>This file type cannot be displayed reliably inside the browser.</p>
+                <Button type="button" size="sm" variant="outline" onClick={handleOpenInNewTab}>
+                  <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
+                  Open the document
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
 
         {isActionable ? (
           <div className="flex flex-wrap gap-2">

@@ -426,9 +426,23 @@ async def _learn_from_benchmark(db, event: Dict):
 async def _learn_po_pattern(db, event: Dict):
     """
     When a user corrects a PO number, learn the vendor's PO format.
+
+    Fixed 2026-07-18: found live that ALL 12 po_correction events in
+    the system - dating back to 2026-03-22, all marked "applied" on
+    2026-04-02 with apply_note="marked_unlearnable" - had been
+    silently discarded since the day they were first replayed, despite
+    every one of them carrying real, usable data. Root cause: this
+    function looked up event["after"]["po_number"], but the actual
+    stored events use the key "po" (confirmed directly from 5 real
+    events, e.g. {"before": {"po": "RMA0015932"}, "after": {"po":
+    "111418"}}) - "po_number" was never present at all, so after_po
+    was always empty and the function always returned False. Checks
+    "po" first (the key actually used in practice) and falls back to
+    "po_number" in case some other event source uses that name
+    instead, rather than assuming only one is ever correct.
     """
-    before_po = str((event.get("before") or {}).get("po_number", "")).strip()
-    after_po = str((event.get("after") or {}).get("po_number", "")).strip()
+    before_po = str((event.get("before") or {}).get("po") or (event.get("before") or {}).get("po_number", "")).strip()
+    after_po = str((event.get("after") or {}).get("po") or (event.get("after") or {}).get("po_number", "")).strip()
     vendor_id = event.get("vendor_id", "")
     doc_id = event.get("document_id", "")
     

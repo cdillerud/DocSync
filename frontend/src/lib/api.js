@@ -385,6 +385,15 @@ export const reconcileSalesOrder = (salesOrderId, lines, cancelled = false) => {
 export const processDocumentIntelligence = (docId) => api.post(`/document-intelligence/process/${docId}`);
 export const getDocumentIntelligence = (docId) => api.get(`/document-intelligence/${docId}`);
 export const getIntelligenceReviewQueue = (params) => api.get('/document-intelligence/review-queue', { params });
+export const getHumanDecisionQueue = () => api.get('/document-intelligence/human-decision-queue');
+export const bulkClassifyDocuments = ({ docIds, docType, mailboxCategory, reclassifyBy }) => {
+  const params = new URLSearchParams();
+  docIds.forEach((id) => params.append('doc_ids', id));
+  params.append('doc_type', docType);
+  if (mailboxCategory) params.append('mailbox_category', mailboxCategory);
+  if (reclassifyBy) params.append('reclassify_by', reclassifyBy);
+  return api.post(`/documents/bulk-classify?${params.toString()}`);
+};
 export const correctDocumentIntelligence = (docId, data) => api.patch(`/document-intelligence/${docId}`, data);
 export const getIntelligenceSummary = () => api.get('/document-intelligence/summary');
 export const createAutoDraft = (docId) => api.post(`/document-intelligence/auto-draft/${docId}`);

@@ -96,6 +96,27 @@ async def api_process_document(doc_id: str):
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 
+@router.get("/human-decision-queue")
+async def api_get_human_decision_queue():
+    """
+    Unified feed of documents genuinely needing a human decision -
+    isolated misroutes below the safe auto-fix confidence threshold,
+    ambiguous document-type labels from Meghan's team's manual
+    review, and (informational only) ambiguous Square9 parity
+    matches that have no direct submit action yet.
+
+    Square9's own answer to this is an unstructured "Miscellaneous"
+    folder a human has to remember to check, with nothing learned
+    from whatever decision gets made. This surfaces exactly what
+    needs attention instead of requiring someone to go looking for
+    it, and every actionable item already routes through /bulk-
+    classify, which - as of tonight - teaches the system automatically
+    from the correction rather than just fixing one document.
+    """
+    from services.human_review_queue_service import get_human_review_queue
+    return get_human_review_queue()
+
+
 @router.get("/review-queue")
 async def api_get_review_queue(
     status: Optional[str] = Query(None, description="Filter: needs_review, blocked, ready"),

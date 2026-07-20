@@ -1,0 +1,184 @@
+import asyncio
+from types import SimpleNamespace
+
+from services import routing_feedback_service as svc
+
+
+class Result:
+    def __init__(self, modified_count=0, deleted_count=0):
+        self.modified_count = modified_count
+        self.deleted_count = deleted_count
+
+
+class Cursor:
+    def __init__(self, rows):
+        self.rows = list(rows)
+
+    def sort(self, *args, **kwargs):
+        return self
+
+    def limit(self, count):
+        self.rows = self.rows[:count]
+        return self
+
+    async def to_list(self, count):
+        return list(self.rows if count is None else self.rows[:count])
+
+
+class StaticCollection:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+        self.inserted = []
+        self.updated = []
+
+    def find(self, *args, **kwargs):
+        return Cursor(self.rows)
+
+    async def find_one(self, *args, **kwargs):
+        return self.rows[0] if self.rows else None
+
+    async def insert_one(self, document):
+        self.inserted.append(document)
+        self.rows.append(document)
+        return Result(modified_count=1)
+
+    async def update_one(self, query, update):
+        self.updated.append((query, update))
+        key = query.get("routing_key")
+        for row in self.rows:
+            if key is None or row.get("routing_key") == key:
+                row.update(update.get("$set", {}))
+                return Result(modified_count=1)
+        return Result(modified_count=0)
+
+    async def delete_one(self, query):
+        return Result(deleted_count=0)
+
+    async def delete_many(self, query):
+        return Result(deleted_count=0)
+
+
+class RoutingFeedbackCollection(StaticCollection):
+    def find(self, query=None, projection=None):
+        query = query or {}
+        rows = list(self.rows)
+        keys = ((query.get("routing_key") or {}).get("$in"))
+        if keys is not None:
+            rows = [row for row in rows if row.get("routing_key") in keys]
+        patterns = ((query.get("vendor_pattern") or {}).get("$in"))
+        if patterns is not None:
+            rows = [row for row in rows if row.get("vendor_pattern") in patterns]
+        minimum = ((query.get("confidence") or {}).get("$gte"))
+        if minimum is not None:
+            rows = [row for row in rows if row.get("confidence", 0) >= minimum]
+        for field in ("doc_type", "has_po", "is_international"):
+            if field in query:
+                rows = [row for row in rows if row.get(field) == query[field]]
+        return Cursor(rows)
+
+
+async def _ball_candidates(_vendor):
+    return [
+        {"value": "BALLCOR", "normalized": "ballcor", "source": "input", "stable": True},
+        {
+            "value": "BALL METAL BEVERAGE CONTAINER CORP",
+            "normalized": "ball metal beverage container corp",
+            "source": "hub_documents.vendor_raw",
+            "stable": False,
+        },
+    ]
+
+
+def test_lookup_feedback_matches_raw_name_rule_after_canonicalization(monkeypatch):
+    raw_key = svc._make_routing_key(
+        "BALL METAL BEVERAGE CONTAINER CORP", "AP_Invoice", True, False
+    )
+    feedback = RoutingFeedbackCollection([
+        {
+            "routing_key": raw_key,
+            "vendor_pattern": "ball metal beverage container corp",
+            "doc_type": "AP_Invoice",
+            "has_po": True,
+            "is_international": False,
+            "correct_folder": "Warehouse Not International",
+            "confidence": 4,
+        }
+    ])
+    db = SimpleNamespace(routing_feedback=feedback)
+    db.__getitem__ = lambda self, name: getattr(self, name)
+
+    monkeypatch.setattr(svc, "_db", db)
+    monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
+
+    result = asyncio.run(svc.lookup_feedback("BALLCOR", "AP_Invoice", True, False))
+    assert result == "Warehouse Not International"
+
+
+def test_record_correction_strengthens_alias_rule_instead_of_creating_duplicate(monkeypatch):
+    raw_key = svc._make_routing_key(
+        "BALL METAL BEVERAGE CONTAINER CORP", "AP_Invoice", True, False
+    )
+    feedback = RoutingFeedbackCollection([
+        {
+            "routing_key": raw_key,
+            "vendor_pattern": "ball metal beverage container corp",
+            "doc_type": "AP_Invoice",
+            "has_po": True,
+            "is_international": False,
+            "correct_folder": "Warehouse Not International",
+            "confidence": 4,
+            "examples": [],
+        }
+    ])
+
+    class FakeDB(SimpleNamespace):
+        def __getitem__(self, name):
+            return getattr(self, name)
+
+    db = FakeDB(routing_feedback=feedback)
+    monkeypatch.setattr(svc, "_db", db)
+    monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
+
+    result = asyncio.run(svc.record_correction(
+        vendor="BALLCOR",
+        doc_type="AP_Invoice",
+        has_po=True,
+        is_international=False,
+        correct_folder="Warehouse Not International",
+        file_name="ball.pdf",
+        source="human_decision_queue",
+    ))
+
+    assert result["status"] == "strengthened"
+    assert result["confidence"] == 5
+    assert not feedback.inserted
+    assert feedback.rows[0]["confidence"] == 5
+    assert "BALLCOR" in feedback.rows[0]["vendor_aliases"]
+
+
+def test_alias_conflict_without_exact_rule_falls_back_to_deterministic(monkeypatch):
+    rules = []
+    for vendor, folder in (
+        ("BALLCOR", "Dropship Not International"),
+        ("BALL METAL BEVERAGE CONTAINER CORP", "Warehouse Not International"),
+    ):
+        rules.append({
+            "routing_key": svc._make_routing_key(vendor, "AP_Invoice", True, False),
+            "vendor_pattern": svc._normalize_vendor(vendor),
+            "doc_type": "AP_Invoice",
+            "has_po": True,
+            "is_international": False,
+            "correct_folder": folder,
+            "confidence": 4,
+        })
+    feedback = RoutingFeedbackCollection(rules)
+
+    class FakeDB(SimpleNamespace):
+        def __getitem__(self, name):
+            return getattr(self, name)
+
+    monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
+    monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
+
+    # BALLCOR has an exact rule, so the exact canonical rule wins a tie.
+    assert asyncio.run(svc.lookup_feedback("BALLCOR", "AP_Invoice", True, False)) == "Dropship Not International"

@@ -10,9 +10,10 @@ The service is called after the intelligence generation step in the pipeline
 and writes routing_status, routing_reasons, routing_score, and routing_timestamp
 to the document record.
 
-It also captures the first folder recommendation at routing time. That snapshot
-is immutable: later filing, manual correction, or rule changes can update the
-final destination without rewriting what the Hub originally recommended.
+Folder recommendations are phase-aware. A recommendation computed before filing
+may initialize the immutable routing_suggestion_snapshot. A recommendation
+computed after SharePoint filing is stored separately as routing_gate_snapshot
+and is never mislabeled as the original pre-filing decision.
 
 Rules (in evaluation order):
   1. Classification confidence
@@ -25,79 +26,46 @@ Rules (in evaluation order):
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from models.document_types import DEFAULT_JOB_TYPES
 
 logger = logging.getLogger("document_routing")
 
-# ---------------------------------------------------------------------------
-# Routing status constants
-# ---------------------------------------------------------------------------
-
 ROUTE_AUTO_PROCESS = "auto_process"
 ROUTE_REVIEW = "review"
 ROUTE_BLOCKED = "blocked"
 
-# Score thresholds
 THRESHOLD_AUTO_PROCESS = 75
 THRESHOLD_REVIEW = 40
 
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
 
 def evaluate_routing(
     doc: Dict[str, Any],
     intelligence: Optional[Dict[str, Any]] = None,
     validation_results: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Evaluate a document and return a routing decision.
-
-    Args:
-        doc: The hub_documents record (must include extracted_fields, ai_confidence, etc.).
-        intelligence: The document_intelligence_results record (optional enrichment).
-        validation_results: BC validation results dict (optional).
-
-    Returns:
-        dict with keys:
-          routing_status   : "auto_process" | "review" | "blocked"
-          routing_reasons  : list[str] — human-readable reasons
-          routing_score    : int 0-100
-          routing_timestamp: ISO-8601 string
-    """
+    """Evaluate a document and return a routing decision."""
     score = 0
     reasons: List[str] = []
 
-    # Resolve key fields from doc + intelligence
     confidence = _resolve_confidence(doc, intelligence)
     doc_type = _resolve_doc_type(doc, intelligence)
     extracted = _resolve_extracted_fields(doc, intelligence)
-    val_results = validation_results or doc.get("validation_results") or (intelligence or {}).get("validation_results")
+    val_results = (
+        validation_results
+        or doc.get("validation_results")
+        or (intelligence or {}).get("validation_results")
+    )
 
-    # --- Rule 1: Classification confidence (max 35 pts) ---
     score += _score_confidence(confidence, reasons)
-
-    # --- Rule 2: Required-field completeness (max 30 pts) ---
     score += _score_required_fields(doc_type, extracted, reasons)
-
-    # --- Rule 3: Validation results (max 15 pts) ---
     score += _score_validation(val_results, reasons)
-
-    # --- Rule 4: Duplicate detection (max 0 pts, penalty only) ---
     score += _score_duplicates(doc, reasons)
-
-    # --- Rule 5: Vendor / customer resolution (max 10 pts) ---
     score += _score_entity_resolution(doc, intelligence, reasons)
-
-    # --- Rule 6: Optional-field bonus (max 10 pts) ---
     score += _score_optional_fields(doc_type, extracted, reasons)
 
-    # Clamp
     score = max(0, min(score, 100))
-
-    # Determine status
     if score >= THRESHOLD_AUTO_PROCESS:
         status = ROUTE_AUTO_PROCESS
     elif score >= THRESHOLD_REVIEW:
@@ -114,31 +82,24 @@ def evaluate_routing(
 
 
 async def route_document(doc_id: str) -> Dict[str, Any]:
-    """Evaluate and persist the routing decision for a document.
+    """Evaluate and persist the routing gate for a document.
 
-    Fetches the document and its intelligence result from the DB, runs the
-    automation gate, and stores an immutable snapshot of the first folder
-    recommendation before any SharePoint filing can occur.
-
-    Returns the routing result dict.
+    If this gate runs before SharePoint filing, it may initialize the immutable
+    pre-filing recommendation. If it runs after filing, its recommendation is
+    recorded separately and cannot overwrite or impersonate pre-filing history.
     """
     from deps import get_db
 
     db = get_db()
-
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 
-    # Fetch intelligence result if available
     intelligence = await db.document_intelligence_results.find_one(
         {"document_id": doc_id}, {"_id": 0}
     )
-
     result = evaluate_routing(doc, intelligence)
 
-    # Persist the routing gate result first. Folder suggestion capture is a
-    # separate guarded write so an older/original snapshot is never overwritten.
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
@@ -154,7 +115,7 @@ async def route_document(doc_id: str) -> Dict[str, Any]:
     try:
         suggestion = await _compute_initial_folder_suggestion(doc, intelligence)
         if suggestion:
-            persisted = await _persist_initial_folder_suggestion(
+            persisted = await _persist_folder_suggestion(
                 db=db,
                 doc_id=doc_id,
                 suggestion=suggestion,
@@ -164,33 +125,56 @@ async def route_document(doc_id: str) -> Dict[str, Any]:
                 "suggested_reason": suggestion["reason"],
                 "suggestion_source": suggestion["source"],
                 "suggestion_timestamp": suggestion["suggested_at"],
+                "suggestion_capture_type": suggestion["capture_type"],
                 "suggestion_persisted": persisted,
             })
-    except Exception as error:  # Routing gate must not fail because audit capture failed.
+    except Exception as error:
         result["suggestion_capture_error"] = str(error)[:300]
         logger.warning(
-            "[Routing] initial folder suggestion capture failed doc=%s: %s",
+            "[Routing] folder suggestion capture failed doc=%s: %s",
             doc_id,
             error,
         )
 
     logger.info(
-        "[Routing] doc=%s status=%s score=%d folder=%s persisted=%s reasons=%s",
+        "[Routing] doc=%s status=%s score=%d folder=%s capture=%s persisted=%s reasons=%s",
         doc_id,
         result["routing_status"],
         result["routing_score"],
         (suggestion or {}).get("folder_path", ""),
+        (suggestion or {}).get("capture_type", ""),
         result.get("suggestion_persisted", False),
         result["routing_reasons"],
     )
     return result
 
 
+def _has_filing_evidence(doc: Dict[str, Any]) -> bool:
+    """Return True once a document has concrete SharePoint/filed evidence."""
+    if any(doc.get(field) for field in (
+        "sharepoint_item_id",
+        "sharepoint_web_url",
+        "filed_at",
+        "filed_folder",
+        "filed_to",
+    )):
+        return True
+
+    status_text = f"{doc.get('status', '')} {doc.get('workflow_status', '')}".lower()
+    return any(token in status_text for token in (
+        "filed",
+        "storedinsp",
+        "exported",
+        "completed",
+        "processed",
+    )) and bool(doc.get("sharepoint_folder_path") or doc.get("sharepoint_folder"))
+
+
 async def _compute_initial_folder_suggestion(
     doc: Dict[str, Any],
     intelligence: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Compute the folder choice from the fully enriched pre-filing document."""
+    """Compute a phase-aware folder recommendation from enriched evidence."""
     from services.folder_routing_service import route_with_feedback
 
     routing_doc = dict(doc)
@@ -205,7 +189,8 @@ async def _compute_initial_folder_suggestion(
         extracted.get("is_international")
     )
     location_code = (
-        routing_doc.get("location_code")
+        routing_doc.get("resolved_location_code")
+        or routing_doc.get("location_code")
         or extracted.get("location_code")
         or extracted.get("locationCode")
     )
@@ -223,23 +208,37 @@ async def _compute_initial_folder_suggestion(
     if not folder_path:
         return None
 
+    post_filing = _has_filing_evidence(routing_doc)
     details = details or {}
     return {
         "folder_path": str(folder_path).strip(),
         "reason": str(reason or "").strip(),
         "source": str(details.get("source") or "folder_routing_service"),
         "suggested_at": datetime.now(timezone.utc).isoformat(),
-        "capture_type": "pre_filing_routing",
+        "capture_type": (
+            "post_filing_routing_gate" if post_filing else "pre_filing_routing"
+        ),
+        "capture_origin": "document_routing_service",
         "details": details,
     }
 
 
-async def _persist_initial_folder_suggestion(
+async def _persist_folder_suggestion(
     db,
     doc_id: str,
     suggestion: Dict[str, Any],
 ) -> bool:
-    """Persist the first recommendation once; never rewrite routing history."""
+    """Persist a recommendation without falsifying or overwriting history."""
+    if suggestion.get("capture_type") == "post_filing_routing_gate":
+        result = await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "routing_gate_snapshot": suggestion,
+                "routing_gate_checked_at": suggestion["suggested_at"],
+            }},
+        )
+        return bool(result.modified_count)
+
     result = await db.hub_documents.update_one(
         {
             "id": doc_id,
@@ -260,6 +259,10 @@ async def _persist_initial_folder_suggestion(
     return bool(result.modified_count)
 
 
+# Backward-compatible private name used by earlier tests/imports.
+_persist_initial_folder_suggestion = _persist_folder_suggestion
+
+
 def _is_truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
@@ -273,7 +276,6 @@ async def get_routing_summary() -> Dict[str, Any]:
     from deps import get_db
 
     db = get_db()
-
     pipeline = [
         {"$group": {
             "_id": "$routing_status",
@@ -284,23 +286,18 @@ async def get_routing_summary() -> Dict[str, Any]:
     raw = await db.hub_documents.aggregate(pipeline).to_list(10)
 
     counts = {}
-    for r in raw:
-        key = r["_id"] or "unrouted"
+    for row in raw:
+        key = row["_id"] or "unrouted"
         counts[key] = {
-            "count": r["count"],
-            "avg_score": round(r.get("avg_score") or 0, 1),
+            "count": row["count"],
+            "avg_score": round(row.get("avg_score") or 0, 1),
         }
 
-    total = sum(v["count"] for v in counts.values())
     return {
-        "total": total,
+        "total": sum(value["count"] for value in counts.values()),
         "counts": counts,
     }
 
-
-# ---------------------------------------------------------------------------
-# Scoring helpers (pure functions — no DB access)
-# ---------------------------------------------------------------------------
 
 def _resolve_confidence(doc: Dict, intel: Optional[Dict]) -> float:
     if intel and intel.get("classification_confidence"):
@@ -324,10 +321,9 @@ def _get_required_fields(doc_type: str) -> List[str]:
     """Look up required extraction fields for a document type."""
     cfg = DEFAULT_JOB_TYPES.get(doc_type)
     if not cfg:
-        # Try common mappings
-        for k, v in DEFAULT_JOB_TYPES.items():
-            if k.upper().replace("_", "") == doc_type.upper().replace("_", ""):
-                cfg = v
+        for key, value in DEFAULT_JOB_TYPES.items():
+            if key.upper().replace("_", "") == doc_type.upper().replace("_", ""):
+                cfg = value
                 break
     if not cfg:
         cfg = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
@@ -337,16 +333,14 @@ def _get_required_fields(doc_type: str) -> List[str]:
 def _get_optional_fields(doc_type: str) -> List[str]:
     cfg = DEFAULT_JOB_TYPES.get(doc_type)
     if not cfg:
-        for k, v in DEFAULT_JOB_TYPES.items():
-            if k.upper().replace("_", "") == doc_type.upper().replace("_", ""):
-                cfg = v
+        for key, value in DEFAULT_JOB_TYPES.items():
+            if key.upper().replace("_", "") == doc_type.upper().replace("_", ""):
+                cfg = value
                 break
     if not cfg:
         cfg = DEFAULT_JOB_TYPES.get("AP_Invoice", {})
     return cfg.get("optional_extractions", [])
 
-
-# --- Individual scorers ---
 
 def _score_confidence(confidence: float, reasons: List[str]) -> int:
     """Max 35 points."""
@@ -366,45 +360,42 @@ def _score_required_fields(doc_type: str, extracted: Dict, reasons: List[str]) -
     """Max 30 points."""
     required = _get_required_fields(doc_type)
     if not required:
-        return 30  # No requirements defined → full marks
+        return 30
 
     present = 0
     missing = []
-    for f in required:
-        val = extracted.get(f)
-        if val and (not isinstance(val, str) or val.strip()):
+    for field in required:
+        value = extracted.get(field)
+        if value and (not isinstance(value, str) or value.strip()):
             present += 1
         else:
-            missing.append(f)
+            missing.append(field)
 
-    if missing:
-        for f in missing:
-            reasons.append(f"missing_required_{f}")
+    for field in missing:
+        reasons.append(f"missing_required_{field}")
 
-    ratio = present / len(required)
-    return int(30 * ratio)
+    return int(30 * (present / len(required)))
 
 
 def _score_validation(val_results: Optional[Dict], reasons: List[str]) -> int:
     """Max 15 points."""
     if not val_results:
         reasons.append("no_validation_results")
-        return 5  # Not validated yet — partial credit
+        return 5
 
     if val_results.get("all_passed"):
         return 15
 
     failed_checks = [
-        c.get("check_name") or c.get("check")
-        for c in val_results.get("checks", [])
-        if not c.get("passed") and c.get("required", True)
+        check.get("check_name") or check.get("check")
+        for check in val_results.get("checks", [])
+        if not check.get("passed") and check.get("required", True)
     ]
     if failed_checks:
-        for c in failed_checks[:3]:
-            reasons.append(f"validation_failed_{c}")
+        for check_name in failed_checks[:3]:
+            reasons.append(f"validation_failed_{check_name}")
         return 0
 
-    # Some non-required checks failed — partial credit
     return 8
 
 
@@ -416,7 +407,11 @@ def _score_duplicates(doc: Dict, reasons: List[str]) -> int:
     return 0
 
 
-def _score_entity_resolution(doc: Dict, intel: Optional[Dict], reasons: List[str]) -> int:
+def _score_entity_resolution(
+    doc: Dict,
+    intel: Optional[Dict],
+    reasons: List[str],
+) -> int:
     """Max 10 points for vendor/customer resolved."""
     points = 0
     has_vendor = bool(
@@ -434,7 +429,6 @@ def _score_entity_resolution(doc: Dict, intel: Optional[Dict], reasons: List[str
     if has_customer:
         points += 5
 
-    # If neither resolved, small penalty/reason
     if not has_vendor and not has_customer:
         reasons.append("no_entity_resolved")
         return 0
@@ -449,9 +443,9 @@ def _score_optional_fields(doc_type: str, extracted: Dict, reasons: List[str]) -
         return 0
 
     present = 0
-    for f in optional:
-        val = extracted.get(f)
-        if val and (not isinstance(val, str) or val.strip()):
+    for field in optional:
+        value = extracted.get(field)
+        if value and (not isinstance(value, str) or value.strip()):
             present += 1
 
     return int(10 * (present / len(optional)))

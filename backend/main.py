@@ -51,6 +51,7 @@ from routers.auto_clear import router as auto_clear_router
 from routers.vendor_resolution import router as vendor_resolution_router
 from routers.readiness import router as readiness_router
 from routers.dashboard import router as dashboard_router
+from routers.inbox_today import router as inbox_today_router
 from routers.sharepoint import router as sharepoint_admin_router
 from routers.square9 import router as square9_router
 from routers.email_polling import router as email_polling_router
@@ -134,6 +135,7 @@ app.include_router(auto_clear_router, prefix="/api")
 app.include_router(vendor_resolution_router, prefix="/api")
 app.include_router(readiness_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
+app.include_router(inbox_today_router, prefix="/api")
 app.include_router(sharepoint_admin_router, prefix="/api")
 app.include_router(square9_router, prefix="/api")
 app.include_router(email_polling_router, prefix="/api")

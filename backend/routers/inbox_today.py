@@ -69,6 +69,8 @@ TODAY_PROJECTION = {
     "initial_routing_suggested_at": 1,
     "routing_suggestion_snapshot": 1,
     "routing_suggested_at": 1,
+    "routing_preupload_checked_at": 1,
+    "routing_preupload_recheck": 1,
     "suggested_folder": 1,
     "suggested_folder_path": 1,
     "routing_reason": 1,
@@ -111,16 +113,19 @@ TODAY_PROJECTION = {
 }
 
 _SPLIT_SUFFIX_RE = re.compile(r"(?i)(?:_(?:doc|p|part)\d+)(?=(?:\.[^.]+)?$)")
-_FOLDER_SLASH_RE = re.compile(r"/+" )
+_FOLDER_SLASH_RE = re.compile(r"/+")
 
-# Production writes may persist either the complete SharePoint path, the base
-# folder tail, or only the relative routing folder depending on the writer and
-# schema generation. The suggestion snapshot intentionally stores the relative
-# routing folder, so these known base forms must be removed before comparison.
+# The snapshot stores a path relative to the SharePoint staging root. Other
+# writers may store either the full production path or only the staging tail.
 _KNOWN_SHAREPOINT_BASES = (
     "general/accounting/accounts payable/temp folder",
     "temp folder",
 )
+_BASE_FOLDER_DISPLAY = "Temp Folder"
+_NON_COMPARABLE_CAPTURE_TYPES = {
+    "routing_gate_snapshot",
+    "post_filing_routing_gate",
+}
 
 
 def _first_nonempty(*values: Any) -> Any:
@@ -168,15 +173,18 @@ def _is_truthy(value: Any) -> bool:
     }
 
 
-def _folder_comparison_key(value: Any) -> str:
-    """Normalize relative and SharePoint-prefixed folder paths for comparison.
-
-    This removes only known SharePoint base folders. It does not use a generic
-    suffix comparison, because that could incorrectly treat two genuinely
-    different folder hierarchies as equivalent.
-    """
+def _normalized_folder_path(value: Any) -> str:
     path = str(value or "").replace("\\", "/").strip()
-    path = _FOLDER_SLASH_RE.sub("/", path).strip("/").casefold()
+    return _FOLDER_SLASH_RE.sub("/", path).strip("/").casefold()
+
+
+def _is_known_base_folder(value: Any) -> bool:
+    return _normalized_folder_path(value) in _KNOWN_SHAREPOINT_BASES
+
+
+def _folder_comparison_key(value: Any) -> str:
+    """Normalize relative and SharePoint-prefixed folder paths for comparison."""
+    path = _normalized_folder_path(value)
     if not path:
         return ""
 
@@ -192,7 +200,12 @@ def _folder_comparison_key(value: Any) -> str:
 def _folders_equivalent(suggested: Any, final: Any) -> bool:
     suggested_key = _folder_comparison_key(suggested)
     final_key = _folder_comparison_key(final)
-    return bool(suggested_key and final_key and suggested_key == final_key)
+
+    if suggested_key or final_key:
+        return bool(suggested_key and final_key and suggested_key == final_key)
+
+    # Empty relative folder means "use the configured SharePoint base folder."
+    return _is_known_base_folder(suggested) and _is_known_base_folder(final)
 
 
 def build_today_filter(now: Optional[datetime] = None) -> Dict[str, Any]:
@@ -363,11 +376,59 @@ async def _normalize_stored_suggestion(db, doc: Dict[str, Any]) -> None:
         doc.update(update)
 
 
+def _snapshot_has_decision(snapshot: Any) -> bool:
+    if not isinstance(snapshot, dict) or not snapshot:
+        return False
+    return (
+        "folder_path" in snapshot
+        or bool(snapshot.get("reason"))
+        or bool(snapshot.get("source"))
+    )
+
+
+def _snapshot_capture_type(
+    doc: Dict[str, Any],
+    snapshot: Dict[str, Any],
+) -> str:
+    capture_type = str(snapshot.get("capture_type") or "initial_snapshot")
+    if capture_type != "pre_filing_routing":
+        return capture_type
+
+    origin = str(snapshot.get("capture_origin") or "")
+    if origin in {"sharepoint_preupload_guard", "sharepoint_service"}:
+        return "pre_filing_routing"
+    if doc.get("routing_preupload_checked_at"):
+        return "pre_filing_routing"
+
+    # Legacy document_routing_service snapshots used the pre-filing label even
+    # when the routing gate ran after SharePoint upload. Preserve the audit
+    # record but do not present it as an initial recommendation.
+    return "routing_gate_snapshot"
+
+
+def _snapshot_display_folder(
+    doc: Dict[str, Any],
+    snapshot: Dict[str, Any],
+) -> str:
+    raw_folder = snapshot.get("folder_path")
+    if raw_folder is not None and str(raw_folder).strip():
+        return str(raw_folder).strip()
+
+    if (
+        "folder_path" in snapshot
+        and _snapshot_capture_type(doc, snapshot) == "pre_filing_routing"
+    ):
+        return _BASE_FOLDER_DISPLAY
+    return ""
+
+
 def _has_stored_suggestion(doc: Dict[str, Any]) -> bool:
-    snapshot = doc.get("routing_suggestion_snapshot") or {}
+    snapshot = doc.get("routing_suggestion_snapshot")
+    if _snapshot_has_decision(snapshot):
+        return True
+
     human = doc.get("human_routing_decision") or {}
     return bool(_first_nonempty(
-        snapshot.get("folder_path"),
         doc.get("initial_suggested_folder"),
         human.get("suggested_folder"),
         doc.get("sharepoint_folder_suggestion"),
@@ -410,25 +471,89 @@ async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
         doc["_display_suggestion_error"] = str(error)[:300]
 
 
-def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
+def _selected_suggestion(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Select one complete suggestion record without mixing provenance fields."""
+    snapshot = doc.get("routing_suggestion_snapshot") or {}
+    if _snapshot_has_decision(snapshot):
+        return {
+            "folder_path": _snapshot_display_folder(doc, snapshot),
+            "reason": str(snapshot.get("reason") or ""),
+            "source": str(snapshot.get("source") or ""),
+            "suggested_at": str(snapshot.get("suggested_at") or ""),
+            "capture_type": _snapshot_capture_type(doc, snapshot),
+        }
+
     human = doc.get("human_routing_decision") or {}
+    if human.get("suggested_folder"):
+        return {
+            "folder_path": str(human.get("suggested_folder")),
+            "reason": str(human.get("suggested_reason") or ""),
+            "source": str(human.get("source") or "human_routing_review"),
+            "suggested_at": str(human.get("created_at") or ""),
+            "capture_type": "human_review",
+        }
+
+    if doc.get("sharepoint_folder_suggestion"):
+        return {
+            "folder_path": str(doc.get("sharepoint_folder_suggestion")),
+            "reason": str(doc.get("sharepoint_folder_reason") or ""),
+            "source": "file_and_clear",
+            "suggested_at": str(doc.get("filed_at") or doc.get("updated_utc") or ""),
+            "capture_type": "file_and_clear_decision",
+        }
+
     route_result = doc.get("route_result") or {}
     evidence = doc.get("routing_evidence") or {}
-    snapshot = doc.get("routing_suggestion_snapshot") or {}
-    display = doc.get("_display_suggestion") or {}
-
-    suggested = str(_first_nonempty(
-        snapshot.get("folder_path"),
+    stored_folder = _first_nonempty(
         doc.get("initial_suggested_folder"),
-        human.get("suggested_folder"),
-        doc.get("sharepoint_folder_suggestion"),
         doc.get("suggested_folder_path"),
         doc.get("suggested_folder"),
         route_result.get("suggested_folder"),
         route_result.get("folder_path"),
         evidence.get("suggested_folder"),
-        display.get("folder_path"),
-    ))
+    )
+    if stored_folder:
+        return {
+            "folder_path": str(stored_folder),
+            "reason": str(_first_nonempty(
+                doc.get("initial_routing_reason"),
+                doc.get("routing_reason"),
+                doc.get("folder_routing_reason"),
+                route_result.get("reason"),
+                evidence.get("reason"),
+            )),
+            "source": str(_first_nonempty(
+                doc.get("initial_routing_source"),
+                doc.get("routing_source"),
+                route_result.get("source"),
+                doc.get("sharepoint_folder_assigned_by"),
+                "stored_routing_suggestion",
+            )),
+            "suggested_at": str(_first_nonempty(
+                doc.get("initial_routing_suggested_at"),
+                doc.get("routing_suggested_at"),
+                doc.get("updated_utc"),
+            )),
+            "capture_type": "stored_suggestion",
+        }
+
+    display = doc.get("_display_suggestion") or {}
+    if display.get("folder_path"):
+        return {
+            "folder_path": str(display.get("folder_path")),
+            "reason": str(display.get("reason") or ""),
+            "source": str(display.get("source") or "current_routing_rules"),
+            "suggested_at": str(display.get("suggested_at") or ""),
+            "capture_type": str(display.get("capture_type") or "computed_current_rule"),
+        }
+
+    return {}
+
+
+def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
+    human = doc.get("human_routing_decision") or {}
+    suggestion = _selected_suggestion(doc)
+    suggested = str(suggestion.get("folder_path") or "")
     final = str(_first_nonempty(
         doc.get("sharepoint_folder_path"),
         doc.get("sharepoint_folder"),
@@ -436,43 +561,7 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
         doc.get("filed_to"),
         human.get("selected_folder"),
     ))
-    reason = str(_first_nonempty(
-        snapshot.get("reason"),
-        doc.get("initial_routing_reason"),
-        human.get("suggested_reason"),
-        doc.get("sharepoint_folder_reason"),
-        doc.get("routing_reason"),
-        doc.get("folder_routing_reason"),
-        route_result.get("reason"),
-        evidence.get("reason"),
-        display.get("reason"),
-    ))
-    source = str(_first_nonempty(
-        snapshot.get("source"),
-        doc.get("initial_routing_source"),
-        human.get("source"),
-        doc.get("routing_source"),
-        route_result.get("source"),
-        display.get("source"),
-        doc.get("sharepoint_folder_assigned_by"),
-    ))
-    suggested_at = str(_first_nonempty(
-        snapshot.get("suggested_at"),
-        doc.get("initial_routing_suggested_at"),
-        doc.get("routing_suggested_at"),
-        human.get("created_at"),
-        display.get("suggested_at"),
-        doc.get("filed_at") if doc.get("sharepoint_folder_suggestion") else "",
-    ))
-    suggestion_capture = str(_first_nonempty(
-        snapshot.get("capture_type"),
-        "human_review" if human.get("suggested_folder") else "",
-        "file_and_clear_decision" if doc.get("sharepoint_folder_suggestion") else "",
-        "stored_suggestion" if _first_nonempty(
-            doc.get("suggested_folder_path"), doc.get("suggested_folder")
-        ) else "",
-        display.get("capture_type"),
-    ))
+    suggestion_capture = str(suggestion.get("capture_type") or "")
 
     status_text = f"{doc.get('status', '')} {doc.get('workflow_status', '')}".lower()
     has_file_evidence = bool(_first_nonempty(
@@ -485,6 +574,15 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
         str(doc.get("automation_decision") or "").lower() == "auto"
         or doc.get("auto_cleared") is True
     )
+
+    comparable = bool(suggested and final) and (
+        suggestion_capture not in _NON_COMPARABLE_CAPTURE_TYPES
+    )
+    matches_final: Optional[bool]
+    if comparable:
+        matches_final = _folders_equivalent(suggested, final)
+    else:
+        matches_final = None
 
     decision_type = str(human.get("decision_type") or "").lower()
     if decision_type == "folder_correction":
@@ -508,14 +606,16 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
         "routing_status": routing_status,
         "suggested_folder": suggested,
         "final_folder": final,
-        "routing_reason": reason,
-        "routing_source": source,
-        "suggested_at": suggested_at,
+        "routing_reason": str(suggestion.get("reason") or ""),
+        "routing_source": str(suggestion.get("source") or ""),
+        "suggested_at": str(suggestion.get("suggested_at") or ""),
         "suggestion_capture": suggestion_capture,
         "suggestion_is_historical": (
-            suggestion_capture != "computed_current_rule" and bool(suggested)
+            suggestion_capture != "computed_current_rule" and bool(suggestion)
         ),
-        "suggestion_matches_final": _folders_equivalent(suggested, final),
+        "suggestion_is_pre_filing": suggestion_capture == "pre_filing_routing",
+        "suggestion_comparable": comparable,
+        "suggestion_matches_final": matches_final,
         "filed": bool(has_file_evidence and final),
         "auto_routed": auto_routed,
         "needs_review": needs_review,
@@ -591,6 +691,9 @@ def _count(rows: Iterable[Dict[str, Any]], key: str, value: Any) -> int:
 
 def _summary(rows: list[Dict[str, Any]]) -> Dict[str, int]:
     source_counts = Counter(row.get("source_file_key") for row in rows)
+    pre_filing = [
+        row for row in rows if row.get("suggestion_capture") == "pre_filing_routing"
+    ]
     return {
         "total": len(rows),
         "produced_documents": len(rows),
@@ -605,8 +708,24 @@ def _summary(rows: list[Dict[str, Any]]) -> Dict[str, int]:
         "needs_review": sum(1 for row in rows if row.get("needs_review") is True),
         "unrouted": _count(rows, "routing_status", "unrouted"),
         "filed": sum(1 for row in rows if row.get("filed") is True),
+        "suggestion_comparable": sum(
+            1 for row in rows if row.get("suggestion_comparable") is True
+        ),
         "suggestion_matches_final": sum(
             1 for row in rows if row.get("suggestion_matches_final") is True
+        ),
+        "suggestion_mismatches_final": sum(
+            1 for row in rows if row.get("suggestion_matches_final") is False
+        ),
+        "pre_filing_snapshots": len(pre_filing),
+        "pre_filing_matches": sum(
+            1 for row in pre_filing if row.get("suggestion_matches_final") is True
+        ),
+        "pre_filing_mismatches": sum(
+            1 for row in pre_filing if row.get("suggestion_matches_final") is False
+        ),
+        "routing_gate_snapshots": sum(
+            1 for row in rows if row.get("suggestion_capture") == "routing_gate_snapshot"
         ),
     }
 

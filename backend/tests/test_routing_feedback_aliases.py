@@ -77,6 +77,11 @@ class RoutingFeedbackCollection(StaticCollection):
         return Cursor(rows)
 
 
+class FakeDB(SimpleNamespace):
+    def __getitem__(self, name):
+        return getattr(self, name)
+
+
 async def _ball_candidates(_vendor):
     return [
         {"value": "BALLCOR", "normalized": "ballcor", "source": "input", "stable": True},
@@ -104,10 +109,8 @@ def test_lookup_feedback_matches_raw_name_rule_after_canonicalization(monkeypatc
             "confidence": 4,
         }
     ])
-    db = SimpleNamespace(routing_feedback=feedback)
-    db.__getitem__ = lambda self, name: getattr(self, name)
 
-    monkeypatch.setattr(svc, "_db", db)
+    monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
     monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
 
     result = asyncio.run(svc.lookup_feedback("BALLCOR", "AP_Invoice", True, False))
@@ -131,12 +134,7 @@ def test_record_correction_strengthens_alias_rule_instead_of_creating_duplicate(
         }
     ])
 
-    class FakeDB(SimpleNamespace):
-        def __getitem__(self, name):
-            return getattr(self, name)
-
-    db = FakeDB(routing_feedback=feedback)
-    monkeypatch.setattr(svc, "_db", db)
+    monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
     monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
 
     result = asyncio.run(svc.record_correction(
@@ -156,7 +154,7 @@ def test_record_correction_strengthens_alias_rule_instead_of_creating_duplicate(
     assert "BALLCOR" in feedback.rows[0]["vendor_aliases"]
 
 
-def test_alias_conflict_without_exact_rule_falls_back_to_deterministic(monkeypatch):
+def test_exact_canonical_rule_wins_equal_confidence_alias_conflict(monkeypatch):
     rules = []
     for vendor, folder in (
         ("BALLCOR", "Dropship Not International"),
@@ -173,12 +171,9 @@ def test_alias_conflict_without_exact_rule_falls_back_to_deterministic(monkeypat
         })
     feedback = RoutingFeedbackCollection(rules)
 
-    class FakeDB(SimpleNamespace):
-        def __getitem__(self, name):
-            return getattr(self, name)
-
     monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
     monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
 
-    # BALLCOR has an exact rule, so the exact canonical rule wins a tie.
-    assert asyncio.run(svc.lookup_feedback("BALLCOR", "AP_Invoice", True, False)) == "Dropship Not International"
+    assert asyncio.run(
+        svc.lookup_feedback("BALLCOR", "AP_Invoice", True, False)
+    ) == "Dropship Not International"

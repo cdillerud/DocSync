@@ -1,7 +1,14 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from routers.inbox_today import _attach_source_counts, _row, _summary, build_today_filter
+from routers.inbox_today import (
+    _attach_source_counts,
+    _folder_comparison_key,
+    _folders_equivalent,
+    _row,
+    _summary,
+    build_today_filter,
+)
 
 
 def test_today_filter_uses_chicago_midnight_and_excludes_batch_parents():
@@ -63,6 +70,32 @@ def test_file_and_clear_suggestion_fields_are_treated_as_historical():
     assert row["routing_status"] == "filed"
 
 
+def test_sharepoint_temp_folder_prefix_is_ignored_for_comparison():
+    assert _folders_equivalent(
+        "Freight Issues",
+        "Temp Folder/Freight Issues",
+    ) is True
+    assert _folders_equivalent(
+        "/Warehouse Not International/Assembly",
+        "/General/Accounting/Accounts Payable/Temp Folder/Warehouse Not International/Assembly",
+    ) is True
+
+
+def test_base_folder_only_does_not_match_a_routing_destination():
+    assert _folder_comparison_key("Temp Folder") == ""
+    assert _folders_equivalent(
+        "Dropship Not International Documents/111823",
+        "Temp Folder",
+    ) is False
+
+
+def test_genuine_folder_difference_remains_a_mismatch():
+    assert _folders_equivalent(
+        "Dropship Not International",
+        "Temp Folder/Warehouse Not International",
+    ) is False
+
+
 def test_split_children_count_as_one_source_file_and_multiple_documents():
     rows = [
         _row({
@@ -84,7 +117,10 @@ def test_split_children_count_as_one_source_file_and_multiple_documents():
     assert summary["split_outputs"] == 3
     assert summary["multi_output_sources"] == 1
     assert all(row["source_output_count"] == 3 for row in rows)
-    assert all(row["source_file_name"] == "R483296_2026071920053947_1.pdf" for row in rows)
+    assert all(
+        row["source_file_name"] == "R483296_2026071920053947_1.pdf"
+        for row in rows
+    )
 
 
 def test_non_split_documents_each_count_as_their_own_source_attachment():

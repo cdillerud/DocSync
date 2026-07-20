@@ -1,12 +1,8 @@
 """Daily Inbox drill-down for Square9 replacement verification.
 
-The endpoint intentionally uses the same local-day boundary and batch-parent
-exclusion as ``GET /dashboard/inbox-stats`` so the modal document total tracks
-the Inbox "Today" KPI.
-
-It also distinguishes original source attachments from documents produced by
-batch splitting, and normalizes any already-persisted pre-filing folder choice
-into a stable routing-suggestion snapshot for audit/reporting.
+The endpoint uses the same Chicago-local day boundary and batch-parent exclusion
+as the Inbox Today KPI. It reports original source attachments separately from
+produced documents and exposes classification, routing, and filing evidence.
 """
 
 from __future__ import annotations
@@ -65,18 +61,14 @@ TODAY_PROJECTION = {
     "filed_to": 1,
     "filed_folder": 1,
     "filed_at": 1,
-    # Existing file-and-clear fields. These are the exact folder choice and
-    # reason computed before the SharePoint filing attempt.
     "sharepoint_folder_suggestion": 1,
     "sharepoint_folder_reason": 1,
-    # Standardized initial-suggestion fields added/normalized by this view.
     "initial_suggested_folder": 1,
     "initial_routing_reason": 1,
     "initial_routing_source": 1,
     "initial_routing_suggested_at": 1,
     "routing_suggestion_snapshot": 1,
     "routing_suggested_at": 1,
-    # Other routing schemas retained for backward compatibility.
     "suggested_folder": 1,
     "suggested_folder_path": 1,
     "routing_reason": 1,
@@ -90,7 +82,6 @@ TODAY_PROJECTION = {
     "customer_name": 1,
     "is_duplicate": 1,
     "possible_duplicate": 1,
-    # Fields needed to distinguish source attachments from split outputs.
     "batch_parent_id": 1,
     "batch_source_filename": 1,
     "batch_group_num": 1,
@@ -102,12 +93,16 @@ TODAY_PROJECTION = {
     "attachment_id": 1,
     "attachment_hash": 1,
     "sha256_hash": 1,
-    # Fields used for a clearly-labelled current-rule suggestion fallback.
     "extracted_fields": 1,
     "normalized_fields": 1,
+    "canonical_fields": 1,
+    "po_number_clean": 1,
     "po_number_extracted": 1,
+    "po_resolution": 1,
+    "bc_po_resolved": 1,
     "is_international": 1,
     "location_code": 1,
+    "resolved_location_code": 1,
     "freight_direction": 1,
     "tags": 1,
     "needs_logistics_approval": 1,
@@ -115,8 +110,16 @@ TODAY_PROJECTION = {
     "approved": 1,
 }
 
-_SPLIT_SUFFIX_RE = re.compile(
-    r"(?i)(?:_(?:doc|p|part)\d+)(?=(?:\.[^.]+)?$)"
+_SPLIT_SUFFIX_RE = re.compile(r"(?i)(?:_(?:doc|p|part)\d+)(?=(?:\.[^.]+)?$)")
+_FOLDER_SLASH_RE = re.compile(r"/+" )
+
+# Production writes may persist either the complete SharePoint path, the base
+# folder tail, or only the relative routing folder depending on the writer and
+# schema generation. The suggestion snapshot intentionally stores the relative
+# routing folder, so these known base forms must be removed before comparison.
+_KNOWN_SHAREPOINT_BASES = (
+    "general/accounting/accounts payable/temp folder",
+    "temp folder",
 )
 
 
@@ -165,13 +168,39 @@ def _is_truthy(value: Any) -> bool:
     }
 
 
+def _folder_comparison_key(value: Any) -> str:
+    """Normalize relative and SharePoint-prefixed folder paths for comparison.
+
+    This removes only known SharePoint base folders. It does not use a generic
+    suffix comparison, because that could incorrectly treat two genuinely
+    different folder hierarchies as equivalent.
+    """
+    path = str(value or "").replace("\\", "/").strip()
+    path = _FOLDER_SLASH_RE.sub("/", path).strip("/").casefold()
+    if not path:
+        return ""
+
+    for base in _KNOWN_SHAREPOINT_BASES:
+        if path == base:
+            return ""
+        prefix = f"{base}/"
+        if path.startswith(prefix):
+            return path[len(prefix):]
+    return path
+
+
+def _folders_equivalent(suggested: Any, final: Any) -> bool:
+    suggested_key = _folder_comparison_key(suggested)
+    final_key = _folder_comparison_key(final)
+    return bool(suggested_key and final_key and suggested_key == final_key)
+
+
 def build_today_filter(now: Optional[datetime] = None) -> Dict[str, Any]:
     """Return the exact query shape used by the Inbox Today KPI."""
     now_ct = (now or datetime.now(GPI_TZ)).astimezone(GPI_TZ)
     today_start = now_ct.replace(hour=0, minute=0, second=0, microsecond=0)
-    today_start_utc = today_start.astimezone(timezone.utc).isoformat()
     return {
-        "created_utc": {"$gte": today_start_utc},
+        "created_utc": {"$gte": today_start.astimezone(timezone.utc).isoformat()},
         "status": {"$ne": "batch_parent"},
     }
 
@@ -187,13 +216,9 @@ def _lane_for_document(doc: Dict[str, Any]) -> str:
     if configured_lane in {"sales", "ar", "accounts receivable", "accounts_receivable"}:
         return "Sales"
 
-    doc_type = str(
-        _first_nonempty(
-            doc.get("document_type"),
-            doc.get("doc_type"),
-            doc.get("suggested_job_type"),
-        )
-    ).lower()
+    doc_type = str(_first_nonempty(
+        doc.get("document_type"), doc.get("doc_type"), doc.get("suggested_job_type")
+    )).lower()
     if any(token in doc_type for token in (
         "warehouse", "shipping", "shipment", "packing", "bill_of_lading", "bol"
     )):
@@ -210,15 +235,11 @@ def _lane_for_document(doc: Dict[str, Any]) -> str:
 
 
 def _canonical_source_filename(file_name: str) -> str:
-    """Collapse generated ``_doc1`` / ``_p1`` suffixes to the source name."""
     value = str(file_name or "").strip()
-    if not value:
-        return "Unknown source"
-    return _SPLIT_SUFFIX_RE.sub("", value)
+    return _SPLIT_SUFFIX_RE.sub("", value) if value else "Unknown source"
 
 
 def _source_identity(doc: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a stable source-attachment identity for one produced document."""
     batch_parent_id = str(doc.get("batch_parent_id") or "").strip()
     batch_source_name = str(doc.get("batch_source_filename") or "").strip()
     file_name = str(doc.get("file_name") or "").strip()
@@ -230,13 +251,9 @@ def _source_identity(doc: Dict[str, Any]) -> Dict[str, Any]:
             "is_split_output": True,
         }
 
-    message_id = str(
-        _first_nonempty(
-            doc.get("internet_message_id"),
-            doc.get("message_id"),
-            doc.get("email_id"),
-        )
-    ).strip()
+    message_id = str(_first_nonempty(
+        doc.get("internet_message_id"), doc.get("message_id"), doc.get("email_id")
+    )).strip()
     attachment_id = str(doc.get("attachment_id") or "").strip()
     attachment_hash = str(doc.get("attachment_hash") or "").strip()
     sha256_hash = str(doc.get("sha256_hash") or "").strip()
@@ -261,7 +278,6 @@ def _source_identity(doc: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _stored_suggestion_candidate(doc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Find a historically persisted suggestion without recomputing routing."""
     if doc.get("routing_suggestion_snapshot"):
         return None
 
@@ -271,7 +287,9 @@ def _stored_suggestion_candidate(doc: Dict[str, Any]) -> Optional[Dict[str, Any]
             "folder_path": str(human.get("suggested_folder")),
             "reason": str(human.get("suggested_reason") or ""),
             "source": str(human.get("source") or "human_routing_review"),
-            "suggested_at": str(human.get("created_at") or doc.get("sharepoint_folder_assigned_at") or ""),
+            "suggested_at": str(
+                human.get("created_at") or doc.get("sharepoint_folder_assigned_at") or ""
+            ),
             "capture_type": "human_review",
         }
 
@@ -289,35 +307,31 @@ def _stored_suggestion_candidate(doc: Dict[str, Any]) -> Optional[Dict[str, Any]
         doc.get("suggested_folder_path"),
         doc.get("suggested_folder"),
     )
-    if stored_folder:
-        return {
-            "folder_path": str(stored_folder),
-            "reason": str(_first_nonempty(
-                doc.get("initial_routing_reason"),
-                doc.get("routing_reason"),
-                doc.get("folder_routing_reason"),
-            )),
-            "source": str(_first_nonempty(
-                doc.get("initial_routing_source"),
-                doc.get("routing_source"),
-                "stored_routing_suggestion",
-            )),
-            "suggested_at": str(_first_nonempty(
-                doc.get("initial_routing_suggested_at"),
-                doc.get("routing_suggested_at"),
-                doc.get("updated_utc"),
-            )),
-            "capture_type": "stored_suggestion",
-        }
-    return None
+    if not stored_folder:
+        return None
+    return {
+        "folder_path": str(stored_folder),
+        "reason": str(_first_nonempty(
+            doc.get("initial_routing_reason"),
+            doc.get("routing_reason"),
+            doc.get("folder_routing_reason"),
+        )),
+        "source": str(_first_nonempty(
+            doc.get("initial_routing_source"),
+            doc.get("routing_source"),
+            "stored_routing_suggestion",
+        )),
+        "suggested_at": str(_first_nonempty(
+            doc.get("initial_routing_suggested_at"),
+            doc.get("routing_suggested_at"),
+            doc.get("updated_utc"),
+        )),
+        "capture_type": "stored_suggestion",
+    }
 
 
 async def _normalize_stored_suggestion(db, doc: Dict[str, Any]) -> None:
-    """Normalize exact persisted suggestions into one stable audit snapshot.
-
-    This never treats a newly-computed current rule as historical. It only
-    copies a folder decision that was already stored on the document.
-    """
+    """Copy an already-persisted decision into the stable snapshot schema."""
     candidate = _stored_suggestion_candidate(doc)
     doc_id = str(doc.get("id") or "")
     if not candidate or not doc_id:
@@ -340,6 +354,7 @@ async def _normalize_stored_suggestion(db, doc: Dict[str, Any]) -> None:
             "$or": [
                 {"routing_suggestion_snapshot": {"$exists": False}},
                 {"routing_suggestion_snapshot": None},
+                {"routing_suggestion_snapshot": {}},
             ],
         },
         {"$set": update},
@@ -362,7 +377,6 @@ def _has_stored_suggestion(doc: Dict[str, Any]) -> bool:
 
 
 async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
-    """Add a non-historical current-rule suggestion for display when needed."""
     if _has_stored_suggestion(doc):
         return
     try:
@@ -375,8 +389,14 @@ async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
         folder, reason, details = await route_with_feedback(
             doc=doc,
             is_international=is_international,
-            location_code=doc.get("location_code") or extracted.get("location_code"),
-            freight_direction=doc.get("freight_direction") or extracted.get("freight_direction"),
+            location_code=(
+                doc.get("resolved_location_code")
+                or doc.get("location_code")
+                or extracted.get("location_code")
+            ),
+            freight_direction=(
+                doc.get("freight_direction") or extracted.get("freight_direction")
+            ),
         )
         if folder:
             doc["_display_suggestion"] = {
@@ -386,7 +406,7 @@ async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
                 "suggested_at": datetime.now(timezone.utc).isoformat(),
                 "capture_type": "computed_current_rule",
             }
-    except Exception as error:  # The view must remain usable if routing lookup fails.
+    except Exception as error:
         doc["_display_suggestion_error"] = str(error)[:300]
 
 
@@ -448,20 +468,19 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
         snapshot.get("capture_type"),
         "human_review" if human.get("suggested_folder") else "",
         "file_and_clear_decision" if doc.get("sharepoint_folder_suggestion") else "",
-        "stored_suggestion" if _first_nonempty(doc.get("suggested_folder_path"), doc.get("suggested_folder")) else "",
+        "stored_suggestion" if _first_nonempty(
+            doc.get("suggested_folder_path"), doc.get("suggested_folder")
+        ) else "",
         display.get("capture_type"),
     ))
 
     status_text = f"{doc.get('status', '')} {doc.get('workflow_status', '')}".lower()
     has_file_evidence = bool(_first_nonempty(
-        doc.get("sharepoint_item_id"),
-        doc.get("sharepoint_web_url"),
-        doc.get("filed_at"),
+        doc.get("sharepoint_item_id"), doc.get("sharepoint_web_url"), doc.get("filed_at")
     )) or any(token in status_text for token in ("filed", "storedinsp", "exported"))
-    needs_review = any(
-        token in status_text
-        for token in ("needsreview", "needs_review", "pending_review", "manual_review", "exception")
-    )
+    needs_review = any(token in status_text for token in (
+        "needsreview", "needs_review", "pending_review", "manual_review", "exception"
+    ))
     auto_routed = bool(final) and (
         str(doc.get("automation_decision") or "").lower() == "auto"
         or doc.get("auto_cleared") is True
@@ -493,8 +512,10 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
         "routing_source": source,
         "suggested_at": suggested_at,
         "suggestion_capture": suggestion_capture,
-        "suggestion_is_historical": suggestion_capture != "computed_current_rule" and bool(suggested),
-        "suggestion_matches_final": bool(suggested and final and suggested.strip("/").casefold() == final.strip("/").casefold()),
+        "suggestion_is_historical": (
+            suggestion_capture != "computed_current_rule" and bool(suggested)
+        ),
+        "suggestion_matches_final": _folders_equivalent(suggested, final),
         "filed": bool(has_file_evidence and final),
         "auto_routed": auto_routed,
         "needs_review": needs_review,
@@ -571,7 +592,7 @@ def _count(rows: Iterable[Dict[str, Any]], key: str, value: Any) -> int:
 def _summary(rows: list[Dict[str, Any]]) -> Dict[str, int]:
     source_counts = Counter(row.get("source_file_key") for row in rows)
     return {
-        "total": len(rows),  # Backward-compatible alias for produced documents.
+        "total": len(rows),
         "produced_documents": len(rows),
         "source_files": len(source_counts),
         "split_outputs": sum(1 for row in rows if row.get("is_split_output") is True),
@@ -584,7 +605,9 @@ def _summary(rows: list[Dict[str, Any]]) -> Dict[str, int]:
         "needs_review": sum(1 for row in rows if row.get("needs_review") is True),
         "unrouted": _count(rows, "routing_status", "unrouted"),
         "filed": sum(1 for row in rows if row.get("filed") is True),
-        "suggestion_matches_final": sum(1 for row in rows if row.get("suggestion_matches_final") is True),
+        "suggestion_matches_final": sum(
+            1 for row in rows if row.get("suggestion_matches_final") is True
+        ),
     }
 
 
@@ -594,20 +617,13 @@ async def get_inbox_today(
     routing_status: str = Query("all", description="Optional routing-status filter"),
     limit: int = Query(1000, ge=1, le=5000),
 ):
-    """Return today's documents with source, classification, and routing evidence."""
     db = get_db()
-    today_filter = build_today_filter()
     docs = await db.hub_documents.find(
-        today_filter, TODAY_PROJECTION
+        build_today_filter(), TODAY_PROJECTION
     ).sort("created_utc", -1).to_list(None)
 
-    # Normalize only already-persisted decisions. This does not rewrite history
-    # from today's current routing rules.
     for doc in docs:
         await _normalize_stored_suggestion(db, doc)
-
-    # If an older document truly has no stored suggestion, show what the current
-    # rules would choose and label it clearly as computed-current-rule.
     for doc in docs:
         await _add_current_rule_suggestion(doc)
 
@@ -618,7 +634,9 @@ async def get_inbox_today(
     normalized_routing = routing_status.strip().lower()
     filtered = rows
     if normalized_lane != "all":
-        filtered = [row for row in filtered if row.get("lane", "").lower() == normalized_lane]
+        filtered = [
+            row for row in filtered if row.get("lane", "").lower() == normalized_lane
+        ]
     if normalized_routing != "all":
         filtered = [
             row for row in filtered

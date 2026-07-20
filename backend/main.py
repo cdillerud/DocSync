@@ -86,6 +86,7 @@ from routers.file_integrity import router as file_integrity_router
 from routers.auto_approve import router as auto_approve_router
 from routers.sharepoint_routing import router as sharepoint_routing_router
 from routers.human_routing_review import router as human_routing_review_router
+from routers.sharepoint_folder_browser import router as sharepoint_folder_browser_router
 from routers.po_resolution import router as po_resolution_router
 from routers.bakeoff import router as bakeoff_router
 from routers.feedback_health import router as feedback_health_router
@@ -168,6 +169,7 @@ app.include_router(file_integrity_router, prefix="/api")
 app.include_router(auto_approve_router, prefix="/api")
 app.include_router(sharepoint_routing_router, prefix="/api")
 app.include_router(human_routing_review_router, prefix="/api")
+app.include_router(sharepoint_folder_browser_router, prefix="/api")
 app.include_router(po_resolution_router, prefix="/api")
 app.include_router(bakeoff_router, prefix="/api")
 app.include_router(feedback_health_router, prefix="/api")

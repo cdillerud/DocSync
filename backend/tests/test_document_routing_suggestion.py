@@ -69,11 +69,13 @@ async def test_route_document_persists_initial_folder_suggestion(monkeypatch):
     result = await route_document("doc-1")
 
     assert result["suggested_folder"] == "Freight Issues"
+    assert result["suggestion_capture_type"] == "pre_filing_routing"
     assert result["suggestion_persisted"] is True
     snapshot = db.hub_documents.document["routing_suggestion_snapshot"]
     assert snapshot["folder_path"] == "Freight Issues"
     assert snapshot["reason"] == "Freight invoice from carrier"
     assert snapshot["capture_type"] == "pre_filing_routing"
+    assert snapshot["capture_origin"] == "document_routing_service"
     assert db.hub_documents.document["initial_suggested_folder"] == "Freight Issues"
 
 
@@ -122,3 +124,54 @@ async def test_route_document_never_overwrites_existing_snapshot(monkeypatch):
 
     assert result["suggestion_persisted"] is False
     assert db.hub_documents.document["routing_suggestion_snapshot"] == original_snapshot
+
+
+@pytest.mark.asyncio
+async def test_post_filing_routing_gate_is_stored_separately(monkeypatch):
+    document = {
+        "id": "doc-filed",
+        "file_name": "ball-filed.pdf",
+        "suggested_job_type": "AP_Invoice",
+        "ai_confidence": 0.99,
+        "vendor_canonical": "BALLCOR",
+        "sharepoint_item_id": "item-123",
+        "sharepoint_web_url": "https://example.test/Temp%20Folder/Warehouse/file.pdf",
+        "sharepoint_folder_path": "Temp Folder/Warehouse Not International",
+        "status": "Completed",
+        "workflow_status": "processed",
+        "extracted_fields": {
+            "vendor": "BALLCOR",
+            "invoice_number": "INV-3",
+            "invoice_date": "2026-07-20",
+            "total_amount": "300.00",
+            "po_number": "W118410",
+        },
+        "validation_results": {"all_passed": True, "checks": []},
+    }
+    db = FakeDB(document)
+    monkeypatch.setattr(deps, "get_db", lambda: db)
+
+    async def changed_route_with_feedback(**kwargs):
+        return (
+            "Dropship Not International",
+            "Post-filing routing gate recomputation",
+            {"source": "folder_routing_service"},
+        )
+
+    monkeypatch.setattr(
+        folder_routing_service,
+        "route_with_feedback",
+        changed_route_with_feedback,
+    )
+
+    result = await route_document("doc-filed")
+
+    assert result["suggestion_capture_type"] == "post_filing_routing_gate"
+    assert result["suggestion_persisted"] is True
+    assert "routing_suggestion_snapshot" not in db.hub_documents.document
+    assert "initial_suggested_folder" not in db.hub_documents.document
+
+    gate = db.hub_documents.document["routing_gate_snapshot"]
+    assert gate["folder_path"] == "Dropship Not International"
+    assert gate["capture_type"] == "post_filing_routing_gate"
+    assert gate["capture_origin"] == "document_routing_service"

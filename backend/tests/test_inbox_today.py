@@ -89,11 +89,106 @@ def test_base_folder_only_does_not_match_a_routing_destination():
     ) is False
 
 
+def test_base_folder_matches_base_folder():
+    assert _folders_equivalent(
+        "Temp Folder",
+        "General/Accounting/Accounts Payable/Temp Folder",
+    ) is True
+
+
 def test_genuine_folder_difference_remains_a_mismatch():
     assert _folders_equivalent(
         "Dropship Not International",
         "Temp Folder/Warehouse Not International",
     ) is False
+
+
+def test_empty_prefiling_snapshot_means_base_folder_and_does_not_mix_current_rule():
+    row = _row({
+        "id": "oi-1",
+        "file_name": "oi.pdf",
+        "document_type": "AP_Invoice",
+        "status": "Completed",
+        "sharepoint_item_id": "item-1",
+        "sharepoint_folder_path": "Temp Folder",
+        "routing_preupload_checked_at": "2026-07-20T19:00:00+00:00",
+        "routing_suggestion_snapshot": {
+            "folder_path": "",
+            "reason": "Staged for AP review",
+            "source": "folder_routing_service",
+            "suggested_at": "2026-07-20T19:00:00+00:00",
+            "capture_type": "pre_filing_routing",
+        },
+        "_display_suggestion": {
+            "folder_path": "Dropship Not International Documents/111823",
+            "reason": "Current rule",
+            "source": "folder_routing_service",
+            "capture_type": "computed_current_rule",
+        },
+    })
+
+    assert row["suggested_folder"] == "Temp Folder"
+    assert row["routing_reason"] == "Staged for AP review"
+    assert row["suggestion_capture"] == "pre_filing_routing"
+    assert row["suggestion_is_pre_filing"] is True
+    assert row["suggestion_comparable"] is True
+    assert row["suggestion_matches_final"] is True
+
+
+def test_legacy_unverified_prefiling_label_is_not_counted_as_initial_mismatch():
+    row = _row({
+        "id": "legacy-gate",
+        "file_name": "ball.pdf",
+        "document_type": "AP_Invoice",
+        "status": "Completed",
+        "sharepoint_item_id": "item-1",
+        "sharepoint_folder_path": "Temp Folder/Warehouse Not International",
+        "routing_suggestion_snapshot": {
+            "folder_path": "Dropship Not International",
+            "reason": "Routing gate recomputation",
+            "source": "folder_routing_service",
+            "suggested_at": "2026-07-20T08:57:27+00:00",
+            "capture_type": "pre_filing_routing",
+        },
+    })
+
+    assert row["suggestion_capture"] == "routing_gate_snapshot"
+    assert row["suggestion_is_pre_filing"] is False
+    assert row["suggestion_comparable"] is False
+    assert row["suggestion_matches_final"] is None
+
+    summary = _summary([row])
+    assert summary["routing_gate_snapshots"] == 1
+    assert summary["suggestion_mismatches_final"] == 0
+    assert summary["pre_filing_mismatches"] == 0
+
+
+def test_verified_prefiling_difference_remains_a_real_mismatch():
+    row = _row({
+        "id": "real-mismatch",
+        "file_name": "invoice.pdf",
+        "document_type": "AP_Invoice",
+        "status": "Completed",
+        "sharepoint_item_id": "item-1",
+        "sharepoint_folder_path": "Temp Folder/Warehouse Not International",
+        "routing_preupload_checked_at": "2026-07-20T12:00:00+00:00",
+        "routing_suggestion_snapshot": {
+            "folder_path": "Dropship Not International",
+            "reason": "Pre-upload route",
+            "source": "folder_routing_service",
+            "suggested_at": "2026-07-20T12:00:00+00:00",
+            "capture_type": "pre_filing_routing",
+        },
+    })
+
+    assert row["suggestion_capture"] == "pre_filing_routing"
+    assert row["suggestion_comparable"] is True
+    assert row["suggestion_matches_final"] is False
+
+    summary = _summary([row])
+    assert summary["pre_filing_snapshots"] == 1
+    assert summary["pre_filing_mismatches"] == 1
+    assert summary["suggestion_mismatches_final"] == 1
 
 
 def test_split_children_count_as_one_source_file_and_multiple_documents():

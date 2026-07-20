@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { MsalProvider } from "@azure/msal-react";
 import "@/index.css";
 import App from "@/App";
+import TodayIntakeDrilldown from "@/components/TodayIntakeDrilldown";
 import { getMsalInstance } from "@/lib/msalConfig";
 
 // Lazy-init: only construct MsalProvider when the environment can safely
@@ -10,12 +11,19 @@ import { getMsalInstance } from "@/lib/msalConfig";
 // the flag off, we render <App/> directly so the legacy login keeps working.
 const msalInstance = getMsalInstance();
 
+const appTree = (
+  <>
+    <App />
+    <TodayIntakeDrilldown />
+  </>
+);
+
 const tree = msalInstance ? (
   <MsalProvider instance={msalInstance}>
-    <App />
+    {appTree}
   </MsalProvider>
 ) : (
-  <App />
+  appTree
 );
 
 const root = ReactDOM.createRoot(document.getElementById("root"));

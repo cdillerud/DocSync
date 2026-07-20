@@ -10,6 +10,10 @@ The service is called after the intelligence generation step in the pipeline
 and writes routing_status, routing_reasons, routing_score, and routing_timestamp
 to the document record.
 
+It also captures the first folder recommendation at routing time. That snapshot
+is immutable: later filing, manual correction, or rule changes can update the
+final destination without rewriting what the Hub originally recommended.
+
 Rules (in evaluation order):
   1. Classification confidence
   2. Required-field completeness
@@ -112,8 +116,9 @@ def evaluate_routing(
 async def route_document(doc_id: str) -> Dict[str, Any]:
     """Evaluate and persist the routing decision for a document.
 
-    Fetches the document and its intelligence result from the DB,
-    runs evaluate_routing, and writes the result back to hub_documents.
+    Fetches the document and its intelligence result from the DB, runs the
+    automation gate, and stores an immutable snapshot of the first folder
+    recommendation before any SharePoint filing can occur.
 
     Returns the routing result dict.
     """
@@ -132,7 +137,8 @@ async def route_document(doc_id: str) -> Dict[str, Any]:
 
     result = evaluate_routing(doc, intelligence)
 
-    # Persist to hub_documents
+    # Persist the routing gate result first. Folder suggestion capture is a
+    # separate guarded write so an older/original snapshot is never overwritten.
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
@@ -144,12 +150,122 @@ async def route_document(doc_id: str) -> Dict[str, Any]:
         }},
     )
 
+    suggestion = None
+    try:
+        suggestion = await _compute_initial_folder_suggestion(doc, intelligence)
+        if suggestion:
+            persisted = await _persist_initial_folder_suggestion(
+                db=db,
+                doc_id=doc_id,
+                suggestion=suggestion,
+            )
+            result.update({
+                "suggested_folder": suggestion["folder_path"],
+                "suggested_reason": suggestion["reason"],
+                "suggestion_source": suggestion["source"],
+                "suggestion_timestamp": suggestion["suggested_at"],
+                "suggestion_persisted": persisted,
+            })
+    except Exception as error:  # Routing gate must not fail because audit capture failed.
+        result["suggestion_capture_error"] = str(error)[:300]
+        logger.warning(
+            "[Routing] initial folder suggestion capture failed doc=%s: %s",
+            doc_id,
+            error,
+        )
+
     logger.info(
-        "[Routing] doc=%s status=%s score=%d reasons=%s",
-        doc_id, result["routing_status"], result["routing_score"],
+        "[Routing] doc=%s status=%s score=%d folder=%s persisted=%s reasons=%s",
+        doc_id,
+        result["routing_status"],
+        result["routing_score"],
+        (suggestion or {}).get("folder_path", ""),
+        result.get("suggestion_persisted", False),
         result["routing_reasons"],
     )
     return result
+
+
+async def _compute_initial_folder_suggestion(
+    doc: Dict[str, Any],
+    intelligence: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Compute the folder choice from the fully enriched pre-filing document."""
+    from services.folder_routing_service import route_with_feedback
+
+    routing_doc = dict(doc)
+    extracted = dict(doc.get("extracted_fields") or {})
+    if intelligence:
+        extracted.update(intelligence.get("extracted_fields") or {})
+        if intelligence.get("document_type"):
+            routing_doc["document_type"] = intelligence["document_type"]
+    routing_doc["extracted_fields"] = extracted
+
+    is_international = _is_truthy(routing_doc.get("is_international")) or _is_truthy(
+        extracted.get("is_international")
+    )
+    location_code = (
+        routing_doc.get("location_code")
+        or extracted.get("location_code")
+        or extracted.get("locationCode")
+    )
+    freight_direction = (
+        routing_doc.get("freight_direction")
+        or extracted.get("freight_direction")
+    )
+
+    folder_path, reason, details = await route_with_feedback(
+        doc=routing_doc,
+        is_international=is_international,
+        location_code=location_code,
+        freight_direction=freight_direction,
+    )
+    if not folder_path:
+        return None
+
+    details = details or {}
+    return {
+        "folder_path": str(folder_path).strip(),
+        "reason": str(reason or "").strip(),
+        "source": str(details.get("source") or "folder_routing_service"),
+        "suggested_at": datetime.now(timezone.utc).isoformat(),
+        "capture_type": "pre_filing_routing",
+        "details": details,
+    }
+
+
+async def _persist_initial_folder_suggestion(
+    db,
+    doc_id: str,
+    suggestion: Dict[str, Any],
+) -> bool:
+    """Persist the first recommendation once; never rewrite routing history."""
+    result = await db.hub_documents.update_one(
+        {
+            "id": doc_id,
+            "$or": [
+                {"routing_suggestion_snapshot": {"$exists": False}},
+                {"routing_suggestion_snapshot": None},
+                {"routing_suggestion_snapshot": {}},
+            ],
+        },
+        {"$set": {
+            "routing_suggestion_snapshot": suggestion,
+            "initial_suggested_folder": suggestion["folder_path"],
+            "initial_routing_reason": suggestion["reason"],
+            "initial_routing_source": suggestion["source"],
+            "initial_routing_suggested_at": suggestion["suggested_at"],
+        }},
+    )
+    return bool(result.modified_count)
+
+
+def _is_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {
+        "1", "true", "yes", "y", "international", "intl"
+    }
 
 
 async def get_routing_summary() -> Dict[str, Any]:

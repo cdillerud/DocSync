@@ -1,34 +1,20 @@
 """
-Routing Feedback Service — The learning layer for folder routing.
+Routing Feedback Service — the learning layer for folder routing.
 
-When documents are corrected (via benchmark fixes, manual overrides, or
-the fix-truth endpoint), the corrections are stored here. On every future
-routing decision, the feedback table is checked FIRST, before the
-hardcoded rules in folder_routing_service.py.
-
-Collections:
-  routing_feedback — one doc per (vendor, doc_type, routing_key) combo
-    {
-      vendor_pattern: "tumaloc",
-      doc_type: "AP_Invoice",
-      routing_key: "tumaloc|AP_Invoice|has_po",
-      correct_folder: "Miscellaneous Documents/Misc Invoices - need approval",
-      confidence: 3,          # how many corrections confirmed this
-      examples: ["0303907.pdf", ...],
-      source: "benchmark_fix",
-      created_at: "...",
-      updated_at: "...",
-    }
+Corrections are stored per vendor/document profile and checked before the
+hard-coded folder rules. Vendor identity is deliberately alias-aware: a rule
+learned from a raw invoice name must still match after the document is resolved
+to a BC vendor number or canonical vendor code.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
 COLLECTION = "routing_feedback"
-
 _db = None
 
 
@@ -38,11 +24,193 @@ def init_feedback_db(db):
     _db = db
 
 
+def _normalize_vendor(value: Any) -> str:
+    """Return the stable comparison form used for feedback keys."""
+    if value is None:
+        return ""
+    raw = str(value).strip()
+    if not raw:
+        return ""
+    try:
+        from services.vendor_name_helpers import normalize_vendor_name
+        normalized = normalize_vendor_name(raw)
+        if normalized:
+            return str(normalized).strip().lower()
+    except Exception:
+        pass
+    return re.sub(r"\s+", " ", raw).strip().lower()
+
+
 def _make_routing_key(vendor: str, doc_type: str, has_po: bool, is_international: bool) -> str:
     """Create a lookup key for feedback matching."""
-    v = vendor.lower().strip()
-    d = doc_type.strip()
+    v = _normalize_vendor(vendor)
+    d = str(doc_type or "").strip()
     return f"{v}|{d}|{'po' if has_po else 'no_po'}|{'intl' if is_international else 'domestic'}"
+
+
+def _exact_ci(value: str) -> Dict[str, Any]:
+    return {"$regex": f"^{re.escape(str(value).strip())}$", "$options": "i"}
+
+
+def _append_candidate(
+    candidates: List[Dict[str, Any]],
+    seen: set,
+    value: Any,
+    *,
+    source: str,
+    stable: bool = False,
+) -> None:
+    normalized = _normalize_vendor(value)
+    if not normalized or normalized in seen:
+        return
+    seen.add(normalized)
+    candidates.append({
+        "value": str(value).strip(),
+        "normalized": normalized,
+        "source": source,
+        "stable": stable,
+    })
+
+
+async def _vendor_candidates(vendor: str) -> List[Dict[str, Any]]:
+    """Resolve canonical IDs, names, and historical aliases for a vendor value.
+
+    Sources are intentionally redundant because production records span several
+    schema generations: vendor_aliases, cached BC vendors, sender mappings, and
+    previously processed Hub documents.
+    """
+    candidates: List[Dict[str, Any]] = []
+    seen = set()
+    _append_candidate(candidates, seen, vendor, source="input", stable=False)
+
+    if _db is None or not str(vendor or "").strip():
+        return candidates
+
+    raw = str(vendor).strip()
+    normalized_input = _normalize_vendor(raw)
+    exact = _exact_ci(raw)
+    normalized_exact = _exact_ci(normalized_input)
+
+    canonical_ids = set()
+
+    # Alias records can be keyed by raw name, normalized alias, canonical ID,
+    # vendor number, or display name depending on when they were created.
+    alias_query = {"$or": [
+        {"alias_string": exact},
+        {"alias": exact},
+        {"normalized_alias": normalized_exact},
+        {"normalized": normalized_exact},
+        {"canonical_vendor_id": exact},
+        {"vendor_no": exact},
+        {"vendor_id": exact},
+        {"vendor_name": exact},
+    ]}
+    try:
+        alias_rows = await _db.vendor_aliases.find(alias_query, {"_id": 0}).to_list(100)
+    except Exception:
+        alias_rows = []
+
+    for row in alias_rows:
+        for key in ("canonical_vendor_id", "vendor_no", "vendor_id"):
+            value = row.get(key)
+            if value:
+                canonical_ids.add(str(value).strip())
+                _append_candidate(candidates, seen, value, source=f"vendor_aliases.{key}", stable=True)
+        for key in ("vendor_name", "alias_string", "alias", "normalized_alias", "normalized"):
+            _append_candidate(candidates, seen, row.get(key), source=f"vendor_aliases.{key}")
+
+    # Once a canonical ID is known, collect every sibling alias attached to it.
+    if canonical_ids:
+        canonical_values = list(canonical_ids)
+        try:
+            sibling_rows = await _db.vendor_aliases.find(
+                {"$or": [
+                    {"canonical_vendor_id": {"$in": canonical_values}},
+                    {"vendor_no": {"$in": canonical_values}},
+                    {"vendor_id": {"$in": canonical_values}},
+                ]},
+                {"_id": 0},
+            ).to_list(500)
+        except Exception:
+            sibling_rows = []
+        for row in sibling_rows:
+            for key in ("canonical_vendor_id", "vendor_no", "vendor_id"):
+                _append_candidate(candidates, seen, row.get(key), source=f"vendor_aliases.{key}", stable=True)
+            for key in ("vendor_name", "alias_string", "alias", "normalized_alias", "normalized"):
+                _append_candidate(candidates, seen, row.get(key), source=f"vendor_aliases.{key}")
+
+    # Cached BC vendor metadata supplies the canonical number/display-name pair.
+    try:
+        bc_rows = await _db.hub_bc_vendors.find(
+            {"$or": [
+                {"number": exact},
+                {"id": exact},
+                {"displayName": exact},
+                {"name_normalized": normalized_exact},
+            ]},
+            {"_id": 0, "number": 1, "id": 1, "displayName": 1, "name_normalized": 1},
+        ).to_list(25)
+    except Exception:
+        bc_rows = []
+    for row in bc_rows:
+        _append_candidate(candidates, seen, row.get("number") or row.get("id"), source="hub_bc_vendors.number", stable=True)
+        _append_candidate(candidates, seen, row.get("displayName"), source="hub_bc_vendors.displayName")
+        _append_candidate(candidates, seen, row.get("name_normalized"), source="hub_bc_vendors.name_normalized")
+
+    # Historical Hub documents bridge cases where the raw invoice name was
+    # learned first and the canonical BC code was applied later (BALLCOR is the
+    # production example that exposed this gap).
+    try:
+        doc_rows = await _db.hub_documents.find(
+            {"$or": [
+                {"vendor_canonical": exact},
+                {"bc_vendor_number": exact},
+                {"vendor_id": exact},
+                {"vendor_no": exact},
+                {"vendor_raw": exact},
+                {"vendor_normalized": normalized_exact},
+                {"extracted_fields.vendor": exact},
+                {"normalized_fields.vendor": exact},
+            ]},
+            {
+                "_id": 0,
+                "vendor_canonical": 1,
+                "bc_vendor_number": 1,
+                "vendor_id": 1,
+                "vendor_no": 1,
+                "vendor_raw": 1,
+                "vendor_normalized": 1,
+                "extracted_fields.vendor": 1,
+                "normalized_fields.vendor": 1,
+            },
+        ).limit(100).to_list(100)
+    except Exception:
+        doc_rows = []
+    for row in doc_rows:
+        extracted = row.get("extracted_fields") or {}
+        normalized = row.get("normalized_fields") or {}
+        for key in ("vendor_canonical", "bc_vendor_number", "vendor_id", "vendor_no"):
+            _append_candidate(candidates, seen, row.get(key), source=f"hub_documents.{key}", stable=True)
+        for value, source in (
+            (row.get("vendor_raw"), "hub_documents.vendor_raw"),
+            (row.get("vendor_normalized"), "hub_documents.vendor_normalized"),
+            (extracted.get("vendor"), "hub_documents.extracted_fields.vendor"),
+            (normalized.get("vendor"), "hub_documents.normalized_fields.vendor"),
+        ):
+            _append_candidate(candidates, seen, value, source=source)
+
+    # Stable IDs first for new records; exact input remains available for legacy
+    # key matching and is preferred when equally confident rules exist.
+    candidates.sort(key=lambda item: (not item["stable"], item["source"] != "input"))
+    return candidates
+
+
+def _rule_profile_query(doc_type: str, has_po: bool, is_international: bool) -> Dict[str, Any]:
+    return {
+        "doc_type": str(doc_type or "").strip(),
+        "has_po": bool(has_po),
+        "is_international": bool(is_international),
+    }
 
 
 async def record_correction(
@@ -54,79 +222,86 @@ async def record_correction(
     file_name: str = "",
     source: str = "benchmark_fix",
 ) -> dict:
-    """
-    Record a routing correction. If a matching rule already exists
-    and agrees with correct_folder, strengthen it (increment
-    confidence). If no rule exists, create one. If a rule already
-    exists and DISAGREES, do not overwrite it - return status=
-    "conflict" instead.
+    """Create or strengthen a learned rule without splitting aliases.
 
-    Conflict protection added 2026-07-18 directly here, in the shared
-    function, rather than continuing to duplicate the same check in
-    every caller. Confirmed live the exact failure this prevents: 6
-    Ball Metal Beverage Container Corp documents processed in one pass
-    by ingest_meghan_folder_corrections_v2.py produced 4 votes for one
-    folder and 2 for another: since this function had no protection of
-    its own, the 2-vote minority silently overwrote the 4-vote
-    majority just by being processed last. That script now has its own
-    pre-check to avoid ever calling this function in a conflicting
-    case - but that only protects that one caller. Putting the
-    protection here too means every current and future caller
-    (including _learn_folder_routing(), fixed in the same change) is
-    protected automatically, without needing to remember to
-    re-implement the same check again next time.
+    Conflicting rules across any known alias are protected exactly like an
+    exact-key conflict; a later minority observation cannot silently replace an
+    established route.
     """
     if _db is None:
         return {"status": "no_db"}
 
-    key = _make_routing_key(vendor, doc_type, has_po, is_international)
+    candidates = await _vendor_candidates(vendor)
+    if not candidates:
+        return {"status": "skipped_no_vendor"}
+
+    keys = [
+        _make_routing_key(c["normalized"], doc_type, has_po, is_international)
+        for c in candidates
+    ]
     now = datetime.now(timezone.utc).isoformat()
 
-    existing = await _db[COLLECTION].find_one(
-        {"routing_key": key},
-        {"_id": 0}
-    )
+    existing_rules = await _db[COLLECTION].find(
+        {"routing_key": {"$in": keys}},
+        {"_id": 0},
+    ).to_list(100)
 
-    if existing and existing.get("correct_folder", "").strip().lower() != correct_folder.strip().lower():
+    conflicting = [
+        rule for rule in existing_rules
+        if str(rule.get("correct_folder") or "").strip().lower()
+        != str(correct_folder or "").strip().lower()
+    ]
+    if conflicting:
+        strongest = sorted(conflicting, key=lambda r: int(r.get("confidence", 1)), reverse=True)[0]
         return {
-            "status": "conflict", "key": key,
-            "existing_folder": existing.get("correct_folder"),
+            "status": "conflict",
+            "key": strongest.get("routing_key"),
+            "existing_folder": strongest.get("correct_folder"),
             "new_folder": correct_folder,
+            "matched_aliases": [c["value"] for c in candidates],
         }
 
-    if existing:
-        # Strengthen existing rule
-        examples = existing.get("examples", [])
+    matching = sorted(existing_rules, key=lambda r: int(r.get("confidence", 1)), reverse=True)
+    alias_values = sorted({c["value"] for c in candidates if c.get("value")})
+
+    if matching:
+        existing = matching[0]
+        key = existing["routing_key"]
+        examples = list(existing.get("examples", []))
         if file_name and file_name not in examples:
             examples.append(file_name)
-            if len(examples) > 10:
-                examples = examples[-10:]
-
+            examples = examples[-10:]
+        confidence = int(existing.get("confidence", 1)) + 1
         await _db[COLLECTION].update_one(
             {"routing_key": key},
             {"$set": {
                 "correct_folder": correct_folder,
-                "confidence": existing.get("confidence", 1) + 1,
+                "confidence": confidence,
                 "examples": examples,
+                "vendor_aliases": alias_values,
                 "updated_at": now,
-            }}
+            }},
         )
-        return {"status": "strengthened", "key": key, "confidence": existing.get("confidence", 1) + 1}
-    else:
-        await _db[COLLECTION].insert_one({
-            "vendor_pattern": vendor.lower().strip(),
-            "doc_type": doc_type,
-            "has_po": has_po,
-            "is_international": is_international,
-            "routing_key": key,
-            "correct_folder": correct_folder,
-            "confidence": 1,
-            "examples": [file_name] if file_name else [],
-            "source": source,
-            "created_at": now,
-            "updated_at": now,
-        })
-        return {"status": "created", "key": key}
+        return {"status": "strengthened", "key": key, "confidence": confidence}
+
+    primary = next((c for c in candidates if c.get("stable")), candidates[0])
+    key = _make_routing_key(primary["normalized"], doc_type, has_po, is_international)
+    await _db[COLLECTION].insert_one({
+        "vendor_pattern": primary["normalized"],
+        "vendor_canonical_key": primary["value"],
+        "vendor_aliases": alias_values,
+        "doc_type": str(doc_type or "").strip(),
+        "has_po": bool(has_po),
+        "is_international": bool(is_international),
+        "routing_key": key,
+        "correct_folder": correct_folder,
+        "confidence": 1,
+        "examples": [file_name] if file_name else [],
+        "source": source,
+        "created_at": now,
+        "updated_at": now,
+    })
+    return {"status": "created", "key": key}
 
 
 async def lookup_feedback(
@@ -136,33 +311,81 @@ async def lookup_feedback(
     is_international: bool,
     min_confidence: int = 1,
 ) -> Optional[str]:
-    """
-    Check if we have a learned routing rule for this document profile.
-    Returns the correct_folder if found, None otherwise.
-    """
+    """Return an alias-aware learned folder for this document profile."""
     if _db is None:
         return None
 
-    key = _make_routing_key(vendor, doc_type, has_po, is_international)
+    candidates = await _vendor_candidates(vendor)
+    if not candidates:
+        return None
 
-    rule = await _db[COLLECTION].find_one(
-        {"routing_key": key, "confidence": {"$gte": min_confidence}},
-        {"_id": 0, "correct_folder": 1, "confidence": 1}
+    keys = [
+        _make_routing_key(c["normalized"], doc_type, has_po, is_international)
+        for c in candidates
+    ]
+    rules = await _db[COLLECTION].find(
+        {
+            "routing_key": {"$in": keys},
+            "confidence": {"$gte": min_confidence},
+        },
+        {"_id": 0},
+    ).to_list(100)
+
+    # Compatibility fallback for records whose key/profile fields were created
+    # by an older script and are not perfectly synchronized.
+    if not rules:
+        patterns = [c["normalized"] for c in candidates]
+        profile = _rule_profile_query(doc_type, has_po, is_international)
+        rules = await _db[COLLECTION].find(
+            {
+                **profile,
+                "vendor_pattern": {"$in": patterns},
+                "confidence": {"$gte": min_confidence},
+            },
+            {"_id": 0},
+        ).to_list(100)
+
+    if not rules:
+        return None
+
+    exact_key = _make_routing_key(vendor, doc_type, has_po, is_international)
+    rules.sort(key=lambda rule: (
+        int(rule.get("confidence", 1)),
+        rule.get("routing_key") == exact_key,
+        str(rule.get("updated_at") or ""),
+    ), reverse=True)
+
+    strongest_confidence = int(rules[0].get("confidence", 1))
+    strongest = [r for r in rules if int(r.get("confidence", 1)) == strongest_confidence]
+    folders = {str(r.get("correct_folder") or "").strip().lower() for r in strongest}
+    if len(folders) > 1:
+        exact = next((r for r in strongest if r.get("routing_key") == exact_key), None)
+        if exact:
+            chosen = exact
+        else:
+            logger.warning(
+                "[Feedback] Alias conflict for vendor=%s type=%s keys=%s folders=%s; falling back to deterministic routing",
+                vendor, doc_type, keys, sorted(folders),
+            )
+            return None
+    else:
+        chosen = strongest[0]
+
+    logger.info(
+        "[Feedback] Alias-aware hit: vendor=%s matched_key=%s -> %s (confidence=%s)",
+        vendor,
+        chosen.get("routing_key"),
+        chosen.get("correct_folder"),
+        chosen.get("confidence"),
     )
-
-    if rule:
-        logger.info(f"[Feedback] Hit: {key} → {rule['correct_folder']} (confidence={rule['confidence']})")
-        return rule["correct_folder"]
-
-    return None
+    return chosen.get("correct_folder")
 
 
 async def get_all_rules() -> list:
     """Return all learned routing rules."""
     if _db is None:
         return []
-    rules = await _db[COLLECTION].find({}, {"_id": 0}).sort("confidence", -1).to_list(500)
-    return rules
+    return await _db[COLLECTION].find({}, {"_id": 0}).sort("confidence", -1).to_list(500)
 
 
 async def delete_rule(routing_key: str) -> bool:

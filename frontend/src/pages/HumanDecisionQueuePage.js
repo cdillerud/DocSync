@@ -4,10 +4,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import {
-  ScanSearch, RefreshCw, Loader2, CheckCircle2, HelpCircle, Building2, Info,
-  Eye, EyeOff, ExternalLink, FileWarning, FolderOpen, Brain, Save,
+  ScanSearch,
+  RefreshCw,
+  Loader2,
+  CheckCircle2,
+  HelpCircle,
+  Building2,
+  Info,
+  Eye,
+  EyeOff,
+  ExternalLink,
+  FileWarning,
+  FolderOpen,
 } from 'lucide-react';
 import api, { getHumanDecisionQueue, bulkClassifyDocuments } from '@/lib/api';
+import HumanRoutingBrowserDialog from '@/components/HumanRoutingBrowserDialog';
 
 const ISSUE_TYPE_META = {
   isolated_misroute: { label: 'Wrong mailbox', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
@@ -20,22 +31,12 @@ const TAB_ORDER = ['all', 'isolated_misroute', 'ambiguous_classification', 'ambi
 
 function groupItems(items) {
   const byKey = new Map();
-  for (const it of items) {
-    const key = `${it.doc_id}|${it.issue_type}`;
+  for (const item of items) {
+    const key = `${item.doc_id}|${item.issue_type}`;
     if (!byKey.has(key)) byKey.set(key, []);
-    byKey.get(key).push(it);
+    byKey.get(key).push(item);
   }
   return [...byKey.values()];
-}
-
-function normalizeFolder(path) {
-  return (path || '')
-    .replaceAll('\\', '/')
-    .split('/')
-    .map(part => part.trim())
-    .filter(Boolean)
-    .join('/')
-    .toLowerCase();
 }
 
 function previewKind(contentType, fileName) {
@@ -78,7 +79,6 @@ async function previewErrorMessage(error) {
 
 export default function HumanDecisionQueuePage() {
   const [data, setData] = useState(null);
-  const [folderOptions, setFolderOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
   const [resolvedKeys, setResolvedKeys] = useState(new Set());
@@ -89,37 +89,33 @@ export default function HumanDecisionQueuePage() {
     try {
       const { data: queueData } = await getHumanDecisionQueue();
       setData(queueData);
-
-      try {
-        const { data: folderData } = await api.get('/human-routing-review/folder-options');
-        setFolderOptions(folderData.options || []);
-      } catch (folderError) {
-        setFolderOptions([]);
-        toast.warning('Decision queue loaded, but folder choices could not be loaded');
-      }
-    } catch (err) {
+    } catch (error) {
       toast.error('Failed to load the decision queue');
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchQueue(); }, [fetchQueue]);
+  useEffect(() => {
+    fetchQueue();
+  }, [fetchQueue]);
 
   const groups = useMemo(() => (data ? groupItems(data.items) : []), [data]);
 
   const visibleGroups = useMemo(() => {
-    const filtered = activeTab === 'all' ? groups : groups.filter(g => g[0].issue_type === activeTab);
-    return filtered.filter(g => !resolvedKeys.has(`${g[0].doc_id}|${g[0].issue_type}`));
+    const filtered = activeTab === 'all'
+      ? groups
+      : groups.filter(group => group[0].issue_type === activeTab);
+    return filtered.filter(group => !resolvedKeys.has(`${group[0].doc_id}|${group[0].issue_type}`));
   }, [groups, activeTab, resolvedKeys]);
 
   const tabCounts = useMemo(() => {
     const counts = { all: 0 };
-    for (const g of groups) {
-      const key = `${g[0].doc_id}|${g[0].issue_type}`;
+    for (const group of groups) {
+      const key = `${group[0].doc_id}|${group[0].issue_type}`;
       if (resolvedKeys.has(key)) continue;
       counts.all += 1;
-      counts[g[0].issue_type] = (counts[g[0].issue_type] || 0) + 1;
+      counts[group[0].issue_type] = (counts[group[0].issue_type] || 0) + 1;
     }
     return counts;
   }, [groups, resolvedKeys]);
@@ -136,9 +132,9 @@ export default function HumanDecisionQueuePage() {
         reclassifyBy: 'human_decision_queue',
       });
       toast.success(`Confirmed — ${primary.file_name}`);
-      setResolvedKeys(prev => new Set(prev).add(key));
-    } catch (err) {
-      toast.error(err.response?.data?.detail || 'That decision didn’t save');
+      setResolvedKeys(previous => new Set(previous).add(key));
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'That decision didn’t save');
     } finally {
       setSubmittingKey(null);
     }
@@ -158,7 +154,7 @@ export default function HumanDecisionQueuePage() {
               Decision Queue
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Review the document, correct its type or mailbox, and choose its exact folder. Every routing confirmation becomes reusable AI guidance.
+              Review the document, correct its type or mailbox, and browse the actual SharePoint destination folders. Every routing decision becomes reusable AI guidance.
             </p>
           </div>
         </div>
@@ -193,7 +189,7 @@ export default function HumanDecisionQueuePage() {
       </div>
 
       <div className="flex items-center gap-1 border-b border-border overflow-x-auto">
-        {TAB_ORDER.filter(key => key === 'all' || tabCounts[key] > 0).map((key) => (
+        {TAB_ORDER.filter(key => key === 'all' || tabCounts[key] > 0).map(key => (
           <button
             key={key}
             onClick={() => setActiveTab(key)}
@@ -204,7 +200,8 @@ export default function HumanDecisionQueuePage() {
                 : 'border-transparent text-muted-foreground hover:text-foreground hover:border-border'
             }`}
           >
-            {key === 'all' ? 'All' : ISSUE_TYPE_META[key].label} <span className="opacity-60">{tabCounts[key] || 0}</span>
+            {key === 'all' ? 'All' : ISSUE_TYPE_META[key].label}{' '}
+            <span className="opacity-60">{tabCounts[key] || 0}</span>
           </button>
         ))}
       </div>
@@ -221,11 +218,10 @@ export default function HumanDecisionQueuePage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {visibleGroups.map((group) => (
+          {visibleGroups.map(group => (
             <DecisionCard
               key={`${group[0].doc_id}|${group[0].issue_type}`}
               group={group}
-              folderOptions={folderOptions}
               submitting={submittingKey === `${group[0].doc_id}|${group[0].issue_type}`}
               onDecide={handleDecision}
             />
@@ -236,24 +232,18 @@ export default function HumanDecisionQueuePage() {
   );
 }
 
-function DecisionCard({ group, folderOptions, submitting, onDecide }) {
+function DecisionCard({ group, submitting, onDecide }) {
   const primary = group[0];
   const meta = ISSUE_TYPE_META[primary.issue_type];
   const Icon = meta.icon;
-  const isActionable = !!primary.submit_via;
+  const isActionable = Boolean(primary.submit_via);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewContentType, setPreviewContentType] = useState('');
   const [previewError, setPreviewError] = useState('');
-
   const [routingOpen, setRoutingOpen] = useState(false);
-  const [routingLoading, setRoutingLoading] = useState(false);
-  const [routingSaving, setRoutingSaving] = useState(false);
-  const [routingInfo, setRoutingInfo] = useState(null);
-  const [selectedFolder, setSelectedFolder] = useState('');
-  const [routingResult, setRoutingResult] = useState(null);
 
   useEffect(() => {
     return () => {
@@ -328,93 +318,7 @@ function DecisionCard({ group, folderOptions, submitting, onDecide }) {
     }
   };
 
-  const loadRouting = useCallback(async () => {
-    if (routingInfo) return routingInfo;
-    setRoutingLoading(true);
-    try {
-      const { data } = await api.get(
-        `/human-routing-review/document/${encodeURIComponent(primary.doc_id)}/suggestion`
-      );
-      setRoutingInfo(data);
-      setSelectedFolder(data.current_folder || data.suggested_folder || '');
-      return data;
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'Could not load routing details');
-      return null;
-    } finally {
-      setRoutingLoading(false);
-    }
-  }, [primary.doc_id, routingInfo]);
-
-  const handleRoutingToggle = async () => {
-    if (routingOpen) {
-      setRoutingOpen(false);
-      return;
-    }
-    setRoutingOpen(true);
-    await loadRouting();
-  };
-
-  const saveRoutingDecision = async () => {
-    const folderPath = selectedFolder.trim();
-    if (!folderPath) {
-      toast.error('Choose a destination folder first');
-      return;
-    }
-
-    setRoutingSaving(true);
-    try {
-      const { data } = await api.post(
-        `/human-routing-review/document/${encodeURIComponent(primary.doc_id)}/assign`,
-        { folder_path: folderPath, source: 'human_decision_queue' }
-      );
-      setRoutingResult(data);
-      setRoutingInfo(prev => ({
-        ...(prev || {}),
-        current_folder: data.folder_path,
-        suggested_folder: data.suggested_folder,
-        reason: data.suggested_reason,
-      }));
-      setSelectedFolder(data.folder_path);
-
-      const status = data.learning?.status;
-      if (status === 'conflict') {
-        toast.warning(
-          `Folder saved, but the learned rule conflicts with an existing pattern for ${data.learning.existing_folder}`
-        );
-      } else if (status === 'strengthened') {
-        toast.success(`Routing confirmed — AI pattern reinforced to confidence ${data.learning.confidence}`);
-      } else if (status === 'created') {
-        toast.success('Routing saved — AI learned this folder pattern');
-      } else if (status === 'skipped_no_vendor') {
-        toast.success('Folder saved; this document had no safe vendor/sender signal for a reusable rule');
-      } else {
-        toast.success('Folder routing saved');
-      }
-    } catch (error) {
-      toast.error(error.response?.data?.detail || 'The routing decision did not save');
-    } finally {
-      setRoutingSaving(false);
-    }
-  };
-
   const kind = previewKind(previewContentType, primary.file_name);
-  const comparisonFolder = routingInfo?.current_folder || routingInfo?.suggested_folder || '';
-  const isRoutingConfirmation = Boolean(selectedFolder) &&
-    normalizeFolder(selectedFolder) === normalizeFolder(comparisonFolder);
-  const datalistId = `folder-options-${primary.doc_id.replace(/[^a-zA-Z0-9_-]/g, '')}`;
-  const uniqueFolderOptions = useMemo(() => {
-    const paths = new Map();
-    for (const option of folderOptions || []) {
-      if (option.path) paths.set(normalizeFolder(option.path), option);
-    }
-    for (const specialPath of [routingInfo?.suggested_folder, routingInfo?.current_folder]) {
-      if (specialPath && !paths.has(normalizeFolder(specialPath))) {
-        paths.set(normalizeFolder(specialPath), { path: specialPath, description: '' });
-      }
-    }
-    return [...paths.values()];
-  }, [folderOptions, routingInfo]);
 
   return (
     <Card className="border border-border" data-testid="decision-card">
@@ -444,7 +348,9 @@ function DecisionCard({ group, folderOptions, submitting, onDecide }) {
           {primary.context?.square9_name && (
             <span className="font-mono">
               <span className="font-sans text-foreground font-medium">vs</span>{' '}
-              {group.length > 1 ? group.map(g => g.context.square9_name).join(', ') : primary.context.square9_name}
+              {group.length > 1
+                ? group.map(item => item.context.square9_name).join(', ')
+                : primary.context.square9_name}
             </span>
           )}
           {primary.ai_confidence != null && (
@@ -478,16 +384,11 @@ function DecisionCard({ group, folderOptions, submitting, onDecide }) {
             type="button"
             size="sm"
             variant="outline"
-            onClick={handleRoutingToggle}
-            disabled={routingLoading}
-            data-testid={`toggle-routing-review-${primary.doc_id}`}
+            onClick={() => setRoutingOpen(true)}
+            data-testid={`open-routing-review-${primary.doc_id}`}
           >
-            {routingLoading ? (
-              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
-            )}
-            {routingOpen ? 'Hide routing' : 'Review routing'}
+            <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+            Review routing
           </Button>
 
           <Button
@@ -553,114 +454,6 @@ function DecisionCard({ group, folderOptions, submitting, onDecide }) {
           </div>
         )}
 
-        {routingOpen && (
-          <div className="mb-4 rounded-md border border-sky-500/25 bg-sky-500/5 p-4" data-testid={`routing-review-${primary.doc_id}`}>
-            {routingLoading ? (
-              <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Loading routing options...
-              </div>
-            ) : routingInfo ? (
-              <div className="space-y-3">
-                <div className="flex items-start gap-2">
-                  <Brain className="w-4 h-4 mt-0.5 text-sky-400 shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-sky-400">AI suggestion</p>
-                    <p className="font-mono text-sm break-all">{routingInfo.suggested_folder || 'No suggestion available'}</p>
-                    {routingInfo.reason && <p className="text-xs text-muted-foreground mt-1">{routingInfo.reason}</p>}
-                  </div>
-                </div>
-
-                {routingInfo.current_folder && (
-                  <p className="text-xs text-muted-foreground">
-                    <span className="font-medium text-foreground">Currently assigned:</span>{' '}
-                    <span className="font-mono">{routingInfo.current_folder}</span>
-                  </p>
-                )}
-
-                <div>
-                  <label htmlFor={`folder-input-${primary.doc_id}`} className="text-xs font-medium text-foreground">
-                    Exact destination folder
-                  </label>
-                  <input
-                    id={`folder-input-${primary.doc_id}`}
-                    list={datalistId}
-                    value={selectedFolder}
-                    onChange={event => {
-                      setSelectedFolder(event.target.value);
-                      setRoutingResult(null);
-                    }}
-                    placeholder="Choose a folder or type a more specific path"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring"
-                    data-testid={`routing-folder-input-${primary.doc_id}`}
-                  />
-                  <datalist id={datalistId}>
-                    {uniqueFolderOptions.map(option => (
-                      <option key={option.path} value={option.path}>{option.description || option.path}</option>
-                    ))}
-                  </datalist>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {folderOptions.length > 0
-                      ? `${folderOptions.length} configured folder destinations are available. You can also type an exact subfolder path.`
-                      : 'Type the exact relative SharePoint folder path.'}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {routingInfo.suggested_folder && normalizeFolder(selectedFolder) !== normalizeFolder(routingInfo.suggested_folder) && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setSelectedFolder(routingInfo.suggested_folder)}
-                    >
-                      <Brain className="w-3.5 h-3.5 mr-1.5" /> Use AI suggestion
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={saveRoutingDecision}
-                    disabled={routingSaving || !selectedFolder.trim()}
-                    data-testid={`save-routing-${primary.doc_id}`}
-                  >
-                    {routingSaving ? (
-                      <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <Save className="w-3.5 h-3.5 mr-1.5" />
-                    )}
-                    {isRoutingConfirmation ? 'Confirm AI routing' : 'Save routing correction'}
-                  </Button>
-                </div>
-
-                {routingResult && (
-                  <div className={`rounded border px-3 py-2 text-xs ${
-                    routingResult.learning?.status === 'conflict'
-                      ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                      : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                  }`}>
-                    <p className="font-medium">
-                      Folder saved as <span className="font-mono">{routingResult.folder_path}</span>.
-                    </p>
-                    {routingResult.learning?.status === 'created' && <p>The AI learned a new reusable routing pattern.</p>}
-                    {routingResult.learning?.status === 'strengthened' && <p>The existing AI routing pattern was reinforced.</p>}
-                    {routingResult.learning?.status === 'conflict' && (
-                      <p>
-                        The document was routed, but the learner kept the established rule for{' '}
-                        <span className="font-mono">{routingResult.learning.existing_folder}</span> instead of overwriting it.
-                      </p>
-                    )}
-                    {routingResult.learning?.status === 'skipped_no_vendor' && (
-                      <p>No reusable vendor/sender signal was available, so only this document was updated.</p>
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Routing details could not be loaded.</p>
-            )}
-          </div>
-        )}
-
         {isActionable ? (
           <div className="flex flex-wrap gap-2">
             {primary.issue_type === 'isolated_misroute' && (
@@ -674,23 +467,29 @@ function DecisionCard({ group, folderOptions, submitting, onDecide }) {
                 Route to AP
               </Button>
             )}
-            {primary.issue_type === 'ambiguous_classification' && primary.candidates?.map((c) => (
+            {primary.issue_type === 'ambiguous_classification' && primary.candidates?.map(candidate => (
               <Button
-                key={c}
+                key={candidate}
                 size="sm"
                 variant="outline"
                 disabled={submitting}
-                onClick={() => onDecide(group, c, undefined)}
-                data-testid={`decide-pick-${c}`}
+                onClick={() => onDecide(group, candidate, undefined)}
+                data-testid={`decide-pick-${candidate}`}
               >
                 {submitting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
-                {c.replace('_', ' ')}
+                {candidate.replace('_', ' ')}
               </Button>
             ))}
           </div>
         ) : (
           <p className="text-xs italic text-muted-foreground">{primary.note}</p>
         )}
+
+        <HumanRoutingBrowserDialog
+          open={routingOpen}
+          onOpenChange={setRoutingOpen}
+          document={primary}
+        />
       </CardContent>
     </Card>
   );

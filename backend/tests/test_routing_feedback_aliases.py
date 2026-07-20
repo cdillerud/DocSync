@@ -87,28 +87,31 @@ async def _ball_candidates(_vendor):
         {"value": "BALLCOR", "normalized": "ballcor", "source": "input", "stable": True},
         {
             "value": "BALL METAL BEVERAGE CONTAINER CORP",
-            "normalized": "ball metal beverage container corp",
-            "source": "hub_documents.vendor_raw",
+            "normalized": "ball metal beverage container",
+            "source": "vendor_aliases.alias_string",
             "stable": False,
         },
     ]
 
 
-def test_lookup_feedback_matches_raw_name_rule_after_canonicalization(monkeypatch):
-    raw_key = svc._make_routing_key(
-        "BALL METAL BEVERAGE CONTAINER CORP", "AP_Invoice", True, False
-    )
-    feedback = RoutingFeedbackCollection([
-        {
-            "routing_key": raw_key,
-            "vendor_pattern": "ball metal beverage container corp",
-            "doc_type": "AP_Invoice",
-            "has_po": True,
-            "is_international": False,
-            "correct_folder": "Warehouse Not International",
-            "confidence": 4,
-        }
-    ])
+def _legacy_ball_rule(confidence=4):
+    # Deliberately bypass _make_routing_key. Production created this rule before
+    # legal-suffix normalization was introduced, so the stored key still has
+    # the trailing "corp" token.
+    return {
+        "routing_key": "ball metal beverage container corp|AP_Invoice|po|domestic",
+        "vendor_pattern": "ball metal beverage container corp",
+        "doc_type": "AP_Invoice",
+        "has_po": True,
+        "is_international": False,
+        "correct_folder": "Warehouse Not International",
+        "confidence": confidence,
+        "examples": [],
+    }
+
+
+def test_lookup_feedback_matches_legacy_raw_name_rule_after_canonicalization(monkeypatch):
+    feedback = RoutingFeedbackCollection([_legacy_ball_rule()])
 
     monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
     monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
@@ -117,22 +120,8 @@ def test_lookup_feedback_matches_raw_name_rule_after_canonicalization(monkeypatc
     assert result == "Warehouse Not International"
 
 
-def test_record_correction_strengthens_alias_rule_instead_of_creating_duplicate(monkeypatch):
-    raw_key = svc._make_routing_key(
-        "BALL METAL BEVERAGE CONTAINER CORP", "AP_Invoice", True, False
-    )
-    feedback = RoutingFeedbackCollection([
-        {
-            "routing_key": raw_key,
-            "vendor_pattern": "ball metal beverage container corp",
-            "doc_type": "AP_Invoice",
-            "has_po": True,
-            "is_international": False,
-            "correct_folder": "Warehouse Not International",
-            "confidence": 4,
-            "examples": [],
-        }
-    ])
+def test_record_correction_strengthens_legacy_alias_rule_instead_of_creating_duplicate(monkeypatch):
+    feedback = RoutingFeedbackCollection([_legacy_ball_rule()])
 
     monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))
     monkeypatch.setattr(svc, "_vendor_candidates", _ball_candidates)
@@ -155,20 +144,18 @@ def test_record_correction_strengthens_alias_rule_instead_of_creating_duplicate(
 
 
 def test_exact_canonical_rule_wins_equal_confidence_alias_conflict(monkeypatch):
-    rules = []
-    for vendor, folder in (
-        ("BALLCOR", "Dropship Not International"),
-        ("BALL METAL BEVERAGE CONTAINER CORP", "Warehouse Not International"),
-    ):
-        rules.append({
-            "routing_key": svc._make_routing_key(vendor, "AP_Invoice", True, False),
-            "vendor_pattern": svc._normalize_vendor(vendor),
+    rules = [
+        {
+            "routing_key": svc._make_routing_key("BALLCOR", "AP_Invoice", True, False),
+            "vendor_pattern": svc._normalize_vendor("BALLCOR"),
             "doc_type": "AP_Invoice",
             "has_po": True,
             "is_international": False,
-            "correct_folder": folder,
+            "correct_folder": "Dropship Not International",
             "confidence": 4,
-        })
+        },
+        _legacy_ball_rule(confidence=4),
+    ]
     feedback = RoutingFeedbackCollection(rules)
 
     monkeypatch.setattr(svc, "_db", FakeDB(routing_feedback=feedback))

@@ -4,9 +4,12 @@ import {
   CheckCircle2,
   Clock3,
   ExternalLink,
+  FileOutput,
+  Files,
   FileText,
   FolderCheck,
   FolderSearch,
+  History,
   Inbox,
   RefreshCw,
   Route,
@@ -57,6 +60,22 @@ const LANE_COLORS = {
   Other: "bg-zinc-500/15 text-zinc-400",
 };
 
+const SUGGESTION_CAPTURE_LABELS = {
+  initial_snapshot: "Initial snapshot",
+  human_review: "Human review",
+  file_and_clear_decision: "Recorded filing decision",
+  stored_suggestion: "Stored suggestion",
+  computed_current_rule: "Current rule — not historical",
+};
+
+const SUGGESTION_CAPTURE_COLORS = {
+  initial_snapshot: "bg-sky-500/15 text-sky-400",
+  human_review: "bg-violet-500/15 text-violet-400",
+  file_and_clear_decision: "bg-emerald-500/15 text-emerald-400",
+  stored_suggestion: "bg-blue-500/15 text-blue-400",
+  computed_current_rule: "bg-amber-500/15 text-amber-400",
+};
+
 const formatLabel = (value) => {
   if (!value) return "—";
   return String(value)
@@ -71,10 +90,23 @@ const formatReceived = (value) => {
   return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 };
 
+const formatSuggestedAt = (value) => {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
+
+const displayPath = (value) => {
+  if (!value) return "—";
+  const path = String(value).replace(/^\/+/, "");
+  return `/${path}`;
+};
+
 const valueIncludes = (value, search) =>
   String(value || "").toLowerCase().includes(search);
 
-function SummaryCard({ icon: Icon, label, value, tone = "text-foreground" }) {
+function SummaryCard({ icon: Icon, label, value, tone = "text-foreground", note = "" }) {
   return (
     <div className="rounded-md border border-border/50 bg-muted/15 px-3 py-2">
       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -82,6 +114,70 @@ function SummaryCard({ icon: Icon, label, value, tone = "text-foreground" }) {
         {label}
       </div>
       <div className="mt-1 text-lg font-semibold tabular-nums">{value ?? 0}</div>
+      {note && <div className="mt-0.5 text-[9px] text-muted-foreground/70">{note}</div>}
+    </div>
+  );
+}
+
+function SourceDetail({ doc }) {
+  if (!doc.source_file_name) return null;
+
+  const isMultiOutput = Number(doc.source_output_count || 1) > 1;
+  const isDifferentName = doc.source_file_name !== doc.file_name;
+  if (!isMultiOutput && !isDifferentName) return null;
+
+  const part = doc.source_part_number
+    ? `output ${doc.source_part_number} of ${doc.source_output_count}`
+    : `${doc.source_output_count} outputs`;
+
+  return (
+    <div className="mt-1 rounded border border-border/40 bg-muted/15 px-2 py-1 text-[9px] text-muted-foreground">
+      <div className="flex items-center gap-1">
+        <FileOutput className="h-2.5 w-2.5 shrink-0 text-sky-400" />
+        <span className="truncate" title={doc.source_file_name}>
+          Source: {doc.source_file_name}
+        </span>
+      </div>
+      {isMultiOutput && <div className="mt-0.5 text-sky-400">Split {part}</div>}
+    </div>
+  );
+}
+
+function SuggestionEvidence({ doc }) {
+  const captureLabel = SUGGESTION_CAPTURE_LABELS[doc.suggestion_capture]
+    || formatLabel(doc.suggestion_capture);
+  const captureColor = SUGGESTION_CAPTURE_COLORS[doc.suggestion_capture]
+    || "bg-zinc-500/15 text-zinc-400";
+  const suggestedTime = formatSuggestedAt(doc.suggested_at);
+
+  return (
+    <div>
+      <div
+        className="line-clamp-2 break-words text-foreground/85"
+        title={doc.suggested_folder}
+      >
+        {displayPath(doc.suggested_folder)}
+      </div>
+      {doc.suggested_folder && (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {captureLabel && (
+            <Badge className={`px-1.5 py-0 text-[8px] ${captureColor}`}>
+              {doc.suggestion_capture === "computed_current_rule" && (
+                <History className="mr-1 inline h-2.5 w-2.5" />
+              )}
+              {captureLabel}
+            </Badge>
+          )}
+          {suggestedTime && (
+            <span className="text-[9px] text-muted-foreground">{suggestedTime}</span>
+          )}
+          {doc.suggestion_matches_final && (
+            <span className="flex items-center gap-0.5 text-[9px] text-emerald-400">
+              <CheckCircle2 className="h-2.5 w-2.5" /> Matched final
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -131,7 +227,7 @@ export default function TodayIntakeDrilldown() {
       node.setAttribute("role", "button");
       node.setAttribute("tabindex", "0");
       node.setAttribute("aria-label", "Open today's intake details");
-      node.setAttribute("title", "Open today's classification and routing details");
+      node.setAttribute("title", "Open today's source files, classification, and routing details");
       node.classList.add(
         "cursor-pointer",
         "rounded-md",
@@ -173,6 +269,7 @@ export default function TodayIntakeDrilldown() {
       if (!normalizedSearch) return true;
       return [
         doc.file_name,
+        doc.source_file_name,
         doc.mailbox,
         doc.sender,
         doc.subject,
@@ -181,6 +278,8 @@ export default function TodayIntakeDrilldown() {
         doc.suggested_folder,
         doc.final_folder,
         doc.routing_reason,
+        doc.routing_source,
+        doc.suggestion_capture,
         doc.vendor_or_customer,
         doc.status,
         doc.workflow_status,
@@ -198,6 +297,8 @@ export default function TodayIntakeDrilldown() {
   };
 
   const summary = payload?.summary || {};
+  const sourceFiles = summary.source_files ?? payload?.source_files_total ?? 0;
+  const producedDocuments = summary.produced_documents ?? summary.total ?? payload?.total ?? 0;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -210,7 +311,7 @@ export default function TodayIntakeDrilldown() {
                 Today&apos;s Intake — Classification &amp; Routing
               </DialogTitle>
               <DialogDescription className="mt-1">
-                {payload?.date || "Today"} · {payload?.timezone || "America/Chicago"} · excludes batch containers
+                {payload?.date || "Today"} · {payload?.timezone || "America/Chicago"} · {sourceFiles} source {sourceFiles === 1 ? "file" : "files"} → {producedDocuments} processed {producedDocuments === 1 ? "document" : "documents"} · excludes batch containers
               </DialogDescription>
             </div>
             <Button
@@ -227,14 +328,15 @@ export default function TodayIntakeDrilldown() {
           </div>
         </DialogHeader>
 
-        <div className="grid grid-cols-2 gap-2 border-b border-border/40 px-6 py-3 sm:grid-cols-4 xl:grid-cols-7">
-          <SummaryCard icon={Inbox} label="Received" value={summary.total} tone="text-sky-400" />
+        <div className="grid grid-cols-2 gap-2 border-b border-border/40 px-6 py-3 sm:grid-cols-4 xl:grid-cols-8">
+          <SummaryCard icon={Files} label="Source files" value={sourceFiles} tone="text-sky-400" note="Original attachments" />
+          <SummaryCard icon={FileOutput} label="Documents" value={producedDocuments} tone="text-cyan-400" note={summary.split_outputs ? `${summary.split_outputs} split outputs` : "No split expansion"} />
           <SummaryCard icon={FileText} label="AP" value={summary.ap} tone="text-blue-400" />
           <SummaryCard icon={Warehouse} label="Warehouse" value={summary.warehouse} tone="text-violet-400" />
           <SummaryCard icon={ShieldCheck} label="Auto-routed" value={summary.auto_routed} tone="text-emerald-400" />
           <SummaryCard icon={Clock3} label="Needs review" value={summary.needs_review} tone="text-amber-400" />
           <SummaryCard icon={AlertTriangle} label="Unrouted" value={summary.unrouted} tone="text-red-400" />
-          <SummaryCard icon={FolderCheck} label="Filed" value={summary.filed} tone="text-emerald-400" />
+          <SummaryCard icon={FolderCheck} label="Filed" value={summary.filed} tone="text-emerald-400" note={summary.suggestion_matches_final ? `${summary.suggestion_matches_final} matched first choice` : ""} />
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-border/40 px-6 py-3">
@@ -243,7 +345,7 @@ export default function TodayIntakeDrilldown() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search file, mailbox, class, folder, reason..."
+              placeholder="Search file, source, mailbox, class, folder, reason..."
               className="h-8 pl-9 text-xs"
               data-testid="today-drilldown-search"
             />
@@ -276,7 +378,7 @@ export default function TodayIntakeDrilldown() {
           </select>
 
           <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-            Showing {filteredDocuments.length} of {payload?.total || 0}
+            Showing {filteredDocuments.length} of {payload?.total || 0} documents
           </span>
         </div>
 
@@ -295,15 +397,15 @@ export default function TodayIntakeDrilldown() {
               No documents match the selected filters.
             </div>
           ) : (
-            <table className="w-full min-w-[1420px] text-left text-xs">
+            <table className="w-full min-w-[1540px] text-left text-xs">
               <thead className="sticky top-0 z-10 bg-background/95 backdrop-blur">
                 <tr className="border-b border-border/60 text-muted-foreground">
                   <th className="px-4 py-2.5 font-medium">Received</th>
-                  <th className="px-4 py-2.5 font-medium">Document</th>
+                  <th className="px-4 py-2.5 font-medium">Produced document / source file</th>
                   <th className="px-4 py-2.5 font-medium">Mailbox / Lane</th>
                   <th className="px-4 py-2.5 font-medium">Classification</th>
                   <th className="px-4 py-2.5 font-medium">Routing</th>
-                  <th className="px-4 py-2.5 font-medium">Suggested destination</th>
+                  <th className="px-4 py-2.5 font-medium">Initial suggestion</th>
                   <th className="px-4 py-2.5 font-medium">Final destination</th>
                   <th className="px-4 py-2.5 font-medium">Workflow</th>
                   <th className="w-12 px-4 py-2.5"></th>
@@ -320,16 +422,17 @@ export default function TodayIntakeDrilldown() {
                     <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
                       {formatReceived(doc.received_local || doc.received_utc)}
                     </td>
-                    <td className="max-w-[260px] px-4 py-3">
+                    <td className="max-w-[300px] px-4 py-3">
                       <div className="flex items-start gap-2">
                         <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-foreground" title={doc.file_name}>
                             {doc.file_name}
                           </div>
                           <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={doc.vendor_or_customer || doc.sender}>
                             {doc.vendor_or_customer || doc.sender || "—"}
                           </div>
+                          <SourceDetail doc={doc} />
                         </div>
                       </div>
                     </td>
@@ -357,14 +460,12 @@ export default function TodayIntakeDrilldown() {
                         {doc.routing_reason || doc.routing_source || "No routing reason recorded"}
                       </div>
                     </td>
-                    <td className="max-w-[260px] px-4 py-3">
-                      <div className="line-clamp-2 break-words text-foreground/85" title={doc.suggested_folder}>
-                        {doc.suggested_folder || "—"}
-                      </div>
+                    <td className="max-w-[290px] px-4 py-3">
+                      <SuggestionEvidence doc={doc} />
                     </td>
-                    <td className="max-w-[260px] px-4 py-3">
+                    <td className="max-w-[270px] px-4 py-3">
                       <div className="line-clamp-2 break-words text-foreground/85" title={doc.final_folder}>
-                        {doc.final_folder || "—"}
+                        {displayPath(doc.final_folder)}
                       </div>
                       {doc.filed && (
                         <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-400">

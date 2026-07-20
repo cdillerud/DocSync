@@ -213,6 +213,83 @@ def _rule_profile_query(doc_type: str, has_po: bool, is_international: bool) -> 
     }
 
 
+def _rule_vendor_values(rule: Dict[str, Any]) -> List[str]:
+    """Return every vendor identity encoded in a legacy or current rule."""
+    values: List[str] = []
+    for field in ("vendor_pattern", "vendor_canonical_key"):
+        value = rule.get(field)
+        if value:
+            values.append(str(value))
+
+    aliases = rule.get("vendor_aliases") or []
+    if isinstance(aliases, str):
+        aliases = [aliases]
+    values.extend(str(value) for value in aliases if value)
+
+    routing_key = str(rule.get("routing_key") or "")
+    if "|" in routing_key:
+        values.append(routing_key.split("|", 1)[0])
+
+    return values
+
+
+def _rule_matches_candidates(rule: Dict[str, Any], candidate_normalized: set) -> bool:
+    """Compare legacy stored vendor text after applying today's normalizer.
+
+    Older feedback records stored raw legal suffixes directly in routing_key and
+    vendor_pattern. Mongo exact matching cannot bridge a legacy value such as
+    ``ball metal beverage container corp`` to today's normalized
+    ``ball metal beverage container``. Normalize both sides in Python instead.
+    """
+    return any(
+        normalized in candidate_normalized
+        for normalized in (_normalize_vendor(value) for value in _rule_vendor_values(rule))
+        if normalized
+    )
+
+
+async def _profile_alias_rules(
+    candidates: List[Dict[str, Any]],
+    doc_type: str,
+    has_po: bool,
+    is_international: bool,
+    *,
+    min_confidence: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Load profile-compatible rules and retain only alias-equivalent vendors."""
+    query: Dict[str, Any] = _rule_profile_query(doc_type, has_po, is_international)
+    if min_confidence is not None:
+        query["confidence"] = {"$gte": min_confidence}
+
+    rules = await _db[COLLECTION].find(query, {"_id": 0}).to_list(500)
+    normalized_candidates = {
+        candidate["normalized"]
+        for candidate in candidates
+        if candidate.get("normalized")
+    }
+    return [
+        rule for rule in rules
+        if _rule_matches_candidates(rule, normalized_candidates)
+    ]
+
+
+def _deduplicate_rules(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """De-duplicate exact-key and compatibility-query results."""
+    deduped: List[Dict[str, Any]] = []
+    seen = set()
+    for rule in rules:
+        identity = (
+            str(rule.get("routing_key") or ""),
+            str(rule.get("correct_folder") or ""),
+            str(rule.get("created_at") or ""),
+        )
+        if identity in seen:
+            continue
+        seen.add(identity)
+        deduped.append(rule)
+    return deduped
+
+
 async def record_correction(
     vendor: str,
     doc_type: str,
@@ -241,10 +318,17 @@ async def record_correction(
     ]
     now = datetime.now(timezone.utc).isoformat()
 
-    existing_rules = await _db[COLLECTION].find(
+    exact_rules = await _db[COLLECTION].find(
         {"routing_key": {"$in": keys}},
         {"_id": 0},
     ).to_list(100)
+    legacy_rules = await _profile_alias_rules(
+        candidates,
+        doc_type,
+        has_po,
+        is_international,
+    )
+    existing_rules = _deduplicate_rules(exact_rules + legacy_rules)
 
     conflicting = [
         rule for rule in existing_rules
@@ -323,27 +407,21 @@ async def lookup_feedback(
         _make_routing_key(c["normalized"], doc_type, has_po, is_international)
         for c in candidates
     ]
-    rules = await _db[COLLECTION].find(
+    exact_rules = await _db[COLLECTION].find(
         {
             "routing_key": {"$in": keys},
             "confidence": {"$gte": min_confidence},
         },
         {"_id": 0},
     ).to_list(100)
-
-    # Compatibility fallback for records whose key/profile fields were created
-    # by an older script and are not perfectly synchronized.
-    if not rules:
-        patterns = [c["normalized"] for c in candidates]
-        profile = _rule_profile_query(doc_type, has_po, is_international)
-        rules = await _db[COLLECTION].find(
-            {
-                **profile,
-                "vendor_pattern": {"$in": patterns},
-                "confidence": {"$gte": min_confidence},
-            },
-            {"_id": 0},
-        ).to_list(100)
+    legacy_rules = await _profile_alias_rules(
+        candidates,
+        doc_type,
+        has_po,
+        is_international,
+        min_confidence=min_confidence,
+    )
+    rules = _deduplicate_rules(exact_rules + legacy_rules)
 
     if not rules:
         return None

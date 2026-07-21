@@ -1853,9 +1853,16 @@ async def intake_document_from_bytes(
         sender_email = (existing_doc or {}).get("email_sender", "")
         if sender_email:
             from services.vendor_matching import lookup_vendor_by_sender
+
+            extracted_vendor_for_sender_guard = (
+                normalized_fields.get("vendor_raw")
+                or normalized_fields.get("vendor")
+                or extracted_fields.get("vendor")
+                or extracted_fields.get("vendor_name")
+            )
             sender_result = await lookup_vendor_by_sender(
                 sender_email,
-                extracted_vendor=normalized_fields.get("vendor_raw"),
+                extracted_vendor=extracted_vendor_for_sender_guard,
                 document_id=doc_id,
             )
             if sender_result.get("vendor_canonical"):

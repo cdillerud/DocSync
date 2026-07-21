@@ -152,3 +152,79 @@ def vendor_match_likely(a: str, b: str) -> bool:
             if x in y or y in x:
                 return True
     return False
+
+# ---------------------------------------------------------------------------
+# Strict vendor identity agreement
+# ---------------------------------------------------------------------------
+
+_VENDOR_IDENTITY_GENERIC_TOKENS = {
+    "packaging",
+    "solution",
+    "solutions",
+    "service",
+    "services",
+    "logistics",
+    "transport",
+    "transportation",
+    "warehouse",
+    "manufacturing",
+    "manufacturer",
+    "industry",
+    "industries",
+    "product",
+    "products",
+    "supply",
+    "supplies",
+    "distribution",
+    "distributor",
+    "distributors",
+    "global",
+    "international",
+    "group",
+    "holdings",
+}
+
+
+def _vendor_identity_anchor_tokens(value: str) -> set:
+    """Return brand-like tokens, excluding generic business descriptors."""
+    normalized = normalize_vendor_name(value)
+    return {
+        token
+        for token in normalized.split()
+        if token and token not in _VENDOR_IDENTITY_GENERIC_TOKENS
+    }
+
+
+def vendor_identity_agrees(a: str, b: str) -> bool:
+    """Safely decide whether two non-empty names identify the same vendor.
+
+    This is intentionally stricter than vendor_match_likely. Generic shared
+    words such as "packaging", "solutions", and "logistics" are not enough
+    to allow sender-, alias-, or history-derived evidence to replace the
+    vendor name extracted directly from a document.
+    """
+    if not a or not b:
+        return True
+
+    normalized_a = normalize_vendor_name(a)
+    normalized_b = normalize_vendor_name(b)
+
+    if not normalized_a or not normalized_b:
+        return True
+    if normalized_a == normalized_b:
+        return True
+
+    anchors_a = _vendor_identity_anchor_tokens(a)
+    anchors_b = _vendor_identity_anchor_tokens(b)
+    score = calculate_fuzzy_score(a, b)
+
+    if anchors_a and anchors_b:
+        anchor_agreement = any(
+            left in right or right in left
+            for left in anchors_a
+            for right in anchors_b
+        )
+        return anchor_agreement and score >= 0.55
+
+    # With no distinctive brand tokens, require near-identical full names.
+    return score >= 0.92

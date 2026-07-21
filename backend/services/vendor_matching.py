@@ -85,6 +85,40 @@ async def lookup_vendor_by_sender(
     if not sender_email:
         return {"vendor_canonical": None, "vendor_match_method": "none"}
 
+    # Some intake callers historically supplied document_id but omitted the
+    # extracted vendor. Recover the document-derived identity before applying
+    # sender history so the sender guard cannot silently become inactive.
+    if not extracted_vendor and document_id:
+        try:
+            evidence_doc = await db.hub_documents.find_one(
+                {"id": document_id},
+                {
+                    "_id": 0,
+                    "vendor_raw": 1,
+                    "normalized_fields": 1,
+                    "extracted_fields": 1,
+                    "ai_extraction": 1,
+                },
+            ) or {}
+            normalized = evidence_doc.get("normalized_fields") or {}
+            extracted = evidence_doc.get("extracted_fields") or {}
+            ai_extraction = evidence_doc.get("ai_extraction") or {}
+            extracted_vendor = (
+                normalized.get("vendor_raw")
+                or normalized.get("vendor")
+                or evidence_doc.get("vendor_raw")
+                or extracted.get("vendor")
+                or extracted.get("vendor_name")
+                or ai_extraction.get("vendor")
+                or ""
+            )
+        except Exception as evidence_error:
+            logger.warning(
+                "[SenderGuard] Could not recover extracted vendor for doc=%s: %s",
+                document_id,
+                evidence_error,
+            )
+
     email_lower = sender_email.strip().lower()
 
     # Locate a mapping (exact email first, then domain). Track which kind
@@ -114,9 +148,9 @@ async def lookup_vendor_by_sender(
     # --- Sender-Stamp Guard v1 ---
     guard_enabled = os.environ.get("SENDER_STAMP_GUARD_ENABLED", "true").lower() == "true"
     if guard_enabled and strict and extracted_vendor:
-        from services.vendor_name_helpers import vendor_match_likely
+        from services.vendor_name_helpers import vendor_identity_agrees
         sender_name = mapping.get("vendor_name") or mapping.get("vendor_canonical")
-        if not vendor_match_likely(extracted_vendor, sender_name):
+        if not vendor_identity_agrees(extracted_vendor, sender_name):
             await _emit_sender_disagreed(
                 db,
                 sender_email=email_lower,
@@ -316,6 +350,30 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
             {"alias": vendor_normalized.strip().upper()},
         ]
     }, {"_id": 0})
+
+    # Auto-learned aliases are advisory. Ignore a learned alias when its
+    # resolved vendor name conflicts with the vendor printed on this document.
+    # Manual aliases remain authoritative because they may represent valid
+    # brand-to-legal-entity mappings with different names.
+    if alias_doc and alias_doc.get("source") in {
+        "auto_learned",
+        "document_history",
+        "document_history_seed",
+    }:
+        from services.vendor_name_helpers import vendor_identity_agrees
+
+        learned_name = str(alias_doc.get("vendor_name") or "").strip()
+        if learned_name and not vendor_identity_agrees(
+            vendor_normalized,
+            learned_name,
+        ):
+            logger.warning(
+                "[VendorAliasGuard] Ignoring conflicting learned alias %r -> %r (%s)",
+                vendor_normalized,
+                learned_name,
+                alias_doc.get("vendor_no") or alias_doc.get("canonical_vendor_id"),
+            )
+            alias_doc = None
 
     if alias_doc:
         canonical_id = (

@@ -570,7 +570,13 @@ async def _validate_bc_match_inner(
                             try:
                                 resolved_no = vendor_result["selected_vendor"].get("number", "")
                                 resolved_name = vendor_result["selected_vendor"].get("displayName", "")
-                                if resolved_no and vendor_name:
+                                from services.vendor_name_helpers import vendor_identity_agrees
+                                if (
+                                    resolved_no
+                                    and vendor_name
+                                    and resolved_name
+                                    and vendor_identity_agrees(vendor_name, resolved_name)
+                                ):
                                     import uuid
                                     from services.vendor_name_helpers import normalize_vendor_name
                                     alias_key = normalize_vendor_name(vendor_name).upper()

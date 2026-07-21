@@ -19,6 +19,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timezone
 
 from services.reference_helpers import normalize_company_name, fuzzy_ratio, is_freight_carrier
+from services.vendor_name_helpers import vendor_identity_agrees
 from services.bc_access import get_bc_adapter
 
 logger = logging.getLogger(__name__)
@@ -175,49 +176,141 @@ class UnifiedVendorMatcher:
         return result
     
     async def _match_from_document_history(
-        self, 
-        vendor_name: str, 
-        vendor_normalized: str
+        self,
+        vendor_name: str,
+        vendor_normalized: str,
     ) -> Optional[Dict]:
-        """Check document history for previously matched vendors."""
-        
-        # Look for exact matches first
-        doc = await self.db.hub_documents.find_one(
-            {
-                "$or": [
-                    {"vendor_canonical": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"}},
-                    {"extracted_fields.vendor": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"}}
-                ],
-                "bc_vendor_number": {"$exists": True, "$ne": None}
-            },
-            {"_id": 0, "vendor_canonical": 1, "bc_vendor_number": 1, "bc_vendor_id": 1}
-        )
-        
-        if doc:
+        """Use history only when extracted and resolved identities agree."""
+
+        projection = {
+            "_id": 0,
+            "vendor_canonical": 1,
+            "vendor_name": 1,
+            "vendor_name_resolved": 1,
+            "vendor_resolution": 1,
+            "vendor_raw": 1,
+            "bc_vendor_number": 1,
+            "bc_vendor_id": 1,
+            "extracted_fields.vendor": 1,
+            "normalized_fields.vendor": 1,
+            "validation_results.bc_record_info": 1,
+            "routing_details.validation_results.bc_record_info": 1,
+        }
+
+        def candidate_display_name(doc: Dict[str, Any]) -> str:
+            resolution = doc.get("vendor_resolution") or {}
+            validation = doc.get("validation_results") or {}
+            routing_validation = (
+                (doc.get("routing_details") or {}).get("validation_results")
+                or {}
+            )
+            return str(
+                resolution.get("vendor_name")
+                or resolution.get("display_name")
+                or (validation.get("bc_record_info") or {}).get("displayName")
+                or (routing_validation.get("bc_record_info") or {}).get(
+                    "displayName"
+                )
+                or doc.get("vendor_name_resolved")
+                or doc.get("vendor_name")
+                or doc.get("vendor_canonical")
+                or ""
+            ).strip()
+
+        async def trusted_history_document(
+            query: Dict[str, Any],
+            matched_by: str,
+        ) -> Optional[Dict[str, Any]]:
+            doc = await self.db.hub_documents.find_one(query, projection)
+            if not doc:
+                return None
+
+            resolved_name = candidate_display_name(doc)
+            if not resolved_name or not vendor_identity_agrees(
+                vendor_name,
+                resolved_name,
+            ):
+                logger.warning(
+                    "[VendorHistoryGuard] Rejected conflict input=%r "
+                    "resolved=%r vendor_no=%r matched_by=%s",
+                    vendor_name,
+                    resolved_name,
+                    doc.get("bc_vendor_number"),
+                    matched_by,
+                )
+                return None
+
             return {
-                "name": doc.get("vendor_canonical"),
+                "name": resolved_name,
                 "vendor_number": doc.get("bc_vendor_number"),
                 "vendor_id": doc.get("bc_vendor_id"),
                 "score": 1.0,
-                "method": "document_history_exact"
+                "method": matched_by,
             }
-        
-        # Check vendor matches collection
+
+        exact_regex = {
+            "$regex": f"^{re.escape(vendor_name)}$",
+            "$options": "i",
+        }
+        vendor_number_exists = {"$exists": True, "$nin": [None, ""]}
+
+        # First prefer a record whose resolved canonical itself matches.
+        canonical_match = await trusted_history_document(
+            {
+                "vendor_canonical": exact_regex,
+                "bc_vendor_number": vendor_number_exists,
+            },
+            "document_history_canonical_exact",
+        )
+        if canonical_match:
+            return canonical_match
+
+        # Extracted-name history is useful only when the corresponding resolved
+        # BC display name still agrees. This is the path that previously allowed
+        # O-I extraction evidence to return Gamer Packaging / VIT1.
+        extracted_match = await trusted_history_document(
+            {
+                "$or": [
+                    {"extracted_fields.vendor": exact_regex},
+                    {"normalized_fields.vendor": exact_regex},
+                    {"vendor_raw": exact_regex},
+                ],
+                "bc_vendor_number": vendor_number_exists,
+            },
+            "document_history_extracted_agreement",
+        )
+        if extracted_match:
+            return extracted_match
+
+        # Cached matches can also contain historical contamination. Treat them
+        # as advisory and reject a conflicting resolved display name.
         match_doc = await self.db.vendor_matches.find_one(
             {"input_normalized": vendor_normalized},
-            {"_id": 0}
+            {"_id": 0},
         )
-        
         if match_doc:
-            return {
-                "name": match_doc.get("matched_name"),
-                "vendor_number": match_doc.get("bc_vendor_number"),
-                "vendor_id": match_doc.get("bc_vendor_id"),
-                "score": match_doc.get("score", 0.9),
-                "method": "vendor_matches_cache",
-                "is_freight": match_doc.get("is_freight", False)
-            }
-        
+            matched_name = str(match_doc.get("matched_name") or "").strip()
+            if matched_name and vendor_identity_agrees(
+                vendor_name,
+                matched_name,
+            ):
+                return {
+                    "name": matched_name,
+                    "vendor_number": match_doc.get("bc_vendor_number"),
+                    "vendor_id": match_doc.get("bc_vendor_id"),
+                    "score": match_doc.get("score", 0.9),
+                    "method": "vendor_matches_cache",
+                    "is_freight": match_doc.get("is_freight", False),
+                }
+
+            logger.warning(
+                "[VendorHistoryGuard] Rejected cached conflict input=%r "
+                "resolved=%r vendor_no=%r",
+                vendor_name,
+                matched_name,
+                match_doc.get("bc_vendor_number"),
+            )
+
         return None
     
     async def _match_from_spiro(

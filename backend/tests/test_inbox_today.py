@@ -47,6 +47,61 @@ def test_manual_routing_correction_is_visible():
     assert row["confidence_pct"] == 97.0
 
 
+
+def test_conflicting_stored_vendor_uses_extracted_vendor_for_display():
+    row = _row({
+        "id": "oi-conflict",
+        "file_name": "oi.pdf",
+        "document_type": "AP_Invoice",
+        "vendor_canonical": "Gamer Packaging, Inc.",
+        "vendor_raw": "O-I PACKAGING SOLUTIONS LLC",
+        "vendor_resolution": {
+            "vendor_name": "Gamer Packaging, Inc.",
+            "vendor_no": "VIT1",
+        },
+        "extracted_fields": {
+            "vendor": "O-I PACKAGING SOLUTIONS LLC",
+        },
+    })
+
+    assert row["vendor_or_customer"] == "O-I PACKAGING SOLUTIONS LLC"
+    assert row["vendor_identity_conflict"] is True
+    assert row["stored_vendor_label"] == "Gamer Packaging, Inc."
+    assert row["stored_vendor_no"] == "VIT1"
+
+
+def test_agreeing_ball_resolution_remains_preferred_for_display():
+    row = _row({
+        "id": "ball-valid",
+        "file_name": "ball.pdf",
+        "document_type": "AP_Invoice",
+        "vendor_canonical": "Ball Corp",
+        "vendor_raw": "BALL METAL BEVERAGE CONTAINER CORP",
+        "extracted_fields": {
+            "vendor": "BALL METAL BEVERAGE CONTAINER CORP",
+        },
+    })
+
+    assert row["vendor_or_customer"] == "Ball Corp"
+    assert row["vendor_identity_conflict"] is False
+
+
+def test_opaque_bc_vendor_code_does_not_create_false_display_conflict():
+    row = _row({
+        "id": "oi-code",
+        "file_name": "oi-code.pdf",
+        "document_type": "AP_Invoice",
+        "vendor_canonical": "OWENS",
+        "vendor_raw": "O-I PACKAGING SOLUTIONS LLC",
+        "extracted_fields": {
+            "vendor": "O-I PACKAGING SOLUTIONS LLC",
+        },
+    })
+
+    assert row["vendor_or_customer"] == "O-I PACKAGING SOLUTIONS LLC"
+    assert row["vendor_identity_conflict"] is False
+
+
 def test_file_and_clear_suggestion_fields_are_treated_as_historical():
     row = _row({
         "id": "doc-filed",

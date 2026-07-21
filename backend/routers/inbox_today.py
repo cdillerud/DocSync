@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 
 from deps import get_db
+from services.vendor_name_helpers import vendor_identity_agrees
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -81,6 +82,12 @@ TODAY_PROJECTION = {
     "route_result": 1,
     "vendor_canonical": 1,
     "vendor_raw": 1,
+    "vendor_name": 1,
+    "vendor_name_resolved": 1,
+    "vendor_no": 1,
+    "bc_vendor_number": 1,
+    "vendor_resolution": 1,
+    "validation_results.bc_record_info": 1,
     "customer_name": 1,
     "is_duplicate": 1,
     "possible_duplicate": 1,
@@ -622,9 +629,93 @@ def _routing_values(doc: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+_VENDOR_CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9._&+/\-]{1,19}$")
+
+
+def _looks_like_vendor_code(value: Any) -> bool:
+    """Return True for compact BC-style IDs such as OWENS or BALLCOR."""
+    return bool(_VENDOR_CODE_RE.fullmatch(str(value or "").strip()))
+
+
+def _safe_vendor_display(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Select a human-readable identity without trusting conflicting history.
+
+    This changes only the API display row. It does not modify the document,
+    aliases, sender mappings, vendor matches, or historical resolutions.
+    """
+    normalized = doc.get("normalized_fields") or {}
+    extracted = doc.get("extracted_fields") or {}
+    resolution = doc.get("vendor_resolution") or {}
+    validation = doc.get("validation_results") or {}
+    bc_info = validation.get("bc_record_info") or {}
+
+    raw_vendor = str(_first_nonempty(
+        normalized.get("vendor_raw"),
+        doc.get("vendor_raw"),
+        normalized.get("vendor"),
+        extracted.get("vendor"),
+        extracted.get("vendor_name"),
+    ) or "").strip()
+
+    resolved_name = str(_first_nonempty(
+        resolution.get("vendor_name"),
+        resolution.get("display_name"),
+        bc_info.get("displayName"),
+        doc.get("vendor_name_resolved"),
+        doc.get("vendor_name"),
+    ) or "").strip()
+
+    canonical = str(doc.get("vendor_canonical") or "").strip()
+    resolved_no = str(_first_nonempty(
+        doc.get("vendor_no"),
+        doc.get("bc_vendor_number"),
+        resolution.get("vendor_no"),
+        bc_info.get("number"),
+        canonical if _looks_like_vendor_code(canonical) else "",
+    ) or "").strip()
+
+    comparison_name = resolved_name or canonical
+    conflict = False
+
+    if raw_vendor and comparison_name:
+        if resolved_name:
+            conflict = not vendor_identity_agrees(raw_vendor, resolved_name)
+        elif canonical and not _looks_like_vendor_code(canonical):
+            conflict = not vendor_identity_agrees(raw_vendor, canonical)
+
+    if conflict:
+        return {
+            "vendor_or_customer": raw_vendor,
+            "vendor_identity_conflict": True,
+            "stored_vendor_label": comparison_name,
+            "stored_vendor_no": resolved_no,
+        }
+
+    canonical_is_usable_name = bool(
+        canonical
+        and (
+            not raw_vendor
+            or vendor_identity_agrees(raw_vendor, canonical)
+        )
+    )
+
+    return {
+        "vendor_or_customer": _first_nonempty(
+            resolved_name,
+            canonical if canonical_is_usable_name else "",
+            raw_vendor,
+            doc.get("customer_name"),
+        ),
+        "vendor_identity_conflict": False,
+        "stored_vendor_label": "",
+        "stored_vendor_no": "",
+    }
+
+
 def _row(doc: Dict[str, Any]) -> Dict[str, Any]:
     routing = _routing_values(doc)
     source_identity = _source_identity(doc)
+    vendor_display = _safe_vendor_display(doc)
     doc_type = str(_first_nonempty(
         doc.get("document_type"),
         doc.get("doc_type"),
@@ -666,9 +757,7 @@ def _row(doc: Dict[str, Any]) -> Dict[str, Any]:
         "status": doc.get("status") or "",
         "workflow_status": doc.get("workflow_status") or "",
         "square9_stage": doc.get("square9_stage") or "",
-        "vendor_or_customer": _first_nonempty(
-            doc.get("vendor_canonical"), doc.get("vendor_raw"), doc.get("customer_name")
-        ),
+        **vendor_display,
         "is_duplicate": doc.get("is_duplicate") is True,
         "possible_duplicate": doc.get("possible_duplicate") is True,
         "source_part_number": doc.get("batch_group_num"),

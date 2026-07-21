@@ -282,6 +282,8 @@ export default function TodayIntakeDrilldown() {
         doc.routing_source,
         doc.suggestion_capture,
         doc.vendor_or_customer,
+        doc.stored_vendor_label,
+        doc.stored_vendor_no,
         doc.status,
         doc.workflow_status,
       ].some((value) => valueIncludes(value, normalizedSearch));
@@ -436,9 +438,26 @@ export default function TodayIntakeDrilldown() {
                           <div className="truncate font-medium text-foreground" title={doc.file_name}>
                             {doc.file_name}
                           </div>
-                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground" title={doc.vendor_or_customer || doc.sender}>
+                          <div
+                            className="mt-0.5 truncate text-[10px] text-muted-foreground"
+                            title={doc.vendor_or_customer || doc.sender}
+                          >
                             {doc.vendor_or_customer || doc.sender || "—"}
                           </div>
+                          {doc.vendor_identity_conflict && (
+                            <div
+                              className="mt-1 flex items-center gap-1 text-[9px] text-amber-400"
+                              title={`Rejected stored vendor: ${doc.stored_vendor_label || "Unknown"}${doc.stored_vendor_no ? ` (${doc.stored_vendor_no})` : ""}`}
+                            >
+                              <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                              <span className="truncate">
+                                Stored vendor rejected
+                                {doc.stored_vendor_label
+                                  ? `: ${doc.stored_vendor_label}`
+                                  : ""}
+                              </span>
+                            </div>
+                          )}
                           <SourceDetail doc={doc} />
                         </div>
                       </div>

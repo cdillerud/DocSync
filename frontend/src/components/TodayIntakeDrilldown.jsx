@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock3,
-  ExternalLink,
   FileOutput,
   Files,
   FileText,
@@ -28,6 +27,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import api from "@/lib/api";
+import DecisionReplayDialog from "@/components/DecisionReplayDialog";
 
 const KPI_SELECTOR = '[data-testid="stat-ingested-today"]';
 
@@ -190,6 +190,7 @@ export default function TodayIntakeDrilldown() {
   const [lane, setLane] = useState("all");
   const [routing, setRouting] = useState("all");
   const [search, setSearch] = useState("");
+  const [replayDocument, setReplayDocument] = useState(null);
   const boundNodes = useRef(new Map());
 
   const load = useCallback(async () => {
@@ -296,12 +297,18 @@ export default function TodayIntakeDrilldown() {
     window.location.assign(path);
   };
 
+  const inspectReplay = (event, doc) => {
+    event.stopPropagation();
+    setReplayDocument(doc);
+  };
+
   const summary = payload?.summary || {};
   const sourceFiles = summary.source_files ?? payload?.source_files_total ?? 0;
   const producedDocuments = summary.produced_documents ?? summary.total ?? payload?.total ?? 0;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <>
+      <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="h-[88vh] w-[96vw] max-w-[96vw] grid-rows-[auto_auto_auto_minmax(0,1fr)] gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b border-border/60 px-6 py-4 pr-12">
           <div className="flex items-start justify-between gap-4">
@@ -484,7 +491,17 @@ export default function TodayIntakeDrilldown() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        title="Inspect decision replay"
+                        aria-label={`Inspect decision replay for ${doc.file_name}`}
+                        data-testid={`decision-replay-${doc.id}`}
+                        onClick={(event) => inspectReplay(event, doc)}
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5 text-sky-400" />
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -494,5 +511,14 @@ export default function TodayIntakeDrilldown() {
         </div>
       </DialogContent>
     </Dialog>
+
+      <DecisionReplayDialog
+        document={replayDocument}
+        open={Boolean(replayDocument)}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) setReplayDocument(null);
+        }}
+      />
+    </>
   );
 }

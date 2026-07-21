@@ -42,6 +42,12 @@ async def get_cache_status():
     return await cache.get_status()
 
 
+@router.get("/cache/health")
+async def get_cache_health():
+    """Monitoring-friendly alias for the read-only cache status report."""
+    return await get_cache_status()
+
+
 @router.post("/cache/sync")
 async def trigger_cache_sync(
     mode: str = Query(default="incremental", description="'bulk' or 'incremental'")

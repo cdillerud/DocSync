@@ -48,6 +48,13 @@ BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
 # Sync interval in minutes (default 10)
 CACHE_SYNC_INTERVAL = int(os.environ.get('BC_CACHE_SYNC_INTERVAL', '10'))
 
+# Production BC currently contains roughly 8,779 items. Keep the default
+# threshold below the normal baseline while still detecting major catalog
+# loss, incomplete restores, or failed first-time backfills.
+ITEM_CATALOG_MIN_COUNT = int(
+    os.environ.get('BC_ITEM_CACHE_MIN_COUNT', '8000')
+)
+
 # =============================================================================
 # ENTITY DEFINITIONS - what to cache per BC table
 # =============================================================================
@@ -256,6 +263,145 @@ def normalize_document_no(value: str) -> str:
     v = re.sub(r'^(PO[-#\s]*|BOL[-#\s]*|SO[-#\s]*|INV[-#\s]*|SI[-#\s]*|ORD[-#\s]*)', '', v)
     v = re.sub(r'[^A-Z0-9]', '', v)
     return v
+
+
+
+def _parse_cache_timestamp(value: Any) -> Optional[datetime]:
+    """Parse a cache timestamp as timezone-aware UTC."""
+    if not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(
+            str(value).replace("Z", "+00:00")
+        )
+    except (TypeError, ValueError):
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return parsed.astimezone(timezone.utc)
+
+
+def evaluate_cache_health(
+    entity_counts: Dict[str, int],
+    last_sync: Optional[str],
+    *,
+    item_numbered_count: Optional[int] = None,
+    now: Optional[datetime] = None,
+    sync_interval_minutes: int = CACHE_SYNC_INTERVAL,
+    item_min_count: int = ITEM_CATALOG_MIN_COUNT,
+) -> Dict[str, Any]:
+    """Evaluate local BC cache health without contacting or writing to BC."""
+    now_utc = now or datetime.now(timezone.utc)
+
+    if now_utc.tzinfo is None:
+        now_utc = now_utc.replace(tzinfo=timezone.utc)
+    else:
+        now_utc = now_utc.astimezone(timezone.utc)
+
+    normalized_counts = {
+        str(name): int(count or 0)
+        for name, count in (entity_counts or {}).items()
+    }
+
+    total_records = sum(normalized_counts.values())
+    item_total = normalized_counts.get("item", 0)
+
+    numbered = (
+        int(item_numbered_count)
+        if item_numbered_count is not None
+        else item_total
+    )
+
+    blank = max(item_total - numbered, 0)
+    max_sync_age_minutes = max(int(sync_interval_minutes) * 3, 1)
+
+    sync_timestamp = _parse_cache_timestamp(last_sync)
+    sync_age_minutes = None
+    alerts = []
+
+    if total_records <= 0:
+        alerts.append({
+            "code": "cache_empty",
+            "severity": "critical",
+            "message": "BC reference cache contains no records.",
+            "actual": total_records,
+        })
+
+    if sync_timestamp is None:
+        alerts.append({
+            "code": "last_sync_missing",
+            "severity": "critical",
+            "message": "BC reference cache has no valid last-sync timestamp.",
+        })
+    else:
+        sync_age_minutes = max(
+            0.0,
+            (now_utc - sync_timestamp).total_seconds() / 60,
+        )
+
+        if sync_age_minutes > max_sync_age_minutes:
+            alerts.append({
+                "code": "cache_sync_stale",
+                "severity": "critical",
+                "message": (
+                    "BC reference cache has not completed a sync within "
+                    f"{max_sync_age_minutes} minutes."
+                ),
+                "actual_minutes": round(sync_age_minutes, 1),
+                "maximum_minutes": max_sync_age_minutes,
+            })
+
+    if item_total < item_min_count:
+        alerts.append({
+            "code": "item_catalog_below_minimum",
+            "severity": "critical",
+            "message": "BC item catalog cache is below its configured minimum.",
+            "actual": item_total,
+            "minimum": item_min_count,
+        })
+
+    alert_codes = {alert["code"] for alert in alerts}
+
+    if "cache_empty" in alert_codes or "last_sync_missing" in alert_codes:
+        status = "empty"
+    elif "cache_sync_stale" in alert_codes:
+        status = "stale"
+    elif alerts:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "healthy": status == "healthy",
+        "total_records": total_records,
+        "entity_counts": normalized_counts,
+        "last_sync": last_sync,
+        "sync_age_minutes": (
+            round(sync_age_minutes, 1)
+            if sync_age_minutes is not None
+            else None
+        ),
+        "sync_interval_minutes": int(sync_interval_minutes),
+        "thresholds": {
+            "item_catalog_min_count": int(item_min_count),
+            "max_sync_age_minutes": max_sync_age_minutes,
+        },
+        "item_catalog": {
+            "total": item_total,
+            "numbered": numbered,
+            "blank_numbers": blank,
+            "numbered_pct": (
+                round(numbered / item_total * 100, 2)
+                if item_total
+                else 0.0
+            ),
+        },
+        "alerts": alerts,
+    }
 
 
 class BCReferenceCacheService:
@@ -814,37 +960,45 @@ class BCReferenceCacheService:
     # =========================================================================
 
     async def get_status(self) -> Dict[str, Any]:
-        """Get cache status: record counts, last sync, health."""
+        """Return read-only cache counts, freshness, thresholds, and alerts."""
         pipeline = [
             {"$group": {"_id": "$bc_entity_type", "count": {"$sum": 1}}}
         ]
         entity_counts = {}
+
         async for doc in self.collection.aggregate(pipeline):
             entity_counts[doc["_id"]] = doc["count"]
 
-        total = sum(entity_counts.values())
+        item_numbered_count = await self.collection.count_documents({
+            "bc_entity_type": "item",
+            "bc_document_no": {"$nin": ["", None]},
+        })
 
-        meta = await self.meta_collection.find_one({"_id": "last_sync"}, {"_id": 0})
+        meta = await self.meta_collection.find_one(
+            {"_id": "last_sync"},
+            {"_id": 0},
+        )
         last_sync = meta.get("timestamp") if meta else None
 
-        health = "healthy" if total > 0 and last_sync else "empty"
-        if last_sync:
-            try:
-                last_dt = datetime.fromisoformat(last_sync.replace("Z", "+00:00"))
-                age_minutes = (datetime.now(timezone.utc) - last_dt).total_seconds() / 60
-                if age_minutes > CACHE_SYNC_INTERVAL * 3:
-                    health = "stale"
-            except Exception:
-                pass
+        health = evaluate_cache_health(
+            entity_counts,
+            last_sync,
+            item_numbered_count=item_numbered_count,
+        )
 
         return {
-            "status": health,
-            "total_records": total,
-            "entity_counts": entity_counts,
-            "last_sync": last_sync,
-            "sync_interval_minutes": CACHE_SYNC_INTERVAL,
+            **health,
+            "last_sync_records_synced": (
+                meta.get("records_synced") if meta else None
+            ),
+            "last_sync_entity_results": (
+                meta.get("results") if meta else None
+            ),
             "initialized": self._initialized,
-            "background_sync_active": self._sync_task is not None and not self._sync_task.done(),
+            "background_sync_active": (
+                self._sync_task is not None
+                and not self._sync_task.done()
+            ),
         }
 
 

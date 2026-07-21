@@ -186,3 +186,79 @@ async def test_dismissed_cache_alert_stays_dismissed_until_recovery():
 
     assert recovered["resolved"] == 1
     assert alerts.documents[0]["status"] == "resolved"
+
+
+class FakeEmailService:
+    def __init__(self):
+        self.messages = []
+
+    async def send_email(
+        self,
+        to,
+        subject,
+        html_body,
+        text_body=None,
+        **kwargs,
+    ):
+        self.messages.append({
+            "to": to,
+            "subject": subject,
+            "html_body": html_body,
+            "text_body": text_body,
+        })
+
+        return SimpleNamespace(
+            success=True,
+            provider="microsoft_graph",
+            message_id="test-message-id",
+            error=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_critical_cache_alert_sends_one_email(
+    monkeypatch,
+):
+    import services.alert_pattern_service as alert_module
+
+    service, alerts, events = _service()
+    email_service = FakeEmailService()
+
+    monkeypatch.setenv(
+        "BC_CACHE_ALERT_EMAIL_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "BC_CACHE_ALERT_EMAIL_RECIPIENTS",
+        "cdillerud@gamerpackaging.com",
+    )
+    monkeypatch.setattr(
+        alert_module,
+        "get_email_service",
+        lambda: email_service,
+    )
+
+    await service._evaluate_cache_health_alerts(
+        _item_catalog_failure()
+    )
+    await service._evaluate_cache_health_alerts(
+        _item_catalog_failure()
+    )
+
+    assert len(email_service.messages) == 1
+
+    message = email_service.messages[0]
+    assert message["to"] == [
+        "cdillerud@gamerpackaging.com"
+    ]
+    assert "CRITICAL BC Cache Alert" in message["subject"]
+    assert "Item Catalog Below Minimum" in message["subject"]
+
+    alert = alerts.documents[0]
+    assert alert["last_notification_status"] == "sent"
+    assert alert["last_notification_provider"] == (
+        "microsoft_graph"
+    )
+    assert alert["last_notification_message_id"] == (
+        "test-message-id"
+    )

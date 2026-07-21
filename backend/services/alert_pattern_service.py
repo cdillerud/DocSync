@@ -19,11 +19,14 @@ Threshold rules:
 """
 
 import asyncio
+import html
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 from services.bc_reference_cache_service import get_cache_service
+from services.email_service import get_email_service
 
 logger = logging.getLogger(__name__)
 
@@ -613,24 +616,209 @@ class AlertPatternService:
     def _severity_rank(severity: str) -> int:
         return {"none": 0, "info": 1, "warning": 2, "critical": 3}.get(severity, 0)
 
-    async def _emit_alert_event(self, pattern_key: str, severity: str, alert: Dict):
-        """Emit system event for notification integration."""
-        if not self.event_service:
-            return
-        try:
-            await self.event_service.emit(
-                event_type=f"alert.{severity}",
-                document_id="system",
-                source_service="alert_patterns",
-                payload={
-                    "pattern_key": pattern_key,
-                    "severity": severity,
-                    "suggested_action": alert.get("suggested_action", ""),
-                    "occurrence_count": alert.get("occurrence_count_30d", 0),
-                }
+    async def _send_cache_alert_email(
+        self,
+        pattern_key: str,
+        severity: str,
+        alert: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Send one email for a critical BC cache incident transition."""
+        enabled = os.environ.get(
+            "BC_CACHE_ALERT_EMAIL_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"}
+
+        if not enabled:
+            return {"status": "disabled"}
+
+        if severity != "critical":
+            return {
+                "status": "skipped",
+                "reason": "severity_below_critical",
+            }
+
+        recipients = [
+            value.strip()
+            for value in os.environ.get(
+                "BC_CACHE_ALERT_EMAIL_RECIPIENTS",
+                "",
+            ).split(",")
+            if value.strip()
+        ]
+
+        if not recipients:
+            logger.warning(
+                "[AlertPatterns] Cache alert email enabled but "
+                "BC_CACHE_ALERT_EMAIL_RECIPIENTS is empty"
             )
-        except Exception:
-            pass
+            return {
+                "status": "skipped",
+                "reason": "no_recipients",
+            }
+
+        code = str(
+            alert.get("system_alert_code")
+            or alert.get("correct_label")
+            or pattern_key
+        )
+
+        readable_code = code.replace("_", " ").replace("-", " ").title()
+        suggested_action = str(alert.get("suggested_action") or "")
+        last_sync = str(alert.get("last_sync") or "Not available")
+        health_status = str(alert.get("health_status") or "unknown")
+        details = alert.get("health_details") or {}
+
+        details_rows = "".join(
+            (
+                "<tr>"
+                f"<td style='padding:4px 12px 4px 0'><strong>"
+                f"{html.escape(str(key))}</strong></td>"
+                f"<td style='padding:4px 0'>"
+                f"{html.escape(str(value))}</td>"
+                "</tr>"
+            )
+            for key, value in sorted(details.items())
+        )
+
+        public_url = os.environ.get(
+            "GPI_HUB_PUBLIC_URL",
+            "",
+        ).strip().rstrip("/")
+
+        health_reference = (
+            f"{public_url}/api/cache/health"
+            if public_url
+            else "/api/cache/health"
+        )
+
+        subject = (
+            f"[GPI Hub] CRITICAL BC Cache Alert: {readable_code}"
+        )
+
+        html_body = f"""
+        <h2>Critical BC Reference Cache Alert</h2>
+        <p>
+          <strong>Condition:</strong>
+          {html.escape(readable_code)}
+        </p>
+        <p>
+          <strong>Health status:</strong>
+          {html.escape(health_status)}
+        </p>
+        <p>
+          <strong>Last successful sync:</strong>
+          {html.escape(last_sync)}
+        </p>
+        <p>{html.escape(suggested_action)}</p>
+        <table>{details_rows}</table>
+        <p>
+          Health report:
+          <code>{html.escape(health_reference)}</code>
+        </p>
+        <p>
+          Alert key:
+          <code>{html.escape(pattern_key)}</code>
+        </p>
+        """
+
+        text_body = (
+            "Critical BC Reference Cache Alert\n\n"
+            f"Condition: {readable_code}\n"
+            f"Health status: {health_status}\n"
+            f"Last successful sync: {last_sync}\n"
+            f"Action: {suggested_action}\n"
+            f"Health report: {health_reference}\n"
+            f"Alert key: {pattern_key}\n"
+        )
+
+        try:
+            result = await get_email_service().send_email(
+                to=recipients,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body,
+            )
+        except Exception as exc:
+            logger.error(
+                "[AlertPatterns] Cache alert email exception: %s",
+                str(exc),
+            )
+            result_data = {
+                "status": "failed",
+                "error": str(exc)[:500],
+            }
+        else:
+            result_data = {
+                "status": "sent" if result.success else "failed",
+                "provider": result.provider,
+                "message_id": result.message_id,
+                "error": result.error,
+            }
+
+        await self.alerts_collection.update_one(
+            {"pattern_key": pattern_key},
+            {
+                "$set": {
+                    "last_notification_at": (
+                        datetime.now(timezone.utc).isoformat()
+                    ),
+                    "last_notification_status": result_data["status"],
+                    "last_notification_provider": result_data.get(
+                        "provider"
+                    ),
+                    "last_notification_message_id": result_data.get(
+                        "message_id"
+                    ),
+                    "last_notification_error": result_data.get("error"),
+                }
+            },
+        )
+
+        if result_data["status"] != "sent":
+            logger.warning(
+                "[AlertPatterns] Cache alert email was not sent: %s",
+                result_data,
+            )
+
+        return result_data
+
+
+    async def _emit_alert_event(self, pattern_key: str, severity: str, alert: Dict):
+        """Emit the internal event and any configured external notification."""
+        if self.event_service:
+            try:
+                await self.event_service.emit(
+                    event_type=f"alert.{severity}",
+                    document_id="system",
+                    source_service="alert_patterns",
+                    payload={
+                        "pattern_key": pattern_key,
+                        "severity": severity,
+                        "suggested_action": alert.get(
+                            "suggested_action",
+                            "",
+                        ),
+                        "occurrence_count": alert.get(
+                            "occurrence_count_30d",
+                            0,
+                        ),
+                        "system_component": alert.get(
+                            "system_component"
+                        ),
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[AlertPatterns] Event emission failed: %s",
+                    str(exc),
+                )
+
+        if alert.get("system_component") == "bc_reference_cache":
+            await self._send_cache_alert_email(
+                pattern_key,
+                severity,
+                alert,
+            )
 
     # =========================================================================
     # QUERY ENDPOINTS

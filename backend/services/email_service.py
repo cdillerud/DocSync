@@ -11,6 +11,9 @@ for verification during the 14-day shadow pilot.
 import os
 import logging
 from datetime import datetime, timezone
+from urllib.parse import quote
+
+import httpx
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from dataclasses import dataclass, asdict
@@ -158,21 +161,198 @@ class MockEmailProvider:
 # =============================================================================
 
 class MicrosoftGraphEmailProvider:
-    """
-    Microsoft Graph API email provider.
-    
-    TODO: Implement when ready to integrate with Entra ID.
-    Will use Microsoft Graph API to send emails via user's mailbox.
-    """
-    
-    def __init__(self, client_id: str, client_secret: str, tenant_id: str):
-        self.client_id = client_id
-        self.client_secret = client_secret
-        self.tenant_id = tenant_id
-        raise NotImplementedError("Microsoft Graph provider not yet implemented")
-    
+    """Send email with Microsoft Graph application permissions."""
+
+    GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        tenant_id: str,
+        sender: str,
+    ):
+        self.client_id = (client_id or "").strip()
+        self.client_secret = (client_secret or "").strip()
+        self.tenant_id = (tenant_id or "").strip()
+        self.sender = (sender or "").strip()
+
+    @staticmethod
+    def _response_error(response: httpx.Response) -> str:
+        try:
+            payload = response.json()
+            graph_error = payload.get("error") or {}
+
+            if isinstance(graph_error, dict):
+                code = graph_error.get("code", "unknown")
+                message = graph_error.get("message", "No message returned")
+                return f"{code}: {message}"[:500]
+        except Exception:
+            pass
+
+        return (
+            response.text[:500]
+            if response.text
+            else f"HTTP {response.status_code}"
+        )
+
+    async def _get_token(self, client: httpx.AsyncClient) -> str:
+        if not all((
+            self.client_id,
+            self.client_secret,
+            self.tenant_id,
+        )):
+            raise RuntimeError(
+                "Microsoft Graph email credentials are incomplete"
+            )
+
+        token_url = (
+            f"https://login.microsoftonline.com/{self.tenant_id}"
+            "/oauth2/v2.0/token"
+        )
+
+        response = await client.post(
+            token_url,
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "scope": "https://graph.microsoft.com/.default",
+                "grant_type": "client_credentials",
+            },
+        )
+
+        if response.status_code != 200:
+            raise RuntimeError(
+                "Microsoft Graph token request failed: "
+                f"{self._response_error(response)}"
+            )
+
+        token = response.json().get("access_token")
+        if not token:
+            raise RuntimeError(
+                "Microsoft Graph token response contained no access token"
+            )
+
+        return token
+
     async def send(self, message: EmailMessage) -> EmailResult:
-        raise NotImplementedError("Microsoft Graph provider not yet implemented")
+        if not self.sender:
+            return EmailResult(
+                success=False,
+                provider="microsoft_graph",
+                error="EMAIL_GRAPH_SENDER is not configured",
+            )
+
+        recipients = [
+            str(address).strip()
+            for address in (message.to or [])
+            if str(address).strip()
+        ]
+
+        if not recipients:
+            return EmailResult(
+                success=False,
+                provider="microsoft_graph",
+                error="No email recipients were provided",
+            )
+
+        if message.attachments:
+            return EmailResult(
+                success=False,
+                provider="microsoft_graph",
+                error=(
+                    "Microsoft Graph attachments are not implemented "
+                    "for this provider"
+                ),
+            )
+
+        graph_message = {
+            "subject": message.subject,
+            "body": {
+                "contentType": "HTML",
+                "content": message.html_body or message.text_body or "",
+            },
+            "toRecipients": [
+                {
+                    "emailAddress": {
+                        "address": address,
+                    }
+                }
+                for address in recipients
+            ],
+        }
+
+        if message.reply_to:
+            graph_message["replyTo"] = [{
+                "emailAddress": {
+                    "address": message.reply_to,
+                }
+            }]
+
+        payload = {
+            "message": graph_message,
+            "saveToSentItems": True,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                token = await self._get_token(client)
+
+                endpoint = (
+                    f"{self.GRAPH_BASE}/users/"
+                    f"{quote(self.sender, safe='@.')}/sendMail"
+                )
+
+                response = await client.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json=payload,
+                )
+
+            if response.status_code != 202:
+                error = self._response_error(response)
+                logger.error(
+                    "[GRAPH EMAIL] Send failed for %s: %s",
+                    self.sender,
+                    error,
+                )
+                return EmailResult(
+                    success=False,
+                    provider="microsoft_graph",
+                    error=error,
+                )
+
+            request_id = (
+                response.headers.get("request-id")
+                or response.headers.get("client-request-id")
+            )
+
+            logger.info(
+                "[GRAPH EMAIL] Sent from %s to %s | Subject: %s",
+                self.sender,
+                ", ".join(recipients),
+                message.subject,
+            )
+
+            return EmailResult(
+                success=True,
+                message_id=request_id,
+                provider="microsoft_graph",
+            )
+
+        except Exception as exc:
+            logger.error(
+                "[GRAPH EMAIL] Send exception: %s",
+                str(exc),
+            )
+            return EmailResult(
+                success=False,
+                provider="microsoft_graph",
+                error=str(exc)[:500],
+            )
 
 
 # =============================================================================
@@ -203,7 +383,21 @@ class EmailService:
             if self.provider_type == EmailProvider.MOCK:
                 self._provider = MockEmailProvider(db=self.db)
             elif self.provider_type == EmailProvider.MICROSOFT_GRAPH:
-                raise NotImplementedError("Microsoft Graph provider not configured")
+                self._provider = MicrosoftGraphEmailProvider(
+                    client_id=(
+                        os.environ.get("EMAIL_GRAPH_CLIENT_ID")
+                        or os.environ.get("GRAPH_CLIENT_ID", "")
+                    ),
+                    client_secret=(
+                        os.environ.get("EMAIL_GRAPH_CLIENT_SECRET")
+                        or os.environ.get("GRAPH_CLIENT_SECRET", "")
+                    ),
+                    tenant_id=(
+                        os.environ.get("EMAIL_GRAPH_TENANT_ID")
+                        or os.environ.get("TENANT_ID", "")
+                    ),
+                    sender=os.environ.get("EMAIL_GRAPH_SENDER", ""),
+                )
             elif self.provider_type == EmailProvider.SENDGRID:
                 raise NotImplementedError("SendGrid provider not configured")
             elif self.provider_type == EmailProvider.RESEND:

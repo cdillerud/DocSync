@@ -13,6 +13,9 @@ Cached entities:
 - salesOrders
 - salesInvoices (posted)
 - salesShipments (posted)
+- customers
+- salespeople
+- items
 
 Population:
 - Bulk sync: Fetches all records from BC on demand
@@ -206,6 +209,39 @@ ENTITY_CONFIGS = {
             "name": r.get("name", ""),
             "email": r.get("email", ""),
             "entity_type": "salesperson",
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
+    "items": {
+        # FIX (2026-07-14): this entity was missing from ENTITY_CONFIGS entirely.
+        # _validate_items_against_catalog() in sales_intake_learning_service.py
+        # queries bc_reference_cache for bc_entity_type == "item", but nothing
+        # ever wrote that entity type into the cache — every item-catalog
+        # lookup returned nothing, for every document, which is the entire
+        # explanation for Item Match sitting at 0% on the Sales Intake
+        # dashboard. New full syncs populate this entity automatically because
+        # sync_all() iterates ENTITY_CONFIGS directly. Existing deployments need
+        # a one-time full item backfill because incremental sync shares the
+        # global last-sync timestamp with all other entity types.
+        "entity_type": "item",
+        "domain": "master",
+        "number_field": "number",
+        "external_ref_field": None,
+        "select_fields": "id,number,displayName,itemCategoryCode,baseUnitOfMeasureCode,unitPrice,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id", ""),
+            "bc_document_no": r.get("number", ""),
+            "displayName": r.get("displayName", ""),
+            # _validate_items_against_catalog() regexes both displayName and
+            # description — BC's item API doesn't expose a separate
+            # "description" field distinct from displayName, so mirror it
+            # here rather than leave the regex branch dead.
+            "description": r.get("displayName", ""),
+            "item_category_code": r.get("itemCategoryCode", ""),
+            "base_uom": r.get("baseUnitOfMeasureCode", ""),
+            "unit_price": r.get("unitPrice"),
+            "entity_type": "item",
+            "number": r.get("number", ""),
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },

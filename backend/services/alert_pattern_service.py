@@ -23,6 +23,8 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
+from services.bc_reference_cache_service import get_cache_service
+
 logger = logging.getLogger(__name__)
 
 # Thresholds
@@ -271,7 +273,13 @@ class AlertPatternService:
         alerts_created += vendor_alerts.get("created", 0)
         alerts_updated += vendor_alerts.get("updated", 0)
 
-        # 5. Resolve stale alerts (patterns no longer meeting thresholds)
+        # 5. BC reference-cache health alerts
+        cache_alerts = await self._evaluate_cache_health_alerts()
+        alerts_created += cache_alerts.get("created", 0)
+        alerts_updated += cache_alerts.get("updated", 0)
+        alerts_resolved += cache_alerts.get("resolved", 0)
+
+        # 6. Resolve stale alerts (patterns no longer meeting thresholds)
         active_keys = {_make_pattern_key(gp["_id"]["predicted_label"], gp["_id"]["actual_entity_type"])
                        for gp in global_patterns
                        if self._compute_severity(
@@ -296,9 +304,191 @@ class AlertPatternService:
             "alerts_created": alerts_created,
             "alerts_updated": alerts_updated,
             "alerts_resolved": alerts_resolved,
+            "cache_health_alerts": cache_alerts,
         }
         logger.info("[AlertPatterns] Evaluation: %s", summary)
         return summary
+
+    async def _evaluate_cache_health_alerts(
+        self,
+        health: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Mirror active BC cache-health conditions into alert_patterns.
+
+        Reads the local cache-health report and writes only local Mongo alert
+        state. It never contacts or writes to Business Central.
+        """
+        if health is None:
+            cache = get_cache_service()
+            if not cache:
+                return {
+                    "status": "skipped",
+                    "reason": "cache_service_not_initialized",
+                    "created": 0,
+                    "updated": 0,
+                    "resolved": 0,
+                }
+
+            try:
+                health = await cache.get_status()
+            except Exception as exc:
+                logger.warning(
+                    "[AlertPatterns] BC cache health evaluation failed: %s",
+                    str(exc),
+                )
+                return {
+                    "status": "error",
+                    "reason": "cache_health_unavailable",
+                    "created": 0,
+                    "updated": 0,
+                    "resolved": 0,
+                }
+
+        now = datetime.now(timezone.utc)
+        now_iso = now.isoformat()
+
+        health_alerts = health.get("alerts") or []
+        if not isinstance(health_alerts, list):
+            health_alerts = []
+
+        created = 0
+        updated = 0
+        resolved = 0
+        active_keys = set()
+
+        for condition in health_alerts:
+            if not isinstance(condition, dict):
+                continue
+
+            code = str(condition.get("code") or "").strip()
+            if not code:
+                continue
+
+            pattern_key = f"system:bc-{code.replace('_', '-')}"
+            active_keys.add(pattern_key)
+
+            severity = str(
+                condition.get("severity") or "critical"
+            ).lower()
+            if severity not in {"info", "warning", "critical"}:
+                severity = "critical"
+
+            message = str(
+                condition.get("message")
+                or "BC reference-cache health condition detected."
+            )
+
+            existing = await self.alerts_collection.find_one(
+                {"pattern_key": pattern_key},
+                {"_id": 0},
+            )
+
+            # A dismissed alert remains acknowledged while the same condition
+            # persists. A resolved alert becomes active again if it recurs.
+            current_status = (
+                existing.get("status") if existing else None
+            )
+            status = (
+                "dismissed"
+                if current_status == "dismissed"
+                else "active"
+            )
+
+            details = {
+                key: value
+                for key, value in condition.items()
+                if key not in {"code", "severity", "message"}
+            }
+
+            alert_doc = {
+                "pattern_key": pattern_key,
+                "predicted_label": "SYSTEM_HEALTH",
+                "actual_entity_type": "bc_reference_cache",
+                "correct_label": code,
+                "vendor_scope": "system",
+                "system_component": "bc_reference_cache",
+                "system_alert_code": code,
+                "occurrence_count_7d": 1,
+                "occurrence_count_30d": 1,
+                "severity_level": severity,
+                "affected_vendors": [],
+                "affected_vendor_count": 0,
+                "trend": "active",
+                "trend_pct": 0,
+                "avg_match_score": 0,
+                "suggested_action": (
+                    f"{message} Review /api/cache/health and the "
+                    "BC cache synchronization logs."
+                ),
+                "health_status": health.get("status"),
+                "health_details": details,
+                "last_sync": health.get("last_sync"),
+                "last_updated": now_iso,
+                "status": status,
+            }
+
+            if existing:
+                old_severity = existing.get("severity_level")
+                await self.alerts_collection.update_one(
+                    {"pattern_key": pattern_key},
+                    {"$set": alert_doc},
+                )
+                updated += 1
+
+                reactivated = current_status == "resolved"
+                escalated = (
+                    self._severity_rank(severity)
+                    > self._severity_rank(old_severity)
+                )
+
+                if status == "active" and (reactivated or escalated):
+                    await self._emit_alert_event(
+                        pattern_key,
+                        severity,
+                        alert_doc,
+                    )
+            else:
+                alert_doc["first_detected"] = now_iso
+                await self.alerts_collection.insert_one(alert_doc)
+                created += 1
+
+                if severity in {"warning", "critical"}:
+                    await self._emit_alert_event(
+                        pattern_key,
+                        severity,
+                        alert_doc,
+                    )
+
+        stale_system_alerts = await self.alerts_collection.find({
+            "vendor_scope": "system",
+            "system_component": "bc_reference_cache",
+            "status": {"$in": ["active", "dismissed"]},
+            "pattern_key": {"$nin": list(active_keys)},
+        }).to_list(20)
+
+        for existing in stale_system_alerts:
+            await self.alerts_collection.update_one(
+                {"pattern_key": existing["pattern_key"]},
+                {
+                    "$set": {
+                        "status": "resolved",
+                        "last_updated": now_iso,
+                        "resolved_reason": "cache_health_recovered",
+                    }
+                },
+            )
+            resolved += 1
+
+        return {
+            "status": "completed",
+            "health_status": health.get("status"),
+            "active_conditions": len(active_keys),
+            "created": created,
+            "updated": updated,
+            "resolved": resolved,
+        }
+
 
     async def _evaluate_vendor_alerts(self, since: str) -> Dict[str, int]:
         """Evaluate vendor-specific critical alerts (mislabel rate ≥ 40%)."""

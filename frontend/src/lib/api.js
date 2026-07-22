@@ -386,6 +386,19 @@ export const processDocumentIntelligence = (docId) => api.post(`/document-intell
 export const getDocumentIntelligence = (docId) => api.get(`/document-intelligence/${docId}`);
 export const getIntelligenceReviewQueue = (params) => api.get('/document-intelligence/review-queue', { params });
 export const getHumanDecisionQueue = () => api.get('/document-intelligence/human-decision-queue');
+export const disposeNonTransactionalDocument = (
+  docId,
+  disposition = 'graphics_artwork',
+  disposedBy = 'human_decision_queue',
+  notes = ''
+) => api.post(
+  `/documents/${encId(docId)}/non-transactional-disposition`,
+  {
+    disposition,
+    disposed_by: disposedBy,
+    notes,
+  }
+);
 export const bulkClassifyDocuments = ({ docIds, docType, mailboxCategory, reclassifyBy }) => {
   const params = new URLSearchParams();
   docIds.forEach((id) => params.append('doc_ids', id));

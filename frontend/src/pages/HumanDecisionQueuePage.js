@@ -16,8 +16,13 @@ import {
   ExternalLink,
   FileWarning,
   FolderOpen,
+  Palette,
 } from 'lucide-react';
-import api, { getHumanDecisionQueue, bulkClassifyDocuments } from '@/lib/api';
+import api, {
+  getHumanDecisionQueue,
+  bulkClassifyDocuments,
+  disposeNonTransactionalDocument,
+} from '@/lib/api';
 import HumanRoutingBrowserDialog from '@/components/HumanRoutingBrowserDialog';
 
 const ISSUE_TYPE_META = {
@@ -140,6 +145,45 @@ export default function HumanDecisionQueuePage() {
     }
   };
 
+  const handleDiscard = async (group) => {
+    const primary = group[0];
+    const key = `${primary.doc_id}|${primary.issue_type}`;
+
+    const confirmed = window.confirm(
+      `Discard "${primary.file_name}" as graphics/artwork?\n\n` +
+      'The file will be retained for audit and AI learning, but removed ' +
+      'from operational queues and blocked from further processing.'
+    );
+
+    if (!confirmed) return;
+
+    setSubmittingKey(key);
+
+    try {
+      const { data: result } =
+        await disposeNonTransactionalDocument(primary.doc_id);
+
+      toast.success(
+        result?.learning_recorded
+          ? 'Discarded as graphics/artwork — AI learning recorded'
+          : 'Discarded as graphics/artwork'
+      );
+
+      setResolvedKeys(previous => {
+        const next = new Set(previous);
+        next.add(key);
+        return next;
+      });
+    } catch (error) {
+      toast.error(
+        error.response?.data?.detail ||
+        'The graphics/artwork disposition did not save'
+      );
+    } finally {
+      setSubmittingKey(null);
+    }
+  };
+
   const actionableCount = data ? data.actionable_count : 0;
   const informationalCount = data ? data.informational_only_count : 0;
   const resolvedCount = resolvedKeys.size;
@@ -224,6 +268,7 @@ export default function HumanDecisionQueuePage() {
               group={group}
               submitting={submittingKey === `${group[0].doc_id}|${group[0].issue_type}`}
               onDecide={handleDecision}
+              onDiscard={handleDiscard}
             />
           ))}
         </div>
@@ -232,7 +277,12 @@ export default function HumanDecisionQueuePage() {
   );
 }
 
-function DecisionCard({ group, submitting, onDecide }) {
+function DecisionCard({
+  group,
+  submitting,
+  onDecide,
+  onDiscard,
+}) {
   const primary = group[0];
   const meta = ISSUE_TYPE_META[primary.issue_type];
   const Icon = meta.icon;
@@ -484,6 +534,24 @@ function DecisionCard({ group, submitting, onDecide }) {
         ) : (
           <p className="text-xs italic text-muted-foreground">{primary.note}</p>
         )}
+
+        <div className="mt-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            disabled={submitting}
+            onClick={() => onDiscard(group)}
+            data-testid={`discard-graphics-artwork-${primary.doc_id}`}
+          >
+            {submitting ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Palette className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            Discard as graphics/artwork
+          </Button>
+        </div>
 
         <HumanRoutingBrowserDialog
           open={routingOpen}

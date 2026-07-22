@@ -16,7 +16,7 @@ import {
   ExternalLink,
   FileWarning,
   FolderOpen,
-  Palette,
+  Ban,
 } from 'lucide-react';
 import api, {
   getHumanDecisionQueue,
@@ -24,6 +24,7 @@ import api, {
   disposeNonTransactionalDocument,
 } from '@/lib/api';
 import HumanRoutingBrowserDialog from '@/components/HumanRoutingBrowserDialog';
+import NonTransactionalDispositionDialog from '@/components/NonTransactionalDispositionDialog';
 
 const ISSUE_TYPE_META = {
   isolated_misroute: { label: 'Wrong mailbox', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
@@ -145,28 +146,30 @@ export default function HumanDecisionQueuePage() {
     }
   };
 
-  const handleDiscard = async (group) => {
+  const handleDiscard = async (
+    group,
+    reason,
+    notes
+  ) => {
     const primary = group[0];
-    const key = `${primary.doc_id}|${primary.issue_type}`;
-
-    const confirmed = window.confirm(
-      `Discard "${primary.file_name}" as graphics/artwork?\n\n` +
-      'The file will be retained for audit and AI learning, but removed ' +
-      'from operational queues and blocked from further processing.'
-    );
-
-    if (!confirmed) return;
+    const key =
+      `${primary.doc_id}|${primary.issue_type}`;
 
     setSubmittingKey(key);
 
     try {
       const { data: result } =
-        await disposeNonTransactionalDocument(primary.doc_id);
+        await disposeNonTransactionalDocument(
+          primary.doc_id,
+          reason.value,
+          'human_decision_queue',
+          notes
+        );
 
       toast.success(
         result?.learning_recorded
-          ? 'Discarded as graphics/artwork — AI learning recorded'
-          : 'Discarded as graphics/artwork'
+          ? `${reason.label} — excluded; AI learning recorded`
+          : `${reason.label} — excluded from processing`
       );
 
       setResolvedKeys(previous => {
@@ -174,11 +177,15 @@ export default function HumanDecisionQueuePage() {
         next.add(key);
         return next;
       });
+
+      return true;
     } catch (error) {
       toast.error(
         error.response?.data?.detail ||
-        'The graphics/artwork disposition did not save'
+        'The document could not be excluded'
       );
+
+      return false;
     } finally {
       setSubmittingKey(null);
     }
@@ -294,6 +301,7 @@ function DecisionCard({
   const [previewContentType, setPreviewContentType] = useState('');
   const [previewError, setPreviewError] = useState('');
   const [routingOpen, setRoutingOpen] = useState(false);
+  const [dispositionOpen, setDispositionOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -541,17 +549,27 @@ function DecisionCard({
             size="sm"
             variant="destructive"
             disabled={submitting}
-            onClick={() => onDiscard(group)}
-            data-testid={`discard-graphics-artwork-${primary.doc_id}`}
+            onClick={() => setDispositionOpen(true)}
+            data-testid={`exclude-from-processing-${primary.doc_id}`}
           >
             {submitting ? (
               <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
             ) : (
-              <Palette className="w-3.5 h-3.5 mr-1.5" />
+              <Ban className="w-3.5 h-3.5 mr-1.5" />
             )}
-            Discard as graphics/artwork
+            Exclude from processing
           </Button>
         </div>
+
+        <NonTransactionalDispositionDialog
+          open={dispositionOpen}
+          onOpenChange={setDispositionOpen}
+          fileName={primary.file_name}
+          submitting={submitting}
+          onSubmit={(reason, notes) =>
+            onDiscard(group, reason, notes)
+          }
+        />
 
         <HumanRoutingBrowserDialog
           open={routingOpen}

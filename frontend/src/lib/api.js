@@ -388,7 +388,7 @@ export const getIntelligenceReviewQueue = (params) => api.get('/document-intelli
 export const getHumanDecisionQueue = () => api.get('/document-intelligence/human-decision-queue');
 export const disposeNonTransactionalDocument = (
   docId,
-  disposition = 'graphics_artwork',
+  disposition,
   disposedBy = 'human_decision_queue',
   notes = ''
 ) => api.post(

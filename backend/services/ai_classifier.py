@@ -33,6 +33,7 @@ VALID_DOC_TYPES = [
     "QUALITY_DOC",
     "PACKING_SLIP",
     "BILL_OF_LADING",
+    "GRAPHICS_ARTWORK",
     "OTHER"
 ]
 

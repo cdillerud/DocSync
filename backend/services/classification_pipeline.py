@@ -730,9 +730,10 @@ def stage_extract(
     }
     meaningful_count = len(meaningful)
 
-    # Minimum varies by type, but we need at least 1 real field
-    min_fields = 1
+    # Non-transactional artwork may contain no transactional fields.
     doc_type = classify_result.data.get("document_type", "Unknown")
+    min_fields = 0 if doc_type == "Graphics_Artwork" else 1
+
     if doc_type in ("AP_Invoice", "Credit_Memo"):
         min_fields = 2  # Need at least vendor + one other field
     elif doc_type in ("Shipping_Document", "Warehouse_Receipt"):
@@ -779,6 +780,27 @@ async def stage_validate(
 ) -> StageResult:
     """Run BC validation on extracted fields."""
     t0 = datetime.now(timezone.utc)
+
+    if doc_type == "Graphics_Artwork":
+        return StageResult(
+            stage="validate",
+            status=StageStatus.PASSED,
+            data={
+                "validation_results": {
+                    "all_passed": True,
+                    "checks": [],
+                    "warnings": [],
+                    "skipped": True,
+                    "reason": "non_transactional_graphics_artwork",
+                },
+                "job_config": {
+                    "automation_level": 0,
+                    "requires_human_review_if_exception": True,
+                },
+            },
+            quality_gate_passed=True,
+            duration_ms=_ms_since(t0),
+        )
 
     try:
         from models.document_types import DEFAULT_JOB_TYPES
@@ -843,6 +865,29 @@ def stage_route(
 ) -> StageResult:
     """Determine automation decision and readiness."""
     t0 = datetime.now(timezone.utc)
+
+    if doc_type == "Graphics_Artwork":
+        return StageResult(
+            stage="route",
+            status=StageStatus.PASSED,
+            data={
+                "automation_decision": "needs_review",
+                "automation_reasoning": (
+                    "Graphics/artwork classification requires "
+                    "human confirmation before exclusion"
+                ),
+                "readiness_status": "needs_review",
+                "readiness_score": int(
+                    max(0.0, min(1.0, classification_confidence))
+                    * 100
+                ),
+                "readiness_reasons": [
+                    "non_transactional_graphics_artwork_requires_confirmation"
+                ],
+            },
+            quality_gate_passed=True,
+            duration_ms=_ms_since(t0),
+        )
 
     try:
         from services.document_intel_helpers import make_automation_decision

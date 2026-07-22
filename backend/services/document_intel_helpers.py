@@ -919,6 +919,20 @@ MULTI-PAGE BUNDLE HANDLING:
 
 DOCUMENT CATEGORIES AND TYPES:
 
+== Non-Transactional Category ==
+Graphics_Artwork: Packaging artwork, dielines, label proofs, can or
+container print layouts, production graphics, and print-ready designs
+- These are NOT invoices, purchase orders, sales orders, packing slips,
+  or shipping documents
+- Strong cues include dielines, print area, slit width, cut height,
+  bleed, trim lines, dimensions in millimeters, color separations,
+  nutrition panels, barcodes, and package-label layouts
+- A nutrition panel or barcode shown as part of artwork does not make
+  the document an invoice, purchase order, or sales order
+- Classify from the content and visual layout of each document; do not
+  assume every file from the same sender is graphics artwork
+- Human confirmation is required before excluding the document
+
 == AP (Accounts Payable) Category ==
 AP_Invoice: Vendor invoices we RECEIVE
 - The VENDOR is the company sending us the invoice (NOT Gamer Packaging)
@@ -1008,7 +1022,7 @@ Unknown_Document: Cannot determine type confidently
 
 Always respond with valid JSON in this exact format:
 {
-    "document_type": "AP_Invoice|AR_Invoice|Credit_Memo|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Inspection_Form|Return_Request|Unknown_Document",
+    "document_type": "Graphics_Artwork|AP_Invoice|AR_Invoice|Credit_Memo|Remittance|Freight_Document|Sales_Order|Sales_Quote|Order_Confirmation|Warehouse_Receipt|Inventory_Report|Shipping_Document|Quality_Issue|Inspection_Form|Return_Request|Unknown_Document",
     "confidence": 0.0-1.0,
     "extracted_fields": {
         "vendor": "...",

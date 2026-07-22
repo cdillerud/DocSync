@@ -14,6 +14,8 @@ DISPOSITION_CONFIG = {
     "graphics_artwork": {
         "document_type": "Graphics_Artwork",
         "label": "Graphics / artwork",
+        "record_classification_correction": True,
+        "notes_required": False,
         "learning_description": (
             "Packaging graphics, label artwork, dielines, print layouts, "
             "artwork proofs, can templates, or other production graphics. "
@@ -22,7 +24,57 @@ DISPOSITION_CONFIG = {
             "barcodes, and package-label layouts."
         ),
     },
+    "duplicate_document": {
+        "document_type": None,
+        "label": "Duplicate document",
+        "record_classification_correction": False,
+        "notes_required": False,
+    },
+    "spam_irrelevant": {
+        "document_type": None,
+        "label": "Spam / irrelevant",
+        "record_classification_correction": False,
+        "notes_required": False,
+    },
+    "unsupported_document": {
+        "document_type": None,
+        "label": "Unsupported document",
+        "record_classification_correction": False,
+        "notes_required": False,
+    },
+    "not_business_document": {
+        "document_type": None,
+        "label": "Not a business document",
+        "record_classification_correction": False,
+        "notes_required": False,
+    },
+    "other": {
+        "document_type": None,
+        "label": "Other",
+        "record_classification_correction": False,
+        "notes_required": True,
+    },
 }
+
+
+def _validate_disposition(
+    disposition: str,
+    notes: str = "",
+) -> Dict[str, Any]:
+    if disposition not in DISPOSITION_CONFIG:
+        raise ValueError(
+            f"Unsupported disposition: {disposition}"
+        )
+
+    config = DISPOSITION_CONFIG[disposition]
+
+    if config.get("notes_required") and not notes.strip():
+        raise ValueError(
+            "Notes are required for the 'other' disposition"
+        )
+
+    return config
+
 
 
 def _original_document_type(doc: Dict[str, Any]) -> str:
@@ -66,28 +118,15 @@ def build_disposition_update(
     disposed_by: str,
     notes: str = "",
 ) -> Dict[str, Any]:
-    if disposition not in DISPOSITION_CONFIG:
-        raise ValueError(f"Unsupported disposition: {disposition}")
-
-    config = DISPOSITION_CONFIG[disposition]
+    config = _validate_disposition(disposition, notes)
     now = datetime.now(timezone.utc).isoformat()
     original_type = _original_document_type(doc)
 
-    return {
-        "document_type": config["document_type"],
-        "doc_type": config["document_type"],
-        "suggested_job_type": config["document_type"],
-        "document_type_source": "human_disposition",
-        "classification_override": {
-            "original_type": original_type,
-            "corrected_type": config["document_type"],
-            "corrected_at": now,
-            "corrected_by": disposed_by,
-        },
+    update = {
         "non_transactional": True,
         "non_transactional_disposition": disposition,
         "non_transactional_label": config["label"],
-        "non_transactional_notes": notes,
+        "non_transactional_notes": notes.strip(),
         "non_transactional_disposed_at": now,
         "non_transactional_disposed_by": disposed_by,
         "excluded_from_processing": True,
@@ -102,9 +141,32 @@ def build_disposition_update(
         "status": "Archived",
         "workflow_status": "completed",
         "auto_cleared": True,
-        "auto_clear_reason": f"non_transactional_{disposition}",
+        "auto_clear_reason": (
+            f"non_transactional_{disposition}"
+        ),
         "updated_utc": now,
     }
+
+    corrected_type = config.get("document_type")
+
+    if corrected_type:
+        update.update(
+            {
+                "document_type": corrected_type,
+                "doc_type": corrected_type,
+                "suggested_job_type": corrected_type,
+                "document_type_source": "human_disposition",
+                "classification_override": {
+                    "original_type": original_type,
+                    "corrected_type": corrected_type,
+                    "corrected_at": now,
+                    "corrected_by": disposed_by,
+                },
+            }
+        )
+
+    return update
+
 
 
 async def apply_non_transactional_disposition(
@@ -116,8 +178,10 @@ async def apply_non_transactional_disposition(
 ) -> Dict[str, Any]:
     """Archive an operationally irrelevant document and record AI feedback."""
 
-    if disposition not in DISPOSITION_CONFIG:
-        raise ValueError(f"Unsupported disposition: {disposition}")
+    config = _validate_disposition(
+        disposition,
+        notes,
+    )
 
     if db is None:
         db = get_db()
@@ -143,6 +207,11 @@ async def apply_non_transactional_disposition(
         }
 
     original_type = _original_document_type(doc)
+    effective_type = (
+        config.get("document_type")
+        or original_type
+    )
+
     update = build_disposition_update(
         doc,
         disposition,
@@ -155,23 +224,29 @@ async def apply_non_transactional_disposition(
         {"$set": update},
     )
 
+    intelligence_update = {
+        "automation_decision": "exclude",
+        "automation_readiness": "excluded",
+        "automation_readiness_score": 100,
+        "automation_readiness_reasons": (
+            update["automation_readiness_reasons"]
+        ),
+        "non_transactional": True,
+        "non_transactional_disposition": disposition,
+        "updated_at": update["updated_utc"],
+    }
+
+    if config.get("document_type"):
+        intelligence_update.update(
+            {
+                "document_type": effective_type,
+                "manually_corrected": True,
+            }
+        )
+
     await db.document_intelligence_results.update_one(
         {"document_id": doc_id},
-        {
-            "$set": {
-                "document_type": update["document_type"],
-                "automation_decision": "exclude",
-                "automation_readiness": "excluded",
-                "automation_readiness_score": 100,
-                "automation_readiness_reasons": (
-                    update["automation_readiness_reasons"]
-                ),
-                "manually_corrected": True,
-                "non_transactional": True,
-                "non_transactional_disposition": disposition,
-                "updated_at": update["updated_utc"],
-            }
-        },
+        {"$set": intelligence_update},
     )
 
     await db.hub_workflow_runs.update_many(
@@ -195,7 +270,7 @@ async def apply_non_transactional_disposition(
         "document_id": doc_id,
         "file_name": doc.get("file_name", ""),
         "original_type": original_type,
-        "corrected_type": update["document_type"],
+        "corrected_type": effective_type,
         "disposition": disposition,
         "disposed_by": disposed_by,
         "disposed_at": update["updated_utc"],
@@ -207,43 +282,55 @@ async def apply_non_transactional_disposition(
 
     learning_recorded = False
     learning_error = None
+    learning_skipped_reason = None
 
-    try:
-        from services.classification_feedback_service import (
-            record_correction,
-        )
+    if config.get("record_classification_correction"):
+        try:
+            from services.classification_feedback_service import (
+                record_correction,
+            )
 
-        result = await record_correction(
-            doc_id=doc_id,
-            original_type=original_type,
-            corrected_type=update["document_type"],
-            corrected_by=disposed_by,
-            doc_context={
-                "file_name": doc.get("file_name", ""),
-                # Deliberately blank: do not teach that every document
-                # from this sender/vendor is graphics artwork.
-                "vendor_raw": "",
-                "vendor_canonical": "",
-                "text_snippet": _learning_text(doc, disposition),
-                "classification_method": doc.get(
-                    "classification_method",
-                    "",
-                ),
-                "classification_confidence": (
-                    doc.get("classification_confidence")
-                    or doc.get("ai_confidence")
-                    or 0
-                ),
-            },
-        )
+            result = await record_correction(
+                doc_id=doc_id,
+                original_type=original_type,
+                corrected_type=effective_type,
+                corrected_by=disposed_by,
+                doc_context={
+                    "file_name": doc.get("file_name", ""),
+                    # Do not teach that every document from this
+                    # sender/vendor has the same classification.
+                    "vendor_raw": "",
+                    "vendor_canonical": "",
+                    "text_snippet": _learning_text(
+                        doc,
+                        disposition,
+                    ),
+                    "classification_method": doc.get(
+                        "classification_method",
+                        "",
+                    ),
+                    "classification_confidence": (
+                        doc.get("classification_confidence")
+                        or doc.get("ai_confidence")
+                        or 0
+                    ),
+                },
+            )
 
-        learning_recorded = bool(result.get("success"))
-    except Exception as exc:
-        learning_error = str(exc)[:500]
-        logger.warning(
-            "Disposition saved but classification learning failed for %s: %s",
-            doc_id,
-            exc,
+            learning_recorded = bool(
+                result.get("success")
+            )
+        except Exception as exc:
+            learning_error = str(exc)[:500]
+            logger.warning(
+                "Disposition saved but classification "
+                "learning failed for %s: %s",
+                doc_id,
+                exc,
+            )
+    else:
+        learning_skipped_reason = (
+            "disposition_does_not_change_classification"
         )
 
     await db.hub_documents.update_one(
@@ -252,6 +339,9 @@ async def apply_non_transactional_disposition(
             "$set": {
                 "disposition_learning_recorded": learning_recorded,
                 "disposition_learning_error": learning_error,
+                "disposition_learning_skipped_reason": (
+                    learning_skipped_reason
+                ),
             }
         },
     )
@@ -262,7 +352,7 @@ async def apply_non_transactional_disposition(
         "document_id": doc_id,
         "file_name": doc.get("file_name", ""),
         "original_type": original_type,
-        "document_type": update["document_type"],
+        "document_type": effective_type,
         "disposition": disposition,
         "learning_recorded": learning_recorded,
         "file_retained": True,

@@ -25,6 +25,7 @@ import api, {
 } from '@/lib/api';
 import HumanRoutingBrowserDialog from '@/components/HumanRoutingBrowserDialog';
 import NonTransactionalDispositionDialog from '@/components/NonTransactionalDispositionDialog';
+import DecisionQueueClassificationDialog from '@/components/DecisionQueueClassificationDialog';
 
 const ISSUE_TYPE_META = {
   isolated_misroute: { label: 'Wrong mailbox', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
@@ -139,8 +140,10 @@ export default function HumanDecisionQueuePage() {
       });
       toast.success(`Confirmed — ${primary.file_name}`);
       setResolvedKeys(previous => new Set(previous).add(key));
+      return true;
     } catch (error) {
       toast.error(error.response?.data?.detail || 'That decision didn’t save');
+      return false;
     } finally {
       setSubmittingKey(null);
     }
@@ -302,6 +305,7 @@ function DecisionCard({
   const [previewError, setPreviewError] = useState('');
   const [routingOpen, setRoutingOpen] = useState(false);
   const [dispositionOpen, setDispositionOpen] = useState(false);
+  const [classificationOpen, setClassificationOpen] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -452,6 +456,18 @@ function DecisionCard({
           <Button
             type="button"
             size="sm"
+            variant="outline"
+            disabled={submitting}
+            onClick={() => setClassificationOpen(true)}
+            data-testid={`change-classification-${primary.doc_id}`}
+          >
+            <HelpCircle className="w-3.5 h-3.5 mr-1.5" />
+            Change classification
+          </Button>
+
+          <Button
+            type="button"
+            size="sm"
             variant="ghost"
             onClick={handleOpenInNewTab}
             disabled={previewLoading}
@@ -560,6 +576,26 @@ function DecisionCard({
             Exclude from processing
           </Button>
         </div>
+
+        <DecisionQueueClassificationDialog
+          open={classificationOpen}
+          onOpenChange={setClassificationOpen}
+          fileName={primary.file_name}
+          currentDocType={
+            primary.current_state?.doc_type || ''
+          }
+          currentMailboxCategory={
+            primary.current_state?.mailbox_category || ''
+          }
+          submitting={submitting}
+          onSubmit={(docType, mailboxCategory) =>
+            onDecide(
+              group,
+              docType,
+              mailboxCategory
+            )
+          }
+        />
 
         <NonTransactionalDispositionDialog
           open={dispositionOpen}

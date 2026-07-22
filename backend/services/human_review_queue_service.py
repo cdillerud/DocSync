@@ -40,6 +40,8 @@ import csv
 import os
 from typing import Any, Dict, List, Optional
 
+from deps import get_db
+
 BUCKET_A_CSV = "prod_reports/bucket_A_root_cause.csv"
 AMBIGUOUS_LABELS_CSV = "prod_reports/manual_folder_labels_ambiguous.csv"
 
@@ -196,23 +198,72 @@ def _ambiguous_folder_label_items() -> List[Dict[str, Any]]:
     return items
 
 
-def get_human_review_queue() -> Dict[str, Any]:
-    """Returns the full, unified review queue plus a summary count by
-    issue_type, so a caller can see at a glance how much of each kind
-    of decision is outstanding without counting the list themselves."""
+def filter_dispositioned_items(
+    items: List[Dict[str, Any]],
+    dispositioned_ids: set,
+) -> List[Dict[str, Any]]:
+    """Remove documents already marked non-transactional."""
+    return [
+        item
+        for item in items
+        if item.get("doc_id") not in dispositioned_ids
+    ]
+
+
+async def get_human_review_queue() -> Dict[str, Any]:
+    """Return unresolved decisions, excluding dispositioned documents."""
     items = _bucket_a_items() + _ambiguous_folder_label_items()
+
+    doc_ids = sorted({
+        item.get("doc_id")
+        for item in items
+        if item.get("doc_id")
+    })
+
+    if doc_ids:
+        db = get_db()
+
+        disposed_documents = await db.hub_documents.find(
+            {
+                "id": {"$in": doc_ids},
+                "$or": [
+                    {"non_transactional": True},
+                    {"excluded_from_processing": True},
+                ],
+            },
+            {
+                "_id": 0,
+                "id": 1,
+            },
+        ).to_list(len(doc_ids))
+
+        disposed_ids = {
+            document.get("id")
+            for document in disposed_documents
+            if document.get("id")
+        }
+
+        items = filter_dispositioned_items(
+            items,
+            disposed_ids,
+        )
 
     by_type: Dict[str, int] = {}
     actionable_count = 0
+
     for item in items:
-        by_type[item["issue_type"]] = by_type.get(item["issue_type"], 0) + 1
+        issue_type = item["issue_type"]
+        by_type[issue_type] = by_type.get(issue_type, 0) + 1
+
         if item.get("submit_via"):
             actionable_count += 1
 
     return {
         "total_items": len(items),
         "actionable_count": actionable_count,
-        "informational_only_count": len(items) - actionable_count,
+        "informational_only_count": (
+            len(items) - actionable_count
+        ),
         "counts_by_issue_type": by_type,
         "items": items,
     }

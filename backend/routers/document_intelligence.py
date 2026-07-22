@@ -114,7 +114,7 @@ async def api_get_human_decision_queue():
     from the correction rather than just fixing one document.
     """
     from services.human_review_queue_service import get_human_review_queue
-    return get_human_review_queue()
+    return await get_human_review_queue()
 
 
 @router.get("/review-queue")

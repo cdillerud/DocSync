@@ -33,6 +33,13 @@ class DocumentUpdate(BaseModel):
     bc_document_no: Optional[str] = None
 
 
+
+
+class NonTransactionalDispositionRequest(BaseModel):
+    disposition: str
+    disposed_by: str = "human_decision_queue"
+    notes: str = ""
+
 # =============================================================================
 # COMPLEX ROUTES — Thin wrappers delegating to server.py functions
 # These use deep server.py internals (AI pipeline, workflows, BC integration).
@@ -763,6 +770,41 @@ async def update_document(doc_id: str, update: DocumentUpdate):
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return updated_doc
+
+
+@router.post("/{doc_id}/non-transactional-disposition")
+async def disposition_non_transactional_document(
+    doc_id: str,
+    body: NonTransactionalDispositionRequest,
+):
+    """
+    Soft-disposition a non-transactional document.
+
+    The file and audit history are retained. The document is removed from
+    operational queues and the human correction is recorded for AI learning.
+    """
+    from services.non_transactional_disposition_service import (
+        apply_non_transactional_disposition,
+    )
+
+    try:
+        return await apply_non_transactional_disposition(
+            doc_id=doc_id,
+            disposition=body.disposition,
+            disposed_by=body.disposed_by,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = (
+            404
+            if message.startswith("Document not found")
+            else 400
+        )
+        raise HTTPException(
+            status_code=status_code,
+            detail=message,
+        )
 
 
 @router.delete("/{doc_id}")

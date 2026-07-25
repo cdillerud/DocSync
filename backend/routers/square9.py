@@ -4,9 +4,10 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Dict
-from deps import get_db
 from services.square9_workflow import (
     Square9Stage, DEFAULT_WORKFLOW_CONFIG, get_square9_stage_info,
     determine_square9_stage,
@@ -48,10 +49,11 @@ async def get_square9_config():
 
 
 @router.get("/stage-counts")
-async def get_square9_stage_counts():
-    db = get_db()
+async def get_square9_stage_counts(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get document counts by Square9 stage."""
-    docs = await db.hub_documents.find({}, {"_id": 0, "id": 1, "workflow_status": 1, "validation_results": 1, "auto_escalated": 1, "square9_stage": 1}).to_list(10000)
+    docs = await database.hub_documents.find({}, {"_id": 0, "id": 1, "workflow_status": 1, "validation_results": 1, "auto_escalated": 1, "square9_stage": 1}).to_list(10000)
 
     stage_counts = {}
     for doc in docs:
@@ -75,25 +77,26 @@ async def get_square9_stage_counts():
 
 
 @router.get("/migration-status")
-async def get_square9_migration_status():
+async def get_square9_migration_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Assess readiness for Square9 decommission.
 
     Returns document counts with/without square9_stage, unique stages,
     and a cutover readiness assessment.
     """
-    db = get_db()
 
-    total = await db.hub_documents.count_documents({})
-    with_stage = await db.hub_documents.count_documents(
+    total = await database.hub_documents.count_documents({})
+    with_stage = await database.hub_documents.count_documents(
         {"square9_stage": {"$exists": True, "$ne": None}}
     )
     without_stage = total - with_stage
 
-    unique_stages = await db.hub_documents.distinct("square9_stage")
+    unique_stages = await database.hub_documents.distinct("square9_stage")
     unique_stages = [s for s in unique_stages if s]
 
     # Check current cutover status
-    cfg = await db.hub_config.find_one({"key": "square9_cutover"}, {"_id": 0})
+    cfg = await database.hub_config.find_one({"key": "square9_cutover"}, {"_id": 0})
     already_cut = cfg.get("square9_active") is False if cfg else False
 
     # Readiness: ready if hub has documents and no active inbound from Square9
@@ -113,20 +116,19 @@ async def get_square9_migration_status():
 
 
 @router.post("/archive-stage-data")
-async def archive_stage_data(body: Dict = Body(...)):
+async def archive_stage_data(body: Dict = Body(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Archive Square9 stage data and mark cutover. IRREVERSIBLE without restore."""
     if not body.get("confirm"):
         raise HTTPException(status_code=400, detail="confirm: true required — this operation is destructive")
 
-    db = get_db()
 
     # Check if already decommissioned
-    cfg = await db.hub_config.find_one({"key": "square9_cutover"}, {"_id": 0})
+    cfg = await database.hub_config.find_one({"key": "square9_cutover"}, {"_id": 0})
     if cfg and cfg.get("square9_active") is False:
         return {"status": "already_decommissioned", "archived_at": cfg.get("archived_at")}
 
     # Count docs with square9_stage that haven't been archived yet
-    to_archive = await db.hub_documents.count_documents(
+    to_archive = await database.hub_documents.count_documents(
         {"square9_stage": {"$exists": True, "$ne": None}}
     )
 
@@ -134,7 +136,7 @@ async def archive_stage_data(body: Dict = Body(...)):
         return {"status": "nothing_to_archive", "archived": 0}
 
     # Bulk archive: copy square9_stage → square9_archived_stage, unset square9_stage
-    result = await db.hub_documents.update_many(
+    result = await database.hub_documents.update_many(
         {"square9_stage": {"$exists": True, "$ne": None}},
         [
             {"$set": {"square9_archived_stage": "$square9_stage"}},
@@ -145,7 +147,7 @@ async def archive_stage_data(body: Dict = Body(...)):
 
     # Mark cutover in hub_config
     now = datetime.now(timezone.utc).isoformat()
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"key": "square9_cutover"},
         {"$set": {
             "key": "square9_cutover",
@@ -166,15 +168,14 @@ async def archive_stage_data(body: Dict = Body(...)):
 
 
 @router.post("/restore-stage-data")
-async def restore_stage_data(body: Dict = Body(...)):
+async def restore_stage_data(body: Dict = Body(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Restore Square9 stage data from archive. Safety escape hatch."""
     if not body.get("confirm"):
         raise HTTPException(status_code=400, detail="confirm: true required")
 
-    db = get_db()
 
     # Count docs with archived stage
-    to_restore = await db.hub_documents.count_documents(
+    to_restore = await database.hub_documents.count_documents(
         {"square9_archived_stage": {"$exists": True, "$ne": None}}
     )
 
@@ -182,7 +183,7 @@ async def restore_stage_data(body: Dict = Body(...)):
         return {"status": "nothing_to_restore", "restored": 0}
 
     # Restore: copy square9_archived_stage → square9_stage, unset archive
-    result = await db.hub_documents.update_many(
+    result = await database.hub_documents.update_many(
         {"square9_archived_stage": {"$exists": True, "$ne": None}},
         [
             {"$set": {"square9_stage": "$square9_archived_stage"}},
@@ -193,7 +194,7 @@ async def restore_stage_data(body: Dict = Body(...)):
 
     # Re-activate Square9 in hub_config
     now = datetime.now(timezone.utc).isoformat()
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"key": "square9_cutover"},
         {"$set": {
             "key": "square9_cutover",
@@ -222,10 +223,11 @@ async def restore_stage_data(body: Dict = Body(...)):
 # of that history - doesn't run the (expensive) readiness check itself.
 
 @router.get("/readiness/latest")
-async def get_latest_readiness_snapshot():
+async def get_latest_readiness_snapshot(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Most recent Square9 cutover readiness snapshot."""
-    db = get_db()
-    latest = await db.square9_readiness_history.find_one(
+    latest = await database.square9_readiness_history.find_one(
         {}, {"_id": 0}, sort=[("recorded_utc", -1)]
     )
     if not latest:
@@ -239,14 +241,13 @@ async def get_latest_readiness_snapshot():
 
 
 @router.get("/readiness/history")
-async def get_readiness_history(limit: int = Query(200, ge=1, le=1000)):
+async def get_readiness_history(limit: int = Query(200, ge=1, le=1000), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Chronological history of readiness snapshots, oldest first, for
     trend charting. Returns a lightweight projection (not the full
     bucket_C detail) to keep the payload small for a trend line.
     """
-    db = get_db()
-    cursor = db.square9_readiness_history.find(
+    cursor = database.square9_readiness_history.find(
         {},
         {
             "_id": 0,
@@ -388,7 +389,9 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
 
 
 @router.post("/readiness/run")
-async def trigger_readiness_check():
+async def trigger_readiness_check(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Kicks off the Square9 cutover readiness check as a background
     subprocess and returns immediately - the check itself takes
     45-90s (observed range over many runs), too long for a normal
@@ -396,8 +399,7 @@ async def trigger_readiness_check():
     progress; GET /readiness/latest picks up the result automatically
     once complete, since this feeds the same square9_readiness_history
     collection that endpoint already reads."""
-    db = get_db()
-    current = await _get_run_status_doc(db)
+    current = await _get_run_status_doc(database)
 
     if current.get("status") == "running" and not _run_is_stale(current):
         raise HTTPException(
@@ -410,25 +412,26 @@ async def trigger_readiness_check():
 
     started_at = datetime.now(timezone.utc).isoformat()
     await _set_run_status(
-        db, status="running", started_at=started_at, finished_at=None, error=None,
+        database, status="running", started_at=started_at, finished_at=None, error=None,
     )
 
     # Fire-and-forget: this task keeps running after this request
     # returns. Deliberately not FastAPI's BackgroundTasks - the
     # subprocess genuinely outlives the request/response cycle by
     # roughly a minute, and this makes that explicit.
-    asyncio.create_task(_execute_readiness_check(db, triggered_by="manual_ui"))
+    asyncio.create_task(_execute_readiness_check(database, triggered_by="manual_ui"))
 
     return {"status": "running", "started_at": started_at}
 
 
 @router.get("/readiness/run-status")
-async def get_readiness_run_status():
+async def get_readiness_run_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Poll this after POST /readiness/run. Returns status: idle |
     running | completed | failed, plus started_at/finished_at and,
     once completed, the resulting snapshot summary."""
-    db = get_db()
-    status_doc = await _get_run_status_doc(db)
+    status_doc = await _get_run_status_doc(database)
     if _run_is_stale(status_doc):
         status_doc = dict(status_doc)
         status_doc["status"] = "failed"

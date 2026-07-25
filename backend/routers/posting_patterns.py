@@ -9,7 +9,9 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, Query, BackgroundTasks, Body
+from fastapi import APIRouter, Query, BackgroundTasks, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,9 @@ router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
 # =============================================================================
 
 @router.get("/learning-dashboard")
-async def get_learning_dashboard():
+async def get_learning_dashboard(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Comprehensive view of what the AI has learned.
     Aggregates data from all learning subsystems:
@@ -32,7 +36,6 @@ async def get_learning_dashboard():
     - Vendor extraction profiles
     - Stable vendor evaluations
     """
-    db = get_db()
 
     # 1. Posting Learning Events — proof of continuous template learning
     # Exclude noise events (readiness self-corrections) that have no amount/line data
@@ -47,10 +50,10 @@ async def get_learning_dashboard():
             {"items_used": {"$ne": None, "$not": {"$size": 0}}},
         ],
     }
-    total_learning_events = await db.posting_learning_events.count_documents(
+    total_learning_events = await database.posting_learning_events.count_documents(
         MEANINGFUL_EVENT_FILTER
     )
-    recent_learning = await db.posting_learning_events.find(
+    recent_learning = await database.posting_learning_events.find(
         MEANINGFUL_EVENT_FILTER,
         {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
     ).sort("posted_at", -1).limit(20).to_list(20)
@@ -71,26 +74,26 @@ async def get_learning_dashboard():
         {"$sort": {"events": -1}},
         {"$limit": 20},
     ]
-    vendor_learning = await db.posting_learning_events.aggregate(vendor_learning_pipeline).to_list(20)
+    vendor_learning = await database.posting_learning_events.aggregate(vendor_learning_pipeline).to_list(20)
 
     # 2. Classification Corrections — proof of classification learning
-    total_corrections = await db.classification_corrections.count_documents({})
-    correction_types = await db.classification_corrections.aggregate([
+    total_corrections = await database.classification_corrections.count_documents({})
+    correction_types = await database.classification_corrections.aggregate([
         {"$group": {"_id": "$correction_type", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]).to_list(20)
 
-    recent_corrections = await db.classification_corrections.find(
+    recent_corrections = await database.classification_corrections.find(
         {}, {"_id": 0, "vendor_id": 1, "correction_type": 1, "original_type": 1,
              "corrected_type": 1, "confirmed_at": 1, "source": 1}
     ).sort("confirmed_at", -1).limit(10).to_list(10)
 
     # 3. Classification Feedback — few-shot examples for LLM
-    total_feedback = await db.classification_feedback.count_documents({})
+    total_feedback = await database.classification_feedback.count_documents({})
 
     # 4. Label Corrections — proof of reference intelligence learning (BOL→PO etc.)
-    total_label_corrections = await db.reference_label_corrections.count_documents({})
-    label_correction_patterns = await db.reference_label_corrections.aggregate([
+    total_label_corrections = await database.reference_label_corrections.count_documents({})
+    label_correction_patterns = await database.reference_label_corrections.aggregate([
         {"$group": {
             "_id": {"predicted": "$predicted_label", "correct": "$correct_label"},
             "count": {"$sum": 1},
@@ -102,8 +105,8 @@ async def get_learning_dashboard():
     ]).to_list(10)
 
     # 5. Posting Template Profiles — how many vendors have learned templates
-    total_profiles = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
-    profiles_by_confidence = await db.posting_pattern_analysis.aggregate([
+    total_profiles = await database.posting_pattern_analysis.count_documents({"status": "analyzed"})
+    profiles_by_confidence = await database.posting_pattern_analysis.aggregate([
         {"$match": {"status": "analyzed"}},
         {"$group": {
             "_id": "$posting_template.confidence",
@@ -114,20 +117,20 @@ async def get_learning_dashboard():
     ]).to_list(5)
 
     # Vendors with continuous learning (template updated after initial analysis)
-    continuously_learning = await db.posting_pattern_analysis.count_documents({
+    continuously_learning = await database.posting_pattern_analysis.count_documents({
         "status": "analyzed",
         "continuous_learning_count": {"$gte": 1},
     })
 
     # 6. Vendor Extraction Profiles — learned extraction biases
-    total_extraction_profiles = await db.vendor_extraction_profiles.count_documents({})
+    total_extraction_profiles = await database.vendor_extraction_profiles.count_documents({})
 
     # 7. Vendor Intelligence Profiles — overall vendor knowledge
-    total_vendor_profiles = await db.vendor_intelligence_profiles.count_documents({})
+    total_vendor_profiles = await database.vendor_intelligence_profiles.count_documents({})
 
     # 8. Auto-draft success tracking
-    total_auto_drafted = await db.hub_documents.count_documents({"auto_draft_created": True})
-    auto_draft_by_vendor = await db.hub_documents.aggregate([
+    total_auto_drafted = await database.hub_documents.count_documents({"auto_draft_created": True})
+    auto_draft_by_vendor = await database.hub_documents.aggregate([
         {"$match": {"auto_draft_created": True}},
         {"$group": {
             "_id": "$bc_vendor_number",
@@ -177,13 +180,14 @@ async def get_learning_dashboard():
 
 
 @router.get("/review-queue/badge-count")
-async def get_review_queue_badge_count():
+async def get_review_queue_badge_count(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Lightweight endpoint for the nav badge — returns count of drafts needing attention.
     Includes pending reviews + BC-edited drafts (feedback detected changes).
     """
-    db = get_db()
-    count = await db.hub_documents.count_documents({
+    count = await database.hub_documents.count_documents({
         "auto_draft_created": True,
         "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
     })
@@ -200,12 +204,12 @@ async def get_review_queue(
     status_filter: str = Query("pending", description="Filter: pending, approved, corrected, all"),
     vendor_no: str = Query("", description="Filter by vendor"),
     limit: int = Query(50, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List auto-drafted Purchase Invoices that need human review.
     Shows documents where auto_draft_created=True with their review status.
     """
-    db = get_db()
 
     match_filter = {"auto_draft_created": True}
     if vendor_no:
@@ -220,7 +224,7 @@ async def get_review_queue(
     elif status_filter in ("approved", "corrected"):
         match_filter["draft_review_status"] = status_filter
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         match_filter,
         {
             "_id": 0, "id": 1, "filename": 1, "file_name": 1,
@@ -264,15 +268,15 @@ async def get_review_queue(
         })
 
     # Summary counts
-    total_pending = await db.hub_documents.count_documents({
+    total_pending = await database.hub_documents.count_documents({
         "auto_draft_created": True,
         "draft_review_status": {"$nin": ["approved", "corrected"]},
     })
-    total_approved = await db.hub_documents.count_documents({
+    total_approved = await database.hub_documents.count_documents({
         "auto_draft_created": True,
         "draft_review_status": "approved",
     })
-    total_corrected = await db.hub_documents.count_documents({
+    total_corrected = await database.hub_documents.count_documents({
         "auto_draft_created": True,
         "draft_review_status": "corrected",
     })
@@ -290,13 +294,12 @@ async def get_review_queue(
 
 
 @router.post("/review-queue/{doc_id}/approve")
-async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
+async def approve_draft(doc_id: str, reviewer: str = Query("admin"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Approve an auto-drafted PI. Marks it as human-verified.
     Creates a positive feedback event so the system learns that this template worked.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
     if not doc:
         return {"success": False, "error": "Document not found"}
     if not doc.get("auto_draft_created"):
@@ -306,7 +309,7 @@ async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
     v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
 
     # Mark as approved
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "draft_review_status": "approved",
@@ -316,7 +319,7 @@ async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
     )
 
     # Create positive feedback event — template produced correct result
-    await db.posting_learning_events.insert_one({
+    await database.posting_learning_events.insert_one({
         "vendor_no": v_no,
         "doc_id": doc_id,
         "event_type": "draft_approved",
@@ -337,7 +340,8 @@ async def auto_approve_drafts(
     min_confidence: str = Query("medium", description="Minimum template confidence: low, medium, high"),
     dry_run: bool = Query(False, description="Preview without actually approving"),
     limit: int = Query(500, le=2000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Batch auto-approve drafts from vendors with proven posting templates.
     
@@ -345,14 +349,13 @@ async def auto_approve_drafts(
     has been invoiced 5+ times, the auto-draft is highly likely correct → approve it.
     This is the key to shrinking the Review Queue.
     """
-    db = get_db()
     from services.posting_pattern_analyzer import get_posting_profile_for_vendor
 
     confidence_levels = {"low": 0, "medium": 1, "high": 2}
     min_conf_level = confidence_levels.get(min_confidence, 1)
 
     # Fetch pending drafts
-    pending_docs = await db.hub_documents.find(
+    pending_docs = await database.hub_documents.find(
         {
             "auto_draft_created": True,
             "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
@@ -384,7 +387,7 @@ async def auto_approve_drafts(
         # Load vendor posting profile (cached)
         if v_no not in vendor_profiles_cache:
             try:
-                pp = await get_posting_profile_for_vendor(db, v_no)
+                pp = await get_posting_profile_for_vendor(database, v_no)
                 vendor_profiles_cache[v_no] = pp
             except Exception:
                 vendor_profiles_cache[v_no] = None
@@ -413,7 +416,7 @@ async def auto_approve_drafts(
 
         # Vendor qualifies — auto-approve this draft
         if not dry_run:
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "draft_review_status": "approved",
@@ -427,7 +430,7 @@ async def auto_approve_drafts(
             )
 
             # Positive feedback event
-            await db.posting_learning_events.insert_one({
+            await database.posting_learning_events.insert_one({
                 "vendor_no": v_no,
                 "doc_id": doc_id,
                 "event_type": "draft_auto_approved",
@@ -460,13 +463,13 @@ async def correct_draft(
     doc_id: str,
     corrections: list = Body(..., description="List of corrections: [{field, original, corrected, note}]"),
     reviewer: str = Query("admin"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Submit corrections for an auto-drafted PI. Records what the human changed
     so the system can learn from mistakes and improve future templates.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
     if not doc:
         return {"success": False, "error": "Document not found"}
     if not doc.get("auto_draft_created"):
@@ -476,7 +479,7 @@ async def correct_draft(
     v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
 
     # Mark as corrected with correction details
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "draft_review_status": "corrected",
@@ -487,7 +490,7 @@ async def correct_draft(
     )
 
     # Create correction feedback event — template needs adjustment
-    await db.posting_learning_events.insert_one({
+    await database.posting_learning_events.insert_one({
         "vendor_no": v_no,
         "doc_id": doc_id,
         "event_type": "draft_corrected",
@@ -501,7 +504,7 @@ async def correct_draft(
 
     # Also record as classification corrections for the learning dashboard
     for c in corrections:
-        await db.classification_corrections.insert_one({
+        await database.classification_corrections.insert_one({
             "doc_id": doc_id,
             "vendor_id": v_no,
             "correction_type": f"draft_{c.get('field', 'unknown')}",
@@ -527,38 +530,35 @@ async def correct_draft(
 # =============================================================================
 
 @router.post("/review-queue/{doc_id}/sync-from-bc")
-async def sync_draft_from_bc_endpoint(doc_id: str):
+async def sync_draft_from_bc_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Fetch the current state of an auto-drafted PI from BC.
     Compares original draft lines with what's currently in BC (after human edits).
     If changes are detected, feeds them back into the posting template.
     """
-    db = get_db()
     from services.draft_feedback_service import sync_draft_from_bc
-    result = await sync_draft_from_bc(doc_id, db)
+    result = await sync_draft_from_bc(doc_id, database)
     return result
 
 
 @router.post("/review-queue/sync-all")
-async def sync_all_drafts(limit: int = Query(50, le=200)):
+async def sync_all_drafts(limit: int = Query(50, le=200), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Batch sync all auto-drafted PIs from BC.
     Detects human edits and feeds corrections back into posting templates.
     """
-    db = get_db()
     from services.draft_feedback_service import process_feedback_batch
-    result = await process_feedback_batch(db, limit=limit)
+    result = await process_feedback_batch(database, limit=limit)
     return result
 
 
 @router.get("/review-queue/{doc_id}/feedback")
-async def get_draft_feedback(doc_id: str):
+async def get_draft_feedback(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get the feedback details for a specific auto-drafted document.
     Shows what changed between the original draft and BC current state.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"id": doc_id},
         {
             "_id": 0, "id": 1,
@@ -597,49 +597,48 @@ async def get_draft_feedback(doc_id: str):
 # =============================================================================
 
 @router.post("/learning/run-all")
-async def run_all_learning_engines_endpoint():
+async def run_all_learning_engines_endpoint(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Trigger all continuous learning engines on-demand:
     A. Detect posted drafts in BC and learn from final versions
     B. Propagate corrections across similar vendors
     C. Auto-promote/demote vendor confidence based on approval ratio
     """
-    db = get_db()
     from services.continuous_learning_service import run_all_learning_engines
-    result = await run_all_learning_engines(db)
+    result = await run_all_learning_engines(database)
     return result
 
 
 @router.post("/learning/detect-posted")
-async def detect_posted_drafts_endpoint(limit: int = Query(100, le=500)):
+async def detect_posted_drafts_endpoint(limit: int = Query(100, le=500), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Detect auto-drafted PIs that have been posted in BC and learn from them."""
-    db = get_db()
     from services.continuous_learning_service import detect_posted_drafts
-    return await detect_posted_drafts(db, limit=limit)
+    return await detect_posted_drafts(database, limit=limit)
 
 
 @router.post("/learning/cross-vendor")
-async def cross_vendor_learning_endpoint(limit: int = Query(20, le=100)):
+async def cross_vendor_learning_endpoint(limit: int = Query(20, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Propagate corrections from one vendor to similar vendors."""
-    db = get_db()
     from services.continuous_learning_service import propagate_cross_vendor_learning
-    return await propagate_cross_vendor_learning(db, limit=limit)
+    return await propagate_cross_vendor_learning(database, limit=limit)
 
 
 @router.post("/learning/auto-promote")
-async def auto_promote_confidence_endpoint():
+async def auto_promote_confidence_endpoint(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Auto-promote/demote vendor confidence based on approval ratio."""
-    db = get_db()
     from services.continuous_learning_service import auto_promote_confidence
-    return await auto_promote_confidence(db)
+    return await auto_promote_confidence(database)
 
 
 @router.get("/learning/extraction-profile/{vendor_no}")
-async def get_extraction_profile(vendor_no: str):
+async def get_extraction_profile(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get the extraction learning profile for a vendor — shows which fields tend to be wrong."""
-    db = get_db()
     from services.continuous_learning_service import get_vendor_extraction_profile
-    profile = await get_vendor_extraction_profile(db, vendor_no)
+    profile = await get_vendor_extraction_profile(database, vendor_no)
     return profile or {"vendor_no": vendor_no, "total_corrections": 0, "field_corrections": {}}
 
 
@@ -648,10 +647,6 @@ async def get_extraction_profile(vendor_no: str):
 _analysis_status = {"running": False, "last_result": None, "progress": "idle"}
 
 
-def get_db():
-    from database import db
-    return db
-
 
 def get_bc_service():
     from services.business_central_service import get_bc_service as _get
@@ -659,20 +654,21 @@ def get_bc_service():
 
 
 @router.get("/status")
-async def get_posting_pattern_status():
+async def get_posting_pattern_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get overall posting pattern analysis status with totals."""
-    db = get_db()
 
-    total_profiles = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
-    high_conf = await db.posting_pattern_analysis.count_documents({
+    total_profiles = await database.posting_pattern_analysis.count_documents({"status": "analyzed"})
+    high_conf = await database.posting_pattern_analysis.count_documents({
         "status": "analyzed",
         "posting_template.confidence": "high"
     })
-    medium_conf = await db.posting_pattern_analysis.count_documents({
+    medium_conf = await database.posting_pattern_analysis.count_documents({
         "status": "analyzed",
         "posting_template.confidence": "medium"
     })
-    low_conf = await db.posting_pattern_analysis.count_documents({
+    low_conf = await database.posting_pattern_analysis.count_documents({
         "status": "analyzed",
         "posting_template.confidence": "low"
     })
@@ -691,7 +687,7 @@ async def get_posting_pattern_status():
     ]
     totals = {"total_invoices": 0, "total_lines": 0, "total_learning_events": 0,
               "total_historical": 0, "total_current": 0}
-    async for row in db.posting_pattern_analysis.aggregate(totals_pipeline):
+    async for row in database.posting_pattern_analysis.aggregate(totals_pipeline):
         totals = {
             "total_invoices": row.get("total_invoices", 0),
             "total_lines": row.get("total_lines", 0),
@@ -701,7 +697,7 @@ async def get_posting_pattern_status():
         }
 
     # Get top 10 vendors by invoice count
-    top_vendors = await db.posting_pattern_analysis.find(
+    top_vendors = await database.posting_pattern_analysis.find(
         {"status": "analyzed"},
         {"_id": 0, "vendor_no": 1, "vendor_names_seen": 1,
          "invoices_analyzed": 1, "lines_analyzed": 1,
@@ -735,12 +731,11 @@ async def get_posting_pattern_status():
 
 
 @router.get("/vendor/{vendor_no}")
-async def get_vendor_posting_profile(vendor_no: str):
+async def get_vendor_posting_profile(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get the full posting profile for a specific vendor."""
-    db = get_db()
     from services.posting_pattern_analyzer import get_posting_profile_for_vendor
 
-    profile = await get_posting_profile_for_vendor(db, vendor_no)
+    profile = await get_posting_profile_for_vendor(database, vendor_no)
     if not profile:
         return {"vendor_no": vendor_no, "status": "not_analyzed",
                 "message": "No posting profile found. Run POST /analyze/{vendor_no} first."}
@@ -748,13 +743,12 @@ async def get_vendor_posting_profile(vendor_no: str):
 
 
 @router.post("/analyze/{vendor_no}")
-async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=0, le=10000, description="0 = fetch ALL invoices (no cap)")):
+async def analyze_single_vendor(vendor_no: str, limit: int = Query(default=0, le=10000, description="0 = fetch ALL invoices (no cap)"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Analyze posting patterns for a single vendor from BC production data. Default: all invoices."""
-    db = get_db()
     bc = get_bc_service()
 
     from services.posting_pattern_analyzer import analyze_vendor_posting_patterns
-    result = await analyze_vendor_posting_patterns(db, bc, vendor_no, limit=limit)
+    result = await analyze_vendor_posting_patterns(database, bc, vendor_no, limit=limit)
     return result
 
 
@@ -764,7 +758,6 @@ async def debug_invoice_lines(vendor_no: str):
     Debug endpoint: Get one invoice for a vendor and try to fetch its lines.
     Shows exactly what BC returns so we can fix field mapping.
     """
-    db = get_db()
     bc = get_bc_service()
 
     # Get one invoice
@@ -798,7 +791,7 @@ async def debug_invoice_lines(vendor_no: str):
     return result
 
 
-async def _run_top_analysis(top_n: int, force: bool = False):
+async def _run_top_analysis(top_n: int, force: bool = False, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Background task: discover ALL vendors from BC posted invoices and analyze each.
     No longer limited to Hub-only vendors — goes straight to BC for the complete picture.
@@ -806,7 +799,6 @@ async def _run_top_analysis(top_n: int, force: bool = False):
     global _analysis_status
     _analysis_status = {"running": True, "last_result": None, "progress": "discovering vendors from BC..."}
     try:
-        db = get_db()
         bc = get_bc_service()
         from services.posting_pattern_analyzer import analyze_vendor_posting_patterns
 
@@ -865,7 +857,7 @@ async def _run_top_analysis(top_n: int, force: bool = False):
             skip += len(page)
 
         # Also include vendors from Hub profiles that might not have BC invoices yet
-        hub_vendors = await db.vendor_invoice_profiles.find(
+        hub_vendors = await database.vendor_invoice_profiles.find(
             {"bc_invoice_count": {"$gte": 1}},
             {"_id": 0, "vendor_no": 1, "vendor_name": 1, "bc_invoice_count": 1}
         ).to_list(500)
@@ -902,7 +894,7 @@ async def _run_top_analysis(top_n: int, force: bool = False):
             # Check if recent analysis exists (skip if < 7 days old, unless force=True)
             if not force:
                 from datetime import datetime, timezone
-                existing = await db.posting_pattern_analysis.find_one(
+                existing = await database.posting_pattern_analysis.find_one(
                     {"vendor_no": vendor_no, "status": "analyzed"},
                     {"_id": 0, "analyzed_at": 1}
                 )
@@ -916,7 +908,7 @@ async def _run_top_analysis(top_n: int, force: bool = False):
                         pass
 
             try:
-                analysis = await analyze_vendor_posting_patterns(db, bc, vendor_no)
+                analysis = await analyze_vendor_posting_patterns(database, bc, vendor_no)
                 if analysis.get("status") == "analyzed":
                     results["analyzed"] += 1
                     results["vendor_details"].append({
@@ -994,17 +986,16 @@ async def get_analysis_status():
 
 
 @router.get("/learning-activity")
-async def get_learning_activity(vendor_no: str = Query("", description="Filter by vendor"), limit: int = Query(20, le=100)):
+async def get_learning_activity(vendor_no: str = Query("", description="Filter by vendor"), limit: int = Query(20, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Show recent continuous learning events — proof that the system
     learns from every single successful BC posting.
     """
-    db = get_db()
     query = {}
     if vendor_no:
         query["vendor_no"] = vendor_no
 
-    events = await db.posting_learning_events.find(
+    events = await database.posting_learning_events.find(
         query,
         {"_id": 0, "vendor_no": 1, "doc_id": 1, "posted_at": 1,
          "line_count": 1, "items_used": 1, "item_families": 1,
@@ -1018,12 +1009,12 @@ async def get_learning_activity(vendor_no: str = Query("", description="Filter b
         {"$limit": 20},
     ]
     vendor_counts = {}
-    async for row in db.posting_learning_events.aggregate(pipeline):
+    async for row in database.posting_learning_events.aggregate(pipeline):
         if row.get("_id"):
             vendor_counts[row["_id"]] = {"events": row["count"], "last_learned": row.get("last", "")}
 
     return {
-        "total_learning_events": await db.posting_learning_events.count_documents({}),
+        "total_learning_events": await database.posting_learning_events.count_documents({}),
         "recent_events": events,
         "vendors_learning": vendor_counts,
         "description": "Every successful BC posting teaches the system. These events show exactly what was learned.",
@@ -1031,14 +1022,13 @@ async def get_learning_activity(vendor_no: str = Query("", description="Filter b
 
 
 @router.get("/learning-proof/{vendor_no}")
-async def posting_learning_proof(vendor_no: str):
+async def posting_learning_proof(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Show exactly what the system has learned about how humans post
     invoices for this vendor — and what the auto-post would do.
     """
-    db = get_db()
 
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"},
         {"_id": 0}
     )
@@ -1154,10 +1144,11 @@ async def posting_learning_proof(vendor_no: str):
 # =============================================================================
 
 @router.get("/settings")
-async def get_auto_post_settings():
+async def get_auto_post_settings(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get current auto-post configuration settings."""
-    db = get_db()
-    settings = await db.auto_post_settings.find_one({"_id": "global"}) or {}
+    settings = await database.auto_post_settings.find_one({"_id": "global"}) or {}
     return {
         "auto_post_enabled": settings.get("auto_post_enabled", False),
         "min_confidence": settings.get("min_confidence", "high"),
@@ -1178,9 +1169,9 @@ async def update_auto_post_settings(
     require_po_match: Optional[bool] = Body(None),
     allowed_vendors: Optional[list] = Body(None),
     blocked_vendors: Optional[list] = Body(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Update auto-post configuration settings."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     update_fields = {"updated_at": now, "updated_by": "admin"}
@@ -1197,7 +1188,7 @@ async def update_auto_post_settings(
     if blocked_vendors is not None:
         update_fields["blocked_vendors"] = blocked_vendors
 
-    await db.auto_post_settings.update_one(
+    await database.auto_post_settings.update_one(
         {"_id": "global"},
         {"$set": update_fields},
         upsert=True,
@@ -1211,12 +1202,12 @@ async def get_ready_queue(
     limit: int = Query(50, le=200),
     vendor_no: str = Query("", description="Filter by vendor"),
     confidence: str = Query("", description="Filter by template confidence: high, medium, low"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List documents that are ReadyForPost with their posting template info.
     This is the queue of invoices ready for auto-posting or manual draft creation.
     """
-    db = get_db()
 
     match_filter = {
         "$or": [
@@ -1230,7 +1221,7 @@ async def get_ready_queue(
             {"vendor_no": vendor_no},
         ]
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         match_filter,
         {
             "_id": 0, "id": 1, "filename": 1, "file_name": 1,
@@ -1251,7 +1242,7 @@ async def get_ready_queue(
         v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
         profile = None
         if v_no:
-            profile = await db.posting_pattern_analysis.find_one(
+            profile = await database.posting_pattern_analysis.find_one(
                 {"vendor_no": v_no, "status": "analyzed"},
                 {"_id": 0, "posting_template": 1, "invoices_analyzed": 1}
             )
@@ -1290,13 +1281,12 @@ async def get_ready_queue(
 
 
 @router.post("/draft-preview/{doc_id}")
-async def preview_draft_pi(doc_id: str):
+async def preview_draft_pi(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Preview what a Draft Purchase Invoice would look like for this document
     using the vendor's posting template. Does NOT create anything in BC.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found"}
 
@@ -1305,7 +1295,7 @@ async def preview_draft_pi(doc_id: str):
         return {"error": "No vendor number resolved", "doc_id": doc_id}
 
     # Load posting template
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"},
         {"_id": 0}
     )
@@ -1410,13 +1400,12 @@ async def preview_draft_pi(doc_id: str):
 
 
 @router.post("/create-draft/{doc_id}")
-async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
+async def create_draft_from_template(doc_id: str, force: bool = Query(False), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Create a Draft Purchase Invoice in BC using the vendor's posting template.
     This uses the learned posting patterns to build lines that match human behavior.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found", "success": False}
 
@@ -1441,7 +1430,7 @@ async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
 
 
 @router.post("/auto-draft-queue")
-async def run_auto_draft_queue(limit: int = Query(50, le=200)):
+async def run_auto_draft_queue(limit: int = Query(50, le=200), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Process the ReadyForPost queue through the confidence gate.
     Automatically creates DRAFT Purchase Invoices for qualifying documents
@@ -1449,9 +1438,8 @@ async def run_auto_draft_queue(limit: int = Query(50, le=200)):
 
     Safety: Only creates DRAFT PIs. Never posts to the ledger.
     """
-    db = get_db()
     from services.ap_auto_post_service import process_auto_draft_queue
-    result = await process_auto_draft_queue(db, limit=limit)
+    result = await process_auto_draft_queue(database, limit=limit)
     return result
 
 
@@ -1625,15 +1613,14 @@ async def sync_item_to_sandbox(
 
 
 @router.get("/auto-draft-eligibility/{doc_id}")
-async def check_document_draft_eligibility(doc_id: str):
+async def check_document_draft_eligibility(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Check if a specific document qualifies for auto-draft PI creation."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found", "eligible": False}
 
     from services.ap_auto_post_service import check_auto_draft_eligibility
-    eligibility = await check_auto_draft_eligibility(doc, db)
+    eligibility = await check_auto_draft_eligibility(doc, database)
     return eligibility
 
 
@@ -1651,7 +1638,6 @@ async def compare_draft_vs_production(
     import os
 
     bc = get_bc_service()
-    db = get_db()
 
     BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
     BC_TENANT_ID = os.environ.get("TENANT_ID", "")
@@ -1781,15 +1767,14 @@ async def compare_draft_vs_production(
 
 
 @router.get("/vendor-summary")
-async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
+async def get_vendor_posting_summary(limit: int = Query(50, le=200), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get a summary of all analyzed vendors with their posting profiles,
     document counts, and auto-post readiness.
     """
-    db = get_db()
 
     # All analyzed profiles
-    profiles = await db.posting_pattern_analysis.find(
+    profiles = await database.posting_pattern_analysis.find(
         {"status": "analyzed"},
         {"_id": 0, "vendor_no": 1, "vendor_names_seen": 1, "invoices_analyzed": 1,
          "lines_analyzed": 1, "invoices_with_lines_analyzed": 1,
@@ -1806,12 +1791,12 @@ async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
         }},
     ]
     ready_counts = {}
-    async for row in db.hub_documents.aggregate(pipeline):
+    async for row in database.hub_documents.aggregate(pipeline):
         if row.get("_id"):
             ready_counts[row["_id"]] = row["count"]
 
     # Get auto-post settings
-    settings = await db.auto_post_settings.find_one({"_id": "global"}) or {}
+    settings = await database.auto_post_settings.find_one({"_id": "global"}) or {}
 
     vendors = []
     for p in profiles:
@@ -1877,18 +1862,18 @@ async def trace_invoice_comparison(
     vendor_no: str,
     invoice_index: int = Query(0, ge=0, description="Which invoice to trace (0 = most recent)"),
     mode: str = Query("trace", description="'trace' = AI can see human's items (optimistic). 'production' = AI uses only template (realistic)."),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Trace a REAL posted invoice for a vendor from BC Production and compare
     how the human actually posted it vs what our AI template would generate.
     Returns a side-by-side diff with matches, mismatches, and gaps.
     """
-    db = get_db()
     bc = get_bc_service()
     import re
 
     # 1. Load our learned posting template for this vendor
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"},
         {"_id": 0}
     )
@@ -2063,17 +2048,17 @@ async def batch_trace_invoices(
     vendor_no: str,
     count: int = Query(5, ge=1, le=20, description="Number of invoices to trace"),
     mode: str = Query("trace", description="'trace' = optimistic (AI sees human items). 'production' = realistic (template only)."),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Run the trace comparison across multiple invoices for a vendor and return
     aggregate statistics. This is the key metric — average match rate across
     a sample of invoices tells you how well the template generalizes.
     """
-    db = get_db()
     bc = get_bc_service()
 
     # Load template
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"},
         {"_id": 0}
     )
@@ -2187,17 +2172,16 @@ async def batch_trace_invoices(
 # =============================================================================
 
 @router.get("/trace-document/{document_id}")
-async def trace_document_posting(document_id: str):
+async def trace_document_posting(document_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     For a specific document that was draft-created in Sandbox, find the same
     invoice in PROD and compare line-by-line: what accounting posted vs what
     the AI created.
     """
-    db = get_db()
     bc = get_bc_service()
 
     # Load the document
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found"}
 
@@ -2303,7 +2287,7 @@ async def trace_document_posting(document_id: str):
     prod_summary = _build_line_summary(prod_lines)
 
     # Load template for comparison
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
     )
     template = profile.get("posting_template", {}) if profile else {}
@@ -2358,7 +2342,7 @@ async def trace_document_posting(document_id: str):
 DAILY_TRACE_COUNT = int(os.environ.get("DAILY_TRACE_COUNT", "15"))
 
 
-async def _run_daily_traces(count: int = None) -> dict:
+async def _run_daily_traces(count: int = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)) -> dict:
     """
     Fetch recent PIs from BC Production (last 3 months), randomly sample
     up to `count`, and compare each PROD-posted invoice vs what the AI
@@ -2367,7 +2351,6 @@ async def _run_daily_traces(count: int = None) -> dict:
     """
     import random
     from datetime import timedelta
-    db = get_db()
     bc = get_bc_service()
     trace_count = count or DAILY_TRACE_COUNT
     run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
@@ -2382,7 +2365,7 @@ async def _run_daily_traces(count: int = None) -> dict:
     try:
         # Get vendor list from profiles
         vendor_nos = []
-        async for vip in db.vendor_invoice_profiles.find(
+        async for vip in database.vendor_invoice_profiles.find(
             {"vendor_no": {"$exists": True, "$ne": ""}},
             {"_id": 0, "vendor_no": 1}
         ).limit(100):
@@ -2438,7 +2421,7 @@ async def _run_daily_traces(count: int = None) -> dict:
                          "match_rate": None, "verdict": None, "dimension_scores": {},
                          "line_alignment_avg": None, "human_line_count": 0, "ai_line_count": 0}],
         }
-        await db.daily_trace_results.insert_one(run_doc)
+        await database.daily_trace_results.insert_one(run_doc)
         run_doc.pop("_id", None)
         return run_doc
 
@@ -2450,13 +2433,13 @@ async def _run_daily_traces(count: int = None) -> dict:
             "traces_error": 0, "avg_match_rate": 0,
             "results": [], "note": f"No PIs found in PROD after {cutoff}",
         }
-        await db.daily_trace_results.insert_one(run_doc)
+        await database.daily_trace_results.insert_one(run_doc)
         run_doc.pop("_id", None)
         return run_doc
 
     # ── Step 2: Build vendor lookup for profiles/templates ──
     vendor_profiles = {}
-    async for vip in db.vendor_invoice_profiles.find(
+    async for vip in database.vendor_invoice_profiles.find(
         {"vendor_no": {"$exists": True, "$ne": ""}},
         {"_id": 0, "vendor_no": 1, "vendor_name": 1}
     ):
@@ -2464,7 +2447,7 @@ async def _run_daily_traces(count: int = None) -> dict:
 
     # Load all posting templates
     templates = {}
-    async for pp in db.posting_pattern_analysis.find(
+    async for pp in database.posting_pattern_analysis.find(
         {"status": "analyzed"}, {"_id": 0, "vendor_no": 1, "posting_template": 1}
     ):
         templates[pp["vendor_no"]] = pp.get("posting_template", {})
@@ -2568,7 +2551,7 @@ async def _run_daily_traces(count: int = None) -> dict:
         "results": results,
     }
 
-    await db.daily_trace_results.insert_one(run_doc)
+    await database.daily_trace_results.insert_one(run_doc)
     logger.info("[DailyTrace] Run %s complete: %d/%d success, avg match=%d%%",
                 run_id, success_count, trace_count, avg_match)
 
@@ -2593,24 +2576,25 @@ async def run_daily_traces(
 async def get_daily_trace_results(
     limit: int = Query(10, ge=1, le=50),
     skip: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Fetch stored daily trace run results, most recent first."""
-    db = get_db()
-    cursor = db.daily_trace_results.find(
+    cursor = database.daily_trace_results.find(
         {}, {"_id": 0}
     ).sort("run_date", -1).skip(skip).limit(limit)
     runs = []
     async for doc in cursor:
         runs.append(doc)
-    total = await db.daily_trace_results.count_documents({})
+    total = await database.daily_trace_results.count_documents({})
     return {"runs": runs, "total": total}
 
 
 @router.get("/daily-trace/latest")
-async def get_latest_daily_trace():
+async def get_latest_daily_trace(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Fetch the most recent daily trace run with full results."""
-    db = get_db()
-    run = await db.daily_trace_results.find_one({}, {"_id": 0}, sort=[("run_date", -1)])
+    run = await database.daily_trace_results.find_one({}, {"_id": 0}, sort=[("run_date", -1)])
     if not run:
         return {"error": "No daily trace runs found"}
     return run
@@ -2619,15 +2603,15 @@ async def get_latest_daily_trace():
 @router.get("/daily-trace/trend")
 async def get_daily_trace_trend(
     days: int = Query(30, ge=1, le=365, description="How many days of history"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Return daily avg match rates over time for trend charting.
     Also breaks down per-vendor performance across the window.
     """
-    db = get_db()
     cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
     # Fetch recent runs
-    cursor = db.daily_trace_results.find(
+    cursor = database.daily_trace_results.find(
         {}, {"_id": 0, "run_id": 1, "run_date": 1, "avg_match_rate": 1,
              "traces_success": 1, "traces_error": 1, "traces_requested": 1,
              "results": 1}
@@ -3594,59 +3578,56 @@ def _align_lines(human_lines: list, ai_lines: list) -> dict:
 # =============================================================================
 
 @router.get("/learning-pulse")
-async def get_learning_pulse():
+async def get_learning_pulse(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Real-time pulse of how the AI is learning from every document.
     Shows outcomes, confidence calibration, top vendors, and validation gaps.
     """
-    from deps import get_db
     from services.per_document_learning_service import get_learning_pulse as _get_pulse
-    db = get_db()
-    return await _get_pulse(db)
+    return await _get_pulse(database)
 
 
 @router.get("/learning-pulse/vendor/{vendor_no}")
-async def get_vendor_learning_profile(vendor_no: str):
+async def get_vendor_learning_profile(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Complete per-document learning profile for a specific vendor.
     Shows intelligence, field accuracy, confidence calibration, gaps.
     """
-    from deps import get_db
     from services.per_document_learning_service import get_vendor_learning_profile as _get_profile
-    db = get_db()
-    profile = await _get_profile(db, vendor_no)
+    profile = await _get_profile(database, vendor_no)
     if not profile:
         return {"vendor_no": vendor_no, "message": "No learning data yet"}
     return profile
 
 
 @router.get("/learning-pulse/confidence-calibration")
-async def get_confidence_calibration():
+async def get_confidence_calibration(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     How well-calibrated is the AI's confidence?
     Shows accuracy per confidence band — globally, per vendor, per doc type.
     """
-    from deps import get_db
     from services.per_document_learning_service import get_confidence_calibration_report
-    db = get_db()
-    return await get_confidence_calibration_report(db)
+    return await get_confidence_calibration_report(database)
 
 
 @router.post("/learning-pulse/backfill")
 async def backfill_per_document_learning(
     limit: int = Query(500, description="Max documents to process"),
     background_tasks: BackgroundTasks = None,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Backfill per-document learning for existing documents.
     Runs through recent documents and extracts learning signals.
     """
-    from deps import get_db
     from services.per_document_learning_service import learn_from_document
-    db = get_db()
 
     async def _backfill():
-        docs = await db.hub_documents.find(
+        docs = await database.hub_documents.find(
             {"status": {"$exists": True}},
             {"_id": 0, "id": 1}
         ).sort("updated_utc", -1).limit(limit).to_list(limit)
@@ -3655,7 +3636,7 @@ async def backfill_per_document_learning(
         errors = 0
         for doc in docs:
             try:
-                await learn_from_document(db, doc["id"], trigger="backfill")
+                await learn_from_document(database, doc["id"], trigger="backfill")
                 processed += 1
             except Exception as e:
                 errors += 1
@@ -3674,7 +3655,9 @@ async def backfill_per_document_learning(
 
 
 @router.post("/intelligence/recalibrate-confidence")
-async def recalibrate_confidence_bands():
+async def recalibrate_confidence_bands(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Recalibrate confidence bands using effective confidence (extraction-adjusted).
     
@@ -3682,19 +3665,17 @@ async def recalibrate_confidence_bands():
     compute_effective_confidence() so docs with high AI confidence but 
     poor extraction get placed in honest (lower) bands.
     """
-    from deps import get_db
     from services.per_document_learning_service import compute_effective_confidence
-    db = get_db()
 
     async def _recalibrate():
         import time
         start = time.time()
 
         # Reset calibration
-        await db.confidence_calibration.delete_many({"calibration_id": "global"})
+        await database.confidence_calibration.delete_many({"calibration_id": "global"})
 
         # Process all documents with ai_confidence
-        cursor = db.hub_documents.find(
+        cursor = database.hub_documents.find(
             {"ai_confidence": {"$exists": True, "$gt": 0}},
             {
                 "_id": 0, "id": 1, "ai_confidence": 1,
@@ -3738,7 +3719,7 @@ async def recalibrate_confidence_bands():
                 else:
                     inc_ops[f"bands.{band}.incorrect"] = 1
 
-                await db.confidence_calibration.update_one(
+                await database.confidence_calibration.update_one(
                     {"calibration_id": "global"},
                     {"$inc": inc_ops, "$set": {"updated_at": datetime.now(timezone.utc).isoformat()}},
                     upsert=True,
@@ -3747,7 +3728,7 @@ async def recalibrate_confidence_bands():
                 # Also store effective confidence on the document
                 raw_conf = float(doc.get("ai_confidence") or 0)
                 penalty = round(raw_conf - eff_conf, 4) if raw_conf > eff_conf else 0
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc["id"]},
                     {"$set": {
                         "effective_confidence": eff_conf,
@@ -3764,7 +3745,7 @@ async def recalibrate_confidence_bands():
         logger.info("[Recalibrate] Done: %d docs in %.1fs. Bands: %s", total, duration, band_counts)
 
         # Read back the calibration for the response
-        cal = await db.confidence_calibration.find_one(
+        cal = await database.confidence_calibration.find_one(
             {"calibration_id": "global"}, {"_id": 0}
         )
         bands_result = {}
@@ -3796,20 +3777,18 @@ async def recalibrate_confidence_bands():
 # =============================================================================
 
 @router.get("/deep-learning/summary")
-async def get_deep_learning_summary():
+async def get_deep_learning_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Complete summary of all 5 deep learning engines."""
-    from deps import get_db
     from services.deep_learning_engine import get_deep_learning_summary as _get_summary
-    db = get_db()
-    return await _get_summary(db)
+    return await _get_summary(database)
 
 
 @router.get("/deep-learning/extraction-patterns/{vendor_no}")
-async def get_extraction_patterns(vendor_no: str):
+async def get_extraction_patterns(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get learned extraction patterns for a specific vendor."""
-    from deps import get_db
-    db = get_db()
-    pattern = await db.extraction_patterns.find_one(
+    pattern = await database.extraction_patterns.find_one(
         {"vendor_no": vendor_no}, {"_id": 0}
     )
     if not pattern:
@@ -3818,77 +3797,66 @@ async def get_extraction_patterns(vendor_no: str):
 
 
 @router.get("/deep-learning/extraction-hints/{vendor_no}")
-async def get_extraction_hints(vendor_no: str):
+async def get_extraction_hints(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get extraction hints for the AI pipeline based on learned patterns."""
-    from deps import get_db
     from services.deep_learning_engine import get_extraction_hints_for_vendor
-    db = get_db()
-    return await get_extraction_hints_for_vendor(db, vendor_no)
+    return await get_extraction_hints_for_vendor(database, vendor_no)
 
 
 @router.post("/deep-learning/find-similar/{doc_id}")
-async def find_similar_documents(doc_id: str):
+async def find_similar_documents(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Find documents most similar to a given document."""
-    from deps import get_db
     from services.deep_learning_engine import find_similar_documents as _find_similar
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found"}
-    results = await _find_similar(db, doc)
+    results = await _find_similar(database, doc)
     return {"doc_id": doc_id, "similar_documents": results}
 
 
 @router.post("/deep-learning/self-correction/run")
 async def run_self_correction(
     sample_size: int = Query(50, description="Number of documents to audit"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Run a self-correction audit — spot-check auto-filed decisions."""
-    from deps import get_db
     from services.deep_learning_engine import run_self_correction_audit
-    db = get_db()
-    return await run_self_correction_audit(db, sample_size)
+    return await run_self_correction_audit(database, sample_size)
 
 
 @router.get("/deep-learning/self-correction/history")
-async def get_self_correction_history():
+async def get_self_correction_history(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get history of self-correction audits."""
-    from deps import get_db
     from services.deep_learning_engine import get_self_correction_history as _get_history
-    db = get_db()
-    return await _get_history(db)
+    return await _get_history(database)
 
 
 @router.get("/deep-learning/vendor-maturity/{vendor_no}")
-async def get_vendor_maturity(vendor_no: str):
+async def get_vendor_maturity(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get multi-dimensional maturity score for a vendor."""
-    from deps import get_db
     from services.deep_learning_engine import compute_vendor_maturity
-    db = get_db()
-    return await compute_vendor_maturity(db, vendor_no)
+    return await compute_vendor_maturity(database, vendor_no)
 
 
 @router.post("/deep-learning/vendor-maturity/compute-all")
-async def compute_all_maturity(background_tasks: BackgroundTasks):
+async def compute_all_maturity(background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Compute maturity scores for all vendors."""
-    from deps import get_db
     from services.deep_learning_engine import compute_all_vendor_maturity
-    db = get_db()
 
     async def _compute():
-        return await compute_all_vendor_maturity(db)
+        return await compute_all_vendor_maturity(database)
 
     background_tasks.add_task(_compute)
     return {"message": "Computing maturity scores for all vendors", "async": True}
 
 
 @router.post("/deep-learning/predict-readiness/{doc_id}")
-async def predict_document_readiness(doc_id: str):
+async def predict_document_readiness(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Predict whether a document will need human review."""
-    from deps import get_db
     from services.deep_learning_engine import predict_and_store
-    db = get_db()
-    return await predict_and_store(db, doc_id)
+    return await predict_and_store(database, doc_id)
 
 
 # =============================================================================
@@ -3896,85 +3864,76 @@ async def predict_document_readiness(doc_id: str):
 # =============================================================================
 
 @router.get("/advanced-learning/summary")
-async def get_advanced_learning_summary():
+async def get_advanced_learning_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Complete summary of all 7 advanced learning engines."""
-    from deps import get_db
     from services.advanced_learning_engine import get_advanced_learning_summary as _get_summary
-    db = get_db()
-    return await _get_summary(db)
+    return await _get_summary(database)
 
 
 @router.get("/advanced-learning/line-items/{vendor_no}")
-async def get_line_item_suggestions(vendor_no: str):
+async def get_line_item_suggestions(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get learned line item patterns/GL suggestions for a vendor."""
-    from deps import get_db
     from services.advanced_learning_engine import get_line_item_suggestions as _get_suggestions
-    db = get_db()
-    suggestions = await _get_suggestions(db, vendor_no)
+    suggestions = await _get_suggestions(database, vendor_no)
     return {"vendor_no": vendor_no, "suggestions": suggestions}
 
 
 @router.get("/advanced-learning/predict-next/{vendor_no}")
-async def predict_next_document(vendor_no: str):
+async def predict_next_document(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Predict what document type will arrive next from a vendor."""
-    from deps import get_db
     from services.advanced_learning_engine import predict_next_document as _predict
-    db = get_db()
-    return await _predict(db, vendor_no)
+    return await _predict(database, vendor_no)
 
 
 @router.get("/advanced-learning/amount-check/{vendor_no}")
-async def check_amount_anomaly(vendor_no: str, amount: float = Query(...)):
+async def check_amount_anomaly(vendor_no: str, amount: float = Query(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Check if an invoice amount is anomalous for a vendor."""
-    from deps import get_db
     from services.advanced_learning_engine import check_amount_anomaly as _check
-    db = get_db()
-    return await _check(db, vendor_no, amount)
+    return await _check(database, vendor_no, amount)
 
 
 @router.get("/advanced-learning/correction-replays")
-async def get_correction_replays():
+async def get_correction_replays(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get history of correction replays."""
-    from deps import get_db
     from services.advanced_learning_engine import get_replay_history
-    db = get_db()
-    return await get_replay_history(db)
+    return await get_replay_history(database)
 
 
 @router.get("/advanced-learning/field-predictions/{doc_id}")
-async def get_field_predictions(doc_id: str):
+async def get_field_predictions(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Use learned correlations to predict doc type from field values."""
-    from deps import get_db
     from services.advanced_learning_engine import get_field_predictions as _predict
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found"}
-    predictions = await _predict(db, doc)
+    predictions = await _predict(database, doc)
     return {"doc_id": doc_id, "predictions": predictions}
 
 
 @router.get("/advanced-learning/volume-prediction")
-async def get_volume_prediction():
+async def get_volume_prediction(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Predict tomorrow's inbox volume."""
-    from deps import get_db
     from services.advanced_learning_engine import predict_volume
-    db = get_db()
-    return await predict_volume(db)
+    return await predict_volume(database)
 
 
 @router.post("/advanced-learning/backfill")
 async def backfill_advanced_learning(
     limit: int = Query(500),
     background_tasks: BackgroundTasks = None,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Backfill all 7 advanced learning engines from existing documents."""
-    from deps import get_db
     from services.advanced_learning_engine import run_advanced_learning
-    db = get_db()
 
     async def _backfill():
-        docs = await db.hub_documents.find(
+        docs = await database.hub_documents.find(
             {"status": {"$exists": True}},
             {"_id": 0, "id": 1}
         ).sort("updated_utc", -1).limit(limit).to_list(limit)
@@ -3982,7 +3941,7 @@ async def backfill_advanced_learning(
         processed = 0
         for doc in docs:
             try:
-                await run_advanced_learning(db, doc["id"], trigger="backfill")
+                await run_advanced_learning(database, doc["id"], trigger="backfill")
                 processed += 1
             except Exception:
                 pass
@@ -4003,19 +3962,19 @@ async def backfill_advanced_learning(
 # =============================================================================
 
 @router.get("/gap-closer/status")
-async def get_gap_closer_status():
+async def get_gap_closer_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Status of all 4 gap closers — how much intelligence is available
     to close each validation gap.
     """
-    from deps import get_db
     from services.gap_closer_service import get_confidence_band_accuracy
-    db = get_db()
 
     # GAP 1: Confidence band calibration
     bands = {}
     for conf, band_name in [(0.25, "0-50%"), (0.60, "50-70%"), (0.77, "70-85%"), (0.90, "85-95%"), (0.97, "95-100%")]:
-        result = await get_confidence_band_accuracy(db, conf)
+        result = await get_confidence_band_accuracy(database, conf)
         bands[band_name] = {
             "accuracy": result.get("accuracy"),
             "samples": result.get("total_samples", 0),
@@ -4024,8 +3983,8 @@ async def get_gap_closer_status():
         }
 
     # GAP 2: PO intelligence (count vendors with extraction patterns)
-    po_vendors = await db.extraction_patterns.count_documents({"field_presence.po_number": {"$exists": True}})
-    po_flow_events = await db.document_flow_sequences.count_documents(
+    po_vendors = await database.extraction_patterns.count_documents({"field_presence.po_number": {"$exists": True}})
+    po_flow_events = await database.document_flow_sequences.count_documents(
         {"doc_type": {"$in": ["Purchase_Order", "PO"]}}
     )
 
@@ -4034,14 +3993,14 @@ async def get_gap_closer_status():
         {"$match": {"validation_results.checks": {"$elemMatch": {"check_name": "customer_match", "passed": True}}}},
         {"$count": "total"},
     ]
-    cust_history = await db.hub_documents.aggregate(cust_pipeline).to_list(1)
+    cust_history = await database.hub_documents.aggregate(cust_pipeline).to_list(1)
     customer_history_count = cust_history[0]["total"] if cust_history else 0
 
     # GAP 4: Sales order flow intelligence
-    so_flow_count = await db.document_flow_sequences.count_documents(
+    so_flow_count = await database.document_flow_sequences.count_documents(
         {"doc_type": {"$in": ["Sales_Order", "Shipping_Document", "BOL"]}}
     )
-    so_matched = await db.hub_documents.count_documents(
+    so_matched = await database.hub_documents.count_documents(
         {"validation_results.matched_sales_order": {"$exists": True}}
     )
 
@@ -4052,14 +4011,14 @@ async def get_gap_closer_status():
     advisory_counts = {}
     for check_name in gap_check_names:
         # Total failed checks
-        total = await db.hub_documents.count_documents({
+        total = await database.hub_documents.count_documents({
             "validation_results.checks": {
                 "$elemMatch": {"check_name": check_name, "passed": False}
             },
             "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
         })
         # Advisory: required explicitly set to false
-        advisory = await db.hub_documents.count_documents({
+        advisory = await database.hub_documents.count_documents({
             "validation_results.checks": {
                 "$elemMatch": {"check_name": check_name, "passed": False, "required": False}
             },
@@ -4074,7 +4033,7 @@ async def get_gap_closer_status():
     # GAP 5: Duplicate Intelligence
     try:
         from services.duplicate_intelligence_service import get_duplicate_intelligence_summary
-        dup_summary = await get_duplicate_intelligence_summary(db)
+        dup_summary = await get_duplicate_intelligence_summary(database)
         dup_intel_summary = {
             "status": "active",
             "vendors_with_intel": dup_summary.get("vendors_with_intel", 0),
@@ -4088,8 +4047,8 @@ async def get_gap_closer_status():
 
     # GAP 6: Amount Anomaly Detection
     try:
-        amount_vendors = await db.amount_patterns.count_documents({"count": {"$gte": 3}})
-        active_anomalies = await db.amount_patterns.count_documents({"latest_is_anomaly": True})
+        amount_vendors = await database.amount_patterns.count_documents({"count": {"$gte": 3}})
+        active_anomalies = await database.amount_patterns.count_documents({"latest_is_anomaly": True})
         amount_anomaly_summary = {
             "status": "active",
             "vendors_with_patterns": amount_vendors,
@@ -4102,7 +4061,7 @@ async def get_gap_closer_status():
     # GAP 7: Auto-Escalation Intelligence
     try:
         from services.escalation_intelligence_service import get_escalation_summary
-        esc_summary = await get_escalation_summary(db)
+        esc_summary = await get_escalation_summary(database)
         escalation_summary = {
             "status": "active",
             "combinations_tracked": esc_summary.get("total_combinations_tracked", 0),
@@ -4114,17 +4073,17 @@ async def get_gap_closer_status():
         escalation_summary = {"status": "initializing"}
 
     # GAP 8: Extraction Quality Gate — count docs resolved vs remaining
-    extraction_gate_resolved = await db.hub_documents.count_documents({"extraction_gap_resolved_via": {"$exists": True}})
-    extraction_gate_downgraded = await db.hub_documents.count_documents({"extraction_gate_downgraded": True})
+    extraction_gate_resolved = await database.hub_documents.count_documents({"extraction_gap_resolved_via": {"$exists": True}})
+    extraction_gate_downgraded = await database.hub_documents.count_documents({"extraction_gate_downgraded": True})
     extraction_gate_blocking = gap_counts.get("extraction_quality_gate", 0)
 
     # GAP 9: Enhanced Vendor Match stats
-    enhanced_vendor_resolved = await db.hub_documents.count_documents({"vendor_enhanced_match_via": {"$exists": True}})
-    vendor_alias_count = await db.vendor_aliases.count_documents({})
+    enhanced_vendor_resolved = await database.hub_documents.count_documents({"vendor_enhanced_match_via": {"$exists": True}})
+    vendor_alias_count = await database.vendor_aliases.count_documents({})
 
     # GAP 10: Enhanced PO Revalidation stats
-    po_enhanced_resolved = await db.hub_documents.count_documents({"po_enhanced_resolved_via": {"$exists": True}})
-    po_downgraded = await db.hub_documents.count_documents({"po_gate_downgraded": True})
+    po_enhanced_resolved = await database.hub_documents.count_documents({"po_enhanced_resolved_via": {"$exists": True}})
+    po_downgraded = await database.hub_documents.count_documents({"po_gate_downgraded": True})
 
     return {
         "gap_1_confidence_calibration": {
@@ -4186,21 +4145,19 @@ async def get_gap_closer_status():
 # =============================================================================
 
 @router.get("/duplicate-intelligence")
-async def get_duplicate_intelligence():
+async def get_duplicate_intelligence(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get duplicate intelligence summary — false-positive learning."""
-    from deps import get_db
     from services.duplicate_intelligence_service import get_duplicate_intelligence_summary
-    db = get_db()
-    return await get_duplicate_intelligence_summary(db)
+    return await get_duplicate_intelligence_summary(database)
 
 
 @router.post("/duplicate-intelligence/batch-clear")
-async def batch_clear_safe_duplicates(limit: int = Query(100)):
+async def batch_clear_safe_duplicates(limit: int = Query(100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Auto-clear duplicate flags for vendors with unreliable duplicate detection."""
-    from deps import get_db
     from services.duplicate_intelligence_service import batch_auto_clear_safe_duplicates
-    db = get_db()
-    return await batch_auto_clear_safe_duplicates(db, limit=limit)
+    return await batch_auto_clear_safe_duplicates(database, limit=limit)
 
 
 # =============================================================================
@@ -4208,19 +4165,19 @@ async def batch_clear_safe_duplicates(limit: int = Query(100)):
 # =============================================================================
 
 @router.get("/escalation-intelligence")
-async def get_escalation_intelligence():
+async def get_escalation_intelligence(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get escalation intelligence summary — which vendor+doc_type combos always fail."""
-    from deps import get_db
     from services.escalation_intelligence_service import get_escalation_summary
-    db = get_db()
-    return await get_escalation_summary(db)
+    return await get_escalation_summary(database)
 
 
 @router.get("/po-gap-breakdown")
-async def get_po_gap_breakdown():
+async def get_po_gap_breakdown(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Break down PO validation gaps by vendor — which vendors have the most PO failures."""
-    from deps import get_db
-    db = get_db()
 
     pipeline = [
         {"$match": {
@@ -4241,7 +4198,7 @@ async def get_po_gap_breakdown():
         {"$limit": 20},
     ]
 
-    results = await db.hub_documents.aggregate(pipeline).to_list(20)
+    results = await database.hub_documents.aggregate(pipeline).to_list(20)
     vendors = []
     for r in results:
         vendor_info = r.get("_id", {})
@@ -4261,12 +4218,12 @@ async def get_po_gap_breakdown():
 
 
 @router.get("/po-format-intelligence")
-async def get_po_format_intelligence():
+async def get_po_format_intelligence(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get PO format learning summary — which transformations work per vendor."""
-    from deps import get_db
     from services.po_format_learning_service import get_po_format_summary
-    db = get_db()
-    return await get_po_format_summary(db)
+    return await get_po_format_summary(database)
 
 
 # =============================================================================
@@ -4274,7 +4231,9 @@ async def get_po_format_intelligence():
 # =============================================================================
 
 @router.post("/intelligence/backfill")
-async def run_intelligence_backfill():
+async def run_intelligence_backfill(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     On-demand: Run all intelligence backfills immediately.
     - Duplicate outcome backfill (completed docs with dup flag → false positive)
@@ -4282,14 +4241,12 @@ async def run_intelligence_backfill():
     - Vendor maturity recompute
     - Duplicate batch-clear
     """
-    from deps import get_db
-    db = get_db()
     results = {}
 
     # 1. Escalation backfill
     try:
         from services.escalation_intelligence_service import record_automation_outcome
-        recent_docs = await db.hub_documents.find(
+        recent_docs = await database.hub_documents.find(
             {
                 "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed", "Needs Review", "Review", "Rejected"]},
                 "escalation_tracked": {"$ne": True},
@@ -4312,8 +4269,8 @@ async def run_intelligence_backfill():
                 outcome = "failure"
             else:
                 outcome = "review"
-            await record_automation_outcome(db, vendor, doc_type, outcome, doc_id)
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"escalation_tracked": True}})
+            await record_automation_outcome(database, vendor, doc_type, outcome, doc_id)
+            await database.hub_documents.update_one({"id": doc_id}, {"$set": {"escalation_tracked": True}})
             tracked += 1
         results["escalation_backfill"] = {"tracked": tracked, "found": len(recent_docs)}
     except Exception as e:
@@ -4322,7 +4279,7 @@ async def run_intelligence_backfill():
     # 2. Duplicate outcome backfill
     try:
         from services.duplicate_intelligence_service import record_duplicate_outcome
-        dup_docs = await db.hub_documents.find(
+        dup_docs = await database.hub_documents.find(
             {
                 "possible_duplicate": True,
                 "status": {"$in": ["Completed", "Posted", "Auto-Draft", "Linked", "Filed"]},
@@ -4338,12 +4295,12 @@ async def run_intelligence_backfill():
             if not vendor:
                 continue
             await record_duplicate_outcome(
-                db, doc_id=doc_id, vendor_no=vendor,
+                database, doc_id=doc_id, vendor_no=vendor,
                 was_flagged_duplicate=True,
                 actual_outcome="false_positive",
                 resolution_source="backfill_completed",
             )
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"duplicate_outcome_tracked": True}})
+            await database.hub_documents.update_one({"id": doc_id}, {"$set": {"duplicate_outcome_tracked": True}})
             dup_tracked += 1
         results["duplicate_backfill"] = {"tracked": dup_tracked, "found": len(dup_docs)}
     except Exception as e:
@@ -4352,7 +4309,7 @@ async def run_intelligence_backfill():
     # 3. Vendor maturity recompute
     try:
         from services.deep_learning_engine import compute_all_vendor_maturity
-        maturity = await compute_all_vendor_maturity(db)
+        maturity = await compute_all_vendor_maturity(database)
         results["vendor_maturity"] = {
             "computed": maturity.get("computed", 0),
             "levels": maturity.get("levels", {}),
@@ -4363,7 +4320,7 @@ async def run_intelligence_backfill():
     # 4. Duplicate batch-clear
     try:
         from services.duplicate_intelligence_service import batch_auto_clear_safe_duplicates
-        clear = await batch_auto_clear_safe_duplicates(db, limit=200)
+        clear = await batch_auto_clear_safe_duplicates(database, limit=200)
         results["duplicate_clear"] = clear
     except Exception as e:
         results["duplicate_clear"] = {"error": str(e)}
@@ -4372,7 +4329,7 @@ async def run_intelligence_backfill():
     # This ensures profiles reflect the latest BC cache data (e.g., after a cache sync).
     try:
         from services.vendor_invoice_profile_service import build_vendor_profile
-        po_gap_vendors = await db.hub_documents.aggregate([
+        po_gap_vendors = await database.hub_documents.aggregate([
             {"$match": {
                 "validation_results.checks": {"$elemMatch": {"check_name": "po_validation", "passed": False}},
                 "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
@@ -4393,13 +4350,13 @@ async def run_intelligence_backfill():
                 vendor_po_profiles.append({"vendor_no": "unknown", "gaps": vg["gap_count"], "profile": "no vendor match"})
                 continue
             # Force rebuild from latest cache data
-            profile = await build_vendor_profile(db, vendor_no, force_refresh=True)
+            profile = await build_vendor_profile(database, vendor_no, force_refresh=True)
             refreshed += 1
-            cache_count = await db.bc_reference_cache.count_documents({
+            cache_count = await database.bc_reference_cache.count_documents({
                 "bc_vendor_no": vendor_no,
                 "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]},
             })
-            cache_with_po = await db.bc_reference_cache.count_documents({
+            cache_with_po = await database.bc_reference_cache.count_documents({
                 "bc_vendor_no": vendor_no,
                 "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]},
                 "bc_order_number": {"$exists": True, "$nin": [None, ""]},
@@ -4418,86 +4375,86 @@ async def run_intelligence_backfill():
 
     # 6. PO Gap Re-validation — now uses freshly refreshed vendor profiles
     try:
-        results["po_revalidation"] = await _batch_revalidate_po_gaps(db, limit=1000)
+        results["po_revalidation"] = await _batch_revalidate_po_gaps(database, limit=1000)
     except Exception as e:
         results["po_revalidation"] = {"error": str(e)}
 
     # 7. Customer Match Re-validation — aliases, vendor→customer history, cache
     try:
         from services.validation_backfill_service import batch_revalidate_customer_gaps
-        results["customer_revalidation"] = await batch_revalidate_customer_gaps(db, limit=500)
+        results["customer_revalidation"] = await batch_revalidate_customer_gaps(database, limit=500)
     except Exception as e:
         results["customer_revalidation"] = {"error": str(e)}
 
     # 8. Sales Order Match Re-validation — cache-first SO lookup, normalization
     try:
         from services.validation_backfill_service import batch_revalidate_so_gaps
-        results["so_revalidation"] = await batch_revalidate_so_gaps(db, limit=500)
+        results["so_revalidation"] = await batch_revalidate_so_gaps(database, limit=500)
     except Exception as e:
         results["so_revalidation"] = {"error": str(e)}
 
     # 9. Vendor Match Re-validation — re-run with latest aliases + email domain
     try:
         from services.validation_backfill_service import batch_revalidate_vendor_gaps
-        results["vendor_revalidation"] = await batch_revalidate_vendor_gaps(db, limit=500)
+        results["vendor_revalidation"] = await batch_revalidate_vendor_gaps(database, limit=500)
     except Exception as e:
         results["vendor_revalidation"] = {"error": str(e)}
 
     # 10. Duplicate Check Re-validation — smart duplicate clearing
     try:
         from services.validation_backfill_service import batch_revalidate_duplicate_gaps
-        results["duplicate_revalidation"] = await batch_revalidate_duplicate_gaps(db, limit=200)
+        results["duplicate_revalidation"] = await batch_revalidate_duplicate_gaps(database, limit=200)
     except Exception as e:
         results["duplicate_revalidation"] = {"error": str(e)}
 
     # 11. Extraction Quality Gate Re-validation — filename parsing, batch context, smart downgrade
     try:
         from services.validation_backfill_service import batch_revalidate_extraction_gaps
-        results["extraction_revalidation"] = await batch_revalidate_extraction_gaps(db, limit=500)
+        results["extraction_revalidation"] = await batch_revalidate_extraction_gaps(database, limit=500)
     except Exception as e:
         results["extraction_revalidation"] = {"error": str(e)}
 
     # 11b. Force-downgrade any remaining blocking extraction quality gate failures
     try:
         from services.validation_backfill_service import force_downgrade_extraction_gate
-        results["extraction_force_downgrade"] = await force_downgrade_extraction_gate(db)
+        results["extraction_force_downgrade"] = await force_downgrade_extraction_gate(database)
     except Exception as e:
         results["extraction_force_downgrade"] = {"error": str(e)}
 
     # 12. Enhanced Vendor Match — cross-doc inference, email domain, aggressive matching
     try:
         from services.validation_backfill_service import enhanced_vendor_match_backfill
-        results["vendor_enhanced_match"] = await enhanced_vendor_match_backfill(db, limit=500)
+        results["vendor_enhanced_match"] = await enhanced_vendor_match_backfill(database, limit=500)
     except Exception as e:
         results["vendor_enhanced_match"] = {"error": str(e)}
 
     # 13. Enhanced PO Revalidation — profile relaxation, broader ref matching, doc type downgrade
     try:
         from services.validation_backfill_service import enhanced_po_revalidation
-        results["po_enhanced_revalidation"] = await enhanced_po_revalidation(db, limit=500)
+        results["po_enhanced_revalidation"] = await enhanced_po_revalidation(database, limit=500)
     except Exception as e:
         results["po_enhanced_revalidation"] = {"error": str(e)}
 
     # 14. Gap Log Cleanup — remove stale entries for resolved/archived docs
     try:
         stale_cleaned = 0
-        gap_log_entries = await db.validation_gap_log.find(
+        gap_log_entries = await database.validation_gap_log.find(
             {}, {"_id": 0, "doc_id": 1, "failure_checks": 1}
         ).limit(2000).to_list(2000)
         for entry in gap_log_entries:
             doc_id = entry.get("doc_id", "")
             if not doc_id:
                 continue
-            doc = await db.hub_documents.find_one(
+            doc = await database.hub_documents.find_one(
                 {"id": doc_id},
                 {"_id": 0, "status": 1, "validation_results.checks": 1}
             )
             if not doc:
-                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                await database.validation_gap_log.delete_many({"doc_id": doc_id})
                 stale_cleaned += 1
                 continue
             if doc.get("status") in ("Completed", "Posted", "Deleted", "Archived"):
-                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                await database.validation_gap_log.delete_many({"doc_id": doc_id})
                 stale_cleaned += 1
                 continue
             # Check if the specific failure checks are now passing
@@ -4508,7 +4465,7 @@ async def run_intelligence_backfill():
                 failures = [failures]
             all_resolved = all(check_map.get(f, False) for f in failures if f)
             if all_resolved:
-                await db.validation_gap_log.delete_many({"doc_id": doc_id})
+                await database.validation_gap_log.delete_many({"doc_id": doc_id})
                 stale_cleaned += 1
         results["gap_log_cleanup"] = {"stale_removed": stale_cleaned, "checked": len(gap_log_entries)}
     except Exception as e:
@@ -4518,7 +4475,9 @@ async def run_intelligence_backfill():
 
 
 @router.post("/system/run-full-cycle")
-async def run_full_cycle():
+async def run_full_cycle(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     ONE BUTTON TO RULE THEM ALL.
 
@@ -4533,8 +4492,6 @@ async def run_full_cycle():
 
     This replaces the need to manually press 10+ buttons in the correct order.
     """
-    from deps import get_db
-    db = get_db()
     results = {"steps_completed": 0, "steps_total": 10, "details": {}}
     step = 0
 
@@ -4575,7 +4532,7 @@ async def run_full_cycle():
     step += 1
     try:
         from services.gap_closer_service import fix_all_validation_gaps
-        gap_fix = await fix_all_validation_gaps(db, limit=500)
+        gap_fix = await fix_all_validation_gaps(database, limit=500)
         results["details"]["2b_validation_gaps"] = {
             "status": "ok",
             "po_vendors_learned": gap_fix.get("po_learning", {}).get("vendors_learned", 0),
@@ -4635,7 +4592,7 @@ async def run_full_cycle():
     step += 1
     try:
         from services.escalation_intelligence_service import recalibrate_escalation_intelligence
-        esc_recal = await recalibrate_escalation_intelligence(db, limit=5000)
+        esc_recal = await recalibrate_escalation_intelligence(database, limit=5000)
         results["details"]["5b_escalation_recal"] = {
             "status": "ok",
             "combos_recalibrated": esc_recal.get("combos_recalibrated", 0),
@@ -4663,8 +4620,8 @@ async def run_full_cycle():
     step += 1
     try:
         from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
-        audit = await run_self_correction_audit(db)
-        maturity = await compute_all_vendor_maturity(db)
+        audit = await run_self_correction_audit(database)
+        maturity = await compute_all_vendor_maturity(database)
         results["details"]["7_deep_learning"] = {
             "status": "ok",
             "self_correction_audited": audit.get("audited", 0),

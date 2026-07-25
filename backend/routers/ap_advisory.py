@@ -7,11 +7,12 @@ feedback, and consolidated advisory view.
 
 import os
 import logging
-from fastapi import APIRouter, HTTPException, Header, Query
+from fastapi import APIRouter, HTTPException, Header, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 from bson import ObjectId
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +40,19 @@ def _verify_token(authorization: Optional[str]) -> str:
 async def review_ap_document(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Run AP advisory review on a document. Stores result, returns it."""
     _verify_token(authorization)
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_canonical") or ""
     vendor_profile = None
     if vendor_no:
-        vendor_profile = await db.vendor_invoice_profiles.find_one(
+        vendor_profile = await database.vendor_invoice_profiles.find_one(
             {"vendor_no": vendor_no}, {"_id": 0}
         )
 
@@ -75,7 +76,7 @@ async def review_ap_document(
         document_context={"doc_id": document_id, "doc_type": doc.get("doc_type"), "file_name": doc.get("file_name")},
     )
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": document_id}, {"$set": {"ap_advisory_review": result.to_dict()}}
     )
 
@@ -90,17 +91,17 @@ async def review_ap_document(
 async def explain_ap_document(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Plain-English explanation of AP advisory result."""
     _verify_token(authorization)
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     from services.ap_invoice_decision_explainer import explain_ap_invoice_decision
-    result = await explain_ap_invoice_decision(doc, db=db)
+    result = await explain_ap_invoice_decision(doc, db=database)
     return result.to_dict()
 
 
@@ -112,12 +113,12 @@ async def explain_ap_document(
 async def get_ap_advisory(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Consolidated AP advisory: review + explainer + vendor profile + feedback."""
     _verify_token(authorization)
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -125,13 +126,13 @@ async def get_ap_advisory(
 
     # Explainer
     from services.ap_invoice_decision_explainer import explain_ap_invoice_decision
-    explainer = (await explain_ap_invoice_decision(doc, db=db)).to_dict()
+    explainer = (await explain_ap_invoice_decision(doc, db=database)).to_dict()
 
     # Vendor profile summary
     vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_canonical") or ""
     profile_summary = None
     if vendor_no:
-        vp = await db.vendor_invoice_profiles.find_one({"vendor_no": vendor_no}, {"_id": 0})
+        vp = await database.vendor_invoice_profiles.find_one({"vendor_no": vendor_no}, {"_id": 0})
         if vp:
             amt = vp.get("amount_stats") or {}
             profile_summary = {
@@ -148,7 +149,7 @@ async def get_ap_advisory(
 
     # Feedback
     from services.ap_invoice_feedback_service import get_ap_feedback
-    feedback = await get_ap_feedback(db, document_id)
+    feedback = await get_ap_feedback(database, document_id)
 
     return {
         "document_id": document_id,
@@ -178,14 +179,14 @@ async def submit_ap_feedback(
     document_id: str,
     body: APFeedbackBody,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Submit feedback on an AP advisory review."""
     user = _verify_token(authorization)
-    db = get_db()
 
     from services.ap_invoice_feedback_service import submit_ap_feedback as _submit
     result = await _submit(
-        db, document_id, user,
+        database, document_id, user,
         body.reviewer_assessment, body.final_human_decision,
         body.disagreed_fields, body.notes,
     )
@@ -198,23 +199,24 @@ async def submit_ap_feedback(
 async def get_feedback(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Get feedback for an AP document."""
     _verify_token(authorization)
-    db = get_db()
 
     from services.ap_invoice_feedback_service import get_ap_feedback
-    records = await get_ap_feedback(db, document_id)
+    records = await get_ap_feedback(database, document_id)
     return {"document_id": document_id, "feedback": records, "total": len(records)}
 
 
 @router.get("/feedback-summary")
-async def feedback_summary():
+async def feedback_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """AP advisory feedback analytics summary."""
-    db = get_db()
 
     from services.ap_invoice_feedback_service import get_ap_feedback_summary
-    return await get_ap_feedback_summary(db)
+    return await get_ap_feedback_summary(database)
 
 
 # =============================================================================
@@ -226,12 +228,12 @@ async def ap_disagreement_diagnostics(
     date_from: str = Query(None), date_to: str = Query(None),
     vendor_no: str = Query(None), assessment: str = Query(None),
     root_cause: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """AP disagreement root-cause diagnostics."""
-    db = get_db()
     from services.ap_invoice_disagreement_diagnostics_service import run_ap_disagreement_diagnostics
     return await run_ap_disagreement_diagnostics(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         vendor_no=vendor_no, assessment=assessment, root_cause=root_cause,
     )
 
@@ -240,12 +242,12 @@ async def ap_disagreement_diagnostics(
 async def calibrate_ap_document(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Run confidence calibration on a single AP document."""
     _verify_token(authorization)
-    db = get_db()
     from services.ap_invoice_confidence_calibration_service import calibrate_ap_document as _cal
-    result = await _cal(db, document_id)
+    result = await _cal(database, document_id)
     if result.error:
         raise HTTPException(status_code=404, detail=result.error)
     return result.to_dict()
@@ -256,11 +258,11 @@ async def generate_ap_suggestions(
     vendor_no: str = Query(None),
     limit: int = Query(50, ge=1, le=500),
     sync: bool = Query(True),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Generate AP learning suggestions from reviewer feedback."""
-    db = get_db()
     from services.unified_learning_service import generate_suggestions, AP_CONFIG
-    return await generate_suggestions(db, AP_CONFIG, limit=limit)
+    return await generate_suggestions(database, AP_CONFIG, limit=limit)
 
 
 @router.get("/suggestions")
@@ -270,12 +272,12 @@ async def list_ap_suggestions(
     status: str = Query(None),
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List AP learning suggestions with filters."""
-    db = get_db()
     from services.ap_invoice_feedback_learning_service import get_ap_suggestions
     return await get_ap_suggestions(
-        db, vendor_no=vendor_no, suggestion_type=suggestion_type,
+        database, vendor_no=vendor_no, suggestion_type=suggestion_type,
         status=status, limit=limit, skip=skip,
     )
 
@@ -288,12 +290,12 @@ async def list_ap_suggestions(
 async def approve_ap_suggestion_endpoint(
     suggestion_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Approve an AP learning suggestion."""
     user = _verify_token(authorization)
-    db = get_db()
     from services.unified_learning_service import approve_suggestion, AP_CONFIG
-    result = await approve_suggestion(db, AP_CONFIG, suggestion_id, user)
+    result = await approve_suggestion(database, AP_CONFIG, suggestion_id, user)
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -303,12 +305,12 @@ async def approve_ap_suggestion_endpoint(
 async def reject_ap_suggestion_endpoint(
     suggestion_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Reject an AP learning suggestion."""
     user = _verify_token(authorization)
-    db = get_db()
     from services.ap_invoice_learning_suggestion_apply_service import reject_ap_suggestion
-    result = await reject_ap_suggestion(db, suggestion_id, user)
+    result = await reject_ap_suggestion(database, suggestion_id, user)
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -318,12 +320,12 @@ async def reject_ap_suggestion_endpoint(
 async def apply_ap_suggestion_endpoint(
     suggestion_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Apply an approved AP learning suggestion to the vendor profile."""
     user = _verify_token(authorization)
-    db = get_db()
     from services.ap_invoice_learning_suggestion_apply_service import apply_ap_suggestion
-    result = await apply_ap_suggestion(db, suggestion_id, user)
+    result = await apply_ap_suggestion(database, suggestion_id, user)
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -334,12 +336,12 @@ async def ap_learning_impact_review(
     date_from: str = Query(None), date_to: str = Query(None),
     vendor_no: str = Query(None), suggestion_type: str = Query(None),
     applied_by: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """AP learning impact review — pre/post apply outcomes."""
-    db = get_db()
     from services.unified_learning_service import run_impact_review, AP_CONFIG
     return await run_impact_review(
-        db, AP_CONFIG, date_from=date_from, date_to=date_to,
+        database, AP_CONFIG, date_from=date_from, date_to=date_to,
         entity_no=vendor_no, suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
@@ -348,11 +350,11 @@ async def ap_learning_impact_review(
 async def ap_learning_impact_details(
     vendor_no: str = Query(None), suggestion_type: str = Query(None),
     limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Per-suggestion impact detail records for AP."""
-    db = get_db()
     from services.unified_learning_service import get_impact_details, AP_CONFIG
-    return await get_impact_details(db, AP_CONFIG, limit=limit, skip=skip, entity_no=vendor_no, suggestion_type=suggestion_type)
+    return await get_impact_details(database, AP_CONFIG, limit=limit, skip=skip, entity_no=vendor_no, suggestion_type=suggestion_type)
 
 
 @router.get("/profile-drift")
@@ -360,30 +362,28 @@ async def ap_profile_drift(
     date_from: str = Query(None), date_to: str = Query(None),
     vendor_no: str = Query(None), drift_risk: str = Query(None),
     suggestion_type: str = Query(None), applied_by: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Vendor profile drift summary for AP."""
-    db = get_db()
     from services.ap_invoice_profile_drift_service import get_ap_profile_drift_summary
     return await get_ap_profile_drift_summary(
-        db, date_from=date_from, date_to=date_to, vendor_no=vendor_no,
+        database, date_from=date_from, date_to=date_to, vendor_no=vendor_no,
         drift_risk=drift_risk, suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
 
 @router.get("/profile-drift/{vendor_no}")
-async def ap_vendor_drift_detail(vendor_no: str):
+async def ap_vendor_drift_detail(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Detailed drift analysis for one AP vendor."""
-    db = get_db()
     from services.ap_invoice_profile_drift_service import get_ap_vendor_drift_detail
-    return await get_ap_vendor_drift_detail(db, vendor_no)
+    return await get_ap_vendor_drift_detail(database, vendor_no)
 
 
 @router.get("/profile-change-history/{vendor_no}")
-async def ap_change_history(vendor_no: str, limit: int = Query(50, ge=1, le=200)):
+async def ap_change_history(vendor_no: str, limit: int = Query(50, ge=1, le=200), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Full change history with pre/post snapshots for an AP vendor."""
-    db = get_db()
     from services.ap_invoice_profile_drift_service import get_ap_change_history
-    return await get_ap_change_history(db, vendor_no, limit=limit)
+    return await get_ap_change_history(database, vendor_no, limit=limit)
 
 
 @router.get("/vendor-hotspots")
@@ -391,19 +391,18 @@ async def ap_vendor_hotspots(
     date_from: str = Query(None), date_to: str = Query(None),
     severity: str = Query(None), root_cause: str = Query(None),
     vendor_no: str = Query(None), limit: int = Query(30, ge=1, le=100),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """AP vendor hotspots — friction ranking and root-cause diagnosis."""
-    db = get_db()
     from services.ap_invoice_vendor_hotspot_review_service import get_ap_vendor_hotspots
     return await get_ap_vendor_hotspots(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         severity=severity, root_cause=root_cause, vendor_no=vendor_no, limit=limit,
     )
 
 
 @router.get("/vendor-hotspots/{vendor_no}")
-async def ap_vendor_hotspot_detail(vendor_no: str):
+async def ap_vendor_hotspot_detail(vendor_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Detailed hotspot analysis for one AP vendor."""
-    db = get_db()
     from services.ap_invoice_vendor_hotspot_review_service import get_ap_vendor_hotspot_detail
-    return await get_ap_vendor_hotspot_detail(db, vendor_no)
+    return await get_ap_vendor_hotspot_detail(database, vendor_no)

@@ -4,9 +4,10 @@ Extracted from server.py. All BC Sandbox API endpoints.
 READ-ONLY: No writes to BC Production or Sandbox.
 """
 
-from fastapi import APIRouter, HTTPException, Query, Body, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, Body, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Dict, Optional
-from deps import get_db
 
 router = APIRouter(tags=["BC Sandbox"])
 
@@ -31,7 +32,6 @@ async def bc_sandbox_status():
 @router.get("/bc-sandbox/vendors/{vendor_number}")
 async def bc_sandbox_get_vendor(vendor_number: str):
     """
-    db = get_db()
     Get vendor details by vendor number.
     READ-ONLY operation.
     """
@@ -55,7 +55,6 @@ async def bc_sandbox_get_customer(customer_number: str):
     Get customer details by customer number.
     READ-ONLY operation.
     """
-    db = get_db()
     result = await get_customer(customer_number)
     return result.to_dict()
 
@@ -66,7 +65,6 @@ async def bc_sandbox_get_purchase_order(po_number: str):
     Get purchase order details by PO number.
     READ-ONLY operation.
     """
-    db = get_db()
     result = await get_purchase_order(po_number)
     return result.to_dict()
 
@@ -77,7 +75,6 @@ async def bc_sandbox_get_purchase_invoice(invoice_number: str):
     Get purchase invoice details by invoice number.
     READ-ONLY operation.
     """
-    db = get_db()
     result = await get_purchase_invoice(invoice_number)
     return result.to_dict()
 
@@ -88,7 +85,6 @@ async def bc_sandbox_get_sales_invoice(invoice_number: str):
     Get sales invoice details by invoice number.
     READ-ONLY operation.
     """
-    db = get_db()
     result = await get_sales_invoice(invoice_number)
     return result.to_dict()
 
@@ -197,15 +193,14 @@ async def create_bc_sales_order(
 
 
 @router.post("/bc-sandbox/document/{doc_id}/validate")
-async def bc_sandbox_validate_document(doc_id: str, background_tasks: BackgroundTasks):
+async def bc_sandbox_validate_document(doc_id: str, background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Validate a document against BC and add validation results to workflow history.
     This is the main integration point for workflow validation.
     
     READ-ONLY operation in observation mode.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -264,7 +259,7 @@ async def bc_sandbox_validate_document(doc_id: str, background_tasks: Background
     
     # Add history entry to document (if we have one)
     if history_entry:
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {
                 "$push": {"workflow_history": history_entry},

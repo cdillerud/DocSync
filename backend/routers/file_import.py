@@ -6,9 +6,10 @@ Extracted from server.py. Handles Excel/CSV file import for sales orders and inv
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
-from deps import get_db
 from services.file_ingestion_service import (
     file_ingestion_service, COLUMN_MAPPINGS
 )
@@ -194,17 +195,17 @@ async def get_import_history(
     customer_id: Optional[str] = Query(None),
     skip: int = Query(0),
     limit: int = Query(50)
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Get history of file imports."""
-    db = get_db()
     query = {}
     if ingestion_type:
         query["ingestion_type"] = ingestion_type
     if customer_id:
         query["customer_id"] = customer_id
 
-    total = await db.file_ingestion_log.count_documents(query)
-    history = await db.file_ingestion_log.find(
+    total = await database.file_ingestion_log.count_documents(query)
+    history = await database.file_ingestion_log.find(
         query, {"_id": 0}
     ).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 

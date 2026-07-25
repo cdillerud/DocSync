@@ -2,8 +2,9 @@
 
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks
-from deps import get_db
+from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from services.stable_vendor_service import get_stable_vendor_service, DEFAULT_STABLE_VENDOR_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,15 @@ async def evaluate_vendor_stability(vendor_id: str):
 
 
 @router.post("/evaluate-document/{doc_id}")
-async def evaluate_document_routing(doc_id: str):
+async def evaluate_document_routing(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Evaluate a document's stable-vendor auto-ready eligibility."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     result = await _svc().evaluate_document(doc)
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "stable_vendor_routing": {
@@ -168,13 +168,14 @@ async def get_vendor_override_history(
 # ==================== DIAGNOSTICS ====================
 
 @router.get("/diagnose")
-async def diagnose_stable_vendors():
+async def diagnose_stable_vendors(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Diagnose why vendors aren't qualifying as stable and suggest threshold changes."""
     svc = _svc()
-    db = get_db()
     cfg = await svc.get_config()
 
-    profiles = await db.vendor_intelligence_profiles.find(
+    profiles = await database.vendor_intelligence_profiles.find(
         {}, {"_id": 0}
     ).to_list(5000)
 
@@ -267,7 +268,6 @@ async def diagnose_stable_vendors():
 async def apply_suggested_thresholds():
     """Run diagnose and apply the suggested thresholds automatically."""
     svc = _svc()
-    db = get_db()
 
     diag = await diagnose_stable_vendors()
     suggested = diag.get("suggested_thresholds", {})

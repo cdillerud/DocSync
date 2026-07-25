@@ -1,24 +1,26 @@
 """GPI Document Hub - Freight G/L Routing Router"""
 
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Dict
 from services.freight_gl_routing_service import get_freight_gl_service, DEFAULT_GL_ACCOUNTS
-from deps import get_db
 
 router = APIRouter(prefix="/freight-routing", tags=["Freight Routing"])
 
 
 @router.get("/validate-gl")
-async def validate_gl_accounts():
+async def validate_gl_accounts(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Cross-reference freight GL accounts against BC catalog cache."""
-    db = get_db()
     svc = get_freight_gl_service()
     if not svc:
         raise HTTPException(status_code=503, detail="Freight G/L routing not initialized")
 
     # Fetch all BC GL accounts from catalog cache
     bc_accounts = {}
-    async for acct in db.bc_catalog_gl_accounts.find({}, {"_id": 0}):
+    async for acct in database.bc_catalog_gl_accounts.find({}, {"_id": 0}):
         bc_accounts[acct.get("account_no", "")] = acct
 
     # Get live freight accounts from MongoDB (may have been updated via update-gl-account)
@@ -55,7 +57,7 @@ async def validate_gl_accounts():
 
     # Cache validation result in hub_config for auto-post checks
     invalid_gl_numbers = [a["gl_number"] for a in invalid_accounts]
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"key": "freight_gl_validation"},
         {"$set": {
             "key": "freight_gl_validation",
@@ -208,14 +210,14 @@ async def batch_classify_freight(body: Dict = Body(...)):
 async def verify_business_rules(
     vendor_filter: str = Query(None, description="Filter by vendor (e.g. TUMALOC, CARGOMO)"),
     limit: int = Query(10, le=50),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Verify controller business rules against real production documents.
     Shows how each document would be classified by the freight business rules engine.
     Use this after deployment to confirm rules are working correctly.
     """
     from workflows.freight.item_charges import classify_freight_document
-    db = get_db()
 
     query = {"is_duplicate": {"$ne": True}}
     if vendor_filter:
@@ -224,7 +226,7 @@ async def verify_business_rules(
             {"vendor_canonical": {"$regex": vendor_filter, "$options": "i"}},
         ]
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {"_id": 0, "id": 1, "file_name": 1, "bc_vendor_number": 1, "vendor_canonical": 1,
          "extracted_fields": 1, "normalized_fields": 1, "bc_location_code": 1,

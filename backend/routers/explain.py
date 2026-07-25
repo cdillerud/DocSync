@@ -6,11 +6,12 @@ Returns a plain-English explanation of why a document is in its current status.
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 from typing import List, Optional
 from bson import ObjectId
-from deps import get_db
 from services.decision_explainer_service import explain_document_status
 
 logger = logging.getLogger(__name__)
@@ -37,19 +38,19 @@ def _verify_token(authorization: Optional[str]) -> str:
 async def explain_document(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return a plain-English explanation of a document's current workflow state."""
     _verify_token(authorization)
 
-    db = get_db()
 
     # Try string id first (the convention used everywhere)
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
 
     # Fallback: try as ObjectId
     if doc is None:
         try:
-            doc = await db.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
         except Exception:
             pass
 
@@ -64,22 +65,22 @@ async def explain_document(
 async def explain_sales_order(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return a plain-English explanation of a sales order's readiness status."""
     _verify_token(authorization)
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if doc is None:
         try:
-            doc = await db.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
         except Exception:
             pass
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
     from services.sales_order_decision_explainer import explain_sales_order_decision
-    result = await explain_sales_order_decision(doc, db=db)
+    result = await explain_sales_order_decision(doc, db=database)
     return result.to_dict()
 
 
@@ -95,14 +96,14 @@ async def submit_so_review_feedback(
     document_id: str,
     body: SOReviewFeedbackBody,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Submit reviewer feedback on a sales order advisory review. Changes nothing about the document's status."""
     user = _verify_token(authorization)
-    db = get_db()
 
     from services.sales_order_reviewer_feedback_service import submit_feedback
     result = await submit_feedback(
-        db=db,
+        db=database,
         document_id=document_id,
         reviewer_user_id=user,
         reviewer_assessment=body.reviewer_assessment,
@@ -120,13 +121,13 @@ async def submit_so_review_feedback(
 async def get_so_review_feedback(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Get all feedback records for a document's SO advisory review."""
     _verify_token(authorization)
-    db = get_db()
 
     from services.sales_order_reviewer_feedback_service import get_feedback_for_document
-    records = await get_feedback_for_document(db, document_id)
+    records = await get_feedback_for_document(database, document_id)
     return {"document_id": document_id, "feedback": records, "total": len(records)}
 
 
@@ -134,19 +135,19 @@ async def get_so_review_feedback(
 async def get_sales_order_advisory(
     document_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Consolidated SO advisory endpoint: combines readiness review,
     explainer, customer profile context, and reviewer feedback
     into a single response for the unified panel.
     """
     _verify_token(authorization)
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": document_id}, {"_id": 0})
     if doc is None:
         try:
-            doc = await db.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"_id": ObjectId(document_id)}, {"_id": 0})
         except Exception:
             pass
     if doc is None:
@@ -154,7 +155,7 @@ async def get_sales_order_advisory(
 
     # 1. Explainer
     from services.sales_order_decision_explainer import explain_sales_order_decision
-    explainer = (await explain_sales_order_decision(doc, db=db)).to_dict()
+    explainer = (await explain_sales_order_decision(doc, db=database)).to_dict()
 
     # 2. Raw readiness review (from document)
     review = doc.get("so_readiness_review") or {}
@@ -182,7 +183,7 @@ async def get_sales_order_advisory(
 
     profile_summary = None
     if customer_no:
-        profile = await db.customer_posting_profiles.find_one(
+        profile = await database.customer_posting_profiles.find_one(
             {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
         )
         if profile:
@@ -199,7 +200,7 @@ async def get_sales_order_advisory(
 
     # 4. Feedback
     from services.sales_order_reviewer_feedback_service import get_feedback_for_document
-    feedback_records = await get_feedback_for_document(db, document_id)
+    feedback_records = await get_feedback_for_document(database, document_id)
 
     # 5. Confidence calibration (run on-demand if review exists)
     calibration = None
@@ -211,7 +212,7 @@ async def get_sales_order_advisory(
             from services.sales_order_confidence_calibration_service import calibrate_confidence as _calibrate
             profile_for_cal = None
             if customer_no:
-                profile_for_cal = await db.customer_posting_profiles.find_one(
+                profile_for_cal = await database.customer_posting_profiles.find_one(
                     {"customer_no": customer_no, "status": "analyzed"}, {"_id": 0}
                 )
             cal_result = _calibrate(review, profile_for_cal)
@@ -247,10 +248,10 @@ async def get_sales_order_advisory(
 async def get_so_draft_context(
     customer_id: str,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return profile-based draft-assist context for SO creation."""
     _verify_token(authorization)
-    db = get_db()
 
     from services.sales_order_draft_context_service import get_draft_context
-    return await get_draft_context(db, customer_id)
+    return await get_draft_context(database, customer_id)

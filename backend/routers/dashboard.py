@@ -1,10 +1,12 @@
 """GPI Document Hub - Dashboard Router"""
 
-from fastapi import APIRouter, Query, Response
+from fastapi import APIRouter, Query, Response, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
-from deps import get_db, DEMO_MODE
+from deps import DEMO_MODE
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -55,12 +57,11 @@ async def _get_alias_metrics_safe(db, total_docs: int) -> dict:
 
 
 @router.get("/daily-ingestion")
-async def get_daily_ingestion(date: Optional[str] = None):
+async def get_daily_ingestion(date: Optional[str] = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get document ingestion stats for a specific day.
     Defaults to today (Central Time). Pass date=YYYY-MM-DD for other days.
     """
-    db = get_db()
 
     if date:
         try:
@@ -78,7 +79,7 @@ async def get_daily_ingestion(date: Optional[str] = None):
 
     date_filter = {"created_utc": {"$gte": day_str_start, "$lt": day_str_end}}
 
-    total = await db.hub_documents.count_documents(date_filter)
+    total = await database.hub_documents.count_documents(date_filter)
 
     # By source
     source_pipeline = [
@@ -86,7 +87,7 @@ async def get_daily_ingestion(date: Optional[str] = None):
         {"$group": {"_id": {"$ifNull": ["$source", "unknown"]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    by_source = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(source_pipeline).to_list(20)}
+    by_source = {r["_id"]: r["count"] for r in await database.hub_documents.aggregate(source_pipeline).to_list(20)}
 
     # By document type
     type_pipeline = [
@@ -94,7 +95,7 @@ async def get_daily_ingestion(date: Optional[str] = None):
         {"$group": {"_id": {"$ifNull": ["$document_type", "Unknown"]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    by_type = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(type_pipeline).to_list(30)}
+    by_type = {r["_id"]: r["count"] for r in await database.hub_documents.aggregate(type_pipeline).to_list(30)}
 
     # By hour
     hour_pipeline = [
@@ -103,7 +104,7 @@ async def get_daily_ingestion(date: Optional[str] = None):
         {"$group": {"_id": "$hour_str", "count": {"$sum": 1}}},
         {"$sort": {"_id": 1}},
     ]
-    by_hour_raw = await db.hub_documents.aggregate(hour_pipeline).to_list(24)
+    by_hour_raw = await database.hub_documents.aggregate(hour_pipeline).to_list(24)
     by_hour = [{"hour": int(r["_id"]), "count": r["count"]} for r in by_hour_raw if r["_id"]]
 
     # By status
@@ -112,7 +113,7 @@ async def get_daily_ingestion(date: Optional[str] = None):
         {"$group": {"_id": {"$ifNull": ["$status", "Unknown"]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    by_status = {r["_id"]: r["count"] for r in await db.hub_documents.aggregate(status_pipeline).to_list(20)}
+    by_status = {r["_id"]: r["count"] for r in await database.hub_documents.aggregate(status_pipeline).to_list(20)}
 
     # By sender (top 10)
     sender_pipeline = [
@@ -121,10 +122,10 @@ async def get_daily_ingestion(date: Optional[str] = None):
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
-    by_sender = [{"sender": r["_id"], "count": r["count"]} for r in await db.hub_documents.aggregate(sender_pipeline).to_list(10)]
+    by_sender = [{"sender": r["_id"], "count": r["count"]} for r in await database.hub_documents.aggregate(sender_pipeline).to_list(10)]
 
     # Recent documents (last 50)
-    recent = await db.hub_documents.find(
+    recent = await database.hub_documents.find(
         date_filter,
         {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "source": 1,
          "status": 1, "workflow_status": 1, "created_utc": 1, "email_sender": 1,
@@ -144,23 +145,22 @@ async def get_daily_ingestion(date: Optional[str] = None):
 
 
 @router.get("/stats")
-async def get_dashboard_stats(date: Optional[str] = None):
-    db = get_db()
+async def get_dashboard_stats(date: Optional[str] = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     df = _date_filter(date)
-    total = await db.hub_documents.count_documents(df)
+    total = await database.hub_documents.count_documents(df)
     by_status = {}
     for s in ["Received", "Classified", "LinkedToBC", "Exception", "Completed"]:
-        by_status[s] = await db.hub_documents.count_documents({**df, "status": s})
+        by_status[s] = await database.hub_documents.count_documents({**df, "status": s})
     by_type = {}
     for t in ["AP_Invoice", "AR_Invoice", "Remittance", "Freight_Document", "Sales_Order",
               "Sales_PO", "Sales_Quote", "Order_Confirmation", "Purchase_Order",
               "Warehouse_Receipt", "Shipping_Document", "Inventory_Report",
               "Quality_Issue", "Return_Request", "Unknown_Document"]:
-        count = await db.hub_documents.count_documents({**df, "document_type": t})
+        count = await database.hub_documents.count_documents({**df, "document_type": t})
         if count > 0:
             by_type[t] = count
-    recent_workflows = await db.hub_workflow_runs.find({}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
-    failed_workflows = await db.hub_workflow_runs.find({"status": "Failed"}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
+    recent_workflows = await database.hub_workflow_runs.find({}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
+    failed_workflows = await database.hub_workflow_runs.find({"status": "Failed"}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     # Routing status counts
     routing_pipeline = [
         {"$match": {**df}},
@@ -170,7 +170,7 @@ async def get_dashboard_stats(date: Optional[str] = None):
             "avg_score": {"$avg": "$routing_score"},
         }},
     ]
-    routing_raw = await db.hub_documents.aggregate(routing_pipeline).to_list(10)
+    routing_raw = await database.hub_documents.aggregate(routing_pipeline).to_list(10)
     routing_counts = {}
     for r in routing_raw:
         key = r["_id"] or "unrouted"
@@ -179,7 +179,7 @@ async def get_dashboard_stats(date: Optional[str] = None):
     # Catalog sync health
     try:
         from services.bc_catalog_sync_service import get_catalog_health
-        catalog_health = await get_catalog_health(db)
+        catalog_health = await get_catalog_health(database)
     except Exception:
         catalog_health = None
 
@@ -194,14 +194,13 @@ async def get_dashboard_stats(date: Optional[str] = None):
 
 
 @router.get("/workflow-intelligence")
-async def get_workflow_intelligence_stats(date: Optional[str] = None):
+async def get_workflow_intelligence_stats(date: Optional[str] = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Comprehensive workflow intelligence metrics.
     Provides insights into vendor matching, validation success, processing efficiency,
     and automation performance across the entire document processing pipeline.
     Optionally filtered to a single Central Time day via ?date=YYYY-MM-DD.
     """
-    db = get_db()
     df = _date_filter(date)
     
     # ============== VENDOR INTELLIGENCE ==============
@@ -215,7 +214,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         }},
         {"$sort": {"count": -1}}
     ]
-    match_method_results = await db.hub_documents.aggregate(match_method_pipeline).to_list(20)
+    match_method_results = await database.hub_documents.aggregate(match_method_pipeline).to_list(20)
     
     # Vendor matches from cached collection
     cached_matches_pipeline = [
@@ -225,10 +224,10 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
             "avg_score": {"$avg": "$score"}
         }}
     ]
-    cached_by_source = await db.vendor_matches.aggregate(cached_matches_pipeline).to_list(10)
+    cached_by_source = await database.vendor_matches.aggregate(cached_matches_pipeline).to_list(10)
     
     # Freight carrier detection stats
-    freight_docs = await db.hub_documents.count_documents({
+    freight_docs = await database.hub_documents.count_documents({
         **df,
         "$or": [
             {"extracted_data.is_freight_carrier": True},
@@ -239,7 +238,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     
     # ============== ACTION REQUIRED QUEUES ==============
     # 1. Needs Vendor Review - AP invoices with no vendor match
-    needs_vendor_review = await db.hub_documents.count_documents({
+    needs_vendor_review = await database.hub_documents.count_documents({
         **df,
         "doc_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Remittance", "REMITTANCE"]},
         "$or": [
@@ -252,7 +251,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     })
     
     # 2. Needs PO Match - Shipping docs missing PO link
-    needs_po_match = await db.hub_documents.count_documents({
+    needs_po_match = await database.hub_documents.count_documents({
         **df,
         "doc_type": {"$in": ["BOL", "Packing_List", "Shipping_Document", "SHIPPING", "Freight_Document"]},
         "$or": [
@@ -266,7 +265,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     })
     
     # 3. Needs Approval - Validated but awaiting human sign-off
-    needs_approval = await db.hub_documents.count_documents({
+    needs_approval = await database.hub_documents.count_documents({
         **df,
         "validation_results.all_passed": True,
         "status": {"$nin": ["Completed", "Archived", "Posted", "Deleted"]},
@@ -284,15 +283,15 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     
     # ============== VALIDATION SUCCESS ==============
     # Overall validation rates
-    total_validated = await db.hub_documents.count_documents({
+    total_validated = await database.hub_documents.count_documents({
         **df, "validation_results": {"$exists": True}
     })
     
-    validation_passed = await db.hub_documents.count_documents({
+    validation_passed = await database.hub_documents.count_documents({
         **df, "validation_results.all_passed": True
     })
     
-    validation_failed = await db.hub_documents.count_documents({
+    validation_failed = await database.hub_documents.count_documents({
         **df, "validation_results.all_passed": False
     })
     
@@ -307,7 +306,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         }},
         {"$sort": {"count": -1}}
     ]
-    failure_reasons = await db.hub_documents.aggregate(failure_reasons_pipeline).to_list(20)
+    failure_reasons = await database.hub_documents.aggregate(failure_reasons_pipeline).to_list(20)
     
     # ============== PROCESSING EFFICIENCY ==============
     # Documents by workflow status
@@ -319,18 +318,18 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         }},
         {"$sort": {"count": -1}}
     ]
-    by_workflow_status = await db.hub_documents.aggregate(workflow_status_pipeline).to_list(30)
+    by_workflow_status = await database.hub_documents.aggregate(workflow_status_pipeline).to_list(30)
     
     # Auto-clear statistics
-    auto_cleared = await db.hub_documents.count_documents({**df, "auto_cleared": True})
+    auto_cleared = await database.hub_documents.count_documents({**df, "auto_cleared": True})
     
     # Processing success (documents that reached Completed/Posted/Archived)
-    processing_complete = await db.hub_documents.count_documents({
+    processing_complete = await database.hub_documents.count_documents({
         **df, "status": {"$in": ["Completed", "Posted", "Archived", "LinkedToBC"]}
     })
     
     # Documents stuck (Exception status or auto_escalated)
-    stuck_docs = await db.hub_documents.count_documents({
+    stuck_docs = await database.hub_documents.count_documents({
         **df,
         "$or": [
             {"status": "Exception"},
@@ -349,12 +348,12 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
             "docs_with_retries": {"$sum": 1}
         }}
     ]
-    retry_stats = await db.hub_documents.aggregate(retry_stats_pipeline).to_list(1)
+    retry_stats = await database.hub_documents.aggregate(retry_stats_pipeline).to_list(1)
     retry_data = retry_stats[0] if retry_stats else {"avg_retries": 0, "max_retries": 0, "total_retries": 0, "docs_with_retries": 0}
     
     # ============== BC INTEGRATION SUCCESS ==============
     # Documents linked to BC
-    bc_linked = await db.hub_documents.count_documents({
+    bc_linked = await database.hub_documents.count_documents({
         **df,
         "$or": [
             {"bc_record_id": {"$exists": True, "$ne": None}},
@@ -364,7 +363,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     })
     
     # Documents posted to BC
-    bc_posted = await db.hub_documents.count_documents({
+    bc_posted = await database.hub_documents.count_documents({
         **df,
         "$or": [
             {"bc_posting_status": "posted"},
@@ -373,13 +372,13 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     })
     
     # BC posting failures
-    bc_post_failed = await db.hub_documents.count_documents({
+    bc_post_failed = await database.hub_documents.count_documents({
         **df, "bc_posting_status": {"$in": ["failed", "error"]}
     })
     
     # ============== SHAREPOINT ARCHIVAL ==============
     # Documents archived to SharePoint
-    sp_archived = await db.hub_documents.count_documents({
+    sp_archived = await database.hub_documents.count_documents({
         **df, "sharepoint_item_id": {"$exists": True, "$ne": None}
     })
     
@@ -393,7 +392,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$sort": {"count": -1}},
         {"$limit": 10}
     ]
-    folder_distribution = await db.hub_documents.aggregate(folder_routing_pipeline).to_list(10)
+    folder_distribution = await database.hub_documents.aggregate(folder_routing_pipeline).to_list(10)
     
     # ============== DOCUMENT SOURCES ==============
     # Ingestion source breakdown
@@ -405,11 +404,11 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         }},
         {"$sort": {"count": -1}}
     ]
-    by_source = await db.hub_documents.aggregate(source_pipeline).to_list(20)
+    by_source = await database.hub_documents.aggregate(source_pipeline).to_list(20)
     
     # ============== SPIRO INTEGRATION ==============
-    spiro_companies = await db.spiro_companies.count_documents({})
-    spiro_freight_carriers = await db.spiro_companies.count_documents({
+    spiro_companies = await database.spiro_companies.count_documents({})
+    spiro_freight_carriers = await database.spiro_companies.count_documents({
         "$or": [
             {"industry": {"$regex": "freight|transport|logistics", "$options": "i"}},
             {"is_freight": True}
@@ -433,11 +432,11 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         }},
         {"$sort": {"_id": 1}}
     ]
-    daily_trends = await db.hub_documents.aggregate(daily_trend_pipeline).to_list(7)
+    daily_trends = await database.hub_documents.aggregate(daily_trend_pipeline).to_list(7)
     
     # Calculate totals
-    total_docs = await db.hub_documents.count_documents(df)
-    docs_with_vendor = await db.hub_documents.count_documents({**df, "vendor_canonical": {"$exists": True, "$ne": None}})
+    total_docs = await database.hub_documents.count_documents(df)
+    docs_with_vendor = await database.hub_documents.count_documents({**df, "vendor_canonical": {"$exists": True, "$ne": None}})
     
     # Calculate success rates
     validation_rate = round((validation_passed / total_validated * 100) if total_validated > 0 else 0, 1)
@@ -459,7 +458,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
             {"vendor_resolution.status": {"$exists": True}},
         ]
     }
-    vendor_applicable_total = await db.hub_documents.count_documents(vendor_applicable_filter)
+    vendor_applicable_total = await database.hub_documents.count_documents(vendor_applicable_filter)
 
     # Auto-resolved: resolved by system without human override
     AUTO_RESOLVE_METHODS = [
@@ -467,7 +466,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         "alias", "learned_alias", "exact_name", "normalized",
         "sender_email", "sender_domain", "extracted_field",
     ]
-    vendor_auto_resolved_total = await db.hub_documents.count_documents({
+    vendor_auto_resolved_total = await database.hub_documents.count_documents({
         "$and": [
             vendor_applicable_filter,
             {
@@ -481,13 +480,13 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
     })
 
     # Final resolved: vendor resolved at final state (any method, including human override)
-    vendor_final_resolved_total = await db.hub_documents.count_documents({
+    vendor_final_resolved_total = await database.hub_documents.count_documents({
         **vendor_applicable_filter,
         "vendor_canonical": {"$exists": True, "$ne": None},
     })
 
     # Needs vendor review: applicable docs currently unresolved or fuzzy_candidate
-    vendor_needs_review_total = await db.hub_documents.count_documents({
+    vendor_needs_review_total = await database.hub_documents.count_documents({
         "$and": [
             vendor_applicable_filter,
             {
@@ -515,7 +514,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$group": {"_id": "$vendor_match_method", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    vendor_method_raw = await db.hub_documents.aggregate(vendor_method_pipeline).to_list(20)
+    vendor_method_raw = await database.hub_documents.aggregate(vendor_method_pipeline).to_list(20)
     vendor_by_method = {r["_id"]: r["count"] for r in vendor_method_raw if r["_id"]}
     
     # ============== ROUTING STATUS (Auto-Clear Gate) ==============
@@ -527,7 +526,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
             "avg_score": {"$avg": "$routing_score"},
         }},
     ]
-    routing_raw = await db.hub_documents.aggregate(routing_pipeline).to_list(10)
+    routing_raw = await database.hub_documents.aggregate(routing_pipeline).to_list(10)
     routing_counts = {}
     for r in routing_raw:
         if r["_id"]:
@@ -542,7 +541,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$match": {**df}},
         {"$group": {"_id": "$readiness.status", "count": {"$sum": 1}}},
     ]
-    readiness_raw = await db.hub_documents.aggregate(readiness_status_pipeline).to_list(10)
+    readiness_raw = await database.hub_documents.aggregate(readiness_status_pipeline).to_list(10)
     readiness_by_status = {r["_id"]: r["count"] for r in readiness_raw if r["_id"]}
     no_readiness = total_docs - sum(readiness_by_status.values())
 
@@ -550,14 +549,14 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$match": {**df, "readiness.recommended_action": {"$exists": True, "$ne": None}}},
         {"$group": {"_id": "$readiness.recommended_action", "count": {"$sum": 1}}},
     ]
-    readiness_action_raw = await db.hub_documents.aggregate(readiness_action_pipeline).to_list(10)
+    readiness_action_raw = await database.hub_documents.aggregate(readiness_action_pipeline).to_list(10)
     readiness_by_action = {r["_id"]: r["count"] for r in readiness_action_raw if r["_id"]}
 
     readiness_conf_pipeline = [
         {"$match": {**df, "readiness.confidence": {"$exists": True}}},
         {"$group": {"_id": "$readiness.status", "avg_confidence": {"$avg": "$readiness.confidence"}}},
     ]
-    readiness_conf_raw = await db.hub_documents.aggregate(readiness_conf_pipeline).to_list(10)
+    readiness_conf_raw = await database.hub_documents.aggregate(readiness_conf_pipeline).to_list(10)
     readiness_confidence = {r["_id"]: round(r["avg_confidence"], 3) for r in readiness_conf_raw if r["_id"]}
 
     readiness_block_pipeline = [
@@ -567,7 +566,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
-    readiness_block_raw = await db.hub_documents.aggregate(readiness_block_pipeline).to_list(10)
+    readiness_block_raw = await database.hub_documents.aggregate(readiness_block_pipeline).to_list(10)
     top_blocking = [{"reason": r["_id"], "count": r["count"]} for r in readiness_block_raw if r["_id"]]
 
     readiness_warn_pipeline = [
@@ -577,7 +576,7 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
-    readiness_warn_raw = await db.hub_documents.aggregate(readiness_warn_pipeline).to_list(10)
+    readiness_warn_raw = await database.hub_documents.aggregate(readiness_warn_pipeline).to_list(10)
     top_warnings = [{"reason": r["_id"], "count": r["count"]} for r in readiness_warn_raw if r["_id"]]
 
     return {
@@ -624,10 +623,10 @@ async def get_workflow_intelligence_stats(date: Optional[str] = None):
                     "avg_score": round(item.get("avg_score", 0) * 100, 1) if item.get("avg_score") else 0
                 } for item in cached_by_source if item["_id"]
             },
-            "cached_vendor_matches": await db.vendor_matches.count_documents({}),
+            "cached_vendor_matches": await database.vendor_matches.count_documents({}),
             "spiro_companies_available": spiro_companies,
             "spiro_freight_carriers": spiro_freight_carriers,
-            "alias_metrics": await _get_alias_metrics_safe(db, vendor_applicable_total),
+            "alias_metrics": await _get_alias_metrics_safe(database, vendor_applicable_total),
         },
         
         "validation_metrics": {
@@ -702,7 +701,6 @@ async def get_document_types_dashboard(
     - Field extraction rates (vendor, invoice_number, amount, po_number, due_date)
     - Match method distribution (exact, normalized, alias, fuzzy, manual, none)
     """
-    db = get_db()
     # Normalize classification filter
     classification_filter = classification if classification in ("deterministic", "ai") else None
     
@@ -757,7 +755,6 @@ async def export_document_types_dashboard(
     
     Returns one row per (doc_type, status) combination with all metrics.
     """
-    db = get_db()
     # Normalize classification filter
     classification_filter = classification if classification in ("deterministic", "ai") else None
     
@@ -871,24 +868,25 @@ async def get_routing_summary():
 
 
 @router.get("/email-stats")
-async def get_email_stats():
+async def get_email_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get email processing statistics."""
-    db = get_db()
-    total_email = await db.hub_documents.count_documents({"source": "email"})
-    needs_review = await db.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
-    auto_linked = await db.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
-    stored_sp = await db.hub_documents.count_documents({"source": "email", "status": "StoredInSP"})
+    total_email = await database.hub_documents.count_documents({"source": "email"})
+    needs_review = await database.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
+    auto_linked = await database.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
+    stored_sp = await database.hub_documents.count_documents({"source": "email", "status": "StoredInSP"})
     
     # Get by job type
     by_job_type = {}
     from models.document_types import DEFAULT_JOB_TYPES
     for jt in DEFAULT_JOB_TYPES.keys():
-        count = await db.hub_documents.count_documents({"source": "email", "suggested_job_type": jt})
+        count = await database.hub_documents.count_documents({"source": "email", "suggested_job_type": jt})
         if count > 0:
             by_job_type[jt] = count
     
     # Recent email documents
-    recent = await db.hub_documents.find(
+    recent = await database.hub_documents.find(
         {"source": "email"},
         {"_id": 0}
     ).sort("created_utc", -1).limit(10).to_list(10)
@@ -908,9 +906,10 @@ async def get_email_stats():
 
 
 @router.get("/inbox-stats")
-async def get_inbox_stats():
+async def get_inbox_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Compact stats for the inbox header: ingestion, validation, auto-filing."""
-    db = get_db()
     tz = GPI_TZ
 
     now_ct = datetime.now(tz)
@@ -919,14 +918,14 @@ async def get_inbox_stats():
     seven_days_ago_utc = (today_start - timedelta(days=7)).astimezone(timezone.utc).isoformat()
 
     # Total docs & today's count
-    total = await db.hub_documents.count_documents({})
+    total = await database.hub_documents.count_documents({})
     # exclude batch_parent docs from ingestion count — they're containers, not individual docs
     today_filter = {"created_utc": {"$gte": today_start_utc}, "status": {"$ne": "batch_parent"}}
-    ingested_today = await db.hub_documents.count_documents(today_filter)
+    ingested_today = await database.hub_documents.count_documents(today_filter)
 
     # 7-day daily average (excluding batch parents)
     seven_d_filter = {"created_utc": {"$gte": seven_days_ago_utc}, "status": {"$ne": "batch_parent"}}
-    ingested_7d = await db.hub_documents.count_documents(seven_d_filter)
+    ingested_7d = await database.hub_documents.count_documents(seven_d_filter)
     avg_daily = round(ingested_7d / 7, 1)
 
     # Auto-validation rate: docs where automation_decision=auto OR auto_cleared=True.
@@ -935,7 +934,7 @@ async def get_inbox_stats():
     # status they inherited from their children. Both sides exclude
     # batch_parent here so the rate is well-formed.
     NON_BATCH = {"status": {"$ne": "batch_parent"}}
-    auto_processed = await db.hub_documents.count_documents({
+    auto_processed = await database.hub_documents.count_documents({
         "$and": [
             NON_BATCH,
             {"$or": [
@@ -945,7 +944,7 @@ async def get_inbox_stats():
             ]},
         ]
     })
-    non_batch_total = await db.hub_documents.count_documents(NON_BATCH)
+    non_batch_total = await database.hub_documents.count_documents(NON_BATCH)
     if non_batch_total > 0:
         raw_rate = (auto_processed / non_batch_total) * 100
         # Defensive clamp at the rounding boundary; only kicks in if the
@@ -955,7 +954,7 @@ async def get_inbox_stats():
         auto_rate = 0
 
     # Pending review (docs needing human attention — exclude duplicates to match inbox)
-    pending_review = await db.hub_documents.count_documents({
+    pending_review = await database.hub_documents.count_documents({
         "is_duplicate": {"$ne": True},
         "status": {"$nin": ["Completed", "Posted", "Archived", "batch_parent", "auto_filed"]},
         "workflow_status": {"$in": [
@@ -964,21 +963,21 @@ async def get_inbox_stats():
         ]}
     })
     # Fallback: also count docs just marked with certain statuses
-    pending_simple = await db.hub_documents.count_documents({
+    pending_simple = await database.hub_documents.count_documents({
         "is_duplicate": {"$ne": True},
         "status": {"$in": ["NeedsReview", "needs_review", "pending_review"]},
     })
     pending = max(pending_review, pending_simple)
 
     # Bounds alerts (active)
-    bounds_alerts = await db.hub_documents.count_documents({"bounds_alert": True})
+    bounds_alerts = await database.hub_documents.count_documents({"bounds_alert": True})
 
     # Posted to BC (7-day window) — a doc counts as "posted" if we captured
     # evidence of a BC record (any of bc_purchase_invoice_no / bc_record_no /
     # bc_document_no / bc_record_id) within the last 7 days. This matches
     # the actual write paths (see PRD 2026-04-10 field-name migration) and
     # no longer requires a literal status == "Posted" string match.
-    posted_to_bc_7d = await db.hub_documents.count_documents({
+    posted_to_bc_7d = await database.hub_documents.count_documents({
         "$and": [
             {
                 "$or": [
@@ -1001,7 +1000,7 @@ async def get_inbox_stats():
     })
     # Count docs currently queued for posting (ReadyForPost) — status/workflow
     # flags may diverge during retries, so match on either.
-    ready_for_post = await db.hub_documents.count_documents({
+    ready_for_post = await database.hub_documents.count_documents({
         "$or": [
             {"status": "ReadyForPost"},
             {"workflow_status": "ready_for_post"},
@@ -1009,7 +1008,7 @@ async def get_inbox_stats():
     })
 
     # Avg AI confidence (sampled from last 200 docs for speed)
-    conf_docs = await db.hub_documents.find(
+    conf_docs = await database.hub_documents.find(
         {"ai_confidence": {"$exists": True, "$ne": None}},
         {"_id": 0, "ai_confidence": 1}
     ).sort("created_utc", -1).limit(200).to_list(200)
@@ -1034,13 +1033,13 @@ async def get_inbox_stats():
 @router.get("/inbox-metrics")
 async def get_inbox_metrics(
     scope: str = Query("all", description="Tab scope: all, accounting, sales, processed, exceptions, po_pending"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Detailed breakdown of documents for the active tab scope."""
     from routers.queue_constants import (
         TERMINAL_STATUSES, DONE_WORKFLOW_STATUSES, AP_TYPES, SALES_TYPES,
         build_inbox_filter,
     )
-    db = get_db()
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
@@ -1089,7 +1088,7 @@ async def get_inbox_metrics(
         {"$group": {"_id": {"$ifNull": ["$workflow_status", "unknown"]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    status_raw = await db.hub_documents.aggregate(status_pipeline).to_list(50)
+    status_raw = await database.hub_documents.aggregate(status_pipeline).to_list(50)
     by_status = {r["_id"]: r["count"] for r in status_raw}
 
     # ── 2. By Document Type ──
@@ -1101,7 +1100,7 @@ async def get_inbox_metrics(
         ]}, "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    type_raw = await db.hub_documents.aggregate(type_pipeline).to_list(50)
+    type_raw = await database.hub_documents.aggregate(type_pipeline).to_list(50)
     by_type = {r["_id"]: r["count"] for r in type_raw}
 
     # ── 3. By Age ──
@@ -1124,7 +1123,7 @@ async def get_inbox_metrics(
             "gt_3d": {"$sum": {"$cond": [{"$lt": ["$created", three_days_ago]}, 1, 0]}},
         }},
     ]
-    age_raw = await db.hub_documents.aggregate(age_pipeline).to_list(1)
+    age_raw = await database.hub_documents.aggregate(age_pipeline).to_list(1)
     by_age = age_raw[0] if age_raw else {"lt_1h": 0, "1h_24h": 0, "24h_3d": 0, "gt_3d": 0}
     by_age.pop("_id", None)
 
@@ -1138,7 +1137,7 @@ async def get_inbox_metrics(
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
-    vendor_raw = await db.hub_documents.aggregate(vendor_pipeline).to_list(10)
+    vendor_raw = await database.hub_documents.aggregate(vendor_pipeline).to_list(10)
     by_vendor = [{"vendor": r["_id"] or "Unknown", "count": r["count"]} for r in vendor_raw]
 
     # ── 5. By Blocker Reason ──
@@ -1173,7 +1172,7 @@ async def get_inbox_metrics(
             ]}},
         }},
     ]
-    blocker_raw = await db.hub_documents.aggregate(blocker_pipeline).to_list(1)
+    blocker_raw = await database.hub_documents.aggregate(blocker_pipeline).to_list(1)
     by_blocker = blocker_raw[0] if blocker_raw else {
         "total": 0, "no_vendor": 0, "no_po": 0, "low_confidence": 0,
         "duplicate_flag": 0, "no_extraction": 0, "validation_failed": 0,
@@ -1193,12 +1192,11 @@ async def get_inbox_metrics(
 
 
 @router.get("/insights-trends")
-async def get_insights_trends(days: int = Query(30, le=90)):
+async def get_insights_trends(days: int = Query(30, le=90), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Daily trending data for the Insights page:
     ingestion volume, auto-validation rate, AI confidence, vendor resolve rate.
     """
-    db = get_db()
     tz = GPI_TZ
     cutoff = (datetime.now(tz) - timedelta(days=days)).astimezone(timezone.utc).isoformat()
 
@@ -1244,7 +1242,7 @@ async def get_insights_trends(days: int = Query(30, le=90)):
         }},
         {"$sort": {"_id": 1}},
     ]
-    daily_raw = await db.hub_documents.aggregate(pipeline).to_list(days)
+    daily_raw = await database.hub_documents.aggregate(pipeline).to_list(days)
 
     daily = []
     for d in daily_raw:
@@ -1260,7 +1258,7 @@ async def get_insights_trends(days: int = Query(30, le=90)):
         })
 
     # Bakeoff accuracy snapshots (latest runs)
-    bakeoff_runs = await db.intake_benchmark_runs.find(
+    bakeoff_runs = await database.intake_benchmark_runs.find(
         {"status": {"$in": ["completed", "active"]}},
         {"_id": 0, "id": 1, "name": 1, "created_at": 1, "summary.total_docs": 1,
          "summary.avg_folder_score": 1, "summary.folder_accuracy_pct": 1,
@@ -1275,7 +1273,9 @@ async def get_insights_trends(days: int = Query(30, le=90)):
 
 
 @router.get("/ap-metrics")
-async def get_ap_metrics():
+async def get_ap_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """AP Invoice posting metrics: submitted, failed, pending, timing, errors.
 
     Field-name correctness (see PRD 2026-04-10 BC field-name migration
@@ -1296,7 +1296,6 @@ async def get_ap_metrics():
     - `success_rate = posted / (posted + failed)` -- attempts that
       succeeded -- never `posted / total_ap` (which is coverage).
     """
-    db = get_db()
 
     AP_TYPE_FILTER = {
         "doc_type": {"$regex": r"^(ap[_-]?invoice|purchase[_-]?invoice)$",
@@ -1315,18 +1314,18 @@ async def get_ap_metrics():
         {"final_state":       "auto_post_failed"},
     ]}
 
-    total_ap = await db.hub_documents.count_documents(AP_TYPE_FILTER)
+    total_ap = await database.hub_documents.count_documents(AP_TYPE_FILTER)
 
-    posted = await db.hub_documents.count_documents(
+    posted = await database.hub_documents.count_documents(
         {"$and": [AP_TYPE_FILTER, POSTED_SIGNAL]})
 
     # Failed = matches a failure signal AND has NOT reached a posted
     # signal. Prevents double-counting docs that failed-then-succeeded.
-    failed = await db.hub_documents.count_documents({"$and": [
+    failed = await database.hub_documents.count_documents({"$and": [
         AP_TYPE_FILTER, FAILED_SIGNAL, {"$nor": [POSTED_SIGNAL]},
     ]})
 
-    pending_review = await db.hub_documents.count_documents({"$and": [
+    pending_review = await database.hub_documents.count_documents({"$and": [
         AP_TYPE_FILTER,
         {"$nor": [POSTED_SIGNAL]},
         {"$nor": [FAILED_SIGNAL]},
@@ -1334,13 +1333,13 @@ async def get_ap_metrics():
     ]})
 
     # Validation pass rate
-    validated = await db.hub_documents.count_documents({"$and": [
+    validated = await database.hub_documents.count_documents({"$and": [
         AP_TYPE_FILTER, {"validation_results.all_passed": True},
     ]})
     validation_rate = round((validated / total_ap * 100) if total_ap > 0 else 0, 1)
 
     # Average time from ingestion to BC posting (for posted docs)
-    posted_docs = await db.hub_documents.find(
+    posted_docs = await database.hub_documents.find(
         {"$and": [
             AP_TYPE_FILTER, POSTED_SIGNAL,
             {"created_utc": {"$exists": True, "$nin": [None, ""]}},
@@ -1380,7 +1379,7 @@ async def get_ap_metrics():
         {"$sort": {"count": -1}},
         {"$limit": 5},
     ]
-    errors_raw = await db.hub_documents.aggregate(error_pipeline).to_list(5)
+    errors_raw = await database.hub_documents.aggregate(error_pipeline).to_list(5)
     error_breakdown = [{"reason": (e["_id"] or "")[:80], "count": e["count"]}
                        for e in errors_raw if e["_id"]]
 

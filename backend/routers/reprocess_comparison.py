@@ -19,8 +19,9 @@ from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, Query, BackgroundTasks
-from deps import get_db
+from fastapi import APIRouter, Query, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("reprocess_comparison")
 
@@ -250,16 +251,15 @@ def _compare_snapshots(before: dict, after: dict) -> dict:
     }
 
 
-async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
+async def _run_comparison(run_id: str, limit: int, doc_type_filter: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Background task: re-classify all docs and compare."""
     global _current_run
-    db = get_db()
 
     query: Dict[str, Any] = {}
     if doc_type_filter:
         query["suggested_job_type"] = doc_type_filter
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     if total == 0:
         _current_run = {
             "status": "completed",
@@ -284,7 +284,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
     }
 
     # Store run metadata
-    await db.reprocess_comparison_runs.insert_one({
+    await database.reprocess_comparison_runs.insert_one({
         "run_id": run_id,
         "status": "running",
         "total": actual_limit,
@@ -292,7 +292,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
         "started_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
+    cursor = database.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
     docs = await cursor.to_list(actual_limit)
 
     results = []
@@ -313,7 +313,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
                     file_path = alt_path
                 else:
                     # Try to recover file from MongoDB b64 or SharePoint
-                    recovered = await _recover_file_to_disk(doc, doc_id, db)
+                    recovered = await _recover_file_to_disk(doc, doc_id, database)
                     if recovered:
                         file_path = recovered
                         _current_run.setdefault("recovered", 0)
@@ -449,7 +449,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
     finished_at = datetime.now(timezone.utc).isoformat()
 
     # Store results in DB
-    await db.reprocess_comparison_runs.update_one(
+    await database.reprocess_comparison_runs.update_one(
         {"run_id": run_id},
         {"$set": {
             "status": "completed",
@@ -462,7 +462,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
     for r in results:
         r["run_id"] = run_id
     if results:
-        await db.reprocess_comparison_results.insert_many(results)
+        await database.reprocess_comparison_results.insert_many(results)
 
     _current_run = {
         "status": "completed",
@@ -516,11 +516,11 @@ async def comparison_status():
 async def comparison_results(
     run_id: str,
     changes_only: bool = Query(False, description="Only show documents with changes"),
-):
-    """Get detailed results of a comparison run."""
-    db = get_db()
 
-    run_meta = await db.reprocess_comparison_runs.find_one(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    """Get detailed results of a comparison run."""
+
+    run_meta = await database.reprocess_comparison_runs.find_one(
         {"run_id": run_id}, {"_id": 0}
     )
     if not run_meta:
@@ -530,7 +530,7 @@ async def comparison_results(
     if changes_only:
         query["delta.has_changes"] = True
 
-    results = await db.reprocess_comparison_results.find(
+    results = await database.reprocess_comparison_results.find(
         query, {"_id": 0}
     ).to_list(5000)
 
@@ -542,10 +542,11 @@ async def comparison_results(
 
 
 @router.get("/runs")
-async def list_comparison_runs():
+async def list_comparison_runs(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List all comparison runs."""
-    db = get_db()
-    runs = await db.reprocess_comparison_runs.find(
+    runs = await database.reprocess_comparison_runs.find(
         {}, {"_id": 0}
     ).sort("started_at", -1).limit(20).to_list(20)
     return {"runs": runs}
@@ -563,7 +564,8 @@ async def apply_improvements(
     run_id: str,
     background_tasks: BackgroundTasks,
     improved_only: bool = Query(True, description="Only apply docs that improved"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Apply comparison results back to production documents.
     
     By default only applies documents where the new pipeline produced better
@@ -578,8 +580,7 @@ async def apply_improvements(
             "run_id": _apply_state.get("run_id"),
         }
 
-    db = get_db()
-    run_meta = await db.reprocess_comparison_runs.find_one(
+    run_meta = await database.reprocess_comparison_runs.find_one(
         {"run_id": run_id}, {"_id": 0}
     )
     if not run_meta:
@@ -603,17 +604,16 @@ async def apply_status():
     return _apply_state
 
 
-async def _apply_results(run_id: str, improved_only: bool):
+async def _apply_results(run_id: str, improved_only: bool, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Background task: apply comparison results back to production."""
     global _apply_state
-    db = get_db()
 
     query: Dict[str, Any] = {"run_id": run_id, "status": "compared"}
     if improved_only:
         query["delta.fields_improved"] = {"$gt": 0}
         query["delta.fields_regressed"] = 0
 
-    results = await db.reprocess_comparison_results.find(query, {"_id": 0}).to_list(5000)
+    results = await database.reprocess_comparison_results.find(query, {"_id": 0}).to_list(5000)
 
     _apply_state = {
         "status": "running",
@@ -667,7 +667,7 @@ async def _apply_results(run_id: str, improved_only: bool):
                 else:
                     set_ops[k] = v
 
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": set_ops})
+            await database.hub_documents.update_one({"id": doc_id}, {"$set": set_ops})
             _apply_state["applied"] += 1
 
         except Exception as e:
@@ -680,7 +680,7 @@ async def _apply_results(run_id: str, improved_only: bool):
     _apply_state["finished_at"] = datetime.now(timezone.utc).isoformat()
 
     # Update run metadata
-    await db.reprocess_comparison_runs.update_one(
+    await database.reprocess_comparison_runs.update_one(
         {"run_id": run_id},
         {"$set": {
             "applied": True,
@@ -743,10 +743,9 @@ async def full_reprocess_status():
     return _full_reprocess_state
 
 
-async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, skip_terminal: bool):
+async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, skip_terminal: bool, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Background task: full pipeline reprocess on each document."""
     global _full_reprocess_state
-    db = get_db()
 
     query: Dict[str, Any] = {}
     if doc_type_filter:
@@ -754,7 +753,7 @@ async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, ski
     if skip_terminal:
         query["status"] = {"$nin": ["Completed", "Posted", "Archived", "LinkedToBC", "batch_parent"]}
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     actual_limit = min(limit, total)
 
     _full_reprocess_state = {
@@ -769,7 +768,7 @@ async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, ski
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
+    cursor = database.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
     docs = await cursor.to_list(actual_limit)
 
     for i, doc in enumerate(docs):
@@ -779,7 +778,7 @@ async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, ski
             file_path = UPLOAD_DIR / doc_id
             if not file_path.exists():
                 # Try to recover file from MongoDB b64 or SharePoint
-                recovered = await _recover_file_to_disk(doc, doc_id, db)
+                recovered = await _recover_file_to_disk(doc, doc_id, database)
                 if recovered:
                     file_path = recovered
                     _full_reprocess_state.setdefault("recovered", 0)

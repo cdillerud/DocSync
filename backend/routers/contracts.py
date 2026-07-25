@@ -31,22 +31,11 @@ import logging
 import re
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import (
-    APIRouter,
-    BackgroundTasks,
-    Body,
-    Depends,
-    File,
-    Header,
-    HTTPException,
-    Query,
-    Request,
-    UploadFile,
-    status,
-)
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
-from deps import get_db
 from models.contracts import CONTRACTS_COLLECTIONS
 from services.auth_deps import get_current_user, require_admin
 from services.contracts.contract_intelligence_service import (
@@ -70,8 +59,10 @@ router = APIRouter(tags=["Contract Intelligence"])
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _service() -> ContractIntelligenceService:
-    return ContractIntelligenceService(get_db())
+def _service(
+    db: AsyncIOMotorDatabase,
+) -> ContractIntelligenceService:
+    return ContractIntelligenceService(db)
 
 
 def _extract_event_id(payload: Dict[str, Any]) -> str:
@@ -116,7 +107,8 @@ async def docusign_webhook(
     background_tasks: BackgroundTasks,
     x_docusign_signature_1: Optional[str] = Header(None),
     x_docusign_signature_2: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Receive a DocuSign Connect SIM event.
 
     Flow:
@@ -160,7 +152,7 @@ async def docusign_webhook(
     envelope_id = _extract_envelope_id(payload)
     event_type = payload.get("event") or "unknown"
 
-    svc = _service()
+    svc = _service(database)
     record = await svc.record_event(
         provider_event_id=event_id,
         provider_envelope_id=envelope_id,
@@ -180,7 +172,8 @@ async def docusign_webhook(
 async def _run_processing(event_id: str) -> None:
     """Background-task wrapper that owns its own DB handle."""
     try:
-        svc = _service()
+        db = get_platform_database()
+        svc = _service(db)
         outcome = await svc.process_event(event_id)
         logger.info("[contracts] processed event %s: %s", event_id, outcome)
     except Exception as exc:  # noqa: BLE001
@@ -199,9 +192,9 @@ async def list_agreements(
     limit: int = Query(50, ge=1, le=500),
     skip: int = Query(0, ge=0),
     _user: dict = Depends(get_current_user),
-):
-    db = get_db()
-    coll = db[CONTRACTS_COLLECTIONS["agreements"]]
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    coll = database[CONTRACTS_COLLECTIONS["agreements"]]
     q: Dict[str, Any] = {}
     if status_filter:
         q["status"] = status_filter
@@ -217,16 +210,16 @@ async def list_agreements(
 async def get_agreement_detail(
     agreement_id: str,
     _user: dict = Depends(get_current_user),
-):
-    db = get_db()
-    agr = await db[CONTRACTS_COLLECTIONS["agreements"]].find_one(
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    agr = await database[CONTRACTS_COLLECTIONS["agreements"]].find_one(
         {"id": agreement_id}, {"_id": 0},
     )
     if not agr:
         raise HTTPException(status_code=404, detail="agreement not found")
 
     async def _all(coll_name: str) -> List[Dict[str, Any]]:
-        return await db[CONTRACTS_COLLECTIONS[coll_name]].find(
+        return await database[CONTRACTS_COLLECTIONS[coll_name]].find(
             {"agreement_id": agreement_id}, {"_id": 0},
         ).to_list(length=None)
 
@@ -268,15 +261,15 @@ async def create_manual_link(
     agreement_id: str,
     body: ManualLinkBody = Body(...),
     user: dict = Depends(get_current_user),
-):
-    db = get_db()
-    agr = await db[CONTRACTS_COLLECTIONS["agreements"]].find_one(
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    agr = await database[CONTRACTS_COLLECTIONS["agreements"]].find_one(
         {"id": agreement_id}, {"_id": 0, "id": 1},
     )
     if not agr:
         raise HTTPException(status_code=404, detail="agreement not found")
     actor = user.get("email") or user.get("id") or "user"
-    link = await _service().manual_link(
+    link = await _service(database).manual_link(
         agreement_id=agreement_id,
         link_type=body.link_type,
         bc_entity=body.bc_entity,
@@ -293,9 +286,10 @@ async def confirm_link_endpoint(
     agreement_id: str,
     link_id: str,
     user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     actor = user.get("email") or user.get("id") or "user"
-    updated = await _service().confirm_link(
+    updated = await _service(database).confirm_link(
         agreement_id=agreement_id, link_id=link_id, actor=actor,
     )
     if not updated:
@@ -313,9 +307,10 @@ async def reject_link_endpoint(
     link_id: str,
     body: RejectLinkBody = Body(default=RejectLinkBody()),
     user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     actor = user.get("email") or user.get("id") or "user"
-    updated = await _service().reject_link(
+    updated = await _service(database).reject_link(
         agreement_id=agreement_id, link_id=link_id, actor=actor, notes=body.notes,
     )
     if not updated:
@@ -331,9 +326,9 @@ async def list_exceptions(
     limit: int = Query(100, ge=1, le=500),
     skip: int = Query(0, ge=0),
     _user: dict = Depends(get_current_user),
-):
-    db = get_db()
-    coll = db[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    coll = database[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
     q: Dict[str, Any] = {}
     if status_filter:
         q["status"] = status_filter
@@ -355,9 +350,10 @@ async def resolve_exception_endpoint(
     exception_id: str,
     body: ResolveExceptionBody = Body(default=ResolveExceptionBody()),
     user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     actor = user.get("email") or user.get("id") or "user"
-    updated = await _service().resolve_exception(
+    updated = await _service(database).resolve_exception(
         exception_id=exception_id, actor=actor, note=body.note,
     )
     if not updated:
@@ -370,12 +366,13 @@ async def resolve_exception_endpoint(
 # ---------------------------------------------------------------------------
 
 @router.get("/contracts/health")
-async def contracts_health():
+async def contracts_health(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     client = get_docusign_client()
-    db = get_db()
     # Surface vendor-side miss volume without flooding the exception queue
     # (vendor-side party misses are intentionally not emitted as exceptions).
-    audit = db[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
+    audit = database[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
     proposed_vendor = await audit.count_documents({
         "action": "proposed_link",
         "after.link_type": "vendor",
@@ -400,7 +397,7 @@ async def contracts_health():
 # ---------------------------------------------------------------------------
 
 @router.get("/contracts/summary")
-async def contracts_summary(_user: dict = Depends(get_current_user)):
+async def contracts_summary(_user: dict = Depends(get_current_user), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """High-level counts for dashboard cards.
 
     Returns:
@@ -411,7 +408,6 @@ async def contracts_summary(_user: dict = Depends(get_current_user)):
           "events":     { "total": N, "unprocessed": N },
         }
     """
-    db = get_db()
 
     async def _group(coll, key: str, match: Optional[Dict[str, Any]] = None):
         pipeline: List[Dict[str, Any]] = []
@@ -423,10 +419,10 @@ async def contracts_summary(_user: dict = Depends(get_current_user)):
             out[str(row["_id"]) if row["_id"] is not None else "null"] = row["count"]
         return out
 
-    agr = db[CONTRACTS_COLLECTIONS["agreements"]]
-    ex = db[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
-    lk = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
-    ev = db[CONTRACTS_COLLECTIONS["agreement_events"]]
+    agr = database[CONTRACTS_COLLECTIONS["agreements"]]
+    ex = database[CONTRACTS_COLLECTIONS["agreement_exceptions"]]
+    lk = database[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    ev = database[CONTRACTS_COLLECTIONS["agreement_events"]]
 
     return {
         "agreements": {
@@ -459,13 +455,13 @@ async def contracts_expiring(
     within_days: int = Query(60, ge=1, le=365),
     limit: int = Query(100, ge=1, le=500),
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Agreements with `expires_at` within the next N days, soonest-first."""
     from datetime import datetime, timedelta, timezone
-    db = get_db()
     now = datetime.now(timezone.utc)
     horizon = now + timedelta(days=within_days)
-    coll = db[CONTRACTS_COLLECTIONS["agreements"]]
+    coll = database[CONTRACTS_COLLECTIONS["agreements"]]
     q = {
         "expires_at": {
             "$ne": None,
@@ -485,14 +481,13 @@ async def contracts_expiring(
 
 
 @router.get("/contracts/coverage")
-async def contracts_coverage(_user: dict = Depends(get_current_user)):
+async def contracts_coverage(_user: dict = Depends(get_current_user), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Aggregate coverage: how many agreements have at least one customer
     link, vendor link, item link; how many pricing rows are matched/unmatched.
     """
-    db = get_db()
-    agr_coll = db[CONTRACTS_COLLECTIONS["agreements"]]
-    lk_coll = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
-    pr_coll = db[CONTRACTS_COLLECTIONS["agreement_pricing"]]
+    agr_coll = database[CONTRACTS_COLLECTIONS["agreements"]]
+    lk_coll = database[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    pr_coll = database[CONTRACTS_COLLECTIONS["agreement_pricing"]]
 
     total_agreements = await agr_coll.count_documents({})
 
@@ -552,7 +547,8 @@ async def contracts_coverage(_user: dict = Depends(get_current_user)):
 async def contracts_threshold_telemetry(
     days: int = Query(30, ge=1, le=365),
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Read-only precision@threshold over the last N days using audit rows.
 
     Reports:
@@ -568,9 +564,8 @@ async def contracts_threshold_telemetry(
         AUTO_CONFIRM_THRESHOLD as auto,
         MIN_PROPOSE_THRESHOLD as propose,
     )
-    db = get_db()
-    audit = db[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
-    links = db[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
+    audit = database[CONTRACTS_COLLECTIONS["agreement_match_audit"]]
+    links = database[CONTRACTS_COLLECTIONS["agreement_bc_links"]]
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     # System-emitted links since `since`
@@ -672,7 +667,8 @@ async def contracts_bc_search(
     link_type: str = Query(..., pattern="^(customer|vendor|item)$"),
     limit: int = Query(10, ge=1, le=50),
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Search the existing BC reference cache for candidates to attach as a
     Contract Intelligence link. Read-only: no BC writes, no cache mutation.
 
@@ -688,8 +684,7 @@ async def contracts_bc_search(
     Returns:
         { "link_type", "query", "matches": [ {bc_no, bc_name, source} ], "hint"? }
     """
-    db = get_db()
-    coll = db["bc_reference_cache"]
+    coll = database["bc_reference_cache"]
     raw = q.strip()
     if not raw:
         return {"link_type": link_type, "query": q, "matches": []}
@@ -749,10 +744,10 @@ async def contracts_audit_for_agreement(
     agreement_id: str,
     limit: int = Query(200, ge=1, le=500),
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Audit trail for a single agreement, newest-first."""
-    db = get_db()
-    items = await db[CONTRACTS_COLLECTIONS["agreement_match_audit"]].find(
+    items = await database[CONTRACTS_COLLECTIONS["agreement_match_audit"]].find(
         {"agreement_id": agreement_id}, {"_id": 0},
     ).sort("at", -1).limit(limit).to_list(length=limit)
     return {"agreement_id": agreement_id, "total": len(items), "items": items}
@@ -769,7 +764,8 @@ async def import_navigator_export(
     commit: bool = Query(False, description="Persist rows. Default false (dry-run)."),
     sheet: Optional[str] = Query(None, description="Worksheet name (xlsx only)."),
     _user: dict = Depends(require_admin),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Admin-gated multipart upload of a DocuSign Navigator AI Metadata
     Export. Default is dry-run; pass ``?commit=true`` to actually persist.
 
@@ -803,11 +799,10 @@ async def import_navigator_export(
     except NavigatorImportError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    db = get_db()
     if commit:
-        summary = await commit_rows(rows, db=db, filename=file.filename)
+        summary = await commit_rows(rows, db=database, filename=file.filename)
     else:
-        summary = await dryrun_rows(rows, db=db, filename=file.filename)
+        summary = await dryrun_rows(rows, db=database, filename=file.filename)
     return summary.to_dict()
 
 
@@ -828,7 +823,8 @@ async def pdf_extract_agreement(
         description="Persist extracted fields. Default false (dry-run preview).",
     ),
     _user: dict = Depends(require_admin),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Admin-gated PDF body extraction for an existing agreement.
 
     Default ``commit=false`` returns a preview only — no DB writes. With
@@ -860,8 +856,7 @@ async def pdf_extract_agreement(
             detail="Only .pdf files are accepted by this endpoint.",
         )
 
-    db = get_db()
-    agr = await db[CONTRACTS_COLLECTIONS["agreements"]].find_one(
+    agr = await database[CONTRACTS_COLLECTIONS["agreements"]].find_one(
         {"id": agreement_id}, {"_id": 0, "id": 1},
     )
     if not agr:
@@ -882,7 +877,7 @@ async def pdf_extract_agreement(
     if not commit:
         return preview
 
-    svc = ContractIntelligenceService(db)
+    svc = ContractIntelligenceService(database)
     actor = (_user or {}).get("email") or "system"
     write_summary = await svc.ingest_pdf_extraction(
         agreement_id=agreement_id,

@@ -4,22 +4,23 @@ Extracted from server.py monolith.
 All analytics/audit/metrics endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta
-from deps import get_db, ENABLE_CREATE_DRAFT_HEADER, DEMO_MODE
+from deps import ENABLE_CREATE_DRAFT_HEADER, DEMO_MODE
 from models.document_types import DEFAULT_JOB_TYPES, TransactionAction
 from services.vendor_name_helpers import normalize_vendor_name
 
 router = APIRouter(tags=["Metrics"])
 
-async def _get_automation_metrics_internal(days: int = 30, job_type: str = None):
+async def _get_automation_metrics_internal(days: int = 30, job_type: str = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Internal helper function to get automation metrics without FastAPI Query parameters.
     Used by other endpoints to aggregate metrics.
     """
-    db = get_db()
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
     # Build query filter
@@ -28,13 +29,13 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
         query["suggested_job_type"] = job_type
     
     # Total documents
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     
     # Status distribution
     status_counts = {}
     for status in ["Received", "StoredInSP", "Classified", "NeedsReview", "LinkedToBC", "Exception"]:
         status_query = {**query, "status": status}
-        status_counts[status] = await db.hub_documents.count_documents(status_query)
+        status_counts[status] = await database.hub_documents.count_documents(status_query)
     
     # Percentages
     status_percentages = {
@@ -45,7 +46,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
     # Job type breakdown
     job_type_breakdown = {}
     for jt in DEFAULT_JOB_TYPES.keys():
-        count = await db.hub_documents.count_documents({**query, "suggested_job_type": jt})
+        count = await database.hub_documents.count_documents({**query, "suggested_job_type": jt})
         if count > 0:
             job_type_breakdown[jt] = count
     
@@ -56,7 +57,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
         "low_0_0.7": 0
     }
     
-    docs_with_confidence = await db.hub_documents.find(
+    docs_with_confidence = await database.hub_documents.find(
         {**query, "ai_confidence": {"$exists": True}},
         {"ai_confidence": 1, "_id": 0}
     ).to_list(10000)
@@ -75,7 +76,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
     avg_confidence = round(total_confidence / len(docs_with_confidence), 3) if docs_with_confidence else 0
     
     # Duplicate prevention count
-    duplicate_prevented = await db.hub_documents.count_documents({
+    duplicate_prevented = await database.hub_documents.count_documents({
         **query,
         "validation_results.checks": {
             "$elemMatch": {"check_name": "duplicate_check", "passed": False}
@@ -88,7 +89,7 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
         "alias": 0, "fuzzy": 0, "manual": 0, "none": 0
     }
     
-    docs_with_match = await db.hub_documents.find(
+    docs_with_match = await database.hub_documents.find(
         query, {"match_method": 1, "status": 1, "_id": 0}
     ).to_list(10000)
     
@@ -112,11 +113,11 @@ async def _get_automation_metrics_internal(days: int = 30, job_type: str = None)
     alias_exception_rate = round((alias_needs_review / total_alias * 100) if total_alias > 0 else 0, 1)
     
     # Draft creation metrics
-    draft_created_count = await db.hub_documents.count_documents({
+    draft_created_count = await database.hub_documents.count_documents({
         **query, "transaction_action": TransactionAction.DRAFT_CREATED
     })
     
-    linked_only_count = await db.hub_documents.count_documents({
+    linked_only_count = await database.hub_documents.count_documents({
         **query, "transaction_action": TransactionAction.LINKED_ONLY
     })
     
@@ -158,15 +159,14 @@ async def get_automation_metrics(
     return await _get_automation_metrics_internal(days=days, job_type=job_type)
 
 @router.get("/metrics/vendors")
-async def get_vendor_friction_metrics(days: int = Query(30)):
-    db = get_db()
+async def get_vendor_friction_metrics(days: int = Query(30), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get vendor friction index - shows where alias mapping will have biggest ROI.
     """
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
     # Get all documents with vendor info
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "created_utc": {"$gte": cutoff_date},
             "extracted_fields.vendor": {"$exists": True}
@@ -175,7 +175,7 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
     ).to_list(5000)
     
     # Get existing aliases
-    aliases = await db.vendor_aliases.find({}, {"alias_string": 1, "vendor_name": 1}).to_list(500)
+    aliases = await database.vendor_aliases.find({}, {"alias_string": 1, "vendor_name": 1}).to_list(500)
     alias_strings = set(a.get("alias_string", "").lower() for a in aliases)
     
     # Aggregate by vendor
@@ -259,20 +259,21 @@ async def get_vendor_friction_metrics(days: int = Query(30)):
     }
 
 @router.get("/metrics/alias-impact")
-async def get_alias_impact_metrics():
+async def get_alias_impact_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Track alias learning impact over time.
     Shows compounding intelligence.
     """
-    db = get_db()
     # Get all aliases with usage stats
-    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    aliases = await database.vendor_aliases.find({}, {"_id": 0}).to_list(500)
     
     total_aliases = len(aliases)
     total_usage = sum(a.get("usage_count", 0) for a in aliases)
     
     # Get match method distribution from recent documents
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {"validation_results.checks": {"$exists": True}},
         {"validation_results.checks": 1, "_id": 0}
     ).sort("created_utc", -1).limit(1000).to_list(1000)
@@ -311,8 +312,7 @@ async def get_alias_impact_metrics():
     }
 
 @router.get("/metrics/resolution-time")
-async def get_resolution_time_metrics(days: int = Query(30)):
-    db = get_db()
+async def get_resolution_time_metrics(days: int = Query(30), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Track time from Received to LinkedToBC.
     Shows efficiency improvements.
@@ -320,7 +320,7 @@ async def get_resolution_time_metrics(days: int = Query(30)):
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
     # Get documents that reached LinkedToBC status
-    linked_docs = await db.hub_documents.find(
+    linked_docs = await database.hub_documents.find(
         {
             "created_utc": {"$gte": cutoff_date},
             "status": "LinkedToBC"
@@ -380,8 +380,7 @@ async def get_resolution_time_metrics(days: int = Query(30)):
     }
 
 @router.get("/metrics/daily")
-async def get_daily_metrics(days: int = Query(14)):
-    db = get_db()
+async def get_daily_metrics(days: int = Query(14), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get daily aggregated metrics for trend charts.
     """
@@ -395,9 +394,9 @@ async def get_daily_metrics(days: int = Query(14)):
         
         query = {"created_utc": {"$gte": start, "$lte": end}}
         
-        total = await db.hub_documents.count_documents(query)
-        linked = await db.hub_documents.count_documents({**query, "status": "LinkedToBC"})
-        review = await db.hub_documents.count_documents({**query, "status": "NeedsReview"})
+        total = await database.hub_documents.count_documents(query)
+        linked = await database.hub_documents.count_documents({**query, "status": "LinkedToBC"})
+        review = await database.hub_documents.count_documents({**query, "status": "NeedsReview"})
         
         daily_metrics.append({
             "date": date_str,
@@ -415,23 +414,24 @@ async def get_daily_metrics(days: int = Query(14)):
 # ==================== ENHANCED DASHBOARD ====================
 
 @router.get("/dashboard/email-stats")
-async def get_email_stats():
-    db = get_db()
+async def get_email_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get email processing statistics."""
-    total_email = await db.hub_documents.count_documents({"source": "email"})
-    needs_review = await db.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
-    auto_linked = await db.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
-    stored_sp = await db.hub_documents.count_documents({"source": "email", "status": "StoredInSP"})
+    total_email = await database.hub_documents.count_documents({"source": "email"})
+    needs_review = await database.hub_documents.count_documents({"source": "email", "status": "NeedsReview"})
+    auto_linked = await database.hub_documents.count_documents({"source": "email", "status": "LinkedToBC"})
+    stored_sp = await database.hub_documents.count_documents({"source": "email", "status": "StoredInSP"})
     
     # Get by job type
     by_job_type = {}
     for jt in DEFAULT_JOB_TYPES.keys():
-        count = await db.hub_documents.count_documents({"source": "email", "suggested_job_type": jt})
+        count = await database.hub_documents.count_documents({"source": "email", "suggested_job_type": jt})
         if count > 0:
             by_job_type[jt] = count
     
     # Recent email documents
-    recent = await db.hub_documents.find(
+    recent = await database.hub_documents.find(
         {"source": "email"},
         {"_id": 0}
     ).sort("created_utc", -1).limit(10).to_list(10)
@@ -451,7 +451,8 @@ async def get_email_stats():
 async def get_match_score_distribution(
     from_date: str = None,
     to_date: str = None
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Get match score distribution histogram for Phase 6 Shadow Mode analysis.
     
@@ -467,7 +468,6 @@ async def get_match_score_distribution(
         from_date: Start date (YYYY-MM-DD), defaults to 14 days ago
         to_date: End date (YYYY-MM-DD), defaults to today
     """
-    db = get_db()
     # Default to last 14 days
     if not to_date:
         to_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -483,7 +483,7 @@ async def get_match_score_distribution(
     }
     
     # Get all documents with match scores in range
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {"match_score": 1, "match_method": 1, "status": 1, "_id": 0}
     ).to_list(10000)
@@ -570,7 +570,7 @@ async def get_match_score_distribution(
 
 
 @router.get("/metrics/alias-exceptions")
-async def get_alias_exception_metrics(days: int = 14):
+async def get_alias_exception_metrics(days: int = 14, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Enhanced alias exception tracking for Phase 6.
     
@@ -584,12 +584,11 @@ async def get_alias_exception_metrics(days: int = 14):
     - Top 10 vendors by alias exceptions
     - Top 10 vendors by alias contribution
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
     
     # Get all documents with match data
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {"match_method": 1, "status": 1, "extracted_fields.vendor": 1, "_id": 0}
     ).to_list(10000)
@@ -667,9 +666,9 @@ async def get_alias_exception_metrics(days: int = 14):
             "created_utc": {"$gte": day, "$lt": day + "T23:59:59"},
             "match_method": "alias"
         }
-        day_total = await db.hub_documents.count_documents(day_query)
-        day_success = await db.hub_documents.count_documents({**day_query, "status": "LinkedToBC"})
-        day_exception = await db.hub_documents.count_documents({**day_query, "status": "NeedsReview"})
+        day_total = await database.hub_documents.count_documents(day_query)
+        day_success = await database.hub_documents.count_documents({**day_query, "status": "LinkedToBC"})
+        day_exception = await database.hub_documents.count_documents({**day_query, "status": "NeedsReview"})
         
         daily_alias_trend.append({
             "date": day,
@@ -705,7 +704,7 @@ async def get_alias_exception_metrics(days: int = 14):
 
 
 @router.get("/metrics/vendor-stability")
-async def get_vendor_stability_analysis(days: int = 14):
+async def get_vendor_stability_analysis(days: int = 14, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Vendor friction stability analysis for Phase 6.
     
@@ -716,12 +715,11 @@ async def get_vendor_stability_analysis(days: int = 14):
     - Vendors with high match scores but high exception rates (process issue)
     - Vendors with consistently high confidence (candidates for lower thresholds)
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
     
     # Get all documents
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {"extracted_fields.vendor": 1, "match_score": 1, "status": 1, "ai_confidence": 1, "_id": 0}
     ).to_list(10000)
@@ -831,15 +829,16 @@ class ShadowModeConfig(BaseModel):
 
 
 @router.get("/settings/shadow-mode")
-async def get_shadow_mode_status():
+async def get_shadow_mode_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Get shadow mode status for Phase 6 monitoring.
     
     Returns feature flag status, shadow mode duration, and quick health indicators.
     """
-    db = get_db()
     # Get shadow mode config from settings
-    settings = await db.hub_settings.find_one({"type": "shadow_mode"}, {"_id": 0})
+    settings = await database.hub_settings.find_one({"type": "shadow_mode"}, {"_id": 0})
     
     if not settings:
         # Initialize shadow mode settings if not exists
@@ -861,7 +860,7 @@ async def get_shadow_mode_status():
     query_7d = {"created_utc": {"$gte": cutoff_7d}}
     
     # High confidence docs percentage
-    docs_with_score = await db.hub_documents.find(
+    docs_with_score = await database.hub_documents.find(
         {**query_7d, "match_score": {"$exists": True, "$ne": None}},
         {"match_score": 1, "_id": 0}
     ).to_list(10000)
@@ -870,15 +869,15 @@ async def get_shadow_mode_status():
     high_conf_pct = round((high_conf_count / len(docs_with_score) * 100) if docs_with_score else 0, 1)
     
     # Alias exception rate (last 7 days)
-    alias_total_7d = await db.hub_documents.count_documents({**query_7d, "match_method": "alias"})
-    alias_exceptions_7d = await db.hub_documents.count_documents({
+    alias_total_7d = await database.hub_documents.count_documents({**query_7d, "match_method": "alias"})
+    alias_exceptions_7d = await database.hub_documents.count_documents({
         **query_7d, "match_method": "alias", "status": "NeedsReview"
     })
     alias_exception_rate_7d = round((alias_exceptions_7d / alias_total_7d * 100) if alias_total_7d > 0 else 0, 1)
     
     # Top friction vendor this week
     top_friction_vendor = None
-    vendor_friction = await db.hub_documents.aggregate([
+    vendor_friction = await database.hub_documents.aggregate([
         {"$match": {**query_7d, "status": "NeedsReview"}},
         {"$group": {"_id": "$extracted_fields.vendor", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
@@ -931,7 +930,7 @@ async def get_shadow_mode_status():
 
 
 @router.post("/settings/shadow-mode")
-async def update_shadow_mode_settings(config: ShadowModeConfig):
+async def update_shadow_mode_settings(config: ShadowModeConfig, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Update shadow mode configuration.
     
@@ -939,7 +938,6 @@ async def update_shadow_mode_settings(config: ShadowModeConfig):
     - Set shadow_mode_started_at when deploying to production
     - Add notes about deployments, vendor changes, alias imports
     """
-    db = get_db()
     update_data = {}
     
     if config.shadow_mode_started_at is not None:
@@ -951,7 +949,7 @@ async def update_shadow_mode_settings(config: ShadowModeConfig):
     if update_data:
         update_data["updated_utc"] = datetime.now(timezone.utc).isoformat()
         
-        await db.hub_settings.update_one(
+        await database.hub_settings.update_one(
             {"type": "shadow_mode"},
             {"$set": update_data},
             upsert=True
@@ -970,7 +968,6 @@ async def get_shadow_mode_performance_report(days: int = 14):
     
     Returns exportable JSON structure for executive presentation.
     """
-    db = get_db()
     # Gather all metrics
     score_dist = await get_match_score_distribution()
     alias_metrics = await get_alias_exception_metrics(days=days)
@@ -1122,7 +1119,7 @@ async def get_shadow_mode_performance_report(days: int = 14):
 
 
 @router.get("/metrics/extraction-quality")
-async def get_extraction_quality_metrics(days: int = 7):
+async def get_extraction_quality_metrics(days: int = 7, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Phase 7 extraction quality metrics.
     
@@ -1132,11 +1129,10 @@ async def get_extraction_quality_metrics(days: int = 7):
     - Vendor name variation tracking
     - Canonical fields completeness
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
     
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {
             "extracted_fields": 1, 
@@ -1553,8 +1549,7 @@ async def get_stable_vendors(
 
 
 @router.get("/metrics/draft-candidates")
-async def get_draft_candidate_metrics(days: int = Query(7)):
-    db = get_db()
+async def get_draft_candidate_metrics(days: int = Query(7), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Phase 7 Week 1: Draft Candidate metrics endpoint.
     
@@ -1569,7 +1564,7 @@ async def get_draft_candidate_metrics(days: int = Query(7)):
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
     
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {
             "id": 1,

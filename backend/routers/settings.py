@@ -1,13 +1,15 @@
 """GPI Document Hub - Settings Router"""
 
-from fastapi import APIRouter, HTTPException, Body, Query
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 from typing import Dict, Optional, List
 from datetime import datetime, timezone
 import httpx
 import logging
 
-from deps import get_db, DEMO_MODE
+from deps import DEMO_MODE
 from models.document_types import DEFAULT_JOB_TYPES, DRAFT_CREATION_CONFIG
 
 # Import configuration variables and helper functions from config_service
@@ -116,15 +118,14 @@ async def get_settings_config():
 
 
 @router.put("/config")
-async def update_settings_config(update: ConfigUpdate):
-    db = get_db()
+async def update_settings_config(update: ConfigUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Save config to MongoDB and reload in-memory. No .env write = no server restart."""
     global DEMO_MODE, TENANT_ID, BC_ENVIRONMENT, BC_COMPANY_NAME
     global BC_CLIENT_ID, BC_CLIENT_SECRET, GRAPH_CLIENT_ID, GRAPH_CLIENT_SECRET
     global SHAREPOINT_SITE_HOSTNAME, SHAREPOINT_SITE_PATH, SHAREPOINT_LIBRARY_NAME
 
     # Load current saved config from DB
-    saved = await db.hub_config.find_one({"_key": "credentials"}, {"_id": 0}) or {"_key": "credentials"}
+    saved = await database.hub_config.find_one({"_key": "credentials"}, {"_id": 0}) or {"_key": "credentials"}
 
     # Merge updates — skip masked placeholder values, strip whitespace
     update_dict = update.model_dump(exclude_none=True)
@@ -133,7 +134,7 @@ async def update_settings_config(update: ConfigUpdate):
             saved[key] = val.strip() if isinstance(val, str) else val
 
     # Upsert into MongoDB
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"_key": "credentials"},
         {"$set": saved},
         upsert=True
@@ -280,10 +281,11 @@ async def get_draft_creation_feature_status():
 # Emergent LLM Key for AI Classification
 
 @router.get("/job-types")
-async def get_job_types():
-    db = get_db()
+async def get_job_types(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get all job type configurations."""
-    job_types = await db.hub_job_types.find({}, {"_id": 0}).to_list(100)
+    job_types = await database.hub_job_types.find({}, {"_id": 0}).to_list(100)
     
     # Merge with defaults for any missing types
     result = dict(DEFAULT_JOB_TYPES)
@@ -294,10 +296,9 @@ async def get_job_types():
 
 
 @router.get("/job-types/{job_type}")
-async def get_job_type(job_type: str):
-    db = get_db()
+async def get_job_type(job_type: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get a specific job type configuration."""
-    jt = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
+    jt = await database.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
     if not jt:
         jt = DEFAULT_JOB_TYPES.get(job_type)
         if not jt:
@@ -306,13 +307,12 @@ async def get_job_type(job_type: str):
 
 
 @router.put("/job-types/{job_type}")
-async def update_job_type(job_type: str, config: JobTypeConfig):
-    db = get_db()
+async def update_job_type(job_type: str, config: JobTypeConfig, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update a job type configuration."""
     update_data = config.model_dump()
     update_data["job_type"] = job_type
     
-    await db.hub_job_types.update_one(
+    await database.hub_job_types.update_one(
         {"job_type": job_type},
         {"$set": update_data},
         upsert=True
@@ -328,15 +328,14 @@ async def get_email_watcher_settings():
 
 
 @router.put("/email-watcher")
-async def update_email_watcher_settings(config: EmailWatchConfig):
-    db = get_db()
+async def update_email_watcher_settings(config: EmailWatchConfig, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update email watcher configuration."""
     update_data = config.model_dump()
     update_data["_key"] = "email_watcher"
     
     logger.info("Saving email watcher config: %s", update_data)
     
-    result = await db.hub_config.update_one(
+    result = await database.hub_config.update_one(
         {"_key": "email_watcher"},
         {"$set": update_data},
         upsert=True
@@ -348,8 +347,7 @@ async def update_email_watcher_settings(config: EmailWatchConfig):
 
 
 @router.post("/email-watcher/subscribe")
-async def subscribe_email_watcher(webhook_url: str = Query(...)):
-    db = get_db()
+async def subscribe_email_watcher(webhook_url: str = Query(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create Graph subscription for email notifications."""
     config = await get_email_watcher_config()
     
@@ -359,7 +357,7 @@ async def subscribe_email_watcher(webhook_url: str = Query(...)):
     result = await subscribe_to_mailbox_notifications(config["mailbox_address"], webhook_url)
     
     if result.get("status") == "ok":
-        await db.hub_config.update_one(
+        await database.hub_config.update_one(
             {"_key": "email_watcher"},
             {"$set": {
                 "webhook_subscription_id": result.get("subscription_id"),
@@ -384,22 +382,22 @@ class NotificationConfigUpdate(BaseModel):
 
 
 @router.get("/notification-config")
-async def get_notification_config_endpoint():
+async def get_notification_config_endpoint(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Read notification email configuration (warehouse receiving address, etc.)."""
-    db = get_db()
     from services.notification_service import get_notification_config
-    config = await get_notification_config(db)
+    config = await get_notification_config(database)
     return {"notification_config": config}
 
 
 @router.put("/notification-config")
-async def update_notification_config_endpoint(body: NotificationConfigUpdate):
+async def update_notification_config_endpoint(body: NotificationConfigUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update notification email configuration."""
-    db = get_db()
     from services.notification_service import get_notification_config, save_notification_config
-    current = await get_notification_config(db)
+    current = await get_notification_config(database)
     new_wh = body.warehouse_receiving_email if body.warehouse_receiving_email is not None else current.get("warehouse_receiving_email", "")
     new_from = body.from_address if body.from_address is not None else current.get("from_address", "")
     new_enabled = body.enabled if body.enabled is not None else current.get("enabled", True)
-    saved = await save_notification_config(db, warehouse_receiving_email=new_wh, from_address=new_from, enabled=new_enabled)
+    saved = await save_notification_config(database, warehouse_receiving_email=new_wh, from_address=new_from, enabled=new_enabled)
     return {"notification_config": saved}

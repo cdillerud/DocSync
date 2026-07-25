@@ -4,8 +4,9 @@ import uuid
 import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from datetime import datetime, timezone, timedelta
-from deps import get_db
 from services.auth_deps import require_admin
 
 logger = logging.getLogger(__name__)
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 async def deprecation_metrics(
     days: int = Query(14, ge=1, le=180, description="Lookback window in days (UTC day buckets)"),
     _user: dict = Depends(require_admin),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Observability for deprecated-route usage. ADMIN ONLY.
 
     Returns day-bucketed hit counts for every deprecated route that has
@@ -43,10 +45,9 @@ async def deprecation_metrics(
       body parsing. Not implemented in v2.5.27 per user directive
       ("finish drain + Phase 4 first, then decide").
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    raw = await db.deprecation_hits.find(
+    raw = await database.deprecation_hits.find(
         {"day_bucket": {"$gte": cutoff}},
         {"_id": 0},
     ).sort([("deprecated_path", 1), ("day_bucket", 1)]).to_list(5000)
@@ -99,7 +100,7 @@ async def deprecation_metrics(
     # Query the 7-day gate window directly (independent of the caller's
     # `days` arg, so /deprecation-metrics?days=1 still reports the full
     # 7-day gate truthfully).
-    gate_rows = await db.deprecation_hits.find(
+    gate_rows = await database.deprecation_hits.find(
         {
             "day_bucket": {"$gte": gate_cutoff},
             "deprecated_path": {"$in": AP_MUTATION_TEMPLATES},
@@ -209,13 +210,14 @@ async def backfill_sales_mailbox(
 
 
 @router.post("/migrate-sales-to-unified")
-async def migrate_sales_documents_to_unified():
+async def migrate_sales_documents_to_unified(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     One-time migration to move sales_documents into the main hub_documents collection.
     Documents from sales_documents will be copied to hub_documents with category='Sales'.
     Duplicates (by document_id) will be skipped.
     """
-    db = get_db()
     run_id = uuid.uuid4().hex[:8]
     stats = {
         "run_id": run_id,
@@ -228,13 +230,13 @@ async def migrate_sales_documents_to_unified():
     }
 
     try:
-        sales_docs = await db.sales_documents.find({}, {"_id": 0}).to_list(1000)
+        sales_docs = await database.sales_documents.find({}, {"_id": 0}).to_list(1000)
         stats["sales_documents_found"] = len(sales_docs)
         logger.info("[Migration:%s] Found %d sales documents to migrate", run_id, len(sales_docs))
 
         for sdoc in sales_docs:
             doc_id = sdoc.get("document_id")
-            existing = await db.hub_documents.find_one({"id": doc_id})
+            existing = await database.hub_documents.find_one({"id": doc_id})
             if existing:
                 stats["skipped_duplicate"] += 1
                 continue
@@ -264,7 +266,7 @@ async def migrate_sales_documents_to_unified():
                 "migrated_at": now,
             }
             try:
-                await db.hub_documents.insert_one(hub_doc)
+                await database.hub_documents.insert_one(hub_doc)
                 stats["migrated"] += 1
                 stats["migrated_documents"].append({
                     "document_id": doc_id,
@@ -283,16 +285,17 @@ async def migrate_sales_documents_to_unified():
 
 
 @router.post("/square9-cutover")
-async def execute_square9_cutover():
+async def execute_square9_cutover(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Decommission Square9 — GPI Hub becomes the authoritative document system.
 
     Sets square9_active=false in hub_config, records timestamp,
     and logs a system activity record. Idempotent.
     """
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    existing = await db.hub_config.find_one({"_key": "square9_cutover"}, {"_id": 0})
+    existing = await database.hub_config.find_one({"_key": "square9_cutover"}, {"_id": 0})
     if existing and existing.get("square9_active") is False:
         return {
             "status": "already_decommissioned",
@@ -300,7 +303,7 @@ async def execute_square9_cutover():
             "message": "Square9 was already decommissioned.",
         }
 
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"_key": "square9_cutover"},
         {"$set": {
             "_key": "square9_cutover",
@@ -311,7 +314,7 @@ async def execute_square9_cutover():
         upsert=True,
     )
 
-    await db.activity_log.insert_one({
+    await database.activity_log.insert_one({
         "id": uuid.uuid4().hex,
         "entity_type": "system",
         "entity_id": "square9_cutover",
@@ -354,21 +357,19 @@ async def recompute_derived_states(
 
 
 @router.get("/recompute-status/{run_id}")
-async def get_recompute_status(run_id: str):
+async def get_recompute_status(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Check status of a recompute job."""
-    db = get_db()
-    job = await db.admin_jobs.find_one({"run_id": run_id}, {"_id": 0})
+    job = await database.admin_jobs.find_one({"run_id": run_id}, {"_id": 0})
     if not job:
         return {"run_id": run_id, "status": "not_found"}
     return job
 
 
-async def _recompute_states_task(run_id: str, dry_run: bool):
+async def _recompute_states_task(run_id: str, dry_run: bool, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Background task to recompute derived states."""
     from services.derived_state_service import DerivedStateService
     
-    db = get_db()
-    svc = DerivedStateService(db)
+    svc = DerivedStateService(database)
     
     stats = {
         "run_id": run_id,
@@ -382,12 +383,12 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
         "changes": [],
     }
     
-    await db.admin_jobs.update_one(
+    await database.admin_jobs.update_one(
         {"run_id": run_id}, {"$set": stats}, upsert=True
     )
     
     try:
-        docs = await db.hub_documents.find(
+        docs = await database.hub_documents.find(
             {},
             {"_id": 0, "id": 1, "validation_state": 1, "workflow_state": 1, 
              "automation_state": 1, "file_name": 1}
@@ -430,7 +431,7 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
             
             # Update progress every 50 docs
             if (i + 1) % 50 == 0:
-                await db.admin_jobs.update_one(
+                await database.admin_jobs.update_one(
                     {"run_id": run_id}, {"$set": stats}
                 )
         
@@ -442,7 +443,7 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
         stats["error_message"] = str(e)
         logger.error("[RecomputeStates:%s] Fatal error: %s", run_id, str(e))
     
-    await db.admin_jobs.update_one(
+    await database.admin_jobs.update_one(
         {"run_id": run_id}, {"$set": stats}
     )
     logger.info(
@@ -456,7 +457,7 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
 # =========================================================================
 
 @router.post("/sh-invoice/{doc_id}/assign-processor")
-async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
+async def assign_sh_processor(doc_id: str, payload: dict = Body(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Assign a processor (Andy or Ellie) to an SH_Invoice document.
 
     Body: {"processor": "Andy" | "Ellie"}
@@ -469,8 +470,7 @@ async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
             detail=f"Invalid processor '{processor}'. Must be 'Andy' or 'Ellie'.",
         )
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -482,7 +482,7 @@ async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
         )
 
     now = datetime.now(timezone.utc).isoformat()
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "processor": processor,
@@ -492,7 +492,7 @@ async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
     )
 
     # Return updated document
-    updated = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return {
         "success": True,
         "doc_id": doc_id,
@@ -508,12 +508,12 @@ async def get_sh_invoice_queue(
     processor: str = Query(None, description="Filter by assigned processor"),
     limit: int = Query(100, ge=1, le=500),
     skip: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return SH_Invoice documents in the approval queue.
 
     Defaults to pending_approval status. Supports filtering by processor.
     """
-    db = get_db()
 
     query = {
         "$or": [
@@ -526,8 +526,8 @@ async def get_sh_invoice_queue(
     if processor:
         query["processor"] = processor
 
-    total = await db.hub_documents.count_documents(query)
-    docs = await db.hub_documents.find(
+    total = await database.hub_documents.count_documents(query)
+    docs = await database.hub_documents.find(
         query, {"_id": 0}
     ).sort("created_utc", -1).skip(skip).limit(limit).to_list(length=limit)
 
@@ -545,17 +545,15 @@ async def get_sh_invoice_queue(
 # =============================================================================
 
 @router.post("/sales-learning/backfill-bc-orders")
-async def backfill_sales_learning(background_tasks: BackgroundTasks):
+async def backfill_sales_learning(background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Trigger bulk customer posting profile build from BC sales orders."""
-    from deps import get_db
-    db = get_db()
 
     async def _run_backfill():
         try:
             from services.sales_order_learning_service import build_all_customer_posting_profiles
             from services.business_central_service import BusinessCentralService
             bc = BusinessCentralService()
-            await build_all_customer_posting_profiles(db, bc, top_n=50)
+            await build_all_customer_posting_profiles(database, bc, top_n=50)
         except Exception as exc:
             logger.error("[SalesLearning] Background backfill failed: %s", exc)
 
@@ -564,18 +562,18 @@ async def backfill_sales_learning(background_tasks: BackgroundTasks):
 
 
 @router.get("/sales-learning/customer-profiles")
-async def get_customer_profiles_summary():
+async def get_customer_profiles_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Summary of all customer posting profiles."""
-    from deps import get_db
-    db = get_db()
 
-    total = await db.customer_posting_profiles.count_documents({})
-    high = await db.customer_posting_profiles.count_documents({"template_confidence": "high"})
-    medium = await db.customer_posting_profiles.count_documents({"template_confidence": "medium"})
-    low = await db.customer_posting_profiles.count_documents({"template_confidence": "low"})
+    total = await database.customer_posting_profiles.count_documents({})
+    high = await database.customer_posting_profiles.count_documents({"template_confidence": "high"})
+    medium = await database.customer_posting_profiles.count_documents({"template_confidence": "medium"})
+    low = await database.customer_posting_profiles.count_documents({"template_confidence": "low"})
 
     # Top customers by orders analyzed
-    cursor = db.customer_posting_profiles.find(
+    cursor = database.customer_posting_profiles.find(
         {"status": "analyzed"},
         {"_id": 0, "customer_no": 1, "customer_name": 1, "invoices_analyzed": 1,
          "template_confidence": 1, "typical_order_value": 1, "common_items": 1,
@@ -587,7 +585,7 @@ async def get_customer_profiles_summary():
         top_customers.append(doc)
 
     # Last run
-    last_job = await db.sales_learning_jobs.find_one(
+    last_job = await database.sales_learning_jobs.find_one(
         {}, {"_id": 0}, sort=[("started_at", -1)]
     )
 
@@ -600,12 +598,12 @@ async def get_customer_profiles_summary():
 
 
 @router.post("/sales-learning/detect-posted-drafts")
-async def detect_posted_so_drafts():
+async def detect_posted_so_drafts(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Manually trigger SO draft detection."""
-    from deps import get_db
     from services.sales_order_learning_service import detect_posted_sales_drafts
-    db = get_db()
-    result = await detect_posted_sales_drafts(db)
+    result = await detect_posted_sales_drafts(database)
     return result
 
 
@@ -619,18 +617,17 @@ async def evaluate_readiness(
     background_tasks: BackgroundTasks,
     limit: int = Query(50, ge=1, le=500),
     sync: bool = Query(False, description="Run synchronously (slower, returns full results)"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Run readiness reviewer against historical sales docs. Evaluation only — changes nothing."""
-    from deps import get_db
     from services.sales_order_readiness_evaluator import run_batch_evaluation
-    db = get_db()
 
     if sync:
-        return await run_batch_evaluation(db, limit=limit)
+        return await run_batch_evaluation(database, limit=limit)
 
     async def _run():
         try:
-            await run_batch_evaluation(db, limit=limit)
+            await run_batch_evaluation(database, limit=limit)
         except Exception as exc:
             logger.error("[SOEval] Background evaluation failed: %s", exc)
 
@@ -639,22 +636,18 @@ async def evaluate_readiness(
 
 
 @router.get("/sales-learning/readiness-evaluations")
-async def list_readiness_evaluations(limit: int = Query(20, ge=1, le=100)):
+async def list_readiness_evaluations(limit: int = Query(20, ge=1, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Fetch recent evaluation run summaries."""
-    from deps import get_db
     from services.sales_order_readiness_evaluator import get_evaluation_runs
-    db = get_db()
-    runs = await get_evaluation_runs(db, limit=limit)
+    runs = await get_evaluation_runs(database, limit=limit)
     return {"runs": runs, "total": len(runs)}
 
 
 @router.get("/sales-learning/readiness-evaluations/{run_id}")
-async def get_readiness_evaluation_details(run_id: str, limit: int = Query(100, ge=1, le=500)):
+async def get_readiness_evaluation_details(run_id: str, limit: int = Query(100, ge=1, le=500), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Fetch per-document details for a specific evaluation run."""
-    from deps import get_db
     from services.sales_order_readiness_evaluator import get_evaluation_details
-    db = get_db()
-    details = await get_evaluation_details(db, run_id, limit=limit)
+    details = await get_evaluation_details(database, run_id, limit=limit)
     return {"run_id": run_id, "total": len(details), "details": details}
 
 
@@ -668,13 +661,12 @@ async def reviewer_feedback_summary(
     customer_no: str = Query(None), reviewer: str = Query(None),
     model: str = Query(None), readiness_status: str = Query(None),
     assessment: str = Query(None), decision: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Aggregate metrics on how the advisory system performs against human feedback."""
-    from deps import get_db
     from services.sales_order_feedback_analytics_service import get_feedback_summary
-    db = get_db()
     return await get_feedback_summary(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         customer_no=customer_no, reviewer=reviewer,
         model=model, readiness_status=readiness_status,
         assessment=assessment, decision=decision,
@@ -687,13 +679,12 @@ async def reviewer_feedback_details(
     date_from: str = Query(None), date_to: str = Query(None),
     customer_no: str = Query(None), reviewer: str = Query(None),
     assessment: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Individual feedback records with filtering."""
-    from deps import get_db
     from services.sales_order_feedback_analytics_service import get_feedback_details
-    db = get_db()
     return await get_feedback_details(
-        db, limit=limit, skip=skip,
+        database, limit=limit, skip=skip,
         date_from=date_from, date_to=date_to,
         customer_no=customer_no, reviewer=reviewer,
         assessment=assessment,
@@ -701,12 +692,10 @@ async def reviewer_feedback_details(
 
 
 @router.get("/sales-learning/reviewer-feedback-by-customer")
-async def reviewer_feedback_by_customer(limit: int = Query(30, ge=1, le=100)):
+async def reviewer_feedback_by_customer(limit: int = Query(30, ge=1, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Per-customer feedback summary."""
-    from deps import get_db
     from services.sales_order_feedback_analytics_service import get_feedback_by_customer
-    db = get_db()
-    customers = await get_feedback_by_customer(db, limit=limit)
+    customers = await get_feedback_by_customer(database, limit=limit)
     return {"customers": customers, "total": len(customers)}
 
 
@@ -720,13 +709,12 @@ async def disagreement_diagnostics(
     customer_no: str = Query(None), reviewer: str = Query(None),
     model: str = Query(None), readiness_status: str = Query(None),
     assessment: str = Query(None), root_cause: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Root-cause analysis of reviewer disagreements for system tuning."""
-    from deps import get_db
     from services.sales_order_disagreement_diagnostics_service import run_disagreement_diagnostics
-    db = get_db()
     return await run_disagreement_diagnostics(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         customer_no=customer_no, reviewer=reviewer,
         model=model, readiness_status=readiness_status,
         assessment=assessment, root_cause=root_cause,
@@ -737,12 +725,11 @@ async def disagreement_diagnostics(
 async def disagreement_examples(
     root_cause: str = Query(None),
     limit: int = Query(20, ge=1, le=100),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Example disagreement records, optionally filtered by root cause."""
-    from deps import get_db
     from services.sales_order_disagreement_diagnostics_service import get_disagreement_examples
-    db = get_db()
-    examples = await get_disagreement_examples(db, root_cause=root_cause, limit=limit)
+    examples = await get_disagreement_examples(database, root_cause=root_cause, limit=limit)
     return {"root_cause_filter": root_cause, "total": len(examples), "examples": examples}
 
 
@@ -755,16 +742,15 @@ async def calibrate_confidence_batch(
     background_tasks: BackgroundTasks,
     limit: int = Query(200, ge=1, le=1000),
     sync: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Run confidence calibration on recent reviewed documents."""
-    from deps import get_db
     from services.sales_order_confidence_calibration_service import batch_calibrate
-    db = get_db()
     if sync:
-        return await batch_calibrate(db, limit=limit)
+        return await batch_calibrate(database, limit=limit)
     async def _run():
         try:
-            await batch_calibrate(db, limit=limit)
+            await batch_calibrate(database, limit=limit)
         except Exception as exc:
             logger.error("[SOCalibration] Batch failed: %s", exc)
     background_tasks.add_task(_run)
@@ -772,21 +758,17 @@ async def calibrate_confidence_batch(
 
 
 @router.get("/sales-learning/calibration-comparison")
-async def calibration_comparison(limit: int = Query(100, ge=1, le=500)):
+async def calibration_comparison(limit: int = Query(100, ge=1, le=500), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Compare raw vs calibrated confidence with agreement rates per band."""
-    from deps import get_db
     from services.sales_order_confidence_calibration_service import get_calibration_comparison
-    db = get_db()
-    return await get_calibration_comparison(db, limit=limit)
+    return await get_calibration_comparison(database, limit=limit)
 
 
 @router.post("/sales-learning/calibrate-document/{document_id}")
-async def calibrate_single_document(document_id: str):
+async def calibrate_single_document(document_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Run calibration on a single document and return the result."""
-    from deps import get_db
     from services.sales_order_confidence_calibration_service import calibrate_document_review
-    db = get_db()
-    result = await calibrate_document_review(db, document_id)
+    result = await calibrate_document_review(database, document_id)
     if result.error:
         raise HTTPException(status_code=404, detail=result.error)
     return result.to_dict()
@@ -802,13 +784,12 @@ async def post_tuning_review(
     customer_no: str = Query(None), reviewer: str = Query(None),
     model: str = Query(None), profile_state: str = Query(None),
     readiness_status: str = Query(None), assessment: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Comprehensive post-tuning impact analysis."""
-    from deps import get_db
     from services.sales_order_post_tuning_review_service import run_post_tuning_review
-    db = get_db()
     return await run_post_tuning_review(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         customer_no=customer_no, reviewer=reviewer,
         model=model, profile_state=profile_state,
         readiness_status=readiness_status, assessment=assessment,
@@ -819,12 +800,11 @@ async def post_tuning_review(
 async def post_tuning_review_details(
     limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
     date_from: str = Query(None), date_to: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Individual feedback records enriched with tuning context."""
-    from deps import get_db
     from services.sales_order_post_tuning_review_service import get_post_tuning_details
-    db = get_db()
-    return await get_post_tuning_details(db, limit=limit, skip=skip,
+    return await get_post_tuning_details(database, limit=limit, skip=skip,
                                          date_from=date_from, date_to=date_to)
 
 
@@ -838,13 +818,12 @@ async def strong_profile_review(
     customer_no: str = Query(None), reviewer: str = Query(None),
     model: str = Query(None), readiness_status: str = Query(None),
     disagreement_field: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Validate strong-profile tuning impact with pre/post comparison."""
-    from deps import get_db
     from services.sales_order_strong_profile_review_service import run_strong_profile_review
-    db = get_db()
     return await run_strong_profile_review(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         customer_no=customer_no, reviewer=reviewer,
         model=model, readiness_status=readiness_status,
         disagreement_field=disagreement_field,
@@ -856,12 +835,11 @@ async def strong_profile_review_details(
     limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
     date_from: str = Query(None), date_to: str = Query(None),
     customer_no: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Individual strong-profile feedback records with enrichment."""
-    from deps import get_db
     from services.sales_order_strong_profile_review_service import get_strong_profile_details
-    db = get_db()
-    return await get_strong_profile_details(db, limit=limit, skip=skip,
+    return await get_strong_profile_details(database, limit=limit, skip=skip,
                                             date_from=date_from, date_to=date_to,
                                             customer_no=customer_no)
 
@@ -876,16 +854,15 @@ async def gen_learning_suggestions(
     customer_no: str = Query(None),
     limit: int = Query(50, ge=1, le=500),
     sync: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Generate candidate profile-learning suggestions from reviewer feedback."""
-    from deps import get_db
     from services.unified_learning_service import generate_suggestions, SALES_CONFIG
-    db = get_db()
     if sync:
-        return await generate_suggestions(db, SALES_CONFIG, limit=limit)
+        return await generate_suggestions(database, SALES_CONFIG, limit=limit)
     async def _run():
         try:
-            await generate_suggestions(db, SALES_CONFIG, limit=limit)
+            await generate_suggestions(database, SALES_CONFIG, limit=limit)
         except Exception as exc:
             logger.error("[FeedbackLearning] Background generation failed: %s", exc)
     background_tasks.add_task(_run)
@@ -900,24 +877,21 @@ async def list_learning_suggestions(
     min_confidence: float = Query(None),
     date_from: str = Query(None), date_to: str = Query(None),
     limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Fetch learning suggestions with filters."""
-    from deps import get_db
     from services.unified_learning_service import get_suggestions, SALES_CONFIG
-    db = get_db()
     return await get_suggestions(
-        db, SALES_CONFIG, entity_no=customer_no, suggestion_type=suggestion_type,
+        database, SALES_CONFIG, entity_no=customer_no, suggestion_type=suggestion_type,
         status=status, limit=limit, skip=skip,
     )
 
 
 @router.get("/sales-learning/learning-suggestions/{suggestion_id}")
-async def get_learning_suggestion(suggestion_id: str):
+async def get_learning_suggestion(suggestion_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Fetch a single suggestion by ID."""
-    from deps import get_db
     from services.unified_learning_service import get_suggestion_by_id, SALES_CONFIG
-    db = get_db()
-    result = await get_suggestion_by_id(db, SALES_CONFIG, suggestion_id)
+    result = await get_suggestion_by_id(database, SALES_CONFIG, suggestion_id)
     if not result:
         raise HTTPException(status_code=404, detail="Suggestion not found")
     return result
@@ -928,36 +902,30 @@ async def get_learning_suggestion(suggestion_id: str):
 # =============================================================================
 
 @router.post("/sales-learning/learning-suggestions/{suggestion_id}/approve")
-async def approve_learning_suggestion(suggestion_id: str):
+async def approve_learning_suggestion(suggestion_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Approve a pending learning suggestion."""
-    from deps import get_db
     from services.sales_order_learning_suggestion_apply_service import approve_suggestion
-    db = get_db()
-    result = await approve_suggestion(db, suggestion_id, approver="admin")
+    result = await approve_suggestion(database, suggestion_id, approver="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
 
 
 @router.post("/sales-learning/learning-suggestions/{suggestion_id}/reject")
-async def reject_learning_suggestion(suggestion_id: str):
+async def reject_learning_suggestion(suggestion_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Reject a pending or approved suggestion."""
-    from deps import get_db
     from services.unified_learning_service import reject_suggestion, SALES_CONFIG
-    db = get_db()
-    result = await reject_suggestion(db, SALES_CONFIG, suggestion_id, approver="admin")
+    result = await reject_suggestion(database, SALES_CONFIG, suggestion_id, approver="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
 
 
 @router.post("/sales-learning/learning-suggestions/{suggestion_id}/apply")
-async def apply_learning_suggestion(suggestion_id: str):
+async def apply_learning_suggestion(suggestion_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Apply an approved suggestion to the customer profile."""
-    from deps import get_db
     from services.unified_learning_service import apply_suggestion, SALES_CONFIG
-    db = get_db()
-    result = await apply_suggestion(db, SALES_CONFIG, suggestion_id, applier="admin")
+    result = await apply_suggestion(database, SALES_CONFIG, suggestion_id, applier="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result
@@ -972,13 +940,12 @@ async def learning_impact_review(
     date_from: str = Query(None), date_to: str = Query(None),
     customer_no: str = Query(None), suggestion_type: str = Query(None),
     applied_by: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Measure whether applied suggestions improved future advisory quality."""
-    from deps import get_db
     from services.unified_learning_service import run_impact_review, SALES_CONFIG
-    db = get_db()
     return await run_impact_review(
-        db, SALES_CONFIG, date_from=date_from, date_to=date_to,
+        database, SALES_CONFIG, date_from=date_from, date_to=date_to,
         entity_no=customer_no, suggestion_type=suggestion_type,
         applied_by=applied_by,
     )
@@ -988,12 +955,11 @@ async def learning_impact_review(
 async def learning_impact_details(
     limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
     customer_no: str = Query(None), suggestion_type: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Per-suggestion apply audit detail records."""
-    from deps import get_db
     from services.unified_learning_service import get_impact_details, SALES_CONFIG
-    db = get_db()
-    return await get_impact_details(db, SALES_CONFIG, limit=limit, skip=skip,
+    return await get_impact_details(database, SALES_CONFIG, limit=limit, skip=skip,
                                     entity_no=customer_no, suggestion_type=suggestion_type)
 
 
@@ -1006,34 +972,29 @@ async def profile_drift_summary(
     date_from: str = Query(None), date_to: str = Query(None),
     customer_no: str = Query(None), drift_risk: str = Query(None),
     suggestion_type: str = Query(None), applied_by: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Profile drift summary across all customers with applied changes."""
-    from deps import get_db
     from services.sales_order_profile_drift_service import get_profile_drift_summary
-    db = get_db()
     return await get_profile_drift_summary(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         customer_no=customer_no, drift_risk=drift_risk,
         suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
 
 @router.get("/sales-learning/profile-drift/{customer_id}")
-async def profile_drift_detail(customer_id: str):
+async def profile_drift_detail(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Detailed drift analysis for a single customer."""
-    from deps import get_db
     from services.sales_order_profile_drift_service import get_customer_drift_detail
-    db = get_db()
-    return await get_customer_drift_detail(db, customer_id)
+    return await get_customer_drift_detail(database, customer_id)
 
 
 @router.get("/sales-learning/profile-change-history/{customer_id}")
-async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, le=200)):
+async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, le=200), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Full change history with pre/post snapshots."""
-    from deps import get_db
     from services.sales_order_profile_drift_service import get_change_history
-    db = get_db()
-    return await get_change_history(db, customer_id, limit=limit)
+    return await get_change_history(database, customer_id, limit=limit)
 
 
 # =============================================================================
@@ -1046,25 +1007,22 @@ async def customer_hotspots(
     rep: str = Query(None), severity: str = Query(None),
     root_cause: str = Query(None), customer_no: str = Query(None),
     limit: int = Query(30, ge=1, le=100),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Rank customers by advisory friction with root-cause diagnosis."""
-    from deps import get_db
     from services.sales_order_customer_hotspot_review_service import get_customer_hotspots
-    db = get_db()
     return await get_customer_hotspots(
-        db, date_from=date_from, date_to=date_to,
+        database, date_from=date_from, date_to=date_to,
         rep=rep, severity=severity, root_cause=root_cause,
         customer_no=customer_no, limit=limit,
     )
 
 
 @router.get("/sales-learning/customer-hotspots/{customer_id}")
-async def customer_hotspot_detail(customer_id: str):
+async def customer_hotspot_detail(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Detailed hotspot analysis for one customer."""
-    from deps import get_db
     from services.sales_order_customer_hotspot_review_service import get_customer_hotspot_detail
-    db = get_db()
-    result = await get_customer_hotspot_detail(db, customer_id)
+    result = await get_customer_hotspot_detail(database, customer_id)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=result["error"])
     return result
@@ -1075,21 +1033,21 @@ async def customer_hotspot_detail(customer_id: str):
 # =============================================================================
 
 @router.get("/sales-learning/maturity-checkpoint")
-async def maturity_checkpoint():
+async def maturity_checkpoint(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Overall maturity assessment of the SO advisory/learning system."""
-    from deps import get_db
     from services.sales_order_maturity_checkpoint_service import run_maturity_checkpoint
-    db = get_db()
-    return await run_maturity_checkpoint(db)
+    return await run_maturity_checkpoint(database)
 
 
 @router.get("/sales-learning/maturity-checkpoint/reusability")
-async def maturity_reusability():
+async def maturity_reusability(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Component reusability inventory and next-workflow recommendation."""
-    from deps import get_db
     from services.sales_order_maturity_checkpoint_service import get_reusability_review
-    db = get_db()
-    return await get_reusability_review(db)
+    return await get_reusability_review(database)
 
 
 # =============================================================================
@@ -1097,12 +1055,12 @@ async def maturity_reusability():
 # =============================================================================
 
 @router.get("/unified-learning/summary")
-async def unified_learning_summary():
+async def unified_learning_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Cross-pipeline learning summary — powers the AI Learning Intelligence dashboard."""
-    from deps import get_db
     from services.unified_learning_service import get_unified_learning_summary
-    db = get_db()
-    return await get_unified_learning_summary(db)
+    return await get_unified_learning_summary(database)
 
 
 
@@ -1388,7 +1346,8 @@ async def filename_heuristics_vendor_history(
                     "filename-heuristic run (normally excluded to avoid feedback loops).",
     ),
     limit: int = Query(2000, ge=100, le=20000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Diagnostic: show a vendor's full classified doc_type distribution.
 
     Use this when `/auto-propose` deferred a vendor with
@@ -1399,10 +1358,8 @@ async def filename_heuristics_vendor_history(
     from services.admin.filename_heuristics_auto_service import (
         vendor_doc_type_distribution,
     )
-    from deps import get_db
-    db = get_db()
     return await vendor_doc_type_distribution(
-        db, vendor, vendor,
+        database, vendor, vendor,
         include_heuristic_applied=include_heuristic_applied,
         limit=limit,
     )

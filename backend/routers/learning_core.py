@@ -7,7 +7,9 @@ Unified cross-domain event log API. Sits alongside the legacy
 during the 30-day dual-write window.
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 
@@ -325,11 +327,9 @@ async def drift_watchlist_send_now(
 
 
 @router.get("/drift-watchlist/runs")
-async def drift_watchlist_runs(limit: int = Query(20, ge=1, le=100)):
+async def drift_watchlist_runs(limit: int = Query(20, ge=1, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Recent watchlist dispatch runs (for audit / debugging)."""
-    from deps import get_db
-    db = get_db()
-    runs = await db.drift_watchlist_runs.find(
+    runs = await database.drift_watchlist_runs.find(
         {}, {"_id": 0},
     ).sort("ran_at", -1).limit(limit).to_list(limit)
     return {"total": len(runs), "runs": runs}

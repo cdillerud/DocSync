@@ -12,10 +12,11 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Header
+from fastapi import APIRouter, HTTPException, Header, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 
-from deps import get_db
 from services.invoice_extractor import EXTRACTION_PROMPT
 from services.llm_router import get_provider
 from services.providers.base_provider import LLMProviderError
@@ -174,15 +175,15 @@ class CompareRequest(BaseModel):
 async def compare_extraction(
     body: CompareRequest,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     _verify_token(authorization)
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": body.document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": body.document_id}, {"_id": 0})
     if doc is None:
         from bson import ObjectId
         try:
-            doc = await db.hub_documents.find_one({"_id": ObjectId(body.document_id)}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"_id": ObjectId(body.document_id)}, {"_id": 0})
         except Exception:
             pass
     if doc is None:
@@ -297,16 +298,16 @@ class TemplateInjectionRequest(BaseModel):
 async def test_template_injection(
     body: TemplateInjectionRequest,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Test template value injection for a document. Writes nothing."""
     _verify_token(authorization)
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": body.document_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": body.document_id}, {"_id": 0})
     if doc is None:
         from bson import ObjectId
         try:
-            doc = await db.hub_documents.find_one({"_id": ObjectId(body.document_id)}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"_id": ObjectId(body.document_id)}, {"_id": 0})
         except Exception:
             pass
     if doc is None:
@@ -316,7 +317,7 @@ async def test_template_injection(
                  or doc.get("matched_vendor_no") or "")
 
     # Load posting template
-    profile = await db.posting_pattern_analysis.find_one(
+    profile = await database.posting_pattern_analysis.find_one(
         {"vendor_no": vendor_no, "status": "analyzed"}, {"_id": 0}
     )
     template = profile.get("posting_template", {}) if profile else {}
@@ -385,16 +386,16 @@ class SOReadinessRequest(BaseModel):
 async def test_so_readiness(
     body: SOReadinessRequest,
     authorization: Optional[str] = Header(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Test SO readiness review against a customer's posting profile. Writes nothing."""
     _verify_token(authorization)
-    db = get_db()
 
     from services.sales_order_readiness_reviewer import review_sales_order_readiness
 
     customer_profile = None
     if body.customer_number:
-        customer_profile = await db.customer_posting_profiles.find_one(
+        customer_profile = await database.customer_posting_profiles.find_one(
             {"customer_no": body.customer_number, "status": "analyzed"}, {"_id": 0}
         )
 

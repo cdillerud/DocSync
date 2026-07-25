@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Query, Depends, Form
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -20,7 +22,6 @@ logger = logging.getLogger(__name__)
 # Create router
 spiro_router = APIRouter(prefix="/spiro", tags=["Spiro Integration"])
 
-from deps import get_db
 
 
 # =============================================================================
@@ -166,7 +167,7 @@ async def oauth_callback_get(code: str = Query(...)):
 # =============================================================================
 
 @spiro_router.post("/sync")
-async def trigger_sync(request: SyncRequest = None):
+async def trigger_sync(request: SyncRequest = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Trigger a manual Spiro data sync.
     
@@ -181,10 +182,9 @@ async def trigger_sync(request: SyncRequest = None):
     if not is_spiro_enabled():
         raise HTTPException(status_code=400, detail="Spiro integration is disabled")
     
-    db = get_db()
     
     request = request or SyncRequest()
-    service = SpiroSyncService(db)
+    service = SpiroSyncService(database)
     
     entity_types = request.entity_types or ["contacts", "companies", "opportunities"]
     results = {}
@@ -231,7 +231,8 @@ async def sync_all(force_full: bool = False):
 async def list_spiro_companies(
     search: Optional[str] = None,
     limit: int = Query(50, le=200)
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List synced Spiro companies.
     
@@ -239,13 +240,12 @@ async def list_spiro_companies(
         search: Optional search term for company name
         limit: Maximum results to return
     """
-    db = get_db()
     
     query = {}
     if search:
         query["name"] = {"$regex": search, "$options": "i"}
     
-    cursor = db.spiro_companies.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_companies.find(query, {"_id": 0}).limit(limit)
     companies = await cursor.to_list(length=limit)
     
     return {
@@ -259,7 +259,8 @@ async def list_spiro_contacts(
     search: Optional[str] = None,
     company_id: Optional[str] = None,
     limit: int = Query(50, le=200)
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List synced Spiro contacts.
     
@@ -268,7 +269,6 @@ async def list_spiro_contacts(
         company_id: Filter by Spiro company ID
         limit: Maximum results to return
     """
-    db = get_db()
     
     query = {}
     if search:
@@ -279,7 +279,7 @@ async def list_spiro_contacts(
     if company_id:
         query["company_id"] = company_id
     
-    cursor = db.spiro_contacts.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_contacts.find(query, {"_id": 0}).limit(limit)
     contacts = await cursor.to_list(length=limit)
     
     return {
@@ -292,15 +292,15 @@ async def list_spiro_contacts(
 async def list_spiro_opportunities(
     company_id: Optional[str] = None,
     limit: int = Query(50, le=200)
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List synced Spiro opportunities."""
-    db = get_db()
     
     query = {}
     if company_id:
         query["company_id"] = company_id
     
-    cursor = db.spiro_opportunities.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_opportunities.find(query, {"_id": 0}).limit(limit)
     opportunities = await cursor.to_list(length=limit)
     
     return {
@@ -314,7 +314,7 @@ async def list_spiro_opportunities(
 # =============================================================================
 
 @spiro_router.get("/context/{doc_id}")
-async def get_document_spiro_context(doc_id: str):
+async def get_document_spiro_context(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get SpiroContext for a specific document.
     
@@ -322,10 +322,9 @@ async def get_document_spiro_context(doc_id: str):
     """
     from services.spiro import get_spiro_context_for_document
     
-    db = get_db()
     
     # Get document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -380,23 +379,21 @@ async def test_spiro_context(
 # =============================================================================
 
 @spiro_router.post("/match-vendor")
-async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Form(0.7)):
+async def spiro_match_vendor(vendor_name: str = Form(...), min_score: float = Form(0.7), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Match a vendor name against Spiro CRM companies.
     Uses fuzzy matching to find the best match.
     """
     from services.spiro_vendor_matcher import match_vendor_with_spiro
-    db = get_db()
-    result = await match_vendor_with_spiro(db, vendor_name, min_score)
+    result = await match_vendor_with_spiro(database, vendor_name, min_score)
     return result
 
 
 @spiro_router.get("/search-companies")
-async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)):
+async def spiro_search_companies(query: str = Query(...), limit: int = Query(10), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Search Spiro companies by name."""
     from services.spiro_vendor_matcher import get_spiro_matcher
-    db = get_db()
-    matcher = get_spiro_matcher(db)
+    matcher = get_spiro_matcher(database)
     companies = await matcher.search_companies(query, limit)
     return {
         "query": query,
@@ -406,11 +403,12 @@ async def spiro_search_companies(query: str = Query(...), limit: int = Query(10)
 
 
 @spiro_router.get("/freight-carriers")
-async def spiro_get_freight_carriers():
+async def spiro_get_freight_carriers(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get all freight carriers from Spiro."""
     from services.spiro_vendor_matcher import get_spiro_matcher
-    db = get_db()
-    matcher = get_spiro_matcher(db)
+    matcher = get_spiro_matcher(database)
     carriers = await matcher.get_freight_carriers()
     return {
         "count": len(carriers),
@@ -419,11 +417,10 @@ async def spiro_get_freight_carriers():
 
 
 @spiro_router.post("/is-freight-carrier")
-async def spiro_is_freight_carrier(vendor_name: str = Form(...)):
+async def spiro_is_freight_carrier(vendor_name: str = Form(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Check if a vendor is a freight carrier based on Spiro data."""
     from services.spiro_vendor_matcher import get_spiro_matcher
-    db = get_db()
-    matcher = get_spiro_matcher(db)
+    matcher = get_spiro_matcher(database)
     is_freight, company = await matcher.is_freight_carrier(vendor_name)
     return {
         "vendor_name": vendor_name,

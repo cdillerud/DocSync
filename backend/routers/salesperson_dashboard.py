@@ -12,8 +12,9 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, Query
-from deps import get_db
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/salesperson-dashboard", tags=["Salesperson Dashboard"])
@@ -22,12 +23,12 @@ router = APIRouter(prefix="/salesperson-dashboard", tags=["Salesperson Dashboard
 @router.get("/overview")
 async def get_salesperson_overview(
     days: int = Query(30, ge=1, le=365, description="Lookback window in days"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Aggregate SO creation metrics per salesperson.
     Returns a ranked list of reps with volume, success rates, and customer counts.
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     # Query all sales-type documents in the window
@@ -63,11 +64,11 @@ async def get_salesperson_overview(
             }
         },
     ]
-    docs = await db.hub_documents.aggregate(pipeline).to_list(5000)
+    docs = await database.hub_documents.aggregate(pipeline).to_list(5000)
 
     # Enrich with salesperson names from BC cache
     sp_cache = {}
-    sp_records = await db.bc_reference_cache.find(
+    sp_records = await database.bc_reference_cache.find(
         {"bc_entity_type": "salesperson"}, {"_id": 0, "code": 1, "name": 1, "email": 1}
     ).to_list(200)
     for sp in sp_records:
@@ -75,7 +76,7 @@ async def get_salesperson_overview(
 
     # Also get customer -> salesperson mapping from cache
     cust_sp_map = {}
-    cust_records = await db.bc_reference_cache.find(
+    cust_records = await database.bc_reference_cache.find(
         {"bc_entity_type": "customer", "salesperson_code": {"$exists": True, "$ne": ""}},
         {"_id": 0, "bc_customer_name": 1, "displayName": 1, "salesperson_code": 1, "bc_customer_no": 1},
     ).to_list(2000)
@@ -217,14 +218,14 @@ async def get_salesperson_overview(
 async def get_salesperson_trend(
     days: int = Query(30, ge=7, le=365),
     interval: str = Query("week", regex="^(day|week|month)$"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     SO creation trend over time, broken down by week/month.
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "$or": [
                 {"doc_type": {"$regex": "sales", "$options": "i"}},
@@ -273,28 +274,28 @@ async def get_salesperson_trend(
 async def get_salesperson_detail(
     salesperson_code: str,
     days: int = Query(30, ge=1, le=365),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Detailed view for a specific salesperson: recent documents, customer breakdown, timeline.
     """
-    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
     # Get salesperson info from cache
-    sp_info = await db.bc_reference_cache.find_one(
+    sp_info = await database.bc_reference_cache.find_one(
         {"bc_entity_type": "salesperson", "code": salesperson_code},
         {"_id": 0},
     )
 
     # Get all their customers
-    customers = await db.bc_reference_cache.find(
+    customers = await database.bc_reference_cache.find(
         {"bc_entity_type": "customer", "salesperson_code": salesperson_code},
         {"_id": 0, "bc_customer_name": 1, "displayName": 1, "bc_customer_no": 1},
     ).to_list(500)
     customer_names = {c.get("displayName") or c.get("bc_customer_name", "") for c in customers}
 
     # Get documents assigned to this rep
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "$or": [
                 {"assigned_salesperson_code": salesperson_code},

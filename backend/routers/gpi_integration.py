@@ -25,11 +25,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from deps import get_db
 from services.gpi_integration_service import (
     list_companies,
     create_sales_order,
@@ -567,7 +568,7 @@ async def _resolve_customer_no(doc: dict) -> dict:
     }
 
 
-async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
+async def _resolve_sales_lines(doc: dict, customer_no: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)) -> list:
     """Resolve the sales lines that will be created in BC.
 
     For each extracted line, attempts item mapping via the mapping service.
@@ -581,7 +582,6 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
     Returns list of dicts with: lineType, lineObjectNumber, description,
     quantity, unitPrice, source, mapping metadata
     """
-    db = get_db()
     ef = doc.get("extracted_fields") or {}
     nf = doc.get("normalized_fields") or {}
     line_items = ef.get("line_items") or nf.get("line_items") or []
@@ -602,7 +602,7 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
 
             # Attempt item mapping
             mapping_result = await map_line_to_item(
-                db,
+                database,
                 description=desc,
                 extracted_sku=extracted_sku,
                 customer_no=customer_no,
@@ -713,14 +713,13 @@ async def _resolve_sales_lines(doc: dict, customer_no: str = "") -> list:
 
 
 @router.post("/sales-orders/preflight/{doc_id}")
-async def sales_order_preflight(doc_id: str):
+async def sales_order_preflight(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Preflight validation: structured review data before BC Sales Order creation.
 
     Returns document_summary, validation_checklist, resolved_lines (with mapping metadata),
     mapped_values, warnings, errors, and overall readiness.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -785,17 +784,17 @@ async def sales_order_preflight(doc_id: str):
         try:
             from services.order_line_patterns import get_suggested_lines, learn_from_bc_posted_orders
             # Check if customer-level patterns exist; if not, try learning from BC
-            has_customer_pattern = await db.order_line_patterns.find_one(
+            has_customer_pattern = await database.order_line_patterns.find_one(
                 {"customer_no": customer_no, "trigger_item_no": "*"}, {"_id": 1}
             )
             if not has_customer_pattern:
                 try:
-                    await learn_from_bc_posted_orders(db, customer_no, order_limit=10, threshold=0.75)
+                    await learn_from_bc_posted_orders(database, customer_no, order_limit=10, threshold=0.75)
                 except Exception as e:
                     logger.debug("[Preflight] BC pattern learning skipped: %s", str(e))
 
             main_items = [ln for ln in resolved_lines if ln.get("lineType") != "Comment" and ln.get("unitPrice", 0) > 0]
-            suggested_lines = await get_suggested_lines(db, customer_no, main_items)
+            suggested_lines = await get_suggested_lines(database, customer_no, main_items)
             if suggested_lines:
                 for sl in suggested_lines:
                     resolved_lines.append({
@@ -862,12 +861,12 @@ async def sales_order_preflight(doc_id: str):
     inventory_summary = None
     try:
         from services.inventory_so_integration import resolve_inventory_workspace, enrich_lines_with_inventory
-        ws_result = await resolve_inventory_workspace(db, customer_no=customer_no or "", customer_name=customer_name or "")
+        ws_result = await resolve_inventory_workspace(database, customer_no=customer_no or "", customer_name=customer_name or "")
         inventory_workspace = ws_result.get("workspace")
         all_workspaces = ws_result.get("all_workspaces", [])
 
         if inventory_workspace and resolved_lines:
-            resolved_lines, inventory_summary = await enrich_lines_with_inventory(db, inventory_workspace["id"], resolved_lines)
+            resolved_lines, inventory_summary = await enrich_lines_with_inventory(database, inventory_workspace["id"], resolved_lines)
             inventory_summary["workspace_name"] = inventory_workspace["name"]
             inventory_summary["workspace_code"] = inventory_workspace["code"]
             inventory_summary["negative_balance_policy"] = inventory_workspace.get("negative_balance_policy", "warn_only")
@@ -919,7 +918,7 @@ async def sales_order_preflight(doc_id: str):
     duplicate_found = False
     duplicate_detail = "No duplicate found"
     if external_doc_no:
-        dup = await db.hub_documents.find_one(
+        dup = await database.hub_documents.find_one(
             {"id": {"$ne": doc_id}, "bc_sales_order.external_doc_no": external_doc_no, "bc_sales_order.success": True},
             {"_id": 0, "id": 1, "bc_sales_order.bc_record_no": 1},
         )
@@ -935,7 +934,7 @@ async def sales_order_preflight(doc_id: str):
         try:
             from services.order_line_patterns import check_quantity_bounds
             main_items = [ln for ln in resolved_lines if not ln.get("suggested") and ln.get("lineType") != "Comment"]
-            bounds_check = await check_quantity_bounds(db, customer_no, main_items)
+            bounds_check = await check_quantity_bounds(database, customer_no, main_items)
             if not bounds_check["in_bounds"]:
                 for v in bounds_check["violations"]:
                     errors.append(
@@ -944,7 +943,7 @@ async def sales_order_preflight(doc_id: str):
                         f"(mean {v['mean']}, ±2σ). {v['severity'].upper()} — requires review."
                     )
                 # Flag document for review
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "bounds_alert": True,
@@ -1047,7 +1046,7 @@ async def _validate_edited_lines(db, lines: list) -> dict:
 
 
 @router.post("/sales-orders/from-document/{doc_id}")
-async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocumentRequest = None, request: Request = None):
+async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocumentRequest = None, request: Request = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a BC Sales Order from a GPI Hub document.
 
     If `edited_lines` are provided in the body, they are used as the source of truth
@@ -1057,8 +1056,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1117,7 +1115,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
 
     if user_edited_lines and len(user_edited_lines) > 0:
         # Validate user-edited targets against catalog
-        validation = await _validate_edited_lines(db, user_edited_lines)
+        validation = await _validate_edited_lines(database, user_edited_lines)
         if not validation["valid"]:
             raise HTTPException(status_code=422, detail={
                 "error": "catalog_validation_failed",
@@ -1186,7 +1184,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         mapping_meta = line.get("mapping", {})
         try:
             await record_mapping_history(
-                db, doc_id=doc_id, line_index=idx,
+                database, doc_id=doc_id, line_index=idx,
                 description=line.get("description", ""),
                 mapping_result=mapping_meta,
                 customer_no=customer_no,
@@ -1221,7 +1219,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "created_by": "gpi_hub",
     }
     try:
-        await db.bc_so_creation_audit.insert_one(audit_entry)
+        await database.bc_so_creation_audit.insert_one(audit_entry)
     except Exception as ae:
         logger.warning("Failed to write SO creation audit: %s", ae)
 
@@ -1231,7 +1229,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         try:
             from services.inventory_so_integration import create_order_commitments
             commitment_result = await create_order_commitments(
-                db,
+                database,
                 workspace_id=inv_workspace_id,
                 doc_id=doc_id,
                 bc_record_no=bc_record_no,
@@ -1269,7 +1267,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "inventory_commitments": commitment_result,
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "bc_sales_order": bc_sales_order,
@@ -1318,12 +1316,12 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     ds_auto_approved = False
     if so_type == "dropship" and result.get("success") and result.get("status") != "already_exists":
         try:
-            ds_auto_approved = await _auto_approve_dropship_so(db, doc_id, bc_record_no, so_type)
+            ds_auto_approved = await _auto_approve_dropship_so(database, doc_id, bc_record_no, so_type)
         except Exception as ds_err:
             logger.warning("Dropship auto-approve failed for SO %s: %s", bc_record_no, ds_err)
         # Set ds_po_pending flag for the DS PO auto-creation path
         try:
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "ds_po_pending": True,
@@ -1337,7 +1335,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         # Fire DS PO auto-creation as a background task
         try:
             import asyncio
-            asyncio.create_task(_ds_po_auto_create_background(db, doc_id, bc_record_no))
+            asyncio.create_task(_ds_po_auto_create_background(database, doc_id, bc_record_no))
         except Exception as ds_bg_err:
             logger.warning("DS PO background task spawn failed for SO %s: %s", bc_record_no, ds_bg_err)
 
@@ -1347,13 +1345,13 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         try:
             from services.notification_service import on_warehouse_so_booked
             notification_results = await on_warehouse_so_booked(
-                doc, bc_sales_order, dry_run=False, db=db,
+                doc, bc_sales_order, dry_run=False, db=database,
             )
         except Exception as notif_err:
             logger.warning("Warehouse SO notification failed for SO %s: %s", bc_record_no, notif_err)
         # Tag subtype
         try:
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {"so_subtype": "WH_Sales_Order"}},
             )
@@ -1467,14 +1465,13 @@ async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type:
 
 
 @router.post("/ds-purchase-orders/auto-create/{doc_id}")
-async def ds_po_auto_create(doc_id: str):
+async def ds_po_auto_create(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Auto-create a Drop-Ship Purchase Order from a DS_Sales_Order document.
 
     Requires: doc_type=DS_Sales_Order, ds_po_pending=True, BC SO status=Released.
     Idempotent: if ds_po_created is already True, returns existing PO info.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1577,7 +1574,7 @@ async def ds_po_auto_create(doc_id: str):
 
     # Update document
     ds_po_id = po_result.get("bc_record_no") or po_result.get("bc_system_id") or ""
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "ds_po_created": True,
@@ -1590,7 +1587,7 @@ async def ds_po_auto_create(doc_id: str):
     )
 
     # Create activity record
-    await db.document_activities.insert_one({
+    await database.document_activities.insert_one({
         "document_id": doc_id,
         "activity_type": "ds_po_created",
         "details": {
@@ -1651,7 +1648,7 @@ async def gpi_create_purchase_invoice(req: CreatePurchaseInvoiceRequest):
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
 
 
-async def _resolve_vendor_no(doc: dict) -> dict:
+async def _resolve_vendor_no(doc: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)) -> dict:
     """Try to resolve a BC vendor number from document data.
     Returns {vendor_no, vendor_name, match_method, confidence}.
     """
@@ -1686,8 +1683,7 @@ async def _resolve_vendor_no(doc: dict) -> dict:
 
     # 3. Try bc_reference_cache lookup
     if not vendor_no and vendor_name:
-        db = get_db()
-        cached = await db.bc_reference_cache.find_one(
+        cached = await database.bc_reference_cache.find_one(
             {"displayName": {"$regex": vendor_name[:30], "$options": "i"}, "entity_type": {"$in": ["vendor", "Vendor"]}},
             {"_id": 0, "number": 1, "displayName": 1, "entity_type": 1}
         )
@@ -1917,10 +1913,9 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
 
 
 @router.post("/purchase-invoices/preflight/{doc_id}")
-async def purchase_invoice_preflight(doc_id: str):
+async def purchase_invoice_preflight(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Preflight validation: check if a document is ready for BC Purchase Invoice creation."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2031,7 +2026,7 @@ async def purchase_invoice_preflight(doc_id: str):
 
 
 @router.post("/purchase-invoices/retry-lines/{doc_id}")
-async def retry_purchase_invoice_lines(doc_id: str):
+async def retry_purchase_invoice_lines(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Add line items to an existing BC Purchase Invoice that was created without lines.
     First deletes any existing (bad) lines, then adds correct ones.
     Uses the stored bc_system_id from the existing PI record.
@@ -2039,8 +2034,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2062,7 +2056,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
 
     # Step 2: Build new lines using vendor profile-driven mapping
     vendor_no = existing_pi.get("vendor_no", "") or doc.get("bc_vendor_number", "") or doc.get("vendor_no", "")
-    bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+    bc_lines = await _build_pi_lines_with_mapping(doc, database, vendor_no=vendor_no)
 
     if not bc_lines:
         raise HTTPException(status_code=422, detail="No line items found and no total amount to create a fallback line. Re-process the document first.")
@@ -2079,7 +2073,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
 
     # Update the document record with line results
     now = datetime.now(timezone.utc).isoformat()
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "bc_purchase_invoice.lines_added": line_results["added"],
@@ -2109,15 +2103,15 @@ async def create_purchase_invoice_from_document(
     doc_id: str,
     vendor_no_override: str = Query("", description="Override vendor number"),
     force: bool = Query(False, description="Force re-creation even if PI already exists"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Create a BC Purchase Invoice from a GPI Hub document.
     Performs preflight, creates the invoice header, adds line items, and writes back to the document graph.
     """
     if not HAS_CREDENTIALS:
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2137,7 +2131,7 @@ async def create_purchase_invoice_from_document(
 
     if force and existing_pi:
         logger.info("Force re-creating PI for doc %s (previous: %s)", doc_id, existing_pi.get("bc_record_no", ""))
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {"bc_purchase_invoice_previous": existing_pi},
              "$unset": {"bc_purchase_invoice": ""}}
@@ -2187,7 +2181,7 @@ async def create_purchase_invoice_from_document(
     line_results = None
     bc_lines = []
     if result.get("success") and result.get("bc_system_id"):
-        bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+        bc_lines = await _build_pi_lines_with_mapping(doc, database, vendor_no=vendor_no)
 
         if bc_lines:
             try:
@@ -2301,7 +2295,7 @@ async def create_purchase_invoice_from_document(
         "document_link_method": link_result.get("method", "") if link_result else "",
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "bc_purchase_invoice": bc_purchase_invoice,
@@ -2336,7 +2330,7 @@ async def create_purchase_invoice_from_document(
         try:
             from services.posting_pattern_analyzer import learn_from_posting
             await learn_from_posting(
-                db=db,
+                db=database,
                 vendor_no=vendor_no,
                 doc=doc,
                 pi_lines=bc_lines,
@@ -2348,7 +2342,7 @@ async def create_purchase_invoice_from_document(
         # === PER-DOCUMENT LEARNING: BC posting is the strongest positive signal ===
         try:
             from services.per_document_learning_service import learn_from_document
-            await learn_from_document(db, doc_id, trigger="bc_post")
+            await learn_from_document(database, doc_id, trigger="bc_post")
         except Exception:
             pass
 
@@ -2452,9 +2446,9 @@ async def gpi_integration_dashboard(
     status: str = Query("", description="Filter by status: created, already_exists, failed"),
     limit: int = Query(100, description="Max results", le=500),
     skip: int = Query(0, description="Offset for pagination"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Aggregated integration dashboard from local document graph data."""
-    db = get_db()
 
     # Build pipeline to find all docs with bc_sales_order or bc_purchase_invoice
     match_stage = {}
@@ -2473,7 +2467,7 @@ async def gpi_integration_dashboard(
     match_stage["$or"] = or_conditions
 
     # Fetch documents
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         match_stage,
         {"_id": 0, "id": 1, "document_type": 1, "bc_sales_order": 1, "bc_purchase_invoice": 1,
          "extracted_fields": 1, "normalized_fields": 1, "vendor_canonical": 1, "file_name": 1}
@@ -2577,15 +2571,14 @@ async def gpi_integration_dashboard(
 # ── Item Mapping CRUD Endpoints ──
 
 @router.get("/item-mappings")
-async def get_item_mappings(customer_no: str = "", active_only: bool = False):
+async def get_item_mappings(customer_no: str = "", active_only: bool = False, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all item mapping rules."""
-    db = get_db()
-    mappings = await list_item_mappings(db, customer_no=customer_no or None, active_only=active_only)
+    mappings = await list_item_mappings(database, customer_no=customer_no or None, active_only=active_only)
     return {"mappings": mappings, "total": len(mappings)}
 
 
 @router.post("/item-mappings")
-async def create_mapping_endpoint(request: Request):
+async def create_mapping_endpoint(request: Request, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new item mapping rule."""
     data = await request.json()
     target_no = data.get("target_no") or data.get("bc_item_number")
@@ -2594,27 +2587,24 @@ async def create_mapping_endpoint(request: Request):
     if not data.get("keyword_phrase") and not data.get("keywords"):
         raise HTTPException(status_code=422, detail="keyword_phrase or keywords is required")
     data["target_no"] = target_no
-    db = get_db()
-    mapping = await create_item_mapping(db, data)
+    mapping = await create_item_mapping(database, data)
     return {"success": True, "mapping": mapping}
 
 
 @router.put("/item-mappings/{mapping_id}")
-async def update_mapping_endpoint(mapping_id: str, request: Request):
+async def update_mapping_endpoint(mapping_id: str, request: Request, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an existing item mapping rule."""
     data = await request.json()
-    db = get_db()
-    mapping = await update_item_mapping(db, mapping_id, data)
+    mapping = await update_item_mapping(database, mapping_id, data)
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return {"success": True, "mapping": mapping}
 
 
 @router.delete("/item-mappings/{mapping_id}")
-async def delete_mapping_endpoint(mapping_id: str):
+async def delete_mapping_endpoint(mapping_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete an item mapping rule."""
-    db = get_db()
-    deleted = await delete_item_mapping(db, mapping_id)
+    deleted = await delete_item_mapping(database, mapping_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Mapping not found")
     return {"success": True}
@@ -2623,81 +2613,77 @@ async def delete_mapping_endpoint(mapping_id: str):
 # ── BC Catalog Sync Endpoints ──
 
 @router.get("/catalog/health")
-async def get_catalog_health_endpoint():
+async def get_catalog_health_endpoint(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get catalog sync health summary (last sync, staleness, counts)."""
     from services.bc_catalog_sync_service import get_catalog_health
-    db = get_db()
-    return await get_catalog_health(db)
+    return await get_catalog_health(database)
 
 
 @router.post("/catalog/sync")
-async def trigger_catalog_sync(entity: str = Query("all", description="Sync entity: items, gl_accounts, or all")):
+async def trigger_catalog_sync(entity: str = Query("all", description="Sync entity: items, gl_accounts, or all"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Trigger a manual BC catalog sync. Reads from Production environment."""
     from services.bc_catalog_sync_service import sync_items, sync_gl_accounts, sync_all
-    db = get_db()
     if entity == "items":
-        result = await sync_items(db)
+        result = await sync_items(database)
     elif entity == "gl_accounts":
-        result = await sync_gl_accounts(db)
+        result = await sync_gl_accounts(database)
     else:
-        result = await sync_all(db)
+        result = await sync_all(database)
     return {"success": True, "result": result}
 
 
 @router.get("/catalog/status")
-async def get_catalog_status():
+async def get_catalog_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get the current catalog sync status."""
     from services.bc_catalog_sync_service import get_sync_status
-    db = get_db()
-    return await get_sync_status(db)
+    return await get_sync_status(database)
 
 
 @router.get("/catalog/items")
-async def search_catalog_items(q: str = "", blocked: bool = None, limit: int = 50):
+async def search_catalog_items(q: str = "", blocked: bool = None, limit: int = 50, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Search synced BC items by number or description."""
     from services.bc_catalog_sync_service import search_items
-    db = get_db()
-    items = await search_items(db, query=q, blocked=blocked, limit=limit)
+    items = await search_items(database, query=q, blocked=blocked, limit=limit)
     return {"items": items, "total": len(items)}
 
 
 @router.get("/catalog/items/{item_no}")
-async def get_catalog_item(item_no: str):
+async def get_catalog_item(item_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Look up a single synced BC item."""
     from services.bc_catalog_sync_service import get_item_by_number
-    db = get_db()
-    item = await get_item_by_number(db, item_no)
+    item = await get_item_by_number(database, item_no)
     if not item:
         raise HTTPException(status_code=404, detail=f"Item '{item_no}' not found in synced catalog")
     return item
 
 
 @router.get("/catalog/items/{item_no}/validate")
-async def validate_catalog_item(item_no: str):
+async def validate_catalog_item(item_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Validate that an item number exists and is usable for sales."""
     from services.bc_catalog_sync_service import validate_item_number
-    db = get_db()
-    return await validate_item_number(db, item_no)
+    return await validate_item_number(database, item_no)
 
 
 @router.get("/catalog/gl-accounts")
-async def search_catalog_gl_accounts(q: str = "", blocked: bool = None, limit: int = 50):
+async def search_catalog_gl_accounts(q: str = "", blocked: bool = None, limit: int = 50, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Search synced BC G/L accounts by number or name."""
     from services.bc_catalog_sync_service import search_gl_accounts
-    db = get_db()
-    accounts = await search_gl_accounts(db, query=q, blocked=blocked, limit=limit)
+    accounts = await search_gl_accounts(database, query=q, blocked=blocked, limit=limit)
     return {"accounts": accounts, "total": len(accounts)}
 
 
 @router.post("/catalog/suggest-items")
-async def suggest_items_for_line(request: Request):
+async def suggest_items_for_line(request: Request, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Suggest BC items for a given line description."""
     from services.bc_catalog_sync_service import suggest_items_for_description
     data = await request.json()
     description = data.get("description", "")
     limit = data.get("limit", 5)
-    db = get_db()
-    suggestions = await suggest_items_for_description(db, description, limit=limit)
+    suggestions = await suggest_items_for_description(database, description, limit=limit)
     return {"description": description, "suggestions": suggestions, "total": len(suggestions)}
 
 
@@ -3154,15 +3140,14 @@ async def _fetch_bc_document_links(bc_document_no: str) -> list:
 # --- STEP 1: GET document links for a BC record ---
 
 @router.get("/document-links/{bc_entity}/{bc_document_no}")
-async def get_document_links(bc_entity: str, bc_document_no: str):
+async def get_document_links(bc_entity: str, bc_document_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all documents linked to a BC record (hub + BC API + legacy Zetadocs).
 
     Returns a combined, deduplicated list sorted by created_utc desc.
     """
-    db = get_db()
 
     # 1) Query hub_documents for docs linked to this BC document
-    hub_docs = await db.hub_documents.find(
+    hub_docs = await database.hub_documents.find(
         {
             "bc_document_no": bc_document_no,
             "sharepoint_web_url": {"$nin": [None, ""]},
@@ -3237,7 +3222,8 @@ async def upload_document_to_bc_record(
     file: UploadFile = File(...),
     uploaded_by: str = Form("BC Drop"),
     vendor_context: str = Form(""),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Upload a file to SharePoint and link it to a BC record.
 
     1. Resolve the SP folder from existing hub_documents or routing rules.
@@ -3245,7 +3231,6 @@ async def upload_document_to_bc_record(
     3. Create GPI Document Link in BC factbox.
     4. Create hub_documents record.
     """
-    db = get_db()
 
     # Read file and enforce 25MB max
     file_content = await file.read()
@@ -3260,7 +3245,7 @@ async def upload_document_to_bc_record(
     folder_path = ""
 
     # Try to find existing folder from hub_documents for this BC record
-    existing = await db.hub_documents.find_one(
+    existing = await database.hub_documents.find_one(
         {
             "bc_document_no": bc_document_no,
             "sharepoint_folder_path": {"$nin": [None, ""]},
@@ -3334,7 +3319,7 @@ async def upload_document_to_bc_record(
         "folder_source": folder_source,
         "file_size_bytes": len(file_content),
     }
-    await db.hub_documents.insert_one(hub_record)
+    await database.hub_documents.insert_one(hub_record)
     hub_record.pop("_id", None)
 
     logger.info("[DocLinks] Uploaded %s to %s for %s/%s (folder_source=%s, bc_link=%s)",
@@ -3354,13 +3339,12 @@ async def upload_document_to_bc_record(
 # --- STEP 3: DELETE a document link (soft delete) ---
 
 @router.delete("/document-links/{bc_entity}/{bc_document_no}/{doc_id_or_sp_item}")
-async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str):
+async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Soft-delete a document link. The SharePoint file remains for audit."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Find by id or sharepoint_item_id
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"$or": [
             {"id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
             {"sharepoint_item_id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
@@ -3370,7 +3354,7 @@ async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp
     if not doc:
         raise HTTPException(status_code=404, detail="Document link not found")
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc.get("id")},
         {"$set": {"deleted": True, "deleted_utc": now, "deleted_by": "user"}}
     )
@@ -3382,7 +3366,9 @@ async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp
 # --- STEP 5: Migrate existing Zetadocs links ---
 
 @router.post("/document-links/migrate-from-zetadocs")
-async def migrate_zetadocs_links():
+async def migrate_zetadocs_links(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Import existing Zetadocs-written links from BC into hub_documents.
 
     Idempotent — safe to run multiple times. Skips records that already exist.
@@ -3398,7 +3384,6 @@ async def migrate_zetadocs_links():
     except ImportError as e:
         raise HTTPException(status_code=500, detail=f"Import error: {e}")
 
-    db = get_db()
     token = await _get_token()
     company_id = await _get_company_id_standard_api()
     doc_link_api = "gpi/documents/v1.0"
@@ -3432,7 +3417,7 @@ async def migrate_zetadocs_links():
                         continue
 
                     # Check if already exists
-                    existing = await db.hub_documents.find_one(
+                    existing = await database.hub_documents.find_one(
                         {"$or": [
                             {"sharepoint_item_id": sp_item_id} if sp_item_id else {"sharepoint_web_url": sp_url},
                             {"sharepoint_web_url": sp_url},
@@ -3459,7 +3444,7 @@ async def migrate_zetadocs_links():
                         "uploaded_by": link.get("uploadedBy", "Zetadocs"),
                     }
                     try:
-                        await db.hub_documents.insert_one(stub)
+                        await database.hub_documents.insert_one(stub)
                         stub.pop("_id", None)
                         migrated += 1
                     except Exception as e:
@@ -3480,7 +3465,7 @@ async def migrate_zetadocs_links():
 # =========================================================================
 
 @router.post("/sales-orders/cost-only-from-document/{doc_id}")
-async def create_cost_only_so_from_document(doc_id: str):
+async def create_cost_only_so_from_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a cost-only Sales Order in BC from an approved SH_Invoice document.
 
     Cost-only SOs use GL Account type lines (not Item type) to post warehouse
@@ -3491,8 +3476,7 @@ async def create_cost_only_so_from_document(doc_id: str):
       - workflow_status must be 'approved'
       - A customer must be resolvable
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -3553,7 +3537,7 @@ async def create_cost_only_so_from_document(doc_id: str):
 
     # Fallback: hub_config default
     if not gl_account_number:
-        config = await db.hub_config.find_one({"_key": "sh_default_gl_account"}, {"_id": 0})
+        config = await database.hub_config.find_one({"_key": "sh_default_gl_account"}, {"_id": 0})
         gl_account_number = (config or {}).get("value", "")
 
     if not gl_account_number:
@@ -3600,7 +3584,7 @@ async def create_cost_only_so_from_document(doc_id: str):
     # Determine processor for folder routing
     processor = doc.get("processor", "")
     if not processor:
-        config = await db.hub_config.find_one({"_key": "sh_default_processor"}, {"_id": 0})
+        config = await database.hub_config.find_one({"_key": "sh_default_processor"}, {"_id": 0})
         processor = (config or {}).get("value", "Andy")
 
     # ── Create SO in BC (or DEMO_MODE) ──
@@ -3631,7 +3615,7 @@ async def create_cost_only_so_from_document(doc_id: str):
         else:
             folder_path = "S&H Invoices Approved Documents/Andy to Process"
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "bc_sales_order": so_record,
@@ -3709,7 +3693,7 @@ async def create_cost_only_so_from_document(doc_id: str):
             "cost_only": True,
         }
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "bc_sales_order": so_record,
@@ -3766,30 +3750,27 @@ async def create_cost_only_so_from_document(doc_id: str):
 # ════════════════════════════════════════════════════════════════════════
 
 @router.post("/order-patterns/learn/{customer_no}")
-async def learn_order_patterns(customer_no: str):
+async def learn_order_patterns(customer_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Analyze historical orders for a customer and learn dunnage patterns."""
-    db = get_db()
     from services.order_line_patterns import learn_patterns_from_history
-    result = await learn_patterns_from_history(db, customer_no)
+    result = await learn_patterns_from_history(database, customer_no)
     return result
 
 
 @router.get("/order-patterns/{customer_no}")
-async def get_order_patterns(customer_no: str):
+async def get_order_patterns(customer_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get learned dunnage patterns for a customer."""
-    db = get_db()
-    patterns = await db.order_line_patterns.find(
+    patterns = await database.order_line_patterns.find(
         {"customer_no": customer_no}, {"_id": 0}
     ).to_list(100)
     return {"customer_no": customer_no, "patterns": patterns}
 
 
 @router.post("/order-patterns/suggest")
-async def suggest_order_lines(payload: dict):
+async def suggest_order_lines(payload: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get dunnage suggestions for given items and customer."""
-    db = get_db()
     from services.order_line_patterns import get_suggested_lines
     customer_no = payload.get("customer_no", "")
     line_items = payload.get("line_items", [])
-    suggestions = await get_suggested_lines(db, customer_no, line_items)
+    suggestions = await get_suggested_lines(database, customer_no, line_items)
     return {"customer_no": customer_no, "suggestions": suggestions}

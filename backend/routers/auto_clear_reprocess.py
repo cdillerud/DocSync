@@ -11,8 +11,9 @@ Endpoints:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from services.auto_clear_service import (
     evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
 )
@@ -29,12 +30,13 @@ _PROTECT_KEYWORDS = ("inventory", "open order", "open release",
 
 
 @router.post("/dry-run")
-async def dry_run():
+async def dry_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview how many non-cleared, non-terminal docs would be auto-cleared."""
-    db = get_db()
 
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
             "auto_cleared": {"$ne": True},
@@ -68,13 +70,14 @@ async def dry_run():
 
 
 @router.post("/run")
-async def run_reprocess():
+async def run_reprocess(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Re-evaluate auto-clear and apply to eligible documents."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
             "auto_cleared": {"$ne": True},
@@ -134,7 +137,7 @@ async def run_reprocess():
             update = get_auto_clear_update(decision, details)
             update["workflow_status"] = "completed"
             update["auto_clear_reason"] = reason
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc["id"]},
                 {"$set": update},
             )
@@ -157,13 +160,14 @@ async def run_reprocess():
 
 
 @router.post("/force-clear-remaining")
-async def force_clear_remaining():
+async def force_clear_remaining(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Force-clear all remaining non-terminal, non-duplicate pending docs."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
-    result = await db.hub_documents.update_many(
+    result = await database.hub_documents.update_many(
         {
             "is_duplicate": {"$ne": True},
             "auto_cleared": {"$ne": True},
@@ -245,14 +249,15 @@ def _is_junk(doc):
 
 
 @router.post("/clear-junk/dry-run")
-async def dry_run_clear_junk():
+async def dry_run_clear_junk(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview which documents would be classified as junk and cleared."""
-    db = get_db()
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
 
     # Query both hub_documents AND document_intelligence_results
     # The Doc Intelligence page reads from the intelligence collection
-    intel_docs = await db.document_intelligence_results.find(
+    intel_docs = await database.document_intelligence_results.find(
         {"automation_readiness": {"$in": ["needs_review", "blocked"]}},
         {"_id": 0},
     ).to_list(5000)
@@ -260,7 +265,7 @@ async def dry_run_clear_junk():
     # Enrich with hub_document metadata
     if intel_docs:
         doc_ids = [d["document_id"] for d in intel_docs]
-        hub_docs = await db.hub_documents.find(
+        hub_docs = await database.hub_documents.find(
             {"id": {"$in": doc_ids}},
             {"_id": 0, "id": 1, "file_name": 1, "original_file_name": 1,
              "doc_type": 1, "document_type": 1, "ai_classification": 1,
@@ -317,12 +322,13 @@ async def dry_run_clear_junk():
 
 
 @router.post("/clear-junk/run")
-async def run_clear_junk():
+async def run_clear_junk(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Clear all junk documents while preserving operational docs."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    intel_docs = await db.document_intelligence_results.find(
+    intel_docs = await database.document_intelligence_results.find(
         {"automation_readiness": {"$in": ["needs_review", "blocked"]}},
         {"_id": 0},
     ).to_list(5000)
@@ -330,7 +336,7 @@ async def run_clear_junk():
     # Enrich with hub_document metadata
     if intel_docs:
         doc_ids = [d["document_id"] for d in intel_docs]
-        hub_docs = await db.hub_documents.find(
+        hub_docs = await database.hub_documents.find(
             {"id": {"$in": doc_ids}},
             {"_id": 0, "id": 1, "file_name": 1, "original_file_name": 1,
              "doc_type": 1, "document_type": 1, "ai_classification": 1,
@@ -356,7 +362,7 @@ async def run_clear_junk():
         doc_id = intel.get("document_id")
 
         # Update intelligence collection — mark as ready (cleared)
-        await db.document_intelligence_results.update_one(
+        await database.document_intelligence_results.update_one(
             {"document_id": doc_id},
             {"$set": {
                 "automation_readiness": "ready",
@@ -367,7 +373,7 @@ async def run_clear_junk():
         )
 
         # Update hub_documents — mark as auto-cleared
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "auto_cleared": True,

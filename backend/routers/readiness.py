@@ -19,7 +19,9 @@ Endpoints:
   GET  /api/readiness/po-pending        - View PO pending queue
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Optional
 
 router = APIRouter(prefix="/readiness", tags=["Readiness"])
@@ -75,7 +77,7 @@ async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
 
 
 @router.post("/fix-validation-gaps")
-async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000)):
+async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Targeted fix for blocking validation gaps (PO validation + Vendor matching).
 
@@ -86,13 +88,11 @@ async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000)):
 
     Returns detailed summary of what was fixed.
     """
-    from deps import get_db
     from services.gap_closer_service import fix_all_validation_gaps
 
-    db = get_db()
-    return await fix_all_validation_gaps(db, limit=limit)
+    return await fix_all_validation_gaps(database, limit=limit)
 @router.post("/sync-status")
-async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
+async def sync_readiness_to_status(limit: int = Query(5000, le=10000), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Aggressive force-cleanup: Directly moves documents OUT of the Inbox queue
     by setting terminal statuses or auto_cleared flags. Uses simple rules:
@@ -103,12 +103,10 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     Rule 4: readiness.status is ready + no blockers → auto_cleared + processed
     Rule 5: Remaining non-terminal docs with vendor resolved → auto_cleared
     """
-    from deps import get_db
     from datetime import datetime, timezone
     import logging
 
     logger = logging.getLogger("force_cleanup")
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Terminal statuses that already remove docs from the queue view
@@ -141,7 +139,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     results = {}
 
     # ── Rule 1: Has BC Purchase Invoice Number → mark Completed ──
-    r1 = await db.hub_documents.update_many(
+    r1 = await database.hub_documents.update_many(
         base_and({"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}}),
         completed_update("has_bc_pi"),
     )
@@ -149,7 +147,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 1 (has BC PI): %d docs → Completed", r1.modified_count)
 
     # ── Rule 2: Draft approved → mark Completed ──
-    r2 = await db.hub_documents.update_many(
+    r2 = await database.hub_documents.update_many(
         base_and({"draft_review_status": "approved"}),
         completed_update("draft_approved"),
     )
@@ -157,7 +155,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 2 (draft approved): %d docs → Completed", r2.modified_count)
 
     # ── Rule 3: Auto-draft created in BC → mark Completed ──
-    r3 = await db.hub_documents.update_many(
+    r3 = await database.hub_documents.update_many(
         base_and({"auto_draft_created": True}),
         completed_update("auto_draft_created"),
     )
@@ -165,7 +163,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 3 (auto-draft created): %d docs → Completed", r3.modified_count)
 
     # ── Rule 4: Readiness says ready + no blocking reasons → Completed ──
-    r4 = await db.hub_documents.update_many(
+    r4 = await database.hub_documents.update_many(
         base_and(
             {"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}},
             {"$or": [
@@ -179,7 +177,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 4 (readiness ready): %d docs → Completed", r4.modified_count)
 
     # ── Rule 5: Vendor resolved + fields present → Completed ──
-    r5 = await db.hub_documents.update_many(
+    r5 = await database.hub_documents.update_many(
         base_and(
             {"readiness.signals.vendor_resolved": True},
             {"readiness.signals.required_fields_complete": True},
@@ -192,7 +190,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 5 (vendor+fields): %d docs → Completed", r5.modified_count)
 
     # ── Rule 6: ReadyForPost status (from old sync) → mark Completed ──
-    r6 = await db.hub_documents.update_many(
+    r6 = await database.hub_documents.update_many(
         {"$and": [not_dup, {"status": "ReadyForPost"}, not_cleared]},
         completed_update("readyforpost_to_completed"),
     )
@@ -200,7 +198,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 6 (ReadyForPost→Completed): %d docs", r6.modified_count)
 
     # ── Rule 7: Readiness says ready (even with blockers) → Completed ──
-    r7 = await db.hub_documents.update_many(
+    r7 = await database.hub_documents.update_many(
         base_and({"readiness.status": {"$in": ["ready_auto_draft", "ready_auto_link", "ready"]}}),
         completed_update("readiness_ready_catchall"),
     )
@@ -211,7 +209,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # Shipping docs, inventory reports, BOLs, statements, etc. should NOT sit
     # in the AP review queue. If they have a vendor, they're filed.
     NON_AP_TYPES_REGEX = "(?i)(shipping|inventory|bol|packing|freight|warehouse|statement|remittance|unknown|receipt|report|order_confirm|w9|w-9)"
-    r8 = await db.hub_documents.update_many(
+    r8 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"doc_type": {"$regex": NON_AP_TYPES_REGEX}},
@@ -238,7 +236,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 9: Non-AP document types WITHOUT vendor → auto-clear ──
     # These are supporting docs (BOLs, receipts, etc.) with no vendor.
     # They're noise in the inbox — file them away.
-    r9 = await db.hub_documents.update_many(
+    r9 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"doc_type": {"$regex": NON_AP_TYPES_REGEX}},
@@ -261,7 +259,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 10: Any doc with a known vendor that was already auto_post_attempted ──
     # These were evaluated and the auto-post system already looked at them.
     # They shouldn't sit in the inbox forever.
-    r10 = await db.hub_documents.update_many(
+    r10 = await database.hub_documents.update_many(
         base_and(
             {"auto_post_attempted": True},
             {"$or": [
@@ -284,7 +282,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 11: Docs reverted by old auto-post bug (status NeedsReview but had been ready) ──
     # The old auto-post code reverted non-AP docs to NeedsReview even when readiness said ready.
     # Look for docs that have auto_post_reason containing "Not classified as AP_Invoice"
-    r11 = await db.hub_documents.update_many(
+    r11 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"auto_post_failures": {"$elemMatch": {"$regex": "Not classified as AP"}}},
@@ -306,7 +304,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 12: Junk file types misclassified as AP Invoice ──
     # .jpg, .png, .xlsx, .xls files are NOT real AP invoices
     JUNK_EXT_REGEX = r"\.(jpg|jpeg|png|gif|bmp|xlsx|xls|csv|tiff?)$"
-    r12 = await db.hub_documents.update_many(
+    r12 = await database.hub_documents.update_many(
         base_and({"file_name": {"$regex": JUNK_EXT_REGEX, "$options": "i"}}),
         {"$set": {
             "status": "Completed",
@@ -323,7 +321,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 13: Account Statements misclassified as AP Invoice ──
     # Files with "statement" or "SOA" in name aren't real invoices
     STATEMENT_REGEX = r"(?i)(statement|SOA_|account.?statement|remittance.?advice|online.?bill.?pay)"
-    r13 = await db.hub_documents.update_many(
+    r13 = await database.hub_documents.update_many(
         base_and({"file_name": {"$regex": STATEMENT_REGEX}}),
         {"$set": {
             "status": "Completed",
@@ -339,7 +337,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # ── Rule 14: Self-vendor docs (vendor is Gamer Packaging = own company) ──
     SELF_VENDOR_REGEX = r"(?i)^gamer\s*(packaging|pack)"
-    r14 = await db.hub_documents.update_many(
+    r14 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"vendor_canonical": {"$regex": SELF_VENDOR_REGEX}},
@@ -360,7 +358,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # ── Rule 15: W9 / tax forms misclassified as AP Invoice ──
     W9_REGEX = r"(?i)(w-?9|w9_|tax.?form)"
-    r15 = await db.hub_documents.update_many(
+    r15 = await database.hub_documents.update_many(
         base_and({"file_name": {"$regex": W9_REGEX}}),
         {"$set": {
             "status": "Completed",
@@ -375,7 +373,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 15 (tax forms): %d docs", r15.modified_count)
 
     # ── Rule 16: "Captured" docs with no vendor — stuck unclassified ──
-    r16 = await db.hub_documents.update_many(
+    r16 = await database.hub_documents.update_many(
         base_and(
             {"status": {"$in": ["Captured", "captured", "received"]}},
         ),
@@ -392,7 +390,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 16 (captured/stale): %d docs", r16.modified_count)
 
     # ── Rule 17: XML duplicates — if an XML invoice has a matching PDF, it's redundant ──
-    r17 = await db.hub_documents.update_many(
+    r17 = await database.hub_documents.update_many(
         base_and({"file_name": {"$regex": r"\.xml$", "$options": "i"}}),
         {"$set": {
             "status": "Completed",
@@ -407,7 +405,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 17 (XML files): %d docs", r17.modified_count)
 
     # ── Rule 18: AR_Invoice / Sales Invoice type — not AP, auto-file ──
-    r18 = await db.hub_documents.update_many(
+    r18 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"doc_type": {"$regex": "(?i)(ar_invoice|sales.?invoice|credit.?memo)"}},
@@ -427,7 +425,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 18 (AR/Sales invoices): %d docs", r18.modified_count)
 
     # ── Rule 19: Broaden self-vendor match — vendor name contains "gamer" ──
-    r19 = await db.hub_documents.update_many(
+    r19 = await database.hub_documents.update_many(
         base_and(
             {"$or": [
                 {"vendor_canonical": {"$regex": "(?i)gamer"}},
@@ -453,13 +451,13 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
         {"$group": {"_id": "$file_name", "count": {"$sum": 1}, "ids": {"$push": "$id"}}},
         {"$match": {"count": {"$gt": 1}}},
     ]
-    dup_groups = await db.hub_documents.aggregate(dup_pipe).to_list(500)
+    dup_groups = await database.hub_documents.aggregate(dup_pipe).to_list(500)
     dup_cleared = 0
     for grp in dup_groups:
         # Keep the first doc, clear the rest as duplicates
         if len(grp["ids"]) > 1:
             dup_ids = grp["ids"][1:]  # skip first
-            r = await db.hub_documents.update_many(
+            r = await database.hub_documents.update_many(
                 {"id": {"$in": dup_ids}},
                 {"$set": {
                     "status": "Completed",
@@ -479,7 +477,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # These docs were previously completed but something set their status back
     # (e.g., AP auto-post failure, reprocessing). They have auto_cleared=True so
     # Rules 1-20 skip them (not_cleared filter). Fix them here.
-    r21 = await db.hub_documents.update_many(
+    r21 = await database.hub_documents.update_many(
         {"$and": [
             not_dup,
             {"auto_cleared": True},
@@ -494,7 +492,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # ── Rule 22: Readiness-status mismatch — readiness says ready but status is NeedsReview ──
     # Direct fix for docs where readiness evaluation worked but status sync was missed
-    r22 = await db.hub_documents.update_many(
+    r22 = await database.hub_documents.update_many(
         {"$and": [
             not_dup,
             {"status": "NeedsReview"},
@@ -512,13 +510,13 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 23: AP Invoices with vendor resolved + po_expected=false → auto-clear ──
     # Vendors whose PO validation has been learned as unnecessary should auto-clear
     # Find vendor_nos where po_expected=false, then clear their docs
-    po_relaxed_vendors = await db.vendor_invoice_profiles.find(
+    po_relaxed_vendors = await database.vendor_invoice_profiles.find(
         {"po_expected": False},
         {"_id": 0, "vendor_no": 1},
     ).to_list(500)
     po_relaxed_vnos = [v["vendor_no"] for v in po_relaxed_vendors if v.get("vendor_no")]
     if po_relaxed_vnos:
-        r23 = await db.hub_documents.update_many(
+        r23 = await database.hub_documents.update_many(
             base_and(
                 {"$or": [
                     {"bc_vendor_number": {"$in": po_relaxed_vnos}},
@@ -543,7 +541,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 24: Packing lists / Commercial invoices from freight forwarders ──
     # These are shipping supporting docs misclassified as AP Invoice
     PACKING_REGEX = r"(?i)(packing.?list|commercial.?invoice|entry.?summary|bill.?of.?lading|house.?bill|hbl|bol|bl_copy|bl_draft)"
-    r24 = await db.hub_documents.update_many(
+    r24 = await database.hub_documents.update_many(
         base_and(
             {"file_name": {"$regex": PACKING_REGEX}},
             {"$or": [
@@ -565,7 +563,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # ── Rule 25: Broadest readiness catchall — NeedsReview with NO blocking reasons ──
     # If readiness has no blocking reasons at all (even with warnings), auto-clear
-    r25 = await db.hub_documents.update_many(
+    r25 = await database.hub_documents.update_many(
         {"$and": [
             not_dup,
             {"status": "NeedsReview"},
@@ -585,7 +583,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     logger.info("[ForceCleanup] Rule 25 (NeedsReview + no blockers + vendor): %d docs → Completed", r25.modified_count)
 
     # ── Count remaining stuck docs ──
-    remaining = await db.hub_documents.count_documents({
+    remaining = await database.hub_documents.count_documents({
         "$and": [
             {"is_duplicate": {"$ne": True}},
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
@@ -614,13 +612,13 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
 
 @router.get("/inbox-diagnostic")
-async def inbox_diagnostic():
+async def inbox_diagnostic(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Shows exactly why documents are stuck in the Inbox and what force-cleanup
     would do for each category. Run this BEFORE sync-status to preview.
     """
-    from deps import get_db
-    db = get_db()
 
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
                 "archived", "FileMissing", "batch_parent", "Validated", "validated",
@@ -641,7 +639,7 @@ async def inbox_diagnostic():
             ]},
         ]
     }
-    total_stuck = await db.hub_documents.count_documents(stuck_filter)
+    total_stuck = await database.hub_documents.count_documents(stuck_filter)
 
     # Break down by status + readiness + doc type
     breakdown_pipe = [
@@ -677,7 +675,7 @@ async def inbox_diagnostic():
         }},
         {"$sort": {"count": -1}},
     ]
-    breakdown = await db.hub_documents.aggregate(breakdown_pipe).to_list(100)
+    breakdown = await database.hub_documents.aggregate(breakdown_pipe).to_list(100)
 
     NON_AP_TYPES = {"shipping", "inventory", "bol", "packing", "freight", "warehouse",
                     "statement", "remittance", "unknown", "receipt", "report",
@@ -757,7 +755,7 @@ async def inbox_diagnostic():
 
 
 @router.get("/automation-rate")
-async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
+async def get_automation_rate(days: int = Query(30, ge=1, le=90), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Automation rate dashboard data:
     - Current automation rate %
@@ -765,19 +763,17 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
     - Queue size breakdown
     - Top vendors still requiring manual review
     """
-    from deps import get_db
     from datetime import datetime, timezone, timedelta
 
-    db = get_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
 
     # --- Current snapshot ---
-    total = await db.hub_documents.count_documents({"is_duplicate": {"$ne": True}})
+    total = await database.hub_documents.count_documents({"is_duplicate": {"$ne": True}})
     auto_statuses = ["ready_auto_draft", "ready_auto_link"]
     manual_statuses = ["needs_review", "ambiguous"]
 
-    auto_count = await db.hub_documents.count_documents({
+    auto_count = await database.hub_documents.count_documents({
         "is_duplicate": {"$ne": True},
         "$or": [
             {"readiness.status": {"$in": auto_statuses}},
@@ -787,17 +783,17 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
             {"auto_cleared": True},
         ],
     })
-    manual_count = await db.hub_documents.count_documents({
+    manual_count = await database.hub_documents.count_documents({
         "is_duplicate": {"$ne": True},
         "readiness.status": {"$in": manual_statuses},
     })
-    blocked_count = await db.hub_documents.count_documents({
+    blocked_count = await database.hub_documents.count_documents({
         "is_duplicate": {"$ne": True},
         "readiness.status": "blocked",
     })
 
     # Docs with BC PI = successfully auto-processed
-    bc_posted = await db.hub_documents.count_documents({
+    bc_posted = await database.hub_documents.count_documents({
         "bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]},
     })
 
@@ -828,7 +824,7 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
         }},
         {"$sort": {"_id": 1}},
     ]
-    daily_raw = await db.hub_documents.aggregate(daily_pipeline).to_list(days + 5)
+    daily_raw = await database.hub_documents.aggregate(daily_pipeline).to_list(days + 5)
     daily_trend = [
         {
             "date": r["_id"],
@@ -855,7 +851,7 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
         {"$sort": {"count": -1}},
         {"$limit": 10},
     ]
-    vendor_manual_raw = await db.hub_documents.aggregate(vendor_manual_pipeline).to_list(10)
+    vendor_manual_raw = await database.hub_documents.aggregate(vendor_manual_pipeline).to_list(10)
     top_manual_vendors = []
     for v in vendor_manual_raw:
         vendor_id = v["_id"] or "Unknown"
@@ -880,7 +876,7 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
         {"$match": {"is_duplicate": {"$ne": True}, "readiness.status": {"$exists": True}}},
         {"$group": {"_id": "$readiness.status", "count": {"$sum": 1}}},
     ]
-    dist_raw = await db.hub_documents.aggregate(dist_pipeline).to_list(10)
+    dist_raw = await database.hub_documents.aggregate(dist_pipeline).to_list(10)
     distribution = {r["_id"]: r["count"] for r in dist_raw if r["_id"]}
 
     return {
@@ -902,17 +898,16 @@ async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
 async def retry_failed_extractions(
     limit: int = Query(100, le=500),
     force_escalate: bool = Query(False, description="If true, immediately move all stuck docs to Exception Queue regardless of retry count"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Batch retry documents with failed extraction (0 fields, no vendor).
     Normal mode: Increments retry_count on each. After 4 retries, moves to Exception Queue.
     Force mode (force_escalate=true): Immediately moves ALL stuck docs to Exception Queue.
     """
-    from deps import get_db
     from datetime import datetime, timezone
     from services.square9_workflow import DEFAULT_WORKFLOW_CONFIG
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     max_retries = DEFAULT_WORKFLOW_CONFIG["max_retry_attempts"]
 
@@ -922,7 +917,7 @@ async def retry_failed_extractions(
                 "Exception", "exception"]
 
     # Find docs stuck in inbox with extraction problems
-    failed_docs = await db.hub_documents.find(
+    failed_docs = await database.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
             "status": {"$nin": TERMINAL},
@@ -956,7 +951,7 @@ async def retry_failed_extractions(
 
         if force_escalate or current_retries >= doc_max:
             # Force escalate or already at max — move to Exception Queue
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "status": "Exception",
@@ -1007,7 +1002,7 @@ async def retry_failed_extractions(
             retried += 1
             action = f"retry_{new_count}/{doc_max}"
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {
                 "$set": update,
@@ -1040,20 +1035,19 @@ async def retry_failed_extractions(
 async def retry_captured_docs(
     limit: int = Query(50, le=200),
     force_escalate: bool = Query(False, description="Immediately move all stuck captured docs to Exception Queue"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Manual trigger: retry documents stuck in 'captured' workflow_status.
     Normal: Re-runs reprocess with reclassify=True, up to 4 retries then Exception Queue.
     Force: Immediately moves all to Exception Queue.
     """
-    from deps import get_db
     from datetime import datetime, timezone
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     MAX_RETRIES = 4
 
-    stuck_docs = await db.hub_documents.find(
+    stuck_docs = await database.hub_documents.find(
         {
             "workflow_status": {"$in": ["captured", "Captured"]},
             "status": {"$nin": ["Completed", "Posted", "Archived", "Exception",
@@ -1072,7 +1066,7 @@ async def retry_captured_docs(
         retry_count = doc.get("captured_retry_count", 0) + 1
 
         if force_escalate or retry_count > MAX_RETRIES:
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "status": "Exception",
@@ -1100,14 +1094,14 @@ async def retry_captured_docs(
         # Attempt reprocess
         try:
             from server import _reprocess_document_inner
-            full_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            full_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             if full_doc:
                 await _reprocess_document_inner(doc_id, full_doc, reclassify=True)
         except Exception as e:
             import logging
             logging.getLogger("readiness").warning("[RetryCaptured] Reprocess failed for %s: %s", doc_id[:8], str(e))
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "captured_retry_count": retry_count,
@@ -1140,13 +1134,12 @@ async def retry_captured_docs(
 async def get_exception_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Returns documents in the Exception Queue — docs that failed extraction
     after max retries and need human review / manual intervention.
     """
-    from deps import get_db
-    db = get_db()
 
     query = {
         "$and": [
@@ -1165,8 +1158,8 @@ async def get_exception_queue(
         ],
     }
 
-    total = await db.hub_documents.count_documents(query)
-    docs = await db.hub_documents.find(
+    total = await database.hub_documents.count_documents(query)
+    docs = await database.hub_documents.find(
         query,
         {
             "_id": 0, "id": 1, "file_name": 1, "status": 1,
@@ -1194,16 +1187,16 @@ PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18 cycles
 
 
 @router.post("/po-pending/park")
-async def park_po_pending_docs():
+async def park_po_pending_docs(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Finds documents stuck on PO validation gaps and parks them in the
     'po_pending' queue. These docs will be auto-retried every 4 hours.
     After 3 days (18 retries) they escalate to the Exception Queue.
     """
-    from deps import get_db
     from datetime import datetime, timezone
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
@@ -1239,7 +1232,7 @@ async def park_po_pending_docs():
         ],
     }
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         po_gap_filter,
         {"_id": 0, "id": 1, "file_name": 1, "vendor_canonical": 1,
          "po_number_clean": 1, "extracted_fields.po_number": 1},
@@ -1252,7 +1245,7 @@ async def park_po_pending_docs():
         doc_id = doc["id"]
         po = doc.get("po_number_clean") or (doc.get("extracted_fields") or {}).get("po_number", "?")
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "po_pending_parked": True,
@@ -1282,24 +1275,24 @@ async def park_po_pending_docs():
 
 
 @router.post("/po-pending/retry")
-async def retry_po_pending_docs():
+async def retry_po_pending_docs(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Re-evaluates all PO-pending documents. If PO now resolves → doc proceeds
     to normal processing. If max retries exceeded → Exception Queue.
     Runs full readiness evaluation (not just PO check).
     """
-    from deps import get_db
     from datetime import datetime, timezone
     from services.unified_validation_service import run_readiness
     import logging
 
     logger = logging.getLogger("po_retry")
-    db = get_db()
     now = datetime.now(timezone.utc)
     now_iso = now.isoformat()
 
     # Find all parked PO-pending docs (exclude batch parents)
-    pending_docs = await db.hub_documents.find(
+    pending_docs = await database.hub_documents.find(
         {
             "po_pending_parked": True,
             "is_batch_parent": {"$ne": True},
@@ -1327,7 +1320,7 @@ async def retry_po_pending_docs():
 
             if po_resolved or is_ready:
                 # PO resolved or doc is now ready — unpark and let it proceed
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "po_pending_parked": False,
@@ -1342,7 +1335,7 @@ async def retry_po_pending_docs():
 
             elif retry_count >= max_retries:
                 # Max retries exceeded — escalate to Exception Queue
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "po_pending_parked": False,
@@ -1363,7 +1356,7 @@ async def retry_po_pending_docs():
             else:
                 # Still pending — update retry count and schedule next
                 next_retry = (now + __import__("datetime").timedelta(hours=PO_RETRY_INTERVAL_HOURS)).isoformat()
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "po_pending_retry_count": retry_count,
@@ -1398,10 +1391,9 @@ async def retry_po_pending_docs():
 async def get_po_pending_queue(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Returns documents in the PO Pending auto-retry queue."""
-    from deps import get_db
-    db = get_db()
 
     query = {
         "po_pending_parked": True,
@@ -1411,8 +1403,8 @@ async def get_po_pending_queue(
             "ValidationPassed", "ReadyForPost", "ready_for_post", "batch_parent",
         ]},
     }
-    total = await db.hub_documents.count_documents(query)
-    docs = await db.hub_documents.find(
+    total = await database.hub_documents.count_documents(query)
+    docs = await database.hub_documents.find(
         query,
         {
             "_id": 0, "id": 1, "file_name": 1, "status": 1,
@@ -1432,16 +1424,15 @@ async def get_po_pending_queue(
 @router.post("/retry-ready-to-post")
 async def retry_ready_to_post(
     limit: int = Query(50, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Manual trigger: attempt to post all ReadyForPost documents to BC.
     Picks up docs that passed all validation but haven't been posted yet.
     """
     import os
-    from deps import get_db
     from datetime import datetime, timezone
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     bc_write_enabled = os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
@@ -1452,7 +1443,7 @@ async def retry_ready_to_post(
             "posted": 0, "failed": 0, "total": 0,
         }
 
-    ready_docs = await db.hub_documents.find(
+    ready_docs = await database.hub_documents.find(
         {
             "$or": [
                 {"status": "ReadyForPost"},
@@ -1480,7 +1471,7 @@ async def retry_ready_to_post(
             )
             if result.get("success") or result.get("already_exists"):
                 bc_record_no = result.get("bc_record_no", "")
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "status": "Posted",
@@ -1517,16 +1508,14 @@ async def retry_ready_to_post(
 
 
 @router.post("/repair-downgraded-docs")
-async def repair_downgraded_docs(dry_run: bool = Query(True)):
+async def repair_downgraded_docs(dry_run: bool = Query(True), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Repair docs incorrectly downgraded from Completed to NeedsReview."""
     try:
-        from deps import get_db
-        db = get_db()
 
         # Any doc in NeedsReview/reviewing that has good data (vendor + invoice OR amount)
         # should be Completed — these were incorrectly downgraded by the readiness changes
         to_fix = []
-        async for doc in db.hub_documents.find(
+        async for doc in database.hub_documents.find(
             {
                 "status": {"$in": ["NeedsReview", "reviewing"]},
                 "vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""},
@@ -1540,7 +1529,7 @@ async def repair_downgraded_docs(dry_run: bool = Query(True)):
             to_fix.append(doc["id"])
 
         if not dry_run and to_fix:
-            result = await db.hub_documents.update_many(
+            result = await database.hub_documents.update_many(
                 {"id": {"$in": to_fix}},
                 {"$set": {"status": "Completed", "workflow_status": "completed"}}
             )

@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional, List
 from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 from services.auth_deps import get_current_user
 from pydantic import BaseModel
@@ -78,7 +80,6 @@ class PostToBCResponse(BaseModel):
 # DEPENDENCIES
 # =============================================================================
 
-from deps import get_db
 from services.business_central_service import get_bc_service
 
 
@@ -155,17 +156,16 @@ async def search_purchase_orders(
 # =============================================================================
 
 @ap_review_router.put("/documents/{doc_id}")
-async def save_ap_review(doc_id: str, data: APReviewData):
+async def save_ap_review(doc_id: str, data: APReviewData, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Save AP review edits to a document.
     Updates vendor, invoice details, line items, etc.
     """
     logger.info(f"AP Review Save: doc_id={doc_id}, vendor_id={data.vendor_id}, invoice={data.invoice_number}")
     
-    db = get_db()
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -275,7 +275,7 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         if data.document_type is not None:
             original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
             if data.document_type != original_type:
-                await record_feedback(db, "classification_correction", doc_id, vendor_id,
+                await record_feedback(database, "classification_correction", doc_id, vendor_id,
                     before={"doc_type": original_type},
                     after={"doc_type": data.document_type},
                     metadata={
@@ -286,7 +286,7 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         logger.debug("AP Review feedback recording skipped: %s", e)
     
     # Update document
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": update_data}
     )
@@ -297,38 +297,38 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         vendor_id = data.vendor_id or doc.get("vendor_canonical") or ""
         
         if data.vendor_id and data.vendor_id != doc.get("vendor_canonical"):
-            await record_feedback(db, "vendor_correction", doc_id, vendor_id,
+            await record_feedback(database, "vendor_correction", doc_id, vendor_id,
                 before={"vendor": doc.get("vendor_canonical", "")},
                 after={"vendor": data.vendor_id},
                 source="ap_review")
         
         if data.total_amount is not None and data.total_amount != doc.get("amount_float"):
-            await record_feedback(db, "amount_correction", doc_id, vendor_id,
+            await record_feedback(database, "amount_correction", doc_id, vendor_id,
                 before={"amount": doc.get("amount_float")},
                 after={"amount": data.total_amount},
                 source="ap_review")
         
         if data.po_number and data.po_number != doc.get("po_number_clean"):
-            await record_feedback(db, "po_correction", doc_id, vendor_id,
+            await record_feedback(database, "po_correction", doc_id, vendor_id,
                 before={"po": doc.get("po_number_clean", "")},
                 after={"po": data.po_number},
                 source="ap_review")
         
         if data.invoice_number and data.invoice_number != doc.get("invoice_number_clean"):
-            await record_feedback(db, "field_edit", doc_id, vendor_id,
+            await record_feedback(database, "field_edit", doc_id, vendor_id,
                 before={"invoice_number": doc.get("invoice_number_clean", "")},
                 after={"invoice_number": data.invoice_number},
                 source="ap_review")
         
         # The act of completing an AP review = approval signal
-        await record_feedback(db, "approval", doc_id, vendor_id,
+        await record_feedback(database, "approval", doc_id, vendor_id,
             metadata={"review_type": "ap_review"},
             source="ap_review")
     except Exception as e:
         logger.debug("Feedback recording skipped: %s", e)
     
     # Fetch updated document
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     logger.info(f"AP Review Save SUCCESS: doc_id={doc_id}")
     
@@ -340,7 +340,7 @@ async def save_ap_review(doc_id: str, data: APReviewData):
 
 
 @ap_review_router.post("/documents/{doc_id}/mark-ready")
-async def mark_ready_for_post(doc_id: str):
+async def mark_ready_for_post(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Mark a document as ready and AUTO-POST to BC.
     
@@ -350,9 +350,8 @@ async def mark_ready_for_post(doc_id: str):
     """
     logger.info(f"AP Review Mark Ready → Auto-Post: doc_id={doc_id}")
     
-    db = get_db()
     
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -374,7 +373,7 @@ async def mark_ready_for_post(doc_id: str):
     
     # Set manual override flag — persists through reprocessing
     from datetime import datetime, timezone
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+    await database.hub_documents.update_one({"id": doc_id}, {"$set": {
         "manual_po_override": True,
         "manual_override": True,
         "manual_override_by": "reviewer",
@@ -383,9 +382,9 @@ async def mark_ready_for_post(doc_id: str):
     
     # Attempt auto-post to BC — source="mark_ready" skips PO check
     from services.ap_auto_post_service import attempt_ap_auto_post
-    result = await attempt_ap_auto_post(doc_id, db, source="mark_ready")
+    result = await attempt_ap_auto_post(doc_id, database, source="mark_ready")
     
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     return {
         "success": result.get("success", False),
@@ -399,7 +398,7 @@ async def mark_ready_for_post(doc_id: str):
 
 
 @ap_review_router.post("/documents/{doc_id}/override-po")
-async def override_po_check(doc_id: str):
+async def override_po_check(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Override the PO validation check for a document.
     
@@ -407,13 +406,12 @@ async def override_po_check(doc_id: str):
     Use this when the PO reference is correct but doesn't match a BC Purchase Order
     (e.g., freight carriers with internal reference numbers).
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     from datetime import datetime, timezone
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+    await database.hub_documents.update_one({"id": doc_id}, {"$set": {
         "manual_po_override": True,
         "manual_override": True,
         "manual_override_by": "reviewer",
@@ -422,9 +420,9 @@ async def override_po_check(doc_id: str):
     
     # Re-run auto-post check now that override is set
     from services.ap_auto_post_service import attempt_ap_auto_post
-    result = await attempt_ap_auto_post(doc_id, db, source="manual_override")
+    result = await attempt_ap_auto_post(doc_id, database, source="manual_override")
     
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     return {
         "success": True,
@@ -559,7 +557,8 @@ async def post_document_to_bc(
                     "applies in production."
     ),
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Post a document to Business Central as a purchase invoice.
     Creates a purchase invoice in BC with the document's extracted data.
@@ -568,10 +567,9 @@ async def post_document_to_bc(
     """
     logger.info(f"AP Review Post to BC: doc_id={doc_id}")
 
-    db = get_db()
 
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -583,7 +581,7 @@ async def post_document_to_bc(
         # Safety valve: queue-status-says-ready but review_status is stale.
         # A known workflow gap where status="ReadyForPost" ≠ review_status.
         if auto_mark_ready and queue_status == "ReadyForPost":
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "review_status": "ready_for_post",
@@ -670,7 +668,7 @@ async def post_document_to_bc(
     # claim. Fetches the doc, advances the engine, and then folds the new
     # workflow_status + workflow_history into the claim's atomic $set so
     # the engine state and the claim land in a single Mongo operation.
-    pre_claim_doc = await db.hub_documents.find_one({"id": doc_id})
+    pre_claim_doc = await database.hub_documents.find_one({"id": doc_id})
     if not pre_claim_doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -692,7 +690,7 @@ async def post_document_to_bc(
         )
 
     claim = await claim_for_bc_post(
-        db,
+        database,
         doc_id=doc_id,
         target_state="posting",
         worker_id=f"ap_review.post_to_bc-{os.getpid()}",
@@ -709,7 +707,7 @@ async def post_document_to_bc(
         # without an actual in-flight post. Revert via direct write (no
         # engine rollback event — the transition never actually happened
         # from the doc's perspective).
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "workflow_status": pre_claim_doc.get("workflow_status"),
@@ -739,7 +737,7 @@ async def post_document_to_bc(
     # A1: posting-attempts history bookkeeping. Each call to this endpoint is
     # one logical post — allocate an attempt_n + correlation_id and we'll
     # build the attempt dict at the release_claim() boundary.
-    attempt_n = await next_attempt_n(db, doc_id)
+    attempt_n = await next_attempt_n(database, doc_id)
     correlation_id = new_correlation_id()
     started_utc = datetime.now(timezone.utc).isoformat()
 
@@ -818,7 +816,7 @@ async def post_document_to_bc(
                 actor=actor,
             )
             await release_claim(
-                db,
+                database,
                 doc_id=doc_id,
                 final_state="posted",
                 extra_set={
@@ -837,7 +835,7 @@ async def post_document_to_bc(
                 attempt=attempt,
             )
 
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             
             return PostToBCResponse(
                 success=True,
@@ -886,7 +884,7 @@ async def post_document_to_bc(
                 context={"metadata": {"error": error_msg}}, actor=actor,
             )
             await release_claim(
-                db,
+                database,
                 doc_id=doc_id,
                 final_state="failed",
                 extra_set={
@@ -935,7 +933,7 @@ async def post_document_to_bc(
                 actor=actor,
             )
             await release_claim(
-                db,
+                database,
                 doc_id=doc_id,
                 final_state="failed",
                 extra_set={
@@ -965,11 +963,11 @@ async def post_document_to_bc(
 async def get_bc_posting_status(
     doc_id: str,
     _user: dict = Depends(get_current_user),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Get the BC posting status for a document. JWT-protected (hygiene patch 2026-04-22)."""
-    db = get_db()
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -993,7 +991,7 @@ async def get_bc_posting_status(
 # =============================================================================
 
 @ap_review_router.post("/documents/{doc_id}/extract-invoice-data")
-async def extract_invoice_data_endpoint(doc_id: str):
+async def extract_invoice_data_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Extract invoice data from PDF using AI/OCR.
     
@@ -1008,10 +1006,9 @@ async def extract_invoice_data_endpoint(doc_id: str):
     """
     logger.info(f"AI Invoice Extraction: doc_id={doc_id}")
     
-    db = get_db()
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1046,13 +1043,13 @@ async def extract_invoice_data_endpoint(doc_id: str):
     try:
         from services.invoice_extractor import extract_and_update_document
         
-        result = await extract_and_update_document(doc_id, file_path, db)
+        result = await extract_and_update_document(doc_id, file_path, database)
         
         if result.get("success"):
             logger.info(f"AI Invoice Extraction SUCCESS: doc_id={doc_id}, confidence={result.get('confidence')}, lines={result.get('line_items_count')}")
             
             # Fetch updated document
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             
             return {
                 "success": True,
@@ -1081,11 +1078,10 @@ async def extract_invoice_data_endpoint(doc_id: str):
 
 
 @ap_review_router.get("/documents/{doc_id}/extraction-status")
-async def get_extraction_status(doc_id: str):
+async def get_extraction_status(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get the AI extraction status for a document."""
-    db = get_db()
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1104,7 +1100,7 @@ async def get_extraction_status(doc_id: str):
 
 
 @ap_review_router.get("/vendor-profile/{vendor_no}")
-async def get_vendor_profile(vendor_no: str, refresh: bool = False):
+async def get_vendor_profile(vendor_no: str, refresh: bool = False, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get the vendor's invoice profile (learned from BC history).
     
     Shows what GL accounts, line types, description patterns, and amounts
@@ -1112,11 +1108,10 @@ async def get_vendor_profile(vendor_no: str, refresh: bool = False):
     """
     from services.vendor_invoice_profile_service import build_vendor_profile, get_or_build_profile
     
-    db = get_db()
     if refresh:
-        profile = await build_vendor_profile(db, vendor_no, force_refresh=True)
+        profile = await build_vendor_profile(database, vendor_no, force_refresh=True)
     else:
-        profile = await get_or_build_profile(db, vendor_no)
+        profile = await get_or_build_profile(database, vendor_no)
     
     return {
         "vendor_no": profile.get("vendor_no"),
@@ -1137,7 +1132,7 @@ async def get_vendor_profile(vendor_no: str, refresh: bool = False):
 
 
 @ap_review_router.post("/vendor-profile/{vendor_no}/overrides")
-async def set_vendor_profile_overrides(vendor_no: str, data: dict):
+async def set_vendor_profile_overrides(vendor_no: str, data: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Manually set profile defaults for vendors whose BC tenant doesn't
     expose line-level history (e.g. freight carriers where posted invoices
     live outside v2.0 API).
@@ -1152,9 +1147,8 @@ async def set_vendor_profile_overrides(vendor_no: str, data: dict):
     """
     from services.vendor_invoice_profile_service import get_or_build_profile
 
-    db = get_db()
     # Ensure a base profile exists before merging overrides
-    await get_or_build_profile(db, vendor_no)
+    await get_or_build_profile(database, vendor_no)
 
     allowed = {
         "default_line_type", "default_gl_account",
@@ -1174,7 +1168,7 @@ async def set_vendor_profile_overrides(vendor_no: str, data: dict):
         "fields": list(updates.keys()),
     }
     # Merge overrides into the cached profile and flag provenance
-    await db.vendor_invoice_profiles.update_one(
+    await database.vendor_invoice_profiles.update_one(
         {"vendor_no": vendor_no},
         {
             "$set": {
@@ -1186,7 +1180,7 @@ async def set_vendor_profile_overrides(vendor_no: str, data: dict):
         upsert=True,
     )
 
-    refreshed = await db.vendor_invoice_profiles.find_one(
+    refreshed = await database.vendor_invoice_profiles.find_one(
         {"vendor_no": vendor_no}, {"_id": 0}
     )
     return {
@@ -1205,7 +1199,7 @@ async def set_vendor_profile_overrides(vendor_no: str, data: dict):
 
 
 @ap_review_router.get("/pi-preflight/{doc_id}")
-async def pi_preflight(doc_id: str):
+async def pi_preflight(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Preview what the Purchase Invoice will look like before posting to BC.
     
     Shows the planned header, lines (with source — profile vs default vs extracted),
@@ -1215,8 +1209,7 @@ async def pi_preflight(doc_id: str):
         get_or_build_profile, build_smart_pi_lines, detect_deviations
     )
     
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1235,7 +1228,7 @@ async def pi_preflight(doc_id: str):
         }
     
     # Get vendor profile
-    profile = await get_or_build_profile(db, vendor_no)
+    profile = await get_or_build_profile(database, vendor_no)
     
     # Build lines using the profile
     from routers.gpi_integration import _resolve_po_reference

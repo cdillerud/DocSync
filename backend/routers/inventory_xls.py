@@ -20,9 +20,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, Query, UploadFile, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
-from deps import get_db
 from services.file_ingestion_service import FileIngestionService
 from services.inventory_xls_classifier import classify_xls
 from services.inventory_xls_parser import (
@@ -45,13 +46,13 @@ async def ingest_xls(
     sender_email: Optional[str] = Form(None),
     sheet_name: Optional[str] = Form(None),
     force_llm: bool = Form(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Classify + parse + stage a new XLS upload.
 
     Returns the staging record (status=pending_review) OR
     {already_staged: true} if this exact file + customer has been staged before.
     """
-    db = get_db()
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=422, detail="Empty file")
@@ -81,7 +82,7 @@ async def ingest_xls(
     # Build column map
     sender_domain = sender_email.split("@", 1)[1].lower() if sender_email and "@" in sender_email else None
     cm = await build_column_map(
-        db, headers=headers, sample_rows=rows[:3],
+        database, headers=headers, sample_rows=rows[:3],
         classification=cls.classification, sender_domain=sender_domain,
         filename=file.filename or "", force_llm=force_llm,
     )
@@ -101,11 +102,11 @@ async def ingest_xls(
     )
 
     # Suggest customer workspace
-    suggested = await suggest_customer_workspace(db, sender_email, file.filename or "")
+    suggested = await suggest_customer_workspace(database, sender_email, file.filename or "")
 
     # Stage
     result = await stage_import(
-        db,
+        database,
         filename=file.filename or "upload.xlsx",
         file_hash=file_hash,
         sender_email=sender_email,
@@ -134,14 +135,13 @@ async def ingest_xls(
 
 
 @router.post("/ingest-pilot-doc/{doc_id}")
-async def ingest_from_pilot_doc(doc_id: str, force_llm: bool = Query(False)):
+async def ingest_from_pilot_doc(doc_id: str, force_llm: bool = Query(False), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Run the XLS pipeline on a document already stored in hub_documents.
 
     Use this to retroactively classify XLS attachments that arrived through the
     main mailbox ingestion before this pipeline existed.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     fname = doc.get("file_name") or ""
@@ -173,16 +173,16 @@ async def ingest_from_pilot_doc(doc_id: str, force_llm: bool = Query(False)):
 
     sender_domain = sender.split("@", 1)[1].lower() if sender and "@" in sender else None
     cm = await build_column_map(
-        db, headers=headers, sample_rows=rows[:3],
+        database, headers=headers, sample_rows=rows[:3],
         classification=cls.classification, sender_domain=sender_domain,
         filename=fname, force_llm=force_llm,
     )
     eff_date = extract_effective_date_from_filename(fname)
     norm = normalize_rows(rows=rows, column_map=cm, classification=cls.classification, filename_effective_date=eff_date)
-    suggested = await suggest_customer_workspace(db, sender, fname)
+    suggested = await suggest_customer_workspace(database, sender, fname)
 
     return await stage_import(
-        db,
+        database,
         filename=fname,
         file_hash=file_hash,
         sender_email=sender,
@@ -210,28 +210,26 @@ async def api_list_staging(
     customer_id: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     skip: int = Query(0, ge=0),
-):
-    db = get_db()
-    return await list_staging(db, status=status, customer_id=customer_id, limit=limit, skip=skip)
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    return await list_staging(database, status=status, customer_id=customer_id, limit=limit, skip=skip)
 
 
 @router.get("/staging/{staging_id}")
-async def api_get_staging(staging_id: str):
-    db = get_db()
-    doc = await get_staging(db, staging_id)
+async def api_get_staging(staging_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    doc = await get_staging(database, staging_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Not found")
     return doc
 
 
 @router.post("/staging/{staging_id}/update")
-async def api_update_staging(staging_id: str, body: dict = Body(default={})):
-    db = get_db()
-    return await update_staging(db, staging_id, body or {})
+async def api_update_staging(staging_id: str, body: dict = Body(default={}), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    return await update_staging(database, staging_id, body or {})
 
 
 @router.post("/staging/{staging_id}/re-normalize")
-async def api_renormalize_staging(staging_id: str):
+async def api_renormalize_staging(staging_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Re-run row normalization on a staging record using its current column_map.
 
     Use this after editing the column_map via /update — it recomputes the
@@ -242,8 +240,7 @@ async def api_renormalize_staging(staging_id: str):
     import hashlib as _h
     from workflows.inventory.planning.staging import STAGING_COLL
 
-    db = get_db()
-    staging = await db[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
+    staging = await database[STAGING_COLL].find_one({"id": staging_id}, {"_id": 0})
     if not staging:
         raise HTTPException(status_code=404, detail="Staging not found")
     if staging.get("status") != "pending_review":
@@ -254,12 +251,12 @@ async def api_renormalize_staging(staging_id: str):
     raw = None
     fname = staging.get("filename", "")
     if source_doc_id:
-        src = await db.hub_documents.find_one({"id": source_doc_id}, {"_id": 0, "file_content_b64": 1})
+        src = await database.hub_documents.find_one({"id": source_doc_id}, {"_id": 0, "file_content_b64": 1})
         if src and src.get("file_content_b64"):
             raw = _b64.b64decode(src["file_content_b64"])
     if not raw:
         # Try to match by file_hash alone
-        h_doc = await db.hub_documents.find_one(
+        h_doc = await database.hub_documents.find_one(
             {"file_hash_sha256": staging.get("file_hash")},
             {"_id": 0, "file_content_b64": 1},
         )
@@ -290,7 +287,7 @@ async def api_renormalize_staging(staging_id: str):
         classification=(staging.get("classification") or {}).get("classification", ""),
         filename_effective_date=staging.get("filename_effective_date"),
     )
-    await db[STAGING_COLL].update_one(
+    await database[STAGING_COLL].update_one(
         {"id": staging_id},
         {"$set": {
             "rows": norm["rows"],
@@ -313,10 +310,9 @@ def _iso_now() -> str:
 
 
 @router.post("/staging/{staging_id}/approve")
-async def api_approve_staging(staging_id: str, approved_by: str = Query("user")):
-    db = get_db()
+async def api_approve_staging(staging_id: str, approved_by: str = Query("user"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     try:
-        return await approve_staging(db, staging_id, approved_by=approved_by)
+        return await approve_staging(database, staging_id, approved_by=approved_by)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
@@ -326,49 +322,49 @@ async def api_reject_staging(
     staging_id: str,
     rejected_by: str = Query("user"),
     reason: str = Query(""),
-):
-    db = get_db()
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     try:
-        return await reject_staging(db, staging_id, rejected_by=rejected_by, reason=reason)
+        return await reject_staging(database, staging_id, rejected_by=rejected_by, reason=reason)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/learning-summary")
-async def api_learning_summary():
-    db = get_db()
-    return await get_learning_summary(db)
+async def api_learning_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
+    return await get_learning_summary(database)
 
 
 @router.post("/staging/re-suggest-customers")
-async def api_resuggest_customers(only_unassigned: bool = Query(True)):
+async def api_resuggest_customers(only_unassigned: bool = Query(True), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Re-run customer auto-suggest on existing staging records using the
     current filename-aware logic. Useful after creating new customer workspaces
     or upgrading the classifier rules.
     """
     from workflows.inventory.planning.staging import STAGING_COLL
 
-    db = get_db()
     q: Dict[str, Any] = {"status": "pending_review"}
     if only_unassigned:
         q["$or"] = [
             {"assigned_customer_id": None},
             {"assigned_customer_id": {"$exists": False}},
         ]
-    staging_rows = await db[STAGING_COLL].find(q, {"_id": 0}).to_list(500)
+    staging_rows = await database[STAGING_COLL].find(q, {"_id": 0}).to_list(500)
 
     updated = 0
     changed: List[Dict[str, str]] = []
     for s in staging_rows:
         cust = await suggest_customer_workspace(
-            db, s.get("sender_email"), s.get("filename", ""),
+            database, s.get("sender_email"), s.get("filename", ""),
         )
         if not cust:
             continue
         new_cust_id = cust["id"]
         if s.get("assigned_customer_id") == new_cust_id:
             continue
-        await db[STAGING_COLL].update_one(
+        await database[STAGING_COLL].update_one(
             {"id": s["id"]},
             {"$set": {
                 "suggested_customer_id": new_cust_id,
@@ -392,7 +388,8 @@ async def backfill_pilot_docs(
     limit: int = Query(200, ge=1, le=1000),
     dry_run: bool = Query(False, description="If true, report classifications without staging"),
     force_llm: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Scan hub_documents for pilot-ingested .xlsx/.xls/.csv files that were
     classified as SALES_INVOICE / Report by the main pipeline, run them
@@ -403,12 +400,11 @@ async def backfill_pilot_docs(
     writes to the ledger (staging approval is still required).
     """
     import base64 as _b64
-    db = get_db()
     q = {
         "inside_sales_pilot": True,
         "file_name": {"$regex": r"\.(xlsx|xls|csv)$", "$options": "i"},
     }
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         q,
         {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
          "file_content_b64": 1, "inventory_xls_backfilled": 1},
@@ -470,7 +466,7 @@ async def backfill_pilot_docs(
                 results["items"].append(entry)
                 # Mark the doc so it's not re-scanned on next backfill
                 if not dry_run:
-                    await db.hub_documents.update_one(
+                    await database.hub_documents.update_one(
                         {"id": doc["id"]},
                         {"$set": {
                             "inventory_xls_backfilled": True,
@@ -492,7 +488,7 @@ async def backfill_pilot_docs(
                 sender_domain = sender.split("@", 1)[1].lower()
 
             cm = await build_column_map(
-                db, headers=headers, sample_rows=rows[:3],
+                database, headers=headers, sample_rows=rows[:3],
                 classification=cls.classification, sender_domain=sender_domain,
                 filename=fname, force_llm=force_llm,
             )
@@ -503,10 +499,10 @@ async def backfill_pilot_docs(
             )
             import hashlib as _h
             file_hash = _h.sha256(raw).hexdigest()
-            suggested = await suggest_customer_workspace(db, sender, fname)
+            suggested = await suggest_customer_workspace(database, sender, fname)
 
             stage_res = await stage_import(
-                db,
+                database,
                 filename=fname,
                 file_hash=file_hash,
                 sender_email=sender,
@@ -538,7 +534,7 @@ async def backfill_pilot_docs(
                 entry["rows"] = (stage_res.get("staging") or {}).get("row_count", 0)
 
             # Mark source doc
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc["id"]},
                 {"$set": {
                     "inventory_xls_backfilled": True,

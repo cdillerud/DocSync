@@ -8,10 +8,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/aliases", tags=["Vendor Aliases"])
@@ -30,9 +31,9 @@ async def get_vendor_aliases(
     vendor_id: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Get all vendor aliases, optionally filtered by vendor_id or source."""
-    db = get_db()
     query = {}
     if vendor_id:
         query["$or"] = [
@@ -42,22 +43,21 @@ async def get_vendor_aliases(
         ]
     if source:
         query["source"] = source
-    aliases = await db.vendor_aliases.find(query, {"_id": 0}).sort("usage_count", -1).limit(limit).to_list(limit)
+    aliases = await database.vendor_aliases.find(query, {"_id": 0}).sort("usage_count", -1).limit(limit).to_list(limit)
     return {"aliases": aliases, "count": len(aliases)}
 
 
 @router.post("/vendors")
-async def create_vendor_alias(alias: VendorAlias):
+async def create_vendor_alias(alias: VendorAlias, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new vendor alias mapping."""
     from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
 
-    db = get_db()
     alias_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
     normalized = normalize_vendor_name(alias.alias_string)
 
-    existing = await db.vendor_aliases.find_one({
+    existing = await database.vendor_aliases.find_one({
         "$or": [
             {"alias_string": alias.alias_string},
             {"normalized_alias": normalized}
@@ -81,7 +81,7 @@ async def create_vendor_alias(alias: VendorAlias):
         "last_used_at": None
     }
 
-    await db.vendor_aliases.insert_one(alias_doc)
+    await database.vendor_aliases.insert_one(alias_doc)
 
     VENDOR_ALIAS_MAP[alias.alias_string] = alias.vendor_name or alias.vendor_no
     VENDOR_ALIAS_MAP[normalized] = alias.vendor_name or alias.vendor_no
@@ -90,10 +90,9 @@ async def create_vendor_alias(alias: VendorAlias):
 
 
 @router.delete("/vendors/{alias_id}")
-async def delete_vendor_alias(alias_id: str):
+async def delete_vendor_alias(alias_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a vendor alias."""
-    db = get_db()
-    result = await db.vendor_aliases.delete_one({"alias_id": alias_id})
+    result = await database.vendor_aliases.delete_one({"alias_id": alias_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Alias not found")
     return {"message": "Alias deleted"}
@@ -104,17 +103,17 @@ async def suggest_alias_creation(
     vendor_name: str = Query(...),
     resolved_vendor_no: str = Query(...),
     resolved_vendor_name: str = Query(...)
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Called when user manually resolves a vendor match.
     Returns suggestion to save as alias.
     """
     from services.vendor_name_helpers import normalize_vendor_name
 
-    db = get_db()
     normalized = normalize_vendor_name(vendor_name)
 
-    existing = await db.vendor_aliases.find_one({
+    existing = await database.vendor_aliases.find_one({
         "$or": [
             {"alias_string": vendor_name},
             {"normalized_alias": normalized}
@@ -140,10 +139,9 @@ async def suggest_alias_creation(
     }
 
 
-async def record_alias_usage(alias_string: str):
+async def record_alias_usage(alias_string: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record when an alias is used for matching."""
-    db = get_db()
-    await db.vendor_aliases.update_one(
+    await database.vendor_aliases.update_one(
         {"alias_string": alias_string},
         {
             "$inc": {"usage_count": 1},
@@ -161,14 +159,13 @@ async def get_alias_metrics():
 
 
 @router.get("/vendors/search-bc")
-async def search_bc_vendors(q: str = Query(..., min_length=2)):
+async def search_bc_vendors(q: str = Query(..., min_length=2), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Search BC vendors by name or vendor number.
     Used by the UI for manual vendor resolution when auto-suggestions are wrong.
     """
     import re
     from difflib import SequenceMatcher
-    db = get_db()
 
     q_lower = q.strip().lower()
     q_pattern = re.escape(q_lower)
@@ -176,7 +173,7 @@ async def search_bc_vendors(q: str = Query(..., min_length=2)):
     # Search in BC reference cache
     bc_vendors = []
     try:
-        cached = await db.bc_reference_cache.find(
+        cached = await database.bc_reference_cache.find(
             {
                 "bc_entity_type": "vendor",
                 "$or": [
@@ -198,7 +195,7 @@ async def search_bc_vendors(q: str = Query(..., min_length=2)):
 
     # Also search vendor profiles
     try:
-        profiles = await db.vendor_invoice_profiles.find(
+        profiles = await database.vendor_invoice_profiles.find(
             {
                 "$or": [
                     {"vendor_name": {"$regex": q_pattern, "$options": "i"}},
@@ -233,7 +230,7 @@ async def search_bc_vendors(q: str = Query(..., min_length=2)):
 
 
 @router.post("/vendors/dismiss-unmatched")
-async def dismiss_unmatched_vendor(body: dict):
+async def dismiss_unmatched_vendor(body: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Dismiss an unmatched vendor — marks its docs as 'vendor_dismissed' so they
     stop appearing in the vendor match gap list. The docs stay in their current
@@ -245,11 +242,10 @@ async def dismiss_unmatched_vendor(body: dict):
     if not vendor_name:
         raise HTTPException(status_code=400, detail="vendor_name required")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Update all docs with this vendor name — mark the vendor_match check as dismissed
-    result = await db.hub_documents.update_many(
+    result = await database.hub_documents.update_many(
         {
             "$or": [
                 {"extracted_fields.vendor": vendor_name},
@@ -281,12 +277,11 @@ async def dismiss_unmatched_vendor(body: dict):
 
 
 @router.delete("/vendors/by-alias/{alias}")
-async def delete_vendor_alias_by_name(alias: str):
+async def delete_vendor_alias_by_name(alias: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a vendor alias by its normalized alias string."""
     from services.vendor_name_helpers import normalize_vendor_name
-    db = get_db()
     normalized = normalize_vendor_name(alias)
-    result = await db.vendor_aliases.delete_one({
+    result = await database.vendor_aliases.delete_one({
         "$or": [
             {"normalized_alias": normalized},
             {"alias_string": alias},
@@ -298,7 +293,9 @@ async def delete_vendor_alias_by_name(alias: str):
 
 
 @router.get("/vendors/unmatched-gaps")
-async def get_unmatched_vendor_gaps():
+async def get_unmatched_vendor_gaps(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Get vendor match gap docs with their closest match candidates.
     Normalizes vendor names to merge duplicates (e.g., "SC Warehouses, LLC" = "SC Warehouses, LLC.").
@@ -307,13 +304,12 @@ async def get_unmatched_vendor_gaps():
     import re
     from difflib import SequenceMatcher
 
-    db = get_db()
 
     # Include Exception/Completed in exclusion to avoid showing already-processed docs
     DONE_STATUSES = ["Completed", "Posted", "Deleted", "Archived", "Exception",
                      "completed", "posted", "archived", "exception"]
 
-    gap_docs = await db.hub_documents.aggregate([
+    gap_docs = await database.hub_documents.aggregate([
         {"$match": {
             "validation_results.checks": {
                 "$elemMatch": {"check_name": "vendor_match", "passed": False}
@@ -372,7 +368,7 @@ async def get_unmatched_vendor_gaps():
     # Load ALL BC vendors from cache + profiles
     bc_vendors = []
     try:
-        cached = await db.bc_reference_cache.find(
+        cached = await database.bc_reference_cache.find(
             {"bc_entity_type": "vendor"},
             {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1}
         ).to_list(1000)
@@ -386,7 +382,7 @@ async def get_unmatched_vendor_gaps():
         pass
 
     try:
-        profiles = await db.vendor_invoice_profiles.find(
+        profiles = await database.vendor_invoice_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
         ).to_list(500)
         existing_nos = {v["vendor_no"] for v in bc_vendors}
@@ -457,7 +453,7 @@ async def get_unmatched_vendor_gaps():
 
 
 @router.post("/vendors/accept-suggestion")
-async def accept_vendor_suggestion(body: dict):
+async def accept_vendor_suggestion(body: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Accept a vendor match suggestion and create an alias.
     Also creates aliases for all name variants and re-validates all affected docs.
@@ -472,7 +468,6 @@ async def accept_vendor_suggestion(body: dict):
     if not alias_string or not vendor_no:
         raise HTTPException(status_code=400, detail="alias_string and vendor_no required")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Create aliases for the main name + all variants
@@ -483,11 +478,11 @@ async def accept_vendor_suggestion(body: dict):
         alias_id = str(uuid.uuid4())
         normalized = normalize_vendor_name(name)
 
-        existing = await db.vendor_aliases.find_one({
+        existing = await database.vendor_aliases.find_one({
             "$or": [{"alias_string": name}, {"normalized_alias": normalized}]
         })
         if not existing:
-            await db.vendor_aliases.insert_one({
+            await database.vendor_aliases.insert_one({
                 "alias_id": alias_id,
                 "alias_string": name,
                 "normalized_alias": normalized,
@@ -511,7 +506,7 @@ async def accept_vendor_suggestion(body: dict):
             {"normalized_fields.vendor": name},
         ])
 
-    gap_docs = await db.hub_documents.find(
+    gap_docs = await database.hub_documents.find(
         {
             "validation_results.checks": {
                 "$elemMatch": {"check_name": "vendor_match", "passed": False}
@@ -535,7 +530,7 @@ async def accept_vendor_suggestion(body: dict):
             "score": 1.0,
         })
         all_passed = all(ch.get("passed", True) for ch in new_checks)
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "validation_results.checks": new_checks,
@@ -554,7 +549,7 @@ async def accept_vendor_suggestion(body: dict):
 
 
 @router.post("/vendors/batch-resolve")
-async def batch_resolve_vendor_aliases(body: dict):
+async def batch_resolve_vendor_aliases(body: dict, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Batch-create vendor aliases and re-validate all affected documents.
     
@@ -571,7 +566,6 @@ async def batch_resolve_vendor_aliases(body: dict):
     if not mappings:
         raise HTTPException(status_code=400, detail="No mappings provided")
 
-    db = get_db()
     results = []
     total_docs_updated = 0
 
@@ -592,13 +586,13 @@ async def batch_resolve_vendor_aliases(body: dict):
         now = datetime.now(timezone.utc).isoformat()
 
         # Create alias if not exists
-        existing = await db.vendor_aliases.find_one({
+        existing = await database.vendor_aliases.find_one({
             "$or": [{"alias_string": alias_string}, {"normalized_alias": normalized}]
         })
         alias_created = False
         if not existing:
             alias_id = str(uuid.uuid4())
-            await db.vendor_aliases.insert_one({
+            await database.vendor_aliases.insert_one({
                 "alias_id": alias_id,
                 "alias_string": alias_string,
                 "normalized_alias": normalized,
@@ -622,7 +616,7 @@ async def batch_resolve_vendor_aliases(body: dict):
                 {"vendor_canonical": {"$regex": f"^{alias_string}$", "$options": "i"}},
             ],
         }
-        gap_docs = await db.hub_documents.find(
+        gap_docs = await database.hub_documents.find(
             doc_query, {"_id": 0, "id": 1, "validation_results": 1}
         ).to_list(500)
 
@@ -640,7 +634,7 @@ async def batch_resolve_vendor_aliases(body: dict):
                 "score": 1.0,
             })
             all_passed = all(ch.get("passed", True) for ch in new_checks)
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "validation_results.checks": new_checks,

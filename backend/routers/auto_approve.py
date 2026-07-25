@@ -10,8 +10,9 @@ Endpoints:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query
-from deps import get_db
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from services.stable_vendor_service import get_stable_vendor_service
 
 logger = logging.getLogger("auto_approve")
@@ -55,11 +56,12 @@ def _get_vendor_id(doc):
 
 
 @router.get("/diagnose")
-async def diagnose_approval_backlog():
+async def diagnose_approval_backlog(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Analyze the Needs Approval backlog and what's blocking auto-approval."""
-    db = get_db()
 
-    candidates = await _get_approval_candidates(db)
+    candidates = await _get_approval_candidates(database)
 
     # Group by vendor
     by_vendor = {}
@@ -78,7 +80,7 @@ async def diagnose_approval_backlog():
 
     stable_vendors = set()
     if svc:
-        profiles = await db.vendor_intelligence_profiles.find(
+        profiles = await database.vendor_intelligence_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1, "stable_vendor_flag": 1,
                  "effective_status": 1, "manual_override_status": 1}
         ).to_list(5000)
@@ -129,15 +131,15 @@ async def dry_run_auto_approve(
     require_stable_vendor: bool = Query(True, description="Only approve docs from stable vendors"),
     require_bc_link: bool = Query(False, description="Only approve docs linked to BC"),
     min_routing_score: int = Query(0, description="Minimum routing score to approve"),
-):
-    """Preview what would be auto-approved."""
-    db = get_db()
 
-    candidates = await _get_approval_candidates(db)
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    """Preview what would be auto-approved."""
+
+    candidates = await _get_approval_candidates(database)
 
     stable_vendors = set()
     if require_stable_vendor:
-        profiles = await db.vendor_intelligence_profiles.find(
+        profiles = await database.vendor_intelligence_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1, "stable_vendor_flag": 1,
                  "manual_override_status": 1}
         ).to_list(5000)
@@ -205,16 +207,16 @@ async def run_auto_approve(
     require_bc_link: bool = Query(False, description="Only approve docs linked to BC"),
     min_routing_score: int = Query(0, description="Minimum routing score to approve"),
     force: bool = Query(False, description="Force approve ALL candidates regardless of vendor stability"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Execute batch auto-approve for qualifying documents."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    candidates = await _get_approval_candidates(db)
+    candidates = await _get_approval_candidates(database)
 
     stable_vendors = set()
     if require_stable_vendor and not force:
-        profiles = await db.vendor_intelligence_profiles.find(
+        profiles = await database.vendor_intelligence_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1, "stable_vendor_flag": 1,
                  "manual_override_status": 1}
         ).to_list(5000)
@@ -243,7 +245,7 @@ async def run_auto_approve(
                 skipped += 1
                 continue
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc["id"]},
             {"$set": {
                 "workflow_status": "approved",

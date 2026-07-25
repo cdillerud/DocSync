@@ -17,9 +17,10 @@ import logging
 import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Optional
-from fastapi import APIRouter, Query, Body
+from fastapi import APIRouter, Query, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sales-dashboard", tags=["Sales Dashboard"])
@@ -132,9 +133,9 @@ async def sales_queue(
     sort: str = Query("created_desc", description="Sort: created_desc|created_asc|amount_desc|amount_asc"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return sales-eligible documents with lightweight readiness assessment."""
-    db = get_db()
 
     # Base query: only sales-eligible document types
     query = {"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}}
@@ -188,8 +189,8 @@ async def sales_queue(
     }
     sort_spec = sort_map.get(sort, [("created_utc", -1)])
 
-    total = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
+    total = await database.hub_documents.count_documents(query)
+    cursor = database.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     # Assess readiness for each doc
@@ -211,7 +212,7 @@ async def sales_queue(
         })
 
     # Summary counts (from full dataset, not paginated)
-    summary = await _compute_summary(db)
+    summary = await _compute_summary(database)
 
     return {
         "items": items,
@@ -224,10 +225,11 @@ async def sales_queue(
 
 
 @router.get("/summary")
-async def sales_summary():
+async def sales_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Fast summary counts for dashboard cards."""
-    db = get_db()
-    return await _compute_summary(db)
+    return await _compute_summary(database)
 
 
 async def _compute_summary(db) -> dict:
@@ -252,14 +254,15 @@ async def _compute_summary(db) -> dict:
 
 
 @router.delete("/queue/clear")
-async def clear_sales_queue():
+async def clear_sales_queue(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Remove all sales-eligible documents from hub_documents.
     This clears the Sales Orders queue completely.
     """
-    db = get_db()
     query = {"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}}
-    result = await db.hub_documents.delete_many(query)
+    result = await database.hub_documents.delete_many(query)
     deleted = result.deleted_count
     logger.info("Cleared sales queue: %d documents removed", deleted)
     return {"deleted": deleted, "message": f"Cleared {deleted} sales documents from queue"}
@@ -278,16 +281,17 @@ class AssignRequest(BaseModel):
 
 
 @router.get("/reps")
-async def list_reps():
+async def list_reps(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List available sales reps from BC cache + overrides.
     Used to populate the 'Select Rep' dropdown.
     """
-    db = get_db()
     reps = []
     seen_emails = set()
 
     # 1. From BC salesperson cache
-    sp_records = await db.bc_reference_cache.find(
+    sp_records = await database.bc_reference_cache.find(
         {"bc_entity_type": "salesperson"},
         {"_id": 0, "code": 1, "name": 1, "email": 1},
     ).to_list(200)
@@ -303,7 +307,7 @@ async def list_reps():
             seen_emails.add(email)
 
     # 2. From customer_rep_overrides
-    overrides = await db.customer_rep_overrides.find(
+    overrides = await database.customer_rep_overrides.find(
         {"active": True}, {"_id": 0}
     ).to_list(500)
     for ov in overrides:
@@ -325,7 +329,7 @@ async def list_reps():
             "rep_name": {"$first": "$assigned_rep_name"},
         }},
     ]
-    from_docs = await db.hub_documents.aggregate(pipeline).to_list(100)
+    from_docs = await database.hub_documents.aggregate(pipeline).to_list(100)
     for d in from_docs:
         email = d["_id"]
         if email and email not in seen_emails:
@@ -349,9 +353,9 @@ async def my_queue(
     sort: str = Query("created_desc"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return documents assigned to a specific sales rep."""
-    db = get_db()
 
     query = {
         "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
@@ -378,8 +382,8 @@ async def my_queue(
     }
     sort_spec = sort_map.get(sort, [("created_utc", -1)])
 
-    total = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
+    total = await database.hub_documents.count_documents(query)
+    cursor = database.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     items = []
@@ -404,7 +408,7 @@ async def my_queue(
         {"$match": {"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}, "assigned_rep_email": rep_email}},
         {"$group": {"_id": "$sales_review_status", "count": {"$sum": 1}}},
     ]
-    for r in await db.hub_documents.aggregate(count_pipeline).to_list(10):
+    for r in await database.hub_documents.aggregate(count_pipeline).to_list(10):
         key = r["_id"] or "pending_rep_review"
         if key in rep_summary:
             rep_summary[key] = r["count"]
@@ -425,9 +429,9 @@ async def triage_queue(
     search: str = Query("", description="Search filename/PO/customer"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return sales-eligible documents with no rep assigned (triage queue)."""
-    db = get_db()
 
     query = {
         "document_type": {"$in": list(SALES_ELIGIBLE_TYPES)},
@@ -458,8 +462,8 @@ async def triage_queue(
             ]
         }
 
-    total = await db.hub_documents.count_documents(combined_query)
-    cursor = db.hub_documents.find(combined_query, {"_id": 0}).sort([("created_utc", -1)]).skip(skip).limit(limit)
+    total = await database.hub_documents.count_documents(combined_query)
+    cursor = database.hub_documents.find(combined_query, {"_id": 0}).sort([("created_utc", -1)]).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     items = []
@@ -479,11 +483,10 @@ async def triage_queue(
 
 
 @router.post("/queue/{doc_id}/approve")
-async def approve_document(doc_id: str):
+async def approve_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Rep approves a document → mark as approved, ready for BC SO creation."""
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
     if not doc:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Document not found")
@@ -495,7 +498,7 @@ async def approve_document(doc_id: str):
         "by": "rep",
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$set": {
@@ -512,11 +515,10 @@ async def approve_document(doc_id: str):
 
 
 @router.post("/queue/{doc_id}/flag")
-async def flag_document(doc_id: str, body: FlagRequest):
+async def flag_document(doc_id: str, body: FlagRequest, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Rep flags a document for attention → stays in queue with notes."""
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
     if not doc:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Document not found")
@@ -529,7 +531,7 @@ async def flag_document(doc_id: str, body: FlagRequest):
         "notes": body.notes,
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$set": {
@@ -547,11 +549,10 @@ async def flag_document(doc_id: str, body: FlagRequest):
 
 
 @router.post("/queue/{doc_id}/assign")
-async def assign_document(doc_id: str, body: AssignRequest):
+async def assign_document(doc_id: str, body: AssignRequest, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Manually assign a rep to a document (triage action)."""
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1})
     if not doc:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Document not found")
@@ -564,7 +565,7 @@ async def assign_document(doc_id: str, body: AssignRequest):
         "rep_name": body.rep_name,
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$set": {
@@ -587,13 +588,12 @@ class ReviewActionRequest(BaseModel):
 
 
 @router.post("/review/{doc_id}")
-async def review_document(doc_id: str, body: ReviewActionRequest):
+async def review_document(doc_id: str, body: ReviewActionRequest, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Unified review action endpoint for the SalesOrderReviewPage.
     Supports both approve and flag actions in a single endpoint.
     """
-    db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "sales_review_status": 1})
     if not doc:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Document not found")
@@ -606,7 +606,7 @@ async def review_document(doc_id: str, body: ReviewActionRequest):
             "at": now,
             "by": "rep",
         }
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {
                 "$set": {
@@ -627,7 +627,7 @@ async def review_document(doc_id: str, body: ReviewActionRequest):
             "by": "rep",
             "notes": body.reason,
         }
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {
                 "$set": {
@@ -649,11 +649,12 @@ async def review_document(doc_id: str, body: ReviewActionRequest):
 
 
 @router.post("/seed-review-data")
-async def seed_review_data():
+async def seed_review_data(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Seed rich, production-realistic demo data for the Inside Sales Rep Review feature.
     Creates realistic sales documents, rep assignments, overrides, and audit trails.
     """
-    db = get_db()
     import random
     random.seed(42)  # Reproducible demo data
 
@@ -942,12 +943,12 @@ async def seed_review_data():
         sample_docs.append(doc)
 
     # ── Clear and insert ──
-    await db.hub_documents.delete_many({"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}})
+    await database.hub_documents.delete_many({"document_type": {"$in": list(SALES_ELIGIBLE_TYPES)}})
     if sample_docs:
-        await db.hub_documents.insert_many(sample_docs)
+        await database.hub_documents.insert_many(sample_docs)
 
     # ── Seed customer→rep overrides for the assigned customers ──
-    await db.customer_rep_overrides.delete_many({})
+    await database.customer_rep_overrides.delete_many({})
     overrides = []
     for cust in customers:
         rep = reps[cust["rep_idx"]]
@@ -963,7 +964,7 @@ async def seed_review_data():
             "updated_utc": now.isoformat(),
         })
     if overrides:
-        await db.customer_rep_overrides.insert_many(overrides)
+        await database.customer_rep_overrides.insert_many(overrides)
 
     # Count by status
     counts = {}
@@ -984,11 +985,12 @@ async def seed_review_data():
 
 
 @router.post("/run-auto-assign")
-async def run_auto_assign():
+async def run_auto_assign(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Run the sales auto-assignment pipeline on all sales-eligible documents
     that don't yet have a rep assigned. Useful for re-processing historical data.
     """
-    db = get_db()
     from services.sales_auto_assign import auto_assign_sales_rep
 
     query = {
@@ -1001,12 +1003,12 @@ async def run_auto_assign():
         ],
     }
 
-    docs = await db.hub_documents.find(query, {"_id": 0}).to_list(1000)
+    docs = await database.hub_documents.find(query, {"_id": 0}).to_list(1000)
     results = {"assigned": 0, "triage": 0, "skipped": 0, "errors": 0}
 
     for doc in docs:
         try:
-            result = await auto_assign_sales_rep(db, doc["id"], doc)
+            result = await auto_assign_sales_rep(database, doc["id"], doc)
             if result and result.get("assigned"):
                 results["assigned"] += 1
             elif result:
@@ -1038,9 +1040,9 @@ async def list_rep_overrides(
     override_type: str = Query(None),
     rep_email: str = Query(None),
     customer_no: str = Query(None),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List customer→rep manual overrides with filters."""
-    db = get_db()
     match: dict = {}
     if active_only:
         match["active"] = True
@@ -1051,7 +1053,7 @@ async def list_rep_overrides(
     if customer_no:
         match["customer_no"] = customer_no
 
-    overrides = await db.customer_rep_overrides.find(
+    overrides = await database.customer_rep_overrides.find(
         match, {"_id": 0}
     ).sort([("customer_name", 1)]).to_list(500)
 
@@ -1066,10 +1068,9 @@ async def list_rep_overrides(
 
 
 @router.post("/rep-overrides")
-async def create_rep_override(body: RepOverrideRequest):
+async def create_rep_override(body: RepOverrideRequest, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create or update a customer→rep override. Used by admins to manually
     map customers to sales reps for auto-assignment."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     if not body.customer_no and not body.customer_name:
@@ -1098,7 +1099,7 @@ async def create_rep_override(body: RepOverrideRequest):
         "updated_by": "admin",
     }
 
-    result = await db.customer_rep_overrides.update_one(
+    result = await database.customer_rep_overrides.update_one(
         filter_q,
         {"$set": override_doc, "$setOnInsert": {"id": str(uuid.uuid4()), "created_utc": now}},
         upsert=True,
@@ -1110,10 +1111,9 @@ async def create_rep_override(body: RepOverrideRequest):
 
 
 @router.delete("/rep-overrides/{customer_no}")
-async def delete_rep_override(customer_no: str):
+async def delete_rep_override(customer_no: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Deactivate a customer→rep override."""
-    db = get_db()
-    result = await db.customer_rep_overrides.update_one(
+    result = await database.customer_rep_overrides.update_one(
         {"customer_no": customer_no},
         {"$set": {"active": False, "updated_utc": datetime.now(timezone.utc).isoformat()}},
     )

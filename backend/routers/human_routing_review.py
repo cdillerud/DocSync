@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel, Field
 
-from deps import get_db
 
 router = APIRouter(prefix="/human-routing-review", tags=["Human Routing Review"])
 
@@ -120,10 +121,11 @@ def _flatten_rules(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 @router.get("/folder-options")
-async def get_folder_options():
+async def get_folder_options(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Return selectable folder-level destinations from the live routing configuration."""
-    db = get_db()
-    rules = await db.sharepoint_folder_rules.find(
+    rules = await database.sharepoint_folder_rules.find(
         {"is_active": {"$ne": False}}, {"_id": 0}
     ).sort("sort_order", 1).to_list(500)
 
@@ -150,10 +152,9 @@ async def get_folder_options():
 
 
 @router.get("/document/{doc_id}/suggestion")
-async def get_routing_suggestion(doc_id: str):
+async def get_routing_suggestion(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return the current folder and the AI/learned routing suggestion for one document."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -180,10 +181,9 @@ async def get_routing_suggestion(doc_id: str):
 
 
 @router.post("/document/{doc_id}/assign")
-async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment):
+async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Save a human folder decision and immediately teach the live routing learner."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -205,7 +205,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
     if profile["vendor"]:
         from services.routing_feedback_service import init_feedback_db, record_correction
 
-        init_feedback_db(db)
+        init_feedback_db(database)
         learning_result = await record_correction(
             vendor=profile["vendor"],
             doc_type=profile["doc_type"],
@@ -238,7 +238,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
         "created_at": now,
     }
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$set": {
@@ -250,7 +250,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
             }
         },
     )
-    await db.human_routing_decisions.insert_one(decision_record)
+    await database.human_routing_decisions.insert_one(decision_record)
     decision_record.pop("_id", None)
 
     return {

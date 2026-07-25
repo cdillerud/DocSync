@@ -4,40 +4,42 @@ PO Resolution Metrics Router
 Exposes truthful metrics for PO resolution and BC linkage rates.
 Includes miss taxonomy, BC link failure breakdown, and batch validation.
 """
-from fastapi import APIRouter, Query
-from deps import get_db
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 router = APIRouter(prefix="/po-resolution", tags=["PO Resolution"])
 
 
 @router.get("/metrics")
-async def get_po_resolution_metrics():
+async def get_po_resolution_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """PO resolution and BC link metrics for shipping-style documents."""
-    db = get_db()
 
     from services.po_resolution_service import PO_REQUIRED_DOC_TYPES
     doc_types = list(PO_REQUIRED_DOC_TYPES)
 
-    total = await db.hub_documents.count_documents({"document_type": {"$in": doc_types}})
-    po_attempted = await db.hub_documents.count_documents(
+    total = await database.hub_documents.count_documents({"document_type": {"$in": doc_types}})
+    po_attempted = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution": {"$exists": True}}
     )
-    po_resolved = await db.hub_documents.count_documents(
+    po_resolved = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": {"$in": ["resolved", "resolved_shipment"]}}
     )
-    po_resolved_po = await db.hub_documents.count_documents(
+    po_resolved_po = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "resolved"}
     )
-    po_resolved_shipment = await db.hub_documents.count_documents(
+    po_resolved_shipment = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "resolved_shipment"}
     )
-    po_ambiguous = await db.hub_documents.count_documents(
+    po_ambiguous = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "ambiguous"}
     )
-    po_not_found = await db.hub_documents.count_documents(
+    po_not_found = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "not_found"}
     )
-    po_skipped = await db.hub_documents.count_documents(
+    po_skipped = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.status": "skipped"}
     )
 
@@ -47,23 +49,23 @@ async def get_po_resolution_metrics():
         {"$group": {"_id": "$po_resolution.miss_reason", "count": {"$sum": 1}}},
     ]
     unresolved_by_miss_reason = {}
-    async for item in db.hub_documents.aggregate(miss_pipeline):
+    async for item in database.hub_documents.aggregate(miss_pipeline):
         unresolved_by_miss_reason[item["_id"]] = item["count"]
 
     # BC link stats — real BC linkage only (has bc_record_id AND linked status)
-    bc_link_attempted = await db.hub_documents.count_documents(
+    bc_link_attempted = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link": {"$exists": True}}
     )
-    bc_linked_real = await db.hub_documents.count_documents(
+    bc_linked_real = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "linked"}
     )
-    bc_linked_local = await db.hub_documents.count_documents(
+    bc_linked_local = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "linked_local"}
     )
-    bc_linked_shipment = await db.hub_documents.count_documents(
+    bc_linked_shipment = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "linked_shipment"}
     )
-    bc_link_failed = await db.hub_documents.count_documents(
+    bc_link_failed = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_resolution.bc_link.status": "failed"}
     )
 
@@ -73,7 +75,7 @@ async def get_po_resolution_metrics():
         {"$group": {"_id": "$po_resolution.bc_link.error_code", "count": {"$sum": 1}}},
     ]
     bc_link_failures_by_reason = {}
-    async for item in db.hub_documents.aggregate(bc_fail_pipeline):
+    async for item in database.hub_documents.aggregate(bc_fail_pipeline):
         bc_link_failures_by_reason[item["_id"] or "unknown"] = item["count"]
 
     # Match method distribution
@@ -82,7 +84,7 @@ async def get_po_resolution_metrics():
         {"$group": {"_id": "$po_resolution.match_method", "count": {"$sum": 1}}},
     ]
     match_methods = {}
-    async for item in db.hub_documents.aggregate(method_pipeline):
+    async for item in database.hub_documents.aggregate(method_pipeline):
         match_methods[item["_id"]] = item["count"]
 
     # Lookup source distribution
@@ -91,26 +93,26 @@ async def get_po_resolution_metrics():
         {"$group": {"_id": "$po_resolution.lookup_source", "count": {"$sum": 1}}},
     ]
     lookup_sources = {}
-    async for item in db.hub_documents.aggregate(source_pipeline):
+    async for item in database.hub_documents.aggregate(source_pipeline):
         lookup_sources[item["_id"]] = item["count"]
 
     # Multi-PO docs
-    multi_po = await db.hub_documents.count_documents(
+    multi_po = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "po_candidates.2": {"$exists": True}}
     )
 
-    needs_review = await db.hub_documents.count_documents(
+    needs_review = await database.hub_documents.count_documents(
         {"document_type": {"$in": doc_types}, "status": "NeedsReview"}
     )
 
     # By doc type breakdown
     type_breakdown = {}
     for dt in doc_types:
-        dt_total = await db.hub_documents.count_documents({"document_type": dt})
-        dt_resolved = await db.hub_documents.count_documents(
+        dt_total = await database.hub_documents.count_documents({"document_type": dt})
+        dt_resolved = await database.hub_documents.count_documents(
             {"document_type": dt, "po_resolution.status": {"$in": ["resolved", "resolved_shipment"]}}
         )
-        dt_bc_linked = await db.hub_documents.count_documents(
+        dt_bc_linked = await database.hub_documents.count_documents(
             {"document_type": dt, "po_resolution.bc_link.status": "linked"}
         )
         type_breakdown[dt] = {"total": dt_total, "resolved": dt_resolved, "bc_linked": dt_bc_linked}
@@ -160,9 +162,9 @@ async def batch_resolve_po(
     limit: int = Query(200),
     force: bool = Query(False, description="Re-resolve even if po_resolution already exists"),
     status_filter: str = Query(None, description="Filter by document status e.g. NeedsReview"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Batch resolve PO for shipping-style documents. Returns a summary."""
-    db = get_db()
 
     from services.po_resolution_service import (
         resolve_po_from_document, attempt_bc_link, PO_REQUIRED_DOC_TYPES,
@@ -178,7 +180,7 @@ async def batch_resolve_po(
     if status_filter:
         query["status"] = status_filter
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query,
         {"_id": 0, "id": 1, "file_name": 1, "document_type": 1,
          "extracted_fields": 1, "raw_text": 1, "po_candidates": 1,
@@ -209,7 +211,7 @@ async def batch_resolve_po(
         bc_link = await attempt_bc_link(doc_id, result)
         result["bc_link"] = bc_link
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {"po_resolution": result, "po_candidates": result.get("candidates_raw", [])}},
         )

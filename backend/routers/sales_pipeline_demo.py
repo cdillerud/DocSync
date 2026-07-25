@@ -20,8 +20,9 @@ import random
 import time
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Query, BackgroundTasks
-from deps import get_db
+from fastapi import APIRouter, Query, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sales-dashboard/demo", tags=["Sales Pipeline Demo"])
@@ -212,13 +213,14 @@ def _generate_po_pdf(scenario: dict) -> bytes:
 
 
 @router.get("/scenarios")
-async def list_scenarios():
+async def list_scenarios(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List available demo scenarios for the pipeline demo.
     Also ensures demo data (overrides) exist — auto-seeds if empty.
     """
-    db = get_db()
     # Auto-seed overrides if none exist (ensures demo works first time)
-    override_count = await db.customer_rep_overrides.count_documents({"active": True})
+    override_count = await database.customer_rep_overrides.count_documents({"active": True})
     if override_count == 0:
         logger.info("[PipelineDemo] No overrides found — auto-seeding demo data")
         # Import and call seed endpoint logic inline
@@ -242,11 +244,10 @@ async def list_scenarios():
 
 
 @router.post("/run")
-async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
+async def run_pipeline_demo(scenario_id: str = Query("bragg-rush"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Run the full intake pipeline on a generated PO document.
     Returns detailed step-by-step trace of every pipeline stage.
     """
-    db = get_db()
 
     # Find scenario
     scenario = next((s for s in DEMO_SCENARIOS if s["id"] == scenario_id), None)
@@ -282,7 +283,7 @@ async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
     t0 = time.time()
     try:
         # Remove any existing doc with same hash to allow re-demos
-        await db.hub_documents.delete_many({"sha256_hash": file_hash})
+        await database.hub_documents.delete_many({"sha256_hash": file_hash})
 
         from services.document_handlers import intake_document_from_bytes
         result = await intake_document_from_bytes(
@@ -326,7 +327,7 @@ async def run_pipeline_demo(scenario_id: str = Query("bragg-rush")):
         return {"steps": steps, "total_duration_ms": round((time.time() - start_time) * 1000), "status": "error"}
 
     # ── STEP 3-7: Read the processed document and extract stage results ──
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         steps.append({"step": 3, "name": "Document Retrieval", "status": "error", "error": "Document not found after intake"})
         return {"steps": steps, "total_duration_ms": round((time.time() - start_time) * 1000), "status": "error"}
@@ -644,15 +645,14 @@ def _generate_batch_po_pdf(po_data: list) -> bytes:
 
 
 @router.post("/run-batch")
-async def run_batch_demo(background_tasks: BackgroundTasks):
+async def run_batch_demo(background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Demo: Generate a multi-page batch PO PDF, ingest it, then split each page.
     Returns immediately with job_id. Poll /demo/batch-status/{job_id} for results.
     """
-    db = get_db()
     job_id = uuid.uuid4().hex[:12]
 
     # Store initial status in DB
-    await db.demo_batch_jobs.update_one(
+    await database.demo_batch_jobs.update_one(
         {"job_id": job_id},
         {"$set": {
             "job_id": job_id,
@@ -665,7 +665,7 @@ async def run_batch_demo(background_tasks: BackgroundTasks):
         upsert=True,
     )
 
-    background_tasks.add_task(_run_batch_demo_bg, db, job_id)
+    background_tasks.add_task(_run_batch_demo_bg, database, job_id)
 
     return {
         "status": "started",
@@ -676,10 +676,9 @@ async def run_batch_demo(background_tasks: BackgroundTasks):
 
 
 @router.get("/batch-status/{job_id}")
-async def batch_status(job_id: str):
+async def batch_status(job_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Poll for batch demo results."""
-    db = get_db()
-    job = await db.demo_batch_jobs.find_one({"job_id": job_id}, {"_id": 0})
+    job = await database.demo_batch_jobs.find_one({"job_id": job_id}, {"_id": 0})
     if not job:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Job not found")

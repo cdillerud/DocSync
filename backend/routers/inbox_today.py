@@ -13,9 +13,10 @@ import re
 from typing import Any, Dict, Iterable, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
-from deps import get_db
 from services.vendor_name_helpers import vendor_identity_agrees
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
@@ -824,14 +825,14 @@ async def get_inbox_today(
     lane: str = Query("all", description="all, ap, warehouse, sales, or other"),
     routing_status: str = Query("all", description="Optional routing-status filter"),
     limit: int = Query(1000, ge=1, le=5000),
-):
-    db = get_db()
-    docs = await db.hub_documents.find(
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    docs = await database.hub_documents.find(
         build_today_filter(), TODAY_PROJECTION
     ).sort("created_utc", -1).to_list(None)
 
     for doc in docs:
-        await _normalize_stored_suggestion(db, doc)
+        await _normalize_stored_suggestion(database, doc)
     for doc in docs:
         await _add_current_rule_suggestion(doc)
 

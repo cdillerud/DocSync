@@ -12,10 +12,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/intake-benchmark", tags=["Intake Benchmark"])
@@ -196,8 +197,7 @@ def auto_score_correctness(doc):
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/runs")
-async def create_run(req: CreateRunReq):
-    db = get_db()
+async def create_run(req: CreateRunReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     run_id = str(uuid.uuid4())[:12]
     now = datetime.now(timezone.utc).isoformat()
     run = {
@@ -215,48 +215,44 @@ async def create_run(req: CreateRunReq):
         "completed_at": None,
         "archived_at": None,
     }
-    await db[RUNS_COLL].insert_one(run)
+    await database[RUNS_COLL].insert_one(run)
     run.pop("_id", None)
     return run
 
 
 @router.get("/runs")
-async def list_runs(status: Optional[str] = None):
-    db = get_db()
+async def list_runs(status: Optional[str] = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     query = {}
     if status:
         query["status"] = status
-    runs = await db[RUNS_COLL].find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
+    runs = await database[RUNS_COLL].find(query, {"_id": 0}).sort("created_at", -1).to_list(200)
     return {"runs": runs, "total": len(runs)}
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: str):
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
+async def get_run(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    run = await database[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
     if not run:
         raise HTTPException(404, "Run not found")
-    doc_count = await db[DOCS_COLL].count_documents({"run_id": run_id})
+    doc_count = await database[DOCS_COLL].count_documents({"run_id": run_id})
     run["actual_document_count"] = doc_count
     return run
 
 
 @router.put("/runs/{run_id}")
-async def update_run(run_id: str, req: UpdateRunReq):
-    db = get_db()
+async def update_run(run_id: str, req: UpdateRunReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     updates = {k: v for k, v in req.dict().items() if v is not None}
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    result = await db[RUNS_COLL].update_one({"run_id": run_id}, {"$set": updates})
+    result = await database[RUNS_COLL].update_one({"run_id": run_id}, {"$set": updates})
     if result.matched_count == 0:
         raise HTTPException(404, "Run not found")
     return await get_run(run_id)
 
 
 @router.post("/runs/{run_id}/complete")
-async def complete_run(run_id: str):
-    db = get_db()
+async def complete_run(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     now = datetime.now(timezone.utc).isoformat()
-    result = await db[RUNS_COLL].update_one(
+    result = await database[RUNS_COLL].update_one(
         {"run_id": run_id},
         {"$set": {"status": "complete", "completed_at": now, "updated_at": now}}
     )
@@ -266,10 +262,9 @@ async def complete_run(run_id: str):
 
 
 @router.post("/runs/{run_id}/archive")
-async def archive_run(run_id: str):
-    db = get_db()
+async def archive_run(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     now = datetime.now(timezone.utc).isoformat()
-    result = await db[RUNS_COLL].update_one(
+    result = await database[RUNS_COLL].update_one(
         {"run_id": run_id},
         {"$set": {"status": "archived", "archived_at": now, "updated_at": now}}
     )
@@ -279,15 +274,14 @@ async def archive_run(run_id: str):
 
 
 @router.delete("/runs/{run_id}")
-async def delete_run(run_id: str):
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
+async def delete_run(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    run = await database[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
     if not run:
         raise HTTPException(404, "Run not found")
     if run["status"] != "draft":
         raise HTTPException(400, "Only draft runs can be deleted")
-    await db[DOCS_COLL].delete_many({"run_id": run_id})
-    await db[RUNS_COLL].delete_one({"run_id": run_id})
+    await database[DOCS_COLL].delete_many({"run_id": run_id})
+    await database[RUNS_COLL].delete_one({"run_id": run_id})
     return {"deleted": True}
 
 
@@ -340,23 +334,21 @@ def _make_doc(run_id: str, data: dict) -> dict:
 
 
 @router.post("/runs/{run_id}/documents")
-async def add_document(run_id: str, req: AddDocumentReq):
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id})
+async def add_document(run_id: str, req: AddDocumentReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    run = await database[RUNS_COLL].find_one({"run_id": run_id})
     if not run:
         raise HTTPException(404, "Run not found")
     doc = _make_doc(run_id, req.dict())
-    await db[DOCS_COLL].insert_one(doc)
+    await database[DOCS_COLL].insert_one(doc)
     doc.pop("_id", None)
-    await db[RUNS_COLL].update_one({"run_id": run_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    await database[RUNS_COLL].update_one({"run_id": run_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
     return doc
 
 
 @router.post("/runs/{run_id}/documents/import")
-async def bulk_import_documents(run_id: str, file: UploadFile = File(...)):
+async def bulk_import_documents(run_id: str, file: UploadFile = File(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Import documents from CSV. Columns: document_id, file_name, source_path, received_date, vendor_truth, doc_type_truth, amount_truth, po_truth, folder_truth"""
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id})
+    run = await database[RUNS_COLL].find_one({"run_id": run_id})
     if not run:
         raise HTTPException(404, "Run not found")
 
@@ -376,11 +368,11 @@ async def bulk_import_documents(run_id: str, file: UploadFile = File(...)):
         docs.append(_make_doc(run_id, row))
 
     if docs:
-        await db[DOCS_COLL].insert_many(docs)
+        await database[DOCS_COLL].insert_many(docs)
         for d in docs:
             d.pop("_id", None)
 
-    await db[RUNS_COLL].update_one({"run_id": run_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
+    await database[RUNS_COLL].update_one({"run_id": run_id}, {"$set": {"updated_at": datetime.now(timezone.utc).isoformat()}})
     return {"imported": len(docs)}
 
 
@@ -397,8 +389,8 @@ async def list_documents(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 200,
-):
-    db = get_db()
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     query = {"run_id": run_id}
 
     if final_status:
@@ -435,24 +427,22 @@ async def list_documents(
             {"vendor_truth": {"$regex": search, "$options": "i"}},
         ]
 
-    total = await db[DOCS_COLL].count_documents(query)
-    docs = await db[DOCS_COLL].find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
+    total = await database[DOCS_COLL].count_documents(query)
+    docs = await database[DOCS_COLL].find(query, {"_id": 0}).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total}
 
 
 @router.get("/runs/{run_id}/documents/{doc_uid}")
-async def get_document(run_id: str, doc_uid: str):
-    db = get_db()
-    doc = await db[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid}, {"_id": 0})
+async def get_document(run_id: str, doc_uid: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    doc = await database[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid}, {"_id": 0})
     if not doc:
         raise HTTPException(404, "Document not found")
     return doc
 
 
 @router.put("/runs/{run_id}/documents/{doc_uid}")
-async def update_document_scoring(run_id: str, doc_uid: str, req: UpdateDocScoringReq):
-    db = get_db()
-    doc = await db[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid})
+async def update_document_scoring(run_id: str, doc_uid: str, req: UpdateDocScoringReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    doc = await database[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid})
     if not doc:
         raise HTTPException(404, "Document not found")
 
@@ -467,25 +457,24 @@ async def update_document_scoring(run_id: str, doc_uid: str, req: UpdateDocScori
         updates["gpi_manually_edited"] = True
 
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db[DOCS_COLL].update_one({"run_id": run_id, "doc_uid": doc_uid}, {"$set": updates})
+    await database[DOCS_COLL].update_one({"run_id": run_id, "doc_uid": doc_uid}, {"$set": updates})
 
     # Re-fetch, auto-score, and apply
-    doc = await db[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid})
+    doc = await database[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid})
     doc.pop("_id", None)
     scores = auto_score_correctness(doc)
     # Only apply auto-scored fields that weren't explicitly set in this request
     auto_apply = {k: v for k, v in scores.items() if k not in updates}
     if auto_apply:
-        await db[DOCS_COLL].update_one({"run_id": run_id, "doc_uid": doc_uid}, {"$set": auto_apply})
+        await database[DOCS_COLL].update_one({"run_id": run_id, "doc_uid": doc_uid}, {"$set": auto_apply})
 
-    final = await db[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid}, {"_id": 0})
+    final = await database[DOCS_COLL].find_one({"run_id": run_id, "doc_uid": doc_uid}, {"_id": 0})
     return final
 
 
 @router.delete("/runs/{run_id}/documents/{doc_uid}")
-async def delete_document(run_id: str, doc_uid: str):
-    db = get_db()
-    result = await db[DOCS_COLL].delete_one({"run_id": run_id, "doc_uid": doc_uid})
+async def delete_document(run_id: str, doc_uid: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    result = await database[DOCS_COLL].delete_one({"run_id": run_id, "doc_uid": doc_uid})
     if result.deleted_count == 0:
         raise HTTPException(404, "Document not found")
     return {"deleted": True}
@@ -600,14 +589,13 @@ async def _normalize_vendor_casing(db, run_id: str, vendor_name: str) -> str:
 
 
 @router.post("/runs/{run_id}/auto-populate")
-async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, description="Seed empty truth fields from GPI extraction")):
+async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, description="Seed empty truth fields from GPI extraction"), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Auto-populate GPI fields from existing hub_documents collection.
     
     When seed_truth=True (default), also fills empty ground truth fields from
     GPI extraction data so accuracy scoring can work immediately.
     """
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
 
     linked = 0
     truth_seeded = 0
@@ -619,7 +607,7 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
             continue
 
         # Try to find matching hub document — multiple strategies
-        hub_doc = await _find_hub_document(db, did, fname)
+        hub_doc = await _find_hub_document(database, did, fname)
 
         if hub_doc:
             # Pull from all possible field locations in hub_documents
@@ -734,7 +722,7 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
                 if seeded:
                     truth_seeded += 1
 
-            await db[DOCS_COLL].update_one(
+            await database[DOCS_COLL].update_one(
                 {"run_id": run_id, "doc_uid": doc["doc_uid"]},
                 {"$set": gpi_updates}
             )
@@ -757,11 +745,11 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
                 else:
                     # Try sync inference first, then async BC cross-reference
                     inferred_vendor, infer_method = await infer_vendor_async(
-                        db, fname, doc.get("extracted_fields")
+                        database, fname, doc.get("extracted_fields")
                     )
                     if inferred_vendor:
                         # Normalize casing: check if vendor exists in run with different case
-                        normalized_vendor = await _normalize_vendor_casing(db, run_id, inferred_vendor)
+                        normalized_vendor = await _normalize_vendor_casing(database, run_id, inferred_vendor)
                         infer_updates["gpi_vendor"] = normalized_vendor
                         infer_updates["gpi_ingested"] = True
                         infer_updates["gpi_notes"] = f"Vendor inferred: {infer_method}"
@@ -779,25 +767,25 @@ async def auto_populate_gpi(run_id: str, seed_truth: bool = Query(True, descript
                     truth_seeded += 1
 
             if len(infer_updates) > 1:  # More than just updated_at
-                await db[DOCS_COLL].update_one(
+                await database[DOCS_COLL].update_one(
                     {"run_id": run_id, "doc_uid": doc["doc_uid"]},
                     {"$set": infer_updates}
                 )
 
     # Auto-score all docs in run
-    all_docs = await db[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
+    all_docs = await database[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
     for d in all_docs:
         d.pop("_id", None)
         scores = auto_score_correctness(d)
         if scores:
-            await db[DOCS_COLL].update_one(
+            await database[DOCS_COLL].update_one(
                 {"run_id": run_id, "doc_uid": d["doc_uid"]},
                 {"$set": scores}
             )
 
     # Update run status
     if linked > 0:
-        await db[RUNS_COLL].update_one(
+        await database[RUNS_COLL].update_one(
             {"run_id": run_id},
             {"$set": {"status": "in_progress", "updated_at": datetime.now(timezone.utc).isoformat()}}
         )
@@ -922,11 +910,10 @@ def _calc_breakdowns(docs):
 
 
 @router.post("/runs/{run_id}/reroute-folders")
-async def reroute_folders(run_id: str):
+async def reroute_folders(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Re-run folder routing for all documents in a run using latest routing logic."""
     from services.folder_routing_service import determine_folder_path
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
     if not docs:
         raise HTTPException(404, "No documents in this run")
     
@@ -956,7 +943,7 @@ async def reroute_folders(run_id: str):
         truth = d.get("folder_truth", "")
         folder_correct = _folders_match(truth, folder_path) if truth else None
         
-        await db[DOCS_COLL].update_one(
+        await database[DOCS_COLL].update_one(
             {"run_id": run_id, "document_id": d["document_id"]},
             {"$set": {
                 "gpi_folder_output": folder_path,
@@ -978,21 +965,22 @@ async def reroute_folders(run_id: str):
 
 
 @router.post("/runs/reroute-all")
-async def reroute_all_runs():
+async def reroute_all_runs(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Re-run folder routing for ALL runs using the latest routing logic.
     Only recalculates docs that are currently wrong or unscored.
     Docs already marked correct are left untouched.
     """
     from services.folder_routing_service import determine_folder_path
-    db = get_db()
-    runs = await db[RUNS_COLL].find({}, {"_id": 0, "run_id": 1}).to_list(500)
+    runs = await database[RUNS_COLL].find({}, {"_id": 0, "run_id": 1}).to_list(500)
     if not runs:
         raise HTTPException(404, "No runs found")
 
     results = []
     for run in runs:
         rid = run["run_id"]
-        docs = await db[DOCS_COLL].find({"run_id": rid}, {"_id": 0}).to_list(2000)
+        docs = await database[DOCS_COLL].find({"run_id": rid}, {"_id": 0}).to_list(2000)
         updated = 0
         for d in docs:
             # Skip docs that are already correctly routed
@@ -1019,7 +1007,7 @@ async def reroute_all_runs():
             # Always recalculate and update
             truth = d.get("folder_truth", "")
             folder_correct = _folders_match(truth, folder_path) if truth else None
-            await db[DOCS_COLL].update_one(
+            await database[DOCS_COLL].update_one(
                 {"run_id": rid, "document_id": d["document_id"]},
                 {"$set": {
                     "gpi_folder_output": folder_path,
@@ -1041,10 +1029,11 @@ async def reroute_all_runs():
 
 
 @router.get("/folder-mismatches")
-async def get_folder_mismatches():
+async def get_folder_mismatches(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Find all documents where GPI folder doesn't match S9 truth."""
-    db = get_db()
-    docs = await db[DOCS_COLL].find(
+    docs = await database[DOCS_COLL].find(
         {"gpi_folder_correct": False},
         {"_id": 0, "file_name": 1, "run_id": 1, "document_id": 1,
          "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
@@ -1056,7 +1045,9 @@ async def get_folder_mismatches():
 
 
 @router.post("/runs/force-fix-mismatches")
-async def force_fix_mismatches():
+async def force_fix_mismatches(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Surgical fix for all docs where gpi_folder_correct is False.
     Uses pattern matching + truth hints to determine correct folder.
@@ -1064,8 +1055,7 @@ async def force_fix_mismatches():
     """
     from services.folder_routing_service import determine_folder_path, _detect_international_vendor
     from services.routing_feedback_service import record_correction
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
+    docs = await database[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
     results = []
     
     for d in docs:
@@ -1146,7 +1136,7 @@ async def force_fix_mismatches():
                 source="benchmark_fix",
             )
 
-        res = await db[DOCS_COLL].update_one(
+        res = await database[DOCS_COLL].update_one(
             {"_id": doc_id},
             {"$set": {
                 "gpi_folder_output": folder_path,
@@ -1179,7 +1169,9 @@ async def force_fix_mismatches():
 
 
 @router.post("/runs/fix-truth-and-output")
-async def fix_truth_and_output():
+async def fix_truth_and_output(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     One-shot fix for docs with bad truth labels or corrupted gpi_folder_output.
     1. Re-applies force-fix logic to all gpi_folder_correct=False docs
@@ -1188,10 +1180,9 @@ async def fix_truth_and_output():
        benchmark source of truth).
     """
     from services.folder_routing_service import determine_folder_path, get_all_folder_paths
-    db = get_db()
     
     valid_folders = set(get_all_folder_paths())
-    docs = await db[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
+    docs = await database[DOCS_COLL].find({"gpi_folder_correct": False}).to_list(500)
     results = []
     
     for d in docs:
@@ -1287,7 +1278,7 @@ async def fix_truth_and_output():
         if truth_fixed:
             update_set["folder_truth"] = new_truth
         
-        await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
+        await database[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
         
         results.append({
             "file_name": file_name[:60],
@@ -1337,15 +1328,16 @@ async def delete_routing_feedback(routing_key: str):
 
 
 @router.post("/routing-feedback/learn-from-benchmark")
-async def learn_from_benchmark():
+async def learn_from_benchmark(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Scan all correctly-routed bakeoff docs and extract routing patterns
     into the feedback table. This is the batch learning endpoint.
     """
     from services.routing_feedback_service import record_correction
-    db = get_db()
     
-    correct_docs = await db[DOCS_COLL].find(
+    correct_docs = await database[DOCS_COLL].find(
         {"gpi_folder_correct": True},
         {"_id": 0, "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
          "gpi_folder_output": 1, "folder_truth": 1, "file_name": 1,
@@ -1392,7 +1384,6 @@ async def learn_from_benchmark():
 async def debug_po_lookup(po_number: str):
     """Debug: trace the full PO location code lookup pipeline."""
     from services.bc_reference_cache_service import get_cache_service
-    db = get_db()
     cache = get_cache_service()
     result = {"po": po_number, "steps": []}
 
@@ -1448,7 +1439,7 @@ async def debug_po_lookup(po_number: str):
 
 
 @router.post("/runs/enrich-and-reroute")
-async def enrich_location_codes_and_reroute(dry_run: bool = Query(False)):
+async def enrich_location_codes_and_reroute(dry_run: bool = Query(False), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     1. Collect all unique PO numbers from bakeoff docs
     2. Check which POs exist in BC cache (purchase_order entity only)
@@ -1459,10 +1450,9 @@ async def enrich_location_codes_and_reroute(dry_run: bool = Query(False)):
     """
     from services.folder_routing_service import determine_folder_path
     from services.bc_reference_cache_service import get_cache_service, normalize_document_no
-    db = get_db()
 
     # Step 1: Get all docs (include gpi_folder_correct to know current state)
-    all_docs = await db[DOCS_COLL].find({}, {"_id": 1, "run_id": 1, "document_id": 1,
+    all_docs = await database[DOCS_COLL].find({}, {"_id": 1, "run_id": 1, "document_id": 1,
         "file_name": 1, "gpi_doc_type": 1, "gpi_vendor": 1, "gpi_po": 1,
         "gpi_folder_output": 1, "gpi_folder_correct": 1,
         "folder_truth": 1, "is_international": 1}).to_list(5000)
@@ -1572,12 +1562,12 @@ async def enrich_location_codes_and_reroute(dry_run: bool = Query(False)):
             }
             if po_resolved is not None:
                 update_set["bc_po_resolved"] = po_resolved
-            await db[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
+            await database[DOCS_COLL].update_one({"_id": doc_id}, {"$set": update_set})
             if folder_path != old_folder:
                 updated_count += 1
 
     if not dry_run:
-        remaining = await db[DOCS_COLL].count_documents({"gpi_folder_correct": False})
+        remaining = await database[DOCS_COLL].count_documents({"gpi_folder_correct": False})
     else:
         # Simulate remaining: current mismatches - fixes + regressions
         current_mismatches = sum(1 for d in all_docs if d.get("gpi_folder_correct") is False)
@@ -1602,16 +1592,15 @@ async def enrich_location_codes_and_reroute(dry_run: bool = Query(False)):
 
 
 @router.get("/runs/{run_id}/metrics")
-async def get_run_metrics(run_id: str):
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+async def get_run_metrics(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
     metrics = _calc_metrics(docs)
     breakdowns = _calc_breakdowns(docs)
     return {"metrics": metrics, "breakdowns": breakdowns}
 
 
 @router.get("/runs/{run_id}/folder-alignment")
-async def get_folder_alignment(run_id: str):
+async def get_folder_alignment(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Folder Alignment Report: compares S9 output folders vs GPI Hub folder structure.
     
@@ -1623,8 +1612,7 @@ async def get_folder_alignment(run_id: str):
     """
     from services.folder_routing_service import FOLDER_STRUCTURE, get_all_folder_paths
 
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
     if not docs:
         raise HTTPException(404, "No documents in this run")
 
@@ -1738,7 +1726,7 @@ async def get_folder_alignment(run_id: str):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/runs/{run_id}/auto-post-readiness")
-async def get_auto_post_readiness(run_id: str):
+async def get_auto_post_readiness(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Analyze what % of AP invoices in a benchmark run could auto-create
     a purchase invoice in BC today.
@@ -1754,8 +1742,7 @@ async def get_auto_post_readiness(run_id: str):
     
     Cross-references hub_documents for full extraction data.
     """
-    db = get_db()
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
     if not docs:
         raise HTTPException(404, "No documents in this run")
 
@@ -1779,7 +1766,7 @@ async def get_auto_post_readiness(run_id: str):
         id_m = re.match(r'^(\d{4,})', fname)
         if id_m:
             doc_id_from_name = id_m.group(1)
-        hub_doc = await _find_hub_document(db, doc_id_from_name, fname)
+        hub_doc = await _find_hub_document(database, doc_id_from_name, fname)
 
         # Build criteria checklist
         criteria = {}
@@ -1824,7 +1811,7 @@ async def get_auto_post_readiness(run_id: str):
         if not vendor_canonical and vendor:
             try:
                 # Check vendor_aliases for this vendor name
-                alias_doc = await db.vendor_aliases.find_one({
+                alias_doc = await database.vendor_aliases.find_one({
                     "$or": [
                         {"vendor_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
                         {"alias_string": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
@@ -1840,7 +1827,7 @@ async def get_auto_post_readiness(run_id: str):
         # Last resort: case-insensitive name match against cached BC vendors
         if not vendor_canonical and vendor:
             try:
-                bc_v = await db.hub_bc_vendors.find_one({
+                bc_v = await database.hub_bc_vendors.find_one({
                     "$or": [
                         {"displayName": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
                         {"name_normalized": vendor.strip().upper()},
@@ -1943,7 +1930,7 @@ async def get_auto_post_readiness(run_id: str):
 
         # If stable data not on hub_doc, look up vendor_intelligence_profiles
         if not stable_flag and vendor_canonical:
-            vip = await db.vendor_intelligence_profiles.find_one(
+            vip = await database.vendor_intelligence_profiles.find_one(
                 {"$or": [
                     {"vendor_no": vendor_canonical},
                     {"vendor_no": {"$regex": f"^{re.escape(vendor_canonical)}$", "$options": "i"}},
@@ -1956,7 +1943,7 @@ async def get_auto_post_readiness(run_id: str):
 
         # Also try by vendor name if vendor_canonical didn't match
         if not stable_flag and vendor:
-            vip2 = await db.vendor_intelligence_profiles.find_one(
+            vip2 = await database.vendor_intelligence_profiles.find_one(
                 {"$or": [
                     {"vendor_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
                     {"display_name": {"$regex": f"^{re.escape(vendor)}$", "$options": "i"}},
@@ -2057,17 +2044,16 @@ async def get_auto_post_readiness(run_id: str):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/runs/{run_id}/export")
-async def export_run(run_id: str):
+async def export_run(run_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Export run as Excel with two sheets: Documents + Summary."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment
 
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
+    run = await database[RUNS_COLL].find_one({"run_id": run_id}, {"_id": 0})
     if not run:
         raise HTTPException(404, "Run not found")
 
-    docs = await db[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
+    docs = await database[DOCS_COLL].find({"run_id": run_id}, {"_id": 0}).to_list(2000)
     metrics = _calc_metrics(docs)
 
     wb = Workbook()
@@ -2306,7 +2292,7 @@ def _generate_demo_files(folder_names, max_per_folder):
 
 
 @router.post("/runs/{run_id}/scan-sharepoint")
-async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
+async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Scan Square 9 output folders on SharePoint and auto-create benchmark entries.
 
@@ -2316,8 +2302,7 @@ async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
     3. Run GPI routing logic to determine where GPI Hub would file it
     4. Create a benchmark document entry with both sides pre-filled
     """
-    db = get_db()
-    run = await db[RUNS_COLL].find_one({"run_id": run_id})
+    run = await database[RUNS_COLL].find_one({"run_id": run_id})
     if not run:
         raise HTTPException(404, "Run not found")
 
@@ -2379,7 +2364,7 @@ async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
         s9_folder = file_info["s9_folder"]
 
         # Check if doc already exists in this run
-        existing = await db[DOCS_COLL].find_one({"run_id": run_id, "file_name": fname})
+        existing = await database[DOCS_COLL].find_one({"run_id": run_id, "file_name": fname})
         if existing:
             continue
 
@@ -2408,7 +2393,7 @@ async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
             id_m = re.match(r'^(\d{4,})', fname)
             if id_m:
                 doc_id_from_name = id_m.group(1)
-            hub_doc = await _find_hub_document(db, doc_id_from_name, fname)
+            hub_doc = await _find_hub_document(database, doc_id_from_name, fname)
 
         if hub_doc:
             ef = hub_doc.get("extracted_fields") or {}
@@ -2526,24 +2511,24 @@ async def scan_sharepoint_folders(run_id: str, req: ScanSharePointReq):
 
             matched_gpi += 1
 
-        await db[DOCS_COLL].insert_one(doc)
+        await database[DOCS_COLL].insert_one(doc)
         doc.pop("_id", None)
         created += 1
 
     # Auto-score all new docs
-    all_docs = await db[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
+    all_docs = await database[DOCS_COLL].find({"run_id": run_id}).to_list(2000)
     for d in all_docs:
         d.pop("_id", None)
         scores = auto_score_correctness(d)
         if scores:
-            await db[DOCS_COLL].update_one(
+            await database[DOCS_COLL].update_one(
                 {"run_id": run_id, "doc_uid": d["doc_uid"]},
                 {"$set": scores}
             )
 
     # Update run status
     now = datetime.now(timezone.utc).isoformat()
-    await db[RUNS_COLL].update_one(
+    await database[RUNS_COLL].update_one(
         {"run_id": run_id},
         {"$set": {"status": "in_progress", "updated_at": now}}
     )

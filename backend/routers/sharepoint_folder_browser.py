@@ -6,9 +6,10 @@ from typing import Any, Dict, List
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
-from deps import get_db
 
 router = APIRouter(prefix="/human-routing-review", tags=["Human Routing Review"])
 
@@ -23,9 +24,10 @@ def _normalize_relative_path(path: str) -> str:
     return "/".join(parts)
 
 
-async def _configured_paths() -> List[str]:
-    db = get_db()
-    rules = await db.sharepoint_folder_rules.find(
+async def _configured_paths(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+) -> List[str]:
+    rules = await database.sharepoint_folder_rules.find(
         {"is_active": {"$ne": False}}, {"_id": 0}
     ).sort("sort_order", 1).to_list(500)
 

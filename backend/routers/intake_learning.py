@@ -6,7 +6,9 @@ Endpoints for the hub-wide Giovanni-style BC + Spiro learning pipeline.
 Reads only — never writes to BC.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
 
@@ -24,7 +26,6 @@ from services.intake_learning_feedback_service import (
     list_recent_events,
     EVENT_TYPES,
 )
-from deps import get_db
 
 router = APIRouter(prefix="/intake", tags=["intake-learning"])
 
@@ -48,10 +49,9 @@ async def run_learning_for_xls(staging_id: str, force: bool = False):
 
 
 @router.get("/insights/{doc_id}")
-async def get_document_insights(doc_id: str):
+async def get_document_insights(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return persisted intake_insights for a hub document."""
-    db = get_db()
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"id": doc_id},
         {"_id": 0, "id": 1, "doc_type": 1, "file_name": 1, "intake_insights": 1},
     )
@@ -66,11 +66,10 @@ async def get_document_insights(doc_id: str):
 
 
 @router.get("/insights-xls/{staging_id}")
-async def get_xls_insights(staging_id: str):
+async def get_xls_insights(staging_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return persisted intake_insights for an XLS staging record."""
-    db = get_db()
     from workflows.inventory.planning.staging import STAGING_COLL
-    staging = await db[STAGING_COLL].find_one(
+    staging = await database[STAGING_COLL].find_one(
         {"id": staging_id},
         {"_id": 0, "id": 1, "filename": 1, "intake_insights": 1},
     )
@@ -125,14 +124,14 @@ async def learning_summary():
 async def list_flagged_documents(
     limit: int = Query(50, le=500),
     customer_no: Optional[str] = None,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List hub documents where intake learning found actionable issues
     (qty bounds violation, suggested lines, or unmatched items)."""
-    db = get_db()
     q = {"intake_insights.has_actionable_findings": True}
     if customer_no:
         q["intake_insights.customer_no"] = customer_no
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         q,
         {
             "_id": 0, "id": 1, "file_name": 1, "doc_type": 1,
@@ -248,16 +247,16 @@ async def similar_customers_preview(
     customer_no: Optional[str] = None,
     doc_id: Optional[str] = None,
     top_k: int = Query(3, le=10),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Preview peer matches for an existing doc or a specific customer's
     own fingerprint. Handy for diagnostics and UI development."""
     from services.cold_start_matcher_service import (
         find_similar_customers, get_or_build_fingerprint,
     )
-    db = get_db()
     line_items: list = []
     if doc_id:
-        d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        d = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
         if d:
             ef = d.get("extracted_fields") or {}
             nf = d.get("normalized_fields") or {}
@@ -275,6 +274,6 @@ async def similar_customers_preview(
         # synthesize pseudo-line-items from the fingerprint tokens
         line_items = [{"description": tok} for tok in (fp.get("tf") or {}).keys()]
     matches = await find_similar_customers(
-        line_items, top_k=top_k, exclude_customer_no=customer_no, db=db,
+        line_items, top_k=top_k, exclude_customer_no=customer_no, db=database,
     )
     return {"matches": matches, "query_item_count": len(line_items)}

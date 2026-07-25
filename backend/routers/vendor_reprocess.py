@@ -15,8 +15,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Dict, Any
 
-from fastapi import APIRouter, Query
-from deps import get_db
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("vendor_reprocess")
 
@@ -45,7 +46,7 @@ async def _get_vendor_raw(doc: dict) -> str:
     ).strip()
 
 
-async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
+async def _reprocess_single(doc: dict, dry_run: bool = False, database: AsyncIOMotorDatabase = Depends(get_platform_database)) -> dict:
     """Re-run vendor matching on a single document. Returns change summary."""
     from services.vendor_matching import lookup_vendor_alias, lookup_vendor_by_sender, learn_sender_vendor
     from services.vendor_name_helpers import normalize_vendor_name
@@ -166,7 +167,6 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
     }
 
     if not dry_run and changed:
-        db = get_db()
         update = {
             "vendor_match_method": new_method,
             "vendor_resolution": resolution,
@@ -177,7 +177,7 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
             update["vendor_no"] = match_result.get("vendor_no")
         update["vendor_reprocessed_at"] = datetime.now(timezone.utc).isoformat()
 
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+        await database.hub_documents.update_one({"id": doc_id}, {"$set": update})
         result["action"] = "updated"
         
         # LEARN: Record sender→vendor mapping
@@ -199,7 +199,8 @@ async def _reprocess_single(doc: dict, dry_run: bool = False) -> dict:
 async def run_reprocess(
     limit: int = Query(500, ge=1, le=5000),
     force_all: bool = Query(False, description="Re-process even if already processed by new logic"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Re-process vendor matching on all vendor-applicable documents.
     
@@ -209,7 +210,6 @@ async def run_reprocess(
     - fuzzy_match (>=0.90 auto-resolve) vs fuzzy_candidate (<0.90 review)
     """
     global _last_run
-    db = get_db()
 
     _last_run = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
 
@@ -224,7 +224,7 @@ async def run_reprocess(
     if not force_all:
         match_filter["vendor_reprocessed_at"] = {"$exists": False}
 
-    cursor = db.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
+    cursor = database.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
     docs = await cursor.to_list(limit)
 
     results = {
@@ -270,15 +270,15 @@ async def run_reprocess(
 async def run_reprocess_all_unresolved(
     limit: int = Query(2000, ge=1, le=5000),
     dry_run: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Re-process ALL unresolved docs through the full vendor matching pipeline.
     No doc_type restriction — uses sender email + extracted_fields + alias/BC matching.
     """
     global _last_run
-    db = get_db()
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {"vendor_match_method": {"$in": ["none", None]}},
         {"_id": 0}
     ).limit(limit).to_list(limit)
@@ -325,12 +325,11 @@ async def run_reprocess_all_unresolved(
 
 
 @router.post("/dry-run")
-async def dry_run_reprocess(limit: int = Query(500, ge=1, le=5000)):
+async def dry_run_reprocess(limit: int = Query(500, ge=1, le=5000), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Preview what would change without writing. Returns same structure as /run
     but with action='would_update' instead of 'updated'.
     """
-    db = get_db()
 
     match_filter = {
         "$or": [
@@ -340,7 +339,7 @@ async def dry_run_reprocess(limit: int = Query(500, ge=1, le=5000)):
         ]
     }
 
-    cursor = db.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
+    cursor = database.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
     docs = await cursor.to_list(limit)
 
     results = {
@@ -384,16 +383,17 @@ async def reprocess_status():
 
 
 @router.post("/learn-from-history")
-async def learn_sender_mappings_from_history():
+async def learn_sender_mappings_from_history(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Scan all documents with resolved vendors AND sender emails.
     Record every sender→vendor mapping into the learning table.
     This bootstraps the feedback loop from existing data.
     """
     from services.vendor_matching import learn_sender_vendor
-    db = get_db()
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "vendor_canonical": {"$exists": True, "$ne": None, "$ne": ""},
             "email_sender": {"$exists": True, "$ne": None, "$ne": ""},
@@ -418,7 +418,7 @@ async def learn_sender_mappings_from_history():
             senders_seen.add(sender)
 
     # Return what was learned
-    mappings = await db.sender_vendor_map.find(
+    mappings = await database.sender_vendor_map.find(
         {"sender_email": {"$exists": True}},
         {"_id": 0}
     ).sort("confirmation_count", -1).to_list(100)
@@ -432,10 +432,11 @@ async def learn_sender_mappings_from_history():
 
 
 @router.get("/sender-mappings")
-async def get_sender_mappings():
+async def get_sender_mappings(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """View all learned sender email → vendor mappings."""
-    db = get_db()
-    mappings = await db.sender_vendor_map.find(
+    mappings = await database.sender_vendor_map.find(
         {}, {"_id": 0}
     ).sort("confirmation_count", -1).to_list(200)
     return {
@@ -445,13 +446,14 @@ async def get_sender_mappings():
 
 
 @router.post("/sender-mappings/clear")
-async def clear_sender_mappings():
+async def clear_sender_mappings(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Delete ALL learned sender→vendor mappings.
     Use this to wipe polluted data before re-running learn-from-history.
     """
-    db = get_db()
-    result = await db.sender_vendor_map.delete_many({})
+    result = await database.sender_vendor_map.delete_many({})
     return {
         "status": "cleared",
         "deleted_count": result.deleted_count,
@@ -461,7 +463,8 @@ async def clear_sender_mappings():
 @router.post("/auto-map-domains")
 async def auto_map_unresolved_domains(
     dry_run: bool = Query(True),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Automatically map unresolved sender domains to vendors by cross-referencing:
     1. Existing resolved hub_documents (vendor_canonical from alias_match, etc.)
@@ -470,7 +473,6 @@ async def auto_map_unresolved_domains(
     """
     from services.vendor_matching import learn_sender_vendor
     from services.vendor_resolution_service import build_resolution_object
-    db = get_db()
 
     EXCLUDED_DOMAINS = {"gamerpackaging.com"}
 
@@ -482,7 +484,7 @@ async def auto_map_unresolved_domains(
         {"$group": {"_id": "$_domain", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    unresolved = await db.hub_documents.aggregate(pipeline).to_list(200)
+    unresolved = await database.hub_documents.aggregate(pipeline).to_list(200)
 
     # Step 2: Build known vendor name list from resolved docs
     vendor_pipeline = [
@@ -492,10 +494,10 @@ async def auto_map_unresolved_domains(
                      "vendor_no": {"$first": "$vendor_no"},
                      "count": {"$sum": 1}}},
     ]
-    known_vendors = await db.hub_documents.aggregate(vendor_pipeline).to_list(500)
+    known_vendors = await database.hub_documents.aggregate(vendor_pipeline).to_list(500)
 
     # Also pull from bakeoff
-    bakeoff_vendors = await db.bakeoff_documents.aggregate([
+    bakeoff_vendors = await database.bakeoff_documents.aggregate([
         {"$match": {"gpi_vendor": {"$exists": True, "$ne": None, "$ne": ""}}},
         {"$group": {"_id": "$gpi_vendor", "count": {"$sum": 1}}},
     ]).to_list(500)
@@ -571,7 +573,7 @@ async def auto_map_unresolved_domains(
         now = datetime.now(timezone.utc).isoformat()
         for m in mappings:
             # Create domain mapping
-            await db.sender_vendor_map.update_one(
+            await database.sender_vendor_map.update_one(
                 {"sender_domain": m["domain"], "sender_email": {"$exists": False}},
                 {"$set": {
                     "sender_domain": m["domain"],
@@ -591,7 +593,7 @@ async def auto_map_unresolved_domains(
                 "vendor_name": m["vendor_name"],
                 "vendor_no": m["vendor_no"],
             }
-            docs = await db.hub_documents.find(
+            docs = await database.hub_documents.find(
                 {"vendor_match_method": {"$in": ["none", None]},
                  "email_sender": {"$regex": f"@{m['domain']}$", "$options": "i"}},
                 {"_id": 0, "id": 1, "email_sender": 1, "vendor_name_raw": 1, "extracted_fields": 1}
@@ -600,7 +602,7 @@ async def auto_map_unresolved_domains(
                 vendor_raw = (doc.get("vendor_name_raw") or
                               (doc.get("extracted_fields") or {}).get("vendor") or "")
                 resolution = build_resolution_object(vendor_raw, match_result)
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc["id"]},
                     {"$set": {
                         "vendor_canonical": m["vendor_canonical"],
@@ -642,7 +644,8 @@ async def teach_domain_vendor(
     vendor_name: str = Query("", description="Vendor display name"),
     vendor_no: str = Query("", description="BC vendor number"),
     dry_run: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Teach the system that a sender domain maps to a specific vendor.
     1. Creates a sender domain mapping in the learning table
@@ -650,14 +653,13 @@ async def teach_domain_vendor(
     """
     from services.vendor_matching import learn_sender_vendor
     from services.vendor_resolution_service import build_resolution_object
-    db = get_db()
 
     domain = domain.strip().lower()
     if not vendor_no:
         vendor_no = vendor_canonical
 
     # Find all unresolved docs from this domain
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "vendor_match_method": {"$in": ["none", None]},
             "email_sender": {"$regex": f"@{domain}$", "$options": "i"},
@@ -675,7 +677,7 @@ async def teach_domain_vendor(
 
     # Create/update the domain mapping
     now = datetime.now(timezone.utc).isoformat()
-    await db.sender_vendor_map.update_one(
+    await database.sender_vendor_map.update_one(
         {"sender_domain": domain, "sender_email": {"$exists": False}},
         {"$set": {
             "sender_domain": domain,
@@ -701,7 +703,7 @@ async def teach_domain_vendor(
         vendor_raw = (doc.get("vendor_name_raw") or
                       (doc.get("extracted_fields") or {}).get("vendor") or "")
         resolution = build_resolution_object(vendor_raw, match_result)
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc["id"]},
             {"$set": {
                 "vendor_canonical": vendor_canonical,
@@ -731,9 +733,10 @@ async def teach_domain_vendor(
 
 
 @router.get("/unresolved-domains")
-async def list_unresolved_domains():
+async def list_unresolved_domains(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List all sender domains with unresolved vendor docs, sorted by count."""
-    db = get_db()
     pipeline = [
         {"$match": {"vendor_match_method": {"$in": ["none", None]},
                      "email_sender": {"$exists": True, "$ne": None, "$ne": ""}}},
@@ -743,7 +746,7 @@ async def list_unresolved_domains():
         {"$sort": {"count": -1}},
         {"$limit": 50},
     ]
-    results = await db.hub_documents.aggregate(pipeline).to_list(50)
+    results = await database.hub_documents.aggregate(pipeline).to_list(50)
     return {
         "total_unresolved_domains": len(results),
         "domains": [{"domain": r["_id"], "count": r["count"],
@@ -755,7 +758,8 @@ async def list_unresolved_domains():
 async def resolve_unresolved_by_sender(
     limit: int = Query(2000, ge=1, le=5000),
     dry_run: bool = Query(False),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Find ALL docs with vendor_match_method='none' that have an email_sender,
     and try to resolve them via sender email/domain lookup.
@@ -763,11 +767,10 @@ async def resolve_unresolved_by_sender(
     """
     from services.vendor_matching import lookup_vendor_by_sender, learn_sender_vendor
     from services.vendor_resolution_service import build_resolution_object
-    db = get_db()
 
     EXCLUDED_SENDER_DOMAINS = {"gamerpackaging.com"}
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "vendor_match_method": {"$in": ["none", None]},
             "email_sender": {"$exists": True, "$ne": None, "$ne": ""},
@@ -801,7 +804,7 @@ async def resolve_unresolved_by_sender(
 
         if not vendor:
             # Try domain-level: find ANY email mapping from this domain
-            domain_entries = await db.sender_vendor_map.find(
+            domain_entries = await database.sender_vendor_map.find(
                 {"sender_domain": domain, "vendor_canonical": {"$exists": True, "$ne": None}},
                 {"_id": 0, "vendor_canonical": 1, "vendor_name": 1, "vendor_no": 1}
             ).to_list(50)
@@ -840,7 +843,7 @@ async def resolve_unresolved_by_sender(
             "vendor_resolution": resolution,
             "vendor_reprocessed_at": datetime.now(timezone.utc).isoformat(),
         }
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+        await database.hub_documents.update_one({"id": doc_id}, {"$set": update})
         resolved += 1
 
         # Reinforce learning

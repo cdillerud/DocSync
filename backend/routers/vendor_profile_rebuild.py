@@ -17,8 +17,9 @@ import time
 from datetime import datetime, timezone
 from collections import defaultdict
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("vendor_profile_rebuild")
 router = APIRouter(prefix="/vendor-profiles", tags=["Vendor Profiles"])
@@ -52,14 +53,15 @@ def _pick_best_display_name(names: list) -> str:
 
 
 @router.post("/rebuild/dry-run")
-async def rebuild_dry_run():
+async def rebuild_dry_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview vendor profile rebuild with consolidation report."""
-    db = get_db()
     start = time.time()
 
-    groups, vendor_no_map = await _aggregate_vendor_data(db)
+    groups, vendor_no_map = await _aggregate_vendor_data(database)
 
-    current_profiles = await db.vendor_intelligence_profiles.find(
+    current_profiles = await database.vendor_intelligence_profiles.find(
         {}, {"_id": 0, "vendor_name": 1, "vendor_no": 1}
     ).to_list(5000)
 
@@ -99,14 +101,15 @@ async def rebuild_dry_run():
 
 
 @router.post("/rebuild/run")
-async def rebuild_run():
+async def rebuild_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Full rebuild of vendor intelligence profiles from document data."""
-    db = get_db()
     start = time.time()
     errors = []
 
     try:
-        groups, vendor_no_map = await _aggregate_vendor_data(db)
+        groups, vendor_no_map = await _aggregate_vendor_data(database)
     except Exception as e:
         logger.error("[RebuildRun] Failed to aggregate vendor data: %s", str(e))
         return {"status": "error", "message": f"Aggregation failed: {str(e)}"}
@@ -114,7 +117,7 @@ async def rebuild_run():
     # Preserve manual overrides from existing profiles (match by vendor_no or normalized name)
     existing = {}
     try:
-        async for p in db.vendor_intelligence_profiles.find({}, {"_id": 0}):
+        async for p in database.vendor_intelligence_profiles.find({}, {"_id": 0}):
             vno = (p.get("vendor_no") or "").strip()
             norm = _normalize_vendor_name(p.get("vendor_name", ""))
             override_data = {
@@ -135,16 +138,16 @@ async def rebuild_run():
 
     # Load stable vendor config ONCE before the loop
     try:
-        sv_cfg = await db.stable_vendor_config.find_one(
+        sv_cfg = await database.stable_vendor_config.find_one(
             {"config_id": "stable_vendor_defaults"}, {"_id": 0}
         ) or {}
     except Exception:
         sv_cfg = {}
 
     # Drop all existing profiles, then drop+recreate indexes to avoid conflicts
-    await db.vendor_intelligence_profiles.delete_many({})
+    await database.vendor_intelligence_profiles.delete_many({})
     try:
-        await db.vendor_intelligence_profiles.drop_index("vendor_no_1")
+        await database.vendor_intelligence_profiles.drop_index("vendor_no_1")
     except Exception:
         pass  # Index may not exist
 
@@ -281,7 +284,7 @@ async def rebuild_run():
                 "manual_override_expires_at": overrides.get("manual_override_expires_at") if overrides else None,
             }
 
-            await db.vendor_intelligence_profiles.insert_one(profile)
+            await database.vendor_intelligence_profiles.insert_one(profile)
             created += 1
 
         except Exception as e:
@@ -292,16 +295,16 @@ async def rebuild_run():
 
     # Recreate indexes after all inserts
     try:
-        await db.vendor_intelligence_profiles.create_index("vendor_no", unique=True, sparse=True)
-        await db.vendor_intelligence_profiles.create_index("vendor_name")
-        await db.vendor_intelligence_profiles.create_index("vendor_name_normalized")
-        await db.vendor_intelligence_profiles.create_index("stable_vendor_flag")
+        await database.vendor_intelligence_profiles.create_index("vendor_no", unique=True, sparse=True)
+        await database.vendor_intelligence_profiles.create_index("vendor_name")
+        await database.vendor_intelligence_profiles.create_index("vendor_name_normalized")
+        await database.vendor_intelligence_profiles.create_index("stable_vendor_flag")
     except Exception as e:
         logger.warning("[RebuildRun] Index creation issue: %s", str(e))
 
     duration_ms = int((time.time() - start) * 1000)
 
-    stable_count = await db.vendor_intelligence_profiles.count_documents({"stable_vendor_flag": True})
+    stable_count = await database.vendor_intelligence_profiles.count_documents({"stable_vendor_flag": True})
 
     # Build consolidation report
     consolidation_report = []

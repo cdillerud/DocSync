@@ -1,7 +1,8 @@
 """GPI Document Hub - Auto-Clear Router"""
 
-from fastapi import APIRouter, HTTPException, Body, Query
-from deps import get_db
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from datetime import datetime, timezone
 
 from services.auto_clear_service import (
@@ -51,13 +52,12 @@ async def update_auto_clear_threshold(doc_type: str, threshold: float = Query(..
 
 
 @router.post("/evaluate/{doc_id}")
-async def evaluate_document_auto_clear(doc_id: str):
-    db = get_db()
+async def evaluate_document_auto_clear(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Manually evaluate a document for auto-clear eligibility.
     Does not apply the result - just shows what would happen.
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -80,13 +80,12 @@ async def evaluate_document_auto_clear(doc_id: str):
 
 
 @router.post("/apply/{doc_id}")
-async def apply_auto_clear(doc_id: str, force: bool = Query(False)):
-    db = get_db()
+async def apply_auto_clear(doc_id: str, force: bool = Query(False), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Apply auto-clear to a document.
     Use force=true to clear even if below threshold (manual clear).
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -107,7 +106,7 @@ async def apply_auto_clear(doc_id: str, force: bool = Query(False)):
     
     if decision == AutoClearDecision.CLEARED or force:
         update = get_auto_clear_update(AutoClearDecision.CLEARED, details)
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+        await database.hub_documents.update_one({"id": doc_id}, {"$set": update})
         
         return {
             "success": True,
@@ -127,14 +126,15 @@ async def apply_auto_clear(doc_id: str, force: bool = Query(False)):
 
 
 @router.get("/stats")
-async def get_auto_clear_stats():
-    db = get_db()
+async def get_auto_clear_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Get statistics about auto-cleared documents.
     """
-    total_docs = await db.hub_documents.count_documents({})
-    auto_cleared = await db.hub_documents.count_documents({"auto_cleared": True})
-    pending = await db.hub_documents.count_documents({
+    total_docs = await database.hub_documents.count_documents({})
+    auto_cleared = await database.hub_documents.count_documents({"auto_cleared": True})
+    pending = await database.hub_documents.count_documents({
         "$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}],
         "status": {"$nin": ["Completed", "Posted", "Archived"]}
     })
@@ -144,14 +144,14 @@ async def get_auto_clear_stats():
         {"$match": {"auto_cleared": True}},
         {"$group": {"_id": "$document_type", "count": {"$sum": 1}}}
     ]
-    by_type = await db.hub_documents.aggregate(pipeline).to_list(50)
+    by_type = await database.hub_documents.aggregate(pipeline).to_list(50)
     
     # Get counts by decision reason
     pipeline_reasons = [
         {"$match": {"auto_clear_decision": {"$exists": True}}},
         {"$group": {"_id": "$auto_clear_decision", "count": {"$sum": 1}}}
     ]
-    by_reason = await db.hub_documents.aggregate(pipeline_reasons).to_list(20)
+    by_reason = await database.hub_documents.aggregate(pipeline_reasons).to_list(20)
     
     return {
         "total_documents": total_docs,
@@ -181,12 +181,11 @@ async def route_single_document(doc_id: str):
 
 
 @router.post("/route-batch")
-async def route_batch_documents(limit: int = Query(100, ge=1, le=1000)):
+async def route_batch_documents(limit: int = Query(100, ge=1, le=1000), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Route all unrouted documents (backfill). Returns counts."""
-    db = get_db()
     from services.document_routing_service import route_document
 
-    cursor = db.hub_documents.find(
+    cursor = database.hub_documents.find(
         {"$or": [
             {"routing_status": {"$exists": False}},
             {"routing_status": None},

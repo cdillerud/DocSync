@@ -6,9 +6,10 @@ ingestion pilot (mkoch, nhannover mailboxes).
 """
 
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from typing import Optional
-from deps import get_db
 from services.inside_sales_pilot_service import (
     INSIDE_SALES_PILOT_ENABLED,
     INSIDE_SALES_PILOT_MAILBOXES,
@@ -24,12 +25,13 @@ router = APIRouter(prefix="/inside-sales-pilot", tags=["Inside Sales Pilot"])
 
 
 @router.get("/status")
-async def pilot_status():
+async def pilot_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Get the current Inside Sales pilot configuration and dashboard summary.
     """
-    db = get_db()
-    summary = await get_pilot_status_summary(db)
+    summary = await get_pilot_status_summary(database)
     return summary
 
 
@@ -61,23 +63,22 @@ async def list_pilot_documents(
     doc_type: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List documents ingested by the Inside Sales pilot.
     Filterable by mailbox and doc_type.
     """
-    db = get_db()
-    return await get_pilot_documents(db, mailbox=mailbox, doc_type=doc_type,
+    return await get_pilot_documents(database, mailbox=mailbox, doc_type=doc_type,
                                      skip=skip, limit=limit)
 
 
 @router.get("/runs")
-async def list_pilot_runs(limit: int = Query(20, ge=1, le=100)):
+async def list_pilot_runs(limit: int = Query(20, ge=1, le=100), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get recent polling run history with stats.
     """
-    db = get_db()
-    runs = await get_pilot_run_history(db, limit=limit)
+    runs = await get_pilot_run_history(database, limit=limit)
     return {"runs": runs, "count": len(runs)}
 
 
@@ -87,11 +88,11 @@ async def list_pilot_logs(
     status: Optional[str] = Query(None),
     mailbox: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Get detailed pilot ingestion logs for debugging and review.
     """
-    db = get_db()
     query = {}
     if run_id:
         query["run_id"] = run_id
@@ -101,7 +102,7 @@ async def list_pilot_logs(
         query["mailbox"] = mailbox
 
     logs = (
-        await db.inside_sales_pilot_log.find(query, {"_id": 0})
+        await database.inside_sales_pilot_log.find(query, {"_id": 0})
         .sort("timestamp", -1)
         .limit(limit)
         .to_list(limit)
@@ -114,12 +115,12 @@ async def review_extractions(
     mailbox: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Review structured extraction results from pilot documents.
     Shows what data the system was able to pull from each document.
     """
-    db = get_db()
     query = {
         "inside_sales_pilot": True,
         "sales_pilot_extraction": {"$exists": True, "$ne": None},
@@ -127,9 +128,9 @@ async def review_extractions(
     if mailbox:
         query["pilot_mailbox"] = mailbox
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     docs = (
-        await db.hub_documents.find(
+        await database.hub_documents.find(
             query,
             {
                 "_id": 0,
@@ -173,14 +174,15 @@ async def smart_reclassify(
 
 
 @router.post("/re-extract-all")
-async def re_extract_all_pilot_docs():
+async def re_extract_all_pilot_docs(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Re-run structured extraction + BC validation on ALL pilot documents
     using the latest improved logic.  Also fixes workflow status to
     pilot_review for any pilot docs that were incorrectly exported.
     """
-    db = get_db()
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {"inside_sales_pilot": True},
         {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
          "email_subject": 1, "pilot_mailbox": 1, "workflow_status": 1},
@@ -195,7 +197,7 @@ async def re_extract_all_pilot_docs():
         try:
             body = ""
             ext = await _extract_sales_fields(
-                db, doc["id"], doc.get("file_name", ""),
+                database, doc["id"], doc.get("file_name", ""),
                 doc.get("email_subject", ""), body, doc.get("email_sender", ""),
             )
             if ext:
@@ -206,7 +208,7 @@ async def re_extract_all_pilot_docs():
             # Fix workflow status — pilot docs should never be "exported" or "completed"
             ws = doc.get("workflow_status", "")
             if ws in ("exported", "completed", "validated", "posted", "ready_to_post"):
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc["id"]},
                     {"$set": {
                         "workflow_status": "pilot_review",
@@ -254,11 +256,11 @@ async def list_validation_results(
     mailbox: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List pilot documents with their BC Production validation results.
     """
-    db = get_db()
     query = {
         "inside_sales_pilot": True,
         "bc_prod_validation": {"$exists": True, "$ne": None},
@@ -266,9 +268,9 @@ async def list_validation_results(
     if mailbox:
         query["pilot_mailbox"] = mailbox
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     docs = (
-        await db.hub_documents.find(
+        await database.hub_documents.find(
             query,
             {
                 "_id": 0,
@@ -293,12 +295,13 @@ async def list_validation_results(
 # ── Match Tier Distribution (donut chart source) ──────────
 
 @router.get("/match-tier-distribution")
-async def match_tier_distribution():
+async def match_tier_distribution(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Aggregate BC Order Match results across all pilot documents into
     tier buckets for the dashboard donut chart.
     """
-    db = get_db()
     pipeline = [
         {"$match": {"inside_sales_pilot": True}},
         {"$project": {
@@ -309,7 +312,7 @@ async def match_tier_distribution():
             "entity_type": "$bc_prod_validation.order_lookup.bc_entity_type",
         }},
     ]
-    rows = await db.hub_documents.aggregate(pipeline).to_list(None)
+    rows = await database.hub_documents.aggregate(pipeline).to_list(None)
 
     buckets = {
         "exact": 0,
@@ -363,7 +366,8 @@ async def match_tier_distribution():
 async def diagnose_order_match(
     sample_size: int = Query(20, ge=1, le=200),
     doc_id: Optional[str] = Query(None, description="If set, diagnose only this doc"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Diagnostic endpoint to root-cause why BC Order Match is returning 0%.
     Runs _check_order on sample pilot documents with full tracing, and
@@ -373,7 +377,6 @@ async def diagnose_order_match(
     import re as _re
     from services.bc_prod_validator import _check_order
 
-    db = get_db()
     report = {
         "cache_health": {},
         "extraction_health": {},
@@ -383,12 +386,12 @@ async def diagnose_order_match(
     }
 
     # 1. Cache health for sales_order
-    total_so = await db.bc_reference_cache.count_documents({"bc_entity_type": "sales_order"})
-    so_with_extref = await db.bc_reference_cache.count_documents({
+    total_so = await database.bc_reference_cache.count_documents({"bc_entity_type": "sales_order"})
+    so_with_extref = await database.bc_reference_cache.count_documents({
         "bc_entity_type": "sales_order",
         "bc_external_document_no": {"$exists": True, "$nin": ["", None]},
     })
-    so_with_docno = await db.bc_reference_cache.count_documents({
+    so_with_docno = await database.bc_reference_cache.count_documents({
         "bc_entity_type": "sales_order",
         "bc_document_no": {"$exists": True, "$nin": ["", None]},
     })
@@ -400,7 +403,7 @@ async def diagnose_order_match(
     }
 
     # Sample 5 raw cache records so we can eyeball the shape
-    sample_cache = await db.bc_reference_cache.find(
+    sample_cache = await database.bc_reference_cache.find(
         {"bc_entity_type": "sales_order"},
         {
             "_id": 0,
@@ -418,8 +421,8 @@ async def diagnose_order_match(
 
     # 2. Extraction health: how many pilot docs have a PO / order number?
     pilot_filter = {"inside_sales_pilot": True}
-    total_docs = await db.hub_documents.count_documents(pilot_filter)
-    with_po = await db.hub_documents.count_documents({
+    total_docs = await database.hub_documents.count_documents(pilot_filter)
+    with_po = await database.hub_documents.count_documents({
         **pilot_filter,
         "$or": [
             {"sales_pilot_extraction.po_number": {"$exists": True, "$nin": ["", None]}},
@@ -427,7 +430,7 @@ async def diagnose_order_match(
             {"normalized_fields.customer_po": {"$exists": True, "$nin": ["", None]}},
         ],
     })
-    with_order = await db.hub_documents.count_documents({
+    with_order = await database.hub_documents.count_documents({
         **pilot_filter,
         "$or": [
             {"sales_pilot_extraction.order_number": {"$exists": True, "$nin": ["", None]}},
@@ -444,7 +447,7 @@ async def diagnose_order_match(
 
     # 3. Run live _check_order tracing on a sample
     sample_query = {"id": doc_id} if doc_id else pilot_filter
-    sample_docs = await db.hub_documents.find(
+    sample_docs = await database.hub_documents.find(
         sample_query,
         {
             "_id": 0,
@@ -505,7 +508,7 @@ async def diagnose_order_match(
         # For each ref, check if it exists in the cache
         ref_hits = []
         for ref in expanded:
-            hit = await db.bc_reference_cache.find_one(
+            hit = await database.bc_reference_cache.find_one(
                 {
                     "bc_entity_type": "sales_order",
                     "$or": [
@@ -521,7 +524,7 @@ async def diagnose_order_match(
         entry["direct_ref_hits"] = ref_hits
 
         # Now actually invoke _check_order
-        res = await _check_order(db, po, on, bc_cust)
+        res = await _check_order(database, po, on, bc_cust)
         entry["result"] = {
             "found": res.get("found"),
             "match_method": res.get("match_method"),
@@ -594,13 +597,13 @@ async def run_readiness_review_all(
 async def list_readiness_review_results(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List pilot documents with their SO readiness review results.
     Shows profile comparison intelligence.
     """
-    db = get_db()
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "inside_sales_pilot": True,
             "so_readiness_review": {"$exists": True, "$ne": None},
@@ -680,7 +683,9 @@ async def validate_sales_corpus_batch(
 
 
 @router.get("/corpus-validation-summary")
-async def corpus_validation_summary():
+async def corpus_validation_summary(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Comprehensive validation summary comparing:
     - Existing sales corpus (1000+ docs)
@@ -689,9 +694,8 @@ async def corpus_validation_summary():
     Shows customer match rates, order match rates, score distribution,
     top customers, and side-by-side comparison.
     """
-    db = get_db()
     from services.bc_prod_validator import get_corpus_validation_summary
-    return await get_corpus_validation_summary(db)
+    return await get_corpus_validation_summary(database)
 
 
 # ── Spiro CRM Integration Endpoints ─────────────────────────
@@ -715,9 +719,9 @@ async def spiro_match_results(
     mailbox: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List pilot documents with their Spiro match results."""
-    db = get_db()
     query = {
         "inside_sales_pilot": True,
         "spiro_match": {"$exists": True, "$ne": None},
@@ -725,9 +729,9 @@ async def spiro_match_results(
     if mailbox:
         query["pilot_mailbox"] = mailbox
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     docs = (
-        await db.hub_documents.find(
+        await database.hub_documents.find(
             query,
             {
                 "_id": 0,
@@ -759,7 +763,9 @@ async def spiro_company_search(name: str = Query(..., min_length=2)):
 
 
 @router.get("/spiro-bc-crossref")
-async def spiro_bc_cross_reference():
+async def spiro_bc_cross_reference(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Spiro ↔ BC cross-reference dashboard.
 
@@ -767,9 +773,8 @@ async def spiro_bc_cross_reference():
     (pipeline leakage), which are BC-only (CRM gap), ISR coverage,
     and opportunity pipeline value.
     """
-    db = get_db()
     from services.spiro_bc_cross_ref_service import build_cross_reference_dashboard
-    return await build_cross_reference_dashboard(db)
+    return await build_cross_reference_dashboard(database)
 
 
 # ── Sales Order Rules Engine Endpoints ───────────────────────
@@ -801,12 +806,12 @@ async def so_rules_results(
     compliance: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     List pilot documents with their SO Rules Engine evaluation results.
     Filterable by stage and compliance status.
     """
-    db = get_db()
     query = {
         "inside_sales_pilot": True,
         "so_rules_evaluation": {"$exists": True, "$ne": None},
@@ -816,9 +821,9 @@ async def so_rules_results(
     if compliance:
         query["so_rules_evaluation.compliance_status"] = compliance
 
-    total = await db.hub_documents.count_documents(query)
+    total = await database.hub_documents.count_documents(query)
     docs = (
-        await db.hub_documents.find(
+        await database.hub_documents.find(
             query,
             {
                 "_id": 0,

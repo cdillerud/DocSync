@@ -13,8 +13,9 @@ from collections import Counter
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict
 
-from fastapi import APIRouter, Query
-from deps import get_db
+from fastapi import APIRouter, Query, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger(__name__)
 
@@ -22,72 +23,73 @@ router = APIRouter(prefix="/governance", tags=["Governance"])
 
 
 @router.get("/dashboard")
-async def governance_dashboard():
+async def governance_dashboard(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Consolidated governance dashboard data — SO + AP + system health."""
-    db = get_db()
     now = datetime.now(timezone.utc)
     thirty_days_ago = (now - timedelta(days=30)).isoformat()
 
     # ── SO Metrics ──
-    so_pending = await db.so_learning_suggestions.count_documents({"status": "pending"})
-    so_approved = await db.so_learning_suggestions.count_documents({"status": "approved"})
-    so_applied = await db.so_learning_suggestions.count_documents({"status": "applied"})
-    so_rejected = await db.so_learning_suggestions.count_documents({"status": "rejected"})
+    so_pending = await database.so_learning_suggestions.count_documents({"status": "pending"})
+    so_approved = await database.so_learning_suggestions.count_documents({"status": "approved"})
+    so_applied = await database.so_learning_suggestions.count_documents({"status": "applied"})
+    so_rejected = await database.so_learning_suggestions.count_documents({"status": "rejected"})
 
-    so_fb_total = await db.so_reviewer_feedback.count_documents({})
-    so_fb_correct = await db.so_reviewer_feedback.count_documents({"reviewer_assessment": "correct"})
+    so_fb_total = await database.so_reviewer_feedback.count_documents({})
+    so_fb_correct = await database.so_reviewer_feedback.count_documents({"reviewer_assessment": "correct"})
     so_agreement_pct = round(so_fb_correct / max(so_fb_total, 1) * 100, 1)
 
-    so_drift_audits = await db.so_learning_apply_audit.find(
+    so_drift_audits = await database.so_learning_apply_audit.find(
         {"applied_at": {"$gte": thirty_days_ago}}, {"_id": 0, "customer_no": 1}
     ).to_list(500)
     so_recent_changes = len(so_drift_audits)
     so_customers_changed = len(set(a.get("customer_no", "") for a in so_drift_audits))
 
     # ── AP Metrics ──
-    ap_pending = await db.ap_learning_suggestions.count_documents({"status": "pending"})
-    ap_approved = await db.ap_learning_suggestions.count_documents({"status": "approved"})
-    ap_applied = await db.ap_learning_suggestions.count_documents({"status": "applied"})
-    ap_rejected = await db.ap_learning_suggestions.count_documents({"status": "rejected"})
+    ap_pending = await database.ap_learning_suggestions.count_documents({"status": "pending"})
+    ap_approved = await database.ap_learning_suggestions.count_documents({"status": "approved"})
+    ap_applied = await database.ap_learning_suggestions.count_documents({"status": "applied"})
+    ap_rejected = await database.ap_learning_suggestions.count_documents({"status": "rejected"})
 
-    ap_fb_total = await db.ap_reviewer_feedback.count_documents({})
-    ap_fb_correct = await db.ap_reviewer_feedback.count_documents({"reviewer_assessment": "correct"})
+    ap_fb_total = await database.ap_reviewer_feedback.count_documents({})
+    ap_fb_correct = await database.ap_reviewer_feedback.count_documents({"reviewer_assessment": "correct"})
     ap_agreement_pct = round(ap_fb_correct / max(ap_fb_total, 1) * 100, 1)
 
-    ap_drift_audits = await db.ap_learning_apply_audit.find(
+    ap_drift_audits = await database.ap_learning_apply_audit.find(
         {"applied_at": {"$gte": thirty_days_ago}}, {"_id": 0, "vendor_no": 1}
     ).to_list(500)
     ap_recent_changes = len(ap_drift_audits)
     ap_vendors_changed = len(set(a.get("vendor_no", "") for a in ap_drift_audits))
 
     # ── Drift Risk Distribution (combined) ──
-    so_drift = await _get_drift_distribution(db, "so")
-    ap_drift = await _get_drift_distribution(db, "ap")
+    so_drift = await _get_drift_distribution(database, "so")
+    ap_drift = await _get_drift_distribution(database, "ap")
 
     # ── Top Hotspots ──
-    so_hotspots = await _get_top_hotspots(db, "so", limit=5)
-    ap_hotspots = await _get_top_hotspots(db, "ap", limit=5)
+    so_hotspots = await _get_top_hotspots(database, "so", limit=5)
+    ap_hotspots = await _get_top_hotspots(database, "ap", limit=5)
 
     # ── System Health ──
     seven_days_ago = (now - timedelta(days=7)).isoformat()
-    total_docs = await db.hub_documents.count_documents({"is_duplicate": {"$ne": True}})
-    pending_review = await db.hub_documents.count_documents({
+    total_docs = await database.hub_documents.count_documents({"is_duplicate": {"$ne": True}})
+    pending_review = await database.hub_documents.count_documents({
         "status": "NeedsReview", "is_duplicate": {"$ne": True}
     })
-    completed = await db.hub_documents.count_documents({
+    completed = await database.hub_documents.count_documents({
         "status": {"$in": ["Completed", "AutoCleared", "Archived"]},
         "is_duplicate": {"$ne": True}
     })
-    posted_7d = await db.hub_documents.count_documents({
+    posted_7d = await database.hub_documents.count_documents({
         "posted_to_bc": True,
         "posted_to_bc_at": {"$gte": seven_days_ago},
     })
-    ready_to_post = await db.hub_documents.count_documents({
+    ready_to_post = await database.hub_documents.count_documents({
         "status": "ReadyForPost", "is_duplicate": {"$ne": True}
     })
 
-    vendor_profiles = await db.vendor_invoice_profiles.count_documents({})
-    customer_profiles = await db.customer_posting_profiles.count_documents({})
+    vendor_profiles = await database.vendor_invoice_profiles.count_documents({})
+    customer_profiles = await database.customer_posting_profiles.count_documents({})
 
     return {
         "generated_at": now.isoformat(),

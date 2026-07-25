@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/settings/mailbox-sources", tags=["Mailbox Sources"])
@@ -35,26 +36,28 @@ class MailboxSource(BaseModel):
 
 
 @router.get("")
-async def list_mailbox_sources():
+async def list_mailbox_sources(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get all configured mailbox sources."""
-    db = get_db()
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
+    sources = await database.mailbox_sources.find({}, {"_id": 0}).to_list(100)
     return {"mailbox_sources": sources, "total": len(sources)}
 
 
 @router.get("/polling-status")
-async def get_mailbox_polling_status():
+async def get_mailbox_polling_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get the status of the dynamic mailbox polling worker."""
     import services.email_polling_service as email_polling_svc
     from deps import EMAIL_POLLING_ENABLED, SALES_EMAIL_POLLING_ENABLED
 
-    db = get_db()
     task = email_polling_svc._dynamic_mailbox_polling_task
     poll_times = email_polling_svc._mailbox_last_poll_times
 
     worker_running = task is not None and not task.done()
 
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
+    sources = await database.mailbox_sources.find({}, {"_id": 0}).to_list(100)
 
     mailbox_statuses = []
     for source in sources:
@@ -82,24 +85,22 @@ async def get_mailbox_polling_status():
 
 
 @router.get("/{mailbox_id}")
-async def get_mailbox_source(mailbox_id: str):
+async def get_mailbox_source(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get a specific mailbox source by ID."""
-    db = get_db()
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     return source
 
 
 @router.post("")
-async def create_mailbox_source(source: MailboxSource):
+async def create_mailbox_source(source: MailboxSource, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new mailbox source."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     mailbox_id = source.mailbox_id or f"mailbox_{uuid.uuid4().hex[:8]}"
 
-    existing = await db.mailbox_sources.find_one({"email_address": source.email_address})
+    existing = await database.mailbox_sources.find_one({"email_address": source.email_address})
     if existing:
         raise HTTPException(status_code=400, detail=f"Mailbox {source.email_address} already exists")
 
@@ -108,7 +109,7 @@ async def create_mailbox_source(source: MailboxSource):
     doc["created_utc"] = now
     doc["updated_utc"] = now
 
-    await db.mailbox_sources.insert_one(doc)
+    await database.mailbox_sources.insert_one(doc)
 
     logger.info("Created mailbox source: %s (%s)", source.name, source.email_address)
 
@@ -116,10 +117,9 @@ async def create_mailbox_source(source: MailboxSource):
 
 
 @router.put("/{mailbox_id}")
-async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
+async def update_mailbox_source(mailbox_id: str, source: MailboxSource, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an existing mailbox source."""
-    db = get_db()
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
+    existing = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
 
@@ -129,7 +129,7 @@ async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
     update_data["created_utc"] = existing.get("created_utc")
     update_data["updated_utc"] = now
 
-    await db.mailbox_sources.update_one(
+    await database.mailbox_sources.update_one(
         {"mailbox_id": mailbox_id},
         {"$set": update_data}
     )
@@ -140,14 +140,13 @@ async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
 
 
 @router.delete("/{mailbox_id}")
-async def delete_mailbox_source(mailbox_id: str):
+async def delete_mailbox_source(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a mailbox source."""
-    db = get_db()
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
+    existing = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
 
-    await db.mailbox_sources.delete_one({"mailbox_id": mailbox_id})
+    await database.mailbox_sources.delete_one({"mailbox_id": mailbox_id})
 
     logger.info("Deleted mailbox source: %s (%s)", existing.get("name"), existing.get("email_address"))
 
@@ -155,12 +154,11 @@ async def delete_mailbox_source(mailbox_id: str):
 
 
 @router.post("/{mailbox_id}/test-connection")
-async def test_mailbox_connection(mailbox_id: str):
+async def test_mailbox_connection(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Test connection to a mailbox source."""
     from services.config_service import get_email_token
 
-    db = get_db()
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
 
@@ -196,12 +194,11 @@ async def test_mailbox_connection(mailbox_id: str):
 
 
 @router.post("/{mailbox_id}/poll-now")
-async def poll_mailbox_now(mailbox_id: str):
+async def poll_mailbox_now(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Manually trigger polling for a specific mailbox."""
     from services.email_polling_service import poll_mailbox_for_documents
 
-    db = get_db()
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
 

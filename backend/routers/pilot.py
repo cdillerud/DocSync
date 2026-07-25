@@ -9,10 +9,11 @@ import hashlib
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Query, Body, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, Body, BackgroundTasks, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel
 from typing import Dict, Optional, List
-from deps import get_db
 from services.pilot_config import PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE, get_pilot_status
 from services.pilot_summary import DAILY_PILOT_EMAIL_ENABLED, PILOT_SUMMARY_RECIPIENTS, PILOT_SUMMARY_CRON_HOUR_UTC
 from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
@@ -50,7 +51,8 @@ async def get_pilot_status_endpoint():
 async def get_pilot_daily_metrics(
     phase: str = Query(default=CURRENT_PILOT_PHASE, description="Pilot phase to query"),
     date: Optional[str] = Query(default=None, description="Specific date (YYYY-MM-DD) or None for all")
-):
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Get daily metrics for the shadow pilot.
     
@@ -61,7 +63,6 @@ async def get_pilot_daily_metrics(
     - Vendor extraction rates
     - Export rates
     """
-    db = get_db()
     # Build date filter
     date_match = {}
     if date:
@@ -80,7 +81,7 @@ async def get_pilot_daily_metrics(
             "count": {"$sum": 1}
         }}
     ]
-    doc_type_results = await db.hub_documents.aggregate(doc_type_pipeline).to_list(20)
+    doc_type_results = await database.hub_documents.aggregate(doc_type_pipeline).to_list(20)
     by_doc_type = {r["_id"]: r["count"] for r in doc_type_results}
     
     # Classification method breakdown
@@ -91,7 +92,7 @@ async def get_pilot_daily_metrics(
             "count": {"$sum": 1}
         }}
     ]
-    classification_results = await db.hub_documents.aggregate(classification_pipeline).to_list(20)
+    classification_results = await database.hub_documents.aggregate(classification_pipeline).to_list(20)
     by_classification = {r["_id"]: r["count"] for r in classification_results}
     
     # Deterministic vs AI counts
@@ -115,7 +116,7 @@ async def get_pilot_daily_metrics(
             "count": {"$sum": 1}
         }}
     ]
-    stuck_results = await db.hub_documents.aggregate(stuck_pipeline).to_list(20)
+    stuck_results = await database.hub_documents.aggregate(stuck_pipeline).to_list(20)
     stuck_by_status = {r["_id"]: r["count"] for r in stuck_results}
     
     # Vendor extraction rate for AP_INVOICE
@@ -123,7 +124,7 @@ async def get_pilot_daily_metrics(
         {"$match": {**base_match, "doc_type": "AP_INVOICE"}},
         {"$count": "total"}
     ]
-    ap_total_result = await db.hub_documents.aggregate(ap_total_pipeline).to_list(1)
+    ap_total_result = await database.hub_documents.aggregate(ap_total_pipeline).to_list(1)
     ap_total = ap_total_result[0]["total"] if ap_total_result else 0
     
     ap_vendor_pipeline = [
@@ -137,7 +138,7 @@ async def get_pilot_daily_metrics(
         }},
         {"$count": "with_vendor"}
     ]
-    ap_vendor_result = await db.hub_documents.aggregate(ap_vendor_pipeline).to_list(1)
+    ap_vendor_result = await database.hub_documents.aggregate(ap_vendor_pipeline).to_list(1)
     ap_with_vendor = ap_vendor_result[0]["with_vendor"] if ap_vendor_result else 0
     
     vendor_extraction_rate = (ap_with_vendor / ap_total * 100) if ap_total > 0 else 0
@@ -147,7 +148,7 @@ async def get_pilot_daily_metrics(
         {"$match": {**base_match, "workflow_status": "exported"}},
         {"$count": "exported"}
     ]
-    exported_result = await db.hub_documents.aggregate(exported_pipeline).to_list(1)
+    exported_result = await database.hub_documents.aggregate(exported_pipeline).to_list(1)
     exported_count = exported_result[0]["exported"] if exported_result else 0
     
     total_docs = sum(by_doc_type.values())
@@ -181,7 +182,7 @@ async def get_pilot_daily_metrics(
             "count": {"$sum": 1}
         }}
     ]
-    missing_results = await db.hub_documents.aggregate(missing_fields_pipeline).to_list(20)
+    missing_results = await database.hub_documents.aggregate(missing_fields_pipeline).to_list(20)
     missing_by_type = {r["_id"]: r["count"] for r in missing_results}
     
     return {
@@ -572,8 +573,7 @@ async def _daily_pilot_summary_scheduler():
 # ==================== WORKFLOW METRICS ====================
 
 @router.get("/workflows/ap_invoice/metrics")
-async def get_ap_workflow_metrics(days: int = Query(30)):
-    db = get_db()
+async def get_ap_workflow_metrics(days: int = Query(30), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Get workflow metrics for AP_Invoice documents.
     Includes counts per status and time-in-status averages.
@@ -586,7 +586,7 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
         {"$group": {"_id": "$workflow_status", "count": {"$sum": 1}}},
         {"$sort": {"_id": 1}}
     ]
-    status_results = await db.hub_documents.aggregate(status_pipeline).to_list(100)
+    status_results = await database.hub_documents.aggregate(status_pipeline).to_list(100)
     status_counts = {r["_id"] or "none": r["count"] for r in status_results}
     
     # Daily workflow status changes
@@ -602,7 +602,7 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
         }},
         {"$sort": {"_id.date": -1}}
     ]
-    daily_results = await db.hub_documents.aggregate(daily_pipeline).to_list(1000)
+    daily_results = await database.hub_documents.aggregate(daily_pipeline).to_list(1000)
     
     # Group by date
     daily_by_date = {}
@@ -629,22 +629,24 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
 # ==================== MAILBOX SOURCES CRUD ====================
 
 @router.get("/settings/mailbox-sources")
-async def list_mailbox_sources():
-    db = get_db()
+async def list_mailbox_sources(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get all configured mailbox sources."""
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
+    sources = await database.mailbox_sources.find({}, {"_id": 0}).to_list(100)
     return {"mailbox_sources": sources, "total": len(sources)}
 
 @router.get("/settings/mailbox-sources/polling-status")
-async def get_mailbox_polling_status():
-    db = get_db()
+async def get_mailbox_polling_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get the status of the dynamic mailbox polling worker."""
     global _dynamic_mailbox_polling_task, _mailbox_last_poll_times
     
     worker_running = _dynamic_mailbox_polling_task is not None and not _dynamic_mailbox_polling_task.done()
     
     # Get all mailbox sources with their last poll times
-    sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
+    sources = await database.mailbox_sources.find({}, {"_id": 0}).to_list(100)
     
     mailbox_statuses = []
     for source in sources:
@@ -671,17 +673,15 @@ async def get_mailbox_polling_status():
     }
 
 @router.get("/settings/mailbox-sources/{mailbox_id}")
-async def get_mailbox_source(mailbox_id: str):
-    db = get_db()
+async def get_mailbox_source(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get a specific mailbox source by ID."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     return source
 
 @router.post("/settings/mailbox-sources")
-async def create_mailbox_source(source: MailboxSource):
-    db = get_db()
+async def create_mailbox_source(source: MailboxSource, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new mailbox source."""
     now = datetime.now(timezone.utc).isoformat()
     
@@ -689,7 +689,7 @@ async def create_mailbox_source(source: MailboxSource):
     mailbox_id = source.mailbox_id or f"mailbox_{uuid.uuid4().hex[:8]}"
     
     # Check for duplicate email address
-    existing = await db.mailbox_sources.find_one({"email_address": source.email_address})
+    existing = await database.mailbox_sources.find_one({"email_address": source.email_address})
     if existing:
         raise HTTPException(status_code=400, detail=f"Mailbox {source.email_address} already exists")
     
@@ -698,7 +698,7 @@ async def create_mailbox_source(source: MailboxSource):
     doc["created_utc"] = now
     doc["updated_utc"] = now
     
-    await db.mailbox_sources.insert_one(doc)
+    await database.mailbox_sources.insert_one(doc)
     
     logger.info("Created mailbox source: %s (%s)", source.name, source.email_address)
     
@@ -706,10 +706,9 @@ async def create_mailbox_source(source: MailboxSource):
     return await get_mailbox_source(mailbox_id)
 
 @router.put("/settings/mailbox-sources/{mailbox_id}")
-async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
-    db = get_db()
+async def update_mailbox_source(mailbox_id: str, source: MailboxSource, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an existing mailbox source."""
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
+    existing = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     
@@ -719,7 +718,7 @@ async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
     update_data["created_utc"] = existing.get("created_utc")  # Preserve creation date
     update_data["updated_utc"] = now
     
-    await db.mailbox_sources.update_one(
+    await database.mailbox_sources.update_one(
         {"mailbox_id": mailbox_id},
         {"$set": update_data}
     )
@@ -729,24 +728,22 @@ async def update_mailbox_source(mailbox_id: str, source: MailboxSource):
     return await get_mailbox_source(mailbox_id)
 
 @router.delete("/settings/mailbox-sources/{mailbox_id}")
-async def delete_mailbox_source(mailbox_id: str):
-    db = get_db()
+async def delete_mailbox_source(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a mailbox source."""
-    existing = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id})
+    existing = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     
-    await db.mailbox_sources.delete_one({"mailbox_id": mailbox_id})
+    await database.mailbox_sources.delete_one({"mailbox_id": mailbox_id})
     
     logger.info("Deleted mailbox source: %s (%s)", existing.get("name"), existing.get("email_address"))
     
     return {"status": "deleted", "mailbox_id": mailbox_id}
 
 @router.post("/settings/mailbox-sources/{mailbox_id}/test-connection")
-async def test_mailbox_connection(mailbox_id: str):
-    db = get_db()
+async def test_mailbox_connection(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Test connection to a mailbox source."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     
@@ -782,10 +779,9 @@ async def test_mailbox_connection(mailbox_id: str):
         return {"status": "error", "message": f"Connection test failed: {str(e)}"}
 
 @router.post("/settings/mailbox-sources/{mailbox_id}/poll-now")
-async def poll_mailbox_now(mailbox_id: str):
-    db = get_db()
+async def poll_mailbox_now(mailbox_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Manually trigger polling for a specific mailbox."""
-    source = await db.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
+    source = await database.mailbox_sources.find_one({"mailbox_id": mailbox_id}, {"_id": 0})
     if not source:
         raise HTTPException(status_code=404, detail=f"Mailbox source {mailbox_id} not found")
     
@@ -805,8 +801,7 @@ async def poll_mailbox_now(mailbox_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None):
-    db = get_db()
+async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Unified mailbox polling function that ingests documents into the main hub_documents collection.
     """
@@ -891,7 +886,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         continue
                     
                     # Check for duplicates
-                    existing = await db.mail_intake_log.find_one({
+                    existing = await database.mail_intake_log.find_one({
                         "internet_message_id": internet_msg_id,
                         "attachment_name": filename
                     })
@@ -930,7 +925,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                         )
                         
                         # Log the intake
-                        await db.mail_intake_log.insert_one({
+                        await database.mail_intake_log.insert_one({
                             "internet_message_id": internet_msg_id,
                             "attachment_name": filename,
                             "attachment_hash": content_hash,
@@ -969,15 +964,15 @@ class VendorAlias(BaseModel):
     notes: Optional[str] = None
 
 @router.get("/aliases/vendors")
-async def get_vendor_aliases():
-    db = get_db()
+async def get_vendor_aliases(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get all vendor aliases."""
-    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    aliases = await database.vendor_aliases.find({}, {"_id": 0}).to_list(500)
     return {"aliases": aliases, "count": len(aliases)}
 
 @router.post("/aliases/vendors")
-async def create_vendor_alias(alias: VendorAlias):
-    db = get_db()
+async def create_vendor_alias(alias: VendorAlias, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new vendor alias mapping."""
     alias_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -986,7 +981,7 @@ async def create_vendor_alias(alias: VendorAlias):
     normalized = normalize_vendor_name(alias.alias_string)
     
     # Check for existing alias
-    existing = await db.vendor_aliases.find_one({
+    existing = await database.vendor_aliases.find_one({
         "$or": [
             {"alias_string": alias.alias_string},
             {"normalized_alias": normalized}
@@ -1010,7 +1005,7 @@ async def create_vendor_alias(alias: VendorAlias):
         "last_used_at": None
     }
     
-    await db.vendor_aliases.insert_one(alias_doc)
+    await database.vendor_aliases.insert_one(alias_doc)
     
     # Update global alias map
     VENDOR_ALIAS_MAP[alias.alias_string] = alias.vendor_name or alias.vendor_no
@@ -1019,17 +1014,15 @@ async def create_vendor_alias(alias: VendorAlias):
     return {"alias_id": alias_id, "message": "Alias created successfully"}
 
 @router.delete("/aliases/vendors/{alias_id}")
-async def delete_vendor_alias(alias_id: str):
-    db = get_db()
+async def delete_vendor_alias(alias_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a vendor alias."""
-    result = await db.vendor_aliases.delete_one({"alias_id": alias_id})
+    result = await database.vendor_aliases.delete_one({"alias_id": alias_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Alias not found")
     return {"message": "Alias deleted"}
 
 @router.get("/aliases/vendors/suggest")
-async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, resolved_vendor_name: str):
-    db = get_db()
+async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, resolved_vendor_name: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Called when user manually resolves a vendor match.
     Returns suggestion to save as alias.
@@ -1037,7 +1030,7 @@ async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, reso
     normalized = normalize_vendor_name(vendor_name)
     
     # Check if alias already exists
-    existing = await db.vendor_aliases.find_one({
+    existing = await database.vendor_aliases.find_one({
         "$or": [
             {"alias_string": vendor_name},
             {"normalized_alias": normalized}
@@ -1063,10 +1056,9 @@ async def suggest_alias_creation(vendor_name: str, resolved_vendor_no: str, reso
     }
 
 # Update resolve endpoint to increment alias usage
-async def record_alias_usage(alias_string: str):
-    db = get_db()
+async def record_alias_usage(alias_string: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record when an alias is used for matching."""
-    await db.vendor_aliases.update_one(
+    await database.vendor_aliases.update_one(
         {"alias_string": alias_string},
         {
             "$inc": {"usage_count": 1},
@@ -1094,15 +1086,14 @@ async def get_pilot_simulation_status():
 
 
 @router.post("/simulation/document/{doc_id}/run")
-async def run_simulation_for_document(doc_id: str):
-    db = get_db()
+async def run_simulation_for_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Run full BC export simulation for a document.
     
     This simulates all applicable BC operations based on doc_type
     and stores results in workflow history and simulation_results collection.
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1131,11 +1122,11 @@ async def run_simulation_for_document(doc_id: str):
     for sim_type, result in results_dict.items():
         db_copy = json_lib.loads(json_lib.dumps(result))
         db_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-        await db.pilot_simulation_results.insert_one(db_copy)
+        await database.pilot_simulation_results.insert_one(db_copy)
     
     # Update document with simulation results and history
     results_for_db = json_lib.loads(json_lib.dumps(results_dict))
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$push": {"workflow_history": history_entry},
@@ -1163,10 +1154,9 @@ async def run_simulation_for_document(doc_id: str):
 
 
 @router.post("/simulation/ap-invoice/{doc_id}")
-async def simulate_ap_invoice_export(doc_id: str):
-    db = get_db()
+async def simulate_ap_invoice_export(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Simulate AP invoice export to BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1180,11 +1170,11 @@ async def simulate_ap_invoice_export(doc_id: str):
     # Store result (deep copy to avoid _id mutation)
     result_copy = copy.deepcopy(result_dict)
     result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-    await db.pilot_simulation_results.insert_one(result_copy)
+    await database.pilot_simulation_results.insert_one(result_copy)
     
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
@@ -1193,10 +1183,9 @@ async def simulate_ap_invoice_export(doc_id: str):
 
 
 @router.post("/simulation/sales-invoice/{doc_id}")
-async def simulate_sales_invoice_export_endpoint(doc_id: str):
-    db = get_db()
+async def simulate_sales_invoice_export_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Simulate sales invoice export to BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1210,11 +1199,11 @@ async def simulate_sales_invoice_export_endpoint(doc_id: str):
     # Store result (deep copy to avoid _id mutation)
     result_copy = copy.deepcopy(result_dict)
     result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-    await db.pilot_simulation_results.insert_one(result_copy)
+    await database.pilot_simulation_results.insert_one(result_copy)
     
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
@@ -1223,10 +1212,9 @@ async def simulate_sales_invoice_export_endpoint(doc_id: str):
 
 
 @router.post("/simulation/po-linkage/{doc_id}")
-async def simulate_po_linkage_endpoint(doc_id: str):
-    db = get_db()
+async def simulate_po_linkage_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Simulate PO linkage in BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1237,11 +1225,11 @@ async def simulate_po_linkage_endpoint(doc_id: str):
     # Store result (deep copy to avoid _id mutation)
     result_copy = copy.deepcopy(result_dict)
     result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-    await db.pilot_simulation_results.insert_one(result_copy)
+    await database.pilot_simulation_results.insert_one(result_copy)
     
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
@@ -1250,10 +1238,9 @@ async def simulate_po_linkage_endpoint(doc_id: str):
 
 
 @router.post("/simulation/attachment/{doc_id}")
-async def simulate_attachment_endpoint(doc_id: str):
-    db = get_db()
+async def simulate_attachment_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Simulate PDF attachment to BC record."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1264,11 +1251,11 @@ async def simulate_attachment_endpoint(doc_id: str):
     # Store result (deep copy to avoid _id mutation)
     result_copy = copy.deepcopy(result_dict)
     result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
-    await db.pilot_simulation_results.insert_one(result_copy)
+    await database.pilot_simulation_results.insert_one(result_copy)
     
     # Add to workflow history
     history_entry = SimulationHistoryEntry.create_simulation_entry(result_dict)
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$push": {"workflow_history": history_entry}}
     )
@@ -1628,8 +1615,7 @@ async def start_batch_reingest(
     }
 
 
-async def run_batch_reingest(batch_size: int, doc_type_filter: str = None):
-    db = get_db()
+async def run_batch_reingest(batch_size: int, doc_type_filter: str = None, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Background task to run batch re-ingest."""
     global _reingest_state
     
@@ -1639,7 +1625,7 @@ async def run_batch_reingest(batch_size: int, doc_type_filter: str = None):
             query["doc_type"] = doc_type_filter
         
         # Get all document IDs
-        cursor = db.hub_documents.find(query, {"_id": 0, "id": 1})
+        cursor = database.hub_documents.find(query, {"_id": 0, "id": 1})
         all_docs = await cursor.to_list(10000)
         doc_ids = [d["id"] for d in all_docs]
         
@@ -1674,8 +1660,7 @@ async def run_batch_reingest(batch_size: int, doc_type_filter: str = None):
         _reingest_state["completed_at"] = datetime.now(timezone.utc).isoformat()
 
 
-async def reingest_single_document(doc_id: str):
-    db = get_db()
+async def reingest_single_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     Re-ingest a single document:
     1. Reset workflow status
@@ -1684,7 +1669,7 @@ async def reingest_single_document(doc_id: str):
     4. Run simulation
     """
     # Get document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise ValueError(f"Document {doc_id} not found")
     
@@ -1738,7 +1723,7 @@ async def reingest_single_document(doc_id: str):
         result_copy = json_lib.loads(json_lib.dumps(result))
         result_copy["_collection_timestamp"] = datetime.now(timezone.utc).isoformat()
         result_copy["_reingest_batch"] = True
-        await db.pilot_simulation_results.insert_one(result_copy)
+        await database.pilot_simulation_results.insert_one(result_copy)
     
     # Step 5: Create simulation history entry
     from workflows.core.engine import SimulationHistoryEntry
@@ -1770,7 +1755,7 @@ async def reingest_single_document(doc_id: str):
         new_status = initial_status
     
     # Step 7: Update document
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {
             "$set": {

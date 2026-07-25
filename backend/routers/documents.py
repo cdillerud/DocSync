@@ -14,11 +14,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query, Body
+from fastapi import APIRouter, BackgroundTasks, HTTPException, UploadFile, File, Form, Query, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -120,12 +121,11 @@ def register_server_routes(app=None):
 
 
 @router.get("/{doc_id}/diagnose")
-async def diagnose_document(doc_id: str):
+async def diagnose_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Diagnostic endpoint — check why a document is stuck and what can be done."""
     import os
     from pathlib import Path
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"error": "Document not found"}
     
@@ -182,8 +182,8 @@ async def list_documents(
     queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default"),
     date_from: str = Query(None, description="Filter: created on or after this date (YYYY-MM-DD)"),
     date_to: str = Query(None, description="Filter: created on or before this date (YYYY-MM-DD)")
-):
-    db = get_db()
+,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     fq = {"is_duplicate": {"$ne": True}}  # Always exclude duplicates
 
     # Date range filter — append T00:00:00 / T23:59:59 to cover the full day
@@ -264,7 +264,7 @@ async def list_documents(
                 text_search_cond = {"$text": {"$search": search_term}}
                 test_fq = {k: v for k, v in fq.items()}
                 test_fq.update(text_search_cond)
-                await db.hub_documents.count_documents(test_fq)
+                await database.hub_documents.count_documents(test_fq)
                 search_cond = text_search_cond
             except Exception:
                 search_cond = text_conditions
@@ -287,17 +287,17 @@ async def list_documents(
         else:
             fq["$and"] = [not_cleared, not_terminal, not_done_wf]
 
-    total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    total = await database.hub_documents.count_documents(fq)
+    docs = await database.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 
     # Compute global counts (excluding duplicates)
     not_dup = {"is_duplicate": {"$ne": True}}
-    total_all = await db.hub_documents.count_documents(not_dup)
-    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True, **not_dup})
+    total_all = await database.hub_documents.count_documents(not_dup)
+    cleared_count = await database.hub_documents.count_documents({"auto_cleared": True, **not_dup})
 
     DONE_WF = DONE_WORKFLOW_STATUSES
 
-    pending_count = await db.hub_documents.count_documents({
+    pending_count = await database.hub_documents.count_documents({
         "$and": [
             not_dup,
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
@@ -309,7 +309,7 @@ async def list_documents(
         ]
     })
     # Exclude batch_parent from completed count (they are containers, not processed work)
-    completed_count = await db.hub_documents.count_documents({
+    completed_count = await database.hub_documents.count_documents({
         "$and": [
             not_dup,
             {"status": {"$ne": "batch_parent"}},  # Exclude batch_parent containers
@@ -322,13 +322,13 @@ async def list_documents(
     })
 
     # Distinct types and statuses for dynamic filter dropdowns
-    distinct_types_raw = await db.hub_documents.aggregate([
+    distinct_types_raw = await database.hub_documents.aggregate([
         {"$match": {"is_duplicate": {"$ne": True}}},
         {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
         {"$match": {"_id": {"$ne": None}}},
         {"$sort": {"count": -1}},
     ]).to_list(50)
-    distinct_statuses_raw = await db.hub_documents.aggregate([
+    distinct_statuses_raw = await database.hub_documents.aggregate([
         {"$match": {"is_duplicate": {"$ne": True}}},
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
         {"$match": {"_id": {"$ne": None}}},
@@ -388,9 +388,9 @@ async def get_bootstrap_status_endpoint():
 async def search_documents(
     q: str = Query(..., min_length=1, description="Search query"),
     limit: int = Query(20, ge=1, le=100),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Dedicated search endpoint with match-field highlights."""
-    db = get_db()
     search_term = q.strip()
 
     # Amount detection
@@ -424,13 +424,13 @@ async def search_documents(
     used_text = False
     try:
         text_query = {"$text": {"$search": search_term}, "is_duplicate": {"$ne": True}}
-        cursor = db.hub_documents.find(text_query, {**projection, "score": {"$meta": "textScore"}})
+        cursor = database.hub_documents.find(text_query, {**projection, "score": {"$meta": "textScore"}})
         cursor = cursor.sort([("score", {"$meta": "textScore"})]).limit(limit)
         docs = await cursor.to_list(limit)
         used_text = True
         # If amount search, also query by amount and merge results
         if amount_match is not None:
-            amount_docs = await db.hub_documents.find(
+            amount_docs = await database.hub_documents.find(
                 {"amount_float": amount_match, "is_duplicate": {"$ne": True}},
                 projection,
             ).limit(limit).to_list(limit)
@@ -448,7 +448,7 @@ async def search_documents(
         if amount_match is not None:
             or_clauses.append({"amount_float": amount_match})
         regex_query = {"$or": or_clauses, "is_duplicate": {"$ne": True}}
-        docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit).to_list(limit)
+        docs = await database.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit).to_list(limit)
 
     # Compute match_fields for each result
     import re
@@ -497,15 +497,14 @@ async def search_documents(
 
 
 @router.get("/{doc_id}")
-async def get_document(doc_id: str, include_events: bool = Query(True)):
+async def get_document(doc_id: str, include_events: bool = Query(True), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     from services.event_service import get_event_service
     from services.derived_state_service import get_derived_state_service, format_state_for_display
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    workflows = await db.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
+    workflows = await database.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
 
     event_timeline = []
     derived_state = None
@@ -630,15 +629,14 @@ async def get_document_timeline(doc_id: str, include_legacy: bool = Query(True))
 
 
 @router.get("/{doc_id}/derived-state")
-async def get_document_derived_state(doc_id: str):
+async def get_document_derived_state(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     from services.derived_state_service import get_derived_state_service, format_state_for_display
 
     derived_state_service = get_derived_state_service()
     if not derived_state_service:
         raise HTTPException(status_code=503, detail="Derived state service not initialized")
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -649,15 +647,14 @@ async def get_document_derived_state(doc_id: str):
 
 
 @router.post("/{doc_id}/refresh-state")
-async def refresh_document_state(doc_id: str):
+async def refresh_document_state(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     from services.derived_state_service import get_derived_state_service
 
     derived_state_service = get_derived_state_service()
     if not derived_state_service:
         raise HTTPException(status_code=503, detail="Derived state service not initialized")
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -667,11 +664,10 @@ async def refresh_document_state(doc_id: str):
 
 
 @router.put("/{doc_id}")
-async def update_document(doc_id: str, update: DocumentUpdate):
-    db = get_db()
+async def update_document(doc_id: str, update: DocumentUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     
     # Fetch current doc to detect classification changes
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -726,7 +722,7 @@ async def update_document(doc_id: str, update: DocumentUpdate):
         if update.document_type is not None:
             original_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
             if update.document_type != original_type:
-                await record_feedback(db, "classification_correction", doc_id, vendor_id,
+                await record_feedback(database, "classification_correction", doc_id, vendor_id,
                     before={"doc_type": original_type},
                     after={"doc_type": update.document_type},
                     metadata={
@@ -739,14 +735,14 @@ async def update_document(doc_id: str, update: DocumentUpdate):
             old_vendor = doc.get("vendor_canonical") or doc.get("vendor_name") or ""
             new_vendor = update.vendor_canonical or update.vendor_name or ""
             if old_vendor != new_vendor:
-                await record_feedback(db, "vendor_correction", doc_id, vendor_id,
+                await record_feedback(database, "vendor_correction", doc_id, vendor_id,
                     before={"vendor": old_vendor}, after={"vendor": new_vendor})
         
         # Amount correction
         for amt_field in ("total_amount", "invoice_amount"):
             new_val = getattr(update, amt_field, None)
             if new_val is not None and new_val != doc.get(amt_field):
-                await record_feedback(db, "amount_correction", doc_id, vendor_id,
+                await record_feedback(database, "amount_correction", doc_id, vendor_id,
                     before={"amount": doc.get(amt_field)}, after={"amount": new_val})
                 break
         
@@ -754,21 +750,21 @@ async def update_document(doc_id: str, update: DocumentUpdate):
         if getattr(update, "po_number_extracted", None) is not None:
             old_po = doc.get("po_number_extracted", "")
             if update.po_number_extracted != old_po:
-                await record_feedback(db, "po_correction", doc_id, vendor_id,
+                await record_feedback(database, "po_correction", doc_id, vendor_id,
                     before={"po": old_po}, after={"po": update.po_number_extracted})
         
         # Folder/routing correction
         for folder_field in ("sharepoint_folder_path", "filed_to"):
             new_val = getattr(update, folder_field, None)
             if new_val is not None and new_val != doc.get(folder_field):
-                await record_feedback(db, "folder_correction", doc_id, vendor_id,
+                await record_feedback(database, "folder_correction", doc_id, vendor_id,
                     before={"folder": doc.get(folder_field, "")}, after={"folder": new_val})
                 break
     except Exception as e:
         logger.debug("Feedback recording skipped: %s", e)
     
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    await database.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return updated_doc
 
 
@@ -808,13 +804,12 @@ async def disposition_non_transactional_document(
 
 
 @router.delete("/{doc_id}")
-async def delete_document(doc_id: str):
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+async def delete_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
-    await db.hub_documents.delete_one({"id": doc_id})
-    await db.hub_workflow_runs.delete_many({"document_id": doc_id})
+    await database.hub_documents.delete_one({"id": doc_id})
+    await database.hub_workflow_runs.delete_many({"document_id": doc_id})
     file_path = UPLOAD_DIR / doc_id
     if file_path.exists():
         file_path.unlink()
@@ -823,10 +818,9 @@ async def delete_document(doc_id: str):
 
 
 @router.post("/{doc_id}/upload-file")
-async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
+async def upload_replacement_file(doc_id: str, file: UploadFile = File(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Upload a replacement file for an existing document, then re-run AI extraction."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -836,7 +830,7 @@ async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
         file_path.write_bytes(content)
         
         # Update document metadata
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+        await database.hub_documents.update_one({"id": doc_id}, {"$set": {
             "file_size": len(content),
             "content_type": file.content_type or "application/pdf",
         }})
@@ -853,12 +847,11 @@ async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
 
 
 @router.get("/{doc_id}/file")
-async def get_document_file(doc_id: str):
+async def get_document_file(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Serve a document file — local disk first, SharePoint fallback."""
     import httpx
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -993,10 +986,9 @@ async def get_document_file(doc_id: str):
 
 
 @router.get("/{doc_id}/preview-url")
-async def get_preview_url(doc_id: str):
+async def get_preview_url(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return the best available URL for previewing the document."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1068,12 +1060,11 @@ def _resolve_file_path(doc_id: str, file_name: str = "") -> Optional[Path]:
 
 
 @router.get("/{doc_id}/pages")
-async def get_document_pages(doc_id: str):
+async def get_document_pages(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return page count and per-page text preview for a PDF document."""
     from pypdf import PdfReader
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1111,7 +1102,7 @@ async def get_document_pages(doc_id: str):
 
 
 @router.get("/{doc_id}/boundary-analysis")
-async def analyze_document_boundaries_endpoint(doc_id: str):
+async def analyze_document_boundaries_endpoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Analyze a multi-page document to detect logical document boundaries.
     
     Returns page fingerprints, detected boundaries, and recommended page groups
@@ -1119,8 +1110,7 @@ async def analyze_document_boundaries_endpoint(doc_id: str):
     """
     from services.document_boundary_service import analyze_document_boundaries
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1140,7 +1130,7 @@ async def analyze_document_boundaries_endpoint(doc_id: str):
 
 
 @router.post("/{doc_id}/auto-split")
-async def auto_split_document(doc_id: str):
+async def auto_split_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Auto-split a multi-page document using intelligent boundary detection.
     
     Each logical document group runs through the full intake pipeline.
@@ -1148,8 +1138,7 @@ async def auto_split_document(doc_id: str):
     from services.document_boundary_service import analyze_document_boundaries
     from services.batch_po_splitter import split_and_ingest_batch
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1182,7 +1171,7 @@ async def auto_split_document(doc_id: str):
 
     # Split using boundary groups
     result = await split_and_ingest_batch(
-        db=db,
+        db=database,
         parent_doc_id=doc_id,
         parent_filename=doc.get("filename") or doc.get("file_name") or "document.pdf",
         file_content=file_content,
@@ -1206,12 +1195,11 @@ class SplitRequest(BaseModel):
 
 
 @router.post("/{doc_id}/split")
-async def split_document(doc_id: str, request: SplitRequest, background_tasks: BackgroundTasks):
+async def split_document(doc_id: str, request: SplitRequest, background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Split a multi-page PDF into multiple independent documents."""
     from pypdf import PdfReader, PdfWriter
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1309,7 +1297,7 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
             "source": doc.get("source", "split"),
             "ingestion_source": "split",
         }
-        await db.hub_documents.insert_one(new_doc)
+        await database.hub_documents.insert_one(new_doc)
 
         # Trigger classification pipeline in background
         background_tasks.add_task(_trigger_classification, new_doc_id)
@@ -1321,7 +1309,7 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
         })
 
     # Mark original as split
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "split_into": [d["doc_id"] for d in new_docs],
@@ -1341,13 +1329,12 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
 
 
 @router.post("/{doc_id}/split-batch")
-async def split_batch_po(doc_id: str, background_tasks: BackgroundTasks):
+async def split_batch_po(doc_id: str, background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """One-click batch split: split every page into its own document and run
     the full intake pipeline (classify → extract → validate → auto-assign)
     on each one. Designed for multi-PO PDFs where each page = 1 PO.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1387,7 +1374,7 @@ async def split_batch_po(doc_id: str, background_tasks: BackgroundTasks):
     # Run the split in background so the API returns immediately
     background_tasks.add_task(
         _run_batch_split,
-        db, doc_id, doc.get("file_name", "document.pdf"), file_content,
+        database, doc_id, doc.get("file_name", "document.pdf"), file_content,
         doc.get("email_sender", ""), page_count,
     )
 
@@ -1433,10 +1420,9 @@ async def _run_batch_split(db, parent_doc_id, parent_filename, file_content, sen
 
 
 @router.post("/{doc_id}/reprocess-batch")
-async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
+async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Re-process an existing batch parent: delete old children, re-split, re-run full pipeline."""
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1458,8 +1444,8 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
     # Delete old children
     old_children_ids = doc.get("batch_children_ids", [])
     if old_children_ids:
-        await db.hub_documents.delete_many({"id": {"$in": old_children_ids}})
-        await db.workflow_events.delete_many({"document_id": {"$in": old_children_ids}})
+        await database.hub_documents.delete_many({"id": {"$in": old_children_ids}})
+        await database.workflow_events.delete_many({"document_id": {"$in": old_children_ids}})
         logger.info("[ReprocessBatch] Deleted %d old children for %s", len(old_children_ids), doc_id[:8])
 
     # Reset parent metadata
@@ -1467,7 +1453,7 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
     reader = PdfReader(io.BytesIO(file_content))
     page_count = len(reader.pages)
 
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "batch_split": False,
@@ -1481,7 +1467,7 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
 
     # Re-run split in background
     sender = doc.get("sender", doc.get("email_sender", ""))
-    background_tasks.add_task(_run_batch_split, db, doc_id, doc.get("file_name", ""), file_content, sender, page_count)
+    background_tasks.add_task(_run_batch_split, database, doc_id, doc.get("file_name", ""), file_content, sender, page_count)
 
     return {
         "success": True,
@@ -1494,10 +1480,9 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
 
 
 @router.get("/{doc_id}/split-status")
-async def get_split_status(doc_id: str):
+async def get_split_status(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Check the status of a batch split operation."""
-    db = get_db()
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"id": doc_id},
         {"_id": 0, "id": 1, "file_name": 1, "batch_split": 1, "batch_detected": 1,
          "batch_page_count": 1, "batch_children_count": 1, "batch_children_ids": 1,
@@ -1509,7 +1494,7 @@ async def get_split_status(doc_id: str):
     children_ids = doc.get("batch_children_ids", [])
     children_details = []
     if children_ids:
-        async for child in db.hub_documents.find(
+        async for child in database.hub_documents.find(
             {"id": {"$in": children_ids}},
             {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1,
              "sales_review_status": 1, "assigned_rep_name": 1, "assigned_rep_email": 1,
@@ -1546,12 +1531,11 @@ async def get_split_status(doc_id: str):
 
 
 @router.post("/{doc_id}/delete-pages")
-async def delete_pages(doc_id: str, payload: dict = Body(...)):
+async def delete_pages(doc_id: str, payload: dict = Body(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete specific pages from a PDF, creating a new version in place."""
     from pypdf import PdfReader, PdfWriter
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1607,7 +1591,7 @@ async def delete_pages(doc_id: str, payload: dict = Body(...)):
         writer.write(f)
 
     now = datetime.now(timezone.utc).isoformat()
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "pages_deleted": sorted(pages_to_delete),
@@ -1647,11 +1631,10 @@ async def _trigger_classification(doc_id: str):
 
 
 @router.get("/{doc_id}/square9-status")
-async def get_square9_status(doc_id: str):
+async def get_square9_status(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     from services.square9_workflow import get_workflow_summary
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1664,18 +1647,17 @@ async def get_square9_status(doc_id: str):
 
 
 @router.post("/{doc_id}/reset-retries")
-async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
+async def reset_document_retries(doc_id: str, reason: str = "Manual reset", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     from services.square9_workflow import reset_retry_counter
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     update_dict = reset_retry_counter(doc, reason)
     update_dict["updated_utc"] = datetime.now(timezone.utc).isoformat()
 
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
+    await database.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
 
     return {
         "success": True,
@@ -1691,15 +1673,14 @@ async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
 # =============================================================================
 
 @router.post("/{doc_id}/file-and-clear")
-async def file_and_clear_document(doc_id: str):
+async def file_and_clear_document(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """
     One-click: suggest folder → move to SharePoint → mark cleared.
     Records the action for AI auto-filing learning.
     """
     from services.folder_routing_service import determine_folder_path
 
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1736,7 +1717,7 @@ async def file_and_clear_document(doc_id: str):
         "filed_folder": folder_path,
         "updated_utc": now,
     }
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
+    await database.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
 
     # Step 4: Record for AI filing learning
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
@@ -1753,7 +1734,7 @@ async def file_and_clear_document(doc_id: str):
         )
     except Exception as e:
         logger.warning("Failed to record classification confirmation on file-and-clear: %s", e)
-    await db.filing_actions.update_one(
+    await database.filing_actions.update_one(
         {"document_type": doc_type, "vendor_lower": vendor.lower(), "folder_path": folder_path},
         {"$inc": {"count": 1}, "$set": {
             "document_type": doc_type,
@@ -1769,7 +1750,7 @@ async def file_and_clear_document(doc_id: str):
     # === PER-DOCUMENT LEARNING: File & clear is a positive signal ===
     try:
         from services.per_document_learning_service import learn_from_document
-        await learn_from_document(db, doc_id, trigger="auto_file")
+        await learn_from_document(database, doc_id, trigger="auto_file")
     except Exception:
         pass
 
@@ -1785,20 +1766,19 @@ async def file_and_clear_document(doc_id: str):
 
 
 @router.post("/bulk-file-and-clear")
-async def bulk_file_and_clear(doc_ids: list = Body(None)):
+async def bulk_file_and_clear(doc_ids: list = Body(None), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Bulk file & clear: route each document to SharePoint and mark cleared."""
     from services.folder_routing_service import determine_folder_path
 
     if not doc_ids:
         raise HTTPException(status_code=422, detail="doc_ids required")
 
-    db = get_db()
     results = {"success": [], "failed": [], "total": len(doc_ids)}
     now = datetime.now(timezone.utc).isoformat()
 
     for doc_id in doc_ids:
         try:
-            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             if not doc:
                 results["failed"].append({"doc_id": doc_id, "error": "Not found"})
                 continue
@@ -1825,12 +1805,12 @@ async def bulk_file_and_clear(doc_ids: list = Body(None)):
                 "filed_folder": folder_path,
                 "updated_utc": now,
             }
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
+            await database.hub_documents.update_one({"id": doc_id}, {"$set": clear_update})
 
             # Record for AI filing learning
             doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
             vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
-            await db.filing_actions.update_one(
+            await database.filing_actions.update_one(
                 {"document_type": doc_type, "vendor_lower": vendor.lower(), "folder_path": folder_path},
                 {"$inc": {"count": 1}, "$set": {
                     "document_type": doc_type, "vendor": vendor, "vendor_lower": vendor.lower(),
@@ -1854,7 +1834,7 @@ async def bulk_file_and_clear(doc_ids: list = Body(None)):
             # === PER-DOCUMENT LEARNING: Bulk file is a positive signal ===
             try:
                 from services.per_document_learning_service import learn_from_document
-                await learn_from_document(db, doc_id, trigger="auto_file")
+                await learn_from_document(database, doc_id, trigger="auto_file")
             except Exception:
                 pass
 
@@ -1866,10 +1846,11 @@ async def bulk_file_and_clear(doc_ids: list = Body(None)):
 
 
 @router.get("/filing-actions/stats")
-async def get_filing_action_stats():
+async def get_filing_action_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get stats on filing actions for AI learning visibility."""
-    db = get_db()
-    actions = await db.filing_actions.find({}, {"_id": 0}).sort("count", -1).to_list(100)
+    actions = await database.filing_actions.find({}, {"_id": 0}).sort("count", -1).to_list(100)
     total = sum(a.get("count", 0) for a in actions)
     return {
         "total_filings": total,
@@ -1884,7 +1865,8 @@ async def get_filing_action_stats():
 async def bulk_approve_and_file(
     category: str = None,
     limit: int = 500,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Bulk approve validated documents and file them to SharePoint.
     
     category options:
@@ -1895,7 +1877,6 @@ async def bulk_approve_and_file(
     """
     from services.folder_routing_service import determine_folder_path
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Build query based on category
@@ -1925,8 +1906,8 @@ async def bulk_approve_and_file(
             ],
         }
 
-    total_matching = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    total_matching = await database.hub_documents.count_documents(query)
+    cursor = database.hub_documents.find(query, {"_id": 0}).limit(limit)
 
     filed = 0
     failed = 0
@@ -1937,7 +1918,7 @@ async def bulk_approve_and_file(
             doc_id = doc["id"]
             folder_path, reason, _ = determine_folder_path(doc)
 
-            await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            await database.hub_documents.update_one({"id": doc_id}, {"$set": {
                 "auto_cleared": True,
                 "auto_clear_decision": "Cleared",
                 "auto_clear_reason": f"Bulk approved & filed: {reason}",
@@ -1953,7 +1934,7 @@ async def bulk_approve_and_file(
             # Record for AI learning
             doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
             vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
-            await db.filing_actions.update_one(
+            await database.filing_actions.update_one(
                 {"document_type": doc_type, "vendor_lower": vendor.lower(), "folder_path": folder_path},
                 {"$inc": {"count": 1}, "$set": {
                     "document_type": doc_type, "vendor": vendor, "vendor_lower": vendor.lower(),
@@ -1984,7 +1965,7 @@ async def bulk_approve_and_file(
 
 
 @router.post("/sweep-reclassify-bols")
-async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
+async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Find documents that are likely BOLs but misclassified, reclassify them,
     and auto-file + clear them from the queue.
     
@@ -1994,7 +1975,6 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
     from services.document_intel_helpers import _BOL_FILENAME_PATTERNS
     from services.folder_routing_service import determine_folder_path
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # Find docs NOT already classified as Shipping_Document / BOL
@@ -2002,7 +1982,7 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
         "document_type": {"$nin": ["Shipping_Document", "BOL", None]},
         "status": {"$nin": ["Deleted"]},
     }
-    cursor = db.hub_documents.find(query, {
+    cursor = database.hub_documents.find(query, {
         "_id": 0, "id": 1, "file_name": 1, "document_type": 1, "status": 1,
         "extracted_fields": 1, "normalized_fields": 1,
     }).limit(limit)
@@ -2076,14 +2056,14 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
     failed = 0
     for item in reclassified:
         try:
-            doc = await db.hub_documents.find_one({"id": item["id"]}, {"_id": 0})
+            doc = await database.hub_documents.find_one({"id": item["id"]}, {"_id": 0})
             if not doc:
                 failed += 1
                 continue
 
             folder_path, reason, _ = determine_folder_path({**doc, "document_type": "Shipping_Document"})
 
-            await db.hub_documents.update_one({"id": item["id"]}, {"$set": {
+            await database.hub_documents.update_one({"id": item["id"]}, {"$set": {
                 "document_type": "Shipping_Document",
                 "classification_method": "heuristic-bol-sweep",
                 "ai_confidence": 0.95,
@@ -2101,7 +2081,7 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
 
             # Record for AI learning
             vendor = doc.get("vendor_canonical") or doc.get("normalized_fields", {}).get("vendor") or ""
-            await db.filing_actions.update_one(
+            await database.filing_actions.update_one(
                 {"document_type": "Shipping_Document", "vendor_lower": vendor.lower(), "folder_path": folder_path},
                 {"$inc": {"count": 1}, "$set": {
                     "document_type": "Shipping_Document", "vendor": vendor, "vendor_lower": vendor.lower(),
@@ -2134,7 +2114,8 @@ async def bulk_classify_documents(
                            "Sales) and teaches the system this sender's "
                            "correct routing for future documents."),
     reclassify_by: str = Query("admin", description="Who is performing the reclassification"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Bulk assign/change document type for multiple documents.
     Records classification corrections for AI learning feedback.
@@ -2148,7 +2129,6 @@ async def bulk_classify_documents(
     automated inference.
     """
     from datetime import datetime, timezone
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     classified = 0
@@ -2159,7 +2139,7 @@ async def bulk_classify_documents(
 
     for doc_id in doc_ids:
         try:
-            doc = await db.hub_documents.find_one({"id": doc_id}, {
+            doc = await database.hub_documents.find_one({"id": doc_id}, {
                 "_id": 0, "id": 1, "doc_type": 1, "document_type": 1,
                 "suggested_job_type": 1, "file_name": 1, "vendor_canonical": 1,
                 "vendor_raw": 1, "raw_text": 1, "extracted_text": 1,
@@ -2175,7 +2155,7 @@ async def bulk_classify_documents(
             original_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
 
             # Update the document type
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "doc_type": doc_type,
@@ -2224,7 +2204,7 @@ async def bulk_classify_documents(
             if mailbox_category:
                 from services.sender_routing_overrides import apply_manual_routing_correction
                 routing_result = await apply_manual_routing_correction(
-                    db, doc_id, doc, mailbox_category, reclassify_by, now,
+                    database, doc_id, doc, mailbox_category, reclassify_by, now,
                 )
                 routing_from = routing_result["prior_mailbox_category"]
                 if routing_result["routing_changed"]:

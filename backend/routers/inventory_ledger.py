@@ -10,10 +10,11 @@ import hashlib
 import csv
 import io
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel, Field
 from typing import Any, Dict, Optional
-from deps import get_db
 from workflows.inventory.ledger.service import (
     list_customers, get_customer, create_customer, update_customer,
     create_movement, list_movements, get_history, item_audit_summary,
@@ -99,36 +100,32 @@ class SeedReq(BaseModel):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/customers")
-async def api_list_customers(active_only: bool = True):
-    db = get_db()
-    return await list_customers(db, active_only)
+async def api_list_customers(active_only: bool = True, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    return await list_customers(database, active_only)
 
 
 @router.post("/customers")
-async def api_create_customer(body: CreateCustomerReq):
-    db = get_db()
+async def api_create_customer(body: CreateCustomerReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     try:
-        return await create_customer(db, body.name, body.code, body.negative_balance_policy)
+        return await create_customer(database, body.name, body.code, body.negative_balance_policy)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/customers/{customer_id}")
-async def api_get_customer(customer_id: str):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+async def api_get_customer(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
     return c
 
 
 @router.put("/customers/{customer_id}")
-async def api_update_customer(customer_id: str, body: UpdateCustomerReq):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+async def api_update_customer(customer_id: str, body: UpdateCustomerReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
-    return await update_customer(db, customer_id, body.dict(exclude_none=True))
+    return await update_customer(database, customer_id, body.dict(exclude_none=True))
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -139,15 +136,15 @@ async def api_update_customer(customer_id: str, body: UpdateCustomerReq):
 async def api_dashboard_summary(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Compute inventory health metrics from derive_balances.
 
     Uses the same status logic (is_short / is_low) as the balance table and CSV export.
     total_reorder_recommendations mirrors the count from /reorder-recommendations.
     Returns zeros for all fields when no inventory exists.
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     total_items = len(set(b["item"] for b in balances))
     items_ok = 0
@@ -171,7 +168,7 @@ async def api_dashboard_summary(
             items_ok += 1
 
     # Reorder recommendation count — same logic as api_reorder_recommendations
-    settings_docs = await db["inv_item_settings"].find(
+    settings_docs = await database["inv_item_settings"].find(
         {"customer_id": customer_id}, {"_id": 0}
     ).to_list(5000)
     settings_map = {s["item"]: s for s in settings_docs}
@@ -208,22 +205,21 @@ async def api_get_balances(
     customer_id: str,
     item: str = Query("", description="Filter by item"),
     warehouse: str = Query("", description="Filter by warehouse"),
-):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
-    balances = await derive_balances(db, customer_id, item=item or None, warehouse=warehouse or None)
+    balances = await derive_balances(database, customer_id, item=item or None, warehouse=warehouse or None)
     return {"customer_id": customer_id, "balances": balances, "count": len(balances)}
 
 
 @router.get("/customers/{customer_id}/summary")
-async def api_get_summary(customer_id: str):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+async def api_get_summary(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
-    s = await customer_summary(db, customer_id)
+    s = await customer_summary(database, customer_id)
     return {"customer_id": customer_id, "customer_name": c["name"], **s}
 
 
@@ -238,7 +234,8 @@ async def api_health_summary(
     low_stock_threshold: float = Query(5.0,
         description="Items with available qty <= this count as 'low'"),
     top_n: int = Query(20, ge=1, le=100),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """
     Cross-customer inventory health overview.
 
@@ -252,12 +249,11 @@ async def api_health_summary(
     from datetime import datetime, timedelta, timezone
     from workflows.inventory.ledger.service import INCOMING_COLL, MOVEMENTS_COLL
 
-    db = get_db()
     now = datetime.now(timezone.utc)
     stale_cutoff = (now - timedelta(days=stale_days)).isoformat()
 
     # All customers
-    customers = await db.inv_customers.find({"active": True}, {"_id": 0}).to_list(500)
+    customers = await database.inv_customers.find({"active": True}, {"_id": 0}).to_list(500)
 
     # Per-customer summary in parallel-ish (sequentially but small N)
     per_customer = []
@@ -276,14 +272,14 @@ async def api_health_summary(
     for c in customers:
         cid = c["id"]
         # Get latest movement timestamp for staleness
-        latest = await db[MOVEMENTS_COLL].find_one(
+        latest = await database[MOVEMENTS_COLL].find_one(
             {"customer_id": cid},
             {"_id": 0, "created_at": 1, "effective_date": 1},
             sort=[("created_at", -1)],
         )
         last_mv = (latest or {}).get("effective_date") or (latest or {}).get("created_at")
 
-        balances = await derive_balances(db, cid)
+        balances = await derive_balances(database, cid)
         if not balances and not last_mv:
             continue
 
@@ -349,15 +345,15 @@ async def api_health_summary(
     # XLS import activity (last 7 / last 30 days)
     seven = (now - timedelta(days=7)).isoformat()
     thirty = (now - timedelta(days=30)).isoformat()
-    staging_7 = await db.inv_import_staging.count_documents({"created_at": {"$gte": seven}})
-    staging_30 = await db.inv_import_staging.count_documents({"created_at": {"$gte": thirty}})
-    applied_7 = await db.inv_import_staging.count_documents({
+    staging_7 = await database.inv_import_staging.count_documents({"created_at": {"$gte": seven}})
+    staging_30 = await database.inv_import_staging.count_documents({"created_at": {"$gte": thirty}})
+    applied_7 = await database.inv_import_staging.count_documents({
         "status": "applied", "approved_at": {"$gte": seven},
     })
-    applied_30 = await db.inv_import_staging.count_documents({
+    applied_30 = await database.inv_import_staging.count_documents({
         "status": "applied", "approved_at": {"$gte": thirty},
     })
-    auto_applied_30 = await db.inv_import_staging.count_documents({
+    auto_applied_30 = await database.inv_import_staging.count_documents({
         "status": "applied",
         "auto_approved": True,
         "approved_at": {"$gte": thirty},
@@ -397,17 +393,16 @@ async def api_list_movements(
     item: str = "", warehouse: str = "",
     movement_type: str = "", source_type: str = "",
     skip: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=500),
-):
-    db = get_db()
-    return await list_movements(db, customer_id, item, warehouse, movement_type, source_type, skip, limit)
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
+    return await list_movements(database, customer_id, item, warehouse, movement_type, source_type, skip, limit)
 
 
 @router.post("/customers/{customer_id}/movements")
-async def api_create_movement(customer_id: str, body: CreateMovementReq):
-    db = get_db()
+async def api_create_movement(customer_id: str, body: CreateMovementReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     try:
         result = await create_movement(
-            db, customer_id,
+            database, customer_id,
             item=body.item,
             item_description=body.item_description,
             warehouse=body.warehouse,
@@ -449,7 +444,7 @@ class ManualMovementReq(BaseModel):
 
 
 @router.post("/movements")
-async def api_manual_movement(body: ManualMovementReq):
+async def api_manual_movement(body: ManualMovementReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a manual inventory ledger movement with strict validation.
 
     Only allows: opening_balance, manual_adjustment, transfer, writeoff, correction.
@@ -458,7 +453,6 @@ async def api_manual_movement(body: ManualMovementReq):
     Duplicate opening_balance for same item/customer/warehouse/ownership is rejected.
     Lightweight idempotency via idempotency_key.
     """
-    db = get_db()
 
     # Type validation
     if body.movement_type in MANUAL_BLOCKED_TYPES:
@@ -488,7 +482,7 @@ async def api_manual_movement(body: ManualMovementReq):
     # Duplicate opening_balance check
     if body.movement_type == "opening_balance":
         from workflows.inventory.ledger.service import MOVEMENTS_COLL
-        existing = await db[MOVEMENTS_COLL].find_one({
+        existing = await database[MOVEMENTS_COLL].find_one({
             "customer_id": body.customer_id,
             "item": body.item.strip(),
             "warehouse": body.warehouse.strip(),
@@ -506,7 +500,7 @@ async def api_manual_movement(body: ManualMovementReq):
     # Idempotency guard
     if body.idempotency_key:
         from workflows.inventory.ledger.service import MOVEMENTS_COLL
-        dup = await db[MOVEMENTS_COLL].find_one(
+        dup = await database[MOVEMENTS_COLL].find_one(
             {"idempotency_key": body.idempotency_key},
             {"_id": 0, "id": 1},
         )
@@ -517,7 +511,7 @@ async def api_manual_movement(body: ManualMovementReq):
 
     try:
         result = await create_movement(
-            db, body.customer_id,
+            database, body.customer_id,
             item=body.item,
             item_description=body.item_description,
             warehouse=body.warehouse,
@@ -534,7 +528,7 @@ async def api_manual_movement(body: ManualMovementReq):
         # Store idempotency_key on the movement if provided
         if body.idempotency_key and result.get("success"):
             from workflows.inventory.ledger.service import MOVEMENTS_COLL
-            await db[MOVEMENTS_COLL].update_one(
+            await database[MOVEMENTS_COLL].update_one(
                 {"id": result["movement"]["id"]},
                 {"$set": {"idempotency_key": body.idempotency_key}},
             )
@@ -556,7 +550,8 @@ async def api_import_csv(
     file: UploadFile = File(...),
     customer_id: str = Form(...),
     import_mode: str = Form(...),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Import inventory movements from CSV.
 
     Each row becomes an immutable ledger movement using the selected import_mode.
@@ -565,7 +560,6 @@ async def api_import_csv(
     For opening_balance: rejects rows where an opening balance already exists
     for the same item/customer/warehouse/ownership.
     """
-    db = get_db()
 
     # Validate import mode
     if import_mode not in IMPORT_ALLOWED_MODES:
@@ -575,7 +569,7 @@ async def api_import_csv(
         )
 
     # Validate customer exists
-    cust = await get_customer(db, customer_id)
+    cust = await get_customer(database, customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
 
@@ -586,7 +580,7 @@ async def api_import_csv(
 
     # Duplicate import protection via file hash
     file_hash = hashlib.sha256(raw + customer_id.encode() + import_mode.encode()).hexdigest()
-    existing_hash = await db[IMPORT_HASHES_COLL].find_one({"hash": file_hash})
+    existing_hash = await database[IMPORT_HASHES_COLL].find_one({"hash": file_hash})
     if existing_hash:
         raise HTTPException(
             status_code=409,
@@ -651,7 +645,7 @@ async def api_import_csv(
 
         # Duplicate opening_balance check
         if import_mode == "opening_balance":
-            existing = await db[MOVEMENTS_COLL].find_one({
+            existing = await database[MOVEMENTS_COLL].find_one({
                 "customer_id": customer_id,
                 "item": item,
                 "warehouse": warehouse,
@@ -668,7 +662,7 @@ async def api_import_csv(
 
         try:
             await create_movement(
-                db, customer_id,
+                database, customer_id,
                 item=item,
                 item_description=item_description,
                 warehouse=warehouse,
@@ -690,7 +684,7 @@ async def api_import_csv(
 
     # Store file hash only if at least one row was imported
     if rows_imported > 0:
-        await db[IMPORT_HASHES_COLL].insert_one({
+        await database[IMPORT_HASHES_COLL].insert_one({
             "hash": file_hash,
             "customer_id": customer_id,
             "import_mode": import_mode,
@@ -719,7 +713,8 @@ async def api_export_balances(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     warehouse: str = Query("", description="Filter by warehouse"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Export current inventory balances as CSV download.
 
     Uses the same derive_balances pipeline as the UI — identical values and status logic.
@@ -729,12 +724,11 @@ async def api_export_balances(
     import csv
     import io
 
-    db = get_db()
-    cust = await get_customer(db, customer_id)
+    cust = await get_customer(database, customer_id)
     cust_name = cust["name"] if cust else customer_id
 
     balances = await derive_balances(
-        db, customer_id,
+        database, customer_id,
         item=item or None,
         warehouse=warehouse or None,
     )
@@ -779,7 +773,8 @@ async def api_demand_signals(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     limit: int = Query(500, ge=1, le=5000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return forward demand pressure per item from Sales Order commitments.
 
     Uses derive_balances for current inventory state.
@@ -788,8 +783,7 @@ async def api_demand_signals(
     Rows included only when total_open_order_qty > 0.
     Sorted by demand_gap descending (highest risk first).
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     rows = []
     for b in balances:
@@ -830,7 +824,8 @@ async def api_supply_coverage(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     limit: int = Query(500, ge=1, le=5000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return supply coverage projection per item.
 
     coverage = on_hand + incoming - committed
@@ -838,8 +833,7 @@ async def api_supply_coverage(
     Only items with committed > 0 included.
     Sorted by coverage ascending (largest shortages first).
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     rows = []
     for b in balances:
@@ -951,18 +945,18 @@ async def api_action_center(
     item: str = Query("", description="Filter by item"),
     action_type: str = Query("", description="Filter by action type"),
     limit: int = Query(500, ge=1, le=5000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Unified prioritized action queue consolidating exceptions, reorder,
     demand, and supply coverage.
 
     Uses only existing pipelines. Returns merged rows with action_types and
     priority_score. Sorted by priority_score desc, then available asc.
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     # Build reorder map (same logic as reorder-recommendations)
-    settings_docs = await db["inv_item_settings"].find(
+    settings_docs = await database["inv_item_settings"].find(
         {"customer_id": customer_id}, {"_id": 0}
     ).to_list(5000)
     settings_map = {s["item"]: s for s in settings_docs}
@@ -1048,7 +1042,7 @@ class PODraftIn(BaseModel):
 
 
 @router.post("/generate-po-draft")
-async def api_generate_po_draft(body: PODraftIn):
+async def api_generate_po_draft(body: PODraftIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Generate a PO draft payload for vendor fulfillment.
 
     Does NOT create ledger movements or ERP records.
@@ -1056,15 +1050,14 @@ async def api_generate_po_draft(body: PODraftIn):
     Duplicate guard: rejects if the same item+customer had a draft
     within the last PO_DUPLICATE_WINDOW_MINUTES.
     """
-    db = get_db()
 
     # Validate customer
-    cust = await get_customer(db, body.customer_id)
+    cust = await get_customer(database, body.customer_id)
     if not cust:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
 
     # Validate items exist in inventory
-    balances = await derive_balances(db, body.customer_id)
+    balances = await derive_balances(database, body.customer_id)
     known_items = {b["item"] for b in balances}
 
     lines = []
@@ -1080,7 +1073,7 @@ async def api_generate_po_draft(body: PODraftIn):
             )
 
         # Duplicate guard
-        recent = await db[PO_DRAFTS_COLL].find_one({
+        recent = await database[PO_DRAFTS_COLL].find_one({
             "customer_id": body.customer_id,
             "lines.item": item,
             "status": "draft",
@@ -1116,7 +1109,7 @@ async def api_generate_po_draft(body: PODraftIn):
     }
 
     # Insert draft (let MongoDB generate _id)
-    await db[PO_DRAFTS_COLL].insert_one(draft.copy())
+    await database[PO_DRAFTS_COLL].insert_one(draft.copy())
     # _id not in original draft dict, so no removal needed
 
     return draft
@@ -1127,13 +1120,13 @@ async def api_list_po_drafts(
     customer_id: str = Query(..., description="Customer workspace ID"),
     status: str = Query("", description="Filter by status (draft|sent|archived)"),
     limit: int = Query(50, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List PO drafts for a customer."""
-    db = get_db()
     query = {"customer_id": customer_id}
     if status:
         query["status"] = status
-    docs = await db[PO_DRAFTS_COLL].find(
+    docs = await database[PO_DRAFTS_COLL].find(
         query, {"_id": 0}
     ).sort("created_at", -1).to_list(limit)
 
@@ -1145,7 +1138,7 @@ async def api_list_po_drafts(
             {"$sort": {"submitted_at": -1}},
             {"$group": {"_id": "$po_draft_id", "latest_status": {"$first": "$status"}, "latest_at": {"$first": "$submitted_at"}}},
         ]
-        agg = await db[PO_SUBMISSION_LOGS_COLL].aggregate(pipeline).to_list(500)
+        agg = await database[PO_SUBMISSION_LOGS_COLL].aggregate(pipeline).to_list(500)
         status_map = {a["_id"]: {"latest_submission_status": a["latest_status"], "latest_submission_at": a["latest_at"]} for a in agg}
         for d in docs:
             sub = status_map.get(d["po_draft_id"])
@@ -1160,12 +1153,12 @@ async def api_list_po_drafts(
 async def api_update_po_draft_status(
     draft_id: str,
     status: str = Query(..., description="New status"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Update PO draft status (draft -> sent -> archived)."""
     if status not in ("draft", "sent", "archived"):
         raise HTTPException(status_code=422, detail="Invalid status. Use: draft, sent, archived")
-    db = get_db()
-    result = await db[PO_DRAFTS_COLL].update_one(
+    result = await database[PO_DRAFTS_COLL].update_one(
         {"po_draft_id": draft_id},
         {"$set": {"status": status, "updated_at": datetime.now(timezone.utc).isoformat()}},
     )
@@ -1175,10 +1168,9 @@ async def api_update_po_draft_status(
 
 
 @router.get("/po-drafts/{draft_id}")
-async def api_get_po_draft(draft_id: str):
+async def api_get_po_draft(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return the full stored PO draft with linked supply summary."""
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one(
+    doc = await database[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
@@ -1193,7 +1185,7 @@ async def api_get_po_draft(draft_id: str):
             "has_bc_po": {"$sum": {"$cond": [{"$gt": ["$bc_po_number", None]}, 1, 0]}},
         }},
     ]
-    agg = await db["inv_incoming_supply"].aggregate(pipeline).to_list(20)
+    agg = await database["inv_incoming_supply"].aggregate(pipeline).to_list(20)
     total_linked = sum(a["count"] for a in agg)
     if total_linked > 0:
         doc["linked_supply_count"] = total_linked
@@ -1211,7 +1203,7 @@ async def api_get_po_draft(draft_id: str):
             "ordered_count": {"$sum": {"$cond": [{"$eq": ["$status", "ordered"]}, 1, 0]}},
         }},
     ]
-    qty_agg = await db["inv_incoming_supply"].aggregate(qty_pipeline).to_list(1)
+    qty_agg = await database["inv_incoming_supply"].aggregate(qty_pipeline).to_list(1)
     if qty_agg:
         qa = qty_agg[0]
         doc["linked_supply_received_count"] = qa["received_count"]
@@ -1220,8 +1212,8 @@ async def api_get_po_draft(draft_id: str):
         doc["linked_supply_received_qty"] = qa["received_qty"]
 
     # Document linkage + process checklist enrichment
-    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", draft_id)
-    po_approval = await _get_latest_approval(db, "po_draft", draft_id)
+    doc_count, docs_by_type, _ = await _get_document_links_summary(database, "po_draft", draft_id)
+    po_approval = await _get_latest_approval(database, "po_draft", draft_id)
     checklist_items, checklist_complete = _derive_po_draft_checklist(doc, doc_count, docs_by_type, approval=po_approval)
     doc["linked_document_count"] = doc_count
     doc["linked_documents_by_type"] = docs_by_type
@@ -1229,32 +1221,31 @@ async def api_get_po_draft(draft_id: str):
     doc["checklist_complete"] = checklist_complete
 
     # Approval enrichment
-    appr_summary = await _get_approval_enrichment(db, "po_draft", draft_id)
+    appr_summary = await _get_approval_enrichment(database, "po_draft", draft_id)
     doc.update(appr_summary)
 
     # Escalation enrichment
-    esc_enrich = await _get_escalation_enrichment(db, "po_draft", draft_id)
+    esc_enrich = await _get_escalation_enrichment(database, "po_draft", draft_id)
     doc.update(esc_enrich)
 
     # Assignment enrichment
-    asgn_enrich = await _get_assignment_enrichment(db, "po_draft", draft_id)
+    asgn_enrich = await _get_assignment_enrichment(database, "po_draft", draft_id)
     doc.update(asgn_enrich)
 
     # Activity enrichment
-    act_enrich = await _get_activity_enrichment(db, "po_draft", draft_id)
+    act_enrich = await _get_activity_enrichment(database, "po_draft", draft_id)
     doc.update(act_enrich)
 
     return doc
 
 
 @router.get("/po-drafts/{draft_id}/export")
-async def api_export_po_draft(draft_id: str):
+async def api_export_po_draft(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Download PO draft as a JSON file. Uses stored data exactly as saved."""
     from fastapi.responses import Response
     import json as json_mod
 
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one(
+    doc = await database[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
@@ -1281,10 +1272,9 @@ class BCResponseIn(BaseModel):
 
 
 @router.patch("/po-drafts/{draft_id}/vendor")
-async def api_update_po_draft_vendor(draft_id: str, body: PODraftVendorIn):
+async def api_update_po_draft_vendor(draft_id: str, body: PODraftVendorIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Assign or update vendor on a PO draft."""
-    db = get_db()
-    result = await db[PO_DRAFTS_COLL].update_one(
+    result = await database[PO_DRAFTS_COLL].update_one(
         {"po_draft_id": draft_id},
         {"$set": {
             "vendor_id": body.vendor_id.strip(),
@@ -1302,7 +1292,7 @@ BC_RESPONSE_TO_LOG_STATUS = {"created": "acknowledged", "rejected": "failed", "p
 
 
 @router.patch("/po-drafts/{draft_id}/bc-response")
-async def api_update_bc_response(draft_id: str, body: BCResponseIn):
+async def api_update_bc_response(draft_id: str, body: BCResponseIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record the downstream BC processing result for a PO draft.
 
     Does NOT create or modify BC records. Purely informational.
@@ -1316,8 +1306,7 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
     if body.bc_response_status == "rejected" and not body.bc_response_notes.strip():
         raise HTTPException(status_code=422, detail="bc_response_notes is required when status is 'rejected'")
 
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    doc = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="PO draft not found")
 
@@ -1333,7 +1322,7 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
     if body.bc_document_id.strip():
         update_fields["bc_document_id"] = body.bc_document_id.strip()
 
-    await db[PO_DRAFTS_COLL].update_one(
+    await database[PO_DRAFTS_COLL].update_one(
         {"po_draft_id": draft_id},
         {"$set": update_fields},
     )
@@ -1377,33 +1366,33 @@ async def api_update_bc_response(draft_id: str, body: BCResponseIn):
         "notes": " | ".join(notes_parts),
         "bc_payload_snapshot": payload_snapshot,
     }
-    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+    await database[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
 
     # --- BC PO linkage to incoming supply (warehouse_supply only) ---
     if body.bc_response_status == "created" and doc.get("po_type") != "drop_ship":
         link_update = {"bc_po_number": body.bc_po_number.strip(), "bc_document_id": body.bc_document_id.strip(), "updated_at": now}
         # Advance planned → ordered; leave ordered/received/cancelled unchanged
-        await db["inv_incoming_supply"].update_many(
+        await database["inv_incoming_supply"].update_many(
             {"source_reference": draft_id, "status": "planned"},
             {"$set": {**link_update, "status": "ordered"}},
         )
         # For already ordered records, just set BC fields (idempotent)
-        await db["inv_incoming_supply"].update_many(
+        await database["inv_incoming_supply"].update_many(
             {"source_reference": draft_id, "status": "ordered"},
             {"$set": {"bc_po_number": body.bc_po_number.strip(), "bc_document_id": body.bc_document_id.strip(), "updated_at": now}},
         )
 
     # Return the updated draft
-    updated = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    updated = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
     # System activity for BC response
-    await _create_activity(db, "po_draft", draft_id, "bc_response",
+    await _create_activity(database, "po_draft", draft_id, "bc_response",
                            f"BC response: {body.bc_response_status}", body.bc_response_notes.strip(), "system",
                            {"bc_po_number": body.bc_po_number.strip()})
     return updated
 
 
 @router.get("/po-drafts/{draft_id}/bc-export")
-async def api_bc_export_po_draft(draft_id: str):
+async def api_bc_export_po_draft(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Generate a Business Central compatible purchase order payload.
 
     Does NOT send data to BC or create any records. Returns a structured
@@ -1413,8 +1402,7 @@ async def api_bc_export_po_draft(draft_id: str):
     from fastapi.responses import Response
     import json as json_mod
 
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one(
+    doc = await database[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
@@ -1476,10 +1464,10 @@ async def api_bc_export_po_draft(draft_id: str):
         "notes": "Auto-logged on BC payload export",
         "bc_payload_snapshot": payload,
     }
-    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+    await database[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
 
     # System activity for BC export
-    await _create_activity(db, "po_draft", draft_id, "bc_export",
+    await _create_activity(database, "po_draft", draft_id, "bc_export",
                            f"BC export payload generated", "", "system")
 
     filename = f"BC-PO-{draft_id}.json"
@@ -1503,7 +1491,7 @@ class SubmissionLogIn(BaseModel):
 
 
 @router.post("/po-drafts/{draft_id}/submission-log")
-async def api_create_submission_log(draft_id: str, body: SubmissionLogIn):
+async def api_create_submission_log(draft_id: str, body: SubmissionLogIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a submission log entry for a PO draft.
 
     Captures the current vendor info and a snapshot of the BC export payload.
@@ -1515,8 +1503,7 @@ async def api_create_submission_log(draft_id: str, body: SubmissionLogIn):
     if body.status not in SUBMISSION_STATUSES:
         raise HTTPException(status_code=422, detail=f"Invalid status. Use: {', '.join(SUBMISSION_STATUSES)}")
 
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one(
+    doc = await database[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
@@ -1568,7 +1555,7 @@ async def api_create_submission_log(draft_id: str, body: SubmissionLogIn):
         "notes": body.notes.strip(),
         "bc_payload_snapshot": payload_snapshot,
     }
-    await db[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
+    await database[PO_SUBMISSION_LOGS_COLL].insert_one(log_entry.copy())
 
     # Return without _id
     log_entry.pop("_id", None)
@@ -1576,16 +1563,15 @@ async def api_create_submission_log(draft_id: str, body: SubmissionLogIn):
 
 
 @router.get("/po-drafts/{draft_id}/submission-log")
-async def api_list_submission_logs(draft_id: str):
+async def api_list_submission_logs(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all submission log entries for a PO draft, reverse chronological."""
-    db = get_db()
 
     # Verify draft exists
-    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
+    doc = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="PO draft not found")
 
-    cursor = db[PO_SUBMISSION_LOGS_COLL].find(
+    cursor = database[PO_SUBMISSION_LOGS_COLL].find(
         {"po_draft_id": draft_id}, {"_id": 0}
     ).sort("submitted_at", -1)
     entries = await cursor.to_list(length=200)
@@ -1593,14 +1579,13 @@ async def api_list_submission_logs(draft_id: str):
 
 
 @router.get("/po-drafts/{draft_id}/incoming-supply")
-async def api_linked_incoming_supply(draft_id: str):
+async def api_linked_incoming_supply(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return all incoming supply records linked to a PO draft."""
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
+    doc = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0, "po_draft_id": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="PO draft not found")
 
-    cursor = db["inv_incoming_supply"].find(
+    cursor = database["inv_incoming_supply"].find(
         {"source_reference": draft_id},
         {"_id": 0},
     ).sort("item", 1)
@@ -1636,7 +1621,7 @@ class BCReceiptIn(BaseModel):
 
 
 @router.post("/po-drafts/{draft_id}/bc-receipt")
-async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
+async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record that a BC PO has been received, advancing linked incoming supply
     from ordered → received through the existing transition pipeline.
 
@@ -1647,8 +1632,7 @@ async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
         transition_supply_status, DuplicateReceiptError,
     )
 
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
+    doc = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": draft_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="PO draft not found")
 
@@ -1660,7 +1644,7 @@ async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
         )
 
     # Get linked supply records
-    linked = await db["inv_incoming_supply"].find(
+    linked = await database["inv_incoming_supply"].find(
         {"source_reference": draft_id}, {"_id": 0}
     ).to_list(500)
     if not linked:
@@ -1708,11 +1692,11 @@ async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
             # Full receipt — use existing transition pipeline
             try:
                 result = await transition_supply_status(
-                    db, supply_id=supply_id, new_status="received",
+                    database, supply_id=supply_id, new_status="received",
                     created_by="bc_receipt_capture",
                 )
                 # Add receipt trace fields
-                await db["inv_incoming_supply"].update_one(
+                await database["inv_incoming_supply"].update_one(
                     {"id": supply_id},
                     {"$set": {"bc_receipt_at": now, "bc_receipt_notes": body.receipt_notes.strip()}},
                 )
@@ -1743,7 +1727,7 @@ async def api_bc_receipt_capture(draft_id: str, body: BCReceiptIn):
 
 
 @router.post("/po-drafts/{draft_id}/create-incoming-supply")
-async def api_po_draft_create_incoming_supply(draft_id: str):
+async def api_po_draft_create_incoming_supply(draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Convert PO draft lines into planned incoming supply records.
 
     Does NOT create ledger movements or ERP records. Creates incoming supply
@@ -1751,8 +1735,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
     the planned quantities automatically.
     Duplicate protection: if the draft has already been converted, returns 409.
     """
-    db = get_db()
-    doc = await db[PO_DRAFTS_COLL].find_one(
+    doc = await database[PO_DRAFTS_COLL].find_one(
         {"po_draft_id": draft_id}, {"_id": 0}
     )
     if not doc:
@@ -1793,7 +1776,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             continue
 
         # Check for existing incoming supply from this draft for this item
-        existing = await db["inv_incoming_supply"].find_one(
+        existing = await database["inv_incoming_supply"].find_one(
             {"customer_id": customer_id, "item": item, "source_reference": draft_id},
             {"_id": 0, "id": 1},
         )
@@ -1803,7 +1786,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             continue
 
         supply = await create_incoming(
-            db, customer_id,
+            database, customer_id,
             item=item,
             item_description="",
             warehouse="MAIN",
@@ -1817,7 +1800,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             status="planned",
         )
         # Store po_draft_id on the created supply record
-        await db["inv_incoming_supply"].update_one(
+        await database["inv_incoming_supply"].update_one(
             {"id": supply["id"]},
             {"$set": {"po_draft_id": draft_id}},
         )
@@ -1828,7 +1811,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
     # Mark draft as converted
     if rows_created > 0:
         now = datetime.now(timezone.utc).isoformat()
-        await db[PO_DRAFTS_COLL].update_one(
+        await database[PO_DRAFTS_COLL].update_one(
             {"po_draft_id": draft_id},
             {"$set": {
                 "incoming_supply_created": True,
@@ -1837,7 +1820,7 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
             }},
         )
         # System activity
-        await _create_activity(db, "po_draft", draft_id, "system",
+        await _create_activity(database, "po_draft", draft_id, "system",
                                f"Converted to incoming supply ({rows_created} lines)", "", "system")
 
     return {
@@ -1859,14 +1842,14 @@ async def api_po_draft_create_incoming_supply(draft_id: str):
 async def api_item_detail(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query(..., min_length=1, description="Item identifier"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return a complete operational picture for a single item.
 
     Reuses derive_balances, item settings, reorder logic, exception
     classification, and movement history pipelines.
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item)
+    balances = await derive_balances(database, customer_id, item=item)
     if not balances:
         raise HTTPException(status_code=404, detail=f"Item '{item}' not found in this workspace")
 
@@ -1889,7 +1872,7 @@ async def api_item_detail(
     }
 
     # Item settings
-    settings_doc = await db["inv_item_settings"].find_one(
+    settings_doc = await database["inv_item_settings"].find_one(
         {"customer_id": customer_id, "item": item}, {"_id": 0}
     )
     settings = None
@@ -1924,10 +1907,10 @@ async def api_item_detail(
     }
 
     # Recent movement history (latest 10)
-    history_data = await get_history(db, customer_id, item=item, limit=10)
+    history_data = await get_history(database, customer_id, item=item, limit=10)
 
     # Movement type summary
-    type_summary = await item_audit_summary(db, customer_id, item)
+    type_summary = await item_audit_summary(database, customer_id, item)
 
     # Demand signal (only when committed > 0)
     committed = balance["committed"]
@@ -1955,7 +1938,7 @@ async def api_item_detail(
         }
 
     # Last PO draft for this item
-    last_po_draft = await db[PO_DRAFTS_COLL].find_one(
+    last_po_draft = await database[PO_DRAFTS_COLL].find_one(
         {"customer_id": customer_id, "lines.item": item},
         {"_id": 0, "po_draft_id": 1, "created_at": 1, "status": 1, "bc_po_number": 1, "bc_response_status": 1},
         sort=[("created_at", -1)],
@@ -1991,16 +1974,16 @@ async def api_exceptions(
     item: str = Query("", description="Filter by item"),
     exception_type: str = Query("", description="Filter by exception type (short|low|reorder|no_incoming)"),
     limit: int = Query(500, ge=1, le=5000),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return inventory items that need attention.
 
     Uses existing derive_balances and reorder recommendation logic.
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     # Build reorder set (same logic as reorder-recommendations)
-    settings_docs = await db["inv_item_settings"].find(
+    settings_docs = await database["inv_item_settings"].find(
         {"customer_id": customer_id}, {"_id": 0}
     ).to_list(5000)
     settings_map = {s["item"]: s for s in settings_docs}
@@ -2203,10 +2186,10 @@ async def api_snapshot(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     include_reorders: bool = Query(True, description="Include reorder recommendations"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Generate a read-only inventory snapshot for the current workspace."""
-    db = get_db()
-    return await _build_snapshot(db, customer_id, item, include_reorders)
+    return await _build_snapshot(database, customer_id, item, include_reorders)
 
 
 @router.get("/snapshot/export")
@@ -2214,16 +2197,16 @@ async def api_snapshot_export(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     include_reorders: bool = Query(True, description="Include reorder recommendations"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Download inventory snapshot as a JSON file."""
     from fastapi.responses import Response
     import json as json_mod
 
-    db = get_db()
-    cust = await get_customer(db, customer_id)
+    cust = await get_customer(database, customer_id)
     cust_name = cust["name"] if cust else customer_id
 
-    snapshot = await _build_snapshot(db, customer_id, item, include_reorders)
+    snapshot = await _build_snapshot(database, customer_id, item, include_reorders)
 
     safe_name = cust_name.replace(" ", "_").replace("/", "_")[:40]
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -2249,18 +2232,18 @@ async def api_reorder_recommendations(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
     limit: int = Query(100, ge=1, le=500),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Generate reorder recommendations based on current derived balances.
 
     Uses per-item settings (reorder_threshold, safety_buffer) when configured.
     Falls back to defaults (threshold=0, buffer=10) when no settings exist.
     recommended_qty = max(0, reorder_threshold - available) + safety_buffer.
     """
-    db = get_db()
-    balances = await derive_balances(db, customer_id, item=item or None)
+    balances = await derive_balances(database, customer_id, item=item or None)
 
     # Load item settings for this workspace
-    settings_docs = await db["inv_item_settings"].find(
+    settings_docs = await database["inv_item_settings"].find(
         {"customer_id": customer_id}, {"_id": 0}
     ).to_list(5000)
     settings_map = {s["item"]: s for s in settings_docs}
@@ -2319,11 +2302,11 @@ async def api_history(
     movement_type: str = Query("", description="Filter by movement_type"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return movement history with display_effect enrichment, reverse chronological."""
-    db = get_db()
     return await get_history(
-        db, customer_id, item=item, reference=reference,
+        database, customer_id, item=item, reference=reference,
         movement_type=movement_type, skip=offset, limit=limit,
     )
 
@@ -2332,10 +2315,10 @@ async def api_history(
 async def api_history_summary(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query(..., description="Item to summarize"),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Compact audit summary: per-type totals + current balance for a given item."""
-    db = get_db()
-    return await item_audit_summary(db, customer_id, item=item)
+    return await item_audit_summary(database, customer_id, item=item)
 
 
 
@@ -2344,19 +2327,17 @@ async def api_history_summary(
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/customers/{customer_id}/incoming")
-async def api_list_incoming(customer_id: str, status: str = "", item: str = ""):
-    db = get_db()
-    return await list_incoming(db, customer_id, status, item)
+async def api_list_incoming(customer_id: str, status: str = "", item: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    return await list_incoming(database, customer_id, status, item)
 
 
 @router.post("/customers/{customer_id}/incoming")
-async def api_create_incoming(customer_id: str, body: CreateIncomingReq):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+async def api_create_incoming(customer_id: str, body: CreateIncomingReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
     return await create_incoming(
-        db, customer_id,
+        database, customer_id,
         item=body.item, item_description=body.item_description,
         warehouse=body.warehouse, ownership_type=body.ownership_type,
         incoming_qty=body.incoming_qty, unit_of_measure=body.unit_of_measure,
@@ -2366,9 +2347,8 @@ async def api_create_incoming(customer_id: str, body: CreateIncomingReq):
 
 
 @router.put("/customers/{customer_id}/incoming/{supply_id}")
-async def api_update_incoming(customer_id: str, supply_id: str, body: UpdateIncomingReq):
-    db = get_db()
-    result = await update_incoming(db, supply_id, body.dict(exclude_none=True))
+async def api_update_incoming(customer_id: str, supply_id: str, body: UpdateIncomingReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    result = await update_incoming(database, supply_id, body.dict(exclude_none=True))
     if not result:
         raise HTTPException(status_code=404, detail="Incoming supply record not found")
     return result
@@ -2379,13 +2359,12 @@ async def api_update_incoming(customer_id: str, supply_id: str, body: UpdateInco
 # ═══════════════════════════════════════════════════════════════
 
 @router.post("/customers/{customer_id}/seed")
-async def api_seed_opening_balances(customer_id: str, body: SeedReq):
-    db = get_db()
-    c = await get_customer(db, customer_id)
+async def api_seed_opening_balances(customer_id: str, body: SeedReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    c = await get_customer(database, customer_id)
     if not c:
         raise HTTPException(status_code=404, detail="Customer workspace not found")
     rows = [r.dict() for r in body.rows]
-    return await seed_opening_balances(db, customer_id, rows, created_by="gpi_hub_import")
+    return await seed_opening_balances(database, customer_id, rows, created_by="gpi_hub_import")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2393,15 +2372,13 @@ async def api_seed_opening_balances(customer_id: str, body: SeedReq):
 # ═══════════════════════════════════════════════════════════════
 
 @router.get("/customers/{customer_id}/items")
-async def api_distinct_items(customer_id: str):
-    db = get_db()
-    return await distinct_items(db, customer_id)
+async def api_distinct_items(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    return await distinct_items(database, customer_id)
 
 
 @router.get("/customers/{customer_id}/warehouses")
-async def api_distinct_warehouses(customer_id: str):
-    db = get_db()
-    return await distinct_warehouses(db, customer_id)
+async def api_distinct_warehouses(customer_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
+    return await distinct_warehouses(database, customer_id)
 
 
 @router.get("/meta")
@@ -2429,17 +2406,16 @@ class ReleaseReq(BaseModel):
 
 
 @router.post("/release")
-async def api_release_commitments(body: ReleaseReq):
+async def api_release_commitments(body: ReleaseReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Release committed inventory for a fulfilled or cancelled Sales Order.
 
     Validates that matching order_commitment exists and that release qty
     does not exceed the outstanding committed quantity.
     """
-    db = get_db()
     try:
         from services.inventory_so_integration import release_order_commitments
         result = await release_order_commitments(
-            db,
+            database,
             sales_order_id=body.sales_order_id,
             lines=[{"item": ln.item, "qty": ln.qty} for ln in body.lines],
             created_by="gpi_hub",
@@ -2466,15 +2442,14 @@ class ReconcileSOReq(BaseModel):
 
 
 @router.post("/reconcile-sales-order")
-async def api_reconcile_sales_order(body: ReconcileSOReq):
+async def api_reconcile_sales_order(body: ReconcileSOReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Reconcile inventory commitments for an edited or cancelled Sales Order.
 
     When cancelled=true, releases all remaining net commitments.
     When cancelled=false, adjusts per-line: creates delta commitments or releases.
     Drop-ship orders are rejected — they have no inventory commitments.
     """
-    db = get_db()
-    order_type = await _get_order_type(db, body.sales_order_id)
+    order_type = await _get_order_type(database, body.sales_order_id)
     if order_type == "drop_ship":
         raise HTTPException(
             status_code=422,
@@ -2483,7 +2458,7 @@ async def api_reconcile_sales_order(body: ReconcileSOReq):
     try:
         from services.inventory_so_integration import reconcile_sales_order
         result = await reconcile_sales_order(
-            db,
+            database,
             sales_order_id=body.sales_order_id,
             lines=[{"item": ln.item, "qty": ln.qty} for ln in body.lines],
             cancelled=body.cancelled,
@@ -2499,27 +2474,27 @@ async def api_reconcile_sales_order(body: ReconcileSOReq):
 
 
 @router.post("/sync-bc-shipments")
-async def api_sync_bc_shipments(lookback_hours: int = 24):
+async def api_sync_bc_shipments(lookback_hours: int = 24, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Trigger a manual sync of BC Sales Shipment Lines into inventory movements.
 
     Creates outbound_shipment movements for each new shipment line.
     Idempotent: duplicate shipments are skipped.
     """
-    db = get_db()
     from services.inventory_so_integration import sync_bc_shipments
-    result = await sync_bc_shipments(db, lookback_hours=lookback_hours)
+    result = await sync_bc_shipments(database, lookback_hours=lookback_hours)
     return result
 
 
 @router.get("/sync-status")
-async def api_get_sync_status():
+async def api_get_sync_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Return the current BC shipment sync status.
 
     Fields: last_sync_at, shipments_processed_today, last_error.
     """
-    db = get_db()
     from services.inventory_so_integration import get_sync_status
-    return await get_sync_status(db)
+    return await get_sync_status(database)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -2549,15 +2524,14 @@ class OrderTypeIn(BaseModel):
 
 
 @router.patch("/sales-orders/{sales_order_id}/order-type")
-async def api_set_order_type(sales_order_id: str, body: OrderTypeIn):
+async def api_set_order_type(sales_order_id: str, body: OrderTypeIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Set or update the order type for a Sales Order."""
     if body.order_type not in VALID_ORDER_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid order_type. Use: {', '.join(VALID_ORDER_TYPES)}")
 
-    db = get_db()
 
     # Verify SO exists via any movement
-    sample = await db[MOVEMENTS_COLL].find_one(
+    sample = await database[MOVEMENTS_COLL].find_one(
         {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}},
         {"_id": 0, "customer_id": 1},
     )
@@ -2568,7 +2542,7 @@ async def api_set_order_type(sales_order_id: str, body: OrderTypeIn):
             {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
             {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
         ]
-        agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
+        agg = await database[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
         committed = sum(abs(a["total"]) for a in agg if a["_id"] == "order_commitment")
         released = sum(abs(a["total"]) for a in agg if a["_id"] == "order_release")
         remaining = round(committed - released, 4)
@@ -2579,7 +2553,7 @@ async def api_set_order_type(sales_order_id: str, body: OrderTypeIn):
             )
 
     now = datetime.now(timezone.utc).isoformat()
-    await db[SO_ORDER_TYPES_COLL].update_one(
+    await database[SO_ORDER_TYPES_COLL].update_one(
         {"sales_order_id": sales_order_id},
         {"$set": {"sales_order_id": sales_order_id, "order_type": body.order_type, "set_at": now}},
         upsert=True,
@@ -2589,10 +2563,9 @@ async def api_set_order_type(sales_order_id: str, body: OrderTypeIn):
 
 
 @router.get("/sales-orders/{sales_order_id}/order-type")
-async def api_get_order_type(sales_order_id: str):
+async def api_get_order_type(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return the order type for a sales order."""
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
     return {"sales_order_id": sales_order_id, "order_type": order_type}
 
 
@@ -2617,7 +2590,7 @@ class DSPODraftIn(BaseModel):
 
 
 @router.post("/sales-orders/{sales_order_id}/generate-drop-ship-po-draft")
-async def api_generate_drop_ship_po_draft(sales_order_id: str, body: DSPODraftIn):
+async def api_generate_drop_ship_po_draft(sales_order_id: str, body: DSPODraftIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Generate a PO draft linked to a Drop-Ship Sales Order.
 
     Validates SO exists and is drop_ship type.
@@ -2626,8 +2599,7 @@ async def api_generate_drop_ship_po_draft(sales_order_id: str, body: DSPODraftIn
     """
     import uuid
 
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
     if order_type != "drop_ship":
         raise HTTPException(
             status_code=422,
@@ -2663,17 +2635,16 @@ async def api_generate_drop_ship_po_draft(sales_order_id: str, body: DSPODraftIn
         "notes": body.notes.strip(),
     }
 
-    await db[PO_DRAFTS_COLL].insert_one(draft.copy())
+    await database[PO_DRAFTS_COLL].insert_one(draft.copy())
     draft.pop("_id", None)
 
     return draft
 
 
 @router.get("/sales-orders/{sales_order_id}/drop-ship-po-drafts")
-async def api_list_drop_ship_po_drafts(sales_order_id: str):
+async def api_list_drop_ship_po_drafts(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List PO drafts linked to a Drop-Ship Sales Order."""
-    db = get_db()
-    cursor = db[PO_DRAFTS_COLL].find(
+    cursor = database[PO_DRAFTS_COLL].find(
         {"sales_order_id": sales_order_id, "po_type": "drop_ship"}, {"_id": 0}
     ).sort("created_at", -1)
     docs = await cursor.to_list(length=100)
@@ -2699,7 +2670,7 @@ class DSVendorShipmentIn(BaseModel):
 
 
 @router.post("/sales-orders/{sales_order_id}/drop-ship-vendor-shipment")
-async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipmentIn):
+async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipmentIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record a vendor shipment for a Drop-Ship Sales Order.
 
     Traceability only. Does NOT release inventory, create ledger movements,
@@ -2707,8 +2678,7 @@ async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipm
     """
     import uuid as _uuid
 
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
     if order_type != "drop_ship":
         raise HTTPException(
             status_code=422,
@@ -2717,7 +2687,7 @@ async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipm
 
     # Validate linked PO draft if supplied
     if body.po_draft_id.strip():
-        draft = await db[PO_DRAFTS_COLL].find_one(
+        draft = await database[PO_DRAFTS_COLL].find_one(
             {"po_draft_id": body.po_draft_id.strip()}, {"_id": 0, "po_type": 1, "sales_order_id": 1}
         )
         if not draft:
@@ -2748,11 +2718,11 @@ async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipm
         "shipped_lines": [{"item": l.item.strip(), "qty_shipped": l.qty_shipped} for l in body.shipped_lines],
         "results": results,
     }
-    await db[DS_VENDOR_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
+    await database[DS_VENDOR_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
     # System activity
-    await _create_activity(db, "sales_order", sales_order_id, "shipment",
+    await _create_activity(database, "sales_order", sales_order_id, "shipment",
                            f"Vendor shipment recorded: {body.vendor_shipment_number.strip()}", "", "system",
                            {"po_draft_id": body.po_draft_id.strip()})
 
@@ -2764,10 +2734,9 @@ async def api_drop_ship_vendor_shipment(sales_order_id: str, body: DSVendorShipm
 
 
 @router.get("/sales-orders/{sales_order_id}/drop-ship-vendor-shipment-log")
-async def api_list_ds_vendor_shipment_logs(sales_order_id: str):
+async def api_list_ds_vendor_shipment_logs(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List drop-ship vendor shipment log entries for a sales order."""
-    db = get_db()
-    cursor = db[DS_VENDOR_SHIPMENT_LOGS_COLL].find(
+    cursor = database[DS_VENDOR_SHIPMENT_LOGS_COLL].find(
         {"sales_order_id": sales_order_id}, {"_id": 0}
     ).sort("shipped_at", -1)
     entries = await cursor.to_list(length=200)
@@ -2796,7 +2765,7 @@ class BCShipmentIn(BaseModel):
 
 
 @router.post("/sales-orders/{sales_order_id}/bc-shipment")
-async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
+async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record that a BC Sales Order has been shipped.
 
     For warehouse orders: uses release_order_commitments to clear inventory.
@@ -2804,8 +2773,7 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
     """
     import uuid as _uuid
 
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
     now = datetime.now(timezone.utc).isoformat()
     results = []
     errors = []
@@ -2823,7 +2791,7 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
             {"$match": {"movement_type": {"$in": ["order_commitment", "order_release"]}, "reference_id": sales_order_id}},
             {"$group": {"_id": {"item": "$item", "mt": "$movement_type"}, "total": {"$sum": "$quantity_delta"}, "cust": {"$first": "$customer_id"}}},
         ]
-        raw = await db[MOVEMENTS_COLL].aggregate(commit_pipeline).to_list(500)
+        raw = await database[MOVEMENTS_COLL].aggregate(commit_pipeline).to_list(500)
         if not raw:
             raise HTTPException(status_code=404, detail=f"No order commitments found for warehouse sales order '{sales_order_id}'")
 
@@ -2861,7 +2829,7 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
 
         if release_lines:
             try:
-                release_result = await release_order_commitments(db, sales_order_id=sales_order_id, lines=release_lines, created_by="bc_shipment_capture")
+                release_result = await release_order_commitments(database, sales_order_id=sales_order_id, lines=release_lines, created_by="bc_shipment_capture")
                 for i, rl in enumerate(release_lines):
                     results.append({"item": rl["item"], "status": "released", "qty_shipped": rl["qty"],
                         "movement_id": release_result["movement_ids"][i] if i < len(release_result.get("movement_ids", [])) else None})
@@ -2877,11 +2845,11 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
         "shipped_lines": [{"item": l.item.strip(), "qty_shipped": l.qty_shipped} for l in body.shipped_lines],
         "results": results, "errors": errors,
     }
-    await db[BC_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
+    await database[BC_SHIPMENT_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
     # System activity
-    await _create_activity(db, "sales_order", sales_order_id, "shipment",
+    await _create_activity(database, "sales_order", sales_order_id, "shipment",
                            f"Shipment recorded: {body.bc_shipment_number.strip()}", "", "system",
                            {"order_type": order_type})
 
@@ -2896,10 +2864,9 @@ async def api_bc_shipment_capture(sales_order_id: str, body: BCShipmentIn):
 
 
 @router.get("/sales-orders/{sales_order_id}/shipment-log")
-async def api_list_shipment_logs(sales_order_id: str):
+async def api_list_shipment_logs(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all shipment log entries for a sales order, reverse chronological."""
-    db = get_db()
-    cursor = db[BC_SHIPMENT_LOGS_COLL].find(
+    cursor = database[BC_SHIPMENT_LOGS_COLL].find(
         {"sales_order_id": sales_order_id}, {"_id": 0}
     ).sort("shipped_at", -1)
     entries = await cursor.to_list(length=200)
@@ -2918,7 +2885,7 @@ class BCInvoiceIn(BaseModel):
 
 
 @router.post("/sales-orders/{sales_order_id}/bc-invoice")
-async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
+async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Record that a shipped Sales Order has been invoiced in BC.
 
     Informational only. Does NOT create ledger movements,
@@ -2927,24 +2894,23 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
     """
     import uuid as _uuid
 
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
     customer_id = ""
 
     if order_type == "drop_ship":
         # Drop-ship: verify shipment exists (BC shipment or vendor shipment), no commitment checks
-        bc_ship_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-        ds_ship_count = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        bc_ship_count = await database[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        ds_ship_count = await database[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
         if bc_ship_count == 0 and ds_ship_count == 0:
             raise HTTPException(status_code=422, detail="No shipment activity recorded. Record a BC shipment or vendor shipment before invoicing.")
         # Try to find customer_id from shipment logs
-        ship_log = await db[BC_SHIPMENT_LOGS_COLL].find_one(
+        ship_log = await database[BC_SHIPMENT_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0, "customer_id": 1}
         )
         customer_id = ship_log.get("customer_id", "") if ship_log else ""
     else:
         # Warehouse: verify SO exists via commitments
-        sample = await db[MOVEMENTS_COLL].find_one(
+        sample = await database[MOVEMENTS_COLL].find_one(
             {"movement_type": "order_commitment", "reference_id": sales_order_id},
             {"_id": 0, "customer_id": 1},
         )
@@ -2957,7 +2923,7 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
             {"$match": {"reference_id": sales_order_id, "movement_type": {"$in": ["order_commitment", "order_release"]}}},
             {"$group": {"_id": "$movement_type", "total": {"$sum": "$quantity_delta"}}},
         ]
-        agg = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
+        agg = await database[MOVEMENTS_COLL].aggregate(pipeline).to_list(5)
         committed = 0
         released = 0
         for a in agg:
@@ -2974,7 +2940,7 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
             )
 
         # Verify shipment activity exists
-        shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        shipment_count = await database[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
         if shipment_count == 0:
             raise HTTPException(status_code=422, detail="No shipment activity recorded. Record shipment before invoicing.")
 
@@ -2990,21 +2956,20 @@ async def api_bc_invoice_capture(sales_order_id: str, body: BCInvoiceIn):
         "invoice_notes": body.invoice_notes.strip(),
         "captured_at": now,
     }
-    await db[BC_INVOICE_LOGS_COLL].insert_one(log_entry.copy())
+    await database[BC_INVOICE_LOGS_COLL].insert_one(log_entry.copy())
     log_entry.pop("_id", None)
 
     # System activity
-    await _create_activity(db, "sales_order", sales_order_id, "invoice",
+    await _create_activity(database, "sales_order", sales_order_id, "invoice",
                            f"Invoice recorded: {body.bc_invoice_number.strip()}", "", "system")
 
     return log_entry
 
 
 @router.get("/sales-orders/{sales_order_id}/invoice-log")
-async def api_list_invoice_logs(sales_order_id: str):
+async def api_list_invoice_logs(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all invoice log entries for a sales order, reverse chronological."""
-    db = get_db()
-    cursor = db[BC_INVOICE_LOGS_COLL].find(
+    cursor = database[BC_INVOICE_LOGS_COLL].find(
         {"sales_order_id": sales_order_id}, {"_id": 0}
     ).sort("captured_at", -1)
     entries = await cursor.to_list(length=200)
@@ -3012,41 +2977,40 @@ async def api_list_invoice_logs(sales_order_id: str):
 
 
 @router.get("/sales-orders/{sales_order_id}/summary")
-async def api_sales_order_summary(sales_order_id: str):
+async def api_sales_order_summary(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return a summary of commitment/release status for a sales order.
 
     For drop_ship orders, returns shipment/invoice logs only (no commitment data).
     """
     from services.inventory_so_integration import _get_net_committed
 
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
+    order_type = await _get_order_type(database, sales_order_id)
 
     if order_type == "drop_ship":
         # Drop-ship: no commitment data, enriched with PO draft + vendor shipment info
-        latest_shipment = await db[BC_SHIPMENT_LOGS_COLL].find_one(
+        latest_shipment = await database[BC_SHIPMENT_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0},
             sort=[("shipped_at", -1)],
         )
-        latest_invoice = await db[BC_INVOICE_LOGS_COLL].find_one(
+        latest_invoice = await database[BC_INVOICE_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0},
             sort=[("captured_at", -1)],
         )
-        bc_shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-        invoice_count = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        bc_shipment_count = await database[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        invoice_count = await database[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
 
         # Drop-ship PO draft info
-        ds_drafts = await db[PO_DRAFTS_COLL].find(
+        ds_drafts = await database[PO_DRAFTS_COLL].find(
             {"sales_order_id": sales_order_id, "po_type": "drop_ship"}, {"_id": 0}
         ).sort("created_at", -1).to_list(100)
         latest_ds_draft = ds_drafts[0] if ds_drafts else None
 
         # Drop-ship vendor shipment info
-        latest_vendor_shipment = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].find_one(
+        latest_vendor_shipment = await database[DS_VENDOR_SHIPMENT_LOGS_COLL].find_one(
             {"sales_order_id": sales_order_id}, {"_id": 0},
             sort=[("shipped_at", -1)],
         )
-        ds_vendor_shipment_count = await db[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+        ds_vendor_shipment_count = await database[DS_VENDOR_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
 
         has_shipment = bc_shipment_count > 0 or ds_vendor_shipment_count > 0
         has_invoice = invoice_count > 0
@@ -3081,28 +3045,28 @@ async def api_sales_order_summary(sales_order_id: str):
             "latest_vendor_shipped_at": latest_vendor_shipment.get("shipped_at", "") if latest_vendor_shipment else "",
         }
         # Enrich with document linkage + checklist
-        doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
-        checklist_items, checklist_complete = await _derive_so_checklist(db, sales_order_id, order_type, doc_count, docs_by_type)
+        doc_count, docs_by_type, _ = await _get_document_links_summary(database, "sales_order", sales_order_id)
+        checklist_items, checklist_complete = await _derive_so_checklist(database, sales_order_id, order_type, doc_count, docs_by_type)
         ds_summary["linked_document_count"] = doc_count
         ds_summary["linked_documents_by_type"] = docs_by_type
         ds_summary["process_checklist"] = checklist_items
         ds_summary["checklist_complete"] = checklist_complete
         # Approval enrichment
-        appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
+        appr = await _get_approval_enrichment(database, "sales_order", sales_order_id)
         ds_summary.update(appr)
         # Escalation enrichment
-        esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
+        esc_enrich = await _get_escalation_enrichment(database, "sales_order", sales_order_id)
         ds_summary.update(esc_enrich)
         # Assignment enrichment
-        asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
+        asgn_enrich = await _get_assignment_enrichment(database, "sales_order", sales_order_id)
         ds_summary.update(asgn_enrich)
         # Activity enrichment
-        act_enrich = await _get_activity_enrichment(db, "sales_order", sales_order_id)
+        act_enrich = await _get_activity_enrichment(database, "sales_order", sales_order_id)
         ds_summary.update(act_enrich)
         return ds_summary
 
     # Warehouse orders: existing behavior
-    sample = await db[MOVEMENTS_COLL].find_one(
+    sample = await database[MOVEMENTS_COLL].find_one(
         {"movement_type": "order_commitment", "reference_id": sales_order_id},
         {"_id": 0, "customer_id": 1},
     )
@@ -3122,7 +3086,7 @@ async def api_sales_order_summary(sales_order_id: str):
             "desc": {"$first": "$item_description"},
         }},
     ]
-    raw = await db[MOVEMENTS_COLL].aggregate(pipeline).to_list(500)
+    raw = await database[MOVEMENTS_COLL].aggregate(pipeline).to_list(500)
 
     items = {}
     for r in raw:
@@ -3146,18 +3110,18 @@ async def api_sales_order_summary(sales_order_id: str):
     total_remaining = sum(l["remaining_committed_qty"] for l in lines)
 
     # Latest shipment info
-    latest_shipment = await db[BC_SHIPMENT_LOGS_COLL].find_one(
+    latest_shipment = await database[BC_SHIPMENT_LOGS_COLL].find_one(
         {"sales_order_id": sales_order_id}, {"_id": 0},
         sort=[("shipped_at", -1)],
     )
 
     # Latest invoice info
-    latest_invoice = await db[BC_INVOICE_LOGS_COLL].find_one(
+    latest_invoice = await database[BC_INVOICE_LOGS_COLL].find_one(
         {"sales_order_id": sales_order_id}, {"_id": 0},
         sort=[("captured_at", -1)],
     )
-    invoice_count = await db[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
-    shipment_count = await db[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+    invoice_count = await database[BC_INVOICE_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
+    shipment_count = await database[BC_SHIPMENT_LOGS_COLL].count_documents({"sales_order_id": sales_order_id})
 
     # Derive operational_status
     is_fully_released = total_remaining <= 0
@@ -3190,23 +3154,23 @@ async def api_sales_order_summary(sales_order_id: str):
         "lines": lines,
     }
     # Enrich with document linkage + checklist
-    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
-    checklist_items, checklist_complete = await _derive_so_checklist(db, sales_order_id, "warehouse", doc_count, docs_by_type)
+    doc_count, docs_by_type, _ = await _get_document_links_summary(database, "sales_order", sales_order_id)
+    checklist_items, checklist_complete = await _derive_so_checklist(database, sales_order_id, "warehouse", doc_count, docs_by_type)
     wh_summary["linked_document_count"] = doc_count
     wh_summary["linked_documents_by_type"] = docs_by_type
     wh_summary["process_checklist"] = checklist_items
     wh_summary["checklist_complete"] = checklist_complete
     # Approval enrichment
-    appr = await _get_approval_enrichment(db, "sales_order", sales_order_id)
+    appr = await _get_approval_enrichment(database, "sales_order", sales_order_id)
     wh_summary.update(appr)
     # Escalation enrichment
-    esc_enrich = await _get_escalation_enrichment(db, "sales_order", sales_order_id)
+    esc_enrich = await _get_escalation_enrichment(database, "sales_order", sales_order_id)
     wh_summary.update(esc_enrich)
     # Assignment enrichment
-    asgn_enrich = await _get_assignment_enrichment(db, "sales_order", sales_order_id)
+    asgn_enrich = await _get_assignment_enrichment(database, "sales_order", sales_order_id)
     wh_summary.update(asgn_enrich)
     # Activity enrichment
-    act_enrich = await _get_activity_enrichment(db, "sales_order", sales_order_id)
+    act_enrich = await _get_activity_enrichment(database, "sales_order", sales_order_id)
     wh_summary.update(act_enrich)
     return wh_summary
 
@@ -3230,7 +3194,7 @@ class DocumentLinkIn(BaseModel):
 
 
 @router.post("/document-links")
-async def api_create_document_link(body: DocumentLinkIn):
+async def api_create_document_link(body: DocumentLinkIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a document linkage record for a Sales Order or PO Draft."""
     import uuid as _uuid
 
@@ -3239,7 +3203,6 @@ async def api_create_document_link(body: DocumentLinkIn):
     if body.document_type not in VALID_DOCUMENT_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid document_type '{body.document_type}'. Must be one of: {VALID_DOCUMENT_TYPES}")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     doc = {
         "document_link_id": f"DOCL-{_uuid.uuid4().hex[:8].upper()}",
@@ -3252,22 +3215,21 @@ async def api_create_document_link(body: DocumentLinkIn):
         "uploaded_by": None,
         "notes": body.notes.strip(),
     }
-    await db[DOCUMENT_LINKS_COLL].insert_one(doc.copy())
+    await database[DOCUMENT_LINKS_COLL].insert_one(doc.copy())
     doc.pop("_id", None)
     # System activity
-    await _create_activity(db, body.entity_type, body.entity_id.strip(), "document",
+    await _create_activity(database, body.entity_type, body.entity_id.strip(), "document",
                            f"Document linked: {body.document_name.strip()}", "", "system",
                            {"document_type": body.document_type})
     return doc
 
 
 @router.get("/document-links")
-async def api_list_document_links(entity_type: str, entity_id: str):
+async def api_list_document_links(entity_type: str, entity_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List document links for a given entity."""
     if entity_type not in VALID_ENTITY_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid entity_type '{entity_type}'.")
-    db = get_db()
-    cursor = db[DOCUMENT_LINKS_COLL].find(
+    cursor = database[DOCUMENT_LINKS_COLL].find(
         {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
     ).sort("uploaded_at", -1)
     docs = await cursor.to_list(length=200)
@@ -3275,15 +3237,14 @@ async def api_list_document_links(entity_type: str, entity_id: str):
 
 
 @router.delete("/document-links/{document_link_id}")
-async def api_delete_document_link(document_link_id: str):
+async def api_delete_document_link(document_link_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Remove a document linkage record."""
-    db = get_db()
-    existing = await db[DOCUMENT_LINKS_COLL].find_one({"document_link_id": document_link_id}, {"_id": 0})
-    result = await db[DOCUMENT_LINKS_COLL].delete_one({"document_link_id": document_link_id})
+    existing = await database[DOCUMENT_LINKS_COLL].find_one({"document_link_id": document_link_id}, {"_id": 0})
+    result = await database[DOCUMENT_LINKS_COLL].delete_one({"document_link_id": document_link_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=f"Document link '{document_link_id}' not found")
     if existing:
-        await _create_activity(db, existing["entity_type"], existing["entity_id"], "document",
+        await _create_activity(database, existing["entity_type"], existing["entity_id"], "document",
                                f"Document removed: {existing.get('document_name', document_link_id)}", "", "system")
     return {"deleted": document_link_id}
 
@@ -3350,12 +3311,11 @@ def _derive_po_draft_checklist(draft: dict, doc_count: int, docs_by_type: dict, 
 
 
 @router.get("/document-links/checklist/sales-order/{sales_order_id}")
-async def api_so_checklist(sales_order_id: str):
+async def api_so_checklist(sales_order_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return derived process checklist for a Sales Order."""
-    db = get_db()
-    order_type = await _get_order_type(db, sales_order_id)
-    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "sales_order", sales_order_id)
-    items, all_satisfied = await _derive_so_checklist(db, sales_order_id, order_type, doc_count, docs_by_type)
+    order_type = await _get_order_type(database, sales_order_id)
+    doc_count, docs_by_type, _ = await _get_document_links_summary(database, "sales_order", sales_order_id)
+    items, all_satisfied = await _derive_so_checklist(database, sales_order_id, order_type, doc_count, docs_by_type)
     return {
         "sales_order_id": sales_order_id,
         "order_type": order_type,
@@ -3367,14 +3327,13 @@ async def api_so_checklist(sales_order_id: str):
 
 
 @router.get("/document-links/checklist/po-draft/{po_draft_id}")
-async def api_po_draft_checklist(po_draft_id: str):
+async def api_po_draft_checklist(po_draft_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Return derived process checklist for a PO Draft."""
-    db = get_db()
-    draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": po_draft_id}, {"_id": 0})
+    draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": po_draft_id}, {"_id": 0})
     if not draft:
         raise HTTPException(status_code=404, detail=f"PO Draft '{po_draft_id}' not found")
-    doc_count, docs_by_type, _ = await _get_document_links_summary(db, "po_draft", po_draft_id)
-    po_approval = await _get_latest_approval(db, "po_draft", po_draft_id)
+    doc_count, docs_by_type, _ = await _get_document_links_summary(database, "po_draft", po_draft_id)
+    po_approval = await _get_latest_approval(database, "po_draft", po_draft_id)
     items, all_satisfied = _derive_po_draft_checklist(draft, doc_count, docs_by_type, approval=po_approval)
     return {
         "po_draft_id": po_draft_id,
@@ -3439,7 +3398,7 @@ async def _get_approval_enrichment(db, entity_type: str, entity_id: str):
 
 
 @router.post("/approvals/request")
-async def api_request_approval(body: ApprovalRequestIn):
+async def api_request_approval(body: ApprovalRequestIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a pending approval request for a Sales Order or PO Draft."""
     import uuid as _uuid
 
@@ -3448,14 +3407,13 @@ async def api_request_approval(body: ApprovalRequestIn):
     if body.approval_type not in VALID_APPROVAL_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid approval_type '{body.approval_type}'. Must be one of: {VALID_APPROVAL_TYPES}")
 
-    db = get_db()
 
     # Validate entity exists
     if body.entity_type == "sales_order":
         # Check via order type collection or shipment logs
         pass  # SOs are referenced by ID, no strict collection to validate against
     elif body.entity_type == "po_draft":
-        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
+        draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
         if not draft:
             raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
 
@@ -3472,23 +3430,22 @@ async def api_request_approval(body: ApprovalRequestIn):
         "decided_at": None,
         "notes": body.notes.strip(),
     }
-    await db[APPROVAL_LOGS_COLL].insert_one(record.copy())
+    await database[APPROVAL_LOGS_COLL].insert_one(record.copy())
     record.pop("_id", None)
     # System activity
-    await _create_activity(db, body.entity_type, body.entity_id.strip(), "approval",
+    await _create_activity(database, body.entity_type, body.entity_id.strip(), "approval",
                            f"Approval requested ({body.approval_type})", body.notes.strip(),
                            body.requested_by.strip() or "system")
     return record
 
 
 @router.patch("/approvals/{approval_id}")
-async def api_decide_approval(approval_id: str, body: ApprovalDecisionIn):
+async def api_decide_approval(approval_id: str, body: ApprovalDecisionIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Approve or reject an approval request."""
     if body.approval_status not in ("approved", "rejected"):
         raise HTTPException(status_code=422, detail="approval_status must be 'approved' or 'rejected'")
 
-    db = get_db()
-    existing = await db[APPROVAL_LOGS_COLL].find_one({"approval_id": approval_id}, {"_id": 0})
+    existing = await database[APPROVAL_LOGS_COLL].find_one({"approval_id": approval_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Approval '{approval_id}' not found")
 
@@ -3502,23 +3459,22 @@ async def api_decide_approval(approval_id: str, body: ApprovalDecisionIn):
         "decided_at": now,
         "notes": body.notes.strip() if body.notes.strip() else existing.get("notes", ""),
     }
-    await db[APPROVAL_LOGS_COLL].update_one({"approval_id": approval_id}, {"$set": update})
+    await database[APPROVAL_LOGS_COLL].update_one({"approval_id": approval_id}, {"$set": update})
 
     result = {**existing, **update}
     # System activity for approval decision
-    await _create_activity(db, existing["entity_type"], existing["entity_id"], "approval",
+    await _create_activity(database, existing["entity_type"], existing["entity_id"], "approval",
                            f"Approval {body.approval_status}", body.notes.strip(),
                            body.approved_by.strip() or "system")
     return result
 
 
 @router.get("/approvals")
-async def api_list_approvals(entity_type: str, entity_id: str):
+async def api_list_approvals(entity_type: str, entity_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List approval history for an entity."""
     if entity_type not in VALID_APPROVAL_ENTITY_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid entity_type '{entity_type}'.")
-    db = get_db()
-    cursor = db[APPROVAL_LOGS_COLL].find(
+    cursor = database[APPROVAL_LOGS_COLL].find(
         {"entity_type": entity_type, "entity_id": entity_id}, {"_id": 0}
     ).sort("requested_at", -1)
     entries = await cursor.to_list(length=200)
@@ -3617,17 +3573,16 @@ class EscalationUpdateIn(BaseModel):
 
 
 @router.post("/escalations")
-async def api_create_escalation(body: EscalationIn):
+async def api_create_escalation(body: EscalationIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create or upsert a due date / escalation record."""
     import uuid as _uuid
 
     if body.entity_type not in ("sales_order", "po_draft"):
         raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
 
-    db = get_db()
     # Validate PO draft exists if applicable
     if body.entity_type == "po_draft":
-        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
+        draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id}, {"_id": 0, "po_draft_id": 1})
         if not draft:
             raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
 
@@ -3635,7 +3590,7 @@ async def api_create_escalation(body: EscalationIn):
     derived_status = _derive_escalation_status(body.due_date.strip())
 
     # Upsert: replace existing record for same entity
-    existing = await db[ESCALATIONS_COLL].find_one(
+    existing = await database[ESCALATIONS_COLL].find_one(
         {"entity_type": body.entity_type, "entity_id": body.entity_id.strip()}, {"_id": 0}
     )
     if existing:
@@ -3645,7 +3600,7 @@ async def api_create_escalation(body: EscalationIn):
             "notes": body.notes.strip(),
             "updated_at": now,
         }
-        await db[ESCALATIONS_COLL].update_one(
+        await database[ESCALATIONS_COLL].update_one(
             {"entity_type": body.entity_type, "entity_id": body.entity_id.strip()},
             {"$set": update},
         )
@@ -3663,24 +3618,23 @@ async def api_create_escalation(body: EscalationIn):
         "created_at": now,
         "updated_at": now,
     }
-    await db[ESCALATIONS_COLL].insert_one(record.copy())
+    await database[ESCALATIONS_COLL].insert_one(record.copy())
     record.pop("_id", None)
     # System activity
-    await _create_activity(db, body.entity_type, body.entity_id.strip(), "escalation",
+    await _create_activity(database, body.entity_type, body.entity_id.strip(), "escalation",
                            f"Due date set: {body.due_date.strip()}", body.notes.strip(), "system")
     return record
 
 
 @router.get("/escalations")
-async def api_list_escalations(entity_type: str = "", entity_id: str = ""):
+async def api_list_escalations(entity_type: str = "", entity_id: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List escalation records, optionally filtered."""
-    db = get_db()
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
     if entity_id:
         query["entity_id"] = entity_id
-    cursor = db[ESCALATIONS_COLL].find(query, {"_id": 0}).sort("created_at", -1)
+    cursor = database[ESCALATIONS_COLL].find(query, {"_id": 0}).sort("created_at", -1)
     entries = await cursor.to_list(length=200)
     # Refresh derived status
     for e in entries:
@@ -3692,10 +3646,9 @@ async def api_list_escalations(entity_type: str = "", entity_id: str = ""):
 
 
 @router.patch("/escalations/{escalation_id}")
-async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn):
+async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update a due date / escalation record."""
-    db = get_db()
-    existing = await db[ESCALATIONS_COLL].find_one({"escalation_id": escalation_id}, {"_id": 0})
+    existing = await database[ESCALATIONS_COLL].find_one({"escalation_id": escalation_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Escalation '{escalation_id}' not found")
 
@@ -3716,14 +3669,14 @@ async def api_update_escalation(escalation_id: str, body: EscalationUpdateIn):
     if new_status != "escalated":
         update["escalation_status"] = _derive_escalation_status(new_due, new_status)
 
-    await db[ESCALATIONS_COLL].update_one({"escalation_id": escalation_id}, {"$set": update})
+    await database[ESCALATIONS_COLL].update_one({"escalation_id": escalation_id}, {"$set": update})
     result = {**existing, **update}
     days_to, days_over = _calc_days(result.get("due_date", ""))
     result["days_to_due"] = days_to
     result["days_overdue"] = days_over
     # System activity
     esc_title = f"Escalation updated: {update.get('escalation_status', result.get('escalation_status', ''))}"
-    await _create_activity(db, existing["entity_type"], existing["entity_id"], "escalation",
+    await _create_activity(database, existing["entity_type"], existing["entity_id"], "escalation",
                            esc_title, body.notes.strip(), "system")
     return result
 
@@ -3773,24 +3726,23 @@ class AssignmentUpdateIn(BaseModel):
 
 
 @router.post("/assignments")
-async def api_create_assignment(body: AssignmentIn):
+async def api_create_assignment(body: AssignmentIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create or upsert the active assignment for an entity."""
     import uuid as _uuid
 
     if body.entity_type not in ("sales_order", "po_draft"):
         raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
 
-    db = get_db()
     # Validate entity exists
     if body.entity_type == "po_draft":
-        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
         if not draft:
             raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
 
     now = datetime.now(timezone.utc).isoformat()
 
     # Upsert: update existing active assignment for same entity
-    existing = await db[ASSIGNMENTS_COLL].find_one(
+    existing = await database[ASSIGNMENTS_COLL].find_one(
         {"entity_type": body.entity_type, "entity_id": body.entity_id.strip(), "assignment_status": {"$ne": "completed"}},
         {"_id": 0},
     )
@@ -3802,13 +3754,13 @@ async def api_create_assignment(body: AssignmentIn):
             "updated_at": now,
             "assignment_status": "assigned",
         }
-        await db[ASSIGNMENTS_COLL].update_one(
+        await database[ASSIGNMENTS_COLL].update_one(
             {"assignment_id": existing["assignment_id"]},
             {"$set": update},
         )
         result = {**existing, **update}
         # System activity for reassignment
-        await _create_activity(db, body.entity_type, body.entity_id.strip(), "assignment",
+        await _create_activity(database, body.entity_type, body.entity_id.strip(), "assignment",
                                f"Reassigned to {body.assigned_to.strip()}", body.notes.strip(),
                                body.assigned_by.strip() or "system")
         return result
@@ -3824,34 +3776,32 @@ async def api_create_assignment(body: AssignmentIn):
         "notes": body.notes.strip(),
         "updated_at": now,
     }
-    await db[ASSIGNMENTS_COLL].insert_one(record.copy())
+    await database[ASSIGNMENTS_COLL].insert_one(record.copy())
     record.pop("_id", None)
     # System activity for new assignment
-    await _create_activity(db, body.entity_type, body.entity_id.strip(), "assignment",
+    await _create_activity(database, body.entity_type, body.entity_id.strip(), "assignment",
                            f"Assigned to {body.assigned_to.strip()}", body.notes.strip(),
                            body.assigned_by.strip() or "system")
     return record
 
 
 @router.get("/assignments")
-async def api_list_assignments(entity_type: str = "", entity_id: str = ""):
+async def api_list_assignments(entity_type: str = "", entity_id: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List assignment records, optionally filtered."""
-    db = get_db()
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
     if entity_id:
         query["entity_id"] = entity_id
-    cursor = db[ASSIGNMENTS_COLL].find(query, {"_id": 0}).sort("assigned_at", -1)
+    cursor = database[ASSIGNMENTS_COLL].find(query, {"_id": 0}).sort("assigned_at", -1)
     entries = await cursor.to_list(length=200)
     return {"total": len(entries), "entries": entries}
 
 
 @router.patch("/assignments/{assignment_id}")
-async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn):
+async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an assignment record."""
-    db = get_db()
-    existing = await db[ASSIGNMENTS_COLL].find_one({"assignment_id": assignment_id}, {"_id": 0})
+    existing = await database[ASSIGNMENTS_COLL].find_one({"assignment_id": assignment_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Assignment '{assignment_id}' not found")
 
@@ -3866,7 +3816,7 @@ async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn):
     if body.notes.strip():
         update["notes"] = body.notes.strip()
 
-    await db[ASSIGNMENTS_COLL].update_one({"assignment_id": assignment_id}, {"$set": update})
+    await database[ASSIGNMENTS_COLL].update_one({"assignment_id": assignment_id}, {"$set": update})
     result = {**existing, **update}
     # System activity for status update
     status_change = update.get("assignment_status", "")
@@ -3877,7 +3827,7 @@ async def api_update_assignment(assignment_id: str, body: AssignmentUpdateIn):
     if status_change:
         title_parts.append(f"Status: {status_change}")
     if title_parts:
-        await _create_activity(db, existing["entity_type"], existing["entity_id"], "assignment",
+        await _create_activity(database, existing["entity_type"], existing["entity_id"], "assignment",
                                " | ".join(title_parts), body.notes.strip(), "system")
     return result
 
@@ -3943,21 +3893,20 @@ class ActivityIn(BaseModel):
 
 
 @router.post("/activities")
-async def api_create_activity(req: ActivityIn):
+async def api_create_activity(req: ActivityIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a manual note or activity record."""
     if req.entity_type not in ("sales_order", "po_draft"):
         raise HTTPException(status_code=422, detail="entity_type must be sales_order or po_draft")
     if req.activity_type not in VALID_ACTIVITY_TYPES:
         raise HTTPException(status_code=422, detail=f"Invalid activity_type. Must be one of: {VALID_ACTIVITY_TYPES}")
 
-    db = get_db()
     if req.entity_type == "po_draft":
-        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": req.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": req.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
         if not draft:
             raise HTTPException(status_code=404, detail=f"PO Draft '{req.entity_id}' not found")
 
     record = await _create_activity(
-        db, req.entity_type, req.entity_id.strip(), req.activity_type,
+        database, req.entity_type, req.entity_id.strip(), req.activity_type,
         req.title.strip(), req.body.strip(), req.created_by.strip(),
     )
     return record
@@ -3967,9 +3916,9 @@ async def api_create_activity(req: ActivityIn):
 async def api_list_activities(
     entity_type: str = "", entity_id: str = "",
     activity_type: str = "", limit: int = 50, offset: int = 0,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """List activities/notes, newest first."""
-    db = get_db()
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
@@ -3977,9 +3926,9 @@ async def api_list_activities(
         query["entity_id"] = entity_id
     if activity_type:
         query["activity_type"] = activity_type
-    cursor = db[ACTIVITIES_COLL].find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit)
+    cursor = database[ACTIVITIES_COLL].find(query, {"_id": 0}).sort("created_at", -1).skip(offset).limit(limit)
     entries = await cursor.to_list(length=limit)
-    total = await db[ACTIVITIES_COLL].count_documents(query)
+    total = await database[ACTIVITIES_COLL].count_documents(query)
     return {"total": total, "offset": offset, "limit": limit, "entries": entries}
 
 
@@ -4010,19 +3959,18 @@ class SavedViewUpdateIn(BaseModel):
 
 
 @router.post("/saved-views")
-async def api_create_saved_view(body: SavedViewIn):
+async def api_create_saved_view(body: SavedViewIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a saved view."""
     import uuid as _uuid
 
     if body.view_type not in VALID_VIEW_TYPES:
         raise HTTPException(status_code=422, detail=f"view_type must be one of: {VALID_VIEW_TYPES}")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     # If setting as default, unset previous default for same view_type + created_by
     if body.is_default:
-        await db[SAVED_VIEWS_COLL].update_many(
+        await database[SAVED_VIEWS_COLL].update_many(
             {"view_type": body.view_type, "created_by": body.created_by.strip(), "is_default": True},
             {"$set": {"is_default": False, "updated_at": now}},
         )
@@ -4039,30 +3987,28 @@ async def api_create_saved_view(body: SavedViewIn):
         "sort": body.sort,
         "notes": body.notes.strip(),
     }
-    await db[SAVED_VIEWS_COLL].insert_one(record.copy())
+    await database[SAVED_VIEWS_COLL].insert_one(record.copy())
     record.pop("_id", None)
     return record
 
 
 @router.get("/saved-views")
-async def api_list_saved_views(view_type: str = "", created_by: str = ""):
+async def api_list_saved_views(view_type: str = "", created_by: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List saved views, optionally filtered."""
-    db = get_db()
     query = {}
     if view_type:
         query["view_type"] = view_type
     if created_by:
         query["created_by"] = created_by
-    cursor = db[SAVED_VIEWS_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
+    cursor = database[SAVED_VIEWS_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
     entries = await cursor.to_list(length=100)
     return {"total": len(entries), "entries": entries}
 
 
 @router.patch("/saved-views/{saved_view_id}")
-async def api_update_saved_view(saved_view_id: str, body: SavedViewUpdateIn):
+async def api_update_saved_view(saved_view_id: str, body: SavedViewUpdateIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update a saved view."""
-    db = get_db()
-    existing = await db[SAVED_VIEWS_COLL].find_one({"saved_view_id": saved_view_id}, {"_id": 0})
+    existing = await database[SAVED_VIEWS_COLL].find_one({"saved_view_id": saved_view_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Saved view '{saved_view_id}' not found")
 
@@ -4073,7 +4019,7 @@ async def api_update_saved_view(saved_view_id: str, body: SavedViewUpdateIn):
     if body.is_default is not None:
         update["is_default"] = body.is_default
         if body.is_default:
-            await db[SAVED_VIEWS_COLL].update_many(
+            await database[SAVED_VIEWS_COLL].update_many(
                 {"view_type": existing["view_type"], "created_by": existing.get("created_by", "user"),
                  "is_default": True, "saved_view_id": {"$ne": saved_view_id}},
                 {"$set": {"is_default": False, "updated_at": now}},
@@ -4085,16 +4031,15 @@ async def api_update_saved_view(saved_view_id: str, body: SavedViewUpdateIn):
     if body.notes is not None:
         update["notes"] = body.notes.strip() if body.notes else ""
 
-    await db[SAVED_VIEWS_COLL].update_one({"saved_view_id": saved_view_id}, {"$set": update})
+    await database[SAVED_VIEWS_COLL].update_one({"saved_view_id": saved_view_id}, {"$set": update})
     result = {**existing, **update}
     return result
 
 
 @router.delete("/saved-views/{saved_view_id}")
-async def api_delete_saved_view(saved_view_id: str):
+async def api_delete_saved_view(saved_view_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a saved view."""
-    db = get_db()
-    result = await db[SAVED_VIEWS_COLL].delete_one({"saved_view_id": saved_view_id})
+    result = await database[SAVED_VIEWS_COLL].delete_one({"saved_view_id": saved_view_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail=f"Saved view '{saved_view_id}' not found")
     return {"deleted": saved_view_id}
@@ -4305,21 +4250,21 @@ async def api_operations_queue(
     sort_by: str = "",
     limit: int = 100,
     offset: int = 0,
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Return a prioritized list of entities requiring operational attention."""
-    db = get_db()
 
     all_items = []
     if not entity_type or entity_type == "sales_order":
-        all_items.extend(await _build_so_queue_items(db))
+        all_items.extend(await _build_so_queue_items(database))
     if not entity_type or entity_type == "po_draft":
-        all_items.extend(await _build_po_draft_queue_items(db))
+        all_items.extend(await _build_po_draft_queue_items(database))
 
     # Enrich with assignment + activity data
     for item in all_items:
-        asgn = await _get_assignment_enrichment(db, item["entity_type"], item["entity_id"])
+        asgn = await _get_assignment_enrichment(database, item["entity_type"], item["entity_id"])
         item.update(asgn)
-        act = await _get_activity_enrichment(db, item["entity_type"], item["entity_id"])
+        act = await _get_activity_enrichment(database, item["entity_type"], item["entity_id"])
         item.update(act)
         # +10 priority for unassigned high-priority items
         if not item.get("current_owner") and item["priority_score"] >= 40:
@@ -4372,8 +4317,8 @@ async def api_operations_queue(
     no_recent_activity_7d = sum(1 for i in all_items if not i.get("latest_activity_at") or i["latest_activity_at"] < stale_cutoff)
 
     # Saved views counts
-    sv_total = await db[SAVED_VIEWS_COLL].count_documents({"view_type": "operations_queue"})
-    sv_default = await db[SAVED_VIEWS_COLL].find_one(
+    sv_total = await database[SAVED_VIEWS_COLL].count_documents({"view_type": "operations_queue"})
+    sv_default = await database[SAVED_VIEWS_COLL].find_one(
         {"view_type": "operations_queue", "is_default": True}, {"_id": 0, "name": 1}
     )
 
@@ -4411,7 +4356,7 @@ class BulkActionIn(BaseModel):
 
 
 @router.post("/operations-queue/bulk-action")
-async def api_bulk_action(body: BulkActionIn):
+async def api_bulk_action(body: BulkActionIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Apply a bulk action to multiple entities."""
     import uuid as _uuid
 
@@ -4422,7 +4367,6 @@ async def api_bulk_action(body: BulkActionIn):
     if not body.entity_ids:
         raise HTTPException(status_code=422, detail="entity_ids must not be empty")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     results = []
 
@@ -4431,7 +4375,7 @@ async def api_bulk_action(body: BulkActionIn):
         try:
             # Validate entity exists
             if body.entity_type == "po_draft":
-                draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": eid}, {"_id": 0, "po_draft_id": 1})
+                draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": eid}, {"_id": 0, "po_draft_id": 1})
                 if not draft:
                     results.append({"entity_id": eid, "status": "failed", "message": f"PO Draft '{eid}' not found"})
                     continue
@@ -4442,23 +4386,23 @@ async def api_bulk_action(body: BulkActionIn):
                 if not assigned_to:
                     results.append({"entity_id": eid, "status": "failed", "message": "assigned_to is required"})
                     continue
-                existing = await db[ASSIGNMENTS_COLL].find_one(
+                existing = await database[ASSIGNMENTS_COLL].find_one(
                     {"entity_type": body.entity_type, "entity_id": eid, "assignment_status": {"$ne": "completed"}}, {"_id": 0}
                 )
                 if existing:
-                    await db[ASSIGNMENTS_COLL].update_one(
+                    await database[ASSIGNMENTS_COLL].update_one(
                         {"assignment_id": existing["assignment_id"]},
                         {"$set": {"assigned_to": assigned_to, "assignment_status": "assigned", "notes": notes, "updated_at": now}},
                     )
                 else:
-                    await db[ASSIGNMENTS_COLL].insert_one({
+                    await database[ASSIGNMENTS_COLL].insert_one({
                         "assignment_id": f"ASGN-{_uuid.uuid4().hex[:8].upper()}",
                         "entity_type": body.entity_type, "entity_id": eid,
                         "assigned_to": assigned_to, "assigned_by": "bulk_action",
                         "assigned_at": now, "assignment_status": "assigned",
                         "notes": notes, "updated_at": now,
                     })
-                await _create_activity(db, body.entity_type, eid, "assignment",
+                await _create_activity(database, body.entity_type, eid, "assignment",
                                        f"Bulk assigned to {assigned_to}", notes, "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Assigned to {assigned_to}"})
 
@@ -4467,17 +4411,17 @@ async def api_bulk_action(body: BulkActionIn):
                 if new_status not in VALID_ASSIGNMENT_STATUSES:
                     results.append({"entity_id": eid, "status": "failed", "message": f"Invalid status: {new_status}"})
                     continue
-                existing = await db[ASSIGNMENTS_COLL].find_one(
+                existing = await database[ASSIGNMENTS_COLL].find_one(
                     {"entity_type": body.entity_type, "entity_id": eid, "assignment_status": {"$ne": "completed"}}, {"_id": 0}
                 )
                 if not existing:
                     results.append({"entity_id": eid, "status": "failed", "message": "No active assignment found"})
                     continue
-                await db[ASSIGNMENTS_COLL].update_one(
+                await database[ASSIGNMENTS_COLL].update_one(
                     {"assignment_id": existing["assignment_id"]},
                     {"$set": {"assignment_status": new_status, "updated_at": now}},
                 )
-                await _create_activity(db, body.entity_type, eid, "assignment",
+                await _create_activity(database, body.entity_type, eid, "assignment",
                                        f"Bulk status update: {new_status}", "", "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Status updated to {new_status}"})
 
@@ -4488,22 +4432,22 @@ async def api_bulk_action(body: BulkActionIn):
                     results.append({"entity_id": eid, "status": "failed", "message": "due_date is required"})
                     continue
                 derived_status = _derive_escalation_status(due_date)
-                existing = await db[ESCALATIONS_COLL].find_one(
+                existing = await database[ESCALATIONS_COLL].find_one(
                     {"entity_type": body.entity_type, "entity_id": eid}, {"_id": 0}
                 )
                 if existing:
-                    await db[ESCALATIONS_COLL].update_one(
+                    await database[ESCALATIONS_COLL].update_one(
                         {"entity_type": body.entity_type, "entity_id": eid},
                         {"$set": {"due_date": due_date, "escalation_status": derived_status, "notes": notes, "updated_at": now}},
                     )
                 else:
-                    await db[ESCALATIONS_COLL].insert_one({
+                    await database[ESCALATIONS_COLL].insert_one({
                         "escalation_id": f"ESC-{_uuid.uuid4().hex[:8].upper()}",
                         "entity_type": body.entity_type, "entity_id": eid,
                         "due_date": due_date, "escalation_status": derived_status,
                         "notes": notes, "created_at": now, "updated_at": now,
                     })
-                await _create_activity(db, body.entity_type, eid, "escalation",
+                await _create_activity(database, body.entity_type, eid, "escalation",
                                        f"Bulk due date set: {due_date}", notes, "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Due date set to {due_date} ({derived_status})"})
 
@@ -4512,17 +4456,17 @@ async def api_bulk_action(body: BulkActionIn):
                 if esc_status not in ("on_track", "due_soon", "overdue", "escalated"):
                     results.append({"entity_id": eid, "status": "failed", "message": f"Invalid escalation_status: {esc_status}"})
                     continue
-                existing = await db[ESCALATIONS_COLL].find_one(
+                existing = await database[ESCALATIONS_COLL].find_one(
                     {"entity_type": body.entity_type, "entity_id": eid}, {"_id": 0}
                 )
                 if not existing:
                     results.append({"entity_id": eid, "status": "failed", "message": "No escalation record found. Set a due date first."})
                     continue
-                await db[ESCALATIONS_COLL].update_one(
+                await database[ESCALATIONS_COLL].update_one(
                     {"entity_type": body.entity_type, "entity_id": eid},
                     {"$set": {"escalation_status": esc_status, "updated_at": now}},
                 )
-                await _create_activity(db, body.entity_type, eid, "escalation",
+                await _create_activity(database, body.entity_type, eid, "escalation",
                                        f"Bulk escalation: {esc_status}", "", "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Escalation set to {esc_status}"})
 
@@ -4539,8 +4483,8 @@ async def api_bulk_action(body: BulkActionIn):
                     "requested_at": now,
                     "decided_by": "", "decided_at": "", "notes": notes,
                 }
-                await db[APPROVAL_LOGS_COLL].insert_one(record.copy())
-                await _create_activity(db, body.entity_type, eid, "approval",
+                await database[APPROVAL_LOGS_COLL].insert_one(record.copy())
+                await _create_activity(database, body.entity_type, eid, "approval",
                                        f"Bulk approval requested ({approval_type})", notes, "bulk_action")
                 results.append({"entity_id": eid, "status": "success", "message": f"Approval requested ({approval_type})"})
 
@@ -4549,14 +4493,14 @@ async def api_bulk_action(body: BulkActionIn):
                 if not tmpl_id:
                     results.append({"entity_id": eid, "status": "failed", "message": "template_id is required"})
                     continue
-                tmpl = await db[TEMPLATES_COLL].find_one({"template_id": tmpl_id, "is_active": True}, {"_id": 0})
+                tmpl = await database[TEMPLATES_COLL].find_one({"template_id": tmpl_id, "is_active": True}, {"_id": 0})
                 if not tmpl:
                     results.append({"entity_id": eid, "status": "failed", "message": f"Template '{tmpl_id}' not found or inactive"})
                     continue
                 if tmpl["entity_type"] != body.entity_type:
                     results.append({"entity_id": eid, "status": "failed", "message": f"Template entity_type mismatch"})
                     continue
-                apply_res = await _apply_template_to_entity(db, tmpl, body.entity_type, eid)
+                apply_res = await _apply_template_to_entity(database, tmpl, body.entity_type, eid)
                 results.append({"entity_id": eid, "status": "success", "message": f"Template applied: {', '.join(apply_res['actions_applied'])} | skipped: {', '.join(apply_res['actions_skipped'])}"})
 
         except Exception as e:
@@ -4616,7 +4560,7 @@ class TemplateApplyIn(BaseModel):
 
 
 @router.post("/templates")
-async def api_create_template(body: TemplateIn):
+async def api_create_template(body: TemplateIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create an operational template."""
     import uuid as _uuid
     if body.entity_type not in VALID_TEMPLATE_ENTITY_TYPES:
@@ -4624,7 +4568,6 @@ async def api_create_template(body: TemplateIn):
     if body.applies_to_order_type and body.applies_to_order_type not in VALID_ORDER_TYPES:
         raise HTTPException(status_code=422, detail=f"applies_to_order_type must be one of: {VALID_ORDER_TYPES}")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     record = {
         "template_id": f"TMPL-{_uuid.uuid4().hex[:8].upper()}",
@@ -4642,15 +4585,14 @@ async def api_create_template(body: TemplateIn):
         "created_at": now,
         "updated_at": now,
     }
-    await db[TEMPLATES_COLL].insert_one(record.copy())
+    await database[TEMPLATES_COLL].insert_one(record.copy())
     record.pop("_id", None)
     return record
 
 
 @router.get("/templates")
-async def api_list_templates(entity_type: str = "", applies_to_order_type: str = "", is_active: str = ""):
+async def api_list_templates(entity_type: str = "", applies_to_order_type: str = "", is_active: str = "", database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List templates, optionally filtered."""
-    db = get_db()
     query = {}
     if entity_type:
         query["entity_type"] = entity_type
@@ -4660,16 +4602,15 @@ async def api_list_templates(entity_type: str = "", applies_to_order_type: str =
         query["is_active"] = True
     elif is_active.lower() in ("false", "0"):
         query["is_active"] = False
-    cursor = db[TEMPLATES_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
+    cursor = database[TEMPLATES_COLL].find(query, {"_id": 0}).sort("updated_at", -1)
     entries = await cursor.to_list(length=100)
     return {"total": len(entries), "entries": entries}
 
 
 @router.patch("/templates/{template_id}")
-async def api_update_template(template_id: str, body: TemplateUpdateIn):
+async def api_update_template(template_id: str, body: TemplateUpdateIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an operational template."""
-    db = get_db()
-    existing = await db[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
+    existing = await database[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
     now = datetime.now(timezone.utc).isoformat()
@@ -4692,19 +4633,18 @@ async def api_update_template(template_id: str, body: TemplateUpdateIn):
         update["notes"] = body.notes.strip() if body.notes else ""
     if body.is_active is not None:
         update["is_active"] = body.is_active
-    await db[TEMPLATES_COLL].update_one({"template_id": template_id}, {"$set": update})
+    await database[TEMPLATES_COLL].update_one({"template_id": template_id}, {"$set": update})
     return {**existing, **update}
 
 
 @router.delete("/templates/{template_id}")
-async def api_delete_template(template_id: str):
+async def api_delete_template(template_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete (or deactivate) a template."""
-    db = get_db()
-    existing = await db[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
+    existing = await database[TEMPLATES_COLL].find_one({"template_id": template_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
     now = datetime.now(timezone.utc).isoformat()
-    await db[TEMPLATES_COLL].update_one(
+    await database[TEMPLATES_COLL].update_one(
         {"template_id": template_id},
         {"$set": {"is_active": False, "updated_at": now}},
     )
@@ -4794,13 +4734,12 @@ async def _apply_template_to_entity(db, tmpl: dict, entity_type: str, entity_id:
 
 
 @router.post("/templates/{template_id}/apply")
-async def api_apply_template(template_id: str, body: TemplateApplyIn):
+async def api_apply_template(template_id: str, body: TemplateApplyIn, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Apply a template to a single entity."""
     if body.entity_type not in VALID_TEMPLATE_ENTITY_TYPES:
         raise HTTPException(status_code=422, detail=f"entity_type must be one of: {VALID_TEMPLATE_ENTITY_TYPES}")
 
-    db = get_db()
-    tmpl = await db[TEMPLATES_COLL].find_one({"template_id": template_id, "is_active": True}, {"_id": 0})
+    tmpl = await database[TEMPLATES_COLL].find_one({"template_id": template_id, "is_active": True}, {"_id": 0})
     if not tmpl:
         raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found or inactive")
     if tmpl["entity_type"] != body.entity_type:
@@ -4808,18 +4747,18 @@ async def api_apply_template(template_id: str, body: TemplateApplyIn):
 
     # Validate entity exists
     if body.entity_type == "po_draft":
-        draft = await db[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
+        draft = await database[PO_DRAFTS_COLL].find_one({"po_draft_id": body.entity_id.strip()}, {"_id": 0, "po_draft_id": 1})
         if not draft:
             raise HTTPException(status_code=404, detail=f"PO Draft '{body.entity_id}' not found")
 
     # Validate order type compatibility for SOs
     if body.entity_type == "sales_order" and tmpl.get("applies_to_order_type"):
-        ot_doc = await db["so_order_types"].find_one({"sales_order_id": body.entity_id.strip()}, {"_id": 0})
+        ot_doc = await database["so_order_types"].find_one({"sales_order_id": body.entity_id.strip()}, {"_id": 0})
         actual_ot = ot_doc.get("order_type", "warehouse") if ot_doc else "warehouse"
         if actual_ot != tmpl["applies_to_order_type"]:
             raise HTTPException(status_code=422, detail=f"Template requires order type '{tmpl['applies_to_order_type']}' but SO is '{actual_ot}'")
 
-    result = await _apply_template_to_entity(db, tmpl, body.entity_type, body.entity_id.strip())
+    result = await _apply_template_to_entity(database, tmpl, body.entity_type, body.entity_id.strip())
     return result
 
 
@@ -4835,17 +4774,16 @@ class ShortageReq(BaseModel):
 
 
 @incoming_supply_router.post("/from-shortage")
-async def api_create_from_shortage(body: ShortageReq):
+async def api_create_from_shortage(body: ShortageReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create incoming supply records for SHORT items on a Sales Order.
 
     Returns 409 if a duplicate supply record already exists for the same
     item + order reference. Returns 422 if shortage <= 0.
     """
-    db = get_db()
     try:
         from services.inventory_so_integration import create_shortage_supply
         result = await create_shortage_supply(
-            db,
+            database,
             sales_order_id=body.sales_order_id,
             lines=[{"item": ln.item, "qty_needed": ln.qty_needed, "qty_available": ln.qty_available} for ln in body.lines],
             created_by="gpi_hub",
@@ -4870,20 +4808,19 @@ class StatusTransitionReq(BaseModel):
 
 
 @incoming_supply_router.post("/{supply_id}/status")
-async def api_transition_status(supply_id: str, body: StatusTransitionReq):
+async def api_transition_status(supply_id: str, body: StatusTransitionReq, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Transition an incoming supply record's status.
 
     Valid: planned→ordered, planned→cancelled, ordered→received, ordered→cancelled.
     When received, creates a receipt ledger movement.
     Returns 409 if already received. Returns 422 for invalid transitions.
     """
-    db = get_db()
     try:
         from services.inventory_so_integration import (
             transition_supply_status, DuplicateReceiptError,
         )
         result = await transition_supply_status(
-            db, supply_id=supply_id, new_status=body.status,
+            database, supply_id=supply_id, new_status=body.status,
         )
         return result
     except DuplicateReceiptError as e:

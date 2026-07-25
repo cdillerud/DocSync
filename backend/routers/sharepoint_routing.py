@@ -8,9 +8,10 @@ processor assignments, and document-to-folder suggestions.
 import logging
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query, Body
+from fastapi import APIRouter, HTTPException, Query, Body, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from hub_platform.bootstrap import get_platform_database
 from pydantic import BaseModel, Field
-from deps import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sharepoint-routing", tags=["SharePoint Routing"])
@@ -69,17 +70,18 @@ class FolderSuggestionRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/folder-tree")
-async def get_folder_tree():
+async def get_folder_tree(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get the complete folder tree structure from DB (or defaults)."""
-    db = get_db()
 
-    rules = await db.sharepoint_folder_rules.find(
+    rules = await database.sharepoint_folder_rules.find(
         {"is_active": True}, {"_id": 0}
     ).sort("sort_order", 1).to_list(200)
 
     if not rules:
         # Seed defaults and return
-        rules = await _seed_default_rules(db)
+        rules = await _seed_default_rules(database)
 
     # Build tree
     tree = _build_tree(rules)
@@ -92,26 +94,24 @@ async def get_folder_tree():
 
 
 @router.get("/folder-rules")
-async def list_folder_rules(include_inactive: bool = False):
+async def list_folder_rules(include_inactive: bool = False, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """List all folder routing rules."""
-    db = get_db()
     query = {} if include_inactive else {"is_active": True}
-    rules = await db.sharepoint_folder_rules.find(
+    rules = await database.sharepoint_folder_rules.find(
         query, {"_id": 0}
     ).sort("sort_order", 1).to_list(200)
 
     if not rules:
-        rules = await _seed_default_rules(db)
+        rules = await _seed_default_rules(database)
 
     return {"rules": rules, "total": len(rules)}
 
 
 @router.post("/folder-rules")
-async def create_folder_rule(rule: FolderRuleCreate):
+async def create_folder_rule(rule: FolderRuleCreate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new folder routing rule."""
-    db = get_db()
 
-    existing = await db.sharepoint_folder_rules.find_one(
+    existing = await database.sharepoint_folder_rules.find_one(
         {"folder_key": rule.folder_key}, {"_id": 0}
     )
     if existing:
@@ -122,15 +122,14 @@ async def create_folder_rule(rule: FolderRuleCreate):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.sharepoint_folder_rules.insert_one(doc)
+    await database.sharepoint_folder_rules.insert_one(doc)
 
     return {"message": "Rule created", "rule": {k: v for k, v in doc.items() if k != "_id"}}
 
 
 @router.put("/folder-rules/{folder_key}")
-async def update_folder_rule(folder_key: str, updates: FolderRuleUpdate):
+async def update_folder_rule(folder_key: str, updates: FolderRuleUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an existing folder routing rule."""
-    db = get_db()
 
     update_data = {k: v for k, v in updates.dict().items() if v is not None}
     if not update_data:
@@ -138,24 +137,23 @@ async def update_folder_rule(folder_key: str, updates: FolderRuleUpdate):
 
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    result = await db.sharepoint_folder_rules.update_one(
+    result = await database.sharepoint_folder_rules.update_one(
         {"folder_key": folder_key},
         {"$set": update_data}
     )
     if result.matched_count == 0:
         raise HTTPException(404, f"Rule '{folder_key}' not found")
 
-    updated = await db.sharepoint_folder_rules.find_one(
+    updated = await database.sharepoint_folder_rules.find_one(
         {"folder_key": folder_key}, {"_id": 0}
     )
     return {"message": "Rule updated", "rule": updated}
 
 
 @router.delete("/folder-rules/{folder_key}")
-async def delete_folder_rule(folder_key: str):
+async def delete_folder_rule(folder_key: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Soft-delete a folder rule."""
-    db = get_db()
-    result = await db.sharepoint_folder_rules.update_one(
+    result = await database.sharepoint_folder_rules.update_one(
         {"folder_key": folder_key},
         {"$set": {"is_active": False, "updated_at": datetime.now(timezone.utc).isoformat()}}
     )
@@ -169,36 +167,35 @@ async def delete_folder_rule(folder_key: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/vendor-mappings")
-async def list_vendor_mappings():
+async def list_vendor_mappings(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List all vendor-to-folder mappings."""
-    db = get_db()
-    mappings = await db.sharepoint_vendor_mappings.find(
+    mappings = await database.sharepoint_vendor_mappings.find(
         {}, {"_id": 0}
     ).sort("vendor_pattern", 1).to_list(500)
 
     if not mappings:
-        mappings = await _seed_default_vendor_mappings(db)
+        mappings = await _seed_default_vendor_mappings(database)
 
     return {"mappings": mappings, "total": len(mappings)}
 
 
 @router.post("/vendor-mappings")
-async def create_vendor_mapping(mapping: VendorMappingUpdate):
+async def create_vendor_mapping(mapping: VendorMappingUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new vendor-to-folder mapping."""
-    db = get_db()
     doc = {
         **mapping.dict(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.sharepoint_vendor_mappings.insert_one(doc)
+    await database.sharepoint_vendor_mappings.insert_one(doc)
     return {"message": "Mapping created", "mapping": {k: v for k, v in doc.items() if k != "_id"}}
 
 
 @router.put("/vendor-mappings/{vendor_pattern}")
-async def update_vendor_mapping(vendor_pattern: str, mapping: VendorMappingUpdate):
+async def update_vendor_mapping(vendor_pattern: str, mapping: VendorMappingUpdate, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Update an existing vendor mapping."""
-    db = get_db()
-    result = await db.sharepoint_vendor_mappings.update_one(
+    result = await database.sharepoint_vendor_mappings.update_one(
         {"vendor_pattern": vendor_pattern},
         {"$set": {
             "folder_target": mapping.folder_target,
@@ -212,10 +209,9 @@ async def update_vendor_mapping(vendor_pattern: str, mapping: VendorMappingUpdat
 
 
 @router.delete("/vendor-mappings/{vendor_pattern}")
-async def delete_vendor_mapping(vendor_pattern: str):
+async def delete_vendor_mapping(vendor_pattern: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a vendor mapping."""
-    db = get_db()
-    result = await db.sharepoint_vendor_mappings.delete_one({"vendor_pattern": vendor_pattern})
+    result = await database.sharepoint_vendor_mappings.delete_one({"vendor_pattern": vendor_pattern})
     if result.deleted_count == 0:
         raise HTTPException(404, f"Mapping for '{vendor_pattern}' not found")
     return {"message": "Mapping deleted"}
@@ -226,36 +222,35 @@ async def delete_vendor_mapping(vendor_pattern: str):
 # ---------------------------------------------------------------------------
 
 @router.get("/processor-assignments")
-async def list_processor_assignments():
+async def list_processor_assignments(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """List all processor assignments (who processes what folders)."""
-    db = get_db()
-    assignments = await db.sharepoint_processor_assignments.find(
+    assignments = await database.sharepoint_processor_assignments.find(
         {}, {"_id": 0}
     ).to_list(200)
 
     if not assignments:
-        assignments = await _seed_default_processor_assignments(db)
+        assignments = await _seed_default_processor_assignments(database)
 
     return {"assignments": assignments, "total": len(assignments)}
 
 
 @router.post("/processor-assignments")
-async def create_processor_assignment(assignment: ProcessorAssignment):
+async def create_processor_assignment(assignment: ProcessorAssignment, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Create a new processor assignment."""
-    db = get_db()
     doc = {
         **assignment.dict(),
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.sharepoint_processor_assignments.insert_one(doc)
+    await database.sharepoint_processor_assignments.insert_one(doc)
     return {"message": "Assignment created", "assignment": {k: v for k, v in doc.items() if k != "_id"}}
 
 
 @router.delete("/processor-assignments")
-async def delete_processor_assignment(folder_path: str = Query(...), processor_name: str = Query(...)):
+async def delete_processor_assignment(folder_path: str = Query(...), processor_name: str = Query(...), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Delete a processor assignment."""
-    db = get_db()
-    await db.sharepoint_processor_assignments.delete_one({
+    await database.sharepoint_processor_assignments.delete_one({
         "folder_path": folder_path,
         "processor_name": processor_name,
     })
@@ -304,17 +299,16 @@ async def suggest_folder(request: FolderSuggestionRequest):
 
 
 @router.get("/document/{doc_id}/suggested-folder")
-async def get_document_suggested_folder(doc_id: str):
+async def get_document_suggested_folder(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Get the suggested SharePoint folder for a specific document."""
-    db = get_db()
     from services.folder_routing_service import determine_folder_path
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, f"Document {doc_id} not found")
 
     # Also check intelligence results for enrichment
-    intel = await db.document_intelligence_results.find_one(
+    intel = await database.document_intelligence_results.find_one(
         {"document_id": doc_id}, {"_id": 0}
     )
     if intel:
@@ -337,10 +331,9 @@ async def get_document_suggested_folder(doc_id: str):
 
 
 @router.post("/document/{doc_id}/assign-folder")
-async def assign_folder_to_document(doc_id: str, folder_path: str = Body(..., embed=True)):
+async def assign_folder_to_document(doc_id: str, folder_path: str = Body(..., embed=True), database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Manually assign a SharePoint folder path to a document."""
-    db = get_db()
-    result = await db.hub_documents.update_one(
+    result = await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "sharepoint_folder": folder_path,
@@ -355,13 +348,12 @@ async def assign_folder_to_document(doc_id: str, folder_path: str = Body(..., em
 
 
 @router.post("/document/{doc_id}/move-to-sharepoint")
-async def move_document_to_sharepoint(doc_id: str):
+async def move_document_to_sharepoint(doc_id: str, database: AsyncIOMotorDatabase = Depends(get_platform_database)):
     """Move/copy a document to its assigned SharePoint folder."""
-    db = get_db()
     from services.folder_routing_service import determine_folder_path
     from services.config_service import DEMO_MODE
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(404, f"Document {doc_id} not found")
 
@@ -380,7 +372,7 @@ async def move_document_to_sharepoint(doc_id: str):
 
     if DEMO_MODE:
         # In demo mode, simulate the move
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "sharepoint_folder": folder_path,
@@ -450,7 +442,7 @@ async def move_document_to_sharepoint(doc_id: str):
                 if move_resp.status_code not in (200, 201):
                     raise HTTPException(500, f"SharePoint move failed: {move_resp.text}")
 
-                await db.hub_documents.update_one(
+                await database.hub_documents.update_one(
                     {"id": doc_id},
                     {"$set": {
                         "sharepoint_folder": folder_path,
@@ -487,7 +479,7 @@ async def move_document_to_sharepoint(doc_id: str):
                         raise HTTPException(500, f"SharePoint upload failed: {upload_resp.text}")
 
                     new_item = upload_resp.json()
-                    await db.hub_documents.update_one(
+                    await database.hub_documents.update_one(
                         {"id": doc_id},
                         {"$set": {
                             "sharepoint_folder": folder_path,
@@ -540,9 +532,9 @@ async def batch_suggest_folders(
     doc_ids: list = Body(None, embed=True),
     doc_type: Optional[str] = Body(None, embed=True),
     limit: int = Body(50, embed=True),
-):
+
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),):
     """Batch compute folder suggestions for multiple documents."""
-    db = get_db()
     from services.folder_routing_service import determine_folder_path
 
     query = {}
@@ -554,7 +546,7 @@ async def batch_suggest_folders(
             {"suggested_job_type": doc_type},
         ]
 
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         query, {"_id": 0}
     ).limit(limit).to_list(limit)
 
@@ -575,18 +567,19 @@ async def batch_suggest_folders(
 
 
 @router.post("/seed-defaults")
-async def seed_defaults():
+async def seed_defaults(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Re-seed default folder rules, vendor mappings, and processor assignments."""
-    db = get_db()
 
     # Clear existing
-    await db.sharepoint_folder_rules.delete_many({})
-    await db.sharepoint_vendor_mappings.delete_many({})
-    await db.sharepoint_processor_assignments.delete_many({})
+    await database.sharepoint_folder_rules.delete_many({})
+    await database.sharepoint_vendor_mappings.delete_many({})
+    await database.sharepoint_processor_assignments.delete_many({})
 
-    rules = await _seed_default_rules(db)
-    mappings = await _seed_default_vendor_mappings(db)
-    assignments = await _seed_default_processor_assignments(db)
+    rules = await _seed_default_rules(database)
+    mappings = await _seed_default_vendor_mappings(database)
+    assignments = await _seed_default_processor_assignments(database)
 
     return {
         "message": "Defaults seeded",

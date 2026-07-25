@@ -2,10 +2,18 @@
 
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Body, Query, BackgroundTasks
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+)
 from pydantic import BaseModel
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timezone
-from deps import get_db
+
+from hub_platform.bootstrap import get_platform_database
 from services.migration import WorkflowInitializer
 from services.migration.sources import create_sample_migration_file
 
@@ -27,7 +35,6 @@ async def run_migration_job(
     background_tasks: BackgroundTasks
 ):
     """Run a migration job to import legacy documents."""
-    db = get_db()
     return {
         "status": "accepted",
         "message": "Migration job queued",
@@ -41,18 +48,35 @@ async def preview_migration(
     source_file: Optional[str] = None,
     source_filter: Optional[str] = None,
     doc_type_filter: Optional[str] = None,
-    limit: int = Query(10, le=100)
+    limit: int = Query(10, le=100),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
     """Preview documents that would be migrated."""
-    db = get_db()
     query = {"is_migrated": True}
+
     if doc_type_filter:
         query["doc_type"] = doc_type_filter
+
     if source_filter:
         query["legacy_system"] = source_filter
 
-    docs = await db.hub_documents.find(query, {"_id": 0}).limit(limit).to_list(limit)
-    return {"preview": docs, "count": len(docs), "filters": {"doc_type": doc_type_filter, "source": source_filter}}
+    docs = await (
+        database.hub_documents.find(
+            query,
+            {"_id": 0},
+        )
+        .limit(limit)
+        .to_list(limit)
+    )
+
+    return {
+        "preview": docs,
+        "count": len(docs),
+        "filters": {
+            "doc_type": doc_type_filter,
+            "source": source_filter,
+        },
+    }
 
 
 @router.post("/generate-sample")
@@ -68,37 +92,58 @@ async def generate_sample_migration_file(
 
 
 @router.get("/stats")
-async def get_migration_stats():
+async def get_migration_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get statistics about migrated documents in the system."""
-    db = get_db()
     pipeline = [
         {"$match": {"is_migrated": True}},
-        {"$group": {
-            "_id": {
-                "legacy_system": "$legacy_system",
-                "doc_type": "$doc_type",
-                "workflow_status": "$workflow_status"
-            },
-            "count": {"$sum": 1}
-        }},
-        {"$sort": {"_id.legacy_system": 1, "_id.doc_type": 1}}
+        {
+            "$group": {
+                "_id": {
+                    "legacy_system": "$legacy_system",
+                    "doc_type": "$doc_type",
+                    "workflow_status": "$workflow_status",
+                },
+                "count": {"$sum": 1},
+            }
+        },
+        {
+            "$sort": {
+                "_id.legacy_system": 1,
+                "_id.doc_type": 1,
+            }
+        },
     ]
 
-    results = await db.hub_documents.aggregate(pipeline).to_list(500)
+    results = await database.hub_documents.aggregate(
+        pipeline
+    ).to_list(500)
 
     by_system = {}
     by_doc_type = {}
     by_status = {}
     total = 0
 
-    for r in results:
-        system = r["_id"].get("legacy_system", "UNKNOWN")
-        doc_type = r["_id"].get("doc_type", "OTHER")
-        status = r["_id"].get("workflow_status", "unknown")
-        count = r["count"]
+    for result in results:
+        system = result["_id"].get(
+            "legacy_system",
+            "UNKNOWN",
+        )
+        doc_type = result["_id"].get(
+            "doc_type",
+            "OTHER",
+        )
+        status = result["_id"].get(
+            "workflow_status",
+            "unknown",
+        )
+        count = result["count"]
 
         by_system[system] = by_system.get(system, 0) + count
-        by_doc_type[doc_type] = by_doc_type.get(doc_type, 0) + count
+        by_doc_type[doc_type] = (
+            by_doc_type.get(doc_type, 0) + count
+        )
         by_status[status] = by_status.get(status, 0) + count
         total += count
 
@@ -106,7 +151,7 @@ async def get_migration_stats():
         "total_migrated": total,
         "by_legacy_system": by_system,
         "by_doc_type": by_doc_type,
-        "by_workflow_status": by_status
+        "by_workflow_status": by_status,
     }
 
 

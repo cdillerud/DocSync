@@ -2,7 +2,6 @@
 
 import logging
 from fastapi import APIRouter, HTTPException, Body, BackgroundTasks, Form
-from deps import get_db
 from services.folder_routing_service import (
     determine_folder_path, get_all_folder_paths, get_folder_structure_summary,
     FOLDER_STRUCTURE, VENDOR_FOLDER_MAPPING

@@ -2,7 +2,10 @@
 
 import asyncio
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 from services.bc_reference_cache_service import get_cache_service
 from services.bc_write_safety_guard import get_write_guard
 
@@ -98,30 +101,61 @@ async def get_auto_resolve_stats():
 
 
 @router.get("/cache/metrics")
-async def get_cache_metrics():
+async def get_cache_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get BC reference cache metrics: hit/miss rates by entity type, last sync, record counts."""
-    from deps import get_db
-    db = get_db()
     cache_svc = get_cache_service()
     if not cache_svc:
-        raise HTTPException(status_code=503, detail="Cache service not initialized")
+        raise HTTPException(
+            status_code=503,
+            detail="Cache service not initialized",
+        )
+
     status = await cache_svc.get_status()
+
     pipeline = [
         {"$group": {"_id": "$bc_entity_type", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
     ]
-    by_type = await db.bc_reference_cache.aggregate(pipeline).to_list(20)
-    total_resolutions = await db.matching_diagnostics.count_documents({})
-    cache_hit_count = await db.matching_diagnostics.count_documents({"cache_results": {"$ne": []}})
-    bc_fallback_count = await db.matching_diagnostics.count_documents({"bc_fallback_results": {"$ne": []}})
+
+    by_type = await database.bc_reference_cache.aggregate(
+        pipeline
+    ).to_list(20)
+
+    total_resolutions = await (
+        database.matching_diagnostics.count_documents({})
+    )
+    cache_hit_count = await (
+        database.matching_diagnostics.count_documents(
+            {"cache_results": {"$ne": []}}
+        )
+    )
+    bc_fallback_count = await (
+        database.matching_diagnostics.count_documents(
+            {"bc_fallback_results": {"$ne": []}}
+        )
+    )
+
     return {
         "cache_status": status,
-        "records_by_entity_type": [{"entity_type": r["_id"], "count": r["count"]} for r in by_type],
-        "total_records": sum(r["count"] for r in by_type),
+        "records_by_entity_type": [
+            {
+                "entity_type": record["_id"],
+                "count": record["count"],
+            }
+            for record in by_type
+        ],
+        "total_records": sum(
+            record["count"] for record in by_type
+        ),
         "resolution_metrics": {
             "total_resolutions": total_resolutions,
             "cache_hit_count": cache_hit_count,
             "bc_fallback_count": bc_fallback_count,
-            "cache_hit_rate": round(cache_hit_count / max(total_resolutions, 1), 3),
+            "cache_hit_rate": round(
+                cache_hit_count / max(total_resolutions, 1),
+                3,
+            ),
         },
     }

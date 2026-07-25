@@ -9,9 +9,11 @@ Endpoints:
 """
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
-from deps import get_db
+
+from hub_platform.bootstrap import get_platform_database
 
 router = APIRouter(prefix="/inventory-items", tags=["Inventory Item Settings"])
 
@@ -30,18 +32,21 @@ class ItemSettingsReq(BaseModel):
 async def api_list_settings(
     customer_id: str = Query(..., description="Customer workspace ID"),
     item: str = Query("", description="Filter by item"),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
     """List item reorder settings for a workspace."""
-    db = get_db()
     query = {"customer_id": customer_id}
     if item:
         query["item"] = item
-    docs = await db[COLL].find(query, {"_id": 0}).sort("item", 1).to_list(5000)
+    docs = await database[COLL].find(query, {"_id": 0}).sort("item", 1).to_list(5000)
     return {"settings": docs, "total": len(docs)}
 
 
 @router.post("/settings")
-async def api_upsert_settings(body: ItemSettingsReq):
+async def api_upsert_settings(
+    body: ItemSettingsReq,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Upsert reorder settings for a specific item + workspace.
 
     Rejects negative reorder_threshold or safety_buffer (422).
@@ -53,16 +58,15 @@ async def api_upsert_settings(body: ItemSettingsReq):
     if not body.item.strip():
         raise HTTPException(status_code=422, detail="item is required")
 
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
     item_key = body.item.strip()
 
-    existing = await db[COLL].find_one(
+    existing = await database[COLL].find_one(
         {"customer_id": body.customer_id, "item": item_key}, {"_id": 0}
     )
 
     if existing:
-        await db[COLL].update_one(
+        await database[COLL].update_one(
             {"customer_id": body.customer_id, "item": item_key},
             {"$set": {
                 "reorder_threshold": body.reorder_threshold,
@@ -72,7 +76,7 @@ async def api_upsert_settings(body: ItemSettingsReq):
             }},
         )
     else:
-        await db[COLL].insert_one({
+        await database[COLL].insert_one({
             "customer_id": body.customer_id,
             "item": item_key,
             "reorder_threshold": body.reorder_threshold,
@@ -82,7 +86,7 @@ async def api_upsert_settings(body: ItemSettingsReq):
             "updated_at": now,
         })
 
-    doc = await db[COLL].find_one(
+    doc = await database[COLL].find_one(
         {"customer_id": body.customer_id, "item": item_key}, {"_id": 0}
     )
     return doc

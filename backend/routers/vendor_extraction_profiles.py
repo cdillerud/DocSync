@@ -1,20 +1,24 @@
 """GPI Document Hub - Vendor Extraction Profiles Router"""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 from services.vendor_extraction_profile_service import get_vep_service
-from deps import get_db
 
 router = APIRouter(prefix="/vendor-extraction-profiles", tags=["Vendor Extraction Profiles"])
 
 
 @router.post("/seed-top-vendors")
-async def seed_top_vendors(min_docs: int = Query(5, ge=1)):
+async def seed_top_vendors(
+    min_docs: int = Query(5, ge=1),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Seed profiles for top vendors by document count from production data."""
     svc = get_vep_service()
     if not svc:
         raise HTTPException(status_code=503, detail="VEP service not initialized")
 
-    db = get_db()
     pipeline = [
         {"$match": {"vendor_canonical": {"$nin": [None, ""]}}},
         {"$group": {"_id": "$vendor_canonical", "count": {"$sum": 1}}},
@@ -23,7 +27,7 @@ async def seed_top_vendors(min_docs: int = Query(5, ge=1)):
         {"$limit": 20},
     ]
     top_vendors = []
-    async for doc in db.hub_documents.aggregate(pipeline):
+    async for doc in database.hub_documents.aggregate(pipeline):
         top_vendors.append({"vendor_id": doc["_id"], "doc_count": doc["count"]})
 
     seeded = []
@@ -50,9 +54,10 @@ async def seed_top_vendors(min_docs: int = Query(5, ge=1)):
 
 
 @router.get("/coverage")
-async def get_profile_coverage():
+async def get_profile_coverage(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Coverage report: how many vendors have profiles vs don't."""
-    db = get_db()
 
     # All vendors with docs
     vendor_pipeline = [
@@ -61,13 +66,19 @@ async def get_profile_coverage():
         {"$sort": {"doc_count": -1}},
     ]
     all_vendors = {}
-    async for doc in db.hub_documents.aggregate(vendor_pipeline):
+    async for doc in database.hub_documents.aggregate(vendor_pipeline):
         all_vendors[doc["_id"]] = doc["doc_count"]
 
     # Vendors with profiles
     profiled = set()
-    async for p in db.vendor_extraction_profiles.find({}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}):
-        profiled.add(p.get("vendor_no") or p.get("vendor_name", ""))
+    async for profile in database.vendor_extraction_profiles.find(
+        {},
+        {"_id": 0, "vendor_no": 1, "vendor_name": 1},
+    ):
+        profiled.add(
+            profile.get("vendor_no")
+            or profile.get("vendor_name", "")
+        )
 
     vendors_with = [v for v in all_vendors if v in profiled]
     vendors_without = [v for v in all_vendors if v not in profiled]

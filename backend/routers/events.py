@@ -1,9 +1,11 @@
 """GPI Document Hub - Events Router"""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from datetime import datetime, timezone, timedelta
-from deps import get_db
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 
 router = APIRouter(prefix="/events", tags=["Events"])
 
@@ -19,25 +21,31 @@ async def get_event_types():
 async def get_recent_events(
     limit: int = Query(50, le=200),
     event_type: Optional[str] = Query(None),
-    status: Optional[str] = Query(None)
+    status: Optional[str] = Query(None),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
     """Get recent events across all documents."""
-    db = get_db()
     query = {}
     if event_type:
         query["event_type"] = event_type
     if status:
         query["status"] = status
 
-    cursor = db.workflow_events.find(query, {"_id": 0}).sort("timestamp", -1).limit(limit)
+    cursor = (
+        database.workflow_events.find(query, {"_id": 0})
+        .sort("timestamp", -1)
+        .limit(limit)
+    )
     events = await cursor.to_list(limit)
     return {"events": events, "count": len(events)}
 
 
 @router.get("/stats")
-async def get_event_stats(since_hours: int = Query(24, le=168)):
+async def get_event_stats(
+    since_hours: int = Query(24, le=168),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get event statistics for the specified time period."""
-    db = get_db()
     since = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
 
     pipeline = [
@@ -51,7 +59,7 @@ async def get_event_stats(since_hours: int = Query(24, le=168)):
         }},
         {"$sort": {"count": -1}}
     ]
-    results = await db.workflow_events.aggregate(pipeline).to_list(100)
+    results = await database.workflow_events.aggregate(pipeline).to_list(100)
     total_events = sum(r["count"] for r in results)
     total_completed = sum(r["completed"] for r in results)
     total_failed = sum(r["failed"] for r in results)

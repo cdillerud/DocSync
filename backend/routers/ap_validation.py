@@ -1,8 +1,10 @@
 """GPI Document Hub - AP Validation Router"""
 
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
-from deps import get_db
+from fastapi import APIRouter, Depends, HTTPException
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 from services.ap_validation_service import APValidationService
 
 router = APIRouter(prefix="/ap-validation", tags=["AP Validation"])
@@ -19,19 +21,28 @@ def _get_event_service():
 
 
 @router.post("/validate/{doc_id}")
-async def validate_document_ap(doc_id: str):
+async def validate_document_ap(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Manually trigger AP validation for a document.
     This runs the full APValidationService pipeline and stores results.
     """
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0},
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
     bc_service = _get_bc_service()
     event_service = _get_event_service()
-    svc = APValidationService(db, bc_service=bc_service, event_service=event_service)
+    svc = APValidationService(
+        database,
+        bc_service=bc_service,
+        event_service=event_service,
+    )
     
     # Build vendor match result from document
     vendor_no = doc.get("matched_vendor_no") or doc.get("vendor_id")
@@ -106,7 +117,10 @@ async def validate_document_ap(doc_id: str):
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }
     
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
+    await database.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": update},
+    )
     
     # Emit event
     if event_service:
@@ -133,10 +147,12 @@ async def validate_document_ap(doc_id: str):
 
 
 @router.get("/status/{doc_id}")
-async def get_ap_validation_status(doc_id: str):
+async def get_ap_validation_status(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get AP validation status for a document."""
-    db = get_db()
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"id": doc_id},
         {"_id": 0, "ap_validation_result": 1, "validation_state": 1, 
          "validation_passed": 1, "validation_errors": 1, "validation_warnings": 1,

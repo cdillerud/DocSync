@@ -6,9 +6,10 @@ import os
 from typing import Optional
 
 from bson import ObjectId
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from deps import get_db
+from hub_platform.bootstrap import get_platform_database
 from services.decision_replay_service import build_ap_decision_replay
 
 
@@ -39,18 +40,18 @@ def _verify_token(authorization: Optional[str]) -> str:
 async def replay_document_decisions(
     document_id: str,
     authorization: Optional[str] = Header(None),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
     """Replay local AP decisions without writes or external service calls."""
     _verify_token(authorization)
-    db = get_db()
 
-    document = await db.hub_documents.find_one(
+    document = await database.hub_documents.find_one(
         {"id": document_id},
         {"_id": 0},
     )
     if document is None:
         try:
-            document = await db.hub_documents.find_one(
+            document = await database.hub_documents.find_one(
                 {"_id": ObjectId(document_id)},
                 {"_id": 0},
             )
@@ -60,4 +61,4 @@ async def replay_document_decisions(
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    return await build_ap_decision_replay(db, document)
+    return await build_ap_decision_replay(database, document)

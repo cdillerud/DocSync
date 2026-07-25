@@ -7,9 +7,10 @@ All endpoints JWT-gated. State transitions additionally require actor email.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
 
-from deps import get_db
+from hub_platform.bootstrap import get_platform_database
 from services.auth_deps import get_current_user
 from workflows.inventory import ownership
 
@@ -28,10 +29,10 @@ async def list_items(
     state: str | None = Query(None, description="consigned_in | consumed | returned"),
     limit: int = Query(200, ge=1, le=1000),
     _user: dict = Depends(get_current_user),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
-    db = get_db()
     items = await ownership.list_consigned_items(
-        db, vendor_no=vendor_no, state=state, limit=limit
+        database, vendor_no=vendor_no, state=state, limit=limit
     )
     return {"total": len(items), "items": items}
 
@@ -40,9 +41,9 @@ async def list_items(
 async def get_item(
     item_no: str,
     _user: dict = Depends(get_current_user),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
-    db = get_db()
-    row = await ownership.get_consigned_item(db, item_no)
+    row = await ownership.get_consigned_item(database, item_no)
     if row is None:
         raise HTTPException(status_code=404, detail="Consigned item not found")
     return row
@@ -52,10 +53,12 @@ async def get_item(
 async def upsert_item(
     payload: ownership.ConsignedItemCreate,
     user: dict = Depends(get_current_user),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
-    db = get_db()
     actor = user.get("email") or user.get("username") or "unknown"
-    return await ownership.upsert_consigned_item(db, payload, actor=actor)
+    return await ownership.upsert_consigned_item(
+        database, payload, actor=actor
+    )
 
 
 @router.post("/{item_no}/transition")
@@ -63,12 +66,12 @@ async def transition_item(
     item_no: str,
     body: TransitionBody,
     _user: dict = Depends(get_current_user),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
     ownership.require_consignment_actor(body.actor_email)
-    db = get_db()
     try:
         return await ownership.transition_consigned_item(
-            db,
+            database,
             item_no=item_no,
             new_state=body.new_state,
             actor=body.actor_email,

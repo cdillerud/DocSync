@@ -11,7 +11,7 @@ from hub_platform.bootstrap.settings import HubSettings
 
 
 class MongoConnectionError(RuntimeError):
-    """Raised when the Hub cannot establish a MongoDB connection."""
+    """Raised when the Hub cannot establish or manage a MongoDB connection."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,15 +21,21 @@ class MongoResources:
 
 
 class MongoManager:
-    """Owns the MongoDB client and database lifecycle."""
+    """Manages MongoDB resources created by or adopted by the Hub platform."""
 
     def __init__(self, settings: HubSettings) -> None:
         self._settings = settings
         self._resources: MongoResources | None = None
+        self._owns_client = False
 
     @property
     def is_connected(self) -> bool:
         return self._resources is not None
+
+    @property
+    def owns_client(self) -> bool:
+        """Whether this manager created and owns the active Mongo client."""
+        return self._owns_client
 
     @property
     def client(self) -> AsyncIOMotorClient:
@@ -45,7 +51,45 @@ class MongoManager:
 
         return self._resources.database
 
+    def adopt(
+        self,
+        client: AsyncIOMotorClient,
+        database: AsyncIOMotorDatabase,
+    ) -> MongoResources:
+        """
+        Register Mongo resources created outside this manager.
+
+        Adopted clients remain owned by their original lifecycle. Calling
+        disconnect() clears this manager's references but does not close an
+        adopted client.
+        """
+        if self._resources is not None:
+            if (
+                self._resources.client is client
+                and self._resources.database is database
+            ):
+                return self._resources
+
+            raise MongoConnectionError(
+                "MongoDB resources have already been registered"
+            )
+
+        resources = MongoResources(
+            client=client,
+            database=database,
+        )
+
+        self._resources = resources
+        self._owns_client = False
+        return resources
+
     async def connect(self) -> MongoResources:
+        """
+        Create and verify a Mongo client owned by this manager.
+
+        If resources are already connected or adopted, the existing resources
+        are returned without creating another connection pool.
+        """
         if self._resources is not None:
             return self._resources
 
@@ -70,6 +114,7 @@ class MongoManager:
         )
 
         self._resources = resources
+        self._owns_client = True
         return resources
 
     async def ping(self) -> bool:
@@ -84,8 +129,17 @@ class MongoManager:
         return True
 
     async def disconnect(self) -> None:
+        """
+        Release the active resources.
+
+        Clients created by this manager are closed. Adopted clients are left
+        open because their original owner remains responsible for shutdown.
+        """
         if self._resources is None:
             return
 
-        self._resources.client.close()
+        if self._owns_client:
+            self._resources.client.close()
+
         self._resources = None
+        self._owns_client = False

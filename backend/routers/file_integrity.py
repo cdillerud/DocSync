@@ -14,8 +14,10 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("file_integrity")
 router = APIRouter(prefix="/file-integrity", tags=["File Integrity"])
@@ -25,12 +27,13 @@ UPLOAD_DIR = ROOT_DIR / "uploads"
 
 
 @router.post("/dry-run")
-async def dry_run():
+async def dry_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview which docs have missing files."""
-    db = get_db()
 
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
             "auto_cleared": {"$ne": True},
@@ -71,13 +74,14 @@ async def dry_run():
 
 
 @router.post("/scan")
-async def scan_and_flag():
+async def scan_and_flag(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Scan pending docs and flag those with missing files."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
             "file_missing": {"$ne": True},
@@ -90,7 +94,7 @@ async def scan_and_flag():
     for doc in docs:
         file_path = UPLOAD_DIR / doc["id"]
         if not file_path.exists():
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc["id"]},
                 {"$set": {
                     "file_missing": True,

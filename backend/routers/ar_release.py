@@ -8,11 +8,12 @@ Endpoints:
   GET  /api/ar-release/queue             — Documents currently held by the gate
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 from typing import Optional
 
-from deps import get_db
+from hub_platform.bootstrap import get_platform_database
 from services.ar_release_gate_service import (
     evaluate_and_store,
     override_gate,
@@ -32,9 +33,10 @@ class OverrideRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.get("/metrics")
-async def ar_release_metrics():
-    db = get_db()
-    return await get_ar_release_metrics(db)
+async def ar_release_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
+    return await get_ar_release_metrics(database)
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +44,11 @@ async def ar_release_metrics():
 # ---------------------------------------------------------------------------
 
 @router.post("/evaluate/{document_id}")
-async def evaluate_document(document_id: str):
-    db = get_db()
-    result = await evaluate_and_store(document_id, db)
+async def evaluate_document(
+    document_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
+    result = await evaluate_and_store(document_id, database)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
@@ -55,9 +59,17 @@ async def evaluate_document(document_id: str):
 # ---------------------------------------------------------------------------
 
 @router.post("/override/{document_id}")
-async def override_document(document_id: str, body: OverrideRequest):
-    db = get_db()
-    result = await override_gate(document_id, db, body.approved_by, body.notes)
+async def override_document(
+    document_id: str,
+    body: OverrideRequest,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
+    result = await override_gate(
+        document_id,
+        database,
+        body.approved_by,
+        body.notes,
+    )
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
     return result
@@ -70,14 +82,14 @@ async def override_document(document_id: str, body: OverrideRequest):
 @router.get("/queue")
 async def ar_held_queue(
     limit: int = Query(50, ge=1, le=200),
-    status: str = Query("held", regex="^(held|released|override|all)$"),
+    status: str = Query("held", pattern="^(held|released|override|all)$"),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
 ):
-    db = get_db()
     match_filter = {"ar_release_gate": {"$exists": True}}
     if status != "all":
         match_filter["ar_release_gate.status"] = status
 
-    cursor = db.hub_documents.find(
+    cursor = database.hub_documents.find(
         match_filter,
         {
             "_id": 0,

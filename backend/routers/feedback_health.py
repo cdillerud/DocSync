@@ -6,8 +6,10 @@ from user corrections. Reads from feedback_events, vendor_aliases,
 classification_feedback, and routing_feedback collections.
 """
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 from services.feedback_loop_service import get_feedback_stats, replay_unapplied_events
 from datetime import datetime, timezone, timedelta
 
@@ -15,19 +17,19 @@ router = APIRouter(prefix="/feedback-loop", tags=["feedback-loop"])
 
 
 @router.get("/health")
-async def feedback_loop_health():
+async def feedback_loop_health(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Aggregated feedback loop health metrics.
     Returns totals, per-type breakdown, learning signal counts,
     recent events, and a daily activity timeline.
     """
-    db = get_db()
-
     # Core stats from the service
-    stats = await get_feedback_stats(db)
+    stats = await get_feedback_stats(database)
 
     # Recent events (last 20)
-    recent_cursor = db.feedback_events.find(
+    recent_cursor = database.feedback_events.find(
         {},
         {"_id": 0, "event_type": 1, "vendor_id": 1, "document_id": 1,
          "source": 1, "created_at": 1, "applied": 1},
@@ -43,7 +45,7 @@ async def feedback_loop_health():
         {"$sort": {"_id": 1}},
     ]
     daily_activity = []
-    async for doc in db.feedback_events.aggregate(daily_pipeline):
+    async for doc in database.feedback_events.aggregate(daily_pipeline):
         daily_activity.append({"date": doc["_id"], "count": doc["count"]})
 
     # Top corrected vendors (by feedback event count)
@@ -54,7 +56,7 @@ async def feedback_loop_health():
         {"$limit": 10},
     ]
     top_vendors = []
-    async for doc in db.feedback_events.aggregate(vendor_pipeline):
+    async for doc in database.feedback_events.aggregate(vendor_pipeline):
         top_vendors.append({"vendor_id": doc["_id"], "event_count": doc["count"]})
 
     return {
@@ -66,11 +68,12 @@ async def feedback_loop_health():
 
 
 @router.post("/replay")
-async def replay_feedback():
+async def replay_feedback(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """
     Retroactively apply all unapplied feedback events.
     Use this after fixing handlers or to catch up on missed events.
     """
-    db = get_db()
-    result = await replay_unapplied_events(db)
+    result = await replay_unapplied_events(database)
     return result

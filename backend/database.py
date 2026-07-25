@@ -14,9 +14,17 @@ import os
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 
+from hub_platform.bootstrap.settings import get_settings
+from hub_platform.infrastructure.mongo import MongoManager
+
 # Defensive: ensure .env is loaded regardless of import order. Idempotent —
 # repeat calls from server.py and elsewhere have no additional effect.
 load_dotenv()
 
 client = AsyncIOMotorClient(os.environ['MONGO_URL'])
 db = client[os.environ['DB_NAME']]
+
+# Register the existing application-owned Mongo resources with the platform
+# abstraction. Existing client and db identities remain unchanged.
+mongo_manager = MongoManager(get_settings())
+mongo_manager.adopt(client, db)

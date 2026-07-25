@@ -2,9 +2,11 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, HTTPException, Body, Query, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request, BackgroundTasks
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 from deps import (
-    get_db,
     EMAIL_POLLING_ENABLED,
     EMAIL_POLLING_INTERVAL_MINUTES,
     EMAIL_POLLING_USER,
@@ -34,12 +36,13 @@ async def trigger_email_poll():
 
 
 @router.get("/email-polling/status")
-async def get_email_polling_status():
-    db = get_db()
+async def get_email_polling_status(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get current email polling configuration and recent run stats."""
     # Get last 24 hours of runs
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-    recent_runs = await db.mail_poll_runs.find(
+    recent_runs = await database.mail_poll_runs.find(
         {"started_at": {"$gte": cutoff}},
         {"_id": 0}
     ).sort("started_at", -1).limit(10).to_list(10)
@@ -52,7 +55,10 @@ async def get_email_polling_status():
     total_failed = sum(r.get("attachments_failed", 0) for r in recent_runs)
     
     # Get watermark
-    watermark_doc = await db.hub_settings.find_one({"type": "email_poll_watermark"}, {"_id": 0})
+    watermark_doc = await database.hub_settings.find_one(
+        {"type": "email_poll_watermark"},
+        {"_id": 0},
+    )
     watermark = watermark_doc.get("last_received_datetime") if watermark_doc else None
     
     return {
@@ -83,15 +89,19 @@ async def get_email_polling_status():
 
 
 @router.get("/email-polling/logs")
-async def get_mail_intake_logs(days: int = Query(1), status: str = Query(None), limit: int = Query(100)):
-    db = get_db()
+async def get_mail_intake_logs(
+    days: int = Query(1),
+    status: str = Query(None),
+    limit: int = Query(100),
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get mail intake logs for debugging."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"processed_at": {"$gte": cutoff}}
     if status:
         query["status"] = status
     
-    logs = await db.mail_intake_log.find(
+    logs = await database.mail_intake_log.find(
         query, {"_id": 0}
     ).sort("processed_at", -1).limit(limit).to_list(limit)
     

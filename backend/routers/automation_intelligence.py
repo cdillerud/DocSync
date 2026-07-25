@@ -10,9 +10,12 @@ Endpoints:
   GET  /api/documents/{id}/automation-confidence        — Automation confidence detail
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel
 from typing import Optional
+
+from hub_platform.bootstrap import get_platform_database
 
 router = APIRouter(tags=["Automation Intelligence"])
 
@@ -55,26 +58,29 @@ async def batch_evaluate(limit: int = Query(200, ge=1, le=1000)):
 # ---------------------------------------------------------------------------
 
 @router.get("/documents/{doc_id}/decision-explanation")
-async def get_decision_explanation(doc_id: str):
+async def get_decision_explanation(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get structured decision explanation for a document."""
-    from deps import get_db
     from services.automation_intelligence_service import (
         build_decision_explanation,
-        compute_automation_confidence,
     )
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    doc = await database.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0},
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Return stored explanation if fresh, otherwise recompute
     stored = doc.get("decision_explanation")
     if stored:
         return stored
 
     explanation = build_decision_explanation(doc)
-    # Persist for future reads
-    await db.hub_documents.update_one(
+
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {"decision_explanation": explanation}},
     )
@@ -82,12 +88,19 @@ async def get_decision_explanation(doc_id: str):
 
 
 @router.get("/documents/{doc_id}/automation-confidence")
-async def get_automation_confidence(doc_id: str):
+async def get_automation_confidence(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Get automation confidence breakdown for a document."""
-    from deps import get_db
-    from services.automation_intelligence_service import compute_automation_confidence
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    from services.automation_intelligence_service import (
+        compute_automation_confidence,
+    )
+
+    doc = await database.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0},
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -96,7 +109,8 @@ async def get_automation_confidence(doc_id: str):
         return stored
 
     confidence = compute_automation_confidence(doc)
-    await db.hub_documents.update_one(
+
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {"automation_confidence": confidence}},
     )
@@ -104,17 +118,28 @@ async def get_automation_confidence(doc_id: str):
 
 
 @router.post("/documents/{doc_id}/review-assist")
-async def review_assist(doc_id: str):
+async def review_assist(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Generate reviewer assist suggestions for a document."""
-    from deps import get_db
-    from services.automation_intelligence_service import generate_review_suggestions
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    from services.automation_intelligence_service import (
+        generate_review_suggestions,
+    )
+
+    doc = await database.hub_documents.find_one(
+        {"id": doc_id},
+        {"_id": 0},
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
     suggestions = generate_review_suggestions(doc)
-    return {"doc_id": doc_id, "suggested_actions": suggestions}
+
+    return {
+        "doc_id": doc_id,
+        "suggested_actions": suggestions,
+    }
 
 
 @router.post("/documents/{doc_id}/accept-suggestion")

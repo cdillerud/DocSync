@@ -12,8 +12,10 @@ Endpoints:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("workflow_fix")
 router = APIRouter(prefix="/workflow-fix", tags=["Workflow Fix"])
@@ -63,12 +65,13 @@ _WF_TO_STATUS = {
 
 
 @router.post("/dry-run")
-async def dry_run():
+async def dry_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview how many stuck docs would be fixed."""
-    db = get_db()
 
     # Find docs where workflow_status doesn't match what it should be
-    stuck = await db.hub_documents.find(
+    stuck = await database.hub_documents.find(
         {"$or": [
             {"workflow_status": "captured"},
             # Docs where status says NeedsReview but they actually passed
@@ -103,12 +106,13 @@ async def dry_run():
 
 
 @router.post("/run")
-async def run_fix():
+async def run_fix(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Batch-fix documents with incorrect workflow_status and status."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    stuck = await db.hub_documents.find(
+    stuck = await database.hub_documents.find(
         {"$or": [
             {"workflow_status": "captured"},
             {"status": "NeedsReview", "auto_cleared": True},
@@ -140,7 +144,7 @@ async def run_fix():
         if new_status and new_status != current_status:
             update_set["status"] = new_status
 
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc["id"]},
             {"$set": update_set,
             "$push": {

@@ -13,8 +13,10 @@ Endpoints:
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter
-from deps import get_db
+from fastapi import APIRouter, Depends
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from hub_platform.bootstrap import get_platform_database
 
 logger = logging.getLogger("dedup")
 router = APIRouter(prefix="/dedup", tags=["Dedup"])
@@ -46,9 +48,10 @@ def _doc_score(doc: dict) -> int:
 
 
 @router.get("/stats")
-async def dedup_stats():
+async def dedup_stats(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Quick summary of duplicate groups."""
-    db = get_db()
 
     pipeline = [
         {"$match": {"is_duplicate": {"$ne": True}}},
@@ -61,7 +64,7 @@ async def dedup_stats():
         {"$sort": {"count": -1}},
         {"$limit": 50},
     ]
-    groups = await db.hub_documents.aggregate(pipeline).to_list(50)
+    groups = await database.hub_documents.aggregate(pipeline).to_list(50)
 
     total_dupes = sum(g["count"] - 1 for g in groups)
     return {
@@ -75,9 +78,10 @@ async def dedup_stats():
 
 
 @router.post("/dry-run")
-async def dry_run():
+async def dry_run(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Preview what would be marked as duplicate."""
-    db = get_db()
 
     pipeline = [
         {"$match": {"is_duplicate": {"$ne": True}, "sha256_hash": {"$ne": None}}},
@@ -88,14 +92,14 @@ async def dry_run():
         }},
         {"$match": {"count": {"$gt": 1}}},
     ]
-    groups = await db.hub_documents.aggregate(pipeline).to_list(5000)
+    groups = await database.hub_documents.aggregate(pipeline).to_list(5000)
 
     would_mark = 0
     by_status = {}
 
     for group in groups:
         doc_ids = group["doc_ids"]
-        docs = await db.hub_documents.find(
+        docs = await database.hub_documents.find(
             {"id": {"$in": doc_ids}},
             {"_id": 0, "id": 1, "status": 1, "auto_cleared": 1,
              "vendor_canonical": 1, "extracted_fields": 1,
@@ -119,9 +123,10 @@ async def dry_run():
 
 
 @router.post("/run")
-async def run_dedup():
+async def run_dedup(
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
     """Mark duplicate documents (keeps the best copy per hash group)."""
-    db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
     pipeline = [
@@ -133,14 +138,14 @@ async def run_dedup():
         }},
         {"$match": {"count": {"$gt": 1}}},
     ]
-    groups = await db.hub_documents.aggregate(pipeline).to_list(5000)
+    groups = await database.hub_documents.aggregate(pipeline).to_list(5000)
 
     marked = 0
     kept = 0
 
     for group in groups:
         doc_ids = group["doc_ids"]
-        docs = await db.hub_documents.find(
+        docs = await database.hub_documents.find(
             {"id": {"$in": doc_ids}},
             {"_id": 0, "id": 1, "status": 1, "auto_cleared": 1,
              "vendor_canonical": 1, "extracted_fields": 1,
@@ -152,7 +157,7 @@ async def run_dedup():
 
         dup_ids = [d["id"] for d in docs[1:]]
         if dup_ids:
-            await db.hub_documents.update_many(
+            await database.hub_documents.update_many(
                 {"id": {"$in": dup_ids}},
                 {"$set": {
                     "is_duplicate": True,

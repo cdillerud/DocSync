@@ -1,8 +1,10 @@
 """GPI Document Hub - Automation Rules Router"""
 
-from fastapi import APIRouter, HTTPException, Body
+from fastapi import APIRouter, Body, Depends, HTTPException
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from typing import Dict
-from deps import get_db
+
+from hub_platform.bootstrap import get_platform_database
 from services.automation_rules_service import get_automation_rules_service
 
 router = APIRouter(prefix="/automation-rules", tags=["Automation Rules"])
@@ -79,9 +81,13 @@ async def toggle_automation_rule(rule_id: str):
 
 
 @router.post("/evaluate/{doc_id}")
-async def evaluate_rules_for_document(doc_id: str):
-    db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+async def evaluate_rules_for_document(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_platform_database),
+):
+    doc = await database.hub_documents.find_one(
+        {"id": doc_id}, {"_id": 0}
+    )
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     svc = get_automation_rules_service()

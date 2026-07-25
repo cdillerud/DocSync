@@ -7,7 +7,7 @@ from motor.motor_asyncio import (
     AsyncIOMotorDatabase,
 )
 
-from hub_platform.config.settings import HubSettings
+from hub_platform.bootstrap.settings import HubSettings
 
 
 class MongoConnectionError(RuntimeError):

@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from hub_platform.config.settings import HubSettings
-from hub_platform.persistence.mongo import (
+from hub_platform.bootstrap.settings import HubSettings
+from hub_platform.infrastructure.mongo import (
     MongoConnectionError,
     MongoManager,
 )
@@ -34,7 +34,7 @@ async def test_connect_creates_resources() -> None:
     client.__getitem__.return_value = database
 
     with patch(
-        "hub_platform.persistence.mongo.AsyncIOMotorClient",
+        "hub_platform.infrastructure.mongo.AsyncIOMotorClient",
         return_value=client,
     ):
         manager = MongoManager(make_settings())
@@ -53,7 +53,7 @@ async def test_connect_is_idempotent() -> None:
     client.__getitem__.return_value = MagicMock()
 
     with patch(
-        "hub_platform.persistence.mongo.AsyncIOMotorClient",
+        "hub_platform.infrastructure.mongo.AsyncIOMotorClient",
         return_value=client,
     ) as client_factory:
         manager = MongoManager(make_settings())
@@ -73,7 +73,7 @@ async def test_connect_closes_client_on_failure() -> None:
     )
 
     with patch(
-        "hub_platform.persistence.mongo.AsyncIOMotorClient",
+        "hub_platform.infrastructure.mongo.AsyncIOMotorClient",
         return_value=client,
     ):
         manager = MongoManager(make_settings())
@@ -92,7 +92,7 @@ async def test_disconnect_closes_client() -> None:
     client.__getitem__.return_value = MagicMock()
 
     with patch(
-        "hub_platform.persistence.mongo.AsyncIOMotorClient",
+        "hub_platform.infrastructure.mongo.AsyncIOMotorClient",
         return_value=client,
     ):
         manager = MongoManager(make_settings())

@@ -1,6 +1,6 @@
 import pytest
 
-from hub_platform.config.settings import (
+from hub_platform.bootstrap.settings import (
     ConfigurationError,
     HubSettings,
 )

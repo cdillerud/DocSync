@@ -4957,3 +4957,386 @@ class TestStartupNoiseCleanupRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestStartupShippingPOFixExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_startup_fix_shipping_po_escalations"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "startup_fix_shipping_po_escalations"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "startup_fix_shipping_po_escalations"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "startup_fix_shipping_po_escalations"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "startup_fix_shipping_po_escalations"
+        )
+
+        assert (
+            _body_hash(function)
+            == "a565914464dd32ec54bff185447251c49a0f828061093eec411ad9da8b9bd902"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            startup_fix_shipping_po_escalations,
+        )
+
+        signature = inspect.signature(
+            startup_fix_shipping_po_escalations
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestStartupShippingPOFixRuntime:
+    @pytest.mark.asyncio
+    async def test_updates_both_shipping_error_states(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+
+        collection.update_many = AsyncMock(
+            side_effect=[
+                Mock(modified_count=2),
+                Mock(modified_count=3),
+            ]
+        )
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_fix_shipping_po_escalations(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            12
+        )
+
+        assert (
+            collection.update_many.await_count
+            == 2
+        )
+
+        first_query = (
+            collection.update_many
+            .await_args_list[0]
+            .args[0]
+        )
+
+        first_update = (
+            collection.update_many
+            .await_args_list[0]
+            .args[1]
+        )
+
+        second_query = (
+            collection.update_many
+            .await_args_list[1]
+            .args[0]
+        )
+
+        second_update = (
+            collection.update_many
+            .await_args_list[1]
+            .args[1]
+        )
+
+        assert (
+            first_query[
+                "po_pending_parked"
+            ]
+            is True
+        )
+
+        assert (
+            first_update["$set"][
+                "po_pending_parked"
+            ]
+            is False
+        )
+
+        assert (
+            first_update["$unset"][
+                "escalation_reason"
+            ]
+            == ""
+        )
+
+        assert (
+            second_query[
+                "escalation_reason"
+            ]["$regex"]
+            == "PO not found"
+        )
+
+        assert (
+            second_query[
+                "escalation_reason"
+            ]["$options"]
+            == "i"
+        )
+
+        assert (
+            second_update["$set"][
+                "po_pending_parked"
+            ]
+            is False
+        )
+
+        assert (
+            second_update["$unset"]
+            == {
+                "escalation_reason": "",
+                "auto_escalated": "",
+            }
+        )
+
+        logger.info.assert_called_once_with(
+            "[Startup] Fixed %d incorrectly "
+            "PO-parked + %d incorrectly "
+            "escalated non-AP docs",
+            2,
+            3,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_modifications_skips_info_log(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+
+        collection.update_many = AsyncMock(
+            side_effect=[
+                Mock(modified_count=0),
+                Mock(modified_count=0),
+            ]
+        )
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_fix_shipping_po_escalations(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            12
+        )
+
+        assert (
+            collection.update_many.await_count
+            == 2
+        )
+
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated shipping fix failure"
+        )
+
+        collection = Mock()
+
+        collection.update_many = AsyncMock(
+            side_effect=error
+        )
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_fix_shipping_po_escalations(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            12
+        )
+
+        logger.warning.assert_called_once_with(
+            "[Startup] Shipping "
+            "PO-escalation fix failed: %s",
+            error,
+        )

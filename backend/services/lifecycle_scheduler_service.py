@@ -330,3 +330,47 @@ async def startup_clean_noise_learning_events(
             logger.info("[Startup] Cleaned %d ghost learning events ($0/no-lines/no-items)", result3.deleted_count)
     except Exception as e:
         logger.warning("[Startup] Noise event cleanup failed: %s", e)
+
+
+async def startup_fix_shipping_po_escalations(
+    *,
+    db,
+    logger,
+) -> None:
+    await asyncio.sleep(12)
+    try:
+        NON_PO_TYPES = [
+            "Shipping_Document", "Shipping Document", "Packing_Slip", "Packing_List",
+            "BOL", "Bill_of_Lading", "Bill of Lading", "Warehouse_Receipt",
+            "STATEMENT", "Statement", "Account_Statement", "Remittance",
+        ]
+        # Un-park non-AP docs that were incorrectly parked by PO retry
+        r1 = await db.hub_documents.update_many(
+            {
+                "po_pending_parked": True,
+                "$or": [
+                    {"doc_type": {"$in": NON_PO_TYPES}},
+                    {"document_type": {"$in": NON_PO_TYPES}},
+                ],
+            },
+            {"$set": {"po_pending_parked": False}, "$unset": {"escalation_reason": ""}},
+        )
+        # Fix shipping docs incorrectly escalated to Exception/Manual Review
+        r2 = await db.hub_documents.update_many(
+            {
+                "$or": [
+                    {"doc_type": {"$in": NON_PO_TYPES}},
+                    {"document_type": {"$in": NON_PO_TYPES}},
+                ],
+                "escalation_reason": {"$regex": "PO not found", "$options": "i"},
+            },
+            {
+                "$set": {"po_pending_parked": False},
+                "$unset": {"escalation_reason": "", "auto_escalated": ""},
+            },
+        )
+        if r1.modified_count or r2.modified_count:
+            logger.info("[Startup] Fixed %d incorrectly PO-parked + %d incorrectly escalated non-AP docs",
+                        r1.modified_count, r2.modified_count)
+    except Exception as e:
+        logger.warning("[Startup] Shipping PO-escalation fix failed: %s", e)

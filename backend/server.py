@@ -3772,46 +3772,9 @@ async def startup():
     register_background_task(asyncio.create_task(startup_clean_noise_learning_events(db=db, logger=logger)), name='startup_clean_noise_learning_events')
 
     # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
-    async def _startup_fix_shipping_po_escalations():
-        await asyncio.sleep(12)
-        try:
-            NON_PO_TYPES = [
-                "Shipping_Document", "Shipping Document", "Packing_Slip", "Packing_List",
-                "BOL", "Bill_of_Lading", "Bill of Lading", "Warehouse_Receipt",
-                "STATEMENT", "Statement", "Account_Statement", "Remittance",
-            ]
-            # Un-park non-AP docs that were incorrectly parked by PO retry
-            r1 = await db.hub_documents.update_many(
-                {
-                    "po_pending_parked": True,
-                    "$or": [
-                        {"doc_type": {"$in": NON_PO_TYPES}},
-                        {"document_type": {"$in": NON_PO_TYPES}},
-                    ],
-                },
-                {"$set": {"po_pending_parked": False}, "$unset": {"escalation_reason": ""}},
-            )
-            # Fix shipping docs incorrectly escalated to Exception/Manual Review
-            r2 = await db.hub_documents.update_many(
-                {
-                    "$or": [
-                        {"doc_type": {"$in": NON_PO_TYPES}},
-                        {"document_type": {"$in": NON_PO_TYPES}},
-                    ],
-                    "escalation_reason": {"$regex": "PO not found", "$options": "i"},
-                },
-                {
-                    "$set": {"po_pending_parked": False},
-                    "$unset": {"escalation_reason": "", "auto_escalated": ""},
-                },
-            )
-            if r1.modified_count or r2.modified_count:
-                logger.info("[Startup] Fixed %d incorrectly PO-parked + %d incorrectly escalated non-AP docs",
-                            r1.modified_count, r2.modified_count)
-        except Exception as e:
-            logger.warning("[Startup] Shipping PO-escalation fix failed: %s", e)
+    from services.lifecycle_scheduler_service import startup_fix_shipping_po_escalations
 
-    register_background_task(asyncio.create_task(_startup_fix_shipping_po_escalations()), name='startup_fix_shipping_po_escalations')
+    register_background_task(asyncio.create_task(startup_fix_shipping_po_escalations(db=db, logger=logger)), name='startup_fix_shipping_po_escalations')
 
 
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──

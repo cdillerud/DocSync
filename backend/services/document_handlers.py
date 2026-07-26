@@ -42,6 +42,7 @@ from services.document_resolution_service import (
     ResolveRequest,
     resolve_and_link_document,
 )
+from services.document_link_service import link_document
 
 logger = logging.getLogger(__name__)
 
@@ -328,38 +329,6 @@ async def resubmit_document(doc_id: str):
     return {"document": updated_doc, "workflow_id": workflow_id}
 
 
-async def link_document(doc_id: str, bc_record_id: str):
-    db = get_db()
-
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    file_path = UPLOAD_DIR / doc_id
-    if not file_path.exists():
-        raise HTTPException(status_code=400, detail="Original file not found")
-
-    file_content = file_path.read_bytes()
-    share_link = doc.get("sharepoint_share_link_url", "")
-    bc_entity = doc.get("bc_entity", "salesOrders")
-
-    link_result = await _link_document_to_bc(
-        bc_record_id=bc_record_id,
-        share_link=share_link,
-        file_name=doc["file_name"],
-        file_content=file_content,
-        bc_entity=bc_entity,
-    )
-
-    if link_result.get("success"):
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-            "bc_record_id": bc_record_id,
-            "status": "LinkedToBC",
-            "updated_utc": datetime.now(timezone.utc).isoformat(),
-        }})
-
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    return {"document": updated_doc, "link_result": link_result}
 
 
 async def intake_document(

@@ -1125,14 +1125,14 @@ async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool,
     # === NON-AP DOCUMENTS: Standard workflow ===
     elif doc_type_value:
         try:
-            # Orchestration Extraction (v2.5.2) — compute_ap_normalized_fields
-            # is directly imported from document_intel_helpers (the server.py
-            # version is already a thin wrapper). _update_standard_workflow_status
-            # remains in server.py for this iteration (next extraction pass).
-            from server import _update_standard_workflow_status
             from services.document_intel_helpers import compute_ap_normalized_fields
+            from workflows.document_capture.rules.workflow_status import (
+                update_standard_workflow_status,
+            )
             norm_fields = compute_ap_normalized_fields(extracted_fields)
-            await _update_standard_workflow_status(doc_id, doc_type_value, confidence, norm_fields)
+            await update_standard_workflow_status(
+                doc_id, doc_type_value, confidence, norm_fields
+            )
             refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "status": 1, "workflow_status": 1})
             if refreshed:
                 new_status = refreshed.get("status", new_status)

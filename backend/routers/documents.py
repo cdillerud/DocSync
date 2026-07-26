@@ -844,7 +844,7 @@ async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
         logger.info("[UPLOAD-FILE] Saved replacement file for %s: %s (%d bytes)", doc_id[:8], file.filename, len(content))
         
         # Auto-trigger reprocess with reclassify
-        from server import reprocess_document
+        from services.document_reprocess_service import reprocess_document
         result = await reprocess_document(doc_id, reclassify=True)
         return result
     except Exception as e:
@@ -1640,7 +1640,7 @@ async def delete_pages(doc_id: str, payload: dict = Body(...)):
 async def _trigger_classification(doc_id: str):
     """Trigger the AI classification pipeline on a document."""
     try:
-        from server import classify_document
+        from services.document_handlers import classify_document
         await classify_document(doc_id)
     except Exception as e:
         logger.warning("[Classification] Failed for %s: %s", doc_id[:8], str(e))

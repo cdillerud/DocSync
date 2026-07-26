@@ -31,6 +31,7 @@ from fastapi import (
 from pydantic import BaseModel
 
 from deps import get_db
+from services.document_reprocess_service import reprocess_document
 
 logger = logging.getLogger(__name__)
 
@@ -759,6 +760,17 @@ async def intake_document(
             "updated_utc": datetime.now(timezone.utc).isoformat(),
         }})
 
+    # Preserve the existing non-bytes intake workflow-status call site.
+    # Step 4d.7 only migrated the import inside intake_document_from_bytes.
+    if suggested_type not in ("AP_Invoice", "AP Invoice"):
+        from server import _update_standard_workflow_status
+        await _update_standard_workflow_status(
+            doc_id,
+            doc_type_value,
+            confidence,
+            normalized_fields,
+        )
+
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
 
     # Incremental vendor profile update
@@ -954,246 +966,6 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
         "success": link_success,
         "document": updated_doc,
         "message": "Document linked to BC" if link_success else f"Document stored in SharePoint. BC linking failed: {link_error}",
-    }
-
-
-async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
-    """Safe reprocess — re-runs validation + vendor match only."""
-    db = get_db()
-
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    try:
-        return await _reprocess_document_inner_dh(doc_id, doc, reclassify, db)
-    except Exception as e:
-        logger.error("[REPROCESS-DH] FATAL error reprocessing %s: %s", doc_id[:8], str(e), exc_info=True)
-        return {
-            "reprocessed": False,
-            "error": str(e),
-            "error_type": type(e).__name__,
-            "old_status": doc.get("status"),
-            "new_status": doc.get("status"),
-            "document": doc,
-            "reasoning": f"Reprocess failed: {str(e)}"
-        }
-
-
-async def _reprocess_document_inner_dh(doc_id: str, doc: dict, reclassify: bool, db):
-    TransactionAction = _get_transaction_action()
-    DEFAULT_JOB_TYPES = _get_default_job_types()
-
-    if doc.get("status") == "LinkedToBC":
-        return {"reprocessed": False, "reason": "Document already linked to BC - no reprocessing needed", "document": doc}
-
-    if doc.get("bc_record_id"):
-        return {"reprocessed": False, "reason": f"BC record already exists ({doc.get('bc_record_id')}) - idempotency guard", "document": doc}
-
-    file_path = UPLOAD_DIR / doc_id
-    if reclassify and file_path.exists():
-        logger.info("Re-running AI classification for document %s", doc_id)
-        classification = await _classify_with_ai(str(file_path), doc["file_name"])
-        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
-            # doc_type added 2026-07-17: confirmed live this was
-            # missing entirely - document_type/suggested_job_type/
-            # extracted_fields all correctly updated to a real,
-            # high-confidence classification (e.g. AP_Invoice, conf
-            # 1.0, 34 extracted fields), but doc_type itself silently
-            # stayed at its stale prior value (OTHER) forever after.
-            # Every part of the system built tonight (parity matching,
-            # bucket_A reports, bulk-classify) treats doc_type as the
-            # authoritative field, so any document reprocessed via
-            # this path - including the manual "Reprocess" UI action,
-            # not just scripts - kept showing as misclassified
-            # downstream despite having actually been reclassified
-            # correctly right here.
-            "doc_type": classification.get("suggested_job_type", "Unknown"),
-            "document_type": classification.get("suggested_job_type", "Unknown"),
-            "suggested_job_type": classification.get("suggested_job_type", "Unknown"),
-            "ai_confidence": classification.get("confidence", 0.0),
-            "extracted_fields": classification.get("extracted_fields") or {},
-            "updated_utc": datetime.now(timezone.utc).isoformat(),
-        }})
-        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-
-    job_type = doc.get("suggested_job_type", "AP_Invoice")
-    job_configs = await db.hub_job_types.find_one({"job_type": job_type}, {"_id": 0})
-    if not job_configs:
-        job_configs = DEFAULT_JOB_TYPES.get(job_type, DEFAULT_JOB_TYPES["AP_Invoice"])
-
-    extracted_fields = doc.get("extracted_fields") or {}
-
-    # ── Re-run PO resolution (regenerates candidates with latest patterns) ──
-    try:
-        from services.po_resolution_service import resolve_po_from_document, attempt_bc_link
-        po_result = await resolve_po_from_document(doc)
-        if po_result:
-            # Also attempt BC link with the new candidates
-            bc_link_result = await attempt_bc_link(doc_id, po_result)
-            po_result["bc_link"] = bc_link_result
-            await db.hub_documents.update_one(
-                {"id": doc_id},
-                {"$set": {
-                    "po_resolution": po_result,
-                    "po_candidates": po_result.get("candidates_raw", []),
-                }}
-            )
-            # Feed resolved PO into validation
-            if po_result.get("po_number"):
-                extracted_fields["_po_resolution_number"] = po_result["po_number"]
-            valid_candidates = po_result.get("candidates_valid", [])
-            if isinstance(valid_candidates, list) and valid_candidates:
-                if isinstance(valid_candidates[0], dict):
-                    valid_candidates = [c["normalized"] for c in valid_candidates if c.get("valid_format") and not c.get("is_non_po")]
-            if valid_candidates:
-                extracted_fields["_po_all_candidates"] = valid_candidates
-            logger.info("[REPROCESS] PO re-resolution for %s: status=%s po=%s candidates=%d",
-                        doc_id[:8], po_result.get("status"), po_result.get("po_number"), len(valid_candidates))
-    except Exception as po_err:
-        logger.warning("[REPROCESS] PO resolution error for %s: %s", doc_id[:8], str(po_err))
-
-    old_match_method = doc.get("match_method", "none")
-    from services.bc_validation_service import validate_bc_match
-    validation_results = await validate_bc_match(job_type, extracted_fields, job_configs)
-    new_match_method = validation_results.get("match_method", "none")
-
-    confidence = doc.get("ai_confidence") or 0.0
-    # FIX: Bump confidence for valid doc types with failed AI extraction
-    doc_type_for_conf = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
-    if doc_type_for_conf not in ("Other", "Unknown", "Unknown_Document", "") and confidence < 0.5:
-        confidence = 0.85
-    decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
-
-    old_status = doc.get("status")
-    new_status = old_status
-    transaction_action = doc.get("transaction_action", TransactionAction.NONE)
-    share_link = doc.get("sharepoint_share_link_url")
-
-    if validation_results.get("all_passed"):
-        if share_link:
-            new_status = "Validated"
-            transaction_action = TransactionAction.VALIDATED
-        else:
-            new_status = "ValidationPassed"
-    elif decision == "needs_review":
-        new_status = "NeedsReview"
-
-    workflow_status_map = {
-        "Validated": "validated", "ValidationPassed": "validation_passed",
-        "NeedsReview": "needs_review", "LinkedToBC": "linked_to_bc",
-        "Posted": "posted", "ReadyForPost": "ready_for_post",
-    }
-    new_workflow_status = workflow_status_map.get(new_status, new_status.lower() if new_status else "pending")
-
-    update_data = {
-        "validation_results": validation_results,
-        "automation_decision": decision,
-        "match_method": new_match_method,
-        "match_score": validation_results.get("match_score", 0.0),
-        "vendor_candidates": decision_metadata.get("vendor_candidates", []),
-        "customer_candidates": decision_metadata.get("customer_candidates", []),
-        "status": new_status,
-        "workflow_status": new_workflow_status,
-        "square9_stage": new_workflow_status,
-        "transaction_action": transaction_action,
-        "reprocessed_utc": datetime.now(timezone.utc).isoformat(),
-        "updated_utc": datetime.now(timezone.utc).isoformat(),
-        "last_error": None,
-        # CRITICAL: Reset auto-clear fields so reprocess starts fresh
-        "auto_cleared": False,
-        "auto_clear_decision": None,
-        "auto_clear_reason": None,
-        "auto_clear_details": None,
-    }
-
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
-
-    # For non-AP document types, run the type-specific workflow (warehouse/sales)
-    # This handles auto-completion for shipping docs with PO/BOL/ship_date present
-    doc_type_value = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or ""
-    workflow_completed = False
-
-    # === AP INVOICES: Simple auto-post or NeedsReview ===
-    if doc_type_value and doc_type_value.upper().replace(" ", "_") in ("AP_INVOICE", "PURCHASE_INVOICE"):
-        from services.ap_auto_post_service import attempt_ap_auto_post
-        post_result = await attempt_ap_auto_post(doc_id, db, source="reprocess")
-        new_status = post_result.get("status", "NeedsReview")
-        workflow_completed = post_result.get("posted", False)
-        logger.info("[REPROCESS] AP auto-post for %s: %s (%s)", doc_id[:8], new_status, post_result.get("reason", ""))
-
-    # === NON-AP DOCUMENTS: Standard workflow ===
-    elif doc_type_value:
-        try:
-            from services.document_intel_helpers import compute_ap_normalized_fields
-            from workflows.document_capture.rules.workflow_status import (
-                update_standard_workflow_status,
-            )
-            norm_fields = compute_ap_normalized_fields(extracted_fields)
-            await update_standard_workflow_status(
-                doc_id, doc_type_value, confidence, norm_fields
-            )
-            refreshed = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "status": 1, "workflow_status": 1})
-            if refreshed:
-                new_status = refreshed.get("status", new_status)
-                new_workflow_status = refreshed.get("workflow_status", new_workflow_status)
-                if new_status == "Completed" or new_workflow_status == "exported":
-                    workflow_completed = True
-        except Exception as wf_err:
-            logger.warning("[REPROCESS] Workflow update error for %s: %s", doc_id[:8], str(wf_err))
-
-        # Run auto-clear for non-AP docs
-        try:
-            from services.auto_clear_service import evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
-            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-            if doc_for_eval:
-                ac_decision, ac_reason, ac_details = evaluate_auto_clear(
-                    doc_for_eval, validation_results=validation_results
-                )
-                ac_update = get_auto_clear_update(ac_decision, ac_details)
-                await db.hub_documents.update_one({"id": doc_id}, {"$set": ac_update})
-                if ac_decision == AutoClearDecision.CLEARED:
-                    new_status = "Completed"
-                    workflow_completed = True
-        except Exception as ac_err:
-            logger.warning("[REPROCESS] Auto-clear error for %s: %s", doc_id[:8], str(ac_err))
-
-    workflow = {
-        "id": str(uuid.uuid4()),
-        "document_id": doc_id,
-        "workflow_name": "reprocess",
-        "started_utc": datetime.now(timezone.utc).isoformat(),
-        "ended_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "Completed",
-        "steps": [
-            {"step": "revalidation", "status": "completed", "result": {
-                "old_match_method": old_match_method,
-                "new_match_method": new_match_method,
-                "validation_passed": validation_results.get("all_passed"),
-                "decision": decision,
-                "square9_aligned": True,
-                "reason": "Square9 workflow: validate data, confirm SharePoint storage. BC attachment handled separately.",
-            }},
-            {"step": "status_transition", "status": "completed" if new_status != old_status else "no_change", "result": {
-                "old_status": old_status, "new_status": new_status, "sharepoint_stored": bool(share_link),
-            }},
-        ],
-        "correlation_id": str(uuid.uuid4()),
-        "error": None,
-    }
-    await db.hub_workflow_runs.insert_one(workflow)
-
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    return {
-        "reprocessed": True,
-        "status_changed": old_status != new_status,
-        "old_status": old_status, "new_status": new_status,
-        "match_method_changed": old_match_method != new_match_method,
-        "old_match_method": old_match_method, "new_match_method": new_match_method,
-        "validation_passed": validation_results.get("all_passed"),
-        "sharepoint_stored": bool(share_link),
-        "document": updated_doc,
-        "reasoning": reasoning,
     }
 
 

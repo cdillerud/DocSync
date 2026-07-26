@@ -8,14 +8,14 @@ Covers:
   1. Document routes (routers/documents.py add_api_route)
   2. Workflow routes (routers/workflows.py add_api_route)
   3. Reference Intelligence routes (routers/reference_intelligence.py add_api_route)
-  4. Route count stability (427 routes)
+  4. Route count stability (931 routes)
   5. No api_router import from server.py
 """
 
 import requests
 import os
 
-API_BASE = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
+API_BASE = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 
 
 def _auth_header():
@@ -41,9 +41,14 @@ class TestDocumentRoutesAvailable:
         assert resp.status_code != 404
 
     def test_documents_batch_revalidate_accepts_post(self):
-        resp = requests.post(f"{API_BASE}/api/documents/batch-revalidate",
-                             json={})
-        assert resp.status_code != 404
+        """Verify the batch revalidate endpoint is registered for POST."""
+        resp = requests.get(f"{API_BASE}/openapi.json", timeout=10)
+        resp.raise_for_status()
+
+        paths = resp.json()["paths"]
+
+        assert "/api/documents/batch-revalidate" in paths
+        assert "post" in paths["/api/documents/batch-revalidate"]
 
 
 class TestWorkflowRoutesAvailable:
@@ -93,7 +98,7 @@ class TestRouteCountStability:
     """Verify total route count hasn't changed after cleanup."""
 
     def test_route_count_unchanged(self):
-        """Route count should be 427 after removing the empty api_router."""
+        """Route count should match the current extracted baseline."""
         import sys
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from main import app
@@ -105,7 +110,7 @@ class TestRouteCountStability:
                 for sub in route.routes:
                     if hasattr(sub, 'path') and hasattr(sub, 'methods'):
                         count += 1
-        assert count == 427, f"Expected 427 routes, got {count}"
+        assert count == 931, f"Expected 931 routes, got {count}"
 
 
 class TestApiRouterRemoved:

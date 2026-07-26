@@ -142,3 +142,23 @@ async def knowledge_seed_scheduler(
         except Exception as e:
             logger.warning("[KnowledgeSeed] Scheduled seed failed: %s", e)
         await asyncio.sleep(6 * 3600)  # Every 6 hours
+
+
+async def intake_pattern_hygiene_scheduler(
+    *,
+    logger,
+) -> None:
+    await asyncio.sleep(600)  # Let refresh scheduler run first
+    while True:
+        try:
+            from workflows.core.learning_core import run_hygiene
+            result = await run_hygiene(domain="all", actor="scheduler")
+            logger.info(
+                "[PatternHygiene.scheduler] done — scanned=%d retired=%d promoted=%d",
+                result.get("total_scanned", 0),
+                result.get("total_retired", 0),
+                result.get("total_promoted", 0),
+            )
+        except Exception as e:
+            logger.warning("[PatternHygiene.scheduler] failed: %s", e)
+        await asyncio.sleep(24 * 3600)

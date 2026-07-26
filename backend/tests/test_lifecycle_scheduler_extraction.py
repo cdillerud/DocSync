@@ -2590,3 +2590,307 @@ class TestKnowledgeSeedRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestPatternHygieneExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_intake_pattern_hygiene_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "intake_pattern_hygiene_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "intake_pattern_hygiene"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "intake_pattern_hygiene_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "intake_pattern_hygiene_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "4aecbab0dc43b9753cacceaa4cfa9b0ab2a0bbe6ffe65101ca602d8e532af383"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            intake_pattern_hygiene_scheduler,
+        )
+
+        signature = inspect.signature(
+            intake_pattern_hygiene_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestPatternHygieneRuntime:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core
+        import services.lifecycle_scheduler_service as scheduler
+
+        run_hygiene = AsyncMock(
+            return_value={
+                "total_scanned": 80,
+                "total_retired": 5,
+                "total_promoted": 3,
+            }
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core"
+        )
+
+        module.run_hygiene = run_hygiene
+
+        monkeypatch.setitem(
+            sys.modules,
+            "workflows.core.learning_core",
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core,
+            "learning_core",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.intake_pattern_hygiene_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (600,),
+            (24 * 3600,),
+        ]
+
+        run_hygiene.assert_awaited_once_with(
+            domain="all",
+            actor="scheduler",
+        )
+
+        logger.info.assert_called_once_with(
+            "[PatternHygiene.scheduler] "
+            "done — scanned=%d retired=%d "
+            "promoted=%d",
+            80,
+            5,
+            3,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated hygiene failure"
+        )
+
+        run_hygiene = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core"
+        )
+
+        module.run_hygiene = run_hygiene
+
+        monkeypatch.setitem(
+            sys.modules,
+            "workflows.core.learning_core",
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core,
+            "learning_core",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.intake_pattern_hygiene_scheduler(
+                logger=logger,
+            )
+
+        run_hygiene.assert_awaited_once_with(
+            domain="all",
+            actor="scheduler",
+        )
+
+        logger.warning.assert_called_once_with(
+            "[PatternHygiene.scheduler] "
+            "failed: %s",
+            error,
+        )

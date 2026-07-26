@@ -3718,22 +3718,8 @@ async def startup():
     # Calls the unified pattern-health service which runs hygiene across
     # BOTH intake (`order_line_patterns`) and AP (`posting_pattern_analysis`)
     # adapters. Consolidates two previously-separate schedulers into one.
-    async def _intake_pattern_hygiene_scheduler():
-        await asyncio.sleep(600)  # Let refresh scheduler run first
-        while True:
-            try:
-                from workflows.core.learning_core import run_hygiene
-                result = await run_hygiene(domain="all", actor="scheduler")
-                logger.info(
-                    "[PatternHygiene.scheduler] done — scanned=%d retired=%d promoted=%d",
-                    result.get("total_scanned", 0),
-                    result.get("total_retired", 0),
-                    result.get("total_promoted", 0),
-                )
-            except Exception as e:
-                logger.warning("[PatternHygiene.scheduler] failed: %s", e)
-            await asyncio.sleep(24 * 3600)
-    register_background_task(asyncio.create_task(_intake_pattern_hygiene_scheduler()), name='intake_pattern_hygiene')
+    from services.lifecycle_scheduler_service import intake_pattern_hygiene_scheduler
+    register_background_task(asyncio.create_task(intake_pattern_hygiene_scheduler(logger=logger)), name='intake_pattern_hygiene')
     logger.info("Unified Pattern Hygiene scheduler started (interval: 24h, domains: sales_intake + ap_posting)")
 
     # ── Drift Alert scheduler (nightly, v2.5.0) ──

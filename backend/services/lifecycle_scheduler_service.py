@@ -5,6 +5,9 @@ Canonical application lifecycle scheduler coroutines.
 from __future__ import annotations
 
 import asyncio
+import os
+from datetime import datetime
+from typing import Optional
 
 
 async def startup_sync_status(
@@ -226,3 +229,38 @@ async def intake_learning_refresh_scheduler(
         except Exception as e:
             logger.warning("[IntakeLearning.scheduler] failed: %s", e)
         await asyncio.sleep(interval)
+
+
+async def drift_watchlist_scheduler(
+    *,
+    logger,
+) -> None:
+    await asyncio.sleep(1500)  # 25-min startup delay
+    target_dow = int(os.environ.get("DRIFT_WATCHLIST_CRON_DOW", "0"))  # 0 = Mon
+    target_hour = int(os.environ.get("DRIFT_WATCHLIST_CRON_HOUR", "7"))
+    enabled = os.environ.get("DRIFT_WATCHLIST_ENABLED", "false").lower() in ("1", "true", "yes")
+    if not enabled:
+        logger.info("Drift Watchlist scheduler disabled (set DRIFT_WATCHLIST_ENABLED=true to enable)")
+        return
+    last_sent_day: Optional[str] = None
+    while True:
+        try:
+            now = datetime.now()
+            day_key = now.strftime("%Y-%m-%d")
+            if (
+                now.weekday() == target_dow
+                and now.hour == target_hour
+                and last_sent_day != day_key
+            ):
+                from workflows.core.learning_core.drift_watchlist_service import send_watchlist
+                result = await send_watchlist(actor="scheduler")
+                last_sent_day = day_key
+                logger.info(
+                    "[DriftWatchlist.scheduler] dispatched: vendors=%d channels=%s",
+                    result.get("vendor_count", 0),
+                    list(result.get("per_channel", {})),
+                )
+        except Exception as e:
+            logger.warning("[DriftWatchlist.scheduler] tick failed: %s", e)
+        # Wake every hour so we don't drift past the target window
+        await asyncio.sleep(3600)

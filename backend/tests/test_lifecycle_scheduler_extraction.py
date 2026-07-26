@@ -3937,3 +3937,672 @@ class TestIntakeLearningRefreshRuntime:
             (300,),
             (777,),
         ]
+
+
+class TestDriftWatchlistExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_drift_watchlist_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "drift_watchlist_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "drift_watchlist"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "drift_watchlist_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "drift_watchlist_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "d508ef124ec7f92b94049730b37d8dd2ce7cb7f8811ba92e0624a8fcbe8481e8"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            drift_watchlist_scheduler,
+        )
+
+        signature = inspect.signature(
+            drift_watchlist_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestDriftWatchlistRuntime:
+    @pytest.mark.asyncio
+    async def test_disabled_by_default(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.delenv(
+            "DRIFT_WATCHLIST_ENABLED",
+            raising=False,
+        )
+
+        monkeypatch.delenv(
+            "DRIFT_WATCHLIST_CRON_DOW",
+            raising=False,
+        )
+
+        monkeypatch.delenv(
+            "DRIFT_WATCHLIST_CRON_HOUR",
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        await scheduler.drift_watchlist_scheduler(
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            1500
+        )
+
+        logger.info.assert_called_once_with(
+            "Drift Watchlist scheduler "
+            "disabled "
+            "(set DRIFT_WATCHLIST_ENABLED=true "
+            "to enable)"
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_matching_window_dispatches(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core.learning_core
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_ENABLED",
+            "true",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_DOW",
+            "0",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_HOUR",
+            "7",
+        )
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                from datetime import (
+                    datetime as real_datetime,
+                )
+
+                return real_datetime(
+                    2026,
+                    7,
+                    27,
+                    7,
+                    15,
+                    0,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        send_watchlist = AsyncMock(
+            return_value={
+                "vendor_count": 6,
+                "per_channel": {
+                    "teams_webhook": {
+                        "ok": True,
+                    },
+                    "email": {
+                        "ok": True,
+                    },
+                },
+            }
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core."
+            "drift_watchlist_service"
+        )
+
+        module.send_watchlist = (
+            send_watchlist
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            (
+                "workflows.core.learning_core."
+                "drift_watchlist_service"
+            ),
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core.learning_core,
+            "drift_watchlist_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_watchlist_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call
+            in sleep.await_args_list
+        ] == [
+            (1500,),
+            (3600,),
+        ]
+
+        send_watchlist.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.info.assert_called_once_with(
+            "[DriftWatchlist.scheduler] "
+            "dispatched: vendors=%d "
+            "channels=%s",
+            6,
+            [
+                "teams_webhook",
+                "email",
+            ],
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_same_day_dispatches_once(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core.learning_core
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_ENABLED",
+            "yes",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_DOW",
+            "0",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_HOUR",
+            "7",
+        )
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                from datetime import (
+                    datetime as real_datetime,
+                )
+
+                return real_datetime(
+                    2026,
+                    7,
+                    27,
+                    7,
+                    30,
+                    0,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        send_watchlist = AsyncMock(
+            return_value={
+                "vendor_count": 2,
+                "per_channel": {
+                    "email": {
+                        "ok": True,
+                    },
+                },
+            }
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core."
+            "drift_watchlist_service"
+        )
+
+        module.send_watchlist = (
+            send_watchlist
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            (
+                "workflows.core.learning_core."
+                "drift_watchlist_service"
+            ),
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core.learning_core,
+            "drift_watchlist_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_watchlist_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call
+            in sleep.await_args_list
+        ] == [
+            (1500,),
+            (3600,),
+            (3600,),
+        ]
+
+        send_watchlist.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.info.assert_called_once()
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_nonmatching_window_skips(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core.learning_core
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_ENABLED",
+            "1",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_DOW",
+            "0",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_HOUR",
+            "7",
+        )
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                from datetime import (
+                    datetime as real_datetime,
+                )
+
+                return real_datetime(
+                    2026,
+                    7,
+                    28,
+                    7,
+                    0,
+                    0,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        send_watchlist = AsyncMock()
+
+        module = ModuleType(
+            "workflows.core.learning_core."
+            "drift_watchlist_service"
+        )
+
+        module.send_watchlist = (
+            send_watchlist
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            (
+                "workflows.core.learning_core."
+                "drift_watchlist_service"
+            ),
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core.learning_core,
+            "drift_watchlist_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_watchlist_scheduler(
+                logger=logger,
+            )
+
+        send_watchlist.assert_not_awaited()
+
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core.learning_core
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_ENABLED",
+            "true",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_DOW",
+            "0",
+        )
+
+        monkeypatch.setenv(
+            "DRIFT_WATCHLIST_CRON_HOUR",
+            "7",
+        )
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                from datetime import (
+                    datetime as real_datetime,
+                )
+
+                return real_datetime(
+                    2026,
+                    7,
+                    27,
+                    7,
+                    0,
+                    0,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        error = RuntimeError(
+            "simulated watchlist failure"
+        )
+
+        send_watchlist = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core."
+            "drift_watchlist_service"
+        )
+
+        module.send_watchlist = (
+            send_watchlist
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            (
+                "workflows.core.learning_core."
+                "drift_watchlist_service"
+            ),
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core.learning_core,
+            "drift_watchlist_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_watchlist_scheduler(
+                logger=logger,
+            )
+
+        send_watchlist.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.warning.assert_called_once_with(
+            "[DriftWatchlist.scheduler] "
+            "tick failed: %s",
+            error,
+        )

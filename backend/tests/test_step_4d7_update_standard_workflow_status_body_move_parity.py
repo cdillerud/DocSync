@@ -13,10 +13,11 @@ Pattern (per signed declaration):
    ``update_standard_workflow_status`` (public; underscore prefix dropped).
 3. Leave a 4-statement delegating shim at server.py:1811 so existing
    imports continue to resolve.
-4. Rewire the INTAKE call site only (`document_handlers.py:1565` lazy
-   tuple) with alias preservation. The two non-intake call sites
-   (``document_handlers.py:1079``, ``server.py:3646``) are explicitly
-   preserved and continue to resolve via the shim.
+4. Rewire the intake_document_from_bytes call site only, with alias
+   preservation.
+5. A later document-handler extraction moved the HTTP intake handler and
+   its preserved server-shim call site into document_intake_service.
+   The server.py call site remains preserved and resolves via the shim.
 
 ``_build_vendor_resolution`` is explicitly out of scope.
 ``_attempt_llm_vendor_ranking`` is explicitly out of scope.
@@ -312,18 +313,29 @@ class TestCallSiteByteParity:
 # 12. Non-intake call sites preserved unchanged
 # ---------------------------------------------------------------------------
 class TestNonIntakeCallSitesPreserved:
-    def test_non_intake_handlers_call_site_intact(self):
-        """Out-of-scope: document_handlers.py:~1079 uses
-        `from server import _update_standard_workflow_status` directly,
-        not the intake lazy tuple. It must still resolve via the shim."""
+    def test_non_intake_service_call_site_intact(self):
+        """The HTTP intake call site moves with its extracted handler."""
         handlers_src = Path(
             BACKEND_ROOT / "services" / "document_handlers.py"
         ).read_text()
+        service_src = Path(
+            BACKEND_ROOT / "services" / "document_intake_service.py"
+        ).read_text()
+
         assert (
             "from server import _update_standard_workflow_status"
-            in handlers_src
-        ), "non-intake `from server import _update_standard_workflow_status` " \
-           "lost — out of scope for 4d.7"
+            in service_src
+        ), "non-bytes server-shim import missing from intake service"
+
+        assert (
+            "await _update_standard_workflow_status("
+            in service_src
+        ), "non-bytes workflow-status call missing from intake service"
+
+        assert (
+            "from server import _update_standard_workflow_status"
+            not in handlers_src
+        ), "non-bytes server-shim import unexpectedly remains in handlers"
 
     def test_in_server_call_site_intact(self):
         """server.py:~3646 calls `_update_standard_workflow_status` from

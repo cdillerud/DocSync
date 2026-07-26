@@ -140,6 +140,23 @@ class TestDocumentHandlersRewiring:
         assert "srv = _server()" not in source
 
 
+    def test_intake_uses_extracted_service(self):
+        import services.document_handlers as handlers
+        from services.document_intake_service import (
+            intake_document as service_intake,
+        )
+
+        assert handlers.intake_document is service_intake
+
+    def test_bytes_intake_remains_in_handlers(self):
+        import services.document_handlers as handlers
+
+        assert (
+            handlers.intake_document_from_bytes.__module__
+            == "services.document_handlers"
+        )
+
+
 class TestServerCompatibilityWrappers:
     """Thin wrappers in server.py still resolve correctly."""
 

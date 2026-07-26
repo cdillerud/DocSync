@@ -8,26 +8,27 @@ Unified ingestion from all sources:
 - Legacy system imports
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, BackgroundTasks, Depends
 from typing import Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel
+from motor.motor_asyncio import AsyncIOMotorDatabase
 import uuid
 import hashlib
 import logging
+
+from dependencies import get_database
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
-# Database and services - set by main app
-db = None
+# Services - set by main app
 classify_fn = None
 workflow_fn = None
 
-def set_dependencies(database, classify_func, workflow_func):
-    global db, classify_fn, workflow_fn
-    db = database
+def set_dependencies(classify_func, workflow_func):
+    global classify_fn, workflow_fn
     classify_fn = classify_func
     workflow_fn = workflow_func
 
@@ -45,12 +46,13 @@ class IngestResult(BaseModel):
 # ==================== CORE INGESTION ====================
 
 async def ingest_document(
+    database: AsyncIOMotorDatabase,
     file_content: bytes,
     file_name: str,
     source: str,
     source_metadata: dict = None,
     category_hint: str = None,
-    skip_classification: bool = False
+    skip_classification: bool = False,
 ) -> dict:
     """
     Core ingestion function - all sources funnel through here.
@@ -89,7 +91,7 @@ async def ingest_document(
     }
     
     # Insert document
-    await db.hub_documents.insert_one(doc)
+    await database.hub_documents.insert_one(doc)
     
     # Classify if not skipped
     if not skip_classification and classify_fn:
@@ -110,7 +112,7 @@ async def ingest_document(
                 "confidence": classification.get("confidence", 0)
             })
             
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "doc_type": doc["doc_type"],
@@ -147,7 +149,8 @@ async def upload_document(
     file: UploadFile = File(...),
     category: Optional[str] = Form(None),
     doc_type: Optional[str] = Form(None),
-    notes: Optional[str] = Form(None)
+    notes: Optional[str] = Form(None),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Manual document upload."""
     content = await file.read()
@@ -156,6 +159,7 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
     
     doc = await ingest_document(
+        database=database,
         file_content=content,
         file_name=file.filename,
         source="upload",
@@ -166,7 +170,7 @@ async def upload_document(
     
     # Override doc_type if explicitly provided
     if doc_type:
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc["id"]},
             {"$set": {
                 "doc_type": doc_type,
@@ -193,10 +197,12 @@ async def ingest_from_email(
     subject: str = None,
     sender: str = None,
     received_date: str = None,
-    category: str = "AP"
+    category: str = "AP",
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Ingest document from email attachment."""
     doc = await ingest_document(
+        database=database,
         file_content=file_content,
         file_name=file_name,
         source="email",
@@ -217,7 +223,8 @@ async def ingest_from_email(
 async def ingest_batch(
     files: list[UploadFile] = File(...),
     source: str = Form("batch_upload"),
-    category: Optional[str] = Form(None)
+    category: Optional[str] = Form(None),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Batch ingest multiple documents."""
     results = []
@@ -226,6 +233,7 @@ async def ingest_batch(
         try:
             content = await file.read()
             doc = await ingest_document(
+                database=database,
                 file_content=content,
                 file_name=file.filename,
                 source=source,
@@ -255,12 +263,13 @@ async def ingest_batch(
 @router.get("/duplicate-check")
 async def check_duplicate(
     content_hash: str = Query(...),
-    file_name: Optional[str] = Query(None)
+    file_name: Optional[str] = Query(None),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Check if document already exists."""
     query = {"content_hash": content_hash}
     
-    existing = await db.hub_documents.find_one(query, {"id": 1, "file_name": 1, "created_utc": 1, "_id": 0})
+    existing = await database.hub_documents.find_one(query, {"id": 1, "file_name": 1, "created_utc": 1, "_id": 0})
     
     if existing:
         return {

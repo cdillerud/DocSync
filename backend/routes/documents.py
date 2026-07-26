@@ -4,22 +4,17 @@ GPI Document Hub - Documents Router
 CRUD operations for hub_documents collection.
 """
 
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, BackgroundTasks, Depends
 from typing import Optional, List
 from datetime import datetime, timezone
 from pydantic import BaseModel
 import uuid
 import hashlib
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from dependencies import get_database
 
 router = APIRouter(prefix="/documents", tags=["documents"])
-
-# Database reference - set by main app
-db = None
-
-def set_db(database):
-    global db
-    db = database
-
 
 # ==================== MODELS ====================
 
@@ -42,7 +37,8 @@ async def list_documents(
     category: Optional[str] = Query(None),
     doc_type: Optional[str] = Query(None),
     source: Optional[str] = Query(None),
-    search: Optional[str] = Query(None)
+    search: Optional[str] = Query(None),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """List documents with filters."""
     query = {}
@@ -62,8 +58,8 @@ async def list_documents(
             {"extracted_invoice_number": {"$regex": search, "$options": "i"}}
         ]
     
-    total = await db.hub_documents.count_documents(query)
-    docs = await db.hub_documents.find(
+    total = await database.hub_documents.count_documents(query)
+    docs = await database.hub_documents.find(
         query, {"_id": 0}
     ).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     
@@ -71,41 +67,49 @@ async def list_documents(
 
 
 @router.get("/{doc_id}")
-async def get_document(doc_id: str):
+async def get_document(doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get a single document by ID."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     return doc
 
 
 @router.put("/{doc_id}")
-async def update_document(doc_id: str, update: DocumentUpdate):
+async def update_document(doc_id: str, update: DocumentUpdate,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Update document fields."""
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_utc"] = datetime.now(timezone.utc).isoformat()
     
-    result = await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
+    result = await database.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return doc
 
 
 @router.delete("/{doc_id}")
-async def delete_document(doc_id: str):
+async def delete_document(doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Delete a document."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    await db.hub_documents.delete_one({"id": doc_id})
+    await database.hub_documents.delete_one({"id": doc_id})
     return {"message": "Document deleted", "id": doc_id}
 
 
 @router.get("/stats/summary")
-async def get_document_stats():
+async def get_document_stats(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get document statistics."""
     pipeline = [
         {"$group": {
@@ -117,7 +121,7 @@ async def get_document_stats():
         }}
     ]
     
-    result = await db.hub_documents.aggregate(pipeline).to_list(1)
+    result = await database.hub_documents.aggregate(pipeline).to_list(1)
     
     if not result:
         return {"total": 0, "by_status": {}, "by_type": {}, "by_source": {}}

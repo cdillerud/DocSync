@@ -9,11 +9,14 @@ API endpoints for AP Invoice review workflow:
 - AI-powered invoice data extraction
 """
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from dependencies import get_database
+
 import os
 import logging
 from datetime import datetime, timezone
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -74,14 +77,12 @@ class PostToBCResponse(BaseModel):
 # DEPENDENCY: Get DB and BC Service
 # =============================================================================
 
-# These will be set by the main server.py when including this router
-db = None
+# Business Central is initialized by server.py.
 bc_service = None
 
-def set_dependencies(database, business_central_service):
-    """Set dependencies injected from main server."""
-    global db, bc_service
-    db = database
+def set_dependencies(business_central_service):
+    """Initialize the Business Central service used by AP Review routes."""
+    global bc_service
     bc_service = business_central_service
 
 
@@ -174,19 +175,20 @@ async def search_purchase_orders(
 # =============================================================================
 
 @ap_review_router.put("/documents/{doc_id}")
-async def save_ap_review(doc_id: str, data: APReviewData):
+async def save_ap_review(
+    doc_id: str,
+    data: APReviewData,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Save AP review edits to a document.
     Updates vendor, invoice details, line items, etc.
     """
     logger.info(f"AP Review Save: doc_id={doc_id}, vendor_id={data.vendor_id}, invoice={data.invoice_number}")
     
-    if db is None:
-        logger.error("AP Review Save failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -238,13 +240,13 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         update_data["ap_review_notes"] = data.notes
     
     # Update document
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": update_data}
     )
     
     # Fetch updated document
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     logger.info(f"AP Review Save SUCCESS: doc_id={doc_id}")
     
@@ -256,19 +258,19 @@ async def save_ap_review(doc_id: str, data: APReviewData):
 
 
 @ap_review_router.post("/documents/{doc_id}/mark-ready")
-async def mark_ready_for_post(doc_id: str):
+async def mark_ready_for_post(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Mark a document as ready for posting to BC.
     Sets review_status to 'ready_for_post'.
     """
     logger.info(f"AP Review Mark Ready: doc_id={doc_id}")
     
-    if db is None:
-        logger.error("AP Review Mark Ready failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -288,7 +290,7 @@ async def mark_ready_for_post(doc_id: str):
         )
     
     # Update status
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "review_status": "ready_for_post",
@@ -299,7 +301,7 @@ async def mark_ready_for_post(doc_id: str):
         }}
     )
     
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     logger.info(f"AP Review Mark Ready SUCCESS: doc_id={doc_id}")
     
@@ -316,7 +318,11 @@ async def mark_ready_for_post(doc_id: str):
 # =============================================================================
 
 @ap_review_router.post("/documents/{doc_id}/post-to-bc")
-async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = None):
+async def post_document_to_bc(
+    doc_id: str,
+    request: Optional[PostToBCRequest] = None,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Post a document to Business Central as a purchase invoice.
     Creates a purchase invoice in BC with the document's extracted data.
@@ -325,11 +331,9 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
     """
     logger.info(f"AP Review Post to BC: doc_id={doc_id}")
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -389,7 +393,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
         raise HTTPException(status_code=400, detail="Invoice date is required for posting")
     
     # Update status to posting
-    await db.hub_documents.update_one(
+    await database.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "bc_posting_status": "posting",
@@ -448,7 +452,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
                 link_writeback_error = "No SharePoint URL available"
             
             # Success - update document with BC details and writeback status
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "bc_document_id": bc_document_id,
@@ -465,7 +469,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
                 }}
             )
             
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             
             return PostToBCResponse(
                 success=True,
@@ -480,7 +484,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
         else:
             # Failure - record error
             error_msg = result.get("error") or result.get("details") or "Unknown error"
-            await db.hub_documents.update_one(
+            await database.hub_documents.update_one(
                 {"id": doc_id},
                 {"$set": {
                     "bc_posting_status": "failed",
@@ -502,7 +506,7 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
         error_msg = str(e)
         logger.error("Post to BC failed for doc %s: %s", doc_id, error_msg)
         
-        await db.hub_documents.update_one(
+        await database.hub_documents.update_one(
             {"id": doc_id},
             {"$set": {
                 "bc_posting_status": "failed",
@@ -521,12 +525,13 @@ async def post_document_to_bc(doc_id: str, request: Optional[PostToBCRequest] = 
 
 
 @ap_review_router.get("/documents/{doc_id}/bc-status")
-async def get_bc_posting_status(doc_id: str):
+async def get_bc_posting_status(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get the BC posting status for a document."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -547,7 +552,10 @@ async def get_bc_posting_status(doc_id: str):
 # =============================================================================
 
 @ap_review_router.post("/documents/{doc_id}/extract-invoice-data")
-async def extract_invoice_data_endpoint(doc_id: str):
+async def extract_invoice_data_endpoint(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Extract invoice data from PDF using AI/OCR.
     
@@ -562,12 +570,9 @@ async def extract_invoice_data_endpoint(doc_id: str):
     """
     logger.info(f"AI Invoice Extraction: doc_id={doc_id}")
     
-    if db is None:
-        logger.error("AI Invoice Extraction failed: Database not initialized")
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Find document
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -602,13 +607,13 @@ async def extract_invoice_data_endpoint(doc_id: str):
     try:
         from services.invoice_extractor import extract_and_update_document
         
-        result = await extract_and_update_document(doc_id, file_path, db)
+        result = await extract_and_update_document(doc_id, file_path, database)
         
         if result.get("success"):
             logger.info(f"AI Invoice Extraction SUCCESS: doc_id={doc_id}, confidence={result.get('confidence')}, lines={result.get('line_items_count')}")
             
             # Fetch updated document
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
             
             return {
                 "success": True,
@@ -637,12 +642,13 @@ async def extract_invoice_data_endpoint(doc_id: str):
 
 
 @ap_review_router.get("/documents/{doc_id}/extraction-status")
-async def get_extraction_status(doc_id: str):
+async def get_extraction_status(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get the AI extraction status for a document."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     

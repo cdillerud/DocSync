@@ -4,23 +4,24 @@ GPI Document Hub - Workflows Router
 Workflow state transitions and queue management.
 """
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from typing import Optional, List
 from datetime import datetime, timezone
 from pydantic import BaseModel
 import logging
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from dependencies import get_database
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
-# Database and workflow engine - set by main app
-db = None
+# Workflow engine - set by main app
 workflow_engine = None
 
-def set_dependencies(database, engine):
-    global db, workflow_engine
-    db = database
+def set_dependencies(engine):
+    global workflow_engine
     workflow_engine = engine
 
 
@@ -39,7 +40,8 @@ async def get_workflow_queue(
     doc_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     skip: int = Query(0),
-    limit: int = Query(50)
+    limit: int = Query(50),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get documents in workflow queues."""
     query = {}
@@ -53,8 +55,8 @@ async def get_workflow_queue(
     if not status:
         query["workflow_status"] = {"$nin": ["archived", "exported", "completed"]}
     
-    total = await db.hub_documents.count_documents(query)
-    docs = await db.hub_documents.find(
+    total = await database.hub_documents.count_documents(query)
+    docs = await database.hub_documents.find(
         query,
         {"_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "workflow_status": 1, 
          "extracted_fields": 1, "created_utc": 1, "updated_utc": 1}
@@ -64,7 +66,9 @@ async def get_workflow_queue(
 
 
 @router.get("/queue/counts")
-async def get_queue_counts():
+async def get_queue_counts(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get counts by workflow status and doc_type."""
     pipeline = [
         {"$match": {"workflow_status": {"$nin": ["archived", "exported", "completed"]}}},
@@ -74,7 +78,7 @@ async def get_queue_counts():
         }}
     ]
     
-    results = await db.hub_documents.aggregate(pipeline).to_list(100)
+    results = await database.hub_documents.aggregate(pipeline).to_list(100)
     
     # Organize by doc_type
     by_type = {}
@@ -101,7 +105,9 @@ async def get_queue_counts():
 # ==================== DOCUMENT WORKFLOW ACTIONS ====================
 
 @router.post("/{doc_id}/transition")
-async def transition_document(doc_id: str, action: WorkflowAction):
+async def transition_document(doc_id: str, action: WorkflowAction,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Transition a document to a new workflow state.
     
@@ -112,7 +118,7 @@ async def transition_document(doc_id: str, action: WorkflowAction):
     - complete: Mark as complete
     - archive: Archive document
     """
-    doc = await db.hub_documents.find_one({"id": doc_id})
+    doc = await database.hub_documents.find_one({"id": doc_id})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -189,9 +195,9 @@ async def transition_document(doc_id: str, action: WorkflowAction):
         }
     }
     
-    await db.hub_documents.update_one({"id": doc_id}, update)
+    await database.hub_documents.update_one({"id": doc_id}, update)
     
-    updated = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     
     return {
         "success": True,
@@ -203,9 +209,11 @@ async def transition_document(doc_id: str, action: WorkflowAction):
 
 
 @router.get("/{doc_id}/history")
-async def get_workflow_history(doc_id: str):
+async def get_workflow_history(doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get workflow history for a document."""
-    doc = await db.hub_documents.find_one(
+    doc = await database.hub_documents.find_one(
         {"id": doc_id}, 
         {"_id": 0, "id": 1, "workflow_history": 1, "workflow_status": 1}
     )
@@ -223,7 +231,9 @@ async def get_workflow_history(doc_id: str):
 # ==================== BULK ACTIONS ====================
 
 @router.post("/bulk/approve")
-async def bulk_approve(doc_ids: List[str], notes: Optional[str] = None):
+async def bulk_approve(doc_ids: List[str], notes: Optional[str] = None,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Approve multiple documents at once."""
     results = []
     
@@ -245,7 +255,9 @@ async def bulk_approve(doc_ids: List[str], notes: Optional[str] = None):
 
 
 @router.post("/bulk/archive")
-async def bulk_archive(doc_ids: List[str]):
+async def bulk_archive(doc_ids: List[str],
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Archive multiple documents."""
     results = []
     
@@ -253,7 +265,8 @@ async def bulk_archive(doc_ids: List[str]):
         try:
             result = await transition_document(
                 doc_id,
-                WorkflowAction(action="archive")
+                WorkflowAction(action="archive"),
+                database,
             )
             results.append({"doc_id": doc_id, "success": True})
         except HTTPException as e:

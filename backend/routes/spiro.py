@@ -8,6 +8,9 @@ Admin and debug endpoints for Spiro integration:
 - Document SpiroContext debugging
 """
 
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from dependencies import get_database
+
 import os
 import logging
 from datetime import datetime, timezone
@@ -19,15 +22,6 @@ logger = logging.getLogger(__name__)
 
 # Create router
 spiro_router = APIRouter(prefix="/api/spiro", tags=["Spiro Integration"])
-
-# Database reference (set during app startup)
-db = None
-
-def set_spiro_routes_db(database):
-    """Set database reference for Spiro routes."""
-    global db
-    db = database
-
 
 # =============================================================================
 # MODELS
@@ -66,7 +60,7 @@ async def get_spiro_status():
         "configured": client.is_configured(),
         "has_token": client.token_manager.get_access_token() is not None,
         "has_refresh_token": client.token_manager.get_refresh_token() is not None,
-        "sync_status": await get_spiro_sync_status() if db is not None else {"error": "DB not initialized"}
+        "sync_status": await get_spiro_sync_status()
     }
 
 
@@ -172,7 +166,10 @@ async def oauth_callback_get(code: str = Query(...)):
 # =============================================================================
 
 @spiro_router.post("/sync")
-async def trigger_sync(request: SyncRequest = None):
+async def trigger_sync(
+    request: SyncRequest = None,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Trigger a manual Spiro data sync.
     
@@ -187,11 +184,9 @@ async def trigger_sync(request: SyncRequest = None):
     if not is_spiro_enabled():
         raise HTTPException(status_code=400, detail="Spiro integration is disabled")
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     request = request or SyncRequest()
-    service = SpiroSyncService(db)
+    service = SpiroSyncService(database)
     
     entity_types = request.entity_types or ["contacts", "companies", "opportunities"]
     results = {}
@@ -237,7 +232,8 @@ async def sync_all(force_full: bool = False):
 @spiro_router.get("/companies")
 async def list_spiro_companies(
     search: Optional[str] = None,
-    limit: int = Query(50, le=200)
+    limit: int = Query(50, le=200),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     List synced Spiro companies.
@@ -246,14 +242,12 @@ async def list_spiro_companies(
         search: Optional search term for company name
         limit: Maximum results to return
     """
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}
     if search:
         query["name"] = {"$regex": search, "$options": "i"}
     
-    cursor = db.spiro_companies.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_companies.find(query, {"_id": 0}).limit(limit)
     companies = await cursor.to_list(length=limit)
     
     return {
@@ -266,7 +260,8 @@ async def list_spiro_companies(
 async def list_spiro_contacts(
     search: Optional[str] = None,
     company_id: Optional[str] = None,
-    limit: int = Query(50, le=200)
+    limit: int = Query(50, le=200),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """
     List synced Spiro contacts.
@@ -276,8 +271,6 @@ async def list_spiro_contacts(
         company_id: Filter by Spiro company ID
         limit: Maximum results to return
     """
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}
     if search:
@@ -288,7 +281,7 @@ async def list_spiro_contacts(
     if company_id:
         query["company_id"] = company_id
     
-    cursor = db.spiro_contacts.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_contacts.find(query, {"_id": 0}).limit(limit)
     contacts = await cursor.to_list(length=limit)
     
     return {
@@ -300,17 +293,16 @@ async def list_spiro_contacts(
 @spiro_router.get("/opportunities")
 async def list_spiro_opportunities(
     company_id: Optional[str] = None,
-    limit: int = Query(50, le=200)
+    limit: int = Query(50, le=200),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """List synced Spiro opportunities."""
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     query = {}
     if company_id:
         query["company_id"] = company_id
     
-    cursor = db.spiro_opportunities.find(query, {"_id": 0}).limit(limit)
+    cursor = database.spiro_opportunities.find(query, {"_id": 0}).limit(limit)
     opportunities = await cursor.to_list(length=limit)
     
     return {
@@ -324,7 +316,10 @@ async def list_spiro_opportunities(
 # =============================================================================
 
 @spiro_router.get("/context/{doc_id}")
-async def get_document_spiro_context(doc_id: str):
+async def get_document_spiro_context(
+    doc_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """
     Get SpiroContext for a specific document.
     
@@ -332,11 +327,9 @@ async def get_document_spiro_context(doc_id: str):
     """
     from services.spiro import get_spiro_context_for_document
     
-    if db is None:
-        raise HTTPException(status_code=500, detail="Database not initialized")
     
     # Get document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await database.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     

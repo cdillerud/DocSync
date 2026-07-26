@@ -4,20 +4,17 @@ GPI Document Hub - Config Router
 System settings, mailbox sources, and configuration.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional, List
 from datetime import datetime, timezone
 from pydantic import BaseModel
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from dependencies import get_database
 import uuid
 
 router = APIRouter(prefix="/config", tags=["config"])
 
-# Database - set by main app
-db = None
-
-def set_db(database):
-    global db
-    db = database
 
 
 # ==================== MODELS ====================
@@ -40,23 +37,29 @@ class SystemConfig(BaseModel):
 # ==================== MAILBOX SOURCES ====================
 
 @router.get("/mailboxes")
-async def list_mailboxes():
+async def list_mailboxes(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """List all configured mailbox sources."""
-    mailboxes = await db.mailbox_sources.find({}, {"_id": 0}).to_list(50)
+    mailboxes = await database.mailbox_sources.find({}, {"_id": 0}).to_list(50)
     return {"mailboxes": mailboxes}
 
 
 @router.get("/mailboxes/{mailbox_id}")
-async def get_mailbox(mailbox_id: str):
+async def get_mailbox(mailbox_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get a single mailbox configuration."""
-    mailbox = await db.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
+    mailbox = await database.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
     if not mailbox:
         raise HTTPException(status_code=404, detail="Mailbox not found")
     return mailbox
 
 
 @router.post("/mailboxes")
-async def create_mailbox(source: MailboxSource):
+async def create_mailbox(source: MailboxSource,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Create a new mailbox source."""
     mailbox_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -70,16 +73,18 @@ async def create_mailbox(source: MailboxSource):
         "updated_utc": now
     }
     
-    await db.mailbox_sources.insert_one(mailbox)
+    await database.mailbox_sources.insert_one(mailbox)
     mailbox.pop("_id", None)
     
     return mailbox
 
 
 @router.put("/mailboxes/{mailbox_id}")
-async def update_mailbox(mailbox_id: str, source: MailboxSource):
+async def update_mailbox(mailbox_id: str, source: MailboxSource,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Update a mailbox configuration."""
-    existing = await db.mailbox_sources.find_one({"id": mailbox_id})
+    existing = await database.mailbox_sources.find_one({"id": mailbox_id})
     if not existing:
         raise HTTPException(status_code=404, detail="Mailbox not found")
     
@@ -88,16 +93,18 @@ async def update_mailbox(mailbox_id: str, source: MailboxSource):
         "updated_utc": datetime.now(timezone.utc).isoformat()
     }
     
-    await db.mailbox_sources.update_one({"id": mailbox_id}, {"$set": update})
+    await database.mailbox_sources.update_one({"id": mailbox_id}, {"$set": update})
     
-    updated = await db.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
+    updated = await database.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
     return updated
 
 
 @router.delete("/mailboxes/{mailbox_id}")
-async def delete_mailbox(mailbox_id: str):
+async def delete_mailbox(mailbox_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Delete a mailbox source."""
-    result = await db.mailbox_sources.delete_one({"id": mailbox_id})
+    result = await database.mailbox_sources.delete_one({"id": mailbox_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Mailbox not found")
     
@@ -105,9 +112,11 @@ async def delete_mailbox(mailbox_id: str):
 
 
 @router.post("/mailboxes/{mailbox_id}/poll")
-async def trigger_mailbox_poll(mailbox_id: str):
+async def trigger_mailbox_poll(mailbox_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Manually trigger a mailbox poll."""
-    mailbox = await db.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
+    mailbox = await database.mailbox_sources.find_one({"id": mailbox_id}, {"_id": 0})
     if not mailbox:
         raise HTTPException(status_code=404, detail="Mailbox not found")
     
@@ -123,9 +132,11 @@ async def trigger_mailbox_poll(mailbox_id: str):
 # ==================== VENDOR ALIASES ====================
 
 @router.get("/vendor-aliases")
-async def list_vendor_aliases():
+async def list_vendor_aliases(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """List all vendor aliases."""
-    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    aliases = await database.vendor_aliases.find({}, {"_id": 0}).to_list(500)
     return {"aliases": aliases}
 
 
@@ -133,14 +144,15 @@ async def list_vendor_aliases():
 async def create_vendor_alias(
     alias_string: str,
     canonical_vendor_no: str,
-    canonical_vendor_name: str
+    canonical_vendor_name: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Create a new vendor alias."""
     alias_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     
     # Check if alias already exists
-    existing = await db.vendor_aliases.find_one(
+    existing = await database.vendor_aliases.find_one(
         {"alias_string": {"$regex": f"^{alias_string}$", "$options": "i"}}
     )
     if existing:
@@ -157,16 +169,18 @@ async def create_vendor_alias(
         "updated_utc": now
     }
     
-    await db.vendor_aliases.insert_one(alias)
+    await database.vendor_aliases.insert_one(alias)
     alias.pop("_id", None)
     
     return alias
 
 
 @router.delete("/vendor-aliases/{alias_id}")
-async def delete_vendor_alias(alias_id: str):
+async def delete_vendor_alias(alias_id: str,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Delete a vendor alias."""
-    result = await db.vendor_aliases.delete_one({"id": alias_id})
+    result = await database.vendor_aliases.delete_one({"id": alias_id})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Alias not found")
     
@@ -176,9 +190,11 @@ async def delete_vendor_alias(alias_id: str):
 # ==================== SYSTEM CONFIG ====================
 
 @router.get("/system")
-async def get_system_config():
+async def get_system_config(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get system configuration."""
-    config = await db.hub_config.find_one({"type": "system"}, {"_id": 0})
+    config = await database.hub_config.find_one({"type": "system"}, {"_id": 0})
     
     if not config:
         # Return defaults
@@ -193,7 +209,9 @@ async def get_system_config():
 
 
 @router.put("/system")
-async def update_system_config(config: SystemConfig):
+async def update_system_config(config: SystemConfig,
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Update system configuration."""
     now = datetime.now(timezone.utc).isoformat()
     
@@ -203,7 +221,7 @@ async def update_system_config(config: SystemConfig):
         "updated_utc": now
     }
     
-    await db.hub_config.update_one(
+    await database.hub_config.update_one(
         {"type": "system"},
         {"$set": update},
         upsert=True
@@ -213,11 +231,13 @@ async def update_system_config(config: SystemConfig):
 
 
 @router.get("/health")
-async def health_check():
+async def health_check(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """System health check."""
     try:
         # Check DB connection
-        await db.command("ping")
+        await database.command("ping")
         db_status = "healthy"
     except Exception as e:
         db_status = f"error: {str(e)}"

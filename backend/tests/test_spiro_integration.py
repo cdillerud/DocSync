@@ -12,9 +12,10 @@ from datetime import datetime, timezone
 
 # Import modules under test
 from services.spiro.spiro_client import (
-    SpiroClient, SpiroTokenManager, normalize_company_name,
+    SpiroClient, SpiroTokenManager,
     is_spiro_enabled
 )
+from services.spiro.spiro_context import normalize_company_name
 from services.spiro.spiro_sync import (
     SpiroSyncService, transform_contact, transform_company, transform_opportunity
 )
@@ -304,6 +305,7 @@ class TestSpiroContextGenerator:
         
         # Mock company collection
         mock_companies_cursor = MagicMock()
+        mock_companies_cursor.limit.return_value = mock_companies_cursor
         mock_companies_cursor.to_list = AsyncMock(return_value=[
             {
                 "spiro_id": "999",
@@ -332,6 +334,7 @@ class TestSpiroContextGenerator:
         
         # Mock contact collection
         mock_contacts_cursor = MagicMock()
+        mock_contacts_cursor.limit.return_value = mock_contacts_cursor
         mock_contacts_cursor.to_list = AsyncMock(return_value=[
             {
                 "spiro_id": "12345",
@@ -347,6 +350,7 @@ class TestSpiroContextGenerator:
         
         # Mock opportunity collection
         mock_opps_cursor = MagicMock()
+        mock_opps_cursor.limit.return_value = mock_opps_cursor
         mock_opps_cursor.to_list = AsyncMock(return_value=[])
         db.spiro_opportunities = MagicMock()
         db.spiro_opportunities.find = MagicMock(return_value=mock_opps_cursor)

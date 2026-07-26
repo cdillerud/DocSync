@@ -43,12 +43,12 @@ async def lifespan(app: FastAPI):
     mongo_client = AsyncIOMotorClient(MONGO_URL)
     db = mongo_client[DB_NAME]
     
-    # Initialize routers with database
-    documents.set_db(db)
-    ingestion.set_dependencies(db, classify_document, route_to_workflow)
-    workflows.set_dependencies(db, WorkflowEngine)
-    dashboard.set_db(db)
-    config.set_db(db)
+    # Expose the active database through FastAPI dependency injection
+    app.state.database = db
+
+    # Initialize remaining service dependencies
+    ingestion.set_dependencies(classify_document, route_to_workflow)
+    workflows.set_dependencies(WorkflowEngine)
     
     # Create indexes
     await create_indexes()

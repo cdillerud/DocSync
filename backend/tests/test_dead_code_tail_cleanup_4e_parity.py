@@ -142,13 +142,16 @@ class TestSourceInspectionGuardrails:
                     break
             assert found, f"services.vendor_matching::{fn_name} not found"
 
-    def test_document_handlers_untouched_for_tier3(self):
-        """services/document_handlers.py still imports Tier-3 helpers from server."""
-        dh_src = (BACKEND_DIR / "services" / "document_handlers.py").read_text()
-        # These should still be in the `from server import (...)` block inside
-        # intake_document_from_bytes (Step 4c.3 has not yet landed).
-        assert "lookup_vendor_alias" in dh_src
-        assert "check_duplicate_document" in dh_src
+    def test_raw_intake_service_retains_tier3_imports(self):
+        """The authoritative raw-intake body retains Tier-3 imports."""
+        service_src = (
+            BACKEND_DIR
+            / "services"
+            / "document_bytes_intake_service.py"
+        ).read_text()
+
+        assert "lookup_vendor_alias" in service_src
+        assert "check_duplicate_document" in service_src
 
     def test_server_py_shrank(self):
         total = sum(1 for _ in (BACKEND_DIR / "server.py").open("r"))

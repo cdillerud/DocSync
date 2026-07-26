@@ -101,12 +101,23 @@ DECLARED_REVERSE_ARROW_NAMES = frozenset({
 
 
 def _intake_func_node():
-    from services import document_handlers
-    tree = ast.parse(inspect.getsource(document_handlers))
+    from services import document_bytes_intake_service
+
+    tree = ast.parse(
+        inspect.getsource(document_bytes_intake_service)
+    )
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == INTAKE_FUNC_NAME:
+        if (
+            isinstance(node, ast.AsyncFunctionDef)
+            and node.name == INTAKE_FUNC_NAME
+        ):
             return node
-    raise AssertionError(f"{INTAKE_FUNC_NAME} not found in document_handlers")
+
+    raise AssertionError(
+        f"{INTAKE_FUNC_NAME} not found in "
+        "document_bytes_intake_service"
+    )
 
 
 def _iter_importfroms(fn_node):
@@ -177,15 +188,18 @@ class TestLazyBlockShrunk:
         )
 
     def test_new_4d7_import_line_with_alias_present(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
+        service_src = Path(
+            BACKEND_ROOT
+            / "services"
+            / "document_bytes_intake_service.py"
         ).read_text()
+
         assert (
             "from workflows.document_capture.rules.workflow_status import (\n"
             "        update_standard_workflow_status "
             "as _update_standard_workflow_status,\n"
             "    )"
-        ) in handlers_src, "Step 4d.7 alias-import block missing"
+        ) in service_src, "Step 4d.7 alias-import block missing"
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +317,16 @@ class TestInnerDefSurvived:
 # ---------------------------------------------------------------------------
 class TestCallSiteByteParity:
     def test_intake_use_site_intact(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
+        service_src = Path(
+            BACKEND_ROOT
+            / "services"
+            / "document_bytes_intake_service.py"
         ).read_text()
-        assert "await _update_standard_workflow_status(" in handlers_src
+
+        assert (
+            "await _update_standard_workflow_status("
+            in service_src
+        )
 
 
 # ---------------------------------------------------------------------------

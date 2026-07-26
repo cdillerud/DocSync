@@ -128,12 +128,13 @@ class TestDocumentHandlersRewiring:
             "from services.document_retry_service import retry_document",
             "from services.document_upload_service import upload_document",
             "from services.document_intake_service import intake_document",
+            "from services.document_bytes_intake_service import",
         )
 
         for required_import in required_imports:
             assert required_import in source
 
-    def test_handlers_is_thin_facade_plus_bytes_intake(self):
+    def test_handlers_is_pure_service_facade(self):
         import ast
         import inspect
         import services.document_handlers as dh
@@ -150,13 +151,14 @@ class TestDocumentHandlersRewiring:
             )
         ]
 
-        assert local_functions == ["intake_document_from_bytes"]
+        assert local_functions == []
+        assert (
+            "from services.document_bytes_intake_service import"
+            in source
+        )
         assert "from fastapi import" not in source
         assert "from pydantic import" not in source
         assert "from deps import get_db" not in source
-        assert "def _get_workflow_enums" not in source
-        assert "def _get_transaction_action" not in source
-        assert "def _get_default_job_types" not in source
 
     def test_classify_document_uses_direct_import(self):
         import inspect
@@ -186,12 +188,16 @@ class TestDocumentHandlersRewiring:
 
         assert handlers.intake_document is service_intake
 
-    def test_bytes_intake_remains_in_handlers(self):
+    def test_bytes_intake_uses_extracted_service(self):
         import services.document_handlers as handlers
+        from services.document_bytes_intake_service import (
+            intake_document_from_bytes as service_intake,
+        )
 
+        assert handlers.intake_document_from_bytes is service_intake
         assert (
             handlers.intake_document_from_bytes.__module__
-            == "services.document_handlers"
+            == "services.document_bytes_intake_service"
         )
 
 

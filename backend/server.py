@@ -3585,6 +3585,7 @@ _mailbox_last_poll_times = {}  # Legacy — real state is in email_polling_svc
 # ---------------------------------------------------------------------------
 async def startup():
     global _email_polling_task
+    from services.lifecycle_service import register_background_task
     from services.lifecycle_startup_service import initialize_core_indexes
     await initialize_core_indexes(db=db, logger=logger)
     from services.lifecycle_startup_service import initialize_pre_scheduler_services
@@ -3608,19 +3609,19 @@ async def startup():
     except Exception as _e:
         logger.warning("ensure_mail_intake_indexes failed (non-fatal): %s", _e)
     global _dynamic_mailbox_polling_task
-    _dynamic_mailbox_polling_task = asyncio.create_task(email_polling_svc.dynamic_mailbox_polling_worker())
+    _dynamic_mailbox_polling_task = register_background_task(asyncio.create_task(email_polling_svc.dynamic_mailbox_polling_worker()), name='dynamic_mailbox_polling')
     email_polling_svc._dynamic_mailbox_polling_task = _dynamic_mailbox_polling_task
     logger.info("Dynamic mailbox polling worker started")
     
     # Start AP email polling worker if enabled (legacy env var method)
     if EMAIL_POLLING_ENABLED:
-        _email_polling_task = asyncio.create_task(email_polling_svc.email_polling_worker())
+        _email_polling_task = register_background_task(asyncio.create_task(email_polling_svc.email_polling_worker()), name='email_polling')
         logger.info("AP email polling worker started (interval: %d min, user: %s)", 
                    EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
     # Start Sales email polling worker if enabled (legacy env var method)
     global _sales_polling_task
     if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
-        _sales_polling_task = asyncio.create_task(email_polling_svc._sales_email_polling_worker())
+        _sales_polling_task = register_background_task(asyncio.create_task(email_polling_svc._sales_email_polling_worker()), name='sales_polling')
         logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
                    SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
 
@@ -3634,7 +3635,7 @@ async def startup():
     )
     await ensure_pilot_indexes(db)
     if _ISP_ENABLED:
-        _inside_sales_pilot_task = asyncio.create_task(inside_sales_pilot_worker())
+        _inside_sales_pilot_task = register_background_task(asyncio.create_task(inside_sales_pilot_worker()), name='inside_sales_pilot')
         logger.info(
             "Inside Sales Pilot worker started (mailboxes=%s, interval=%dm)",
             _ISP_MAILBOXES, _ISP_INTERVAL,
@@ -3694,7 +3695,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[CatalogSync] Scheduled sync failed: %s", e)
             await asyncio.sleep(24 * 3600)  # Sleep 24 hours
-    asyncio.create_task(_catalog_sync_scheduler())
+    register_background_task(asyncio.create_task(_catalog_sync_scheduler()), name='catalog_sync')
     logger.info("BC Catalog Sync scheduler started (interval: 24h)")
 
     # ── Intake Learning Refresh scheduler (daily) ──
@@ -3721,7 +3722,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[IntakeLearning.scheduler] failed: %s", e)
             await asyncio.sleep(interval)
-    asyncio.create_task(_intake_learning_refresh_scheduler())
+    register_background_task(asyncio.create_task(_intake_learning_refresh_scheduler()), name='intake_learning_refresh')
     logger.info("Intake Learning Refresh scheduler started (interval: 24h)")
 
     # ── Intake Pattern Hygiene scheduler (nightly) ──
@@ -3743,7 +3744,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[PatternHygiene.scheduler] failed: %s", e)
             await asyncio.sleep(24 * 3600)
-    asyncio.create_task(_intake_pattern_hygiene_scheduler())
+    register_background_task(asyncio.create_task(_intake_pattern_hygiene_scheduler()), name='intake_pattern_hygiene')
     logger.info("Unified Pattern Hygiene scheduler started (interval: 24h, domains: sales_intake + ap_posting)")
 
     # ── Drift Alert scheduler (nightly, v2.5.0) ──
@@ -3764,7 +3765,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[DriftAlerts.scheduler] failed: %s", e)
             await asyncio.sleep(24 * 3600)
-    asyncio.create_task(_drift_alert_scheduler())
+    register_background_task(asyncio.create_task(_drift_alert_scheduler()), name='drift_alert')
     logger.info("Drift Alert scheduler started (interval: 24h)")
 
     # ── Weekly Digest scheduler (v2.5.2) ──
@@ -3786,7 +3787,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[WeeklyDigest.scheduler] failed: %s", e)
             await asyncio.sleep(24 * 3600)
-    asyncio.create_task(_weekly_digest_scheduler())
+    register_background_task(asyncio.create_task(_weekly_digest_scheduler()), name='weekly_digest')
     logger.info("Weekly Digest scheduler started (interval: 24h, rebuilds current-week digest)")
 
     # ── Drift Watchlist scheduler (v2.5.4) ───────────────────────
@@ -3825,7 +3826,7 @@ async def startup():
                 logger.warning("[DriftWatchlist.scheduler] tick failed: %s", e)
             # Wake every hour so we don't drift past the target window
             await asyncio.sleep(3600)
-    asyncio.create_task(_drift_watchlist_scheduler())
+    register_background_task(asyncio.create_task(_drift_watchlist_scheduler()), name='drift_watchlist')
     logger.info("Drift Watchlist scheduler started (check: hourly; fires once per target day/hour)")
 
     # Start BC Shipment Sync scheduler (every 1h)
@@ -3841,7 +3842,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[ShipmentSync] Scheduled sync failed: %s", e)
             await asyncio.sleep(3600)  # 1 hour
-    asyncio.create_task(_shipment_sync_scheduler())
+    register_background_task(asyncio.create_task(_shipment_sync_scheduler()), name='shipment_sync')
     logger.info("BC Shipment Sync scheduler started (interval: 1h)")
 
     # Start Knowledge Base auto-seed scheduler (on startup + every 6h)
@@ -3860,7 +3861,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[KnowledgeSeed] Scheduled seed failed: %s", e)
             await asyncio.sleep(6 * 3600)  # Every 6 hours
-    asyncio.create_task(_knowledge_seed_scheduler())
+    register_background_task(asyncio.create_task(_knowledge_seed_scheduler()), name='knowledge_seed')
     logger.info("Knowledge Seed scheduler started (on startup + every 6h)")
 
     # ── Daily Trace scheduler — runs random PROD BC invoice traces ──
@@ -3877,7 +3878,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[DailyTrace] Scheduler failed: %s", e)
             await asyncio.sleep(24 * 3600)  # Every 24 hours
-    asyncio.create_task(_daily_trace_scheduler())
+    register_background_task(asyncio.create_task(_daily_trace_scheduler()), name='daily_trace')
     logger.info("Daily Trace scheduler started (interval: 24h)")
 
     # Initialize Auto-Resolution Service
@@ -3907,7 +3908,7 @@ async def startup():
         else:
             logger.info("[Startup] No not_run documents to re-queue")
 
-    asyncio.create_task(_startup_requeue_not_run())
+    register_background_task(asyncio.create_task(_startup_requeue_not_run()), name='startup_requeue_not_run')
 
     # ── Startup: Auto-file ready docs left in inbox (prevents post-deploy regression) ──
     async def _startup_sync_status():
@@ -3924,7 +3925,7 @@ async def startup():
         except Exception as e:
             logger.warning("[Startup] Sync-status auto-run failed: %s", e)
 
-    asyncio.create_task(_startup_sync_status())
+    register_background_task(asyncio.create_task(_startup_sync_status()), name='startup_sync_status')
 
     # ── Periodic: Re-run sync_readiness_to_status every 30 minutes ──
     async def _periodic_sync_status():
@@ -3941,7 +3942,7 @@ async def startup():
                 logger.warning("[PeriodicSync] Sync-status failed: %s", e)
             await asyncio.sleep(30 * 60)  # Every 30 minutes
 
-    asyncio.create_task(_periodic_sync_status())
+    register_background_task(asyncio.create_task(_periodic_sync_status()), name='periodic_sync_status')
     logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
 
     # ── Startup: Clean up noise events from posting_learning_events ──
@@ -4006,7 +4007,7 @@ async def startup():
         except Exception as e:
             logger.warning("[Startup] Noise event cleanup failed: %s", e)
 
-    asyncio.create_task(_startup_clean_noise_learning_events())
+    register_background_task(asyncio.create_task(_startup_clean_noise_learning_events()), name='startup_clean_noise_learning_events')
 
     # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
     async def _startup_fix_shipping_po_escalations():
@@ -4048,7 +4049,7 @@ async def startup():
         except Exception as e:
             logger.warning("[Startup] Shipping PO-escalation fix failed: %s", e)
 
-    asyncio.create_task(_startup_fix_shipping_po_escalations())
+    register_background_task(asyncio.create_task(_startup_fix_shipping_po_escalations()), name='startup_fix_shipping_po_escalations')
 
 
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──
@@ -4081,7 +4082,7 @@ async def startup():
         except Exception as e:
             logger.warning("[Startup] PI no backfill failed: %s", e)
 
-    asyncio.create_task(_startup_backfill_pi_no())
+    register_background_task(asyncio.create_task(_startup_backfill_pi_no()), name='startup_backfill_pi_no')
 
     
     # Initialize Vendor Intelligence Service
@@ -4152,7 +4153,7 @@ async def startup():
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:
         from routers.pilot import _daily_pilot_summary_scheduler
-        _pilot_summary_task = asyncio.create_task(_daily_pilot_summary_scheduler())
+        _pilot_summary_task = register_background_task(asyncio.create_task(_daily_pilot_summary_scheduler()), name='pilot_summary')
         logger.info("Daily pilot summary scheduler started (cron: %d:00 UTC)", PILOT_SUMMARY_CRON_HOUR_UTC)
     
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
@@ -4263,7 +4264,7 @@ async def startup():
                 logger.warning("[VendorLearnBackfill] Scheduled backfill failed: %s", e)
 
             await asyncio.sleep(2 * 3600)  # Every 2 hours
-    asyncio.create_task(_draft_feedback_sync_scheduler())
+    register_background_task(asyncio.create_task(_draft_feedback_sync_scheduler()), name='draft_feedback_sync')
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
 
     # === Deep Learning: Self-Correction + Vendor Maturity (every 4 hours) ===
@@ -4282,7 +4283,7 @@ async def startup():
             except Exception as e:
                 logger.warning("[DeepLearning] Scheduled deep learning failed: %s", e)
             await asyncio.sleep(4 * 3600)  # Every 4 hours
-    asyncio.create_task(_deep_learning_scheduler())
+    register_background_task(asyncio.create_task(_deep_learning_scheduler()), name='deep_learning')
     logger.info("Deep Learning scheduler started (self-correction + vendor maturity, interval: 4h)")
 
     # === Intelligence Maintenance: Duplicate Clearing + Escalation Backfill (every 2 hours) ===
@@ -4419,7 +4420,7 @@ async def startup():
                 logger.warning("[IntelMaint] Gap closer failed: %s", e)
 
             await asyncio.sleep(2 * 3600)  # Every 2 hours
-    asyncio.create_task(_intelligence_maintenance_scheduler())
+    register_background_task(asyncio.create_task(_intelligence_maintenance_scheduler()), name='intelligence_maintenance')
     logger.info("Intelligence Maintenance scheduler started (dup clear + escalation + dup backfill, interval: 2h)")
 
     # === PO Auto-Retry Queue (every 4 hours) ===
@@ -4554,7 +4555,7 @@ async def startup():
                 logger.warning("[CapturedRetry] Scheduled cycle failed: %s", e)
 
             await asyncio.sleep(CAPTURED_RETRY_INTERVAL_SECONDS)
-    asyncio.create_task(_captured_retry_scheduler())
+    register_background_task(asyncio.create_task(_captured_retry_scheduler()), name='captured_retry')
     logger.info("Captured Doc Auto-Retry scheduler started (interval: %ds, max retries: %d)", CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_MAX_RETRIES)
 
     async def _po_retry_scheduler():
@@ -4696,7 +4697,7 @@ async def startup():
                 logger.warning("[PO Retry] Scheduled cycle failed: %s", e)
 
             await asyncio.sleep(PO_RETRY_INTERVAL_HOURS * 3600)
-    asyncio.create_task(_po_retry_scheduler())
+    register_background_task(asyncio.create_task(_po_retry_scheduler()), name='po_retry')
     logger.info("PO Auto-Retry scheduler started (interval: %dh, max wait: %d days)", PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS)
 
     # === ReadyForPost Auto-Post Scheduler (every 5 minutes) ===
@@ -4837,7 +4838,7 @@ async def startup():
 
             await asyncio.sleep(READY_POST_INTERVAL_SECONDS)
 
-    asyncio.create_task(_ready_to_post_scheduler())
+    register_background_task(asyncio.create_task(_ready_to_post_scheduler()), name='ready_to_post')
     logger.info("ReadyToPost Auto-Post scheduler started (interval: %ds, max retries: %d)",
                 READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES)
 

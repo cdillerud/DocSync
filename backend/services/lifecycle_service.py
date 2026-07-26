@@ -10,6 +10,54 @@ from __future__ import annotations
 import asyncio
 
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
+def register_background_task(
+    task: asyncio.Task,
+    *,
+    name: str,
+) -> asyncio.Task:
+    """Register one application-owned background task."""
+    task.set_name(name)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(
+        _BACKGROUND_TASKS.discard
+    )
+
+    return task
+
+
+async def cancel_registered_tasks(
+    logger,
+) -> None:
+    """Cancel and await every active registered task."""
+    tasks = [
+        task
+        for task in tuple(
+            _BACKGROUND_TASKS
+        )
+        if not task.done()
+    ]
+
+    for task in tasks:
+        task.cancel()
+
+    if tasks:
+        await asyncio.gather(
+            *tasks,
+            return_exceptions=True,
+        )
+
+        logger.info(
+            "Stopped %d registered "
+            "background tasks",
+            len(tasks),
+        )
+
+    _BACKGROUND_TASKS.clear()
+
+
 async def _cancel_task(
     task,
     stopped_message: str,
@@ -61,6 +109,10 @@ async def shutdown_application(
         pilot_summary_task,
         "Pilot summary scheduler stopped",
         logger,
+    )
+
+    await cancel_registered_tasks(
+        logger
     )
 
     cache = get_cache_service()

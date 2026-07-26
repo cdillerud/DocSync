@@ -3726,21 +3726,8 @@ async def startup():
     # Scans the unified learning_events_v2 log for anomalies (trusted-pattern
     # rejections, bounds drift, AP template drift, catalog explosions) and
     # writes structured alerts to `learning_drift_alerts`.
-    async def _drift_alert_scheduler():
-        await asyncio.sleep(900)  # 15-min startup delay so other schedulers settle
-        while True:
-            try:
-                from services.drift_alert_service import run_drift_scan
-                result = await run_drift_scan(actor="scheduler")
-                logger.info(
-                    "[DriftAlerts.scheduler] done — fired=%d open_total=%d",
-                    result.get("rules_fired", 0),
-                    result.get("open_alerts_total", 0),
-                )
-            except Exception as e:
-                logger.warning("[DriftAlerts.scheduler] failed: %s", e)
-            await asyncio.sleep(24 * 3600)
-    register_background_task(asyncio.create_task(_drift_alert_scheduler()), name='drift_alert')
+    from services.lifecycle_scheduler_service import drift_alert_scheduler
+    register_background_task(asyncio.create_task(drift_alert_scheduler(logger=logger)), name='drift_alert')
     logger.info("Drift Alert scheduler started (interval: 24h)")
 
     # ── Weekly Digest scheduler (v2.5.2) ──

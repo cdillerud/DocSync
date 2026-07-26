@@ -2894,3 +2894,304 @@ class TestPatternHygieneRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestDriftAlertExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_drift_alert_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "drift_alert_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["drift_alert"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "drift_alert_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "drift_alert_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "d59460658d0b45de09c5909c02710c47c200500a8acac37727a3fc3108be8cb0"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            drift_alert_scheduler,
+        )
+
+        signature = inspect.signature(
+            drift_alert_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestDriftAlertRuntime:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        run_drift_scan = AsyncMock(
+            return_value={
+                "rules_fired": 4,
+                "open_alerts_total": 11,
+            }
+        )
+
+        module = ModuleType(
+            "services.drift_alert_service"
+        )
+
+        module.run_drift_scan = (
+            run_drift_scan
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.drift_alert_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "drift_alert_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_alert_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (900,),
+            (24 * 3600,),
+        ]
+
+        run_drift_scan.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.info.assert_called_once_with(
+            "[DriftAlerts.scheduler] "
+            "done — fired=%d open_total=%d",
+            4,
+            11,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated drift scan failure"
+        )
+
+        run_drift_scan = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "services.drift_alert_service"
+        )
+
+        module.run_drift_scan = (
+            run_drift_scan
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.drift_alert_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "drift_alert_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.drift_alert_scheduler(
+                logger=logger,
+            )
+
+        run_drift_scan.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.warning.assert_called_once_with(
+            "[DriftAlerts.scheduler] "
+            "failed: %s",
+            error,
+        )

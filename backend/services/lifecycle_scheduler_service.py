@@ -162,3 +162,22 @@ async def intake_pattern_hygiene_scheduler(
         except Exception as e:
             logger.warning("[PatternHygiene.scheduler] failed: %s", e)
         await asyncio.sleep(24 * 3600)
+
+
+async def drift_alert_scheduler(
+    *,
+    logger,
+) -> None:
+    await asyncio.sleep(900)  # 15-min startup delay so other schedulers settle
+    while True:
+        try:
+            from services.drift_alert_service import run_drift_scan
+            result = await run_drift_scan(actor="scheduler")
+            logger.info(
+                "[DriftAlerts.scheduler] done — fired=%d open_total=%d",
+                result.get("rules_fired", 0),
+                result.get("open_alerts_total", 0),
+            )
+        except Exception as e:
+            logger.warning("[DriftAlerts.scheduler] failed: %s", e)
+        await asyncio.sleep(24 * 3600)

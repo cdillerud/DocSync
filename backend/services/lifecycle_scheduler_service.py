@@ -67,3 +67,21 @@ async def startup_requeue_not_run(
         )
     else:
         logger.info("[Startup] No not_run documents to re-queue")
+
+
+async def catalog_sync_scheduler(
+    *,
+    db,
+    logger,
+) -> None:
+    """Background worker: sync BC item catalog and GL accounts every 24 hours."""
+    await asyncio.sleep(60)  # Initial delay — let other services start first
+    while True:
+        try:
+            from services.bc_catalog_sync_service import sync_all
+            logger.info("[CatalogSync] Starting scheduled BC catalog sync")
+            result = await sync_all(db)
+            logger.info("[CatalogSync] Completed: %s", result)
+        except Exception as e:
+            logger.warning("[CatalogSync] Scheduled sync failed: %s", e)
+        await asyncio.sleep(24 * 3600)  # Sleep 24 hours

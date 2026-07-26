@@ -1228,3 +1228,391 @@ class TestStartupRequeueRuntime:
             "[Startup] No not_run documents "
             "to re-queue"
         )
+
+
+class TestCatalogSyncExtraction:
+    def test_server_uses_canonical_catalog_coroutine(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        nested = [
+            node
+            for node in startup.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "_catalog_sync_scheduler"
+            )
+        ]
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "catalog_sync_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert nested == []
+        assert len(imports) == 1
+
+    def test_catalog_registry_ownership_preserved(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["catalog_sync"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert isinstance(
+            create_task,
+            ast.Call,
+        )
+
+        assert isinstance(
+            create_task.func,
+            ast.Attribute,
+        )
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert isinstance(
+            coroutine_call,
+            ast.Call,
+        )
+
+        assert isinstance(
+            coroutine_call.func,
+            ast.Name,
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "catalog_sync_scheduler"
+        )
+
+        bindings = {
+            keyword.arg: (
+                keyword.value.id
+                if isinstance(
+                    keyword.value,
+                    ast.Name,
+                )
+                else None
+            )
+            for keyword
+            in coroutine_call.keywords
+        }
+
+        assert bindings == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+    def test_catalog_body_matches_original(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "catalog_sync_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "a9b26801843f4abcf83cf4d99c358da670ed7d956f9f6090dfd4dfc64e58e953"
+        )
+
+    def test_catalog_signature(self):
+        from services.lifecycle_scheduler_service import (
+            catalog_sync_scheduler,
+        )
+
+        signature = inspect.signature(
+            catalog_sync_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestCatalogSyncRuntime:
+    @pytest.mark.asyncio
+    async def test_runs_catalog_sync_and_logs(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        sync_all = AsyncMock(
+            return_value={
+                "items": 25,
+                "gl_accounts": 8,
+            }
+        )
+
+        catalog_module = ModuleType(
+            "services.bc_catalog_sync_service"
+        )
+
+        catalog_module.sync_all = sync_all
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.bc_catalog_sync_service",
+            catalog_module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "bc_catalog_sync_service",
+            catalog_module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.catalog_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        assert sleep.await_count == 2
+
+        assert (
+            sleep.await_args_list[
+                0
+            ].args
+            == (60,)
+        )
+
+        assert (
+            sleep.await_args_list[
+                1
+            ].args
+            == (24 * 3600,)
+        )
+
+        sync_all.assert_awaited_once_with(
+            db
+        )
+
+        assert (
+            logger.info.call_args_list[
+                0
+            ].args
+            == (
+                "[CatalogSync] Starting "
+                "scheduled BC catalog sync",
+            )
+        )
+
+        assert (
+            logger.info.call_args_list[
+                1
+            ].args
+            == (
+                "[CatalogSync] Completed: %s",
+                {
+                    "items": 25,
+                    "gl_accounts": 8,
+                },
+            )
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_catalog_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated catalog failure"
+        )
+
+        sync_all = AsyncMock(
+            side_effect=error
+        )
+
+        catalog_module = ModuleType(
+            "services.bc_catalog_sync_service"
+        )
+
+        catalog_module.sync_all = sync_all
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.bc_catalog_sync_service",
+            catalog_module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "bc_catalog_sync_service",
+            catalog_module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.catalog_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        logger.warning.assert_called_once_with(
+            "[CatalogSync] Scheduled sync "
+            "failed: %s",
+            error,
+        )

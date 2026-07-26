@@ -3509,3 +3509,431 @@ class TestWeeklyDigestRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestIntakeLearningRefreshExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_intake_learning_refresh_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "intake_learning_refresh_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "intake_learning_refresh"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "intake_learning_refresh_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "intake_learning_refresh_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "a9d97505a40b74f1bde205ccadecab29972fcf26b54cbab29773e792fa4022a3"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            intake_learning_refresh_scheduler,
+        )
+
+        signature = inspect.signature(
+            intake_learning_refresh_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestIntakeLearningRefreshRuntime:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "INTAKE_LEARNING_LOOKBACK_HOURS",
+            "36",
+        )
+
+        monkeypatch.setenv(
+            "INTAKE_LEARNING_INTERVAL_SECONDS",
+            "1234",
+        )
+
+        refresh_active_customers = AsyncMock(
+            return_value={
+                "active_customers": 8,
+                "docs_refreshed": 27,
+                "xls_refreshed": 4,
+            }
+        )
+
+        module = ModuleType(
+            "services.sales_intake_learning_service"
+        )
+
+        module.refresh_active_customers = (
+            refresh_active_customers
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.sales_intake_learning_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "sales_intake_learning_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.intake_learning_refresh_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (300,),
+            (1234,),
+        ]
+
+        refresh_active_customers.assert_awaited_once_with(
+            lookback_hours=36,
+        )
+
+        assert (
+            logger.info.call_args_list[
+                0
+            ].args
+            == (
+                "[IntakeLearning.scheduler] "
+                "Starting daily refresh "
+                "(lookback=%dh)",
+                36,
+            )
+        )
+
+        assert (
+            logger.info.call_args_list[
+                1
+            ].args
+            == (
+                "[IntakeLearning.scheduler] "
+                "done — customers=%d docs=%d "
+                "xls=%d",
+                8,
+                27,
+                4,
+            )
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_default_environment_values(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.delenv(
+            "INTAKE_LEARNING_LOOKBACK_HOURS",
+            raising=False,
+        )
+
+        monkeypatch.delenv(
+            "INTAKE_LEARNING_INTERVAL_SECONDS",
+            raising=False,
+        )
+
+        refresh_active_customers = AsyncMock(
+            return_value={}
+        )
+
+        module = ModuleType(
+            "services.sales_intake_learning_service"
+        )
+
+        module.refresh_active_customers = (
+            refresh_active_customers
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.sales_intake_learning_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "sales_intake_learning_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.intake_learning_refresh_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (300,),
+            (24 * 3600,),
+        ]
+
+        refresh_active_customers.assert_awaited_once_with(
+            lookback_hours=24,
+        )
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "INTAKE_LEARNING_LOOKBACK_HOURS",
+            "12",
+        )
+
+        monkeypatch.setenv(
+            "INTAKE_LEARNING_INTERVAL_SECONDS",
+            "777",
+        )
+
+        error = RuntimeError(
+            "simulated intake refresh failure"
+        )
+
+        refresh_active_customers = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "services.sales_intake_learning_service"
+        )
+
+        module.refresh_active_customers = (
+            refresh_active_customers
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.sales_intake_learning_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "sales_intake_learning_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.intake_learning_refresh_scheduler(
+                logger=logger,
+            )
+
+        refresh_active_customers.assert_awaited_once_with(
+            lookback_hours=12,
+        )
+
+        logger.warning.assert_called_once_with(
+            "[IntakeLearning.scheduler] "
+            "failed: %s",
+            error,
+        )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (300,),
+            (777,),
+        ]

@@ -202,3 +202,27 @@ async def weekly_digest_scheduler(
         except Exception as e:
             logger.warning("[WeeklyDigest.scheduler] failed: %s", e)
         await asyncio.sleep(24 * 3600)
+
+
+async def intake_learning_refresh_scheduler(
+    *,
+    logger,
+) -> None:
+    import os as _os
+    lookback = int(_os.environ.get("INTAKE_LEARNING_LOOKBACK_HOURS", "24"))
+    interval = int(_os.environ.get("INTAKE_LEARNING_INTERVAL_SECONDS", str(24 * 3600)))
+    await asyncio.sleep(300)  # Wait 5 min after startup so BC cache + catalog sync settle first
+    while True:
+        try:
+            from services.sales_intake_learning_service import refresh_active_customers
+            logger.info("[IntakeLearning.scheduler] Starting daily refresh (lookback=%dh)", lookback)
+            result = await refresh_active_customers(lookback_hours=lookback)
+            logger.info(
+                "[IntakeLearning.scheduler] done — customers=%d docs=%d xls=%d",
+                result.get("active_customers", 0),
+                result.get("docs_refreshed", 0),
+                result.get("xls_refreshed", 0),
+            )
+        except Exception as e:
+            logger.warning("[IntakeLearning.scheduler] failed: %s", e)
+        await asyncio.sleep(interval)

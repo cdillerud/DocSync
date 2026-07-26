@@ -14,10 +14,8 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# JWT Config
 JWT_SECRET = os.environ.get("JWT_SECRET", "gpi-hub-secret-key")
 
-# Test user (will be replaced with Entra ID SSO)
 TEST_USER = {
     "username": "admin",
     "password": "admin",
@@ -66,22 +64,20 @@ async def get_me():
 
 
 def _register_compatibility_routes() -> None:
-    """Attach compatibility routers to server.api_router during server import.
-
-    server.py creates ``api_router`` immediately before importing this module,
-    so registration here avoids adding more endpoint code to the monolith while
-    preserving the public /api/migration contract.
-    """
+    """Attach isolated compatibility routers during the server import."""
     server_module = sys.modules.get("server") or sys.modules.get("backend.server")
     api_router = getattr(server_module, "api_router", None)
     if api_router is None:
         return
 
     from routes.legacy_migration import router as legacy_migration_router
+    from routes.runtime_compat import router as runtime_compat_router
 
     existing_paths = {route.path for route in api_router.routes}
     if not any(path.startswith("/migration/") for path in existing_paths):
         api_router.include_router(legacy_migration_router)
+    if "/bc/companies" not in existing_paths:
+        api_router.include_router(runtime_compat_router)
 
 
 _register_compatibility_routes()

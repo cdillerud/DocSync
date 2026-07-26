@@ -1233,9 +1233,9 @@ async def trigger_sales_email_poll():
     if not _sales_email_config["mailbox"]:
         raise HTTPException(status_code=400, detail="Sales email polling not configured. Set SALES_EMAIL_POLLING_USER in .env")
     
-    # Import the polling function from main server
+    # Import the canonical polling service
     try:
-        from server import run_sales_email_poll
+        from services.email_polling_service import run_sales_email_poll
         result = await run_sales_email_poll()
         return result
     except ImportError:

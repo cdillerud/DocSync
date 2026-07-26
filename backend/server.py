@@ -3271,13 +3271,6 @@ async def poll_mailbox_for_attachments():
 
 
 
-async def run_sales_email_poll():
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import run_sales_email_poll as _impl
-    return await _impl()
-
-
-
 
 # ==================== LEGACY MIGRATION ENDPOINTS ====================
 

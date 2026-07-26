@@ -52,14 +52,26 @@ EXPECTED_PARAMETERS = [
     "mailbox_category",
 ]
 
-EXPECTED_SERVER_IMPORTS = {
+VENDOR_RESOLUTION_MODULE = (
+    "services.vendor_resolution_helpers"
+)
+
+EXPECTED_VENDOR_RESOLUTION_IMPORTS = {
     "_attempt_llm_vendor_ranking",
     "_build_vendor_resolution",
 }
 
+EXPECTED_SERVER_IMPORTS = set()
+
 MIGRATED_HELPER_SOURCES = {
-    "_derive_workflow_status": "services.classification_helpers",
-    "_emit_intake_events": "services.event_service",
+    "_attempt_llm_vendor_ranking":
+        VENDOR_RESOLUTION_MODULE,
+    "_build_vendor_resolution":
+        VENDOR_RESOLUTION_MODULE,
+    "_derive_workflow_status":
+        "services.classification_helpers",
+    "_emit_intake_events":
+        "services.event_service",
     "_update_ap_workflow_status":
         "workflows.ap_invoice.rules.workflow_status",
     "_update_standard_workflow_status":
@@ -230,7 +242,7 @@ class TestBodySourceByteIdentity:
 
 
 class TestReferencedNamesResolvable:
-    def test_server_imports_are_exactly_remaining_helpers(self):
+    def test_no_server_imports_remain(self):
         imports = _function_import_sources()
 
         actual = {
@@ -239,7 +251,18 @@ class TestReferencedNamesResolvable:
             if module == "server"
         }
 
-        assert actual == EXPECTED_SERVER_IMPORTS
+        assert actual == EXPECTED_SERVER_IMPORTS == set()
+
+        vendor_resolution_imports = {
+            name
+            for name, module in imports.items()
+            if module == VENDOR_RESOLUTION_MODULE
+        }
+
+        assert (
+            vendor_resolution_imports
+            == EXPECTED_VENDOR_RESOLUTION_IMPORTS
+        )
 
     @pytest.mark.parametrize(
         "bound_name,expected_module",
@@ -446,10 +469,10 @@ class TestSourceInspectionGuardrails:
             ).open()
         )
 
-        assert 5283 <= total <= 5313, (
+        assert 5150 <= total <= 5180, (
             f"server.py line count {total} outside "
             "the current extracted baseline band "
-            "(5283-5313)."
+            "(5150-5180)."
         )
 
     def test_authoritative_body_remains_large(self):
@@ -463,27 +486,42 @@ class TestSourceInspectionGuardrails:
 
         assert len(code_lines) >= 500
 
-    def test_first_body_import_is_server_compatibility_block(self):
+    def test_first_body_import_is_vendor_resolution_service(self):
         _, node = _intake_source_and_node()
         body = list(node.body)
 
         if (
             body
             and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)
+            and isinstance(
+                body[0].value,
+                ast.Constant,
+            )
+            and isinstance(
+                body[0].value.value,
+                str,
+            )
         ):
             body = body[1:]
 
-        assert isinstance(body[0], ast.ImportFrom)
-        assert body[0].module == "server"
+        assert isinstance(
+            body[0],
+            ast.ImportFrom,
+        )
+        assert (
+            body[0].module
+            == VENDOR_RESOLUTION_MODULE
+        )
 
         names = {
             alias.asname or alias.name
             for alias in body[0].names
         }
 
-        assert names == EXPECTED_SERVER_IMPORTS
+        assert (
+            names
+            == EXPECTED_VENDOR_RESOLUTION_IMPORTS
+        )
 
     @pytest.mark.parametrize(
         "relative_path",

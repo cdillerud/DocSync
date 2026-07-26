@@ -19,8 +19,8 @@ Pattern (per signed declaration):
    its preserved server-shim call site into document_intake_service.
    The server.py call site remains preserved and resolves via the shim.
 
-``_build_vendor_resolution`` is explicitly out of scope.
-``_attempt_llm_vendor_ranking`` is explicitly out of scope.
+The two vendor-resolution helpers were out of scope for Step 4d.7 and
+were migrated later by the final reverse-import cleanup.
 
 17 probes covering AST shape, byte-identity, shim integrity, package
 bootstrap, prelude contract, reverse-arrow safety, and live surface.
@@ -58,9 +58,12 @@ UPDATE_STD_WORKFLOW_STATUS_PRE_4D7_SHA256 = (
 )
 UPDATE_STD_WORKFLOW_STATUS_PRE_4D7_LEN = 21160
 
-# After 4d.7, the lazy `from server import (...)` tuple in
-# intake_document_from_bytes should be exactly these 2 names.
-EXPECTED_LAZY_TUPLE = {
+# These two helpers remained in the server lazy tuple after Step 4d.7.
+# The final reverse-import cleanup later moved both to one canonical module.
+VENDOR_RESOLUTION_MODULE = (
+    "services.vendor_resolution_helpers"
+)
+EXPECTED_VENDOR_RESOLUTION_HELPERS = {
     "_attempt_llm_vendor_ranking",
     "_build_vendor_resolution",
 }
@@ -177,14 +180,34 @@ class TestLazyBlockShrunk:
                     f"{BOUND_NAME} still in lazy tuple: {sorted(names)}"
                 )
 
-    def test_lazy_tuple_now_two_private_helpers(self):
+    def test_final_vendor_helpers_use_canonical_module(self):
         fn = _intake_func_node()
-        server_imports = [n for n in _iter_importfroms(fn) if n.module == "server"]
-        assert len(server_imports) == 1
-        names = {alias.name for alias in server_imports[0].names}
-        assert names == EXPECTED_LAZY_TUPLE, (
-            f"expected lazy tuple == {sorted(EXPECTED_LAZY_TUPLE)}, "
-            f"got {sorted(names)}"
+
+        server_imports = [
+            node
+            for node in _iter_importfroms(fn)
+            if node.module == "server"
+        ]
+
+        assert server_imports == []
+
+        canonical_imports = [
+            node
+            for node in _iter_importfroms(fn)
+            if node.module
+            == VENDOR_RESOLUTION_MODULE
+        ]
+
+        assert len(canonical_imports) == 1
+
+        names = {
+            alias.name
+            for alias in canonical_imports[0].names
+        }
+
+        assert (
+            names
+            == EXPECTED_VENDOR_RESOLUTION_HELPERS
         )
 
     def test_new_4d7_import_line_with_alias_present(self):

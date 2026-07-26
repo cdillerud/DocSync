@@ -1,0 +1,39 @@
+{
+  "authoritative_module": "services.vendor_resolution_helpers",
+  "baseline_kind": "server_to_vendor_resolution_helpers_extraction",
+  "helpers": {
+    "_attempt_llm_vendor_ranking": {
+      "external_dependencies": [
+        "VENDOR_RANKING_CONFIDENCE_THRESHOLD",
+        "datetime",
+        "db",
+        "logger",
+        "os",
+        "timezone"
+      ],
+      "kind": "async",
+      "normalized_source_char_count": 6916,
+      "normalized_source_line_count": 151,
+      "normalized_source_sha256": "2efb980fbf4708ed37faaf0c1c880dd763880f6d9e8917d4a6522c35e80efdc5",
+      "signature_parameters": [
+        "doc_id",
+        "vendor_alias_result",
+        "vendor_raw",
+        "normalized_fields"
+      ]
+    },
+    "_build_vendor_resolution": {
+      "external_dependencies": [],
+      "kind": "sync",
+      "normalized_source_char_count": 430,
+      "normalized_source_line_count": 7,
+      "normalized_source_sha256": "affb36df4725b0e733342000f4320ade0a6a6e1520a3b5c6dbee8d817da26227",
+      "signature_parameters": [
+        "vendor_raw",
+        "match_result"
+      ]
+    }
+  },
+  "pre_move_module": "server",
+  "raw_intake_executable_body_sha256": "5f326a7f4d755075c0ca16816a4c4e211d37bbf97203c6638ed790095efed46c"
+}

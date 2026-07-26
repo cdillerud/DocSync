@@ -22,9 +22,8 @@ logger = logging.getLogger(__name__)
 # Signature and return shape preserved byte-identical to the Step 4a wrapper
 # so the 6 external callers (sales_pipeline_demo, pilot, email_polling,
 # inside_sales_pilot, batch_po_splitter) require NO further changes. Helper
-# dispatch is preserved via a lazy-import block from ``server`` at the top
-# of the function body — substituting any of those imports is a Step-4c
-# concern and must land with its own signed parity proof.
+# dispatch now resolves directly through canonical service modules. The final
+# server reverse import was removed with a signed helper-extraction proof.
 # =============================================================================
 async def intake_document_from_bytes(
     file_content: bytes,
@@ -41,14 +40,12 @@ async def intake_document_from_bytes(
     Moved verbatim from ``server._internal_intake_document`` (2026-04-23).
     Behavior-preserving move — the body below is byte-identical to the
     pre-move source captured in ``tests/fixtures/intake_body_move_baseline.json``.
-    Helper dispatch is preserved via the lazy-import block from ``server``
-    below. A future Step 4c will migrate these helpers to their authoritative
-    service-module homes one at a time, each with its own parity proof.
+    Helper dispatch now resolves through canonical service modules. The
+    executable intake body remains protected by the current-body baseline.
     """
-    # Step 4b: conservative lazy-import cascade. DO NOT substitute any of these
-    # with their same-named counterparts in services.* — that is a Step-4c
-    # behavioral change and must land with its own signed parity proof.
-    from server import (
+    # Final reverse-import cleanup: these two bound names now resolve through
+    # their canonical service while all existing call sites remain unchanged.
+    from services.vendor_resolution_helpers import (
         _attempt_llm_vendor_ranking,
         _build_vendor_resolution,
     )

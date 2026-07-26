@@ -5039,58 +5039,16 @@ async def startup():
                 READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES)
 
 async def shutdown_db_client():
-    global _email_polling_task, _sales_polling_task, _dynamic_mailbox_polling_task, _pilot_summary_task
-    # Cancel dynamic mailbox polling worker
-    if _dynamic_mailbox_polling_task and not _dynamic_mailbox_polling_task.done():
-        _dynamic_mailbox_polling_task.cancel()
-        try:
-            await _dynamic_mailbox_polling_task
-        except asyncio.CancelledError:
-            logger.info("Dynamic mailbox polling worker stopped")
-    # Cancel AP email polling worker if running
-    if _email_polling_task and not _email_polling_task.done():
-        _email_polling_task.cancel()
-        try:
-            await _email_polling_task
-        except asyncio.CancelledError:
-            logger.info("AP email polling worker stopped")
-    # Cancel Sales email polling worker if running
-    if _sales_polling_task and not _sales_polling_task.done():
-        _sales_polling_task.cancel()
-        try:
-            await _sales_polling_task
-        except asyncio.CancelledError:
-            logger.info("Sales email polling worker stopped")
-    # Cancel pilot summary scheduler if running
-    if _pilot_summary_task and not _pilot_summary_task.done():
-        _pilot_summary_task.cancel()
-        try:
-            await _pilot_summary_task
-        except asyncio.CancelledError:
-            logger.info("Pilot summary scheduler stopped")
-    # Stop BC cache background sync
-    cache = get_cache_service()
-    if cache:
-        cache.stop_background_sync()
-    # Stop auto-resolution workers
-    auto_resolve = get_auto_resolve_service()
-    if auto_resolve:
-        auto_resolve.stop()
-    client.close()
+    """Delegate application cleanup to the canonical lifecycle service."""
+    from services.lifecycle_service import shutdown_application
 
-    # Cancel pilot summary scheduler if running
-    if _pilot_summary_task and not _pilot_summary_task.done():
-        _pilot_summary_task.cancel()
-        try:
-            await _pilot_summary_task
-        except asyncio.CancelledError:
-            logger.info("Pilot summary scheduler stopped")
-    # Stop BC cache background sync
-    cache = get_cache_service()
-    if cache:
-        cache.stop_background_sync()
-    # Stop auto-resolution workers
-    auto_resolve = get_auto_resolve_service()
-    if auto_resolve:
-        auto_resolve.stop()
-    client.close()
+    await shutdown_application(
+        dynamic_mailbox_task=_dynamic_mailbox_polling_task,
+        email_polling_task=_email_polling_task,
+        sales_polling_task=_sales_polling_task,
+        pilot_summary_task=_pilot_summary_task,
+        get_cache_service=get_cache_service,
+        get_auto_resolve_service=get_auto_resolve_service,
+        client=client,
+        logger=logger,
+    )

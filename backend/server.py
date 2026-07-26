@@ -127,6 +127,9 @@ SHAREPOINT_SITE_PATH = os.environ.get('SHAREPOINT_SITE_PATH', '/sites/GPI-Docume
 SHAREPOINT_LIBRARY_NAME = os.environ.get('SHAREPOINT_LIBRARY_NAME', 'Documents')
 
 app = FastAPI(title="GPI Document Hub API")
+
+# Make the active MongoDB database available to FastAPI dependencies.
+app.state.database = db
 api_router = APIRouter(prefix="/api")
 
 # Global polling task references
@@ -158,7 +161,7 @@ from routes.sharepoint_migration import router as sharepoint_migration_router
 import routes.sharepoint_migration as sharepoint_migration_module
 
 # ==================== SPIRO INTEGRATION ====================
-from routes.spiro import spiro_router, set_spiro_routes_db
+from routes.spiro import spiro_router
 from services.spiro.spiro_sync import set_spiro_db
 
 import jwt as pyjwt
@@ -12922,7 +12925,7 @@ async def startup():
     await db.hub_documents.create_index("bc_posting_status")
     await db.hub_documents.create_index("vendor_id")
     # Initialize AP Review router dependencies
-    set_ap_review_deps(db, get_bc_service())
+    set_ap_review_deps(get_bc_service())
     # Legacy indexes (keep for backward compat)
     await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)
@@ -12949,7 +12952,6 @@ async def startup():
     set_file_ingestion_db(db)
     # Spiro Integration: Initialize database
     set_spiro_db(db)
-    set_spiro_routes_db(db)
     # Create Spiro indexes
     await db.spiro_contacts.create_index("spiro_id", unique=True)
     await db.spiro_contacts.create_index("email")

@@ -4,57 +4,54 @@ GPI Document Hub - Dashboard Router
 Statistics, metrics, and reporting.
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 from datetime import datetime, timezone, timedelta
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from dependencies import get_database
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
-
-# Database - set by main app
-db = None
-
-def set_db(database):
-    global db
-    db = database
-
 
 # ==================== MAIN DASHBOARD ====================
 
 @router.get("/stats")
-async def get_dashboard_stats():
+async def get_dashboard_stats(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Main dashboard statistics."""
     # Total documents
-    total = await db.hub_documents.count_documents({})
+    total = await database.hub_documents.count_documents({})
     
     # By status
     status_pipeline = [
         {"$group": {"_id": "$status", "count": {"$sum": 1}}}
     ]
-    status_results = await db.hub_documents.aggregate(status_pipeline).to_list(20)
+    status_results = await database.hub_documents.aggregate(status_pipeline).to_list(20)
     by_status = {r["_id"]: r["count"] for r in status_results if r["_id"]}
     
     # By doc_type
     type_pipeline = [
         {"$group": {"_id": "$doc_type", "count": {"$sum": 1}}}
     ]
-    type_results = await db.hub_documents.aggregate(type_pipeline).to_list(20)
+    type_results = await database.hub_documents.aggregate(type_pipeline).to_list(20)
     by_type = {r["_id"]: r["count"] for r in type_results if r["_id"]}
     
     # By source
     source_pipeline = [
         {"$group": {"_id": "$source", "count": {"$sum": 1}}}
     ]
-    source_results = await db.hub_documents.aggregate(source_pipeline).to_list(20)
+    source_results = await database.hub_documents.aggregate(source_pipeline).to_list(20)
     by_source = {r["_id"]: r["count"] for r in source_results if r["_id"]}
     
     # Recent activity (last 24h)
     yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-    recent_count = await db.hub_documents.count_documents(
+    recent_count = await database.hub_documents.count_documents(
         {"created_utc": {"$gte": yesterday}}
     )
     
     # Pending review count
-    pending_review = await db.hub_documents.count_documents(
+    pending_review = await database.hub_documents.count_documents(
         {"workflow_status": {"$in": ["pending_review", "vendor_pending", "bc_validation_pending"]}}
     )
     
@@ -72,12 +69,13 @@ async def get_dashboard_stats():
 @router.get("/activity")
 async def get_recent_activity(
     days: int = Query(7, ge=1, le=30),
-    limit: int = Query(50)
+    limit: int = Query(50),
+    database: AsyncIOMotorDatabase = Depends(get_database),
 ):
     """Get recent document activity."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
-    docs = await db.hub_documents.find(
+    docs = await database.hub_documents.find(
         {"created_utc": {"$gte": since}},
         {"_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "status": 1, 
          "source": 1, "created_utc": 1}
@@ -91,7 +89,9 @@ async def get_recent_activity(
 
 
 @router.get("/trends")
-async def get_trends(days: int = Query(14)):
+async def get_trends(days: int = Query(14),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get daily document trends."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
     
@@ -107,7 +107,7 @@ async def get_trends(days: int = Query(14)):
         {"$sort": {"_id.date": 1}}
     ]
     
-    results = await db.hub_documents.aggregate(pipeline).to_list(500)
+    results = await database.hub_documents.aggregate(pipeline).to_list(500)
     
     # Organize by date
     by_date = {}
@@ -130,7 +130,9 @@ async def get_trends(days: int = Query(14)):
 # ==================== METRICS ====================
 
 @router.get("/metrics/classification")
-async def get_classification_metrics():
+async def get_classification_metrics(
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get classification accuracy metrics."""
     pipeline = [
         {"$match": {"classification": {"$exists": True}}},
@@ -144,7 +146,7 @@ async def get_classification_metrics():
         }}
     ]
     
-    results = await db.hub_documents.aggregate(pipeline).to_list(100)
+    results = await database.hub_documents.aggregate(pipeline).to_list(100)
     
     by_method = {"deterministic": 0, "ai": 0, "unknown": 0}
     by_type = {}
@@ -186,7 +188,9 @@ async def get_processing_time_metrics(days: int = Query(7)):
 
 
 @router.get("/metrics/sources")
-async def get_source_metrics(days: int = Query(30)):
+async def get_source_metrics(days: int = Query(30),
+    database: AsyncIOMotorDatabase = Depends(get_database),
+):
     """Get metrics by document source."""
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
@@ -199,7 +203,7 @@ async def get_source_metrics(days: int = Query(30)):
         }}
     ]
     
-    results = await db.hub_documents.aggregate(pipeline).to_list(20)
+    results = await database.hub_documents.aggregate(pipeline).to_list(20)
     
     sources = []
     for r in results:

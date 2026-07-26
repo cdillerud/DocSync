@@ -103,3 +103,21 @@ async def shipment_sync_scheduler(
         except Exception as e:
             logger.warning("[ShipmentSync] Scheduled sync failed: %s", e)
         await asyncio.sleep(3600)  # 1 hour
+
+
+async def daily_trace_scheduler(
+    *,
+    logger,
+) -> None:
+    """Background worker: run random invoice traces once per day."""
+    await asyncio.sleep(120)  # Wait 2 min after startup
+    while True:
+        try:
+            from routers.posting_patterns import _run_daily_traces
+            result = await _run_daily_traces()
+            logger.info("[DailyTrace] Scheduler complete: %s/%s success, avg match=%s%%",
+                        result.get("traces_success", 0), result.get("traces_requested", 0),
+                        result.get("avg_match_rate", 0))
+        except Exception as e:
+            logger.warning("[DailyTrace] Scheduler failed: %s", e)
+        await asyncio.sleep(24 * 3600)  # Every 24 hours

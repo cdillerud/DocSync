@@ -3843,20 +3843,8 @@ async def startup():
     logger.info("Knowledge Seed scheduler started (on startup + every 6h)")
 
     # ── Daily Trace scheduler — runs random PROD BC invoice traces ──
-    async def _daily_trace_scheduler():
-        """Background worker: run random invoice traces once per day."""
-        await asyncio.sleep(120)  # Wait 2 min after startup
-        while True:
-            try:
-                from routers.posting_patterns import _run_daily_traces
-                result = await _run_daily_traces()
-                logger.info("[DailyTrace] Scheduler complete: %s/%s success, avg match=%s%%",
-                            result.get("traces_success", 0), result.get("traces_requested", 0),
-                            result.get("avg_match_rate", 0))
-            except Exception as e:
-                logger.warning("[DailyTrace] Scheduler failed: %s", e)
-            await asyncio.sleep(24 * 3600)  # Every 24 hours
-    register_background_task(asyncio.create_task(_daily_trace_scheduler()), name='daily_trace')
+    from services.lifecycle_scheduler_service import daily_trace_scheduler  # Every 24 hours
+    register_background_task(asyncio.create_task(daily_trace_scheduler(logger=logger)), name='daily_trace')
     logger.info("Daily Trace scheduler started (interval: 24h)")
 
     # Initialize Auto-Resolution Service

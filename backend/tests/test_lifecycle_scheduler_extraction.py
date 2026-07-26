@@ -2014,3 +2014,243 @@ class TestShipmentSyncRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestDailyTraceExtraction:
+    def test_source_registry_body_and_signature(self):
+        tree = ast.parse(
+            (BACKEND_DIR / "server.py").read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "_daily_trace_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            == "services.lifecycle_scheduler_service"
+            and any(
+                alias.name == "daily_trace_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if keyword.arg == "name"
+                and isinstance(
+                    keyword.value,
+                    ast.Constant,
+                )
+            ]
+
+            if names == ["daily_trace"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        coroutine_call = (
+            wrappers[0].args[0].args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "daily_trace_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword in coroutine_call.keywords
+        } == {"logger": "logger"}
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "daily_trace_scheduler"
+        )
+
+        assert _body_hash(function) == "dd9ff7359a9cd41391c3a82559590833d6490a9f3be7455fb0197867a0c9b946"
+
+        from services.lifecycle_scheduler_service import (
+            daily_trace_scheduler,
+        )
+
+        signature = inspect.signature(
+            daily_trace_scheduler
+        )
+
+        assert list(signature.parameters) == [
+            "logger"
+        ]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestDailyTraceRuntime:
+    @pytest.mark.asyncio
+    async def test_success(self, monkeypatch):
+        import services.lifecycle_scheduler_service as scheduler
+
+        run_daily_traces = AsyncMock(
+            return_value={
+                "traces_success": 8,
+                "traces_requested": 10,
+                "avg_match_rate": 92,
+            }
+        )
+
+        module = __import__("types").ModuleType(
+            "routers.posting_patterns"
+        )
+
+        module._run_daily_traces = (
+            run_daily_traces
+        )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "routers.posting_patterns",
+            module,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.daily_trace_scheduler(
+                logger=logger
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (120,),
+            (24 * 3600,),
+        ]
+
+        run_daily_traces.assert_awaited_once_with()
+
+        logger.info.assert_called_once_with(
+            "[DailyTrace] Scheduler complete: "
+            "%s/%s success, avg match=%s%%",
+            8,
+            10,
+            92,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated trace failure"
+        )
+
+        run_daily_traces = AsyncMock(
+            side_effect=error
+        )
+
+        module = __import__("types").ModuleType(
+            "routers.posting_patterns"
+        )
+
+        module._run_daily_traces = (
+            run_daily_traces
+        )
+
+        monkeypatch.setitem(
+            __import__("sys").modules,
+            "routers.posting_patterns",
+            module,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.daily_trace_scheduler(
+                logger=logger
+            )
+
+        logger.warning.assert_called_once_with(
+            "[DailyTrace] Scheduler failed: %s",
+            error,
+        )

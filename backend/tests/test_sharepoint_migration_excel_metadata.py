@@ -7,10 +7,104 @@ document_sub_type, document_status) are properly supported.
 import pytest
 import requests
 import os
+import subprocess
+import json
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL')
 if BASE_URL:
     BASE_URL = BASE_URL.rstrip('/')
+
+TEST_CANDIDATE_ID = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+MONGO_CONTAINER = os.environ.get("TEST_MONGO_CONTAINER", "gpi-mongodb")
+TEST_DB_NAME = os.environ.get("TEST_DB_NAME", "gpi_document_hub_test")
+
+
+def run_mongosh(javascript):
+    """Execute JavaScript against the isolated MongoDB test database."""
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            MONGO_CONTAINER,
+            "mongosh",
+            "--quiet",
+            "--eval",
+            javascript,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def test_candidate():
+    """Create an isolated migration candidate and remove it after testing."""
+    candidate = {
+        "id": TEST_CANDIDATE_ID,
+        "source_item_id": "pytest-sharepoint-metadata-001",
+        "source_drive_id": "pytest-drive",
+        "file_name": "pytest-sharepoint-metadata.docx",
+        "legacy_path": "/pytest/pytest-sharepoint-metadata.docx",
+        "legacy_url": "https://example.invalid/pytest-sharepoint-metadata.docx",
+        "status": "discovered",
+        "level1": None,
+        "level2": None,
+        "level3": None,
+        "level4": None,
+        "level5": None,
+        "classification_source": None,
+        "acct_type": "Customer Accounts",
+        "acct_name": "Prospecting Lead",
+        "document_type": "Customer Documents",
+        "document_sub_type": "Inquiry Form",
+        "document_status": "Active",
+        "doc_type": None,
+        "department": None,
+        "customer_name": None,
+        "vendor_name": None,
+        "project_or_part_number": None,
+        "document_date": None,
+        "retention_category": None,
+        "classification_confidence": None,
+        "classification_method": None,
+        "target_site_url": None,
+        "target_library_name": None,
+        "target_item_id": None,
+        "target_url": None,
+        "migration_timestamp": None,
+        "migration_error": None,
+    }
+
+    candidate_json = json.dumps(candidate)
+
+    run_mongosh(
+        f'''
+        db = db.getSiblingDB({json.dumps(TEST_DB_NAME)});
+        const candidate = JSON.parse({json.dumps(candidate_json)});
+        const now = new Date().toISOString();
+        candidate.created_utc = now;
+        candidate.updated_utc = now;
+
+        db.migration_candidates.replaceOne(
+            {{ id: {json.dumps(TEST_CANDIDATE_ID)} }},
+            candidate,
+            {{ upsert: true }}
+        );
+        '''
+    )
+
+    yield
+
+    run_mongosh(
+        f'''
+        db = db.getSiblingDB({json.dumps(TEST_DB_NAME)});
+        db.migration_candidates.deleteOne(
+            {{ id: {json.dumps(TEST_CANDIDATE_ID)} }}
+        );
+        '''
+    )
 
 
 class TestSharePointMigrationSummary:
@@ -82,7 +176,7 @@ class TestSharePointMigrationCandidates:
     def test_candidate_with_populated_excel_metadata(self):
         """At least one candidate should have populated Excel metadata fields"""
         # The test candidate ID that was manually updated
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         response = requests.get(f"{BASE_URL}/api/migration/sharepoint/candidates/{test_candidate_id}")
         
@@ -111,7 +205,7 @@ class TestSharePointMigrationCandidateUpdate:
     
     def test_patch_accepts_excel_metadata_fields(self):
         """PATCH should accept and save new Excel metadata fields"""
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         # Update with Excel metadata
         update_data = {
@@ -154,7 +248,7 @@ class TestSharePointMigrationCandidateUpdate:
     
     def test_patch_persists_excel_metadata(self):
         """Verify PATCH changes are persisted to database via GET"""
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         # First update
         update_data = {
@@ -208,7 +302,7 @@ class TestSharePointMigrationValidDocTypes:
     ])
     def test_valid_document_types_accepted(self, doc_type):
         """Various Excel document types should be accepted"""
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         response = requests.patch(
             f"{BASE_URL}/api/migration/sharepoint/candidates/{test_candidate_id}",
@@ -230,7 +324,7 @@ class TestSharePointMigrationValidDocTypes:
     ])
     def test_valid_acct_types_accepted(self, acct_type):
         """All Excel AcctType values should be accepted"""
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         response = requests.patch(
             f"{BASE_URL}/api/migration/sharepoint/candidates/{test_candidate_id}",
@@ -244,7 +338,7 @@ class TestSharePointMigrationValidDocTypes:
     @pytest.mark.parametrize("doc_status", ["Active", "Archived", "Pending"])
     def test_valid_document_status_accepted(self, doc_status):
         """All Excel DocumentStatus values should be accepted"""
-        test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
+        test_candidate_id = TEST_CANDIDATE_ID
         
         response = requests.patch(
             f"{BASE_URL}/api/migration/sharepoint/candidates/{test_candidate_id}",
@@ -256,21 +350,3 @@ class TestSharePointMigrationValidDocTypes:
         assert response.json()["candidate"].get("document_status") == doc_status
 
 
-# Cleanup fixture to reset test candidate after tests
-@pytest.fixture(scope="module", autouse=True)
-def reset_test_candidate():
-    """Reset test candidate to original state after all tests"""
-    yield
-    # Restore original values
-    test_candidate_id = "2e509aa3-ce81-486a-8349-ceadbf31d12a"
-    requests.patch(
-        f"{BASE_URL}/api/migration/sharepoint/candidates/{test_candidate_id}",
-        json={
-            "acct_type": "Customer Accounts",
-            "acct_name": "Prospecting Lead",
-            "document_type": "Customer Documents",
-            "document_sub_type": "Inquiry Form",
-            "document_status": "Active"
-        },
-        headers={"Content-Type": "application/json"}
-    )

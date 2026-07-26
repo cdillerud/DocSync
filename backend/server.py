@@ -3733,23 +3733,8 @@ async def startup():
     # ── Weekly Digest scheduler (v2.5.2) ──
     # Rebuilds the current-week digest every 24h so `/api/learning/digest/latest`
     # always reflects the in-progress week. Idempotent by week_key.
-    async def _weekly_digest_scheduler():
-        await asyncio.sleep(1200)  # 20-min startup delay
-        while True:
-            try:
-                from workflows.core.learning_core import build_weekly_digest
-                d = await build_weekly_digest(actor="scheduler")
-                logger.info(
-                    "[WeeklyDigest.scheduler] built %s — events=%d reviewers=%d drift=%d",
-                    d.get("week_key"),
-                    d.get("events", {}).get("total", 0),
-                    len(d.get("top_reviewers", [])),
-                    d.get("drift_summary", {}).get("total_new", 0),
-                )
-            except Exception as e:
-                logger.warning("[WeeklyDigest.scheduler] failed: %s", e)
-            await asyncio.sleep(24 * 3600)
-    register_background_task(asyncio.create_task(_weekly_digest_scheduler()), name='weekly_digest')
+    from services.lifecycle_scheduler_service import weekly_digest_scheduler
+    register_background_task(asyncio.create_task(weekly_digest_scheduler(logger=logger)), name='weekly_digest')
     logger.info("Weekly Digest scheduler started (interval: 24h, rebuilds current-week digest)")
 
     # ── Drift Watchlist scheduler (v2.5.4) ───────────────────────

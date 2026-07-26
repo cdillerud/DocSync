@@ -3195,3 +3195,317 @@ class TestDriftAlertRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestWeeklyDigestExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_weekly_digest_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "weekly_digest_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["weekly_digest"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "weekly_digest_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "weekly_digest_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "32832b5937ee75d34c7c0ec01f057f3a008f89c6e6a6c8a47cdf5533e3765153"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            weekly_digest_scheduler,
+        )
+
+        signature = inspect.signature(
+            weekly_digest_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestWeeklyDigestRuntime:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core
+        import services.lifecycle_scheduler_service as scheduler
+
+        build_weekly_digest = AsyncMock(
+            return_value={
+                "week_key": "2026-W30",
+                "events": {
+                    "total": 48,
+                },
+                "top_reviewers": [
+                    {"name": "One"},
+                    {"name": "Two"},
+                    {"name": "Three"},
+                ],
+                "drift_summary": {
+                    "total_new": 7,
+                },
+            }
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core"
+        )
+
+        module.build_weekly_digest = (
+            build_weekly_digest
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "workflows.core.learning_core",
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core,
+            "learning_core",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.weekly_digest_scheduler(
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (1200,),
+            (24 * 3600,),
+        ]
+
+        build_weekly_digest.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.info.assert_called_once_with(
+            "[WeeklyDigest.scheduler] "
+            "built %s — events=%d reviewers=%d "
+            "drift=%d",
+            "2026-W30",
+            48,
+            3,
+            7,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import workflows.core
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated digest failure"
+        )
+
+        build_weekly_digest = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "workflows.core.learning_core"
+        )
+
+        module.build_weekly_digest = (
+            build_weekly_digest
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "workflows.core.learning_core",
+            module,
+        )
+
+        monkeypatch.setattr(
+            workflows.core,
+            "learning_core",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.weekly_digest_scheduler(
+                logger=logger,
+            )
+
+        build_weekly_digest.assert_awaited_once_with(
+            actor="scheduler",
+        )
+
+        logger.warning.assert_called_once_with(
+            "[WeeklyDigest.scheduler] "
+            "failed: %s",
+            error,
+        )

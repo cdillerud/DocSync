@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import ast
+import asyncio
 import hashlib
 import inspect
 import sys
@@ -469,5 +470,380 @@ class TestRuntimeBehavior:
         logger.warning.assert_called_once_with(
             "[Startup] Sync-status "
             "auto-run failed: %s",
+            error,
+        )
+
+
+class TestPeriodicSyncStatusExtraction:
+    def test_server_uses_canonical_periodic_coroutine(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        nested = [
+            node
+            for node in startup.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "_periodic_sync_status"
+            )
+        ]
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "periodic_sync_status"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert nested == []
+        assert len(imports) == 1
+
+    def test_periodic_registry_ownership_preserved(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "periodic_sync_status"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert isinstance(
+            create_task,
+            ast.Call,
+        )
+
+        assert isinstance(
+            create_task.func,
+            ast.Attribute,
+        )
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert isinstance(
+            coroutine_call,
+            ast.Call,
+        )
+
+        assert isinstance(
+            coroutine_call.func,
+            ast.Name,
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "periodic_sync_status"
+        )
+
+        logger_keywords = [
+            keyword
+            for keyword
+            in coroutine_call.keywords
+            if (
+                keyword.arg == "logger"
+                and isinstance(
+                    keyword.value,
+                    ast.Name,
+                )
+                and keyword.value.id
+                == "logger"
+            )
+        ]
+
+        assert len(logger_keywords) == 1
+
+    def test_periodic_body_matches_original(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "periodic_sync_status"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "6545fc7060f4024d7410a7c17f6fb2b26c9f10213af853b5684fc2530581c766"
+        )
+
+    def test_periodic_signature(self):
+        from services.lifecycle_scheduler_service import (
+            periodic_sync_status,
+        )
+
+        signature = inspect.signature(
+            periodic_sync_status
+        )
+
+        assert list(
+            signature.parameters
+        ) == ["logger"]
+
+        assert (
+            signature.parameters[
+                "logger"
+            ].kind
+            is inspect.Parameter.KEYWORD_ONLY
+        )
+
+
+class TestPeriodicSyncStatusRuntime:
+    @pytest.mark.asyncio
+    async def test_logs_fixed_documents(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        sync = AsyncMock(
+            return_value={
+                "total_fixed": 4,
+            }
+        )
+
+        install_readiness_module(
+            monkeypatch,
+            sync,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.periodic_sync_status(
+                logger=logger
+            )
+
+        assert sleep.await_count == 2
+
+        assert (
+            sleep.await_args_list[
+                0
+            ].args
+            == (120,)
+        )
+
+        assert (
+            sleep.await_args_list[
+                1
+            ].args
+            == (30 * 60,)
+        )
+
+        sync.assert_awaited_once_with()
+
+        logger.info.assert_called_once_with(
+            "[PeriodicSync] Sync-status "
+            "auto-filed %d docs",
+            4,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_zero_changes_is_quiet(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        sync = AsyncMock(
+            return_value={
+                "total_fixed": 0,
+            }
+        )
+
+        install_readiness_module(
+            monkeypatch,
+            sync,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.periodic_sync_status(
+                logger=logger
+            )
+
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        error = RuntimeError(
+            "simulated periodic failure"
+        )
+
+        sync = AsyncMock(
+            side_effect=error
+        )
+
+        install_readiness_module(
+            monkeypatch,
+            sync,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.periodic_sync_status(
+                logger=logger
+            )
+
+        logger.warning.assert_called_once_with(
+            "[PeriodicSync] Sync-status "
+            "failed: %s",
             error,
         )

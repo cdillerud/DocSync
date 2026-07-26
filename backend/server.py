@@ -3916,21 +3916,9 @@ async def startup():
     register_background_task(asyncio.create_task(startup_sync_status(logger=logger)), name='startup_sync_status')
 
     # ── Periodic: Re-run sync_readiness_to_status every 30 minutes ──
-    async def _periodic_sync_status():
-        """Periodically sync readiness→status to catch any docs that fall through cracks."""
-        await asyncio.sleep(120)  # Initial delay: 2 minutes after startup sync
-        while True:
-            try:
-                from routers.readiness import sync_readiness_to_status
-                result = await sync_readiness_to_status()
-                total = result.get("total_fixed", 0)
-                if total > 0:
-                    logger.info("[PeriodicSync] Sync-status auto-filed %d docs", total)
-            except Exception as e:
-                logger.warning("[PeriodicSync] Sync-status failed: %s", e)
-            await asyncio.sleep(30 * 60)  # Every 30 minutes
+    from services.lifecycle_scheduler_service import periodic_sync_status  # Every 30 minutes
 
-    register_background_task(asyncio.create_task(_periodic_sync_status()), name='periodic_sync_status')
+    register_background_task(asyncio.create_task(periodic_sync_status(logger=logger)), name='periodic_sync_status')
     logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
 
     # ── Startup: Clean up noise events from posting_learning_events ──

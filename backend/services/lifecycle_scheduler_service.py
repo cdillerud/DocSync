@@ -85,3 +85,21 @@ async def catalog_sync_scheduler(
         except Exception as e:
             logger.warning("[CatalogSync] Scheduled sync failed: %s", e)
         await asyncio.sleep(24 * 3600)  # Sleep 24 hours
+
+
+async def shipment_sync_scheduler(
+    *,
+    db,
+    logger,
+) -> None:
+    """Background worker: sync BC shipment lines into inventory every 1 hour."""
+    await asyncio.sleep(120)  # Initial delay
+    while True:
+        try:
+            from services.inventory_so_integration import sync_bc_shipments
+            logger.info("[ShipmentSync] Starting scheduled BC shipment sync")
+            result = await sync_bc_shipments(db, lookback_hours=24)
+            logger.info("[ShipmentSync] Completed: %s", result)
+        except Exception as e:
+            logger.warning("[ShipmentSync] Scheduled sync failed: %s", e)
+        await asyncio.sleep(3600)  # 1 hour

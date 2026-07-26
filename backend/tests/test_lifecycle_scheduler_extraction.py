@@ -1616,3 +1616,401 @@ class TestCatalogSyncRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestShipmentSyncExtraction:
+    def test_server_uses_canonical_shipment_coroutine(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        nested = [
+            node
+            for node in startup.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "_shipment_sync_scheduler"
+            )
+        ]
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "shipment_sync_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert nested == []
+        assert len(imports) == 1
+
+    def test_shipment_registry_ownership_preserved(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["shipment_sync"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert isinstance(
+            create_task,
+            ast.Call,
+        )
+
+        assert isinstance(
+            create_task.func,
+            ast.Attribute,
+        )
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert isinstance(
+            coroutine_call,
+            ast.Call,
+        )
+
+        assert isinstance(
+            coroutine_call.func,
+            ast.Name,
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "shipment_sync_scheduler"
+        )
+
+        bindings = {
+            keyword.arg: (
+                keyword.value.id
+                if isinstance(
+                    keyword.value,
+                    ast.Name,
+                )
+                else None
+            )
+            for keyword
+            in coroutine_call.keywords
+        }
+
+        assert bindings == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+    def test_shipment_body_matches_original(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "shipment_sync_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "ac5a7f1f8b453c6c2c906a219364c90ef8bf8bd0b1d41090a2d1f9753c1bf009"
+        )
+
+    def test_shipment_signature(self):
+        from services.lifecycle_scheduler_service import (
+            shipment_sync_scheduler,
+        )
+
+        signature = inspect.signature(
+            shipment_sync_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestShipmentSyncRuntime:
+    @pytest.mark.asyncio
+    async def test_runs_shipment_sync_and_logs(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        sync_bc_shipments = AsyncMock(
+            return_value={
+                "shipments": 7,
+                "lines": 18,
+            }
+        )
+
+        shipment_module = ModuleType(
+            "services.inventory_so_integration"
+        )
+
+        shipment_module.sync_bc_shipments = (
+            sync_bc_shipments
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.inventory_so_integration",
+            shipment_module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "inventory_so_integration",
+            shipment_module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.shipment_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        assert sleep.await_count == 2
+
+        assert (
+            sleep.await_args_list[
+                0
+            ].args
+            == (120,)
+        )
+
+        assert (
+            sleep.await_args_list[
+                1
+            ].args
+            == (3600,)
+        )
+
+        sync_bc_shipments.assert_awaited_once_with(
+            db,
+            lookback_hours=24,
+        )
+
+        assert (
+            logger.info.call_args_list[
+                0
+            ].args
+            == (
+                "[ShipmentSync] Starting "
+                "scheduled BC shipment sync",
+            )
+        )
+
+        assert (
+            logger.info.call_args_list[
+                1
+            ].args
+            == (
+                "[ShipmentSync] Completed: %s",
+                {
+                    "shipments": 7,
+                    "lines": 18,
+                },
+            )
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_shipment_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated shipment failure"
+        )
+
+        sync_bc_shipments = AsyncMock(
+            side_effect=error
+        )
+
+        shipment_module = ModuleType(
+            "services.inventory_so_integration"
+        )
+
+        shipment_module.sync_bc_shipments = (
+            sync_bc_shipments
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.inventory_so_integration",
+            shipment_module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "inventory_so_integration",
+            shipment_module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.shipment_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        sync_bc_shipments.assert_awaited_once_with(
+            db,
+            lookback_hours=24,
+        )
+
+        logger.warning.assert_called_once_with(
+            "[ShipmentSync] Scheduled sync "
+            "failed: %s",
+            error,
+        )

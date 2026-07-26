@@ -3911,21 +3911,9 @@ async def startup():
     register_background_task(asyncio.create_task(_startup_requeue_not_run()), name='startup_requeue_not_run')
 
     # ── Startup: Auto-file ready docs left in inbox (prevents post-deploy regression) ──
-    async def _startup_sync_status():
-        """Run lightweight inbox cleanup 30s after startup to file any ready docs."""
-        await asyncio.sleep(30)
-        try:
-            from routers.readiness import sync_readiness_to_status
-            result = await sync_readiness_to_status()
-            total = result.get("total_fixed", 0)
-            if total > 0:
-                logger.info("[Startup] Sync-status auto-filed %d docs that were ready but sitting in inbox", total)
-            else:
-                logger.info("[Startup] Sync-status check: inbox is clean, no docs to auto-file")
-        except Exception as e:
-            logger.warning("[Startup] Sync-status auto-run failed: %s", e)
+    from services.lifecycle_scheduler_service import startup_sync_status
 
-    register_background_task(asyncio.create_task(_startup_sync_status()), name='startup_sync_status')
+    register_background_task(asyncio.create_task(startup_sync_status(logger=logger)), name='startup_sync_status')
 
     # ── Periodic: Re-run sync_readiness_to_status every 30 minutes ──
     async def _periodic_sync_status():

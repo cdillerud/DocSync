@@ -121,3 +121,24 @@ async def daily_trace_scheduler(
         except Exception as e:
             logger.warning("[DailyTrace] Scheduler failed: %s", e)
         await asyncio.sleep(24 * 3600)  # Every 24 hours
+
+
+async def knowledge_seed_scheduler(
+    *,
+    db,
+    logger,
+) -> None:
+    """Background worker: keep knowledge base fresh after BC cache changes."""
+    await asyncio.sleep(30)  # Let BC cache and other services initialize first
+    while True:
+        try:
+            from services.knowledge_seed_service import run_full_knowledge_seed
+            logger.info("[KnowledgeSeed] Starting scheduled knowledge seed")
+            result = await run_full_knowledge_seed(db)
+            aliases = result.get("vendor_aliases", {}).get("total_aliases", 0)
+            profiles = result.get("vendor_profiles", {}).get("total_profiles", 0)
+            domains = result.get("sender_domains", {}).get("total_sender_mappings", 0)
+            logger.info("[KnowledgeSeed] Scheduled seed complete: aliases=%s, profiles=%s, domains=%s", aliases, profiles, domains)
+        except Exception as e:
+            logger.warning("[KnowledgeSeed] Scheduled seed failed: %s", e)
+        await asyncio.sleep(6 * 3600)  # Every 6 hours

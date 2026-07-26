@@ -2254,3 +2254,339 @@ class TestDailyTraceRuntime:
             "[DailyTrace] Scheduler failed: %s",
             error,
         )
+
+
+class TestKnowledgeSeedExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_knowledge_seed_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "knowledge_seed_scheduler"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if keyword.arg == "name"
+                and isinstance(
+                    keyword.value,
+                    ast.Constant,
+                )
+            ]
+
+            if names == ["knowledge_seed"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert isinstance(
+            create_task.func,
+            ast.Attribute,
+        )
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "knowledge_seed_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "knowledge_seed_scheduler"
+        )
+
+        assert (
+            _body_hash(function)
+            == "1c9482a9c0a11a0e04828976156eb39ab8c95a8b52fc08cfaf10f57ebc3878b6"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            knowledge_seed_scheduler,
+        )
+
+        signature = inspect.signature(
+            knowledge_seed_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestKnowledgeSeedRuntime:
+    @pytest.mark.asyncio
+    async def test_success(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        run_seed = AsyncMock(
+            return_value={
+                "vendor_aliases": {
+                    "total_aliases": 14,
+                },
+                "vendor_profiles": {
+                    "total_profiles": 9,
+                },
+                "sender_domains": {
+                    "total_sender_mappings": 6,
+                },
+            }
+        )
+
+        module = ModuleType(
+            "services.knowledge_seed_service"
+        )
+
+        module.run_full_knowledge_seed = (
+            run_seed
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.knowledge_seed_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "knowledge_seed_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.knowledge_seed_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (30,),
+            (6 * 3600,),
+        ]
+
+        run_seed.assert_awaited_once_with(
+            db
+        )
+
+        assert (
+            logger.info.call_args_list[
+                0
+            ].args
+            == (
+                "[KnowledgeSeed] Starting "
+                "scheduled knowledge seed",
+            )
+        )
+
+        assert (
+            logger.info.call_args_list[
+                1
+            ].args
+            == (
+                "[KnowledgeSeed] Scheduled "
+                "seed complete: aliases=%s, "
+                "profiles=%s, domains=%s",
+                14,
+                9,
+                6,
+            )
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services
+        import services.lifecycle_scheduler_service as scheduler
+
+        error = RuntimeError(
+            "simulated seed failure"
+        )
+
+        run_seed = AsyncMock(
+            side_effect=error
+        )
+
+        module = ModuleType(
+            "services.knowledge_seed_service"
+        )
+
+        module.run_full_knowledge_seed = (
+            run_seed
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.knowledge_seed_service",
+            module,
+        )
+
+        monkeypatch.setattr(
+            services,
+            "knowledge_seed_service",
+            module,
+            raising=False,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                asyncio.CancelledError(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            asyncio.CancelledError
+        ):
+            await scheduler.knowledge_seed_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        run_seed.assert_awaited_once_with(
+            db
+        )
+
+        logger.warning.assert_called_once_with(
+            "[KnowledgeSeed] Scheduled seed "
+            "failed: %s",
+            error,
+        )

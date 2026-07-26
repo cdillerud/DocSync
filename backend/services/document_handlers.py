@@ -1,38 +1,21 @@
 """
-GPI Document Hub - Document Domain Handlers
+GPI Document Hub route-handler facade.
 
-Authoritative implementations of document-domain route handlers, extracted
-from server.py during the "Document Handler Extraction" remediation pass.
-
-These are route-facing orchestration functions consumed by
-routers/documents.py via add_api_route().
-
-Dependencies are sourced from proper service modules where available.
-Functions still imported from server.py are documented inline as
-extraction targets for future passes.
+Route-facing handlers are imported directly from their authoritative service
+modules. The parity-sensitive intake_document_from_bytes implementation remains
+local until its dedicated migration contract is updated.
 """
 
 import hashlib
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 
-from fastapi import (
-    BackgroundTasks,
-    File,
-    Form,
-    HTTPException,
-    Query,
-    UploadFile,
-)
-from pydantic import BaseModel
-
-from deps import get_db
 from services.document_reprocess_service import reprocess_document
-from services.document_batch_revalidate_service import batch_revalidate_documents
+from services.document_batch_revalidate_service import (
+    batch_revalidate_documents,
+)
 from services.document_preview_service import (
     DryRunPreviewRequest,
     preview_post_to_bc,
@@ -49,120 +32,6 @@ from services.document_upload_service import upload_document
 from services.document_intake_service import intake_document
 
 logger = logging.getLogger(__name__)
-
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-
-
-def _derive_workflow_status_simple(final_status: str, decision: str) -> str:
-    """Map processing result to workflow_status so docs don't stay 'captured'."""
-    s = (final_status or "").lower()
-    if s in ("completed", "posted", "archived"):
-        return "completed"
-    if s == "exception":
-        return "exception"
-    if s in ("readytolink", "linkedtobc"):
-        return "ready_for_approval"
-    if s == "storedinsp":
-        return "processed"
-    if decision == "auto_link":
-        return "validation_passed"
-    if s == "needsreview":
-        return "needs_review"
-    return "classified"
-
-
-
-# ---------------------------------------------------------------------------
-# Pydantic models (moved from server.py)
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Lazy imports from proper service modules
-# ---------------------------------------------------------------------------
-
-def _get_workflow_enums():
-    from workflows.core.engine import (
-        DocType,
-        SourceSystem,
-        CaptureChannel,
-        WorkflowStatus,
-        WorkflowEvent,
-        DocumentClassifier,
-    )
-    return DocType, SourceSystem, CaptureChannel, WorkflowStatus, WorkflowEvent, DocumentClassifier
-
-
-def _get_transaction_action():
-    from models.document_types import TransactionAction
-    return TransactionAction
-
-
-def _get_default_job_types():
-    from models.document_types import DEFAULT_JOB_TYPES
-    return DEFAULT_JOB_TYPES
-
-
-# ---------------------------------------------------------------------------
-# Direct imports from authoritative service modules
-# ---------------------------------------------------------------------------
-from services.document_intel_helpers import (
-    classify_document_with_ai as _classify_with_ai,
-    compute_ap_normalized_fields as _compute_ap_normalized,
-    make_automation_decision as _make_automation_decision,
-)
-from services.vendor_matching import (
-    lookup_vendor_alias as _lookup_vendor_alias,
-    check_duplicate_document as _check_duplicate,
-)
-from services.ap_computation import (
-    compute_ap_validation as _compute_ap_validation,
-    is_eligible_for_draft_creation as _is_eligible_for_draft,
-)
-from services.bc_api_helpers import get_bc_companies as _get_bc_companies
-
-# ---------------------------------------------------------------------------
-# Server.py functions still needed (remaining extraction targets)
-# Used for: _update_vendor_profile_incremental, _update_standard_workflow_status
-# ---------------------------------------------------------------------------
-
-# Extracted service imports
-from services.document_orchestration_service import run_upload_and_link_workflow as _run_upload_and_link_workflow
-from services.sharepoint_service import upload_to_sharepoint as _upload_to_sharepoint
-from services.sharepoint_service import create_sharing_link as _create_sharing_link
-from services.bc_link_service import link_document_to_bc as _link_document_to_bc
-from services.bc_draft_service import check_duplicate_purchase_invoice as _check_duplicate_purchase_invoice
-from services.bc_draft_service import create_purchase_invoice_header as _create_purchase_invoice_header
-from services.classification_helpers import classify_document_type as _classify_document_type
-from services.config_service import get_bc_token as _get_bc_token
-
-
-# ---------------------------------------------------------------------------
-# Handler implementations
-# ---------------------------------------------------------------------------
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # =============================================================================

@@ -114,11 +114,49 @@ class TestDocumentHandlersRewiring:
     def test_direct_imports_present(self):
         import inspect
         import services.document_handlers as dh
+
         source = inspect.getsource(dh)
-        assert "from services.document_intel_helpers import" in source
-        assert "from services.vendor_matching import" in source
-        assert "from services.ap_computation import" in source
-        assert "from services.bc_api_helpers import" in source
+
+        required_imports = (
+            "from services.document_reprocess_service import reprocess_document",
+            "from services.document_batch_revalidate_service import",
+            "from services.document_preview_service import",
+            "from services.document_classification_service import classify_document",
+            "from services.document_resolution_service import",
+            "from services.document_link_service import link_document",
+            "from services.document_resubmit_service import resubmit_document",
+            "from services.document_retry_service import retry_document",
+            "from services.document_upload_service import upload_document",
+            "from services.document_intake_service import intake_document",
+        )
+
+        for required_import in required_imports:
+            assert required_import in source
+
+    def test_handlers_is_thin_facade_plus_bytes_intake(self):
+        import ast
+        import inspect
+        import services.document_handlers as dh
+
+        source = inspect.getsource(dh)
+        tree = ast.parse(source)
+
+        local_functions = [
+            node.name
+            for node in tree.body
+            if isinstance(
+                node,
+                (ast.FunctionDef, ast.AsyncFunctionDef),
+            )
+        ]
+
+        assert local_functions == ["intake_document_from_bytes"]
+        assert "from fastapi import" not in source
+        assert "from pydantic import" not in source
+        assert "from deps import get_db" not in source
+        assert "def _get_workflow_enums" not in source
+        assert "def _get_transaction_action" not in source
+        assert "def _get_default_job_types" not in source
 
     def test_classify_document_uses_direct_import(self):
         import inspect

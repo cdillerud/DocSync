@@ -27,6 +27,7 @@ os.environ["DEMO_MODE"] = "true"
 
 LIVE_API_MODULES = {
     "test_audit_dashboard.py",
+    "test_file_import.py",
     "test_generic_workflow_api.py",
     "test_generic_workflow_apis.py",
     "test_gpi_document_hub.py",

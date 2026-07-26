@@ -154,11 +154,17 @@ class TestSourceInspectionGuardrails:
         assert "check_duplicate_document" in service_src
 
     def test_server_py_shrank(self):
-        total = sum(1 for _ in (BACKEND_DIR / "server.py").open("r"))
-        # Document reprocess extraction removed a further 425 legacy lines.
-        assert 5795 <= total <= 5825, (
-            f"server.py line count {total} outside extracted baseline band "
-            "(5795-5825)."
+        total = sum(
+            1
+            for _ in (
+                BACKEND_DIR / "server.py"
+            ).open("r")
+        )
+
+        assert 5301 <= total <= 5331, (
+            f"server.py line count {total} outside "
+            "the current extracted baseline band "
+            "(5301-5331)."
         )
 
     @pytest.mark.parametrize("helper_name,_", TIER_3_HELPERS)

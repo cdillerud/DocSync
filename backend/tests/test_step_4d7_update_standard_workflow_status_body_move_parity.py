@@ -371,11 +371,54 @@ class TestNonIntakeCallSitesPreserved:
             not in handlers_src
         )
 
-    def test_in_server_call_site_intact(self):
-        """server.py:~3646 calls `_update_standard_workflow_status` from
-        within server itself; the shim is what makes that resolve."""
-        server_src = Path(BACKEND_ROOT / "server.py").read_text()
-        assert "await _update_standard_workflow_status(" in server_src
+    def test_canonical_service_call_sites_intact(self):
+        """Both intake paths call the canonical workflow-status helper."""
+        server_src = Path(
+            BACKEND_ROOT / "server.py"
+        ).read_text()
+
+        standard_intake_src = Path(
+            BACKEND_ROOT
+            / "services"
+            / "document_intake_service.py"
+        ).read_text()
+
+        bytes_intake_src = Path(
+            BACKEND_ROOT
+            / "services"
+            / "document_bytes_intake_service.py"
+        ).read_text()
+
+        canonical_import = (
+            "from workflows.document_capture.rules."
+            "workflow_status import ("
+        )
+
+        canonical_alias = (
+            "update_standard_workflow_status "
+            "as _update_standard_workflow_status"
+        )
+
+        assert (
+            "await _update_standard_workflow_status("
+            not in server_src
+        )
+
+        for service_src in (
+            standard_intake_src,
+            bytes_intake_src,
+        ):
+            assert canonical_import in service_src
+            assert canonical_alias in service_src
+            assert (
+                "await _update_standard_workflow_status("
+                in service_src
+            )
+            assert (
+                "from server import "
+                "_update_standard_workflow_status"
+                not in service_src
+            )
 
     def test_server_shim_resolves(self):
         import server

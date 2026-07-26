@@ -1,0 +1,22 @@
+{
+  "authoritative_module": "services.workflow_link_service",
+  "baseline_kind": "server_to_workflow_link_service_extraction",
+  "external_dependencies": [
+    "HTTPException",
+    "UPLOAD_DIR",
+    "datetime",
+    "db",
+    "get_bc_sales_orders",
+    "link_document_to_bc",
+    "timezone",
+    "uuid"
+  ],
+  "function_name": "link_document",
+  "normalized_source_char_count": 4741,
+  "normalized_source_line_count": 91,
+  "normalized_source_sha256": "09595c4428fc41669e29da9e7d9f5edcee5d24fd679270c548ab3382e6e6efde",
+  "pre_move_module": "server",
+  "signature_parameters": [
+    "doc_id"
+  ]
+}

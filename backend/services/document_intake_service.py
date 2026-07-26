@@ -516,10 +516,12 @@ async def intake_document(
             "updated_utc": datetime.now(timezone.utc).isoformat(),
         }})
 
-    # Preserve the existing non-bytes intake workflow-status call site.
-    # Step 4d.7 only migrated the import inside intake_document_from_bytes.
+    # Resolve the non-bytes intake workflow status through its canonical
+    # implementation while preserving the existing bound name and call site.
     if suggested_type not in ("AP_Invoice", "AP Invoice"):
-        from server import _update_standard_workflow_status
+        from workflows.document_capture.rules.workflow_status import (
+            update_standard_workflow_status as _update_standard_workflow_status,
+        )
         await _update_standard_workflow_status(
             doc_id,
             doc_type_value,

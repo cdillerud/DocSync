@@ -334,7 +334,7 @@ class TestCallSiteByteParity:
 # ---------------------------------------------------------------------------
 class TestNonIntakeCallSitesPreserved:
     def test_non_intake_service_call_site_intact(self):
-        """The HTTP intake call site moves with its extracted handler."""
+        """The HTTP intake path uses the canonical workflow-status function."""
         handlers_src = Path(
             BACKEND_ROOT / "services" / "document_handlers.py"
         ).read_text()
@@ -342,20 +342,34 @@ class TestNonIntakeCallSitesPreserved:
             BACKEND_ROOT / "services" / "document_intake_service.py"
         ).read_text()
 
+        service_tree = ast.parse(service_src)
+
+        canonical_matches = [
+            node
+            for node in ast.walk(service_tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module
+            == "workflows.document_capture.rules.workflow_status"
+            and any(
+                alias.name == "update_standard_workflow_status"
+                and alias.asname == "_update_standard_workflow_status"
+                for alias in node.names
+            )
+        ]
+
+        assert len(canonical_matches) == 1
         assert (
             "from server import _update_standard_workflow_status"
-            in service_src
-        ), "non-bytes server-shim import missing from intake service"
-
+            not in service_src
+        )
         assert (
             "await _update_standard_workflow_status("
             in service_src
-        ), "non-bytes workflow-status call missing from intake service"
-
+        )
         assert (
             "from server import _update_standard_workflow_status"
             not in handlers_src
-        ), "non-bytes server-shim import unexpectedly remains in handlers"
+        )
 
     def test_in_server_call_site_intact(self):
         """server.py:~3646 calls `_update_standard_workflow_status` from

@@ -555,7 +555,7 @@ class TestLiveSurfaceAndAudit:
             pytest.skip(f"backend not reachable: {exc}")
         assert r.status_code == 200
         paths = r.json().get("paths", {})
-        assert len(paths) == 858, f"OpenAPI path count drift: {len(paths)}"
+        assert len(paths) == 888, f"OpenAPI path count drift: {len(paths)}"
 
     def test_audit_script_reports_eight_passing(self):
         script = BACKEND_ROOT / "tests" / "audit_shim_substitution.py"

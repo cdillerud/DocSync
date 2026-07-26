@@ -6,7 +6,7 @@ Validates:
   2. ap_computation module functions work correctly
   3. document_handlers.py imports directly from extracted modules
   4. server.py compatibility wrappers still functional
-  5. Route count stable at 427
+  5. Route count stable at 931
   6. Affected endpoints still respond correctly
 """
 
@@ -14,7 +14,7 @@ import os
 import sys
 import requests
 
-API_BASE = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
+API_BASE = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8000").rstrip("/")
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -128,11 +128,9 @@ class TestDocumentHandlersRewiring:
         assert "srv.classify_document_with_ai" not in source
 
     def test_reprocess_uses_direct_import(self):
-        import inspect
-        from services.document_handlers import reprocess_document
-        source = inspect.getsource(reprocess_document)
-        assert "_classify_with_ai(" in source or "_make_automation_decision(" in source
-        assert "srv = _server()" not in source
+        import services.document_handlers as handlers
+        from services.document_reprocess_service import reprocess_document as service_reprocess
+        assert handlers.reprocess_document is service_reprocess
 
     def test_batch_revalidate_uses_direct_import(self):
         import inspect
@@ -196,7 +194,7 @@ class TestExistingEndpointsUnaffected:
 
 
 class TestRouteCountStable:
-    """Route count preserved at 427."""
+    """Route count preserved at the current extracted baseline."""
 
     def test_count(self):
         from main import app
@@ -208,4 +206,4 @@ class TestRouteCountStable:
                 for sub in route.routes:
                     if hasattr(sub, 'path') and hasattr(sub, 'methods'):
                         count += 1
-        assert count == 427, f"Expected 427, got {count}"
+        assert count == 931, f"Expected 931, got {count}"

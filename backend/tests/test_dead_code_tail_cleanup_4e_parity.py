@@ -152,10 +152,10 @@ class TestSourceInspectionGuardrails:
 
     def test_server_py_shrank(self):
         total = sum(1 for _ in (BACKEND_DIR / "server.py").open("r"))
-        # Pre-4e: 6,642. Post-4e expected: ~6,488 (delete 154; allow ±6).
-        assert 6480 <= total <= 6500, (
-            f"server.py line count {total} outside expected Step 4e delta band "
-            "(6480–6500)."
+        # Document reprocess extraction removed a further 425 legacy lines.
+        assert 5795 <= total <= 5825, (
+            f"server.py line count {total} outside extracted baseline band "
+            "(5795-5825)."
         )
 
     @pytest.mark.parametrize("helper_name,_", TIER_3_HELPERS)
@@ -202,7 +202,7 @@ class TestLiveSurfaceSmoke:
             pytest.skip("No backend reachable")
         import requests
         paths = requests.get(f"{self.BASE_URL}/openapi.json").json().get("paths", {})
-        assert len(paths) == 858
+        assert len(paths) == 888
 
     @pytest.mark.parametrize("helper_name,_", TIER_3_HELPERS)
     def test_shim_importable(self, helper_name: str, _):

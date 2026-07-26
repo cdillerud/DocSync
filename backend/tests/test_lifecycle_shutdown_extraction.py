@@ -110,6 +110,7 @@ class TestSourceExtraction:
 
 class TestCanonicalShutdown:
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_stops_every_resource_once(self):
         from services.lifecycle_service import (
             shutdown_application,
@@ -129,6 +130,8 @@ class TestCanonicalShutdown:
 
         cache = Mock()
         auto_resolve = Mock()
+        alert_pattern = Mock()
+        vep = Mock()
         client = Mock()
         logger = Mock()
 
@@ -138,6 +141,14 @@ class TestCanonicalShutdown:
 
         get_auto_resolve_service = Mock(
             return_value=auto_resolve
+        )
+
+        get_alert_pattern_service = Mock(
+            return_value=alert_pattern
+        )
+
+        get_vep_service = Mock(
+            return_value=vep
         )
 
         await shutdown_application(
@@ -151,6 +162,12 @@ class TestCanonicalShutdown:
             get_auto_resolve_service=(
                 get_auto_resolve_service
             ),
+            get_alert_pattern_service=(
+                get_alert_pattern_service
+            ),
+            get_vep_service=(
+                get_vep_service
+            ),
             client=client,
             logger=logger,
         )
@@ -160,14 +177,20 @@ class TestCanonicalShutdown:
             for task in tasks
         )
 
+        get_alert_pattern_service.assert_called_once_with()
+        get_vep_service.assert_called_once_with()
         get_cache_service.assert_called_once_with()
         get_auto_resolve_service.assert_called_once_with()
+
+        alert_pattern.stop_background_eval.assert_called_once_with()
+        vep.stop_background_learning.assert_called_once_with()
         cache.stop_background_sync.assert_called_once_with()
         auto_resolve.stop.assert_called_once_with()
         client.close.assert_called_once_with()
 
         assert logger.info.call_count == 4
 
+    @pytest.mark.asyncio
     @pytest.mark.asyncio
     async def test_ignores_none_and_completed_tasks(self):
         from services.lifecycle_service import (
@@ -185,6 +208,8 @@ class TestCanonicalShutdown:
 
         cache = Mock()
         auto_resolve = Mock()
+        alert_pattern = Mock()
+        vep = Mock()
         client = Mock()
         logger = Mock()
 
@@ -199,6 +224,12 @@ class TestCanonicalShutdown:
             get_auto_resolve_service=Mock(
                 return_value=auto_resolve
             ),
+            get_alert_pattern_service=Mock(
+                return_value=alert_pattern
+            ),
+            get_vep_service=Mock(
+                return_value=vep
+            ),
             client=client,
             logger=logger,
         )
@@ -206,6 +237,9 @@ class TestCanonicalShutdown:
         assert completed.done()
         assert not completed.cancelled()
         assert logger.info.call_count == 0
+
+        alert_pattern.stop_background_eval.assert_called_once_with()
+        vep.stop_background_learning.assert_called_once_with()
         cache.stop_background_sync.assert_called_once_with()
         auto_resolve.stop.assert_called_once_with()
         client.close.assert_called_once_with()
@@ -213,12 +247,15 @@ class TestCanonicalShutdown:
 
 class TestServerCompatibilitySeam:
     @pytest.mark.asyncio
+    @pytest.mark.asyncio
     async def test_server_passes_current_resources(
         self,
         monkeypatch,
     ):
         import server
+        import services.alert_pattern_service as alert_pattern_module
         import services.lifecycle_service as lifecycle
+        import services.vendor_extraction_profile_service as vep_module
 
         sentinels = {
             "dynamic": object(),
@@ -231,6 +268,8 @@ class TestServerCompatibilitySeam:
 
         cache_getter = Mock()
         auto_getter = Mock()
+        alert_getter = Mock()
+        vep_getter = Mock()
 
         monkeypatch.setattr(
             server,
@@ -266,6 +305,18 @@ class TestServerCompatibilitySeam:
             server,
             "get_auto_resolve_service",
             auto_getter,
+        )
+
+        monkeypatch.setattr(
+            alert_pattern_module,
+            "get_alert_pattern_service",
+            alert_getter,
+        )
+
+        monkeypatch.setattr(
+            vep_module,
+            "get_vep_service",
+            vep_getter,
         )
 
         monkeypatch.setattr(
@@ -313,6 +364,12 @@ class TestServerCompatibilitySeam:
             ),
             "get_auto_resolve_service": (
                 auto_getter
+            ),
+            "get_alert_pattern_service": (
+                alert_getter
+            ),
+            "get_vep_service": (
+                vep_getter
             ),
             "client": sentinels["client"],
             "logger": sentinels["logger"],

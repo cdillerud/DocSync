@@ -83,6 +83,8 @@ async def shutdown_application(
     pilot_summary_task,
     get_cache_service,
     get_auto_resolve_service,
+    get_alert_pattern_service,
+    get_vep_service,
     client,
     logger,
 ) -> None:
@@ -115,12 +117,26 @@ async def shutdown_application(
         logger
     )
 
+    alert_pattern = (
+        get_alert_pattern_service()
+    )
+
+    if alert_pattern:
+        alert_pattern.stop_background_eval()
+
+    vep = get_vep_service()
+
+    if vep:
+        vep.stop_background_learning()
+
     cache = get_cache_service()
 
     if cache:
         cache.stop_background_sync()
 
-    auto_resolve = get_auto_resolve_service()
+    auto_resolve = (
+        get_auto_resolve_service()
+    )
 
     if auto_resolve:
         auto_resolve.stop()

@@ -4844,7 +4844,9 @@ async def startup():
 
 async def shutdown_db_client():
     """Delegate application cleanup to the canonical lifecycle service."""
+    from services.alert_pattern_service import get_alert_pattern_service
     from services.lifecycle_service import shutdown_application
+    from services.vendor_extraction_profile_service import get_vep_service
 
     await shutdown_application(
         dynamic_mailbox_task=_dynamic_mailbox_polling_task,
@@ -4853,6 +4855,8 @@ async def shutdown_db_client():
         pilot_summary_task=_pilot_summary_task,
         get_cache_service=get_cache_service,
         get_auto_resolve_service=get_auto_resolve_service,
+        get_alert_pattern_service=get_alert_pattern_service,
+        get_vep_service=get_vep_service,
         client=client,
         logger=logger,
     )

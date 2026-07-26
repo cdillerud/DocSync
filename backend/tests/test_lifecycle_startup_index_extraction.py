@@ -17,10 +17,12 @@ BACKEND_DIR = (
 
 def _source_order_create_index_calls():
     """
-    Read create_index calls in source execution order.
+    Read create_index calls from only the
+    initialize_core_indexes function.
 
-    ast.walk() is breadth-first and does not preserve
-    statement order around try/except blocks.
+    Other startup lifecycle functions may also
+    create indexes and must not affect this
+    function's parity baseline.
     """
     service_path = (
         BACKEND_DIR
@@ -32,9 +34,24 @@ def _source_order_create_index_calls():
         service_path.read_text()
     )
 
+    initialize_core_indexes = next(
+        node
+        for node in tree.body
+        if (
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "initialize_core_indexes"
+        )
+    )
+
     ordered_calls = []
 
-    for node in ast.walk(tree):
+    for node in ast.walk(
+        initialize_core_indexes
+    ):
         if not isinstance(
             node,
             ast.Call,

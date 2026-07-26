@@ -99,3 +99,150 @@ async def initialize_core_indexes(*, db, logger) -> None:
     await db.mail_intake_log.create_index([("internet_message_id", 1), ("attachment_hash", 1)])
     await db.mail_intake_log.create_index("processed_at")
     await db.mail_poll_runs.create_index("started_at")
+
+async def initialize_pre_scheduler_services(
+    *,
+    db,
+    logger,
+    sales_email_polling_enabled: bool,
+    sales_email_polling_user: str,
+    sales_email_polling_interval_minutes: int,
+    load_config_from_db,
+    default_job_types,
+    vendor_alias_map,
+):
+    """Initialize services and reference data before workers start."""
+    from datetime import datetime, timezone
+
+    from sales_module import (
+        configure_sales_email_polling,
+        initialize_sales_indexes,
+        set_db as set_sales_db,
+    )
+    from services.file_ingestion_service import (
+        set_file_ingestion_db,
+    )
+    from services.spiro.spiro_sync import set_spiro_db
+
+    # Sales Module (Phase 0): Initialize database and indexes
+    set_sales_db(db)
+    await initialize_sales_indexes(db)
+    # File Ingestion Service: Initialize database
+    set_file_ingestion_db(db)
+    # Initialize centralized deps module for modular routers
+    from deps import set_db as set_deps_db
+    set_deps_db(db)
+    # Spiro Integration: Initialize database
+    set_spiro_db(db)
+    # Routing Feedback: Initialize learning layer
+    from services.routing_feedback_service import init_feedback_db
+    init_feedback_db(db)
+    await db.routing_feedback.create_index("routing_key", unique=True)
+    await db.routing_feedback.create_index("confidence")
+    await db.sender_vendor_map.create_index("sender_email")
+    await db.sender_vendor_map.create_index("sender_domain")
+    logger.info("Routing feedback + vendor sender learning initialized")
+    # Create Spiro indexes
+    await db.spiro_contacts.create_index("spiro_id", unique=True)
+    await db.spiro_contacts.create_index("email")
+    await db.spiro_contacts.create_index("email_domain")
+    await db.spiro_contacts.create_index("company_id")
+    await db.spiro_companies.create_index("spiro_id", unique=True)
+    await db.spiro_companies.create_index("name_normalized")
+    await db.spiro_companies.create_index("email_domain")
+    await db.spiro_opportunities.create_index("spiro_id", unique=True)
+    await db.spiro_opportunities.create_index("company_id")
+    await db.spiro_sync_status.create_index("entity_type", unique=True)
+    logger.info("Spiro integration initialized")
+    # Configure Sales email polling
+    configure_sales_email_polling(
+        enabled=sales_email_polling_enabled,
+        mailbox=sales_email_polling_user,
+        interval_minutes=sales_email_polling_interval_minutes
+    )
+    # Load saved config from MongoDB (overrides .env defaults)
+    await load_config_from_db()
+    # Initialize default job types if not present
+    for jt_key, jt_config in default_job_types.items():
+        existing = await db.hub_job_types.find_one({"job_type": jt_key})
+        if not existing:
+            await db.hub_job_types.insert_one(jt_config)
+    # Load vendor aliases into memory
+    aliases = await db.vendor_aliases.find({}, {"_id": 0}).to_list(500)
+    for alias in aliases:
+        alias_str = alias.get("alias_string") or alias.get("alias") or ""
+        norm_alias = alias.get("normalized_alias") or alias_str.lower()
+        vendor_val = alias.get("vendor_name") or alias.get("vendor_no")
+        if alias_str and vendor_val:
+            vendor_alias_map[alias_str] = vendor_val
+        if norm_alias and vendor_val:
+            vendor_alias_map[norm_alias] = vendor_val
+
+    # Seed known manual vendor aliases (OCR variants → BC vendor)
+    _MANUAL_ALIASES = [
+        {"alias": "MEXUS, INC", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+        {"alias": "MEXUS, INC.", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+        {"alias": "MEXUS INC", "normalized": "mexus", "vendor_name": "Mexus Inc", "vendor_no": "MEXUS"},
+    ]
+    for ma in _MANUAL_ALIASES:
+        existing = await db.vendor_aliases.find_one({"normalized_alias": ma["normalized"]})
+        if not existing:
+            await db.vendor_aliases.insert_one({
+                "alias_string": ma["alias"],
+                "normalized_alias": ma["normalized"],
+                "alias": ma["alias"],
+                "normalized": ma["normalized"],
+                "canonical_vendor_id": ma["vendor_no"],
+                "vendor_no": ma["vendor_no"],
+                "vendor_name": ma["vendor_name"],
+                "vendor_id": ma["vendor_no"],
+                "source": "manual_resolution",
+                "confidence": 1.0,
+                "usage_count": 0,
+                "first_seen": datetime.now(timezone.utc).isoformat(),
+                "last_seen": datetime.now(timezone.utc).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            vendor_alias_map[ma["alias"]] = ma["vendor_name"]
+            vendor_alias_map[ma["normalized"]] = ma["vendor_name"]
+            logger.info("Seeded manual vendor alias: %s → %s (%s)", ma["alias"], ma["vendor_name"], ma["vendor_no"])
+
+    # Bootstrap: create normalized aliases for all BC vendor names
+    try:
+        bc_vendors = await db.hub_bc_vendors.find({}, {"_id": 0, "displayName": 1, "number": 1}).to_list(2000)
+        from services.vendor_name_helpers import normalize_vendor_name as _norm_vendor
+        bootstrap_count = 0
+        for bv in bc_vendors:
+            display = bv.get("displayName", "")
+            vendor_no = bv.get("number", "")
+            if not display or not vendor_no:
+                continue
+            normalized = _norm_vendor(display)
+            if not normalized or len(normalized) < 3:
+                continue
+            # Only insert if not already present
+            existing = await db.vendor_aliases.find_one({"normalized_alias": normalized})
+            if not existing:
+                await db.vendor_aliases.insert_one({
+                    "alias_string": display,
+                    "normalized_alias": normalized,
+                    "canonical_vendor_id": vendor_no,
+                    "vendor_no": vendor_no,
+                    "vendor_name": display,
+                    "vendor_id": vendor_no,
+                    "source": "bc_bootstrap",
+                    "confidence": 1.0,
+                    "usage_count": 0,
+                    "first_seen": datetime.now(timezone.utc).isoformat(),
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                vendor_alias_map[display] = display
+                vendor_alias_map[normalized] = display
+                bootstrap_count += 1
+        if bootstrap_count > 0:
+            logger.info("Bootstrapped %d BC vendor aliases into vendor_aliases collection", bootstrap_count)
+    except Exception as e:
+        logger.warning("BC vendor alias bootstrap failed: %s", e)
+
+    return aliases

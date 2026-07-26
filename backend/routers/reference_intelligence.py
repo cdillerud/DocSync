@@ -41,7 +41,9 @@ def register_server_routes(app=None):
         rerun_matching_with_diagnostics,
     )
 
-    from server import batch_auto_resolve
+    from services.reference_batch_resolve_service import (
+        batch_auto_resolve,
+    )
 
     # BC reference resolution (standalone)
     app.add_api_route(

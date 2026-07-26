@@ -1,0 +1,19 @@
+{
+  "authoritative_module": "services.reference_batch_resolve_service",
+  "baseline_kind": "server_to_reference_batch_resolve_service",
+  "external_dependencies": [
+    "HTTPException",
+    "Query",
+    "db",
+    "get_auto_resolve_service"
+  ],
+  "function_name": "batch_auto_resolve",
+  "normalized_source_char_count": 1019,
+  "normalized_source_line_count": 27,
+  "normalized_source_sha256": "8f5ec05a8b3f0d6784b8387a5c1143e3e085cd046f58153a9b025e7f8d007067",
+  "pre_move_module": "server",
+  "signature_parameters": [
+    "limit",
+    "status_filter"
+  ]
+}

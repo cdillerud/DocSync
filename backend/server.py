@@ -394,41 +394,16 @@ async def check_duplicate_purchase_invoice(vendor_no: str, external_doc_no: str,
     return await _impl(vendor_no, external_doc_no, company_id, token)
 
 
-async def create_purchase_invoice_header(
-    vendor_no: str,
-    external_doc_no: str,
-    document_date: str = None,
-    due_date: str = None,
-    currency_code: str = None,
-    posting_date: str = None,
-    company_id: str = None,
-    token: str = None
-) -> dict:
-    from services.bc_draft_service import create_purchase_invoice_header as _impl
-    return await _impl(vendor_no, external_doc_no, document_date, due_date, currency_code, posting_date, company_id, token)
+from services.bc_draft_service import create_purchase_invoice_header
 
 
-# ---------------------------------------------------------------------------
-# COMPATIBILITY WRAPPER: is_eligible_for_draft_creation
-# Authoritative source: services.ap_computation
-# ---------------------------------------------------------------------------
-def is_eligible_for_draft_creation(
-    job_type: str,
-    match_method: str,
-    match_score: float,
-    ai_confidence: float,
-    validation_results: dict,
-    doc: dict
-) -> tuple:
-    from services.ap_computation import is_eligible_for_draft_creation as _impl
-    return _impl(job_type, match_method, match_score, ai_confidence, validation_results, doc)
+# Direct canonical AP eligibility import
+from services.ap_computation import is_eligible_for_draft_creation
 
 
 # ==================== WORKFLOW ENGINE ====================
 
-async def run_upload_and_link_workflow(doc_id: str, file_content: bytes, file_name: str, doc_type: str, bc_record_id: str = None, bc_document_no: str = None):
-    from services.document_orchestration_service import run_upload_and_link_workflow as _impl
-    return await _impl(doc_id, file_content, file_name, doc_type, bc_record_id, bc_document_no)
+from services.document_orchestration_service import run_upload_and_link_workflow
 
 # ==================== DOCUMENT ENDPOINTS ====================
 
@@ -1454,10 +1429,7 @@ async def fetch_email_with_attachments(email_id: str, mailbox_address: str) -> d
     from services.email_polling_service import fetch_email_with_attachments as _impl
     return await _impl(email_id, mailbox_address)
 
-async def move_email_to_folder(email_id: str, mailbox_address: str, folder_name: str) -> dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import move_email_to_folder as _impl
-    return await _impl(email_id, mailbox_address, folder_name)
+from services.email_polling_service import move_email_to_folder
 
 # ==================== AUTOMATIC WORKFLOW TRIGGER ====================
 
@@ -3297,10 +3269,6 @@ async def poll_mailbox_for_attachments():
     return await _impl()
 
 
-async def email_polling_worker():
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import email_polling_worker as _impl
-    return await _impl()
 
 
 async def run_sales_email_poll():
@@ -3309,10 +3277,6 @@ async def run_sales_email_poll():
     return await _impl()
 
 
-async def _sales_email_polling_worker():
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import _sales_email_polling_worker as _impl
-    return await _impl()
 
 
 # ==================== LEGACY MIGRATION ENDPOINTS ====================
@@ -3621,10 +3585,6 @@ _dynamic_mailbox_polling_task = None
 _mailbox_last_poll_times = {}  # Legacy — real state is in email_polling_svc
 
 
-async def dynamic_mailbox_polling_worker():
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import dynamic_mailbox_polling_worker as _impl
-    return await _impl()
 
 
 # ---------------------------------------------------------------------------

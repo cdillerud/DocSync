@@ -1,0 +1,25 @@
+{
+  "baseline_kind": "post_4d_pre_raw_service_move",
+  "body_char_count": 37584,
+  "body_line_count": 808,
+  "body_sha256": "5f326a7f4d755075c0ca16816a4c4e211d37bbf97203c6638ed790095efed46c",
+  "function_name": "intake_document_from_bytes",
+  "optional_defaults": {
+    "email_id": null,
+    "mailbox_category": null,
+    "sender": null,
+    "subject": null
+  },
+  "signature_parameters": [
+    "file_content",
+    "filename",
+    "content_type",
+    "source",
+    "sender",
+    "subject",
+    "email_id",
+    "mailbox_category"
+  ],
+  "source_default": "email_poll",
+  "source_module": "services.document_handlers"
+}

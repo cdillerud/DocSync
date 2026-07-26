@@ -620,7 +620,7 @@ async def poll_mailbox_for_attachments():
 
                         try:
                             # Lazy import to avoid circular dependency
-                            from services.document_handlers import intake_document_from_bytes
+                            from services.document_bytes_intake_service import intake_document_from_bytes
                             resolved_category = normalize_mailbox_category("AP")
                             logger.info(
                                 "[Intake:legacy_ap] mailbox=%s configured_category=%s resolved_category=%s filename=%s",
@@ -1076,7 +1076,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                     continue
 
                                 # Lazy import to avoid circular dependency
-                                from services.document_handlers import intake_document_from_bytes
+                                from services.document_bytes_intake_service import intake_document_from_bytes
                                 resolved_category = normalize_mailbox_category(default_category)
                                 # Learned sender override (2026-07-17): if a
                                 # specific sender has been identified as a

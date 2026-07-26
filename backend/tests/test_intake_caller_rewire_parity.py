@@ -42,7 +42,7 @@ class TestSeamSignatureStability:
     """intake_document_from_bytes keeps the Step-4a signature contract."""
 
     def test_signature_parameter_list(self):
-        from services.document_handlers import intake_document_from_bytes
+        from services.document_bytes_intake_service import intake_document_from_bytes
         sig = inspect.signature(intake_document_from_bytes)
         assert list(sig.parameters.keys()) == [
             "file_content", "filename", "content_type", "source",
@@ -50,14 +50,14 @@ class TestSeamSignatureStability:
         ]
 
     def test_signature_defaults(self):
-        from services.document_handlers import intake_document_from_bytes
+        from services.document_bytes_intake_service import intake_document_from_bytes
         sig = inspect.signature(intake_document_from_bytes)
         assert sig.parameters["source"].default == "email_poll"
         for opt in ("sender", "subject", "email_id", "mailbox_category"):
             assert sig.parameters[opt].default is None
 
     def test_is_coroutine_function(self):
-        from services.document_handlers import intake_document_from_bytes
+        from services.document_bytes_intake_service import intake_document_from_bytes
         assert inspect.iscoroutinefunction(intake_document_from_bytes)
 
 
@@ -71,7 +71,7 @@ class TestCallerSourceRewire:
     def test_caller_uses_new_seam(self, rel_path: str, expected_calls: int):
         src = (BACKEND_DIR / rel_path).read_text()
 
-        assert "from services.document_handlers import intake_document_from_bytes" in src, (
+        assert "from services.document_bytes_intake_service import intake_document_from_bytes" in src, (
             f"{rel_path}: missing new-seam import"
         )
 
@@ -104,12 +104,12 @@ class TestLiveOpenApiUnchanged:
         except Exception:
             return False
 
-    def test_openapi_path_count_858(self):
+    def test_openapi_path_count_888(self):
         if not self._reachable():
             pytest.skip("No live backend reachable")
         import requests
         paths = requests.get(f"{self.BASE_URL}/openapi.json").json().get("paths", {})
-        assert len(paths) == 858
+        assert len(paths) == 888
 
     def test_intake_route_still_registered(self):
         if not self._reachable():

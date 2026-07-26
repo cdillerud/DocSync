@@ -195,6 +195,15 @@ class TestDocumentHandlersRewiring:
         )
 
 
+    def test_bytes_intake_service_seam_identity(self):
+        import services.document_handlers as handlers
+        from services.document_bytes_intake_service import (
+            intake_document_from_bytes as service_intake,
+        )
+
+        assert service_intake is handlers.intake_document_from_bytes
+
+
 class TestServerCompatibilityWrappers:
     """Thin wrappers in server.py still resolve correctly."""
 

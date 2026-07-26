@@ -167,7 +167,7 @@ async def split_and_ingest_batch(
         dict with split results: {status, children_count, children: [...]}
     """
     import asyncio
-    from services.document_handlers import intake_document_from_bytes
+    from services.document_bytes_intake_service import intake_document_from_bytes
 
     now = datetime.now(timezone.utc).isoformat()
     reader = PdfReader(io.BytesIO(file_content))

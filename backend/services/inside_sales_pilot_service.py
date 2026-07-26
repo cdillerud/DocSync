@@ -384,7 +384,7 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
 
                         # --- INGEST via unified pipeline ---
                         try:
-                            from services.document_handlers import intake_document_from_bytes
+                            from services.document_bytes_intake_service import intake_document_from_bytes
 
                             result = await intake_document_from_bytes(
                                 file_content=content_bytes,

@@ -1137,21 +1137,6 @@ async def retry_workflow(wf_id: str):
 # This wrapper exists because no internal server.py code calls it, but
 # the function name is retained for compatibility during transition.
 # ---------------------------------------------------------------------------
-async def _aggregate_document_types_data(
-    source_system: Optional[str] = None, 
-    doc_type: Optional[str] = None,
-    classification: Optional[str] = None
-) -> Dict:
-    from services.dashboard_helpers import aggregate_document_types_data
-    return await aggregate_document_types_data(source_system, doc_type, classification)
-
-
-
-
-
-
-
-
 
 # Spiro vendor matching routes moved to routes/spiro.py — REMOVED (Domain 6)
 
@@ -1765,13 +1750,6 @@ async def classify_document_type(
     """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
     from services.classification_helpers import classify_document_type as _impl
     return await _impl(document, extracted_fields, suggested_type, confidence, metadata)
-
-
-def _get_category_for_doc_type(doc_type: str) -> str:
-    """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
-    from services.classification_helpers import get_category_for_doc_type as _impl
-    return _impl(doc_type)
-
 
 
 def _derive_workflow_status(final_status: str, doc_type: str, decision: str) -> str:

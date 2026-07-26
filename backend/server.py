@@ -3767,68 +3767,9 @@ async def startup():
     logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
 
     # ── Startup: Clean up noise events from posting_learning_events ──
-    async def _startup_clean_noise_learning_events():
-        """One-time cleanup: move readiness self-correction events out of posting_learning_events."""
-        await asyncio.sleep(45)
-        try:
-            noise_count = await db.posting_learning_events.count_documents({
-                "event_type": {"$in": ["readiness_contradiction_fix", "readiness_self_correction"]}
-            })
-            if noise_count > 0:
-                result = await db.posting_learning_events.delete_many({
-                    "event_type": {"$in": ["readiness_contradiction_fix", "readiness_self_correction"]}
-                })
-                logger.info("[Startup] Cleaned %d noise events from posting_learning_events (readiness self-corrections)", result.deleted_count)
-            # Also clean events with blank vendor_no and no amount data
-            blank_count = await db.posting_learning_events.count_documents({
-                "vendor_no": {"$in": [None, ""]},
-                "$or": [
-                    {"amount": {"$exists": False}},
-                    {"amount": 0},
-                    {"amount": None},
-                ],
-            })
-            if blank_count > 0:
-                result2 = await db.posting_learning_events.delete_many({
-                    "vendor_no": {"$in": [None, ""]},
-                    "$or": [
-                        {"amount": {"$exists": False}},
-                        {"amount": 0},
-                        {"amount": None},
-                    ],
-                })
-                logger.info("[Startup] Cleaned %d blank-vendor/zero-amount noise events from posting_learning_events", result2.deleted_count)
-            # Clean events with known vendor but $0 amount AND no line data (ghost events)
-            ghost_count = await db.posting_learning_events.count_documents({
-                "$and": [
-                    {"$or": [{"amount": 0}, {"amount": None}, {"amount": {"$exists": False}}]},
-                    {"$or": [{"line_count": 0}, {"line_count": None}, {"line_count": {"$exists": False}}]},
-                    {"$or": [
-                        {"items_used": {"$exists": False}},
-                        {"items_used": None},
-                        {"items_used": {"$size": 0}},
-                        {"items_used": []},
-                    ]},
-                ],
-            })
-            if ghost_count > 0:
-                result3 = await db.posting_learning_events.delete_many({
-                    "$and": [
-                        {"$or": [{"amount": 0}, {"amount": None}, {"amount": {"$exists": False}}]},
-                        {"$or": [{"line_count": 0}, {"line_count": None}, {"line_count": {"$exists": False}}]},
-                        {"$or": [
-                            {"items_used": {"$exists": False}},
-                            {"items_used": None},
-                            {"items_used": {"$size": 0}},
-                            {"items_used": []},
-                        ]},
-                    ],
-                })
-                logger.info("[Startup] Cleaned %d ghost learning events ($0/no-lines/no-items)", result3.deleted_count)
-        except Exception as e:
-            logger.warning("[Startup] Noise event cleanup failed: %s", e)
+    from services.lifecycle_scheduler_service import startup_clean_noise_learning_events
 
-    register_background_task(asyncio.create_task(_startup_clean_noise_learning_events()), name='startup_clean_noise_learning_events')
+    register_background_task(asyncio.create_task(startup_clean_noise_learning_events(db=db, logger=logger)), name='startup_clean_noise_learning_events')
 
     # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
     async def _startup_fix_shipping_po_escalations():

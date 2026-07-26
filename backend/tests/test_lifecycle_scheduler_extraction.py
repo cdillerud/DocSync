@@ -4606,3 +4606,354 @@ class TestDriftWatchlistRuntime:
             "tick failed: %s",
             error,
         )
+
+
+class TestStartupNoiseCleanupExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_startup_clean_noise_learning_events"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "startup_clean_noise_learning_events"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "startup_clean_noise_learning_events"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "startup_clean_noise_learning_events"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "startup_clean_noise_learning_events"
+        )
+
+        assert (
+            _body_hash(function)
+            == "d49c6afbc0f0986ece81e76ff66195acfe1e87e5599e9fedd6524294376b00d7"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            startup_clean_noise_learning_events,
+        )
+
+        signature = inspect.signature(
+            startup_clean_noise_learning_events
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestStartupNoiseCleanupRuntime:
+    @pytest.mark.asyncio
+    async def test_removes_all_noise_categories(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+
+        collection.count_documents = AsyncMock(
+            side_effect=[
+                2,
+                3,
+                4,
+            ]
+        )
+
+        collection.delete_many = AsyncMock(
+            side_effect=[
+                Mock(deleted_count=2),
+                Mock(deleted_count=3),
+                Mock(deleted_count=4),
+            ]
+        )
+
+        db = Mock()
+        db.posting_learning_events = collection
+
+        logger = Mock()
+
+        await scheduler.startup_clean_noise_learning_events(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            45
+        )
+
+        assert (
+            collection.count_documents.await_count
+            == 3
+        )
+
+        assert (
+            collection.delete_many.await_count
+            == 3
+        )
+
+        assert [
+            call.args
+            for call
+            in logger.info.call_args_list
+        ] == [
+            (
+                "[Startup] Cleaned %d noise "
+                "events from "
+                "posting_learning_events "
+                "(readiness self-corrections)",
+                2,
+            ),
+            (
+                "[Startup] Cleaned %d "
+                "blank-vendor/zero-amount "
+                "noise events from "
+                "posting_learning_events",
+                3,
+            ),
+            (
+                "[Startup] Cleaned %d ghost "
+                "learning events "
+                "($0/no-lines/no-items)",
+                4,
+            ),
+        ]
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_clean_collection_skips_deletes(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+
+        collection.count_documents = AsyncMock(
+            side_effect=[
+                0,
+                0,
+                0,
+            ]
+        )
+
+        collection.delete_many = AsyncMock()
+
+        db = Mock()
+        db.posting_learning_events = collection
+
+        logger = Mock()
+
+        await scheduler.startup_clean_noise_learning_events(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            45
+        )
+
+        assert (
+            collection.count_documents.await_count
+            == 3
+        )
+
+        collection.delete_many.assert_not_awaited()
+
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated cleanup failure"
+        )
+
+        collection = Mock()
+
+        collection.count_documents = AsyncMock(
+            side_effect=error
+        )
+
+        collection.delete_many = AsyncMock()
+
+        db = Mock()
+        db.posting_learning_events = collection
+
+        logger = Mock()
+
+        await scheduler.startup_clean_noise_learning_events(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            45
+        )
+
+        collection.delete_many.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[Startup] Noise event cleanup "
+            "failed: %s",
+            error,
+        )

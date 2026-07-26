@@ -3888,27 +3888,9 @@ async def startup():
     logger.info("Auto-Resolution Service initialized (5 workers)")
 
     # ── Startup: Re-queue any "not_run" docs that were lost from in-memory queue ──
-    async def _startup_requeue_not_run():
-        """Scan for docs with ref intel = not_run and enqueue them."""
-        await asyncio.sleep(10)  # Let all services finish initializing
-        svc = get_auto_resolve_service()
-        if not svc:
-            return
-        query = {"reference_intelligence_status": {"$in": [None, "not_run"]}}
-        not_run_docs = await db.hub_documents.find(
-            query, {"id": 1, "_id": 0}
-        ).limit(500).to_list(500)
-        if not_run_docs:
-            for doc in not_run_docs:
-                await svc.enqueue(doc["id"])
-            logger.info(
-                "[Startup] Re-queued %d documents with not_run ref intel status",
-                len(not_run_docs),
-            )
-        else:
-            logger.info("[Startup] No not_run documents to re-queue")
+    from services.lifecycle_scheduler_service import startup_requeue_not_run
 
-    register_background_task(asyncio.create_task(_startup_requeue_not_run()), name='startup_requeue_not_run')
+    register_background_task(asyncio.create_task(startup_requeue_not_run(db=db, logger=logger, get_auto_resolve_service=get_auto_resolve_service)), name='startup_requeue_not_run')
 
     # ── Startup: Auto-file ready docs left in inbox (prevents post-deploy regression) ──
     from services.lifecycle_scheduler_service import startup_sync_status

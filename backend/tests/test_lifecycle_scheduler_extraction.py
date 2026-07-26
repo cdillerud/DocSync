@@ -847,3 +847,384 @@ class TestPeriodicSyncStatusRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestStartupRequeueExtraction:
+    def test_server_uses_canonical_requeue_coroutine(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        nested = [
+            node
+            for node in startup.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "_startup_requeue_not_run"
+            )
+        ]
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "startup_requeue_not_run"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert nested == []
+        assert len(imports) == 1
+
+    def test_requeue_registry_ownership_preserved(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "startup_requeue_not_run"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert isinstance(
+            create_task,
+            ast.Call,
+        )
+
+        assert isinstance(
+            create_task.func,
+            ast.Attribute,
+        )
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert isinstance(
+            coroutine_call,
+            ast.Call,
+        )
+
+        assert isinstance(
+            coroutine_call.func,
+            ast.Name,
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "startup_requeue_not_run"
+        )
+
+        bindings = {
+            keyword.arg: (
+                keyword.value.id
+                if isinstance(
+                    keyword.value,
+                    ast.Name,
+                )
+                else None
+            )
+            for keyword
+            in coroutine_call.keywords
+        }
+
+        assert bindings == {
+            "db": "db",
+            "logger": "logger",
+            "get_auto_resolve_service": (
+                "get_auto_resolve_service"
+            ),
+        }
+
+    def test_requeue_body_matches_original(
+        self,
+    ):
+        tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "startup_requeue_not_run"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "6b3dd938ecf63341997b733a70a3342f0db3da25f2a6fa968e8b20b5a32c1ca6"
+        )
+
+    def test_requeue_signature(self):
+        from services.lifecycle_scheduler_service import (
+            startup_requeue_not_run,
+        )
+
+        signature = inspect.signature(
+            startup_requeue_not_run
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+            "get_auto_resolve_service",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestStartupRequeueRuntime:
+    @pytest.mark.asyncio
+    async def test_missing_service_exits_cleanly(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock()
+        getter = Mock(
+            return_value=None
+        )
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        await scheduler.startup_requeue_not_run(
+            db=db,
+            logger=logger,
+            get_auto_resolve_service=getter,
+        )
+
+        sleep.assert_awaited_once_with(10)
+        getter.assert_called_once_with()
+
+        db.hub_documents.find.assert_not_called()
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_enqueues_not_run_documents(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock()
+        svc = Mock()
+        svc.enqueue = AsyncMock()
+
+        getter = Mock(
+            return_value=svc
+        )
+
+        cursor = Mock()
+        cursor.limit.return_value = cursor
+        cursor.to_list = AsyncMock(
+            return_value=[
+                {"id": "doc-1"},
+                {"id": "doc-2"},
+            ]
+        )
+
+        db = Mock()
+        db.hub_documents.find.return_value = cursor
+
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        await scheduler.startup_requeue_not_run(
+            db=db,
+            logger=logger,
+            get_auto_resolve_service=getter,
+        )
+
+        db.hub_documents.find.assert_called_once_with(
+            {
+                "reference_intelligence_status": {
+                    "$in": [None, "not_run"]
+                }
+            },
+            {"id": 1, "_id": 0},
+        )
+
+        cursor.limit.assert_called_once_with(
+            500
+        )
+
+        cursor.to_list.assert_awaited_once_with(
+            500
+        )
+
+        assert (
+            svc.enqueue.await_count == 2
+        )
+
+        assert [
+            call.args
+            for call in svc.enqueue.await_args_list
+        ] == [
+            ("doc-1",),
+            ("doc-2",),
+        ]
+
+        logger.info.assert_called_once_with(
+            "[Startup] Re-queued %d "
+            "documents with not_run ref "
+            "intel status",
+            2,
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_query_logs_cleanly(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock()
+        svc = Mock()
+        svc.enqueue = AsyncMock()
+
+        getter = Mock(
+            return_value=svc
+        )
+
+        cursor = Mock()
+        cursor.limit.return_value = cursor
+        cursor.to_list = AsyncMock(
+            return_value=[]
+        )
+
+        db = Mock()
+        db.hub_documents.find.return_value = cursor
+
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        await scheduler.startup_requeue_not_run(
+            db=db,
+            logger=logger,
+            get_auto_resolve_service=getter,
+        )
+
+        svc.enqueue.assert_not_awaited()
+
+        logger.info.assert_called_once_with(
+            "[Startup] No not_run documents "
+            "to re-queue"
+        )

@@ -3692,16 +3692,17 @@ async def startup():
     # for any customer whose BC posted orders changed in the last 24h
     # and re-running intake learning on their open docs + pending XLS
     # staging. Read-only — never writes to BC.
-    from services.lifecycle_scheduler_service import intake_learning_refresh_scheduler
-    register_background_task(asyncio.create_task(intake_learning_refresh_scheduler(logger=logger)), name='intake_learning_refresh')
+    from services.lifecycle_scheduler_service import start_intake_learning_tasks
+    start_intake_learning_tasks(
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Intake Learning Refresh scheduler started (interval: 24h)")
 
     # ── Intake Pattern Hygiene scheduler (nightly) ──
     # Calls the unified pattern-health service which runs hygiene across
     # BOTH intake (`order_line_patterns`) and AP (`posting_pattern_analysis`)
     # adapters. Consolidates two previously-separate schedulers into one.
-    from services.lifecycle_scheduler_service import intake_pattern_hygiene_scheduler
-    register_background_task(asyncio.create_task(intake_pattern_hygiene_scheduler(logger=logger)), name='intake_pattern_hygiene')
     logger.info("Unified Pattern Hygiene scheduler started (interval: 24h, domains: sales_intake + ap_posting)")
 
     # ── Drift Alert scheduler (nightly, v2.5.0) ──

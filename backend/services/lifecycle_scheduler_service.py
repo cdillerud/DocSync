@@ -1126,3 +1126,28 @@ async def captured_retry_scheduler(
             logger.warning("[CapturedRetry] Scheduled cycle failed: %s", e)
 
         await asyncio.sleep(CAPTURED_RETRY_INTERVAL_SECONDS)
+
+
+def start_intake_learning_tasks(
+    *,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register intake-learning maintenance tasks."""
+    register_background_task(
+        asyncio.create_task(
+            intake_learning_refresh_scheduler(
+                logger=logger
+            )
+        ),
+        name="intake_learning_refresh",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            intake_pattern_hygiene_scheduler(
+                logger=logger
+            )
+        ),
+        name="intake_pattern_hygiene",
+    )

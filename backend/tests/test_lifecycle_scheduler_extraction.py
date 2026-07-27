@@ -337,7 +337,7 @@ class TestSourceExtraction:
             )
         ]
 
-        owners = set()
+        owners = []
 
         for create_task in create_tasks:
             current = parents.get(
@@ -352,7 +352,7 @@ class TestSourceExtraction:
                         ast.AsyncFunctionDef,
                     ),
                 ):
-                    owners.add(
+                    owners.append(
                         current.name
                     )
                     break
@@ -362,10 +362,14 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 2
-        assert owners == {
+        assert len(create_tasks) == 4
+
+        assert sorted(owners) == [
+            "start_intake_learning_tasks",
+            "start_intake_learning_tasks",
             "start_status_sync_tasks",
-        }
+            "start_status_sync_tasks",
+        ]
 
     def test_canonical_signature(self):
         from services.lifecycle_scheduler_service import (
@@ -2657,40 +2661,78 @@ class TestPatternHygieneExtraction:
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_intake_pattern_hygiene_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "intake_pattern_hygiene_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "intake_pattern_hygiene_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "intake_pattern_hygiene_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_intake_learning_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_intake_learning_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -2722,14 +2764,11 @@ class TestPatternHygieneExtraction:
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
         )
 
         assert (
@@ -2744,14 +2783,6 @@ class TestPatternHygieneExtraction:
         } == {
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -3576,40 +3607,78 @@ class TestIntakeLearningRefreshExtraction:
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_intake_learning_refresh_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "intake_learning_refresh_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "intake_learning_refresh_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "intake_learning_refresh_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_intake_learning_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_intake_learning_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -3641,14 +3710,11 @@ class TestIntakeLearningRefreshExtraction:
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
         )
 
         assert (
@@ -3663,14 +3729,6 @@ class TestIntakeLearningRefreshExtraction:
         } == {
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -8984,5 +9042,100 @@ class TestStatusSyncTaskOwnershipRuntime:
             },
             {
                 "name": "periodic_sync_status",
+            },
+        ]
+
+
+class TestIntakeLearningTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        refresh_coroutine = object()
+        hygiene_coroutine = object()
+
+        refresh = Mock(
+            return_value=refresh_coroutine
+        )
+
+        hygiene = Mock(
+            return_value=hygiene_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "refresh-task",
+                "hygiene-task",
+            ]
+        )
+
+        register = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "intake_learning_refresh_scheduler",
+            refresh,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "intake_pattern_hygiene_scheduler",
+            hygiene,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_intake_learning_tasks(
+            logger=logger,
+            register_background_task=register,
+        )
+
+        refresh.assert_called_once_with(
+            logger=logger
+        )
+
+        hygiene.assert_called_once_with(
+            logger=logger
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (refresh_coroutine,),
+            (hygiene_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("refresh-task",),
+            ("hygiene-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": (
+                    "intake_learning_refresh"
+                ),
+            },
+            {
+                "name": (
+                    "intake_pattern_hygiene"
+                ),
             },
         ]

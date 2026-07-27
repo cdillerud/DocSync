@@ -362,9 +362,11 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 8
+        assert len(create_tasks) == 10
 
         assert sorted(owners) == [
+            "start_bc_maintenance_tasks",
+            "start_bc_maintenance_tasks",
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
             "start_learning_reporting_tasks",
@@ -1705,7 +1707,37 @@ class TestShipmentSyncExtraction:
             )
         ]
 
-        imports = [
+        direct_imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "shipment_sync_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "shipment_sync_scheduler"
+            )
+        ]
+
+        helper_imports = [
             node
             for node in ast.walk(startup)
             if (
@@ -1720,39 +1752,71 @@ class TestShipmentSyncExtraction:
                 )
                 and any(
                     alias.name
-                    == "shipment_sync_scheduler"
+                    == "start_bc_maintenance_tasks"
                     for alias in node.names
                 )
             )
         ]
 
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_bc_maintenance_tasks"
+            )
+        ]
+
         assert nested == []
-        assert len(imports) == 1
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_imports) == 1
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
 
     def test_shipment_registry_ownership_preserved(
         self,
     ):
         tree = ast.parse(
             (
-                BACKEND_DIR / "server.py"
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
             ).read_text()
         )
 
-        startup = next(
+        helper = next(
             node
             for node in tree.body
             if (
                 isinstance(
                     node,
-                    ast.AsyncFunctionDef,
+                    ast.FunctionDef,
                 )
-                and node.name == "startup"
+                and node.name
+                == "start_bc_maintenance_tasks"
             )
         )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -2405,30 +2469,78 @@ class TestKnowledgeSeedExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "knowledge_seed_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "knowledge_seed_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "knowledge_seed_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_bc_maintenance_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_bc_maintenance_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -2443,10 +2555,12 @@ class TestKnowledgeSeedExtraction:
             names = [
                 keyword.value.value
                 for keyword in node.keywords
-                if keyword.arg == "name"
-                and isinstance(
-                    keyword.value,
-                    ast.Constant,
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
                 )
             ]
 
@@ -2484,14 +2598,6 @@ class TestKnowledgeSeedExtraction:
             "db": "db",
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -9474,5 +9580,100 @@ class TestMonitoringTaskOwnershipRuntime:
             },
             {
                 "name": "daily_trace",
+            },
+        ]
+
+
+class TestBCMaintenanceTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        shipment_coroutine = object()
+        knowledge_coroutine = object()
+
+        shipment = Mock(
+            return_value=shipment_coroutine
+        )
+
+        knowledge = Mock(
+            return_value=knowledge_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "shipment-task",
+                "knowledge-task",
+            ]
+        )
+
+        register = Mock()
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "shipment_sync_scheduler",
+            shipment,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "knowledge_seed_scheduler",
+            knowledge,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_bc_maintenance_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+        )
+
+        shipment.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        knowledge.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (shipment_coroutine,),
+            (knowledge_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("shipment-task",),
+            ("knowledge-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": "shipment_sync",
+            },
+            {
+                "name": "knowledge_seed",
             },
         ]

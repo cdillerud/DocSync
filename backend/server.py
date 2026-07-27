@@ -3735,13 +3735,15 @@ async def startup():
     logger.info("Drift Watchlist scheduler started (check: hourly; fires once per target day/hour)")
 
     # Start BC Shipment Sync scheduler (every 1h)
-    from services.lifecycle_scheduler_service import shipment_sync_scheduler  # 1 hour
-    register_background_task(asyncio.create_task(shipment_sync_scheduler(db=db, logger=logger)), name='shipment_sync')
+    from services.lifecycle_scheduler_service import start_bc_maintenance_tasks
+    start_bc_maintenance_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("BC Shipment Sync scheduler started (interval: 1h)")
 
     # Start Knowledge Base auto-seed scheduler (on startup + every 6h)
-    from services.lifecycle_scheduler_service import knowledge_seed_scheduler  # Every 6 hours
-    register_background_task(asyncio.create_task(knowledge_seed_scheduler(db=db, logger=logger)), name='knowledge_seed')
     logger.info("Knowledge Seed scheduler started (on startup + every 6h)")
 
     # ── Daily Trace scheduler — runs random PROD BC invoice traces ──

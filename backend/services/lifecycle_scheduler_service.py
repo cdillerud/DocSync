@@ -1201,3 +1201,31 @@ def start_monitoring_tasks(
         ),
         name="daily_trace",
     )
+
+
+def start_bc_maintenance_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register BC synchronization and seed tasks."""
+    register_background_task(
+        asyncio.create_task(
+            shipment_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="shipment_sync",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            knowledge_seed_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="knowledge_seed",
+    )

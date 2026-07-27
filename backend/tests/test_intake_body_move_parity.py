@@ -469,10 +469,10 @@ class TestSourceInspectionGuardrails:
             ).open()
         )
 
-        assert 4552 <= total <= 4572, (
+        assert 4538 <= total <= 4558, (
             f"server.py line count {total} outside "
             "the current extracted baseline band "
-            "(4552-4572)."
+            "(4538-4558)."
         )
 
     def test_authoritative_body_remains_large(self):

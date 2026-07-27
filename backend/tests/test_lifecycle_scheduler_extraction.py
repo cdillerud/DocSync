@@ -5790,3 +5790,330 @@ class TestStartupPINumberBackfillRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestDeepLearningExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_deep_learning_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "deep_learning_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["deep_learning"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == "deep_learning_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "deep_learning_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "68bfb7601679614c15c43b1e20d460cefbd8acf964d8db6cc2c8e238a4e6110e"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            deep_learning_scheduler,
+        )
+
+        signature = inspect.signature(
+            deep_learning_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestDeepLearningRuntime:
+    @pytest.mark.asyncio
+    async def test_runs_audit_and_vendor_maturity(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        audit = AsyncMock(
+            return_value={
+                "audited": 100,
+                "drifts": 4,
+                "drift_rate": 0.04,
+            }
+        )
+
+        maturity = AsyncMock(
+            return_value={
+                "computed": 12,
+                "levels": {
+                    "mature": 8,
+                    "learning": 4,
+                },
+            }
+        )
+
+        module = ModuleType(
+            "services.deep_learning_engine"
+        )
+
+        module.run_self_correction_audit = audit
+        module.compute_all_vendor_maturity = maturity
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.deep_learning_engine",
+            module,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.deep_learning_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (300,),
+            (4 * 3600,),
+        ]
+
+        audit.assert_awaited_once_with(
+            db,
+            sample_size=100,
+        )
+
+        maturity.assert_awaited_once_with(
+            db
+        )
+
+        logger.info.assert_any_call(
+            "[DeepLearning] Running scheduled "
+            "self-correction audit + "
+            "vendor maturity..."
+        )
+
+        logger.info.assert_any_call(
+            "[DeepLearning] Self-correction: "
+            "%d audited, %d drifts (%.1f%%)",
+            100,
+            4,
+            4.0,
+        )
+
+        logger.info.assert_any_call(
+            "[DeepLearning] Vendor maturity: "
+            "%d vendors scored, levels=%s",
+            12,
+            {
+                "mature": 8,
+                "learning": 4,
+            },
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated deep learning failure"
+        )
+
+        audit = AsyncMock(
+            side_effect=error
+        )
+
+        maturity = AsyncMock()
+
+        module = ModuleType(
+            "services.deep_learning_engine"
+        )
+
+        module.run_self_correction_audit = audit
+        module.compute_all_vendor_maturity = maturity
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.deep_learning_engine",
+            module,
+        )
+
+        db = Mock()
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.deep_learning_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        audit.assert_awaited_once_with(
+            db,
+            sample_size=100,
+        )
+
+        maturity.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[DeepLearning] Scheduled deep "
+            "learning failed: %s",
+            error,
+        )

@@ -408,3 +408,24 @@ async def startup_backfill_pi_no(
             logger.info("[Startup] Backfilled bc_purchase_invoice_no on %d documents", backfilled)
     except Exception as e:
         logger.warning("[Startup] PI no backfill failed: %s", e)
+
+
+async def deep_learning_scheduler(
+    *,
+    db,
+    logger,
+) -> None:
+    await asyncio.sleep(300)  # Initial delay: 5 minutes
+    while True:
+        try:
+            logger.info("[DeepLearning] Running scheduled self-correction audit + vendor maturity...")
+            from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
+            audit = await run_self_correction_audit(db, sample_size=100)
+            logger.info("[DeepLearning] Self-correction: %d audited, %d drifts (%.1f%%)",
+                        audit.get("audited", 0), audit.get("drifts", 0), audit.get("drift_rate", 0) * 100)
+            maturity = await compute_all_vendor_maturity(db)
+            logger.info("[DeepLearning] Vendor maturity: %d vendors scored, levels=%s",
+                        maturity.get("computed", 0), maturity.get("levels", {}))
+        except Exception as e:
+            logger.warning("[DeepLearning] Scheduled deep learning failed: %s", e)
+        await asyncio.sleep(4 * 3600)  # Every 4 hours

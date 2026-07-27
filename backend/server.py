@@ -3966,22 +3966,8 @@ async def startup():
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
 
     # === Deep Learning: Self-Correction + Vendor Maturity (every 4 hours) ===
-    async def _deep_learning_scheduler():
-        await asyncio.sleep(300)  # Initial delay: 5 minutes
-        while True:
-            try:
-                logger.info("[DeepLearning] Running scheduled self-correction audit + vendor maturity...")
-                from services.deep_learning_engine import run_self_correction_audit, compute_all_vendor_maturity
-                audit = await run_self_correction_audit(db, sample_size=100)
-                logger.info("[DeepLearning] Self-correction: %d audited, %d drifts (%.1f%%)",
-                            audit.get("audited", 0), audit.get("drifts", 0), audit.get("drift_rate", 0) * 100)
-                maturity = await compute_all_vendor_maturity(db)
-                logger.info("[DeepLearning] Vendor maturity: %d vendors scored, levels=%s",
-                            maturity.get("computed", 0), maturity.get("levels", {}))
-            except Exception as e:
-                logger.warning("[DeepLearning] Scheduled deep learning failed: %s", e)
-            await asyncio.sleep(4 * 3600)  # Every 4 hours
-    register_background_task(asyncio.create_task(_deep_learning_scheduler()), name='deep_learning')
+    from services.lifecycle_scheduler_service import deep_learning_scheduler  # Every 4 hours
+    register_background_task(asyncio.create_task(deep_learning_scheduler(db=db, logger=logger)), name='deep_learning')
     logger.info("Deep Learning scheduler started (self-correction + vendor maturity, interval: 4h)")
 
     # === Intelligence Maintenance: Duplicate Clearing + Escalation Backfill (every 2 hours) ===

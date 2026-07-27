@@ -7771,3 +7771,564 @@ class TestPORetryRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestReadyToPostExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_ready_to_post_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "ready_to_post_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["ready_to_post"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == "ready_to_post_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "READY_POST_INTERVAL_SECONDS": (
+                "READY_POST_INTERVAL_SECONDS"
+            ),
+            "READY_POST_MAX_RETRIES": (
+                "READY_POST_MAX_RETRIES"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "ready_to_post_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "ff6f7e12afd600383f8c400af7d6b606a7fb826ab50006de8adf564a67fe1192"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            ready_to_post_scheduler,
+        )
+
+        signature = inspect.signature(
+            ready_to_post_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+            "READY_POST_INTERVAL_SECONDS",
+            "READY_POST_MAX_RETRIES",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestReadyToPostRuntime:
+    @pytest.mark.asyncio
+    async def test_skips_when_bc_write_disabled(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "BC_WRITE_ENABLED",
+            "false",
+        )
+
+        class StopLoop(BaseException):
+            pass
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopLoop(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+        collection.find = Mock()
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopLoop
+        ):
+            await scheduler.ready_to_post_scheduler(
+                db=db,
+                logger=logger,
+                READY_POST_INTERVAL_SECONDS=300,
+                READY_POST_MAX_RETRIES=5,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (120,),
+            (300,),
+        ]
+
+        collection.find.assert_not_called()
+        collection.update_one.assert_not_awaited()
+
+        logger.debug.assert_called_once_with(
+            "[ReadyToPost] "
+            "BC_WRITE_ENABLED=false, "
+            "skipping cycle"
+        )
+
+    @pytest.mark.asyncio
+    async def test_posts_and_tracks_failures(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "BC_WRITE_ENABLED",
+            "true",
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        create_invoice = AsyncMock(
+            side_effect=[
+                {
+                    "success": True,
+                    "bc_record_no": "PI-1001",
+                    "bc_system_id": "system-1",
+                },
+                {
+                    "success": False,
+                    "error_message": (
+                        "Temporary BC failure"
+                    ),
+                },
+                {
+                    "success": False,
+                    "error": (
+                        "Permanent BC failure"
+                    ),
+                },
+            ]
+        )
+
+        integration_module = ModuleType(
+            "routers.gpi_integration"
+        )
+
+        integration_module.create_purchase_invoice_from_document = (
+            create_invoice
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "routers.gpi_integration",
+            integration_module,
+        )
+
+        documents = [
+            {
+                "id": "doc-posted",
+                "bc_vendor_number": "V100",
+                "ready_post_retry_count": 0,
+            },
+            {
+                "id": "doc-retry",
+                "vendor_no": "V200",
+                "ready_post_retry_count": 1,
+            },
+            {
+                "id": "doc-exhausted",
+                "vendor_no": "V300",
+                "ready_post_retry_count": 4,
+            },
+        ]
+
+        cursor = Mock()
+
+        cursor.limit = Mock(
+            return_value=cursor
+        )
+
+        cursor.to_list = AsyncMock(
+            return_value=documents
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            return_value=cursor
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.ready_to_post_scheduler(
+                db=db,
+                logger=logger,
+                READY_POST_INTERVAL_SECONDS=300,
+                READY_POST_MAX_RETRIES=5,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (120,),
+            (300,),
+        ]
+
+        collection.find.assert_called_once()
+
+        cursor.limit.assert_called_once_with(
+            50
+        )
+
+        cursor.to_list.assert_awaited_once_with(
+            50
+        )
+
+        assert [
+            call.args
+            for call
+            in create_invoice.await_args_list
+        ] == [
+            (
+                "doc-posted",
+            ),
+            (
+                "doc-retry",
+            ),
+            (
+                "doc-exhausted",
+            ),
+        ]
+
+        for call in create_invoice.await_args_list:
+            assert call.kwargs == {
+                "vendor_no_override": "",
+                "force": False,
+            }
+
+        assert (
+            collection.update_one.await_count
+            == 3
+        )
+
+        updates = [
+            call.args
+            for call
+            in collection.update_one.await_args_list
+        ]
+
+        assert updates[0][0] == {
+            "id": "doc-posted",
+        }
+
+        assert updates[0][1]["$set"][
+            "status"
+        ] == "Posted"
+
+        assert updates[0][1]["$set"][
+            "workflow_status"
+        ] == "posted"
+
+        assert updates[0][1]["$set"][
+            "bc_record_no"
+        ] == "PI-1001"
+
+        assert updates[0][1]["$set"][
+            "bc_purchase_invoice_no"
+        ] == "PI-1001"
+
+        assert updates[0][1]["$set"][
+            "bc_system_id"
+        ] == "system-1"
+
+        assert updates[0][1]["$set"][
+            "ready_post_retry_count"
+        ] == 1
+
+        assert updates[1][0] == {
+            "id": "doc-retry",
+        }
+
+        assert updates[1][1]["$set"][
+            "ready_post_retry_count"
+        ] == 2
+
+        assert updates[1][1]["$set"][
+            "ready_post_last_error"
+        ] == "Temporary BC failure"
+
+        assert (
+            "ready_post_exhausted"
+            not in updates[1][1]["$set"]
+        )
+
+        assert updates[2][0] == {
+            "id": "doc-exhausted",
+        }
+
+        assert updates[2][1]["$set"][
+            "ready_post_retry_count"
+        ] == 5
+
+        assert updates[2][1]["$set"][
+            "ready_post_exhausted"
+        ] is True
+
+        assert updates[2][1]["$set"][
+            "ready_post_last_error"
+        ] == "Permanent BC failure"
+
+        logger.info.assert_any_call(
+            "[ReadyToPost] Found %d "
+            "ReadyForPost docs to attempt posting",
+            3,
+        )
+
+        logger.info.assert_any_call(
+            "[ReadyToPost] Posted doc %s "
+            "to BC: PI #%s",
+            "doc-post",
+            "PI-1001",
+        )
+
+        logger.info.assert_any_call(
+            "[ReadyToPost] BC post attempt "
+            "%d/%d failed for %s: %s",
+            2,
+            5,
+            "doc-retr",
+            "Temporary BC failure",
+        )
+
+        logger.warning.assert_any_call(
+            "[ReadyToPost] Exhausted retries "
+            "for doc %s after %d attempts: %s",
+            "doc-exha",
+            5,
+            "Permanent BC failure",
+        )
+
+        logger.info.assert_any_call(
+            "[ReadyToPost] Cycle done: "
+            "%d found, %d posted, "
+            "%d failed (will retry), "
+            "%d exhausted",
+            3,
+            1,
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cycle_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        monkeypatch.setenv(
+            "BC_WRITE_ENABLED",
+            "true",
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated ReadyToPost failure"
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            side_effect=error
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.ready_to_post_scheduler(
+                db=db,
+                logger=logger,
+                READY_POST_INTERVAL_SECONDS=300,
+                READY_POST_MAX_RETRIES=5,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (120,),
+            (300,),
+        ]
+
+        collection.find.assert_called_once()
+        collection.update_one.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[ReadyToPost] Scheduled cycle "
+            "failed: %s",
+            error,
+        )

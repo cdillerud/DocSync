@@ -7273,3 +7273,501 @@ class TestIntelligenceMaintenanceRuntime:
                 },
             },
         )
+
+
+class TestPORetryExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_po_retry_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "po_retry_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["po_retry"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == "po_retry_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "PO_RETRY_INTERVAL_HOURS": (
+                "PO_RETRY_INTERVAL_HOURS"
+            ),
+            "PO_MAX_WAIT_DAYS": (
+                "PO_MAX_WAIT_DAYS"
+            ),
+            "PO_MAX_RETRIES": (
+                "PO_MAX_RETRIES"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "po_retry_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "5cf811fe6b6334ac74ab558bcc38fc3fa77ed8878d8ee5a31a4bb548d070ab7c"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            po_retry_scheduler,
+        )
+
+        signature = inspect.signature(
+            po_retry_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+            "PO_RETRY_INTERVAL_HOURS",
+            "PO_MAX_WAIT_DAYS",
+            "PO_MAX_RETRIES",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestPORetryRuntime:
+    @pytest.mark.asyncio
+    async def test_processes_retry_outcomes(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        run_readiness = AsyncMock(
+            side_effect=[
+                {
+                    "status": "waiting",
+                    "signals": {
+                        "po_resolved": True,
+                    },
+                },
+                {
+                    "status": "waiting",
+                    "signals": {
+                        "po_resolved": False,
+                    },
+                },
+                {
+                    "status": "waiting",
+                    "signals": {
+                        "po_resolved": False,
+                    },
+                },
+            ]
+        )
+
+        validation_module = ModuleType(
+            "services.unified_validation_service"
+        )
+
+        validation_module.run_readiness = (
+            run_readiness
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.unified_validation_service",
+            validation_module,
+        )
+
+        pending_documents = [
+            {
+                "id": "doc-resolved",
+                "po_pending_retry_count": 0,
+                "po_pending_max_retries": 18,
+            },
+            {
+                "id": "doc-escalated",
+                "po_pending_retry_count": 17,
+                "po_pending_max_retries": 18,
+            },
+            {
+                "id": "doc-waiting",
+                "po_pending_retry_count": 1,
+                "po_pending_max_retries": 18,
+            },
+        ]
+
+        cursor = Mock()
+
+        cursor.limit = Mock(
+            return_value=cursor
+        )
+
+        cursor.to_list = AsyncMock(
+            return_value=pending_documents
+        )
+
+        first_update = Mock()
+        first_update.modified_count = 2
+
+        cleanup_update = Mock()
+        cleanup_update.modified_count = 1
+
+        collection = Mock()
+
+        collection.update_many = AsyncMock(
+            side_effect=[
+                first_update,
+                cleanup_update,
+            ]
+        )
+
+        collection.find = Mock(
+            return_value=cursor
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.po_retry_scheduler(
+                db=db,
+                logger=logger,
+                PO_RETRY_INTERVAL_HOURS=4,
+                PO_MAX_WAIT_DAYS=3,
+                PO_MAX_RETRIES=18,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (600,),
+            (4 * 3600,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in run_readiness.await_args_list
+        ] == [
+            ("doc-resolved",),
+            ("doc-escalated",),
+            ("doc-waiting",),
+        ]
+
+        assert (
+            collection.update_many.await_count
+            == 2
+        )
+
+        first_update_args = (
+            collection
+            .update_many
+            .await_args_list[0]
+            .args
+        )
+
+        assert (
+            first_update_args[1]["$set"]
+            ["po_pending_max_retries"]
+            == 18
+        )
+
+        assert (
+            first_update_args[1]["$set"]
+            ["workflow_status"]
+            == "po_pending"
+        )
+
+        cleanup_args = (
+            collection
+            .update_many
+            .await_args_list[1]
+            .args
+        )
+
+        assert cleanup_args[1] == {
+            "$set": {
+                "po_pending_parked": False,
+            },
+            "$unset": {
+                "escalation_reason": "",
+            },
+        }
+
+        assert (
+            collection.update_one.await_count
+            == 3
+        )
+
+        updates = [
+            call.args
+            for call
+            in collection.update_one.await_args_list
+        ]
+
+        assert updates[0][0] == {
+            "id": "doc-resolved",
+        }
+
+        assert updates[0][1]["$set"][
+            "po_pending_parked"
+        ] is False
+
+        assert updates[0][1]["$set"][
+            "po_pending_retry_count"
+        ] == 1
+
+        assert updates[1][0] == {
+            "id": "doc-escalated",
+        }
+
+        assert updates[1][1]["$set"][
+            "status"
+        ] == "Exception"
+
+        assert updates[1][1]["$set"][
+            "workflow_status"
+        ] == "exception_review"
+
+        assert updates[1][1]["$set"][
+            "po_pending_retry_count"
+        ] == 18
+
+        assert (
+            "3 days"
+            in updates[1][1]["$set"][
+                "escalation_reason"
+            ]
+        )
+
+        assert updates[2][0] == {
+            "id": "doc-waiting",
+        }
+
+        assert updates[2][1]["$set"][
+            "po_pending_retry_count"
+        ] == 2
+
+        assert (
+            "po_pending_last_retry"
+            in updates[2][1]["$set"]
+        )
+
+        logger.warning.assert_not_called()
+
+        logger.info.assert_any_call(
+            "[PO Retry] Auto-parked "
+            "%d new PO-gap docs",
+            2,
+        )
+
+        logger.info.assert_any_call(
+            "[PO Retry] Cycle done: "
+            "%d checked, %d resolved, "
+            "%d still waiting, %d escalated",
+            3,
+            1,
+            1,
+            1,
+        )
+
+        logger.info.assert_any_call(
+            "[PO Retry] Cleaned up "
+            "%d incorrectly parked "
+            "non-AP/cleared docs",
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cycle_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated PO retry failure"
+        )
+
+        collection = Mock()
+
+        collection.update_many = AsyncMock(
+            side_effect=error
+        )
+
+        collection.find = Mock()
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.po_retry_scheduler(
+                db=db,
+                logger=logger,
+                PO_RETRY_INTERVAL_HOURS=4,
+                PO_MAX_WAIT_DAYS=3,
+                PO_MAX_RETRIES=18,
+            )
+
+        sleep.assert_any_await(
+            600
+        )
+
+        sleep.assert_any_await(
+            4 * 3600
+        )
+
+        collection.update_many.assert_awaited_once()
+        collection.find.assert_not_called()
+        collection.update_one.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[PO Retry] Scheduled cycle "
+            "failed: %s",
+            error,
+        )

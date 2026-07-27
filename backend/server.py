@@ -3755,15 +3755,13 @@ async def startup():
 
     register_background_task(asyncio.create_task(startup_requeue_not_run(db=db, logger=logger, get_auto_resolve_service=get_auto_resolve_service)), name='startup_requeue_not_run')
 
-    # ── Startup: Auto-file ready docs left in inbox (prevents post-deploy regression) ──
-    from services.lifecycle_scheduler_service import startup_sync_status
+    # ── Startup + periodic readiness status-sync tasks ──
+    from services.lifecycle_scheduler_service import start_status_sync_tasks
 
-    register_background_task(asyncio.create_task(startup_sync_status(logger=logger)), name='startup_sync_status')
-
-    # ── Periodic: Re-run sync_readiness_to_status every 30 minutes ──
-    from services.lifecycle_scheduler_service import periodic_sync_status  # Every 30 minutes
-
-    register_background_task(asyncio.create_task(periodic_sync_status(logger=logger)), name='periodic_sync_status')
+    start_status_sync_tasks(
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
 
     # ── Startup: Clean up noise events from posting_learning_events ──

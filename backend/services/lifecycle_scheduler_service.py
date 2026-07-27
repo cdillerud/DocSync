@@ -43,7 +43,33 @@ async def periodic_sync_status(
                 logger.info("[PeriodicSync] Sync-status auto-filed %d docs", total)
         except Exception as e:
             logger.warning("[PeriodicSync] Sync-status failed: %s", e)
-        await asyncio.sleep(30 * 60)  # Every 30 minutes
+        await asyncio.sleep(30 * 60)
+
+
+def start_status_sync_tasks(
+    *,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register startup and periodic readiness-sync tasks."""
+    register_background_task(
+        asyncio.create_task(
+            startup_sync_status(
+                logger=logger
+            )
+        ),
+        name="startup_sync_status",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            periodic_sync_status(
+                logger=logger
+            )
+        ),
+        name="periodic_sync_status",
+    )
+  # Every 30 minutes
 
 
 async def startup_requeue_not_run(

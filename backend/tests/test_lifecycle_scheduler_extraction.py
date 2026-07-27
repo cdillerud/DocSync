@@ -40,7 +40,8 @@ def _body_hash(function_node):
 
 
 class TestSourceExtraction:
-    def test_server_uses_canonical_coroutine(
+
+    def test_server_delegates_status_sync_task_ownership(
         self,
     ):
         tree = ast.parse(
@@ -61,20 +62,7 @@ class TestSourceExtraction:
             )
         )
 
-        nested = [
-            node
-            for node in startup.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "_startup_sync_status"
-            )
-        ]
-
-        imports = [
+        helper_imports = [
             node
             for node in ast.walk(startup)
             if (
@@ -89,40 +77,109 @@ class TestSourceExtraction:
                 )
                 and any(
                     alias.name
-                    == "startup_sync_status"
+                    == "start_status_sync_tasks"
                     for alias in node.names
                 )
             )
         ]
 
-        assert nested == []
-        assert len(imports) == 1
+        legacy_imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name in {
+                        "startup_sync_status",
+                        "periodic_sync_status",
+                    }
+                    for alias in node.names
+                )
+            )
+        ]
+
+        calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_status_sync_tasks"
+            )
+        ]
+
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id in {
+                    "startup_sync_status",
+                    "periodic_sync_status",
+                }
+            )
+        ]
+
+        assert len(helper_imports) == 1
+        assert legacy_imports == []
+        assert len(calls) == 1
+        assert direct_calls == []
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword in calls[0].keywords
+        } == {
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
 
     def test_registry_name_and_ownership_preserved(
         self,
     ):
         tree = ast.parse(
             (
-                BACKEND_DIR / "server.py"
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
             ).read_text()
         )
 
-        startup = next(
+        helper = next(
             node
             for node in tree.body
             if (
                 isinstance(
                     node,
-                    ast.AsyncFunctionDef,
+                    ast.FunctionDef,
                 )
-                and node.name == "startup"
+                and node.name
+                == "start_status_sync_tasks"
             )
         )
 
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
+        wrappers = [
+            node
+            for node in ast.walk(helper)
+            if (
                 isinstance(node, ast.Call)
                 and isinstance(
                     node.func,
@@ -130,84 +187,58 @@ class TestSourceExtraction:
                 )
                 and node.func.id
                 == "register_background_task"
-            ):
-                continue
-
-            task_names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if task_names == [
-                "startup_sync_status"
-            ]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        wrapper = wrappers[0]
-
-        assert len(wrapper.args) == 1
-
-        create_task = wrapper.args[0]
-
-        assert isinstance(
-            create_task,
-            ast.Call,
-        )
-
-        assert isinstance(
-            create_task.func,
-            ast.Attribute,
-        )
-
-        assert (
-            create_task.func.attr
-            == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
-        )
-
-        assert isinstance(
-            coroutine_call,
-            ast.Call,
-        )
-
-        assert isinstance(
-            coroutine_call.func,
-            ast.Name,
-        )
-
-        assert (
-            coroutine_call.func.id
-            == "startup_sync_status"
-        )
-
-        logger_keywords = [
-            keyword
-            for keyword
-            in coroutine_call.keywords
-            if (
-                keyword.arg == "logger"
-                and isinstance(
-                    keyword.value,
-                    ast.Name,
-                )
-                and keyword.value.id
-                == "logger"
             )
         ]
 
-        assert len(logger_keywords) == 1
+        assert len(wrappers) == 2
+
+        observed = {}
+
+        for wrapper in wrappers:
+            task_name = next(
+                keyword.value.value
+                for keyword in wrapper.keywords
+                if keyword.arg == "name"
+            )
+
+            create_task = wrapper.args[0]
+
+            assert isinstance(
+                create_task,
+                ast.Call,
+            )
+
+            assert isinstance(
+                create_task.func,
+                ast.Attribute,
+            )
+
+            assert (
+                create_task.func.attr
+                == "create_task"
+            )
+
+            coroutine = create_task.args[0]
+
+            assert isinstance(
+                coroutine.func,
+                ast.Name,
+            )
+
+            observed[task_name] = {
+                keyword.arg: keyword.value.id
+                for keyword
+                in coroutine.keywords
+            }
+
+        assert observed == {
+            "startup_sync_status": {
+                "logger": "logger",
+            },
+            "periodic_sync_status": {
+                "logger": "logger",
+            },
+        }
 
     def test_canonical_body_matches_original(
         self,
@@ -238,7 +269,8 @@ class TestSourceExtraction:
             == EXPECTED_BODY_HASH
         )
 
-    def test_service_has_no_server_or_task_ownership(
+
+    def test_service_has_no_server_dependency_and_limited_task_ownership(
         self,
     ):
         tree = ast.parse(
@@ -257,8 +289,7 @@ class TestSourceExtraction:
                     node,
                     ast.ImportFrom,
                 )
-                and node.module
-                in {
+                and node.module in {
                     "server",
                     "backend.server",
                 }
@@ -269,8 +300,7 @@ class TestSourceExtraction:
                     ast.Import,
                 )
                 and any(
-                    alias.name
-                    in {
+                    alias.name in {
                         "server",
                         "backend.server",
                     }
@@ -278,6 +308,14 @@ class TestSourceExtraction:
                 )
             )
         ]
+
+        parents = {}
+
+        for node in ast.walk(tree):
+            for child in ast.iter_child_nodes(
+                node
+            ):
+                parents[child] = node
 
         create_tasks = [
             node
@@ -299,8 +337,35 @@ class TestSourceExtraction:
             )
         ]
 
+        owners = set()
+
+        for create_task in create_tasks:
+            current = parents.get(
+                create_task
+            )
+
+            while current is not None:
+                if isinstance(
+                    current,
+                    (
+                        ast.FunctionDef,
+                        ast.AsyncFunctionDef,
+                    ),
+                ):
+                    owners.add(
+                        current.name
+                    )
+                    break
+
+                current = parents.get(
+                    current
+                )
+
         assert server_imports == []
-        assert create_tasks == []
+        assert len(create_tasks) == 2
+        assert owners == {
+            "start_status_sync_tasks",
+        }
 
     def test_canonical_signature(self):
         from services.lifecycle_scheduler_service import (
@@ -475,7 +540,8 @@ class TestRuntimeBehavior:
 
 
 class TestPeriodicSyncStatusExtraction:
-    def test_server_uses_canonical_periodic_coroutine(
+
+    def test_server_no_longer_owns_periodic_coroutine(
         self,
     ):
         tree = ast.parse(
@@ -496,31 +562,13 @@ class TestPeriodicSyncStatusExtraction:
             )
         )
 
-        nested = [
-            node
-            for node in startup.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "_periodic_sync_status"
-            )
-        ]
-
-        imports = [
+        periodic_imports = [
             node
             for node in ast.walk(startup)
             if (
                 isinstance(
                     node,
                     ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
                 )
                 and any(
                     alias.name
@@ -530,33 +578,66 @@ class TestPeriodicSyncStatusExtraction:
             )
         ]
 
-        assert nested == []
-        assert len(imports) == 1
+        periodic_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "periodic_sync_status"
+            )
+        ]
+
+        ownership_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_status_sync_tasks"
+            )
+        ]
+
+        assert periodic_imports == []
+        assert periodic_calls == []
+        assert len(ownership_calls) == 1
+
 
     def test_periodic_registry_ownership_preserved(
         self,
     ):
         tree = ast.parse(
             (
-                BACKEND_DIR / "server.py"
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
             ).read_text()
         )
 
-        startup = next(
+        helper = next(
             node
             for node in tree.body
             if (
                 isinstance(
                     node,
-                    ast.AsyncFunctionDef,
+                    ast.FunctionDef,
                 )
-                and node.name == "startup"
+                and node.name
+                == "start_status_sync_tasks"
             )
         )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -588,57 +669,20 @@ class TestPeriodicSyncStatusExtraction:
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
-
-        assert isinstance(
-            create_task,
-            ast.Call,
-        )
-
-        assert isinstance(
-            create_task.func,
-            ast.Attribute,
-        )
+        coroutine = create_task.args[0]
 
         assert (
-            create_task.func.attr
-            == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
-        )
-
-        assert isinstance(
-            coroutine_call,
-            ast.Call,
-        )
-
-        assert isinstance(
-            coroutine_call.func,
-            ast.Name,
-        )
-
-        assert (
-            coroutine_call.func.id
+            coroutine.func.id
             == "periodic_sync_status"
         )
 
-        logger_keywords = [
-            keyword
+        assert {
+            keyword.arg: keyword.value.id
             for keyword
-            in coroutine_call.keywords
-            if (
-                keyword.arg == "logger"
-                and isinstance(
-                    keyword.value,
-                    ast.Name,
-                )
-                and keyword.value.id
-                == "logger"
-            )
-        ]
-
-        assert len(logger_keywords) == 1
+            in coroutine.keywords
+        } == {
+            "logger": "logger",
+        }
 
     def test_periodic_body_matches_original(
         self,
@@ -8851,3 +8895,94 @@ class TestCapturedRetryRuntime:
             "cycle failed: %s",
             error,
         )
+
+
+class TestStatusSyncTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        startup_coroutine = object()
+        periodic_coroutine = object()
+
+        startup = Mock(
+            return_value=startup_coroutine
+        )
+
+        periodic = Mock(
+            return_value=periodic_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "startup-task",
+                "periodic-task",
+            ]
+        )
+
+        register = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "startup_sync_status",
+            startup,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "periodic_sync_status",
+            periodic,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_status_sync_tasks(
+            logger=logger,
+            register_background_task=register,
+        )
+
+        startup.assert_called_once_with(
+            logger=logger
+        )
+
+        periodic.assert_called_once_with(
+            logger=logger
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (startup_coroutine,),
+            (periodic_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("startup-task",),
+            ("periodic-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": "startup_sync_status",
+            },
+            {
+                "name": "periodic_sync_status",
+            },
+        ]

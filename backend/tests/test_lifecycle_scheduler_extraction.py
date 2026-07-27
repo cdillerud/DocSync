@@ -362,11 +362,13 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 4
+        assert len(create_tasks) == 6
 
         assert sorted(owners) == [
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
+            "start_learning_reporting_tasks",
+            "start_learning_reporting_tasks",
             "start_status_sync_tasks",
             "start_status_sync_tasks",
         ]
@@ -2992,40 +2994,78 @@ class TestDriftAlertExtraction:
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_drift_alert_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "drift_alert_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "drift_alert_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "drift_alert_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_learning_reporting_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_learning_reporting_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -3049,20 +3089,19 @@ class TestDriftAlertExtraction:
                 )
             ]
 
-            if names == ["drift_alert"]:
+            if names == [
+                "drift_alert"
+            ]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
         )
 
         assert (
@@ -3077,14 +3116,6 @@ class TestDriftAlertExtraction:
         } == {
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -3293,40 +3324,78 @@ class TestWeeklyDigestExtraction:
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_weekly_digest_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "weekly_digest_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "weekly_digest_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "weekly_digest_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_learning_reporting_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_learning_reporting_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -3350,20 +3419,19 @@ class TestWeeklyDigestExtraction:
                 )
             ]
 
-            if names == ["weekly_digest"]:
+            if names == [
+                "weekly_digest"
+            ]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
         )
 
         assert (
@@ -3378,14 +3446,6 @@ class TestWeeklyDigestExtraction:
         } == {
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -9137,5 +9197,96 @@ class TestIntakeLearningTaskOwnershipRuntime:
                 "name": (
                     "intake_pattern_hygiene"
                 ),
+            },
+        ]
+
+
+class TestLearningReportingTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        drift_coroutine = object()
+        digest_coroutine = object()
+
+        drift = Mock(
+            return_value=drift_coroutine
+        )
+
+        digest = Mock(
+            return_value=digest_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "drift-task",
+                "digest-task",
+            ]
+        )
+
+        register = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "drift_alert_scheduler",
+            drift,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "weekly_digest_scheduler",
+            digest,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_learning_reporting_tasks(
+            logger=logger,
+            register_background_task=register,
+        )
+
+        drift.assert_called_once_with(
+            logger=logger
+        )
+
+        digest.assert_called_once_with(
+            logger=logger
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (drift_coroutine,),
+            (digest_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("drift-task",),
+            ("digest-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": "drift_alert",
+            },
+            {
+                "name": "weekly_digest",
             },
         ]

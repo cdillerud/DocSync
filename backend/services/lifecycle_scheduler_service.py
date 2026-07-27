@@ -1151,3 +1151,28 @@ def start_intake_learning_tasks(
         ),
         name="intake_pattern_hygiene",
     )
+
+
+def start_learning_reporting_tasks(
+    *,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register learning reporting and alert tasks."""
+    register_background_task(
+        asyncio.create_task(
+            drift_alert_scheduler(
+                logger=logger
+            )
+        ),
+        name="drift_alert",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            weekly_digest_scheduler(
+                logger=logger
+            )
+        ),
+        name="weekly_digest",
+    )

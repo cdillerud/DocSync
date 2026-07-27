@@ -3709,15 +3709,16 @@ async def startup():
     # Scans the unified learning_events_v2 log for anomalies (trusted-pattern
     # rejections, bounds drift, AP template drift, catalog explosions) and
     # writes structured alerts to `learning_drift_alerts`.
-    from services.lifecycle_scheduler_service import drift_alert_scheduler
-    register_background_task(asyncio.create_task(drift_alert_scheduler(logger=logger)), name='drift_alert')
+    from services.lifecycle_scheduler_service import start_learning_reporting_tasks
+    start_learning_reporting_tasks(
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Drift Alert scheduler started (interval: 24h)")
 
     # ── Weekly Digest scheduler (v2.5.2) ──
     # Rebuilds the current-week digest every 24h so `/api/learning/digest/latest`
     # always reflects the in-progress week. Idempotent by week_key.
-    from services.lifecycle_scheduler_service import weekly_digest_scheduler
-    register_background_task(asyncio.create_task(weekly_digest_scheduler(logger=logger)), name='weekly_digest')
     logger.info("Weekly Digest scheduler started (interval: 24h, rebuilds current-week digest)")
 
     # ── Drift Watchlist scheduler (v2.5.4) ───────────────────────

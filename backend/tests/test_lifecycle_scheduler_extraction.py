@@ -362,7 +362,7 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 12
+        assert len(create_tasks) == 14
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
@@ -375,6 +375,8 @@ class TestSourceExtraction:
             "start_learning_reporting_tasks",
             "start_monitoring_tasks",
             "start_monitoring_tasks",
+            "start_startup_repair_tasks",
+            "start_startup_repair_tasks",
             "start_status_sync_tasks",
             "start_status_sync_tasks",
         ]
@@ -5004,30 +5006,90 @@ class TestStartupNoiseCleanupExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "startup_clean_noise_learning_events"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "startup_clean_noise_learning_events"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "startup_clean_noise_learning_events"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_startup_repair_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_startup_repair_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -5051,55 +5113,44 @@ class TestStartupNoiseCleanupExtraction:
                 )
             ]
 
-            if names == [
-                "startup_clean_noise_learning_events"
-            ]:
+            if names == ["startup_clean_noise_learning_events"]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
         )
 
-        coroutine_call = (
-            create_task.args[0]
-        )
-
         assert (
-            coroutine_call.func.id
+            coroutine.func.id
             == "startup_clean_noise_learning_events"
         )
 
         assert {
             keyword.arg: keyword.value.id
             for keyword
-            in coroutine_call.keywords
+            in coroutine.keywords
         } == {
             "db": "db",
             "logger": "logger",
         }
 
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
         function = next(
             node
             for node in service_tree.body
-            if isinstance(
-                node,
-                ast.AsyncFunctionDef,
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "startup_clean_noise_learning_events"
             )
-            and node.name
-            == "startup_clean_noise_learning_events"
         )
 
         assert (
@@ -5355,30 +5406,90 @@ class TestStartupShippingPOFixExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "startup_fix_shipping_po_escalations"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "startup_fix_shipping_po_escalations"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "startup_fix_shipping_po_escalations"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_startup_repair_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_startup_repair_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -5402,55 +5513,44 @@ class TestStartupShippingPOFixExtraction:
                 )
             ]
 
-            if names == [
-                "startup_fix_shipping_po_escalations"
-            ]:
+            if names == ["startup_fix_shipping_po_escalations"]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
         )
 
-        coroutine_call = (
-            create_task.args[0]
-        )
-
         assert (
-            coroutine_call.func.id
+            coroutine.func.id
             == "startup_fix_shipping_po_escalations"
         )
 
         assert {
             keyword.arg: keyword.value.id
             for keyword
-            in coroutine_call.keywords
+            in coroutine.keywords
         } == {
             "db": "db",
             "logger": "logger",
         }
 
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
         function = next(
             node
             for node in service_tree.body
-            if isinstance(
-                node,
-                ast.AsyncFunctionDef,
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "startup_fix_shipping_po_escalations"
             )
-            and node.name
-            == "startup_fix_shipping_po_escalations"
         )
 
         assert (
@@ -9875,6 +9975,105 @@ class TestIntelligenceTaskOwnershipRuntime:
             {
                 "name": (
                     "intelligence_maintenance"
+                ),
+            },
+        ]
+
+
+class TestStartupRepairTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        cleanup_coroutine = object()
+        shipping_coroutine = object()
+
+        cleanup = Mock(
+            return_value=cleanup_coroutine
+        )
+
+        shipping = Mock(
+            return_value=shipping_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "cleanup-task",
+                "shipping-task",
+            ]
+        )
+
+        register = Mock()
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "startup_clean_noise_learning_events",
+            cleanup,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "startup_fix_shipping_po_escalations",
+            shipping,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_startup_repair_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+        )
+
+        cleanup.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        shipping.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (cleanup_coroutine,),
+            (shipping_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("cleanup-task",),
+            ("shipping-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": (
+                    "startup_clean_noise_learning_events"
+                ),
+            },
+            {
+                "name": (
+                    "startup_fix_shipping_po_escalations"
                 ),
             },
         ]

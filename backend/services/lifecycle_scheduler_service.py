@@ -1257,3 +1257,31 @@ def start_intelligence_tasks(
         ),
         name="intelligence_maintenance",
     )
+
+
+def start_startup_repair_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register one-shot startup repair tasks."""
+    register_background_task(
+        asyncio.create_task(
+            startup_clean_noise_learning_events(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="startup_clean_noise_learning_events",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            startup_fix_shipping_po_escalations(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="startup_fix_shipping_po_escalations",
+    )

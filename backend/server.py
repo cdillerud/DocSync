@@ -3770,14 +3770,16 @@ async def startup():
     logger.info("Periodic sync-readiness-to-status scheduler started (interval: 30min)")
 
     # ── Startup: Clean up noise events from posting_learning_events ──
-    from services.lifecycle_scheduler_service import startup_clean_noise_learning_events
+    from services.lifecycle_scheduler_service import start_startup_repair_tasks
 
-    register_background_task(asyncio.create_task(startup_clean_noise_learning_events(db=db, logger=logger)), name='startup_clean_noise_learning_events')
+    start_startup_repair_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
 
     # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
-    from services.lifecycle_scheduler_service import startup_fix_shipping_po_escalations
 
-    register_background_task(asyncio.create_task(startup_fix_shipping_po_escalations(db=db, logger=logger)), name='startup_fix_shipping_po_escalations')
 
 
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──

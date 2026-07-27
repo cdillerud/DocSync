@@ -6644,3 +6644,632 @@ class TestDraftFeedbackRuntime:
         )
 
         auto_approve_drafts.assert_awaited_once()
+
+
+class TestIntelligenceMaintenanceExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_intelligence_maintenance_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == (
+                        "intelligence_maintenance_scheduler"
+                    )
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "intelligence_maintenance"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == (
+                "intelligence_maintenance_scheduler"
+            )
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == (
+                    "intelligence_maintenance_scheduler"
+                )
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "3512d1ba9395b885eedaf16dae92ba2f20eb1c634a462f1fa0a48cbe0fa9bd95"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            intelligence_maintenance_scheduler,
+        )
+
+        signature = inspect.signature(
+            intelligence_maintenance_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestIntelligenceMaintenanceRuntime:
+    @pytest.mark.asyncio
+    async def test_runs_all_maintenance_stages(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+        from datetime import datetime as real_datetime
+
+        class FixedDateTime(real_datetime):
+            @classmethod
+            def now(
+                cls,
+                tz=None,
+            ):
+                return cls(
+                    2026,
+                    7,
+                    26,
+                    12,
+                    0,
+                    0,
+                    tzinfo=tz,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        batch_clear = AsyncMock(
+            return_value={
+                "cleared": 2,
+                "safe_vendors": 1,
+            }
+        )
+
+        record_automation = AsyncMock()
+        record_duplicate = AsyncMock()
+
+        run_readiness = AsyncMock(
+            return_value={
+                "status": "ready_for_post",
+                "blocking_reasons": [],
+            }
+        )
+
+        duplicate_module = ModuleType(
+            "services.duplicate_intelligence_service"
+        )
+
+        duplicate_module.batch_auto_clear_safe_duplicates = (
+            batch_clear
+        )
+
+        duplicate_module.record_duplicate_outcome = (
+            record_duplicate
+        )
+
+        escalation_module = ModuleType(
+            "services.escalation_intelligence_service"
+        )
+
+        escalation_module.record_automation_outcome = (
+            record_automation
+        )
+
+        validation_module = ModuleType(
+            "services.unified_validation_service"
+        )
+
+        validation_module.run_readiness = (
+            run_readiness
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.duplicate_intelligence_service",
+            duplicate_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.escalation_intelligence_service",
+            escalation_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.unified_validation_service",
+            validation_module,
+        )
+
+        class Cursor:
+            def __init__(
+                self,
+                documents,
+            ):
+                self.limit = Mock(
+                    return_value=self
+                )
+
+                self.to_list = AsyncMock(
+                    return_value=documents
+                )
+
+        escalation_cursor = Cursor(
+            [
+                {
+                    "id": "doc-1",
+                    "bc_vendor_number": "V100",
+                    "document_type": (
+                        "PURCHASE_INVOICE"
+                    ),
+                    "status": "Completed",
+                },
+            ]
+        )
+
+        duplicate_cursor = Cursor(
+            [
+                {
+                    "id": "doc-2",
+                    "vendor_no": "V200",
+                },
+            ]
+        )
+
+        gap_cursor = Cursor(
+            [
+                {
+                    "id": "doc-3",
+                },
+            ]
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            side_effect=[
+                escalation_cursor,
+                duplicate_cursor,
+                gap_cursor,
+            ]
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await (
+                scheduler
+                .intelligence_maintenance_scheduler(
+                    db=db,
+                    logger=logger,
+                )
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (180,),
+            (2 * 3600,),
+        ]
+
+        batch_clear.assert_awaited_once_with(
+            db,
+            limit=200,
+        )
+
+        record_automation.assert_awaited_once_with(
+            db,
+            "V100",
+            "PURCHASE_INVOICE",
+            "success",
+            "doc-1",
+        )
+
+        record_duplicate.assert_awaited_once_with(
+            db,
+            doc_id="doc-2",
+            vendor_no="V200",
+            was_flagged_duplicate=True,
+            actual_outcome="false_positive",
+            resolution_source="backfill_completed",
+        )
+
+        run_readiness.assert_awaited_once_with(
+            "doc-3"
+        )
+
+        assert (
+            collection.update_one.await_count
+            == 3
+        )
+
+        assert [
+            call.args
+            for call
+            in collection.update_one.await_args_list
+        ] == [
+            (
+                {
+                    "id": "doc-1",
+                },
+                {
+                    "$set": {
+                        "escalation_tracked": True,
+                    },
+                },
+            ),
+            (
+                {
+                    "id": "doc-2",
+                },
+                {
+                    "$set": {
+                        "duplicate_outcome_tracked": True,
+                    },
+                },
+            ),
+            (
+                {
+                    "id": "doc-3",
+                },
+                {
+                    "$set": {
+                        "gap_closer_last_run": (
+                            "2026-07-26T12:00:00+00:00"
+                        ),
+                    },
+                },
+            ),
+        ]
+
+        logger.warning.assert_not_called()
+
+        logger.info.assert_any_call(
+            "[IntelMaint] Duplicate clear: "
+            "%d cleared, %d safe vendors",
+            2,
+            1,
+        )
+
+        logger.info.assert_any_call(
+            "[IntelMaint] Escalation backfill: "
+            "tracked %d documents",
+            1,
+        )
+
+        logger.info.assert_any_call(
+            "[IntelMaint] Duplicate backfill: "
+            "tracked %d false positives",
+            1,
+        )
+
+        logger.info.assert_any_call(
+            "[IntelMaint] Gap closer: "
+            "resolved %d/%d validation gaps",
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stage_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+        from datetime import datetime as real_datetime
+
+        class FixedDateTime(real_datetime):
+            @classmethod
+            def now(
+                cls,
+                tz=None,
+            ):
+                return cls(
+                    2026,
+                    7,
+                    26,
+                    12,
+                    0,
+                    0,
+                    tzinfo=tz,
+                )
+
+        monkeypatch.setattr(
+            scheduler,
+            "datetime",
+            FixedDateTime,
+        )
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated duplicate clear failure"
+        )
+
+        batch_clear = AsyncMock(
+            side_effect=error
+        )
+
+        record_automation = AsyncMock()
+        record_duplicate = AsyncMock()
+        run_readiness = AsyncMock()
+
+        duplicate_module = ModuleType(
+            "services.duplicate_intelligence_service"
+        )
+
+        duplicate_module.batch_auto_clear_safe_duplicates = (
+            batch_clear
+        )
+
+        duplicate_module.record_duplicate_outcome = (
+            record_duplicate
+        )
+
+        escalation_module = ModuleType(
+            "services.escalation_intelligence_service"
+        )
+
+        escalation_module.record_automation_outcome = (
+            record_automation
+        )
+
+        validation_module = ModuleType(
+            "services.unified_validation_service"
+        )
+
+        validation_module.run_readiness = (
+            run_readiness
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.duplicate_intelligence_service",
+            duplicate_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.escalation_intelligence_service",
+            escalation_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.unified_validation_service",
+            validation_module,
+        )
+
+        class Cursor:
+            def __init__(
+                self,
+                documents,
+            ):
+                self.limit = Mock(
+                    return_value=self
+                )
+
+                self.to_list = AsyncMock(
+                    return_value=documents
+                )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            side_effect=[
+                Cursor(
+                    [
+                        {
+                            "id": "doc-4",
+                            "vendor_no": "V400",
+                            "suggested_job_type": (
+                                "PACKING_SLIP"
+                            ),
+                            "status": "Posted",
+                        },
+                    ]
+                ),
+                Cursor([]),
+                Cursor([]),
+            ]
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await (
+                scheduler
+                .intelligence_maintenance_scheduler(
+                    db=db,
+                    logger=logger,
+                )
+            )
+
+        batch_clear.assert_awaited_once_with(
+            db,
+            limit=200,
+        )
+
+        logger.warning.assert_called_once_with(
+            "[IntelMaint] Duplicate clear "
+            "failed: %s",
+            error,
+        )
+
+        record_automation.assert_awaited_once_with(
+            db,
+            "V400",
+            "PACKING_SLIP",
+            "success",
+            "doc-4",
+        )
+
+        collection.update_one.assert_awaited_once_with(
+            {
+                "id": "doc-4",
+            },
+            {
+                "$set": {
+                    "escalation_tracked": True,
+                },
+            },
+        )

@@ -161,10 +161,10 @@ class TestSourceInspectionGuardrails:
             ).open("r")
         )
 
-        assert 4032 <= total <= 4052, (
+        assert 3911 <= total <= 3931, (
             f"server.py line count {total} outside "
             "the current extracted baseline band "
-            "(4032-4052)."
+            "(3911-3931)."
         )
 
     @pytest.mark.parametrize("helper_name,_", TIER_3_HELPERS)

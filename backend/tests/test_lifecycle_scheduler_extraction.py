@@ -8332,3 +8332,522 @@ class TestReadyToPostRuntime:
             "failed: %s",
             error,
         )
+
+
+class TestCapturedRetryExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "captured_retry_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == ["captured_retry"]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == "captured_retry_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "_reprocess_document_inner": (
+                "_reprocess_document_inner"
+            ),
+            "CAPTURED_RETRY_INTERVAL_SECONDS": (
+                "CAPTURED_RETRY_INTERVAL_SECONDS"
+            ),
+            "CAPTURED_STALE_THRESHOLD_SECONDS": (
+                "CAPTURED_STALE_THRESHOLD_SECONDS"
+            ),
+            "CAPTURED_MAX_RETRIES": (
+                "CAPTURED_MAX_RETRIES"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "captured_retry_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "e652fe1401cc94971dac44fde5c4889e43a42a049e62560fd6e2070437f5d617"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            captured_retry_scheduler,
+        )
+
+        signature = inspect.signature(
+            captured_retry_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+            "_reprocess_document_inner",
+            "CAPTURED_RETRY_INTERVAL_SECONDS",
+            "CAPTURED_STALE_THRESHOLD_SECONDS",
+            "CAPTURED_MAX_RETRIES",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestCapturedRetryRuntime:
+    @pytest.mark.asyncio
+    async def test_retries_escalates_and_tracks_failures(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        class StopLoop(BaseException):
+            pass
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopLoop(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        stuck_documents = [
+            {
+                "id": "doc-escalated",
+                "file_name": "escalated.pdf",
+                "captured_retry_count": 4,
+            },
+            {
+                "id": "doc-moved",
+                "file_name": "moved.pdf",
+                "captured_retry_count": 0,
+            },
+            {
+                "id": "doc-failed",
+                "file_name": "failed.pdf",
+                "captured_retry_count": 1,
+            },
+        ]
+
+        cursor = Mock()
+
+        cursor.limit = Mock(
+            return_value=cursor
+        )
+
+        cursor.to_list = AsyncMock(
+            return_value=stuck_documents
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            return_value=cursor
+        )
+
+        collection.find_one = AsyncMock(
+            side_effect=[
+                {
+                    "id": "doc-moved",
+                    "workflow_status": "captured",
+                },
+                {
+                    "workflow_status": "validated",
+                    "status": "Validated",
+                },
+                {
+                    "id": "doc-failed",
+                    "workflow_status": "captured",
+                },
+            ]
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        reprocess_error = RuntimeError(
+            "simulated reprocess failure"
+        )
+
+        reprocess = AsyncMock(
+            side_effect=[
+                {
+                    "reprocessed": True,
+                },
+                reprocess_error,
+            ]
+        )
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopLoop
+        ):
+            await scheduler.captured_retry_scheduler(
+                db=db,
+                logger=logger,
+                _reprocess_document_inner=reprocess,
+                CAPTURED_RETRY_INTERVAL_SECONDS=300,
+                CAPTURED_STALE_THRESHOLD_SECONDS=300,
+                CAPTURED_MAX_RETRIES=4,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (180,),
+            (300,),
+        ]
+
+        collection.find.assert_called_once()
+
+        cursor.limit.assert_called_once_with(
+            50
+        )
+
+        cursor.to_list.assert_awaited_once_with(
+            50
+        )
+
+        query = collection.find.call_args.args[0]
+
+        assert query[
+            "workflow_status"
+        ] == {
+            "$in": [
+                "captured",
+                "Captured",
+            ],
+        }
+
+        assert query[
+            "captured_retry_escalated"
+        ] == {
+            "$ne": True,
+        }
+
+        assert "$lt" in query[
+            "created_utc"
+        ]
+
+        assert [
+            call.args
+            for call
+            in reprocess.await_args_list
+        ] == [
+            (
+                "doc-moved",
+                {
+                    "id": "doc-moved",
+                    "workflow_status": "captured",
+                },
+            ),
+            (
+                "doc-failed",
+                {
+                    "id": "doc-failed",
+                    "workflow_status": "captured",
+                },
+            ),
+        ]
+
+        for call in reprocess.await_args_list:
+            assert call.kwargs == {
+                "reclassify": True,
+            }
+
+        assert (
+            collection.find_one.await_count
+            == 3
+        )
+
+        assert (
+            collection.update_one.await_count
+            == 3
+        )
+
+        updates = [
+            call.args
+            for call
+            in collection.update_one.await_args_list
+        ]
+
+        assert updates[0][0] == {
+            "id": "doc-escalated",
+        }
+
+        assert updates[0][1]["$set"][
+            "status"
+        ] == "Exception"
+
+        assert updates[0][1]["$set"][
+            "workflow_status"
+        ] == "exception_review"
+
+        assert updates[0][1]["$set"][
+            "captured_retry_escalated"
+        ] is True
+
+        assert updates[0][1]["$set"][
+            "captured_retry_count"
+        ] == 5
+
+        assert (
+            updates[0][1]["$push"]
+            ["workflow_history"]["event"]
+            == "captured_retry_escalation"
+        )
+
+        assert updates[1][0] == {
+            "id": "doc-moved",
+        }
+
+        assert updates[1][1]["$set"][
+            "captured_retry_count"
+        ] == 1
+
+        assert (
+            updates[1][1]["$push"]
+            ["workflow_history"]["to_status"]
+            == "validated"
+        )
+
+        assert (
+            updates[1][1]["$push"]
+            ["workflow_history"]["event"]
+            == "captured_auto_retry"
+        )
+
+        assert updates[2][0] == {
+            "id": "doc-failed",
+        }
+
+        assert updates[2][1]["$set"][
+            "captured_retry_count"
+        ] == 2
+
+        assert updates[2][1]["$set"][
+            "captured_last_retry_error"
+        ] == "simulated reprocess failure"
+
+        logger.info.assert_any_call(
+            "[CapturedRetry] Escalated doc %s "
+            "to Exception Queue (retries=%d)",
+            "doc-esca",
+            4,
+        )
+
+        logger.info.assert_any_call(
+            "[CapturedRetry] Doc %s moved "
+            "to '%s' after retry %d",
+            "doc-move",
+            "validated",
+            1,
+        )
+
+        logger.warning.assert_called_once_with(
+            "[CapturedRetry] Error "
+            "reprocessing doc %s: %s",
+            "doc-fail",
+            "simulated reprocess failure",
+        )
+
+        logger.info.assert_any_call(
+            "[CapturedRetry] Cycle done: "
+            "%d found, %d retried, "
+            "%d escalated, %d failed",
+            3,
+            1,
+            1,
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cycle_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        class StopLoop(BaseException):
+            pass
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopLoop(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated captured retry failure"
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            side_effect=error
+        )
+
+        collection.find_one = AsyncMock()
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        reprocess = AsyncMock()
+        logger = Mock()
+
+        with pytest.raises(
+            StopLoop
+        ):
+            await scheduler.captured_retry_scheduler(
+                db=db,
+                logger=logger,
+                _reprocess_document_inner=reprocess,
+                CAPTURED_RETRY_INTERVAL_SECONDS=300,
+                CAPTURED_STALE_THRESHOLD_SECONDS=300,
+                CAPTURED_MAX_RETRIES=4,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (180,),
+            (300,),
+        ]
+
+        collection.find.assert_called_once()
+        collection.find_one.assert_not_awaited()
+        collection.update_one.assert_not_awaited()
+        reprocess.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[CapturedRetry] Scheduled "
+            "cycle failed: %s",
+            error,
+        )

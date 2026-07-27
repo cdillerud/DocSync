@@ -6117,3 +6117,530 @@ class TestDeepLearningRuntime:
             "learning failed: %s",
             error,
         )
+
+
+class TestDraftFeedbackExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "startup"
+            )
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_draft_feedback_sync_scheduler"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and node.module
+                == (
+                    "services."
+                    "lifecycle_scheduler_service"
+                )
+                and any(
+                    alias.name
+                    == "draft_feedback_sync_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "draft_feedback_sync"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+        coroutine = create_task.args[0]
+
+        assert (
+            coroutine.func.id
+            == "draft_feedback_sync_scheduler"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name
+                == "draft_feedback_sync_scheduler"
+            )
+        )
+
+        assert (
+            _body_hash(function)
+            == "a13282b312ffca016cf3c63e76440b8965817dd7a6d0a9aa11957aa980f853fb"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            draft_feedback_sync_scheduler,
+        )
+
+        signature = inspect.signature(
+            draft_feedback_sync_scheduler
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestDraftFeedbackRuntime:
+    @pytest.mark.asyncio
+    async def test_runs_all_learning_stages(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        process_feedback_batch = AsyncMock(
+            return_value={
+                "processed": 3,
+                "changes_found": 1,
+                "no_changes": 2,
+                "errors": 0,
+            }
+        )
+
+        run_all_learning_engines = AsyncMock(
+            return_value={
+                "posted_draft_detection": {
+                    "posted_found": 2,
+                },
+                "cross_vendor_learning": {
+                    "propagated_to_vendors": 4,
+                },
+                "confidence_auto_promotion": {
+                    "promoted": ["V100"],
+                    "demoted": [],
+                },
+            }
+        )
+
+        auto_approve_drafts = AsyncMock(
+            return_value={
+                "approved": 2,
+                "skipped": 1,
+            }
+        )
+
+        learn_from_posting = AsyncMock()
+
+        feedback_module = ModuleType(
+            "services.draft_feedback_service"
+        )
+
+        feedback_module.process_feedback_batch = (
+            process_feedback_batch
+        )
+
+        learning_module = ModuleType(
+            "services.continuous_learning_service"
+        )
+
+        learning_module.run_all_learning_engines = (
+            run_all_learning_engines
+        )
+
+        posting_module = ModuleType(
+            "routers.posting_patterns"
+        )
+
+        posting_module.auto_approve_drafts = (
+            auto_approve_drafts
+        )
+
+        analyzer_module = ModuleType(
+            "services.posting_pattern_analyzer"
+        )
+
+        analyzer_module.learn_from_posting = (
+            learn_from_posting
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.draft_feedback_service",
+            feedback_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.continuous_learning_service",
+            learning_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "routers.posting_patterns",
+            posting_module,
+        )
+
+        monkeypatch.setitem(
+            sys.modules,
+            "services.posting_pattern_analyzer",
+            analyzer_module,
+        )
+
+        cursor = Mock()
+
+        cursor.limit = Mock(
+            return_value=cursor
+        )
+
+        cursor.to_list = AsyncMock(
+            return_value=[
+                {
+                    "id": "doc-1",
+                    "bc_vendor_number": "V100",
+                    "bc_purchase_invoice": {
+                        "lines": [
+                            {
+                                "no": "ITEM-1",
+                                "description": "Widget",
+                                "quantity": 2,
+                                "directUnitCost": 12.50,
+                                "amountIncludingVAT": 25.00,
+                            },
+                        ],
+                    },
+                },
+            ]
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            return_value=cursor
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.draft_feedback_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        assert [
+            call.args
+            for call in sleep.await_args_list
+        ] == [
+            (300,),
+            (2 * 3600,),
+        ]
+
+        process_feedback_batch.assert_awaited_once_with(
+            db,
+            limit=100,
+        )
+
+        run_all_learning_engines.assert_awaited_once_with(
+            db
+        )
+
+        auto_approve_drafts.assert_awaited_once_with(
+            min_vendor_invoices=5,
+            min_confidence="medium",
+            dry_run=False,
+            limit=500,
+        )
+
+        collection.find.assert_called_once()
+
+        cursor.limit.assert_called_once_with(
+            50
+        )
+
+        cursor.to_list.assert_awaited_once_with(
+            50
+        )
+
+        expected_lines = [
+            {
+                "No_": "ITEM-1",
+                "Description": "Widget",
+                "Quantity": 2,
+                "Direct_Unit_Cost": 12.50,
+                "Amount": 25.00,
+            },
+        ]
+
+        learn_from_posting.assert_awaited_once_with(
+            db,
+            "doc-1",
+            "V100",
+            expected_lines,
+            result_status="Posted",
+            source="bc_sync_backfill",
+        )
+
+        collection.update_one.assert_awaited_once_with(
+            {
+                "id": "doc-1",
+            },
+            {
+                "$set": {
+                    "amount_learning_backfilled": True,
+                },
+            },
+        )
+
+        logger.warning.assert_not_called()
+
+        logger.info.assert_any_call(
+            "[DraftFeedback] Sync complete: "
+            "processed=%d, changes=%d, "
+            "no_changes=%d, errors=%d",
+            3,
+            1,
+            2,
+            0,
+        )
+
+        logger.info.assert_any_call(
+            "[DraftAutoApprove] Auto-approved "
+            "%d drafts, skipped %d",
+            2,
+            1,
+        )
+
+        logger.info.assert_any_call(
+            "[VendorLearnBackfill] Backfilled "
+            "learning data for %d docs",
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_stage_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            side_effect=[
+                None,
+                StopAsyncIteration(),
+            ]
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated feedback failure"
+        )
+
+        process_feedback_batch = AsyncMock(
+            side_effect=error
+        )
+
+        run_all_learning_engines = AsyncMock(
+            return_value={
+                "posted_draft_detection": {},
+                "cross_vendor_learning": {},
+                "confidence_auto_promotion": {},
+            }
+        )
+
+        auto_approve_drafts = AsyncMock(
+            return_value={
+                "approved": 0,
+                "skipped": 0,
+            }
+        )
+
+        learn_from_posting = AsyncMock()
+
+        modules = {
+            "services.draft_feedback_service": (
+                "process_feedback_batch",
+                process_feedback_batch,
+            ),
+            "services.continuous_learning_service": (
+                "run_all_learning_engines",
+                run_all_learning_engines,
+            ),
+            "routers.posting_patterns": (
+                "auto_approve_drafts",
+                auto_approve_drafts,
+            ),
+            "services.posting_pattern_analyzer": (
+                "learn_from_posting",
+                learn_from_posting,
+            ),
+        }
+
+        for module_name, (
+            attribute,
+            value,
+        ) in modules.items():
+            module = ModuleType(
+                module_name
+            )
+
+            setattr(
+                module,
+                attribute,
+                value,
+            )
+
+            monkeypatch.setitem(
+                sys.modules,
+                module_name,
+                module,
+            )
+
+        cursor = Mock()
+
+        cursor.limit = Mock(
+            return_value=cursor
+        )
+
+        cursor.to_list = AsyncMock(
+            return_value=[]
+        )
+
+        collection = Mock()
+        collection.find = Mock(
+            return_value=cursor
+        )
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        with pytest.raises(
+            StopAsyncIteration
+        ):
+            await scheduler.draft_feedback_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+
+        logger.warning.assert_called_once_with(
+            "[DraftFeedback] Scheduled sync "
+            "failed: %s",
+            error,
+        )
+
+        run_all_learning_engines.assert_awaited_once_with(
+            db
+        )
+
+        auto_approve_drafts.assert_awaited_once()

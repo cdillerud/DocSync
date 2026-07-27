@@ -362,13 +362,15 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 6
+        assert len(create_tasks) == 8
 
         assert sorted(owners) == [
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
             "start_learning_reporting_tasks",
             "start_learning_reporting_tasks",
+            "start_monitoring_tasks",
+            "start_monitoring_tasks",
             "start_status_sync_tasks",
             "start_status_sync_tasks",
         ]
@@ -2067,44 +2069,104 @@ class TestShipmentSyncRuntime:
 
 
 class TestDailyTraceExtraction:
-    def test_source_registry_body_and_signature(self):
-        tree = ast.parse(
-            (BACKEND_DIR / "server.py").read_text()
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
         )
 
         startup = next(
             node
-            for node in tree.body
-            if isinstance(node, ast.AsyncFunctionDef)
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(node, ast.AsyncFunctionDef)
-            and node.name == "_daily_trace_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(node, ast.ImportFrom)
-            and node.module
-            == "services.lifecycle_scheduler_service"
-            and any(
-                alias.name == "daily_trace_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "daily_trace_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "daily_trace_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_monitoring_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_monitoring_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
                 and node.func.id
                 == "register_background_task"
             ):
@@ -2113,20 +2175,28 @@ class TestDailyTraceExtraction:
             names = [
                 keyword.value.value
                 for keyword in node.keywords
-                if keyword.arg == "name"
-                and isinstance(
-                    keyword.value,
-                    ast.Constant,
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
                 )
             ]
 
-            if names == ["daily_trace"]:
+            if names == [
+                "daily_trace"
+            ]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
-        coroutine_call = (
-            wrappers[0].args[0].args[0]
+        create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
         )
 
         assert (
@@ -2136,16 +2206,11 @@ class TestDailyTraceExtraction:
 
         assert {
             keyword.arg: keyword.value.id
-            for keyword in coroutine_call.keywords
-        } == {"logger": "logger"}
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "logger": "logger",
+        }
 
         function = next(
             node
@@ -2158,7 +2223,10 @@ class TestDailyTraceExtraction:
             == "daily_trace_scheduler"
         )
 
-        assert _body_hash(function) == "dd9ff7359a9cd41391c3a82559590833d6490a9f3be7455fb0197867a0c9b946"
+        assert (
+            _body_hash(function)
+            == "dd9ff7359a9cd41391c3a82559590833d6490a9f3be7455fb0197867a0c9b946"
+        )
 
         from services.lifecycle_scheduler_service import (
             daily_trace_scheduler,
@@ -2168,9 +2236,9 @@ class TestDailyTraceExtraction:
             daily_trace_scheduler
         )
 
-        assert list(signature.parameters) == [
-            "logger"
-        ]
+        assert list(
+            signature.parameters
+        ) == ["logger"]
 
         assert (
             signature.parameters[
@@ -4122,40 +4190,78 @@ class TestDriftWatchlistExtraction:
             and node.name == "startup"
         )
 
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_drift_watchlist_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "drift_watchlist_scheduler"
-                for alias in node.names
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "drift_watchlist_scheduler"
+                    for alias in node.names
+                )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "drift_watchlist_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_monitoring_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_monitoring_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -4187,14 +4293,11 @@ class TestDriftWatchlistExtraction:
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
+        coroutine_call = create_task.args[0]
 
         assert (
             create_task.func.attr
             == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
         )
 
         assert (
@@ -4209,14 +4312,6 @@ class TestDriftWatchlistExtraction:
         } == {
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -9288,5 +9383,96 @@ class TestLearningReportingTaskOwnershipRuntime:
             },
             {
                 "name": "weekly_digest",
+            },
+        ]
+
+
+class TestMonitoringTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        watchlist_coroutine = object()
+        trace_coroutine = object()
+
+        watchlist = Mock(
+            return_value=watchlist_coroutine
+        )
+
+        trace = Mock(
+            return_value=trace_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "watchlist-task",
+                "trace-task",
+            ]
+        )
+
+        register = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "drift_watchlist_scheduler",
+            watchlist,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "daily_trace_scheduler",
+            trace,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_monitoring_tasks(
+            logger=logger,
+            register_background_task=register,
+        )
+
+        watchlist.assert_called_once_with(
+            logger=logger
+        )
+
+        trace.assert_called_once_with(
+            logger=logger
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (watchlist_coroutine,),
+            (trace_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("watchlist-task",),
+            ("trace-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": "drift_watchlist",
+            },
+            {
+                "name": "daily_trace",
             },
         ]

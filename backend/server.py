@@ -3727,8 +3727,11 @@ async def startup():
     # email). Fires once every 24h; each tick checks whether "now" matches
     # the configured day-of-week (0=Mon..6=Sun) and hour window. Defaults to
     # Monday 07:00 local server time.
-    from services.lifecycle_scheduler_service import drift_watchlist_scheduler
-    register_background_task(asyncio.create_task(drift_watchlist_scheduler(logger=logger)), name='drift_watchlist')
+    from services.lifecycle_scheduler_service import start_monitoring_tasks
+    start_monitoring_tasks(
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Drift Watchlist scheduler started (check: hourly; fires once per target day/hour)")
 
     # Start BC Shipment Sync scheduler (every 1h)
@@ -3742,8 +3745,6 @@ async def startup():
     logger.info("Knowledge Seed scheduler started (on startup + every 6h)")
 
     # ── Daily Trace scheduler — runs random PROD BC invoice traces ──
-    from services.lifecycle_scheduler_service import daily_trace_scheduler  # Every 24 hours
-    register_background_task(asyncio.create_task(daily_trace_scheduler(logger=logger)), name='daily_trace')
     logger.info("Daily Trace scheduler started (interval: 24h)")
 
     # Initialize Auto-Resolution Service

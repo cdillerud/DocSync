@@ -1176,3 +1176,28 @@ def start_learning_reporting_tasks(
         ),
         name="weekly_digest",
     )
+
+
+def start_monitoring_tasks(
+    *,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register monitoring and trace tasks."""
+    register_background_task(
+        asyncio.create_task(
+            drift_watchlist_scheduler(
+                logger=logger
+            )
+        ),
+        name="drift_watchlist",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            daily_trace_scheduler(
+                logger=logger
+            )
+        ),
+        name="daily_trace",
+    )

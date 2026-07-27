@@ -3865,13 +3865,15 @@ async def startup():
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
 
     # === Deep Learning: Self-Correction + Vendor Maturity (every 4 hours) ===
-    from services.lifecycle_scheduler_service import deep_learning_scheduler  # Every 4 hours
-    register_background_task(asyncio.create_task(deep_learning_scheduler(db=db, logger=logger)), name='deep_learning')
+    from services.lifecycle_scheduler_service import start_intelligence_tasks
+    start_intelligence_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Deep Learning scheduler started (self-correction + vendor maturity, interval: 4h)")
 
     # === Intelligence Maintenance: Duplicate Clearing + Escalation Backfill (every 2 hours) ===
-    from services.lifecycle_scheduler_service import intelligence_maintenance_scheduler  # Every 2 hours
-    register_background_task(asyncio.create_task(intelligence_maintenance_scheduler(db=db, logger=logger)), name='intelligence_maintenance')
     logger.info("Intelligence Maintenance scheduler started (dup clear + escalation + dup backfill, interval: 2h)")
 
     # === PO Auto-Retry Queue (every 4 hours) ===

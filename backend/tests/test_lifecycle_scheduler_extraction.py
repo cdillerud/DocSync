@@ -362,13 +362,15 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 10
+        assert len(create_tasks) == 12
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
             "start_bc_maintenance_tasks",
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
+            "start_intelligence_tasks",
+            "start_intelligence_tasks",
             "start_learning_reporting_tasks",
             "start_learning_reporting_tasks",
             "start_monitoring_tasks",
@@ -6188,18 +6190,13 @@ class TestDeepLearningExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
             if (
                 isinstance(
                     node,
                     ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
                 )
                 and any(
                     alias.name
@@ -6209,11 +6206,74 @@ class TestDeepLearningExtraction:
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "deep_learning_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_intelligence_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_intelligence_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -6246,6 +6306,11 @@ class TestDeepLearningExtraction:
         coroutine = create_task.args[0]
 
         assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        assert (
             coroutine.func.id
             == "deep_learning_scheduler"
         )
@@ -6258,14 +6323,6 @@ class TestDeepLearningExtraction:
             "db": "db",
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -7042,7 +7099,7 @@ class TestIntelligenceMaintenanceExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
             if (
@@ -7050,26 +7107,82 @@ class TestIntelligenceMaintenanceExtraction:
                     node,
                     ast.ImportFrom,
                 )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
-                )
                 and any(
                     alias.name
-                    == (
-                        "intelligence_maintenance_scheduler"
-                    )
+                    == "intelligence_maintenance_scheduler"
                     for alias in node.names
                 )
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "intelligence_maintenance_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_intelligence_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_intelligence_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -7093,9 +7206,7 @@ class TestIntelligenceMaintenanceExtraction:
                 )
             ]
 
-            if names == [
-                "intelligence_maintenance"
-            ]:
+            if names == ["intelligence_maintenance"]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
@@ -7104,10 +7215,13 @@ class TestIntelligenceMaintenanceExtraction:
         coroutine = create_task.args[0]
 
         assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        assert (
             coroutine.func.id
-            == (
-                "intelligence_maintenance_scheduler"
-            )
+            == "intelligence_maintenance_scheduler"
         )
 
         assert {
@@ -7119,14 +7233,6 @@ class TestIntelligenceMaintenanceExtraction:
             "logger": "logger",
         }
 
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
         function = next(
             node
             for node in service_tree.body
@@ -7136,9 +7242,7 @@ class TestIntelligenceMaintenanceExtraction:
                     ast.AsyncFunctionDef,
                 )
                 and node.name
-                == (
-                    "intelligence_maintenance_scheduler"
-                )
+                == "intelligence_maintenance_scheduler"
             )
         )
 
@@ -9675,5 +9779,102 @@ class TestBCMaintenanceTaskOwnershipRuntime:
             },
             {
                 "name": "knowledge_seed",
+            },
+        ]
+
+
+class TestIntelligenceTaskOwnershipRuntime:
+    def test_helper_creates_and_registers_both_tasks(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        deep_coroutine = object()
+        maintenance_coroutine = object()
+
+        deep_learning = Mock(
+            return_value=deep_coroutine
+        )
+
+        maintenance = Mock(
+            return_value=maintenance_coroutine
+        )
+
+        create_task = Mock(
+            side_effect=[
+                "deep-learning-task",
+                "maintenance-task",
+            ]
+        )
+
+        register = Mock()
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "deep_learning_scheduler",
+            deep_learning,
+        )
+
+        monkeypatch.setattr(
+            scheduler,
+            "intelligence_maintenance_scheduler",
+            maintenance,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_intelligence_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+        )
+
+        deep_learning.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        maintenance.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        assert [
+            call.args
+            for call
+            in create_task.call_args_list
+        ] == [
+            (deep_coroutine,),
+            (maintenance_coroutine,),
+        ]
+
+        assert [
+            call.args
+            for call
+            in register.call_args_list
+        ] == [
+            ("deep-learning-task",),
+            ("maintenance-task",),
+        ]
+
+        assert [
+            call.kwargs
+            for call
+            in register.call_args_list
+        ] == [
+            {
+                "name": "deep_learning",
+            },
+            {
+                "name": (
+                    "intelligence_maintenance"
+                ),
             },
         ]

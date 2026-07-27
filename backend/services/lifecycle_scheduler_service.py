@@ -1229,3 +1229,31 @@ def start_bc_maintenance_tasks(
         ),
         name="knowledge_seed",
     )
+
+
+def start_intelligence_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register intelligence learning and maintenance tasks."""
+    register_background_task(
+        asyncio.create_task(
+            deep_learning_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="deep_learning",
+    )
+
+    register_background_task(
+        asyncio.create_task(
+            intelligence_maintenance_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="intelligence_maintenance",
+    )

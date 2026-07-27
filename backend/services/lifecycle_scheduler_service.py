@@ -374,3 +374,37 @@ async def startup_fix_shipping_po_escalations(
                         r1.modified_count, r2.modified_count)
     except Exception as e:
         logger.warning("[Startup] Shipping PO-escalation fix failed: %s", e)
+
+
+async def startup_backfill_pi_no(
+    *,
+    db,
+    logger,
+) -> None:
+    await asyncio.sleep(15)
+    try:
+        # Find docs that have bc_purchase_invoice.bc_record_no but missing bc_purchase_invoice_no
+        cursor = db.hub_documents.find(
+            {
+                "bc_purchase_invoice.bc_record_no": {"$exists": True, "$nin": [None, ""]},
+                "$or": [
+                    {"bc_purchase_invoice_no": {"$exists": False}},
+                    {"bc_purchase_invoice_no": None},
+                    {"bc_purchase_invoice_no": ""},
+                ],
+            },
+            {"_id": 0, "id": 1, "bc_purchase_invoice.bc_record_no": 1},
+        )
+        backfilled = 0
+        async for doc in cursor:
+            pi_no = (doc.get("bc_purchase_invoice") or {}).get("bc_record_no", "")
+            if pi_no:
+                await db.hub_documents.update_one(
+                    {"id": doc["id"]},
+                    {"$set": {"bc_purchase_invoice_no": pi_no}},
+                )
+                backfilled += 1
+        if backfilled > 0:
+            logger.info("[Startup] Backfilled bc_purchase_invoice_no on %d documents", backfilled)
+    except Exception as e:
+        logger.warning("[Startup] PI no backfill failed: %s", e)

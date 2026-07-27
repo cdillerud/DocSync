@@ -5340,3 +5340,453 @@ class TestStartupShippingPOFixRuntime:
             "PO-escalation fix failed: %s",
             error,
         )
+
+
+class TestStartupPINumberBackfillExtraction:
+    def test_source_registry_body_and_signature(
+        self,
+    ):
+        server_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "server.py"
+            ).read_text()
+        )
+
+        startup = next(
+            node
+            for node in server_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name == "startup"
+        )
+
+        assert not any(
+            isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "_startup_backfill_pi_no"
+            for node in startup.body
+        )
+
+        imports = [
+            node
+            for node in ast.walk(startup)
+            if isinstance(
+                node,
+                ast.ImportFrom,
+            )
+            and node.module
+            == (
+                "services."
+                "lifecycle_scheduler_service"
+            )
+            and any(
+                alias.name
+                == "startup_backfill_pi_no"
+                for alias in node.names
+            )
+        ]
+
+        assert len(imports) == 1
+
+        wrappers = []
+
+        for node in ast.walk(startup):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "register_background_task"
+            ):
+                continue
+
+            names = [
+                keyword.value.value
+                for keyword in node.keywords
+                if (
+                    keyword.arg == "name"
+                    and isinstance(
+                        keyword.value,
+                        ast.Constant,
+                    )
+                )
+            ]
+
+            if names == [
+                "startup_backfill_pi_no"
+            ]:
+                wrappers.append(node)
+
+        assert len(wrappers) == 1
+
+        create_task = wrappers[0].args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
+
+        coroutine_call = (
+            create_task.args[0]
+        )
+
+        assert (
+            coroutine_call.func.id
+            == "startup_backfill_pi_no"
+        )
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in coroutine_call.keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        function = next(
+            node
+            for node in service_tree.body
+            if isinstance(
+                node,
+                ast.AsyncFunctionDef,
+            )
+            and node.name
+            == "startup_backfill_pi_no"
+        )
+
+        assert (
+            _body_hash(function)
+            == "679d9e0b57e5a28aad94b993b6ef599f4f16e3b13d2c41093ece797c4d4bb62d"
+        )
+
+        from services.lifecycle_scheduler_service import (
+            startup_backfill_pi_no,
+        )
+
+        signature = inspect.signature(
+            startup_backfill_pi_no
+        )
+
+        assert list(
+            signature.parameters
+        ) == [
+            "db",
+            "logger",
+        ]
+
+        assert all(
+            parameter.kind
+            is inspect.Parameter.KEYWORD_ONLY
+            for parameter
+            in signature.parameters.values()
+        )
+
+
+class TestStartupPINumberBackfillRuntime:
+    @pytest.mark.asyncio
+    async def test_backfills_valid_pi_numbers(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        class AsyncCursor:
+            def __init__(
+                self,
+                documents,
+            ):
+                self._iterator = iter(
+                    documents
+                )
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(
+                        self._iterator
+                    )
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        documents = [
+            {
+                "id": "doc-1",
+                "bc_purchase_invoice": {
+                    "bc_record_no": "PI-1001",
+                },
+            },
+            {
+                "id": "doc-2",
+                "bc_purchase_invoice": {
+                    "bc_record_no": "",
+                },
+            },
+            {
+                "id": "doc-3",
+                "bc_purchase_invoice": {
+                    "bc_record_no": "PI-1003",
+                },
+            },
+            {
+                "id": "doc-4",
+                "bc_purchase_invoice": None,
+            },
+        ]
+
+        collection = Mock()
+
+        collection.find = Mock(
+            return_value=AsyncCursor(
+                documents
+            )
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_backfill_pi_no(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            15
+        )
+
+        collection.find.assert_called_once_with(
+            {
+                (
+                    "bc_purchase_invoice."
+                    "bc_record_no"
+                ): {
+                    "$exists": True,
+                    "$nin": [
+                        None,
+                        "",
+                    ],
+                },
+                "$or": [
+                    {
+                        "bc_purchase_invoice_no": {
+                            "$exists": False,
+                        },
+                    },
+                    {
+                        "bc_purchase_invoice_no": None,
+                    },
+                    {
+                        "bc_purchase_invoice_no": "",
+                    },
+                ],
+            },
+            {
+                "_id": 0,
+                "id": 1,
+                (
+                    "bc_purchase_invoice."
+                    "bc_record_no"
+                ): 1,
+            },
+        )
+
+        assert (
+            collection.update_one.await_count
+            == 2
+        )
+
+        assert [
+            call.args
+            for call
+            in collection.update_one.await_args_list
+        ] == [
+            (
+                {
+                    "id": "doc-1",
+                },
+                {
+                    "$set": {
+                        "bc_purchase_invoice_no": "PI-1001",
+                    },
+                },
+            ),
+            (
+                {
+                    "id": "doc-3",
+                },
+                {
+                    "$set": {
+                        "bc_purchase_invoice_no": "PI-1003",
+                    },
+                },
+            ),
+        ]
+
+        logger.info.assert_called_once_with(
+            "[Startup] Backfilled "
+            "bc_purchase_invoice_no on "
+            "%d documents",
+            2,
+        )
+
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_valid_numbers_skips_updates(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        class AsyncCursor:
+            def __init__(
+                self,
+                documents,
+            ):
+                self._iterator = iter(
+                    documents
+                )
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                try:
+                    return next(
+                        self._iterator
+                    )
+                except StopIteration:
+                    raise StopAsyncIteration
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            return_value=AsyncCursor(
+                [
+                    {
+                        "id": "doc-1",
+                        "bc_purchase_invoice": {
+                            "bc_record_no": "",
+                        },
+                    },
+                    {
+                        "id": "doc-2",
+                        "bc_purchase_invoice": None,
+                    },
+                ]
+            )
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_backfill_pi_no(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            15
+        )
+
+        collection.update_one.assert_not_awaited()
+
+        logger.info.assert_not_called()
+        logger.warning.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failure_is_nonfatal(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        sleep = AsyncMock(
+            return_value=None
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "sleep",
+            sleep,
+        )
+
+        error = RuntimeError(
+            "simulated PI backfill failure"
+        )
+
+        collection = Mock()
+
+        collection.find = Mock(
+            side_effect=error
+        )
+
+        collection.update_one = AsyncMock()
+
+        db = Mock()
+        db.hub_documents = collection
+
+        logger = Mock()
+
+        await scheduler.startup_backfill_pi_no(
+            db=db,
+            logger=logger,
+        )
+
+        sleep.assert_awaited_once_with(
+            15
+        )
+
+        collection.update_one.assert_not_awaited()
+
+        logger.warning.assert_called_once_with(
+            "[Startup] PI no backfill "
+            "failed: %s",
+            error,
+        )

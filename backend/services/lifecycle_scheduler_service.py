@@ -1321,3 +1321,75 @@ def start_draft_feedback_tasks(
         ),
         name="draft_feedback_sync",
     )
+
+
+def start_captured_retry_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+    _reprocess_document_inner,
+    CAPTURED_RETRY_INTERVAL_SECONDS,
+    CAPTURED_STALE_THRESHOLD_SECONDS,
+    CAPTURED_MAX_RETRIES,
+) -> None:
+    """Create and register the captured-document retry task."""
+    register_background_task(
+        asyncio.create_task(
+            captured_retry_scheduler(
+                db=db,
+                logger=logger,
+                _reprocess_document_inner=_reprocess_document_inner,
+                CAPTURED_RETRY_INTERVAL_SECONDS=CAPTURED_RETRY_INTERVAL_SECONDS,
+                CAPTURED_STALE_THRESHOLD_SECONDS=CAPTURED_STALE_THRESHOLD_SECONDS,
+                CAPTURED_MAX_RETRIES=CAPTURED_MAX_RETRIES,
+            )
+        ),
+        name="captured_retry",
+    )
+
+
+def start_po_retry_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+    PO_RETRY_INTERVAL_HOURS,
+    PO_MAX_WAIT_DAYS,
+    PO_MAX_RETRIES,
+) -> None:
+    """Create and register the PO retry task."""
+    register_background_task(
+        asyncio.create_task(
+            po_retry_scheduler(
+                db=db,
+                logger=logger,
+                PO_RETRY_INTERVAL_HOURS=PO_RETRY_INTERVAL_HOURS,
+                PO_MAX_WAIT_DAYS=PO_MAX_WAIT_DAYS,
+                PO_MAX_RETRIES=PO_MAX_RETRIES,
+            )
+        ),
+        name="po_retry",
+    )
+
+
+def start_ready_to_post_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+    READY_POST_INTERVAL_SECONDS,
+    READY_POST_MAX_RETRIES,
+) -> None:
+    """Create and register the ReadyForPost posting task."""
+    register_background_task(
+        asyncio.create_task(
+            ready_to_post_scheduler(
+                db=db,
+                logger=logger,
+                READY_POST_INTERVAL_SECONDS=READY_POST_INTERVAL_SECONDS,
+                READY_POST_MAX_RETRIES=READY_POST_MAX_RETRIES,
+            )
+        ),
+        name="ready_to_post",
+    )

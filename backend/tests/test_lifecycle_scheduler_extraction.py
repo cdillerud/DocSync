@@ -362,7 +362,7 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 16
+        assert len(create_tasks) == 19
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
@@ -377,6 +377,9 @@ class TestSourceExtraction:
             "start_learning_reporting_tasks",
             "start_monitoring_tasks",
             "start_monitoring_tasks",
+            "start_po_retry_tasks",
+            "start_ready_to_post_tasks",
+            "start_captured_retry_tasks",
             "start_startup_repair_tasks",
             "start_startup_repair_tasks",
             "start_status_sync_tasks",
@@ -10289,3 +10292,211 @@ class TestSeparatedSchedulerOwnershipRuntime:
             "draft-feedback-task",
             name="draft_feedback_sync",
         )
+
+
+class TestRetryAndPostingTaskOwnership:
+    HELPERS = {
+        "start_captured_retry_tasks": "captured_retry_scheduler",
+        "start_po_retry_tasks": "po_retry_scheduler",
+        "start_ready_to_post_tasks": "ready_to_post_scheduler",
+    }
+
+    def test_server_delegates_retry_and_posting_tasks(self):
+        tree = ast.parse(
+            (BACKEND_DIR / "server.py").read_text()
+        )
+
+        startup = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "startup"
+        )
+
+        imported = {
+            alias.name
+            for node in ast.walk(startup)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "services.lifecycle_scheduler_service"
+            for alias in node.names
+        }
+
+        called = [
+            node.func.id
+            for node in ast.walk(startup)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+        ]
+
+        assert set(self.HELPERS) <= imported
+
+        for helper_name, scheduler_name in self.HELPERS.items():
+            assert called.count(helper_name) == 1
+            assert scheduler_name not in imported
+            assert scheduler_name not in called
+
+        helper_lines = {
+            name: next(
+                node.lineno
+                for node in ast.walk(startup)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == name
+            )
+            for name in self.HELPERS
+        }
+
+        assert (
+            helper_lines["start_captured_retry_tasks"]
+            < helper_lines["start_po_retry_tasks"]
+            < helper_lines["start_ready_to_post_tasks"]
+        )
+
+    def test_runtime_registry_body_and_signatures(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        db = object()
+        logger = Mock()
+        reprocess = object()
+        registered = []
+
+        markers = {
+            "captured_retry_scheduler": object(),
+            "po_retry_scheduler": object(),
+            "ready_to_post_scheduler": object(),
+        }
+
+        scheduler_mocks = {}
+
+        for name, marker in markers.items():
+            scheduler_mocks[name] = Mock(return_value=marker)
+            monkeypatch.setattr(
+                scheduler,
+                name,
+                scheduler_mocks[name],
+            )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            lambda coroutine: ("task", coroutine),
+        )
+
+        def register(task, *, name):
+            registered.append((task, name))
+            return task
+
+        scheduler.start_captured_retry_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+            _reprocess_document_inner=reprocess,
+            CAPTURED_RETRY_INTERVAL_SECONDS=300,
+            CAPTURED_STALE_THRESHOLD_SECONDS=301,
+            CAPTURED_MAX_RETRIES=4,
+        )
+
+        scheduler.start_po_retry_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+            PO_RETRY_INTERVAL_HOURS=4,
+            PO_MAX_WAIT_DAYS=3,
+            PO_MAX_RETRIES=18,
+        )
+
+        scheduler.start_ready_to_post_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+            READY_POST_INTERVAL_SECONDS=300,
+            READY_POST_MAX_RETRIES=5,
+        )
+
+        assert [
+            name for _, name in registered
+        ] == [
+            "captured_retry",
+            "po_retry",
+            "ready_to_post",
+        ]
+
+        assert [
+            task[1] for task, _ in registered
+        ] == [
+            markers["captured_retry_scheduler"],
+            markers["po_retry_scheduler"],
+            markers["ready_to_post_scheduler"],
+        ]
+
+        scheduler_mocks[
+            "captured_retry_scheduler"
+        ].assert_called_once_with(
+            db=db,
+            logger=logger,
+            _reprocess_document_inner=reprocess,
+            CAPTURED_RETRY_INTERVAL_SECONDS=300,
+            CAPTURED_STALE_THRESHOLD_SECONDS=301,
+            CAPTURED_MAX_RETRIES=4,
+        )
+
+        scheduler_mocks[
+            "po_retry_scheduler"
+        ].assert_called_once_with(
+            db=db,
+            logger=logger,
+            PO_RETRY_INTERVAL_HOURS=4,
+            PO_MAX_WAIT_DAYS=3,
+            PO_MAX_RETRIES=18,
+        )
+
+        scheduler_mocks[
+            "ready_to_post_scheduler"
+        ].assert_called_once_with(
+            db=db,
+            logger=logger,
+            READY_POST_INTERVAL_SECONDS=300,
+            READY_POST_MAX_RETRIES=5,
+        )
+
+        assert list(
+            inspect.signature(
+                scheduler.start_captured_retry_tasks
+            ).parameters
+        ) == [
+            "db",
+            "logger",
+            "register_background_task",
+            "_reprocess_document_inner",
+            "CAPTURED_RETRY_INTERVAL_SECONDS",
+            "CAPTURED_STALE_THRESHOLD_SECONDS",
+            "CAPTURED_MAX_RETRIES",
+        ]
+
+        assert list(
+            inspect.signature(
+                scheduler.start_po_retry_tasks
+            ).parameters
+        ) == [
+            "db",
+            "logger",
+            "register_background_task",
+            "PO_RETRY_INTERVAL_HOURS",
+            "PO_MAX_WAIT_DAYS",
+            "PO_MAX_RETRIES",
+        ]
+
+        assert list(
+            inspect.signature(
+                scheduler.start_ready_to_post_tasks
+            ).parameters
+        ) == [
+            "db",
+            "logger",
+            "register_background_task",
+            "READY_POST_INTERVAL_SECONDS",
+            "READY_POST_MAX_RETRIES",
+        ]

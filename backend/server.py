@@ -3896,21 +3896,20 @@ async def startup():
     CAPTURED_STALE_THRESHOLD_SECONDS = 300  # Docs stuck >5 min
     CAPTURED_MAX_RETRIES = 4
 
-    from services.lifecycle_scheduler_service import captured_retry_scheduler
-    register_background_task(asyncio.create_task(captured_retry_scheduler(db=db, logger=logger, _reprocess_document_inner=_reprocess_document_inner, CAPTURED_RETRY_INTERVAL_SECONDS=CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_STALE_THRESHOLD_SECONDS=CAPTURED_STALE_THRESHOLD_SECONDS, CAPTURED_MAX_RETRIES=CAPTURED_MAX_RETRIES)), name='captured_retry')
+    from services.lifecycle_scheduler_service import start_captured_retry_tasks
+    start_captured_retry_tasks(db=db, logger=logger, register_background_task=register_background_task, _reprocess_document_inner=_reprocess_document_inner, CAPTURED_RETRY_INTERVAL_SECONDS=CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_STALE_THRESHOLD_SECONDS=CAPTURED_STALE_THRESHOLD_SECONDS, CAPTURED_MAX_RETRIES=CAPTURED_MAX_RETRIES)
     logger.info("Captured Doc Auto-Retry scheduler started (interval: %ds, max retries: %d)", CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_MAX_RETRIES)
 
-    from services.lifecycle_scheduler_service import po_retry_scheduler
-    register_background_task(asyncio.create_task(po_retry_scheduler(db=db, logger=logger, PO_RETRY_INTERVAL_HOURS=PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS=PO_MAX_WAIT_DAYS, PO_MAX_RETRIES=PO_MAX_RETRIES)), name='po_retry')
+    from services.lifecycle_scheduler_service import start_po_retry_tasks
+    start_po_retry_tasks(db=db, logger=logger, register_background_task=register_background_task, PO_RETRY_INTERVAL_HOURS=PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS=PO_MAX_WAIT_DAYS, PO_MAX_RETRIES=PO_MAX_RETRIES)
     logger.info("PO Auto-Retry scheduler started (interval: %dh, max wait: %d days)", PO_RETRY_INTERVAL_HOURS, PO_MAX_WAIT_DAYS)
 
     # === ReadyForPost Auto-Post Scheduler (every 5 minutes) ===
     READY_POST_INTERVAL_SECONDS = 300   # 5 min
     READY_POST_MAX_RETRIES = 5          # Max BC post attempts before giving up
 
-    from services.lifecycle_scheduler_service import ready_to_post_scheduler
-
-    register_background_task(asyncio.create_task(ready_to_post_scheduler(db=db, logger=logger, READY_POST_INTERVAL_SECONDS=READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES=READY_POST_MAX_RETRIES)), name='ready_to_post')
+    from services.lifecycle_scheduler_service import start_ready_to_post_tasks
+    start_ready_to_post_tasks(db=db, logger=logger, register_background_task=register_background_task, READY_POST_INTERVAL_SECONDS=READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES=READY_POST_MAX_RETRIES)
     logger.info("ReadyToPost Auto-Post scheduler started (interval: %ds, max retries: %d)",
                 READY_POST_INTERVAL_SECONDS, READY_POST_MAX_RETRIES)
 

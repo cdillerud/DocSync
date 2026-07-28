@@ -3869,7 +3869,8 @@ async def startup():
     global _pilot_summary_task
     if PILOT_MODE_ENABLED and DAILY_PILOT_EMAIL_ENABLED:
         from routers.pilot import _daily_pilot_summary_scheduler
-        _pilot_summary_task = register_background_task(asyncio.create_task(_daily_pilot_summary_scheduler()), name='pilot_summary')
+        from services.lifecycle_scheduler_service import start_pilot_summary_tasks
+        _pilot_summary_task = start_pilot_summary_tasks(register_background_task=register_background_task, _daily_pilot_summary_scheduler=_daily_pilot_summary_scheduler)
         logger.info("Daily pilot summary scheduler started (cron: %d:00 UTC)", PILOT_SUMMARY_CRON_HOUR_UTC)
     
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))

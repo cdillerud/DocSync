@@ -362,7 +362,7 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 21
+        assert len(create_tasks) == 22
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
@@ -379,6 +379,7 @@ class TestSourceExtraction:
             "start_monitoring_tasks",
             "start_monitoring_tasks",
             "start_pi_backfill_tasks",
+            "start_pilot_summary_tasks",
             "start_po_retry_tasks",
             "start_ready_to_post_tasks",
             "start_startup_repair_tasks",

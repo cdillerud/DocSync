@@ -1431,3 +1431,17 @@ def start_pi_backfill_tasks(
         ),
         name="startup_backfill_pi_no",
     )
+
+
+def start_pilot_summary_tasks(
+    *,
+    register_background_task,
+    _daily_pilot_summary_scheduler,
+):
+    """Create, register, and return the daily pilot-summary task."""
+    return register_background_task(
+        asyncio.create_task(
+            _daily_pilot_summary_scheduler()
+        ),
+        name="pilot_summary",
+    )

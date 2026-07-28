@@ -362,7 +362,7 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 22
+        assert len(create_tasks) == 26
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
@@ -370,6 +370,10 @@ class TestSourceExtraction:
             "start_captured_retry_tasks",
             "start_catalog_sync_tasks",
             "start_draft_feedback_tasks",
+            "start_email_polling_tasks",
+            "start_email_polling_tasks",
+            "start_email_polling_tasks",
+            "start_inside_sales_pilot_tasks",
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
             "start_intelligence_tasks",
@@ -9965,3 +9969,111 @@ class TestRetryAndPostingTaskOwnership:
             "READY_POST_INTERVAL_SECONDS",
             "READY_POST_MAX_RETRIES",
         ]
+
+
+def _assert_server_delegates_polling_tasks():
+    server_tree = ast.parse(
+        (BACKEND_DIR / "server.py").read_text()
+    )
+    startup = next(
+        node
+        for node in server_tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "startup"
+    )
+
+    helper_names = {
+        "start_email_polling_tasks",
+        "start_inside_sales_pilot_tasks",
+    }
+
+    imported = [
+        alias.name
+        for node in ast.walk(startup)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        == "services.lifecycle_scheduler_service"
+        for alias in node.names
+    ]
+
+    called = [
+        node.func.id
+        for node in ast.walk(startup)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+    ]
+
+    for helper_name in helper_names:
+        assert imported.count(helper_name) == 1
+        assert called.count(helper_name) == 1
+
+    worker_names = {
+        "dynamic_mailbox_polling_worker",
+        "email_polling_worker",
+        "_sales_email_polling_worker",
+        "inside_sales_pilot_worker",
+    }
+
+    direct_tasks = [
+        node
+        for node in ast.walk(startup)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "asyncio"
+        and node.func.attr == "create_task"
+        and node.args
+        and isinstance(node.args[0], ast.Call)
+        and (
+            (
+                isinstance(node.args[0].func, ast.Name)
+                and node.args[0].func.id in worker_names
+            )
+            or (
+                isinstance(node.args[0].func, ast.Attribute)
+                and node.args[0].func.attr in worker_names
+            )
+        )
+    ]
+
+    assert direct_tasks == []
+
+    service_tree = ast.parse(
+        (
+            BACKEND_DIR
+            / "services"
+            / "lifecycle_scheduler_service.py"
+        ).read_text()
+    )
+
+    service_functions = {
+        node.name: node
+        for node in service_tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    expected = {
+        "start_email_polling_tasks": {
+            "dynamic_mailbox_polling",
+            "email_polling",
+            "sales_polling",
+        },
+        "start_inside_sales_pilot_tasks": {
+            "inside_sales_pilot",
+        },
+    }
+
+    for helper_name, registry_names in expected.items():
+        helper = service_functions[helper_name]
+        observed = {
+            keyword.value.value
+            for node in ast.walk(helper)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id
+            == "register_background_task"
+            for keyword in node.keywords
+            if keyword.arg == "name"
+            and isinstance(keyword.value, ast.Constant)
+        }
+        assert observed == registry_names

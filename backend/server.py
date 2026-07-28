@@ -3584,7 +3584,9 @@ _mailbox_last_poll_times = {}  # Legacy — real state is in email_polling_svc
 # Startup / shutdown are called explicitly by main.py, not via app events.
 # ---------------------------------------------------------------------------
 async def startup():
+    global _dynamic_mailbox_polling_task
     global _email_polling_task
+    global _sales_polling_task
     from services.lifecycle_service import register_background_task
     from services.lifecycle_startup_service import initialize_core_indexes
     await initialize_core_indexes(db=db, logger=logger)
@@ -3608,22 +3610,20 @@ async def startup():
         logger.info("mail_intake_log indexes ensured")
     except Exception as _e:
         logger.warning("ensure_mail_intake_indexes failed (non-fatal): %s", _e)
-    global _dynamic_mailbox_polling_task
-    _dynamic_mailbox_polling_task = register_background_task(asyncio.create_task(email_polling_svc.dynamic_mailbox_polling_worker()), name='dynamic_mailbox_polling')
-    email_polling_svc._dynamic_mailbox_polling_task = _dynamic_mailbox_polling_task
-    logger.info("Dynamic mailbox polling worker started")
-    
-    # Start AP email polling worker if enabled (legacy env var method)
-    if EMAIL_POLLING_ENABLED:
-        _email_polling_task = register_background_task(asyncio.create_task(email_polling_svc.email_polling_worker()), name='email_polling')
-        logger.info("AP email polling worker started (interval: %d min, user: %s)", 
-                   EMAIL_POLLING_INTERVAL_MINUTES, EMAIL_POLLING_USER)
-    # Start Sales email polling worker if enabled (legacy env var method)
-    global _sales_polling_task
-    if SALES_EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_USER:
-        _sales_polling_task = register_background_task(asyncio.create_task(email_polling_svc._sales_email_polling_worker()), name='sales_polling')
-        logger.info("Sales email polling worker started (interval: %d min, user: %s)", 
-                   SALES_EMAIL_POLLING_INTERVAL_MINUTES, SALES_EMAIL_POLLING_USER)
+    from services.lifecycle_scheduler_service import start_email_polling_tasks
+    polling_tasks = start_email_polling_tasks(
+        logger=logger, register_background_task=register_background_task,
+        email_polling_svc=email_polling_svc,
+        email_polling_enabled=EMAIL_POLLING_ENABLED,
+        email_polling_interval_minutes=EMAIL_POLLING_INTERVAL_MINUTES,
+        email_polling_user=EMAIL_POLLING_USER,
+        sales_email_polling_enabled=SALES_EMAIL_POLLING_ENABLED,
+        sales_email_polling_interval_minutes=SALES_EMAIL_POLLING_INTERVAL_MINUTES,
+        sales_email_polling_user=SALES_EMAIL_POLLING_USER,
+    )
+    _dynamic_mailbox_polling_task = polling_tasks["dynamic"]
+    if polling_tasks["email"] is not None: _email_polling_task = polling_tasks["email"]
+    if polling_tasks["sales"] is not None: _sales_polling_task = polling_tasks["sales"]
 
     # Start Inside Sales Pilot worker (controlled ingestion for mkoch/nhannover)
     from services.inside_sales_pilot_service import (
@@ -3634,15 +3634,17 @@ async def startup():
         ensure_pilot_indexes,
     )
     await ensure_pilot_indexes(db)
-    if _ISP_ENABLED:
-        _inside_sales_pilot_task = register_background_task(asyncio.create_task(inside_sales_pilot_worker()), name='inside_sales_pilot')
-        logger.info(
-            "Inside Sales Pilot worker started (mailboxes=%s, interval=%dm)",
-            _ISP_MAILBOXES, _ISP_INTERVAL,
-        )
-    else:
-        logger.info("Inside Sales Pilot disabled (INSIDE_SALES_PILOT_ENABLED=false)")
-    
+    from services.lifecycle_scheduler_service import start_inside_sales_pilot_tasks
+    inside_sales_pilot_task = start_inside_sales_pilot_tasks(
+        logger=logger, register_background_task=register_background_task,
+        inside_sales_pilot_enabled=_ISP_ENABLED,
+        inside_sales_pilot_worker=inside_sales_pilot_worker,
+        inside_sales_pilot_mailboxes=_ISP_MAILBOXES,
+        inside_sales_pilot_interval_minutes=_ISP_INTERVAL,
+    )
+    if inside_sales_pilot_task is not None:
+        _inside_sales_pilot_task = inside_sales_pilot_task
+
     # Initialize email service
     email_service = EmailService(db=db)
     set_email_service(email_service)

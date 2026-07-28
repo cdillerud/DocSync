@@ -1445,3 +1445,102 @@ def start_pilot_summary_tasks(
         ),
         name="pilot_summary",
     )
+
+
+def start_email_polling_tasks(
+    *,
+    logger,
+    register_background_task,
+    email_polling_svc,
+    email_polling_enabled,
+    email_polling_interval_minutes,
+    email_polling_user,
+    sales_email_polling_enabled,
+    sales_email_polling_interval_minutes,
+    sales_email_polling_user,
+):
+    'Create polling tasks and preserve the legacy shutdown handles.'
+    dynamic_task = register_background_task(
+        asyncio.create_task(
+            email_polling_svc.dynamic_mailbox_polling_worker()
+        ),
+        name="dynamic_mailbox_polling",
+    )
+    email_polling_svc._dynamic_mailbox_polling_task = (
+        dynamic_task
+    )
+    logger.info(
+        "Dynamic mailbox polling worker started"
+    )
+
+    email_task = None
+    if email_polling_enabled:
+        email_task = register_background_task(
+            asyncio.create_task(
+                email_polling_svc.email_polling_worker()
+            ),
+            name="email_polling",
+        )
+        logger.info(
+            "AP email polling worker started "
+            "(interval: %d min, user: %s)",
+            email_polling_interval_minutes,
+            email_polling_user,
+        )
+
+    sales_task = None
+    if (
+        sales_email_polling_enabled
+        and sales_email_polling_user
+    ):
+        sales_task = register_background_task(
+            asyncio.create_task(
+                email_polling_svc
+                ._sales_email_polling_worker()
+            ),
+            name="sales_polling",
+        )
+        logger.info(
+            "Sales email polling worker started "
+            "(interval: %d min, user: %s)",
+            sales_email_polling_interval_minutes,
+            sales_email_polling_user,
+        )
+
+    return {
+        "dynamic": dynamic_task,
+        "email": email_task,
+        "sales": sales_task,
+    }
+
+
+def start_inside_sales_pilot_tasks(
+    *,
+    logger,
+    register_background_task,
+    inside_sales_pilot_enabled,
+    inside_sales_pilot_worker,
+    inside_sales_pilot_mailboxes,
+    inside_sales_pilot_interval_minutes,
+):
+    'Create the optional Inside Sales pilot task.'
+    if inside_sales_pilot_enabled:
+        task = register_background_task(
+            asyncio.create_task(
+                inside_sales_pilot_worker()
+            ),
+            name="inside_sales_pilot",
+        )
+        logger.info(
+            "Inside Sales Pilot worker started "
+            "(mailboxes=%s, interval=%dm)",
+            inside_sales_pilot_mailboxes,
+            inside_sales_pilot_interval_minutes,
+        )
+        return task
+
+    logger.info(
+        "Inside Sales Pilot disabled "
+        "(INSIDE_SALES_PILOT_ENABLED=false)"
+    )
+    return None

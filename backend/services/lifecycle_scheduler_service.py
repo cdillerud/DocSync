@@ -1393,3 +1393,41 @@ def start_ready_to_post_tasks(
         ),
         name="ready_to_post",
     )
+
+
+def start_startup_requeue_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+    get_auto_resolve_service,
+) -> None:
+    "Create and register the startup not-run requeue task."
+    register_background_task(
+        asyncio.create_task(
+            startup_requeue_not_run(
+                db=db,
+                logger=logger,
+                get_auto_resolve_service=get_auto_resolve_service,
+            )
+        ),
+        name="startup_requeue_not_run",
+    )
+
+
+def start_pi_backfill_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    "Create and register the purchase-invoice-number backfill task."
+    register_background_task(
+        asyncio.create_task(
+            startup_backfill_pi_no(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="startup_backfill_pi_no",
+    )

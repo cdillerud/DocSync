@@ -362,11 +362,12 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 19
+        assert len(create_tasks) == 21
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
             "start_bc_maintenance_tasks",
+            "start_captured_retry_tasks",
             "start_catalog_sync_tasks",
             "start_draft_feedback_tasks",
             "start_intake_learning_tasks",
@@ -377,11 +378,12 @@ class TestSourceExtraction:
             "start_learning_reporting_tasks",
             "start_monitoring_tasks",
             "start_monitoring_tasks",
+            "start_pi_backfill_tasks",
             "start_po_retry_tasks",
             "start_ready_to_post_tasks",
-            "start_captured_retry_tasks",
             "start_startup_repair_tasks",
             "start_startup_repair_tasks",
+            "start_startup_requeue_tasks",
             "start_status_sync_tasks",
             "start_status_sync_tasks",
         ]
@@ -912,175 +914,158 @@ class TestPeriodicSyncStatusRuntime:
         )
 
 
+def _assert_server_delegates_lifecycle_task(
+    helper_name,
+    scheduler_name,
+):
+    tree = ast.parse(
+        (BACKEND_DIR / "server.py").read_text()
+    )
+    startup = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "startup"
+    )
+
+    imports = [
+        alias.name
+        for node in ast.walk(startup)
+        if isinstance(node, ast.ImportFrom)
+        and node.module
+        == "services.lifecycle_scheduler_service"
+        for alias in node.names
+    ]
+    calls = [
+        node.func.id
+        for node in ast.walk(startup)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+    ]
+
+    assert imports.count(helper_name) == 1
+    assert calls.count(helper_name) == 1
+    assert scheduler_name not in imports
+    assert scheduler_name not in calls
+    assert not [
+        node
+        for statement in startup.body
+        for node in ast.walk(statement)
+        if isinstance(node, ast.AsyncFunctionDef)
+    ]
+
+
+def _assert_lifecycle_helper_ownership(
+    helper_name,
+    scheduler_name,
+    registry_name,
+    expected_bindings,
+):
+    tree = ast.parse(
+        (
+            BACKEND_DIR
+            / "services"
+            / "lifecycle_scheduler_service.py"
+        ).read_text()
+    )
+    helper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == helper_name
+    )
+
+    wrappers = [
+        node
+        for node in ast.walk(helper)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "register_background_task"
+        and any(
+            keyword.arg == "name"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value == registry_name
+            for keyword in node.keywords
+        )
+    ]
+
+    assert len(wrappers) == 1
+    create_task = wrappers[0].args[0]
+    assert isinstance(create_task, ast.Call)
+    assert isinstance(create_task.func, ast.Attribute)
+    assert create_task.func.attr == "create_task"
+
+    coroutine = create_task.args[0]
+    assert isinstance(coroutine, ast.Call)
+    assert isinstance(coroutine.func, ast.Name)
+    assert coroutine.func.id == scheduler_name
+
+    bindings = {
+        keyword.arg: (
+            keyword.value.id
+            if isinstance(keyword.value, ast.Name)
+            else None
+        )
+        for keyword in coroutine.keywords
+    }
+    assert bindings == expected_bindings
+
+
+def _assert_lifecycle_scheduler_contract(
+    scheduler_name,
+    expected_body_hash,
+    expected_parameters,
+):
+    tree = ast.parse(
+        (
+            BACKEND_DIR
+            / "services"
+            / "lifecycle_scheduler_service.py"
+        ).read_text()
+    )
+    function = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == scheduler_name
+    )
+    assert _body_hash(function) == expected_body_hash
+
+    import services.lifecycle_scheduler_service as scheduler
+    signature = inspect.signature(
+        getattr(scheduler, scheduler_name)
+    )
+    assert list(signature.parameters) == expected_parameters
+    assert all(
+        parameter.kind
+        is inspect.Parameter.KEYWORD_ONLY
+        for parameter in signature.parameters.values()
+    )
+
+
 class TestStartupRequeueExtraction:
     def test_server_uses_canonical_requeue_coroutine(
         self,
     ):
-        tree = ast.parse(
-            (
-                BACKEND_DIR / "server.py"
-            ).read_text()
+        _assert_server_delegates_lifecycle_task(
+            "start_startup_requeue_tasks",
+            "startup_requeue_not_run",
         )
-
-        startup = next(
-            node
-            for node in tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name == "startup"
-            )
-        )
-
-        nested = [
-            node
-            for node in startup.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "_startup_requeue_not_run"
-            )
-        ]
-
-        imports = [
-            node
-            for node in ast.walk(startup)
-            if (
-                isinstance(
-                    node,
-                    ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
-                )
-                and any(
-                    alias.name
-                    == "startup_requeue_not_run"
-                    for alias in node.names
-                )
-            )
-        ]
-
-        assert nested == []
-        assert len(imports) == 1
 
     def test_requeue_registry_ownership_preserved(
         self,
     ):
-        tree = ast.parse(
-            (
-                BACKEND_DIR / "server.py"
-            ).read_text()
+        _assert_lifecycle_helper_ownership(
+            "start_startup_requeue_tasks",
+            "startup_requeue_not_run",
+            "startup_requeue_not_run",
+            {
+                "db": "db",
+                "logger": "logger",
+                "get_auto_resolve_service":
+                    "get_auto_resolve_service",
+            },
         )
-
-        startup = next(
-            node
-            for node in tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name == "startup"
-            )
-        )
-
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(
-                    node.func,
-                    ast.Name,
-                )
-                and node.func.id
-                == "register_background_task"
-            ):
-                continue
-
-            names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if names == [
-                "startup_requeue_not_run"
-            ]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        create_task = wrappers[0].args[0]
-
-        assert isinstance(
-            create_task,
-            ast.Call,
-        )
-
-        assert isinstance(
-            create_task.func,
-            ast.Attribute,
-        )
-
-        assert (
-            create_task.func.attr
-            == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
-        )
-
-        assert isinstance(
-            coroutine_call,
-            ast.Call,
-        )
-
-        assert isinstance(
-            coroutine_call.func,
-            ast.Name,
-        )
-
-        assert (
-            coroutine_call.func.id
-            == "startup_requeue_not_run"
-        )
-
-        bindings = {
-            keyword.arg: (
-                keyword.value.id
-                if isinstance(
-                    keyword.value,
-                    ast.Name,
-                )
-                else None
-            )
-            for keyword
-            in coroutine_call.keywords
-        }
-
-        assert bindings == {
-            "db": "db",
-            "logger": "logger",
-            "get_auto_resolve_service": (
-                "get_auto_resolve_service"
-            ),
-        }
 
     def test_requeue_body_matches_original(
         self,
@@ -5869,156 +5854,23 @@ class TestStartupPINumberBackfillExtraction:
     def test_source_registry_body_and_signature(
         self,
     ):
-        server_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "server.py"
-            ).read_text()
+        _assert_server_delegates_lifecycle_task(
+            "start_pi_backfill_tasks",
+            "startup_backfill_pi_no",
         )
-
-        startup = next(
-            node
-            for node in server_tree.body
-            if isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name == "startup"
+        _assert_lifecycle_helper_ownership(
+            "start_pi_backfill_tasks",
+            "startup_backfill_pi_no",
+            "startup_backfill_pi_no",
+            {
+                "db": "db",
+                "logger": "logger",
+            },
         )
-
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_startup_backfill_pi_no"
-            for node in startup.body
-        )
-
-        imports = [
-            node
-            for node in ast.walk(startup)
-            if isinstance(
-                node,
-                ast.ImportFrom,
-            )
-            and node.module
-            == (
-                "services."
-                "lifecycle_scheduler_service"
-            )
-            and any(
-                alias.name
-                == "startup_backfill_pi_no"
-                for alias in node.names
-            )
-        ]
-
-        assert len(imports) == 1
-
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(
-                    node.func,
-                    ast.Name,
-                )
-                and node.func.id
-                == "register_background_task"
-            ):
-                continue
-
-            names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if names == [
-                "startup_backfill_pi_no"
-            ]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        create_task = wrappers[0].args[0]
-
-        assert (
-            create_task.func.attr
-            == "create_task"
-        )
-
-        coroutine_call = (
-            create_task.args[0]
-        )
-
-        assert (
-            coroutine_call.func.id
-            == "startup_backfill_pi_no"
-        )
-
-        assert {
-            keyword.arg: keyword.value.id
-            for keyword
-            in coroutine_call.keywords
-        } == {
-            "db": "db",
-            "logger": "logger",
-        }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
-        function = next(
-            node
-            for node in service_tree.body
-            if isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "startup_backfill_pi_no"
-        )
-
-        assert (
-            _body_hash(function)
-            == "679d9e0b57e5a28aad94b993b6ef599f4f16e3b13d2c41093ece797c4d4bb62d"
-        )
-
-        from services.lifecycle_scheduler_service import (
-            startup_backfill_pi_no,
-        )
-
-        signature = inspect.signature(
-            startup_backfill_pi_no
-        )
-
-        assert list(
-            signature.parameters
-        ) == [
-            "db",
-            "logger",
-        ]
-
-        assert all(
-            parameter.kind
-            is inspect.Parameter.KEYWORD_ONLY
-            for parameter
-            in signature.parameters.values()
+        _assert_lifecycle_scheduler_contract(
+            "startup_backfill_pi_no",
+            "679d9e0b57e5a28aad94b993b6ef599f4f16e3b13d2c41093ece797c4d4bb62d",
+            ["db", "logger"],
         )
 
 
@@ -7957,164 +7809,33 @@ class TestPORetryExtraction:
     def test_source_registry_body_and_signature(
         self,
     ):
-        server_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "server.py"
-            ).read_text()
+        _assert_server_delegates_lifecycle_task(
+            "start_po_retry_tasks",
+            "po_retry_scheduler",
         )
-
-        startup = next(
-            node
-            for node in server_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name == "startup"
-            )
+        _assert_lifecycle_helper_ownership(
+            "start_po_retry_tasks",
+            "po_retry_scheduler",
+            "po_retry",
+            {
+                "db": "db",
+                "logger": "logger",
+                "PO_RETRY_INTERVAL_HOURS":
+                    "PO_RETRY_INTERVAL_HOURS",
+                "PO_MAX_WAIT_DAYS": "PO_MAX_WAIT_DAYS",
+                "PO_MAX_RETRIES": "PO_MAX_RETRIES",
+            },
         )
-
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_po_retry_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
-            node
-            for node in ast.walk(startup)
-            if (
-                isinstance(
-                    node,
-                    ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
-                )
-                and any(
-                    alias.name
-                    == "po_retry_scheduler"
-                    for alias in node.names
-                )
-            )
-        ]
-
-        assert len(imports) == 1
-
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(
-                    node.func,
-                    ast.Name,
-                )
-                and node.func.id
-                == "register_background_task"
-            ):
-                continue
-
-            names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if names == ["po_retry"]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        create_task = wrappers[0].args[0]
-        coroutine = create_task.args[0]
-
-        assert (
-            coroutine.func.id
-            == "po_retry_scheduler"
-        )
-
-        assert {
-            keyword.arg: keyword.value.id
-            for keyword
-            in coroutine.keywords
-        } == {
-            "db": "db",
-            "logger": "logger",
-            "PO_RETRY_INTERVAL_HOURS": (
-                "PO_RETRY_INTERVAL_HOURS"
-            ),
-            "PO_MAX_WAIT_DAYS": (
-                "PO_MAX_WAIT_DAYS"
-            ),
-            "PO_MAX_RETRIES": (
-                "PO_MAX_RETRIES"
-            ),
-        }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
-        function = next(
-            node
-            for node in service_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "po_retry_scheduler"
-            )
-        )
-
-        assert (
-            _body_hash(function)
-            == "5cf811fe6b6334ac74ab558bcc38fc3fa77ed8878d8ee5a31a4bb548d070ab7c"
-        )
-
-        from services.lifecycle_scheduler_service import (
-            po_retry_scheduler,
-        )
-
-        signature = inspect.signature(
-            po_retry_scheduler
-        )
-
-        assert list(
-            signature.parameters
-        ) == [
-            "db",
-            "logger",
-            "PO_RETRY_INTERVAL_HOURS",
-            "PO_MAX_WAIT_DAYS",
-            "PO_MAX_RETRIES",
-        ]
-
-        assert all(
-            parameter.kind
-            is inspect.Parameter.KEYWORD_ONLY
-            for parameter
-            in signature.parameters.values()
+        _assert_lifecycle_scheduler_contract(
+            "po_retry_scheduler",
+            "5cf811fe6b6334ac74ab558bcc38fc3fa77ed8878d8ee5a31a4bb548d070ab7c",
+            [
+                "db",
+                "logger",
+                "PO_RETRY_INTERVAL_HOURS",
+                "PO_MAX_WAIT_DAYS",
+                "PO_MAX_RETRIES",
+            ],
         )
 
 
@@ -8455,160 +8176,32 @@ class TestReadyToPostExtraction:
     def test_source_registry_body_and_signature(
         self,
     ):
-        server_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "server.py"
-            ).read_text()
+        _assert_server_delegates_lifecycle_task(
+            "start_ready_to_post_tasks",
+            "ready_to_post_scheduler",
         )
-
-        startup = next(
-            node
-            for node in server_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name == "startup"
-            )
+        _assert_lifecycle_helper_ownership(
+            "start_ready_to_post_tasks",
+            "ready_to_post_scheduler",
+            "ready_to_post",
+            {
+                "db": "db",
+                "logger": "logger",
+                "READY_POST_INTERVAL_SECONDS":
+                    "READY_POST_INTERVAL_SECONDS",
+                "READY_POST_MAX_RETRIES":
+                    "READY_POST_MAX_RETRIES",
+            },
         )
-
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            and node.name
-            == "_ready_to_post_scheduler"
-            for node in startup.body
-        )
-
-        imports = [
-            node
-            for node in ast.walk(startup)
-            if (
-                isinstance(
-                    node,
-                    ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
-                )
-                and any(
-                    alias.name
-                    == "ready_to_post_scheduler"
-                    for alias in node.names
-                )
-            )
-        ]
-
-        assert len(imports) == 1
-
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(
-                    node.func,
-                    ast.Name,
-                )
-                and node.func.id
-                == "register_background_task"
-            ):
-                continue
-
-            names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if names == ["ready_to_post"]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        create_task = wrappers[0].args[0]
-        coroutine = create_task.args[0]
-
-        assert (
-            coroutine.func.id
-            == "ready_to_post_scheduler"
-        )
-
-        assert {
-            keyword.arg: keyword.value.id
-            for keyword
-            in coroutine.keywords
-        } == {
-            "db": "db",
-            "logger": "logger",
-            "READY_POST_INTERVAL_SECONDS": (
-                "READY_POST_INTERVAL_SECONDS"
-            ),
-            "READY_POST_MAX_RETRIES": (
-                "READY_POST_MAX_RETRIES"
-            ),
-        }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
-        function = next(
-            node
-            for node in service_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "ready_to_post_scheduler"
-            )
-        )
-
-        assert (
-            _body_hash(function)
-            == "ff6f7e12afd600383f8c400af7d6b606a7fb826ab50006de8adf564a67fe1192"
-        )
-
-        from services.lifecycle_scheduler_service import (
-            ready_to_post_scheduler,
-        )
-
-        signature = inspect.signature(
-            ready_to_post_scheduler
-        )
-
-        assert list(
-            signature.parameters
-        ) == [
-            "db",
-            "logger",
-            "READY_POST_INTERVAL_SECONDS",
-            "READY_POST_MAX_RETRIES",
-        ]
-
-        assert all(
-            parameter.kind
-            is inspect.Parameter.KEYWORD_ONLY
-            for parameter
-            in signature.parameters.values()
+        _assert_lifecycle_scheduler_contract(
+            "ready_to_post_scheduler",
+            "ff6f7e12afd600383f8c400af7d6b606a7fb826ab50006de8adf564a67fe1192",
+            [
+                "db",
+                "logger",
+                "READY_POST_INTERVAL_SECONDS",
+                "READY_POST_MAX_RETRIES",
+            ],
         )
 
 
@@ -9016,166 +8609,37 @@ class TestCapturedRetryExtraction:
     def test_source_registry_body_and_signature(
         self,
     ):
-        server_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "server.py"
-            ).read_text()
+        _assert_server_delegates_lifecycle_task(
+            "start_captured_retry_tasks",
+            "captured_retry_scheduler",
         )
-
-        startup = next(
-            node
-            for node in server_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name == "startup"
-            )
+        _assert_lifecycle_helper_ownership(
+            "start_captured_retry_tasks",
+            "captured_retry_scheduler",
+            "captured_retry",
+            {
+                "db": "db",
+                "logger": "logger",
+                "_reprocess_document_inner":
+                    "_reprocess_document_inner",
+                "CAPTURED_RETRY_INTERVAL_SECONDS":
+                    "CAPTURED_RETRY_INTERVAL_SECONDS",
+                "CAPTURED_STALE_THRESHOLD_SECONDS":
+                    "CAPTURED_STALE_THRESHOLD_SECONDS",
+                "CAPTURED_MAX_RETRIES": "CAPTURED_MAX_RETRIES",
+            },
         )
-
-        assert not any(
-            isinstance(
-                node,
-                ast.AsyncFunctionDef,
-            )
-            for node in startup.body
-        )
-
-        imports = [
-            node
-            for node in ast.walk(startup)
-            if (
-                isinstance(
-                    node,
-                    ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
-                )
-                and any(
-                    alias.name
-                    == "captured_retry_scheduler"
-                    for alias in node.names
-                )
-            )
-        ]
-
-        assert len(imports) == 1
-
-        wrappers = []
-
-        for node in ast.walk(startup):
-            if not (
-                isinstance(node, ast.Call)
-                and isinstance(
-                    node.func,
-                    ast.Name,
-                )
-                and node.func.id
-                == "register_background_task"
-            ):
-                continue
-
-            names = [
-                keyword.value.value
-                for keyword in node.keywords
-                if (
-                    keyword.arg == "name"
-                    and isinstance(
-                        keyword.value,
-                        ast.Constant,
-                    )
-                )
-            ]
-
-            if names == ["captured_retry"]:
-                wrappers.append(node)
-
-        assert len(wrappers) == 1
-
-        create_task = wrappers[0].args[0]
-        coroutine = create_task.args[0]
-
-        assert (
-            coroutine.func.id
-            == "captured_retry_scheduler"
-        )
-
-        assert {
-            keyword.arg: keyword.value.id
-            for keyword
-            in coroutine.keywords
-        } == {
-            "db": "db",
-            "logger": "logger",
-            "_reprocess_document_inner": (
-                "_reprocess_document_inner"
-            ),
-            "CAPTURED_RETRY_INTERVAL_SECONDS": (
-                "CAPTURED_RETRY_INTERVAL_SECONDS"
-            ),
-            "CAPTURED_STALE_THRESHOLD_SECONDS": (
-                "CAPTURED_STALE_THRESHOLD_SECONDS"
-            ),
-            "CAPTURED_MAX_RETRIES": (
-                "CAPTURED_MAX_RETRIES"
-            ),
-        }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
-
-        function = next(
-            node
-            for node in service_tree.body
-            if (
-                isinstance(
-                    node,
-                    ast.AsyncFunctionDef,
-                )
-                and node.name
-                == "captured_retry_scheduler"
-            )
-        )
-
-        assert (
-            _body_hash(function)
-            == "e652fe1401cc94971dac44fde5c4889e43a42a049e62560fd6e2070437f5d617"
-        )
-
-        from services.lifecycle_scheduler_service import (
-            captured_retry_scheduler,
-        )
-
-        signature = inspect.signature(
-            captured_retry_scheduler
-        )
-
-        assert list(
-            signature.parameters
-        ) == [
-            "db",
-            "logger",
-            "_reprocess_document_inner",
-            "CAPTURED_RETRY_INTERVAL_SECONDS",
-            "CAPTURED_STALE_THRESHOLD_SECONDS",
-            "CAPTURED_MAX_RETRIES",
-        ]
-
-        assert all(
-            parameter.kind
-            is inspect.Parameter.KEYWORD_ONLY
-            for parameter
-            in signature.parameters.values()
+        _assert_lifecycle_scheduler_contract(
+            "captured_retry_scheduler",
+            "e652fe1401cc94971dac44fde5c4889e43a42a049e62560fd6e2070437f5d617",
+            [
+                "db",
+                "logger",
+                "_reprocess_document_inner",
+                "CAPTURED_RETRY_INTERVAL_SECONDS",
+                "CAPTURED_STALE_THRESHOLD_SECONDS",
+                "CAPTURED_MAX_RETRIES",
+            ],
         )
 
 

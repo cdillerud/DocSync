@@ -3760,9 +3760,14 @@ async def startup():
     logger.info("Auto-Resolution Service initialized (5 workers)")
 
     # ── Startup: Re-queue any "not_run" docs that were lost from in-memory queue ──
-    from services.lifecycle_scheduler_service import startup_requeue_not_run
+    from services.lifecycle_scheduler_service import start_startup_requeue_tasks
 
-    register_background_task(asyncio.create_task(startup_requeue_not_run(db=db, logger=logger, get_auto_resolve_service=get_auto_resolve_service)), name='startup_requeue_not_run')
+    start_startup_requeue_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+        get_auto_resolve_service=get_auto_resolve_service,
+    )
 
     # ── Startup + periodic readiness status-sync tasks ──
     from services.lifecycle_scheduler_service import start_status_sync_tasks
@@ -3787,9 +3792,13 @@ async def startup():
 
 
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──
-    from services.lifecycle_scheduler_service import startup_backfill_pi_no
+    from services.lifecycle_scheduler_service import start_pi_backfill_tasks
 
-    register_background_task(asyncio.create_task(startup_backfill_pi_no(db=db, logger=logger)), name='startup_backfill_pi_no')
+    start_pi_backfill_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
 
     
     # Initialize Vendor Intelligence Service

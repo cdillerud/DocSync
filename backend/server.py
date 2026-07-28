@@ -3683,8 +3683,12 @@ async def startup():
     logger.info("BC Reference Cache Service initialized (background sync enabled)")
     
     # Start BC Catalog Sync scheduler (every 24h)
-    from services.lifecycle_scheduler_service import catalog_sync_scheduler  # Sleep 24 hours
-    register_background_task(asyncio.create_task(catalog_sync_scheduler(db=db, logger=logger)), name='catalog_sync')
+    from services.lifecycle_scheduler_service import start_catalog_sync_tasks
+    start_catalog_sync_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("BC Catalog Sync scheduler started (interval: 24h)")
 
     # ── Intake Learning Refresh scheduler (daily) ──
@@ -3862,8 +3866,12 @@ async def startup():
     logger.info("GPI Document Hub started. Demo mode: %s, Loaded %d vendor aliases", DEMO_MODE, len(aliases))
 
     # Start Draft Feedback Sync scheduler (every 2h)
-    from services.lifecycle_scheduler_service import draft_feedback_sync_scheduler  # Every 2 hours
-    register_background_task(asyncio.create_task(draft_feedback_sync_scheduler(db=db, logger=logger)), name='draft_feedback_sync')
+    from services.lifecycle_scheduler_service import start_draft_feedback_tasks
+    start_draft_feedback_tasks(
+        db=db,
+        logger=logger,
+        register_background_task=register_background_task,
+    )
     logger.info("Draft Feedback Sync + Continuous Learning scheduler started (interval: 2h)")
 
     # === Deep Learning: Self-Correction + Vendor Maturity (every 4 hours) ===

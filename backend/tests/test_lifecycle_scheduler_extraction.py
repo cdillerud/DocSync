@@ -362,11 +362,13 @@ class TestSourceExtraction:
                 )
 
         assert server_imports == []
-        assert len(create_tasks) == 14
+        assert len(create_tasks) == 16
 
         assert sorted(owners) == [
             "start_bc_maintenance_tasks",
             "start_bc_maintenance_tasks",
+            "start_catalog_sync_tasks",
+            "start_draft_feedback_tasks",
             "start_intake_learning_tasks",
             "start_intake_learning_tasks",
             "start_intelligence_tasks",
@@ -1323,7 +1325,37 @@ class TestCatalogSyncExtraction:
             )
         ]
 
-        imports = [
+        direct_imports = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(
+                    node,
+                    ast.ImportFrom,
+                )
+                and any(
+                    alias.name
+                    == "catalog_sync_scheduler"
+                    for alias in node.names
+                )
+            )
+        ]
+
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "catalog_sync_scheduler"
+            )
+        ]
+
+        helper_imports = [
             node
             for node in ast.walk(startup)
             if (
@@ -1338,39 +1370,71 @@ class TestCatalogSyncExtraction:
                 )
                 and any(
                     alias.name
-                    == "catalog_sync_scheduler"
+                    == "start_catalog_sync_tasks"
                     for alias in node.names
                 )
             )
         ]
 
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_catalog_sync_tasks"
+            )
+        ]
+
         assert nested == []
-        assert len(imports) == 1
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_imports) == 1
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
 
     def test_catalog_registry_ownership_preserved(
         self,
     ):
         tree = ast.parse(
             (
-                BACKEND_DIR / "server.py"
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
             ).read_text()
         )
 
-        startup = next(
+        helper = next(
             node
             for node in tree.body
             if (
                 isinstance(
                     node,
-                    ast.AsyncFunctionDef,
+                    ast.FunctionDef,
                 )
-                and node.name == "startup"
+                and node.name
+                == "start_catalog_sync_tasks"
             )
         )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -1435,20 +1499,11 @@ class TestCatalogSyncExtraction:
             == "catalog_sync_scheduler"
         )
 
-        bindings = {
-            keyword.arg: (
-                keyword.value.id
-                if isinstance(
-                    keyword.value,
-                    ast.Name,
-                )
-                else None
-            )
+        assert {
+            keyword.arg: keyword.value.id
             for keyword
             in coroutine_call.keywords
-        }
-
-        assert bindings == {
+        } == {
             "db": "db",
             "logger": "logger",
         }
@@ -6672,18 +6727,13 @@ class TestDraftFeedbackExtraction:
             for node in startup.body
         )
 
-        imports = [
+        direct_imports = [
             node
             for node in ast.walk(startup)
             if (
                 isinstance(
                     node,
                     ast.ImportFrom,
-                )
-                and node.module
-                == (
-                    "services."
-                    "lifecycle_scheduler_service"
                 )
                 and any(
                     alias.name
@@ -6693,11 +6743,74 @@ class TestDraftFeedbackExtraction:
             )
         ]
 
-        assert len(imports) == 1
+        direct_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "draft_feedback_sync_scheduler"
+            )
+        ]
+
+        helper_calls = [
+            node
+            for node in ast.walk(startup)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(
+                    node.func,
+                    ast.Name,
+                )
+                and node.func.id
+                == "start_draft_feedback_tasks"
+            )
+        ]
+
+        assert direct_imports == []
+        assert direct_calls == []
+        assert len(helper_calls) == 1
+
+        assert {
+            keyword.arg: keyword.value.id
+            for keyword
+            in helper_calls[0].keywords
+        } == {
+            "db": "db",
+            "logger": "logger",
+            "register_background_task": (
+                "register_background_task"
+            ),
+        }
+
+        service_tree = ast.parse(
+            (
+                BACKEND_DIR
+                / "services"
+                / "lifecycle_scheduler_service.py"
+            ).read_text()
+        )
+
+        helper = next(
+            node
+            for node in service_tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.FunctionDef,
+                )
+                and node.name
+                == "start_draft_feedback_tasks"
+            )
+        )
 
         wrappers = []
 
-        for node in ast.walk(startup):
+        for node in ast.walk(helper):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(
@@ -6721,15 +6834,18 @@ class TestDraftFeedbackExtraction:
                 )
             ]
 
-            if names == [
-                "draft_feedback_sync"
-            ]:
+            if names == ["draft_feedback_sync"]:
                 wrappers.append(node)
 
         assert len(wrappers) == 1
 
         create_task = wrappers[0].args[0]
         coroutine = create_task.args[0]
+
+        assert (
+            create_task.func.attr
+            == "create_task"
+        )
 
         assert (
             coroutine.func.id
@@ -6744,14 +6860,6 @@ class TestDraftFeedbackExtraction:
             "db": "db",
             "logger": "logger",
         }
-
-        service_tree = ast.parse(
-            (
-                BACKEND_DIR
-                / "services"
-                / "lifecycle_scheduler_service.py"
-            ).read_text()
-        )
 
         function = next(
             node
@@ -10077,3 +10185,107 @@ class TestStartupRepairTaskOwnershipRuntime:
                 ),
             },
         ]
+
+
+class TestSeparatedSchedulerOwnershipRuntime:
+    def test_catalog_helper_creates_and_registers_task(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        coroutine = object()
+        catalog = Mock(
+            return_value=coroutine
+        )
+
+        create_task = Mock(
+            return_value="catalog-task"
+        )
+
+        register = Mock()
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "catalog_sync_scheduler",
+            catalog,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_catalog_sync_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+        )
+
+        catalog.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        create_task.assert_called_once_with(
+            coroutine
+        )
+
+        register.assert_called_once_with(
+            "catalog-task",
+            name="catalog_sync",
+        )
+
+    def test_draft_feedback_helper_creates_and_registers_task(
+        self,
+        monkeypatch,
+    ):
+        import services.lifecycle_scheduler_service as scheduler
+
+        coroutine = object()
+        draft_feedback = Mock(
+            return_value=coroutine
+        )
+
+        create_task = Mock(
+            return_value="draft-feedback-task"
+        )
+
+        register = Mock()
+        db = Mock()
+        logger = Mock()
+
+        monkeypatch.setattr(
+            scheduler,
+            "draft_feedback_sync_scheduler",
+            draft_feedback,
+        )
+
+        monkeypatch.setattr(
+            scheduler.asyncio,
+            "create_task",
+            create_task,
+        )
+
+        scheduler.start_draft_feedback_tasks(
+            db=db,
+            logger=logger,
+            register_background_task=register,
+        )
+
+        draft_feedback.assert_called_once_with(
+            db=db,
+            logger=logger,
+        )
+
+        create_task.assert_called_once_with(
+            coroutine
+        )
+
+        register.assert_called_once_with(
+            "draft-feedback-task",
+            name="draft_feedback_sync",
+        )

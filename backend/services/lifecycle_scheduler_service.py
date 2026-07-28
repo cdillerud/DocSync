@@ -1285,3 +1285,39 @@ def start_startup_repair_tasks(
         ),
         name="startup_fix_shipping_po_escalations",
     )
+
+
+def start_catalog_sync_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register the BC catalog synchronization task."""
+    register_background_task(
+        asyncio.create_task(
+            catalog_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="catalog_sync",
+    )
+
+
+def start_draft_feedback_tasks(
+    *,
+    db,
+    logger,
+    register_background_task,
+) -> None:
+    """Create and register the draft-feedback learning task."""
+    register_background_task(
+        asyncio.create_task(
+            draft_feedback_sync_scheduler(
+                db=db,
+                logger=logger,
+            )
+        ),
+        name="draft_feedback_sync",
+    )

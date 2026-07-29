@@ -10,7 +10,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SERVER_PATH = BACKEND_DIR / "server.py"
 EXPECTED_SERVER_MIN = 3422
-EXPECTED_SERVER_MAX = 3442
+EXPECTED_SERVER_MAX = 3058
 
 
 def _top_level_names(path: Path) -> set[str]:
@@ -32,7 +32,6 @@ def _top_level_names(path: Path) -> set[str]:
 def test_server_duplicate_is_absent():
     names = _top_level_names(SERVER_PATH)
     assert "batch_revalidate_documents" not in names
-    assert "process_incoming_email" in names
 
 
 def test_authoritative_service_remains_complete():

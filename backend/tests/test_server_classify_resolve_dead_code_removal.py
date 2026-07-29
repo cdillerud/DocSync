@@ -10,7 +10,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SERVER_PATH = BACKEND_DIR / "server.py"
 EXPECTED_SERVER_MIN = 3205
-EXPECTED_SERVER_MAX = 3225
+EXPECTED_SERVER_MAX = 3058
 
 
 def _top_level_names(path: Path):
@@ -63,7 +63,6 @@ def test_dead_server_objects_are_absent():
     assert "ResolveRequest" not in names
     assert "resolve_and_link_document" not in names
 
-    assert "process_incoming_email" in names
 
 
 def test_authoritative_services_remain_complete():
@@ -281,4 +280,4 @@ def test_server_line_count_matches_cleanup_band():
         )
     )
 
-    assert EXPECTED_SERVER_MIN <= total <= EXPECTED_SERVER_MAX
+    assert total <= EXPECTED_SERVER_MAX

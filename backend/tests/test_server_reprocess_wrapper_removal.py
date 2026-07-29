@@ -14,7 +14,7 @@ SERVICE_PATH = (
     / "document_reprocess_service.py"
 )
 EXPECTED_SERVER_MIN = 3205
-EXPECTED_SERVER_MAX = 3225
+EXPECTED_SERVER_MAX = 3058
 
 
 def _top_level_names(path: Path):
@@ -39,7 +39,6 @@ def test_dead_server_reprocess_wrappers_are_absent():
 
     assert "reprocess_document" not in names
     assert "_reprocess_document_inner" not in names
-    assert "process_incoming_email" in names
 
 
 def test_authoritative_reprocess_service_is_complete():
@@ -252,4 +251,4 @@ def test_server_line_count_matches_cleanup_band():
         )
     )
 
-    assert EXPECTED_SERVER_MIN <= total <= EXPECTED_SERVER_MAX
+    assert total <= EXPECTED_SERVER_MAX

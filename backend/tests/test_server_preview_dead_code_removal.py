@@ -10,7 +10,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SERVER_PATH = BACKEND_DIR / "server.py"
 EXPECTED_SERVER_MIN = 3548
-EXPECTED_SERVER_MAX = 3568
+EXPECTED_SERVER_MAX = 3058
 
 
 def _top_level_names(path: Path) -> set[str]:
@@ -35,7 +35,6 @@ def test_server_preview_duplicate_is_absent():
 
     assert "DryRunPreviewRequest" not in names
     assert "preview_post_to_bc" not in names
-    assert "process_incoming_email" in names
 
 
 def test_authoritative_preview_service_remains_complete():

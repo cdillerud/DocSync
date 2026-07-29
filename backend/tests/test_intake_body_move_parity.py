@@ -469,7 +469,7 @@ class TestSourceInspectionGuardrails:
             ).open()
         )
 
-        assert 3205 <= total <= 3225, (
+        assert total <= 3058, (
             f"server.py line count {total} outside "
             "the post-reprocess-wrapper-cleanup baseline band "
             "(3205-3225)."

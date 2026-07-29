@@ -2331,20 +2331,6 @@ async def intake_document(
         "draft_result": draft_result,
         "transaction_action": transaction_action
     }
-# ==================== SAFE REPROCESS ENDPOINT ====================
-
-# Moved to routers/documents.py (Domain 7)
-async def reprocess_document(doc_id: str, reclassify: bool = Query(False)):
-    """Compatibility wrapper for services.document_reprocess_service."""
-    from services.document_reprocess_service import reprocess_document as _impl
-    return await _impl(doc_id, reclassify=reclassify)
-
-
-
-async def _reprocess_document_inner(doc_id: str, doc: dict, reclassify: bool):
-    """Compatibility wrapper for services.document_reprocess_service."""
-    from services.document_reprocess_service import reprocess_document_inner
-    return await reprocess_document_inner(doc_id, doc, reclassify)
 async def process_incoming_email(email_id: str, mailbox_address: str):
     """Process a new incoming email with attachments."""
     config = await get_email_watcher_config()
@@ -3192,7 +3178,8 @@ async def startup():
     CAPTURED_MAX_RETRIES = 4
 
     from services.lifecycle_scheduler_service import start_captured_retry_tasks
-    start_captured_retry_tasks(db=db, logger=logger, register_background_task=register_background_task, _reprocess_document_inner=_reprocess_document_inner, CAPTURED_RETRY_INTERVAL_SECONDS=CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_STALE_THRESHOLD_SECONDS=CAPTURED_STALE_THRESHOLD_SECONDS, CAPTURED_MAX_RETRIES=CAPTURED_MAX_RETRIES)
+    from services.document_reprocess_service import reprocess_document_inner
+    start_captured_retry_tasks(db=db, logger=logger, register_background_task=register_background_task, _reprocess_document_inner=reprocess_document_inner, CAPTURED_RETRY_INTERVAL_SECONDS=CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_STALE_THRESHOLD_SECONDS=CAPTURED_STALE_THRESHOLD_SECONDS, CAPTURED_MAX_RETRIES=CAPTURED_MAX_RETRIES)
     logger.info("Captured Doc Auto-Retry scheduler started (interval: %ds, max retries: %d)", CAPTURED_RETRY_INTERVAL_SECONDS, CAPTURED_MAX_RETRIES)
 
     from services.lifecycle_scheduler_service import start_po_retry_tasks

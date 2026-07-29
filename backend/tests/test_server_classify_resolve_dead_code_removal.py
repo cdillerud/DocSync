@@ -9,8 +9,8 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 SERVER_PATH = BACKEND_DIR / "server.py"
-EXPECTED_SERVER_MIN = 3218
-EXPECTED_SERVER_MAX = 3238
+EXPECTED_SERVER_MIN = 3205
+EXPECTED_SERVER_MAX = 3225
 
 
 def _top_level_names(path: Path):
@@ -63,8 +63,6 @@ def test_dead_server_objects_are_absent():
     assert "ResolveRequest" not in names
     assert "resolve_and_link_document" not in names
 
-    assert "reprocess_document" in names
-    assert "_reprocess_document_inner" in names
     assert "process_incoming_email" in names
 
 

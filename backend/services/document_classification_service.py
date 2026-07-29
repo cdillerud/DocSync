@@ -16,6 +16,9 @@ from services.document_intel_helpers import (
     classify_document_with_ai as _classify_with_ai,
     make_automation_decision as _make_automation_decision,
 )
+from services.document_learning_hooks import (
+    record_document_learning,
+)
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -70,6 +73,13 @@ async def classify_document(doc_id: str):
     }})
 
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    await record_document_learning(
+        db,
+        doc_id,
+        "classification",
+    )
+
     return {
         "document": updated_doc,
         "classification": classification,

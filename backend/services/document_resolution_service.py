@@ -22,6 +22,9 @@ from services.sharepoint_service import (
     create_sharing_link as _create_sharing_link,
     upload_to_sharepoint as _upload_to_sharepoint,
 )
+from services.document_learning_hooks import (
+    record_document_learning,
+)
 
 UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -146,6 +149,13 @@ async def resolve_and_link_document(doc_id: str, resolve: ResolveRequest):
     await db.hub_workflow_runs.insert_one(workflow)
 
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+
+    await record_document_learning(
+        db,
+        doc_id,
+        "link",
+    )
+
     return {
         "success": link_success,
         "document": updated_doc,

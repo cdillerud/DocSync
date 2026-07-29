@@ -161,10 +161,10 @@ class TestSourceInspectionGuardrails:
             ).open("r")
         )
 
-        assert 3422 <= total <= 3442, (
+        assert 3218 <= total <= 3238, (
             f"server.py line count {total} outside "
-            "the post-batch-revalidation-cleanup baseline band "
-            "(3422-3442)."
+            "the post-classify-resolve-cleanup baseline band "
+            "(3218-3238)."
         )
 
     @pytest.mark.parametrize("helper_name,_", TIER_3_HELPERS)

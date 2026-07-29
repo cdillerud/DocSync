@@ -2333,47 +2333,8 @@ async def intake_document(
     }
 # ==================== PHASE 7 C1: EMAIL POLLING (OBSERVATION INFRASTRUCTURE) ====================
 # Authoritative source: services/email_polling_service.py
-# Compatibility wrappers below — functions delegated to the extracted service.
 
 _email_polling_task = None
-_email_polling_lock = asyncio.Lock()
-
-SKIP_CONTENT_TYPES = {'image/gif', 'image/x-icon', 'image/bmp'}
-SKIP_FILENAME_PATTERNS = [
-    r'^image\d+\.(png|jpg|gif)$',
-    r'^signature',
-    r'^logo',
-    r'\.vcf$',
-]
-
-
-async def record_mail_intake_log(message_id, internet_message_id, attachment_id, attachment_hash, filename, status, sharepoint_doc_id=None, error=None):
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import record_mail_intake_log as _impl
-    return await _impl(message_id, internet_message_id, attachment_id, attachment_hash, filename, status, sharepoint_doc_id, error)
-
-
-async def check_duplicate_mail_intake(internet_message_id, attachment_hash, message_id=None, attachment_id=None):
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import check_duplicate_mail_intake as _impl
-    return await _impl(internet_message_id, attachment_hash, message_id, attachment_id)
-
-
-def should_skip_attachment(filename, content_type, size_bytes):
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import should_skip_attachment as _impl
-    return _impl(filename, content_type, size_bytes)
-
-
-async def poll_mailbox_for_attachments():
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import poll_mailbox_for_attachments as _impl
-    return await _impl()
-
-
-
-
-
 # ==================== LEGACY MIGRATION ENDPOINTS ====================
 
 class MigrationRequest(BaseModel):
@@ -2389,14 +2350,6 @@ class MigrationRequest(BaseModel):
 
 # Mailbox source routes moved to routers/mailbox_sources.py — REMOVED (Domain 3)
 # poll_mailbox_for_documents authoritative source: services.email_polling_service
-
-
-async def poll_mailbox_for_documents(mailbox_address: str, default_category: str = "AP", source_id: str = None):
-    """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
-    from services.email_polling_service import poll_mailbox_for_documents as _impl
-    return await _impl(mailbox_address, default_category, source_id)
-
-
 # ==================== VENDOR ALIAS ENGINE ====================
 # Routes moved to routers/aliases.py — REMOVED (Domain 2)
 # Helper record_alias_usage also moved to routers/aliases.py

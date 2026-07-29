@@ -18,8 +18,8 @@ BYTES_INTAKE_PATH = (
     / "services"
     / "document_bytes_intake_service.py"
 )
-EXPECTED_SERVER_MIN = 3038
-EXPECTED_SERVER_MAX = 3058
+EXPECTED_SERVER_MIN = 2993
+EXPECTED_SERVER_MAX = 3009
 
 
 def _tree(path: Path):
@@ -46,11 +46,11 @@ def test_dead_server_incoming_email_pipeline_is_absent():
 
     assert "process_incoming_email" not in names
 
-    assert "record_mail_intake_log" in names
-    assert "check_duplicate_mail_intake" in names
-    assert "should_skip_attachment" in names
-    assert "poll_mailbox_for_attachments" in names
-    assert "poll_mailbox_for_documents" in names
+    assert "record_mail_intake_log" not in names
+    assert "check_duplicate_mail_intake" not in names
+    assert "should_skip_attachment" not in names
+    assert "poll_mailbox_for_attachments" not in names
+    assert "poll_mailbox_for_documents" not in names
 
 
 def test_authoritative_email_service_is_complete():

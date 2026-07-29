@@ -181,7 +181,6 @@ from database import db, client
 
 # Config
 DEMO_MODE = os.environ.get('DEMO_MODE', 'true').lower() == 'true'
-JWT_SECRET = os.environ.get('JWT_SECRET', 'gpi-hub-secret-key')
 # Feature flag for Phase 4: CREATE_DRAFT_HEADER (Sandbox only)
 ENABLE_CREATE_DRAFT_HEADER = os.environ.get('ENABLE_CREATE_DRAFT_HEADER', 'false').lower() == 'true'
 # AI Classification Config
@@ -232,9 +231,7 @@ _sales_polling_task = None
 _pilot_summary_task = None
 
 # ==================== AUTH ====================
-# NOTE: Auth endpoints are in routers/auth.py, registered by main.py
-from routers.auth import router as auth_router
-
+# Authoritative implementation: routers/auth.py and services/auth_deps.py
 # ==================== AP REVIEW ====================
 from routers.ap_review import ap_review_router
 from services.business_central_service import BusinessCentralService, get_bc_service
@@ -258,26 +255,11 @@ sharepoint_migration_module = None
 # ==================== SPIRO INTEGRATION ====================
 from routers.spiro import spiro_router
 from services.spiro.spiro_sync import set_spiro_db
-
-import jwt as pyjwt
-
-TEST_USER = {"username": "admin", "password": "admin", "display_name": "Hub Admin", "role": "administrator"}
-
-class LoginRequest(BaseModel):
-    username: str
-    password: str
-
 class DocumentUpdate(BaseModel):
     document_type: Optional[str] = None
     bc_record_type: Optional[str] = None
     bc_record_id: Optional[str] = None
     bc_document_no: Optional[str] = None
-
-def create_token(username: str) -> str:
-    payload = {"sub": username, "exp": datetime.now(timezone.utc).timestamp() + 86400}
-    return pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
-
-# Auth endpoints moved to routes/auth.py — registered in main.py
 
 # ==================== MICROSOFT SERVICES (MOCK/REAL) ====================
 

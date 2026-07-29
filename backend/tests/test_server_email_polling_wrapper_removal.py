@@ -13,9 +13,7 @@ SERVICE_PATH = (
     / "services"
     / "email_polling_service.py"
 )
-EXPECTED_SERVER_MIN = 2993
-EXPECTED_SERVER_MAX = 3009
-
+EXPECTED_SERVER_MAX = 2991
 WRAPPER_NAMES = {
     "record_mail_intake_log",
     "check_duplicate_mail_intake",
@@ -160,4 +158,4 @@ def test_server_line_count_matches_cleanup_band():
         )
     )
 
-    assert EXPECTED_SERVER_MIN <= total <= EXPECTED_SERVER_MAX
+    assert total <= EXPECTED_SERVER_MAX

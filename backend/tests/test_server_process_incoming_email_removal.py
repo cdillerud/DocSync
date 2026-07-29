@@ -18,10 +18,7 @@ BYTES_INTAKE_PATH = (
     / "services"
     / "document_bytes_intake_service.py"
 )
-EXPECTED_SERVER_MIN = 2993
-EXPECTED_SERVER_MAX = 3009
-
-
+EXPECTED_SERVER_MAX = 2991
 def _tree(path: Path):
     return ast.parse(path.read_text(encoding="utf-8"))
 
@@ -204,4 +201,4 @@ def test_server_line_count_matches_cleanup_band():
         )
     )
 
-    assert EXPECTED_SERVER_MIN <= total <= EXPECTED_SERVER_MAX
+    assert total <= EXPECTED_SERVER_MAX

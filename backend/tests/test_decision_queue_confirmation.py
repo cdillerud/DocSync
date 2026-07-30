@@ -158,3 +158,75 @@ def test_multiple_issue_confirmations_are_independent():
         doc,
         "square9_side_issue",
     ) is False
+
+
+
+def test_acknowledgement_is_not_state_bound():
+    confirmation = build_confirmation_record(
+        {
+            "id": "doc-ack",
+            "doc_type": "Shipping_Document",
+            "mailbox_category": "Operations",
+        },
+        confirmed_by="human_decision_queue",
+        issue_type="square9_side_issue",
+        resolution="acknowledged",
+    )
+
+    assert confirmation["state_bound"] is False
+    assert confirmation["resolution"] == "acknowledged"
+
+
+def test_different_document_allows_unknown_type():
+    confirmation = build_confirmation_record(
+        {
+            "id": "doc-match",
+            "doc_type": "Unknown_Document",
+            "mailbox_category": "Operations",
+        },
+        confirmed_by="human_decision_queue",
+        issue_type="ambiguous_match",
+        resolution="different_document",
+    )
+
+    assert confirmation["state_bound"] is False
+
+
+def test_issue_resolution_remains_resolved_after_state_change():
+    doc = {
+        "doc_type": "AP_Invoice",
+        "mailbox_category": "AP",
+        "decision_queue_confirmations": {
+            "ambiguous_match": {
+                "document_type": "Shipping_Document",
+                "mailbox_category": "Operations",
+                "issue_type": "ambiguous_match",
+                "resolution": "different_document",
+            },
+        },
+    }
+
+    assert confirmation_matches_current_state(
+        doc,
+        "ambiguous_match",
+    ) is True
+
+
+def test_corrected_state_reopens_after_later_change():
+    doc = {
+        "doc_type": "Shipping_Document",
+        "mailbox_category": "Operations",
+        "decision_queue_confirmations": {
+            "isolated_misroute": {
+                "document_type": "AP_Invoice",
+                "mailbox_category": "AP",
+                "issue_type": "isolated_misroute",
+                "resolution": "corrected_state",
+            },
+        },
+    }
+
+    assert confirmation_matches_current_state(
+        doc,
+        "isolated_misroute",
+    ) is False

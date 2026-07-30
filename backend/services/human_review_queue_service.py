@@ -301,10 +301,10 @@ def _bucket_a_items() -> List[Dict[str, Any]]:
                 "context": context,
                 "submit_via": None,
                 "submit_hint": None,
-                "note": "No direct action exists yet for confirming/rejecting a "
-                        "match itself - informational only. If the underlying "
-                        "document's own doc_type or routing is actually wrong, "
-                        "that can still be corrected via bulk-classify.",
+                "note": "Choose whether the Hub document and the listed "
+                        "Square9 candidate are the same document, different "
+                        "documents, or unable to determine. This decision does "
+                        "not change classification or routing.",
                 "source": "bucket_A_root_cause",
             })
         elif root_cause == "square9_ap_folder_contains_non_ap_document":
@@ -321,8 +321,9 @@ def _bucket_a_items() -> List[Dict[str, Any]]:
                 "context": context,
                 "submit_via": None,
                 "submit_hint": None,
-                "note": "Informational only - this is a Square9 data-quality "
-                        "observation, not a Hub classification or routing gap.",
+                "note": "This is a Square9-only data-quality observation. "
+                        "Acknowledge it to resolve the queue issue without "
+                        "changing the Hub document.",
                 "source": "bucket_A_root_cause",
             })
         # "uncertain" and any other root_cause values are deliberately

@@ -45,6 +45,7 @@ class DecisionQueueConfirmationRequest(BaseModel):
     confirmed_by: str = "human_decision_queue"
     issue_type: str = ""
     notes: str = ""
+    resolution: str = "confirmed_current"
 
 # =============================================================================
 # COMPLEX ROUTES — Thin wrappers delegating to server.py functions
@@ -794,6 +795,7 @@ async def confirm_document_current_decision(
             confirmed_by=body.confirmed_by,
             issue_type=body.issue_type,
             notes=body.notes,
+            resolution=body.resolution,
         )
     except ValueError as exc:
         message = str(exc)

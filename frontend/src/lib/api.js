@@ -403,13 +403,15 @@ export const confirmCurrentDecision = (
   docId,
   issueType,
   confirmedBy = 'human_decision_queue',
-  notes = ''
+  notes = '',
+  resolution = 'confirmed_current'
 ) => api.post(
   `/documents/${encId(docId)}/confirm-current-decision`,
   {
     confirmed_by: confirmedBy,
     issue_type: issueType,
     notes,
+    resolution,
   }
 );
 

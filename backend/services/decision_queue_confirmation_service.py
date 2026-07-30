@@ -17,6 +17,20 @@ UNKNOWN_DOCUMENT_TYPES = {
     None,
 }
 
+VALID_DECISION_QUEUE_RESOLUTIONS = {
+    "confirmed_current",
+    "corrected_state",
+    "acknowledged",
+    "same_document",
+    "different_document",
+    "unable_to_determine",
+}
+
+STATE_BOUND_RESOLUTIONS = {
+    "confirmed_current",
+    "corrected_state",
+}
+
 
 def current_document_state(
     doc: Dict[str, Any],
@@ -93,6 +107,14 @@ def confirmation_matches_current_state(
     if not confirmation:
         return False
 
+    resolution = str(
+        confirmation.get("resolution")
+        or "confirmed_current"
+    ).strip().lower()
+
+    if resolution not in STATE_BOUND_RESOLUTIONS:
+        return True
+
     state = current_document_state(doc)
 
     return (
@@ -111,11 +133,29 @@ def build_confirmation_record(
     confirmed_by: str,
     issue_type: str = "",
     notes: str = "",
+    resolution: str = "confirmed_current",
 ) -> Dict[str, Any]:
     state = current_document_state(doc)
     document_type = state["doc_type"]
 
-    if document_type in UNKNOWN_DOCUMENT_TYPES:
+    normalized_resolution = str(
+        resolution
+        or "confirmed_current"
+    ).strip().lower()
+
+    if (
+        normalized_resolution
+        not in VALID_DECISION_QUEUE_RESOLUTIONS
+    ):
+        raise ValueError(
+            "Invalid Decision Queue resolution"
+        )
+
+    if (
+        normalized_resolution
+        in STATE_BOUND_RESOLUTIONS
+        and document_type in UNKNOWN_DOCUMENT_TYPES
+    ):
         raise ValueError(
             "Set a valid document type before confirming"
         )
@@ -148,6 +188,11 @@ def build_confirmation_record(
         "confirmed_by": confirmed_by,
         "confirmed_at": now,
         "issue_type": normalized_issue_type,
+        "resolution": normalized_resolution,
+        "state_bound": (
+            normalized_resolution
+            in STATE_BOUND_RESOLUTIONS
+        ),
         "notes": notes.strip(),
         "source": "human_decision_queue",
     }
@@ -158,6 +203,7 @@ async def confirm_current_decision(
     confirmed_by: str = "human_decision_queue",
     issue_type: str = "",
     notes: str = "",
+    resolution: str = "confirmed_current",
     db: Optional[Any] = None,
 ) -> Dict[str, Any]:
     if db is None:
@@ -200,10 +246,11 @@ async def confirm_current_decision(
         }
 
     confirmation = build_confirmation_record(
-        doc,
-        confirmed_by,
-        issue_type,
-        notes,
+        doc=doc,
+        confirmed_by=confirmed_by,
+        issue_type=issue_type,
+        notes=notes,
+        resolution=resolution,
     )
 
     confirmation_key = (
@@ -255,6 +302,25 @@ async def confirm_current_decision(
     await db.document_decision_confirmations.insert_one(
         audit_record
     )
+
+    if confirmation["resolution"] != "confirmed_current":
+        return {
+            "success": True,
+            "skipped": False,
+            "document_id": doc_id,
+            "document_type": state["doc_type"],
+            "mailbox_category": (
+                state["mailbox_category"]
+            ),
+            "resolution": (
+                confirmation["resolution"]
+            ),
+            "classification_feedback": {
+                "success": False,
+                "reason": "not_applicable",
+            },
+            "sender_routing_override_written": False,
+        }
 
     classification_feedback = {
         "success": False,
@@ -348,6 +414,9 @@ async def confirm_current_decision(
         "document_type": state["doc_type"],
         "mailbox_category": (
             state["mailbox_category"]
+        ),
+        "resolution": (
+            confirmation["resolution"]
         ),
         "classification_feedback": (
             classification_feedback

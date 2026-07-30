@@ -139,7 +139,18 @@ export default function HumanDecisionQueuePage() {
         mailboxCategory,
         reclassifyBy: 'human_decision_queue',
       });
-      toast.success(`Confirmed — ${primary.file_name}`);
+
+      await confirmCurrentDecision(
+        primary.doc_id,
+        primary.issue_type,
+        'human_decision_queue',
+        'Document state corrected from the Decision Queue',
+        'corrected_state'
+      );
+
+      toast.success(
+        `Saved and resolved — ${primary.file_name}`
+      );
       setResolvedKeys(previous => new Set(previous).add(key));
       return true;
     } catch (error) {
@@ -150,10 +161,27 @@ export default function HumanDecisionQueuePage() {
     }
   };
 
-  const handleConfirmCurrent = async group => {
+  const handleConfirmCurrent = async (
+    group,
+    resolution = 'confirmed_current',
+    notes = ''
+  ) => {
     const primary = group[0];
     const key =
       `${primary.doc_id}|${primary.issue_type}`;
+
+    const successMessages = {
+      confirmed_current:
+        `Current type and lane confirmed — ${primary.file_name}`,
+      acknowledged:
+        `Issue acknowledged — ${primary.file_name}`,
+      same_document:
+        `Recorded as the same document — ${primary.file_name}`,
+      different_document:
+        `Recorded as a different document — ${primary.file_name}`,
+      unable_to_determine:
+        `Recorded as unable to determine — ${primary.file_name}`,
+    };
 
     setSubmittingKey(key);
 
@@ -161,11 +189,14 @@ export default function HumanDecisionQueuePage() {
       await confirmCurrentDecision(
         primary.doc_id,
         primary.issue_type,
-        'human_decision_queue'
+        'human_decision_queue',
+        notes,
+        resolution
       );
 
       toast.success(
-        `Confirmed current type and lane — ${primary.file_name}`
+        successMessages[resolution] ||
+        `Issue resolved — ${primary.file_name}`
       );
 
       setResolvedKeys(previous => {
@@ -178,7 +209,7 @@ export default function HumanDecisionQueuePage() {
     } catch (error) {
       toast.error(
         error.response?.data?.detail ||
-        'The current classification could not be confirmed'
+        'The queue issue could not be resolved'
       );
 
       return false;
@@ -352,6 +383,17 @@ function DecisionCard({
     'ambiguous_classification',
   ].includes(primary.issue_type);
 
+  const acknowledgeableIssue =
+    primary.issue_type === 'square9_side_issue';
+
+  const ambiguousMatchIssue =
+    primary.issue_type === 'ambiguous_match';
+
+  const confidenceLabel =
+    primary.source === 'bucket_A_root_cause'
+      ? 'Match confidence'
+      : 'AI confidence';
+
   const validCurrentType =
     Boolean(currentDocType) &&
     ![
@@ -502,7 +544,18 @@ function DecisionCard({
             </span>
           )}
           {primary.ai_confidence != null && (
-            <span><span className="text-foreground font-medium">AI confidence</span> {Math.round(primary.ai_confidence * 100)}%</span>
+            <span
+              title={
+                primary.source === 'bucket_A_root_cause'
+                  ? 'Confidence that this Hub document matches the referenced Square9 file'
+                  : undefined
+              }
+            >
+              <span className="text-foreground font-medium">
+                {confidenceLabel}
+              </span>{' '}
+              {Math.round(primary.ai_confidence * 100)}%
+            </span>
           )}
           {primary.context?.folder_label && (
             <span><span className="text-foreground font-medium">Tagged</span> &quot;{primary.context.folder_label}&quot;</span>
@@ -525,7 +578,7 @@ function DecisionCard({
             ) : (
               <Eye className="w-3.5 h-3.5 mr-1.5" />
             )}
-            {previewOpen ? 'Hide document' : 'Review document'}
+            {previewOpen ? 'Hide preview' : 'Review document'}
           </Button>
 
           <Button
@@ -614,7 +667,13 @@ function DecisionCard({
           </div>
         )}
 
-        {isActionable ? (
+        {primary.note && (
+          <p className="mb-3 text-xs italic text-muted-foreground">
+            {primary.note}
+          </p>
+        )}
+
+        {isActionable && (
           <div className="flex flex-wrap gap-2">
             {confirmableIssue && (
               <Button
@@ -625,11 +684,6 @@ function DecisionCard({
                 disabled={
                   submitting ||
                   !canConfirmCurrent
-                }
-                title={
-                  validCurrentType
-                    ? 'Confirm that the current document type and mailbox lane are correct'
-                    : 'Choose a valid document classification before confirming'
                 }
                 onClick={() =>
                   onConfirmCurrent(group)
@@ -649,29 +703,116 @@ function DecisionCard({
               <Button
                 size="sm"
                 disabled={submitting}
-                onClick={() => onDecide(group, primary.submit_hint.doc_type, primary.submit_hint.mailbox_category)}
+                onClick={() =>
+                  onDecide(
+                    group,
+                    primary.submit_hint.doc_type,
+                    primary.submit_hint.mailbox_category
+                  )
+                }
                 data-testid="decide-route-ap"
               >
-                {submitting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
                 Route to AP
               </Button>
             )}
-            {primary.issue_type === 'ambiguous_classification' && primary.candidates?.map(candidate => (
-              <Button
-                key={candidate}
-                size="sm"
-                variant="outline"
-                disabled={submitting}
-                onClick={() => onDecide(group, candidate, undefined)}
-                data-testid={`decide-pick-${candidate}`}
-              >
-                {submitting ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
-                {candidate.replace('_', ' ')}
-              </Button>
-            ))}
+
+            {primary.issue_type === 'ambiguous_classification' &&
+              primary.candidates?.map(candidate => (
+                <Button
+                  key={candidate}
+                  size="sm"
+                  variant="outline"
+                  disabled={submitting}
+                  onClick={() =>
+                    onDecide(
+                      group,
+                      candidate,
+                      undefined
+                    )
+                  }
+                  data-testid={`decide-pick-${candidate}`}
+                >
+                  {candidate.replace('_', ' ')}
+                </Button>
+              ))}
           </div>
-        ) : (
-          <p className="text-xs italic text-muted-foreground">{primary.note}</p>
+        )}
+
+        {acknowledgeableIssue && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+            disabled={submitting}
+            onClick={() =>
+              onConfirmCurrent(
+                group,
+                'acknowledged',
+                'Square9-side observation acknowledged; Hub document unchanged'
+              )
+            }
+            data-testid={`acknowledge-square9-issue-${primary.doc_id}`}
+          >
+            {submitting ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            Acknowledge and hide issue
+          </Button>
+        )}
+
+        {ambiguousMatchIssue && (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={submitting}
+              onClick={() =>
+                onConfirmCurrent(
+                  group,
+                  'same_document',
+                  'Human determined the Hub and Square9 files are the same document'
+                )
+              }
+            >
+              Same document
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={submitting}
+              onClick={() =>
+                onConfirmCurrent(
+                  group,
+                  'different_document',
+                  'Human determined the Hub and Square9 files are different documents'
+                )
+              }
+              data-testid={`match-different-document-${primary.doc_id}`}
+            >
+              Different document
+            </Button>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={submitting}
+              onClick={() =>
+                onConfirmCurrent(
+                  group,
+                  'unable_to_determine',
+                  'Human could not determine whether the documents match'
+                )
+              }
+            >
+              Unable to determine
+            </Button>
+          </div>
         )}
 
         <div className="mt-3">

@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from deps import get_db
@@ -236,6 +237,118 @@ ACTIONABLE_MISROUTE_CAUSES = {
     "sales_mailbox_captured_AP_invoice",
 }
 
+
+
+CLEARLY_NON_AP_DOCUMENT_TYPES = {
+    "bill_of_lading",
+    "bol",
+    "delivery_receipt",
+    "ds_sales_order",
+    "graphics_artwork",
+    "order_confirmation",
+    "packing_list",
+    "purchase_order",
+    "quality_document",
+    "sales_order",
+    "shipping_document",
+    "warehouse_receipt",
+    "wh_sales_order",
+}
+
+
+def _document_type_key(value: Any) -> str:
+    return re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        str(value or "").strip().lower(),
+    ).strip("_")
+
+
+def is_clearly_non_ap_document_type(
+    document_type: Any,
+) -> bool:
+    return (
+        _document_type_key(document_type)
+        in CLEARLY_NON_AP_DOCUMENT_TYPES
+    )
+
+
+def reconcile_item_with_live_state(
+    item: Dict[str, Any],
+    document: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Reconcile historical findings with live Hub state."""
+    if item.get("issue_type") != "isolated_misroute":
+        return item
+
+    context = item.setdefault("context", {})
+    root_cause = str(
+        context.get("root_cause")
+        or ""
+    ).strip()
+
+    if root_cause not in ACTIONABLE_MISROUTE_CAUSES:
+        return item
+
+    current_state = (
+        item.get("current_state")
+        or current_document_state(document)
+    )
+
+    document_type = str(
+        current_state.get("doc_type")
+        or ""
+    ).strip()
+
+    current_lane = str(
+        current_state.get("mailbox_category")
+        or ""
+    ).strip()
+
+    if not is_clearly_non_ap_document_type(
+        document_type
+    ):
+        return item
+
+    original_source_lane = (
+        ROOT_CAUSE_SOURCE_LANES.get(root_cause)
+        or ""
+    )
+
+    if (
+        original_source_lane
+        and current_lane
+        and current_lane.lower()
+        != original_source_lane.lower()
+    ):
+        return item
+
+    original_question = item.get("question") or ""
+
+    item["issue_type"] = "square9_side_issue"
+    item["question"] = (
+        "Historical Square9 analysis flagged this as a "
+        "possible AP misroute, but the live Hub document "
+        f"is {document_type or 'a non-AP document'} in "
+        f"{current_lane or 'its current lane'}."
+    )
+    item["submit_via"] = None
+    item["submit_hint"] = None
+    item["note"] = (
+        "The live Hub classification and lane indicate this "
+        "is not an AP-routing correction. Acknowledge this "
+        "historical observation without changing the document."
+    )
+
+    context["original_issue_type"] = (
+        "isolated_misroute"
+    )
+    context["original_question"] = original_question
+    context["live_state_reconciliation"] = (
+        "clearly_non_ap_document"
+    )
+
+    return item
 
 def _read_csv_rows(path: str) -> List[Dict[str, str]]:
     if not os.path.exists(path):
@@ -469,6 +582,11 @@ async def get_human_review_queue() -> Dict[str, Any]:
                 item,
                 document,
                 source_mailboxes_by_lane,
+            )
+
+            item = reconcile_item_with_live_state(
+                item,
+                document,
             )
 
             if document.get("file_name"):

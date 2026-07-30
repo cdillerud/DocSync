@@ -232,8 +232,7 @@ _pilot_summary_task = None
 
 # ==================== AUTH ====================
 # Authoritative implementation: routers/auth.py and services/auth_deps.py
-# ==================== AP REVIEW ====================
-from routers.ap_review import ap_review_router
+# ==================== BUSINESS CENTRAL SERVICE ====================
 from services.business_central_service import BusinessCentralService, get_bc_service
 
 # ==================== AUTO-POST SERVICE ====================
@@ -247,13 +246,8 @@ from services.auto_post_service import (
     attempt_auto_create_sales_order
 )
 
-# ==================== SHAREPOINT MIGRATION ====================
-# Module does not currently exist; kept as None for forward-compatibility.
-sharepoint_migration_router = None
-sharepoint_migration_module = None
-
 # ==================== SPIRO INTEGRATION ====================
-from routers.spiro import spiro_router
+# Router registration is authoritative in main.py.
 from services.spiro.spiro_sync import set_spiro_db
 class DocumentUpdate(BaseModel):
     document_type: Optional[str] = None
@@ -2689,13 +2683,11 @@ async def startup():
     await db.email_logs.create_index("sent_at")
     logger.info("Email service initialized (provider: mock)")
     
-    # Initialize SharePoint Migration module
-    if sharepoint_migration_module:
-        sharepoint_migration_module.db = db
+    # Initialize migration candidate indexes
     await db.migration_candidates.create_index("source_item_id", unique=True)
     await db.migration_candidates.create_index("status")
     await db.migration_candidates.create_index("doc_type")
-    logger.info("SharePoint Migration module initialized")
+    logger.info("Migration candidate indexes initialized")
     
     # Initialize Event-Driven Workflow Services (Phase 1 & 2)
     set_event_service(db)

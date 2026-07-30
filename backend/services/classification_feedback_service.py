@@ -112,6 +112,7 @@ async def record_confirmation(
         "bulk_file_and_clear": 0.90,
         "completed": 0.85,
         "posted_to_bc": 0.95,
+        "human_decision_queue": 1.00,
     }
 
     record = {

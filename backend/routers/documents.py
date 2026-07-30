@@ -40,6 +40,12 @@ class NonTransactionalDispositionRequest(BaseModel):
     disposed_by: str = "human_decision_queue"
     notes: str = ""
 
+
+class DecisionQueueConfirmationRequest(BaseModel):
+    confirmed_by: str = "human_decision_queue"
+    issue_type: str = ""
+    notes: str = ""
+
 # =============================================================================
 # COMPLEX ROUTES — Thin wrappers delegating to server.py functions
 # These use deep server.py internals (AI pipeline, workflows, BC integration).
@@ -770,6 +776,37 @@ async def update_document(doc_id: str, update: DocumentUpdate):
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
     updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     return updated_doc
+
+
+@router.post("/{doc_id}/confirm-current-decision")
+async def confirm_document_current_decision(
+    doc_id: str,
+    body: DecisionQueueConfirmationRequest,
+):
+    """Confirm that the current type and mailbox lane are correct."""
+    from services.decision_queue_confirmation_service import (
+        confirm_current_decision,
+    )
+
+    try:
+        return await confirm_current_decision(
+            doc_id=doc_id,
+            confirmed_by=body.confirmed_by,
+            issue_type=body.issue_type,
+            notes=body.notes,
+        )
+    except ValueError as exc:
+        message = str(exc)
+        status_code = (
+            404
+            if message.startswith("Document not found")
+            else 400
+        )
+
+        raise HTTPException(
+            status_code=status_code,
+            detail=message,
+        )
 
 
 @router.post("/{doc_id}/non-transactional-disposition")

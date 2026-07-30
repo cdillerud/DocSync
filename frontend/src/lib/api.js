@@ -399,6 +399,20 @@ export const disposeNonTransactionalDocument = (
     notes,
   }
 );
+export const confirmCurrentDecision = (
+  docId,
+  issueType,
+  confirmedBy = 'human_decision_queue',
+  notes = ''
+) => api.post(
+  `/documents/${encId(docId)}/confirm-current-decision`,
+  {
+    confirmed_by: confirmedBy,
+    issue_type: issueType,
+    notes,
+  }
+);
+
 export const bulkClassifyDocuments = ({ docIds, docType, mailboxCategory, reclassifyBy }) => {
   const params = new URLSearchParams();
   docIds.forEach((id) => params.append('doc_ids', id));

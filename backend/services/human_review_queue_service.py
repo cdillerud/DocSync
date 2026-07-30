@@ -41,6 +41,10 @@ import os
 from typing import Any, Dict, List, Optional
 
 from deps import get_db
+from services.decision_queue_confirmation_service import (
+    confirmation_matches_current_state,
+    current_document_state,
+)
 
 BUCKET_A_CSV = "prod_reports/bucket_A_root_cause.csv"
 AMBIGUOUS_LABELS_CSV = "prod_reports/manual_folder_labels_ambiguous.csv"
@@ -223,30 +227,96 @@ async def get_human_review_queue() -> Dict[str, Any]:
     if doc_ids:
         db = get_db()
 
-        disposed_documents = await db.hub_documents.find(
+        documents = await db.hub_documents.find(
             {
                 "id": {"$in": doc_ids},
-                "$or": [
-                    {"non_transactional": True},
-                    {"excluded_from_processing": True},
-                ],
             },
             {
                 "_id": 0,
                 "id": 1,
+                "file_name": 1,
+                "doc_type": 1,
+                "document_type": 1,
+                "suggested_job_type": 1,
+                "mailbox_category": 1,
+                "email_sender": 1,
+                "vendor_raw": 1,
+                "vendor_canonical": 1,
+                "non_transactional": 1,
+                "excluded_from_processing": 1,
+                "decision_queue_confirmation": 1,
+                "decision_queue_confirmations": 1,
             },
         ).to_list(len(doc_ids))
 
-        disposed_ids = {
-            document.get("id")
-            for document in disposed_documents
+        documents_by_id = {
+            document.get("id"): document
+            for document in documents
             if document.get("id")
         }
 
-        items = filter_dispositioned_items(
-            items,
-            disposed_ids,
-        )
+        hydrated_items = []
+
+        for item in items:
+            document = documents_by_id.get(
+                item.get("doc_id")
+            )
+
+            if not document:
+                hydrated_items.append(item)
+                continue
+
+            if (
+                document.get("non_transactional")
+                is True
+                or document.get(
+                    "excluded_from_processing"
+                )
+                is True
+            ):
+                continue
+
+            item["current_state"] = {
+                **(
+                    item.get("current_state")
+                    or {}
+                ),
+                **current_document_state(
+                    document
+                ),
+            }
+
+            if document.get("file_name"):
+                item["file_name"] = (
+                    document["file_name"]
+                )
+
+            context = item.setdefault(
+                "context",
+                {},
+            )
+
+            if not context.get(
+                "vendor_or_sender"
+            ):
+                context["vendor_or_sender"] = (
+                    document.get("email_sender")
+                    or document.get("vendor_raw")
+                    or document.get(
+                        "vendor_canonical"
+                    )
+                    or ""
+                )
+
+            if confirmation_matches_current_state(
+                document,
+                item.get("issue_type", ""),
+            ):
+                continue
+
+            hydrated_items.append(item)
+
+        items = hydrated_items
 
     by_type: Dict[str, int] = {}
     actionable_count = 0

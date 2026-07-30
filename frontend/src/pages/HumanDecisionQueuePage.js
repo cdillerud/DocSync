@@ -21,6 +21,7 @@ import {
 import api, {
   getHumanDecisionQueue,
   bulkClassifyDocuments,
+  confirmCurrentDecision,
   disposeNonTransactionalDocument,
 } from '@/lib/api';
 import HumanRoutingBrowserDialog from '@/components/HumanRoutingBrowserDialog';
@@ -143,6 +144,43 @@ export default function HumanDecisionQueuePage() {
       return true;
     } catch (error) {
       toast.error(error.response?.data?.detail || 'That decision didn’t save');
+      return false;
+    } finally {
+      setSubmittingKey(null);
+    }
+  };
+
+  const handleConfirmCurrent = async group => {
+    const primary = group[0];
+    const key =
+      `${primary.doc_id}|${primary.issue_type}`;
+
+    setSubmittingKey(key);
+
+    try {
+      await confirmCurrentDecision(
+        primary.doc_id,
+        primary.issue_type,
+        'human_decision_queue'
+      );
+
+      toast.success(
+        `Confirmed current type and lane — ${primary.file_name}`
+      );
+
+      setResolvedKeys(previous => {
+        const next = new Set(previous);
+        next.add(key);
+        return next;
+      });
+
+      return true;
+    } catch (error) {
+      toast.error(
+        error.response?.data?.detail ||
+        'The current classification could not be confirmed'
+      );
+
       return false;
     } finally {
       setSubmittingKey(null);
@@ -278,6 +316,7 @@ export default function HumanDecisionQueuePage() {
               group={group}
               submitting={submittingKey === `${group[0].doc_id}|${group[0].issue_type}`}
               onDecide={handleDecision}
+              onConfirmCurrent={handleConfirmCurrent}
               onDiscard={handleDiscard}
             />
           ))}
@@ -291,12 +330,35 @@ function DecisionCard({
   group,
   submitting,
   onDecide,
+  onConfirmCurrent,
   onDiscard,
 }) {
   const primary = group[0];
   const meta = ISSUE_TYPE_META[primary.issue_type];
   const Icon = meta.icon;
   const isActionable = Boolean(primary.submit_via);
+
+  const currentDocType =
+    primary.current_state?.doc_type || '';
+
+  const currentMailboxCategory =
+    primary.current_state?.mailbox_category || '';
+
+  const confirmableIssue = [
+    'isolated_misroute',
+    'ambiguous_classification',
+  ].includes(primary.issue_type);
+
+  const validCurrentType =
+    Boolean(currentDocType) &&
+    ![
+      'Unknown',
+      'Unknown_Document',
+      'OTHER',
+    ].includes(currentDocType);
+
+  const canConfirmCurrent =
+    confirmableIssue && validCurrentType;
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -404,6 +466,20 @@ function DecisionCard({
         <p className="text-sm mb-3">{primary.question}</p>
 
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground border-t border-border/60 pt-2 mb-3">
+          <span>
+            <span className="text-foreground font-medium">
+              Document type
+            </span>{' '}
+            {currentDocType || 'Not set'}
+          </span>
+
+          <span>
+            <span className="text-foreground font-medium">
+              Mailbox / lane
+            </span>{' '}
+            {currentMailboxCategory || 'Not set'}
+          </span>
+
           {primary.context?.vendor_or_sender && (
             <span><span className="text-foreground font-medium">Vendor/sender</span> {primary.context.vendor_or_sender}</span>
           )}
@@ -530,6 +606,35 @@ function DecisionCard({
 
         {isActionable ? (
           <div className="flex flex-wrap gap-2">
+            {confirmableIssue && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+                disabled={
+                  submitting ||
+                  !canConfirmCurrent
+                }
+                title={
+                  validCurrentType
+                    ? 'Confirm that the current document type and mailbox lane are correct'
+                    : 'Choose a valid document classification before confirming'
+                }
+                onClick={() =>
+                  onConfirmCurrent(group)
+                }
+                data-testid={`confirm-current-${primary.doc_id}`}
+              >
+                {submitting ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                Confirm current
+              </Button>
+            )}
+
             {primary.issue_type === 'isolated_misroute' && (
               <Button
                 size="sm"

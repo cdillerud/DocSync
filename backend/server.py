@@ -468,382 +468,13 @@ async def upload_document(
 # get_document_derived_state — moved to routers/documents.py
 
 # refresh_document_state — moved to routers/documents.py
-
-
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def resolve_bc_reference(
-    reference_number: str = Query(..., description="Reference number to resolve"),
-    tables: Optional[str] = Query(None, description="Comma-separated tables to check")
-):
-    """
-    Resolve a reference number against BC tables.
-    
-    Checks in order: Purchase Orders, Posted Purchase Invoices, 
-    Sales Orders, Posted Sales Invoices, Posted Sales Shipments.
-    """
-    resolver = get_reference_resolver()
-    
-    check_tables = tables.split(",") if tables else None
-    
-    result = await resolver.resolve_reference(reference_number, check_tables)
-    
-    # Emit event
-    event_service = get_event_service()
-    if event_service:
-        await event_service.emit(
-            event_type="reference.resolve.completed",
-            document_id="api_call",
-            status="completed" if result.status == "found" else "warning",
-            source_service="bc_reference_resolver",
-            payload=result.to_dict()
-        )
-    
-    return result.to_dict()
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def resolve_document_reference(doc_id: str):
-    """
-    Resolve PO/Order reference for a specific document.
-    
-    Looks up extracted PO number or order reference and resolves against BC.
-    """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Get reference number from document
-    reference_number = (
-        doc.get("po_number_clean") or
-        (doc.get("extracted_fields") or {}).get("po_number") or
-        doc.get("bol_number") or
-        (doc.get("extracted_fields") or {}).get("bol_number")
-    )
-    
-    if not reference_number:
-        return {
-            "document_id": doc_id,
-            "status": "no_reference",
-            "message": "No PO or BOL reference found in document"
-        }
-    
-    resolver = get_reference_resolver()
-    result = await resolver.resolve_reference(reference_number)
-    
-    # Update document with resolution result
-    await db.hub_documents.update_one(
-        {"id": doc_id},
-        {"$set": {
-            "reference_resolution": result.to_dict(),
-            "updated_utc": datetime.now(timezone.utc).isoformat()
-        }}
-    )
-    
-    # Emit event
-    event_service = get_event_service()
-    if event_service:
-        await event_service.emit(
-            event_type="reference.resolve.completed",
-            document_id=doc_id,
-            status="completed" if result.status == "found" else "warning",
-            source_service="bc_reference_resolver",
-            payload=result.to_dict()
-        )
-    
-    return {
-        "document_id": doc_id,
-        **result.to_dict()
-    }
-
-
-# =============================================================================
-# REFERENCE INTELLIGENCE ENDPOINTS
-# =============================================================================
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def resolve_document_intelligence(doc_id: str):
-    """
-    Full AI-Assisted Reference Intelligence resolution for a document.
-    
-    Extracts all candidate references, classifies them, resolves against BC 
-    with document-type-aware strategy, and scores matches.
-    """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ref_service = get_reference_intelligence_service()
-    if not ref_service:
-        raise HTTPException(status_code=503, detail="Reference Intelligence Service not initialized")
-    
-    # Build extracted fields from document
-    extracted_fields = doc.get("extracted_fields") or {}
-    if not extracted_fields:
-        extracted_fields = {}
-    # Merge top-level extracted fields into extracted_fields dict
-    for fld in ["po_number", "bol_number", "invoice_number", "order_number", "shipment_number"]:
-        if doc.get(fld) and not extracted_fields.get(fld):
-            extracted_fields[fld] = doc[fld]
-    if doc.get("po_number_clean") and not extracted_fields.get("po_number"):
-        extracted_fields["po_number"] = doc["po_number_clean"]
-    if doc.get("invoice_number_clean") and not extracted_fields.get("invoice_number"):
-        extracted_fields["invoice_number"] = doc["invoice_number_clean"]
-    
-    # Get document text if available
-    document_text = doc.get("extracted_text") or doc.get("raw_text") or ""
-    
-    # Run full reference intelligence resolution
-    resolution = await ref_service.resolve_document_references(
-        document=doc,
-        extracted_fields=extracted_fields,
-        document_text=document_text
-    )
-    
-    # Update document with results
-    await ref_service.update_document_references(doc_id, resolution)
-    
-    return resolution.to_dict()
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def get_document_reference_intelligence(doc_id: str):
-    """
-    Get stored reference intelligence data for a document.
-    Returns the last resolution result without re-running.
-    """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ref_intel = doc.get("reference_intelligence")
-    if not ref_intel:
-        return {
-            "document_id": doc_id,
-            "status": "not_resolved",
-            "message": "Reference intelligence has not been run for this document. POST to /resolve-intelligence to trigger."
-        }
-    
-    return ref_intel
-
-
-
-
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def trigger_auto_resolve(doc_id: str):
-    """Manually enqueue a document for auto-resolution (re-run)."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    svc = get_auto_resolve_service()
-    if not svc:
-        raise HTTPException(status_code=503, detail="Auto-resolution service not initialized")
-    
-    # Force re-run by setting status to not_run
-    await db.hub_documents.update_one(
-        {"id": doc_id},
-        {"$set": {"reference_intelligence_status": "not_run"}}
-    )
-    await svc.enqueue(doc_id)
-    
-    return {"status": "queued", "document_id": doc_id}
-
-
-async def batch_auto_resolve(
-    limit: int = Query(50, le=500),
-    status_filter: str = Query("NeedsReview"),
-):
-    """Compatibility wrapper for batch auto-resolution."""
-    from services.reference_batch_resolve_service import (
-        batch_auto_resolve as _impl,
-    )
-    return await _impl(limit, status_filter)
-
-
 # =============================================================================
 # VENDOR INTELLIGENCE ENDPOINTS
 # =============================================================================
 
 
-
-
-
 # automation-rules routes moved to routers/automation_rules.py — REMOVED (duplicate)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def get_matching_debug(doc_id: str):
-    """
-    Get full matching diagnostics for a document.
-    Shows: extraction, normalization, resolver strategy, cache/API results,
-    candidate scores with breakdown, decision and failure reasons.
-    """
-    # Check persisted diagnostics first
-    diag = await db.matching_diagnostics.find_one(
-        {"document_id": doc_id}, {"_id": 0}
-    )
-    
-    # Also get doc-level reference intelligence
-    doc = await db.hub_documents.find_one(
-        {"id": doc_id},
-        {"_id": 0, "reference_intelligence": 1, "reference_candidates": 1,
-         "reference_match_outcome": 1, "reference_best_match": 1,
-         "document_type": 1, "vendor_canonical": 1, "vendor_raw": 1,
-         "unified_vendor_match": 1, "freight_gl_classification": 1}
-    )
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    ref_intel = doc.get("reference_intelligence", {})
-    
-    # Fetch label corrections for this document
-    label_corrections = []
-    lc_svc = get_label_correction_service()
-    if lc_svc:
-        label_corrections = await lc_svc.get_corrections_for_document(doc_id)
-    
-    # Fetch vendor correction patterns
-    vendor_patterns = None
-    vendor_id = doc.get("vendor_canonical") or doc.get("vendor_raw") or ""
-    if lc_svc and vendor_id:
-        vendor_patterns = await lc_svc.get_vendor_patterns(vendor_id)
-    
-    # Fetch vendor extraction profile
-    vep_data = None
-    vep_svc = get_vep_service()
-    if vep_svc and vendor_id:
-        vep_data = await vep_svc.get_resolver_adjustments(vendor_id)
-        # Fallback: try the raw vendor name if vendor_no didn't match
-        if not vep_data or not vep_data.get("has_profile"):
-            alt_vendor = doc.get("vendor_raw") or doc.get("matched_vendor_name") or ""
-            if alt_vendor and alt_vendor != vendor_id:
-                vep_data = await vep_svc.get_resolver_adjustments(alt_vendor)
-    
-    # Fetch layout fingerprint for this document
-    layout_fp_data = None
-    layout_svc = get_layout_fingerprint_service()
-    if layout_svc:
-        layout_fp_data = await layout_svc.get_fingerprint_for_document(doc_id)
-        # If we have a family, get family details
-        if layout_fp_data and layout_fp_data.get("layout_family_id"):
-            family_detail = await layout_svc.get_family_detail(layout_fp_data["layout_family_id"])
-            if family_detail:
-                layout_fp_data["family_detail"] = {
-                    "documents_count": family_detail.get("documents_count", 0),
-                    "first_seen": family_detail.get("first_seen"),
-                    "last_seen": family_detail.get("last_seen"),
-                    "performance_metrics": family_detail.get("performance_metrics", {}),
-                }
-    
-    return {
-        "document_id": doc_id,
-        "document_type": doc.get("document_type"),
-        "vendor": vendor_id,
-        "is_freight_carrier": (doc.get("unified_vendor_match") or {}).get("is_freight_carrier", False),
-        "match_outcome": doc.get("reference_match_outcome") or ref_intel.get("match_outcome"),
-        "diagnostics": diag,
-        "reference_intelligence": ref_intel,
-        "freight_gl": doc.get("freight_gl_classification"),
-        "label_corrections": label_corrections,
-        "vendor_correction_patterns": vendor_patterns,
-        "vendor_extraction_profile": vep_data,
-        "layout_fingerprint": layout_fp_data,
-    }
-
-
-# Moved to routers/reference_intelligence.py (Domain 9)
-async def rerun_matching_with_diagnostics(doc_id: str):
-    """
-    Rerun reference resolution with full diagnostics capture.
-    """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    svc = get_reference_intelligence_service()
-    if not svc:
-        raise HTTPException(status_code=503, detail="Reference intelligence not initialized")
-    
-    result = await svc.resolve_document_references(
-        document=doc,
-        extracted_fields=doc.get("extracted_fields"),
-        capture_diagnostics=True
-    )
-    
-    # Save result and diagnostics
-    await svc.update_document_references(doc_id, result)
-    
-    # Trigger label correction feedback loop (learn from this resolution)
-    lc_svc = get_label_correction_service()
-    if lc_svc and result.best_match:
-        try:
-            corrections = await lc_svc.detect_and_record(
-                document_id=doc_id,
-                resolution_result=result.to_dict(),
-                document=doc,
-            )
-            if corrections:
-                # Update vendor profiles with correction patterns
-                vendor_intel = get_vendor_intelligence_service()
-                uvm = doc.get("unified_vendor_match") or {}
-                vid = uvm.get("bc_vendor_no") or doc.get("vendor_raw") or ""
-                if vendor_intel and vid:
-                    for c in corrections:
-                        try:
-                            await vendor_intel.update_label_correction_patterns(vid, c)
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-    
-    return result.to_dict()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # vendor-extraction-profiles route moved to routers/vendor_extraction_profiles.py — REMOVED (duplicate)
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 # update_document — moved to routers/documents.py (Domain 7)
@@ -957,9 +588,6 @@ async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
     }
 
 
-
-
-
 # Moved to routers/documents.py — resubmit_document
 async def resubmit_document(doc_id: str):
     """Re-submit a failed document: re-run the full workflow using the stored file."""
@@ -1051,7 +679,6 @@ async def retry_workflow(wf_id: str):
     return {"message": "Cannot retry - document missing SharePoint link or BC reference"}
 
 # ==================== DASHBOARD ====================
-
 
 
 # ---------------------------------------------------------------------------
@@ -1690,7 +1317,6 @@ async def _update_vendor_profile_incremental(db, doc_id: str, vendor_name: str, 
     return await _impl(db, doc_id, vendor_name, update_data, final_status)
 
 
-
 async def _attempt_llm_vendor_ranking(
     doc_id: str,
     vendor_alias_result: dict,
@@ -1707,7 +1333,6 @@ async def _attempt_llm_vendor_ranking(
         vendor_raw,
         normalized_fields,
     )
-
 
 
 async def _run_pilot_enrichment(pid: str):
@@ -2313,18 +1938,10 @@ class VendorAlias(BaseModel):
 # ==================== AUTOMATION METRICS ENGINE ====================
 
 
-
-
 class ShadowModeConfig(BaseModel):
     """Configuration for shadow mode tracking."""
     shadow_mode_started_at: Optional[str] = None
     shadow_mode_notes: Optional[str] = None
-
-
-
-
-
-
 
 
 from services.bc_sandbox_service import (
@@ -2337,19 +1954,6 @@ from services.bc_sandbox_service import (
 from workflows.core.engine import BCValidationHistoryEntry
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
 from services.bc_simulation_service import (
     simulate_export_ap_invoice, simulate_create_purchase_invoice,
     simulate_attach_pdf, simulate_sales_invoice_export, simulate_po_linkage,
@@ -2357,14 +1961,6 @@ from services.bc_simulation_service import (
     get_simulation_service_status, SimulationResult, SimulationType, SimulationStatus
 )
 from workflows.core.engine import SimulationHistoryEntry
-
-
-
-
-
-
-
-
 
 
 from services.simulation_metrics_service import (
@@ -2383,11 +1979,6 @@ def get_simulation_metrics_service():
     return _simulation_metrics_service
 
 
-
-
-
-
-
 _reingest_state = {
     "running": False,
     "total": 0,
@@ -2400,8 +1991,6 @@ _reingest_state = {
     "started_at": None,
     "completed_at": None
 }
-
-
 
 
 async def run_batch_reingest(batch_size: int, doc_type_filter: str = None):
@@ -2579,8 +2168,6 @@ logger = logging.getLogger(__name__)
 
 _dynamic_mailbox_polling_task = None
 _mailbox_last_poll_times = {}  # Legacy — real state is in email_polling_svc
-
-
 
 
 # ---------------------------------------------------------------------------
@@ -2791,7 +2378,6 @@ async def startup():
     )
 
     # ── Startup: Fix shipping docs incorrectly parked/escalated by PO retry ──
-
 
 
     # ── Startup: Backfill bc_purchase_invoice_no from bc_purchase_invoice.bc_record_no ──

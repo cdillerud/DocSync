@@ -250,30 +250,7 @@ from services.auto_post_service import (
 # Router registration is authoritative in main.py.
 from services.spiro.spiro_sync import set_spiro_db
 
-# ==================== MICROSOFT SERVICES (MOCK/REAL) ====================
-
-FOLDER_MAP = {
-    "SalesOrder": "Sales", "SalesInvoice": "Sales",
-    "PurchaseInvoice": "Purchase", "PurchaseOrder": "Purchase",
-    "Shipment": "Warehouse", "Receipt": "Warehouse",
-    "Other": "Incoming"
-}
-
-MOCK_COMPANIES = [
-    {"id": "c1d2e3f4-0000-0000-0000-000000000001", "name": "GPI Packaging Ltd", "displayName": "GPI Packaging Ltd"},
-    {"id": "c1d2e3f4-0000-0000-0000-000000000002", "name": "GPI Test Company", "displayName": "GPI Test Company"}
-]
-
-MOCK_SALES_ORDERS = [
-    {"id": "a1b2c3d4-1111-0000-0000-000000000001", "number": "SO-1001", "orderDate": "2025-11-15", "customerName": "Acme Corp", "status": "Open", "totalAmountIncludingVAT": 1250.00},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000002", "number": "SO-1002", "orderDate": "2025-11-16", "customerName": "Widget Co", "status": "Open", "totalAmountIncludingVAT": 3400.50},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000003", "number": "SO-1003", "orderDate": "2025-12-01", "customerName": "TechnoServ Ltd", "status": "Released", "totalAmountIncludingVAT": 8900.00},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000004", "number": "SO-1004", "orderDate": "2025-12-05", "customerName": "PackRight Inc", "status": "Open", "totalAmountIncludingVAT": 520.75},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000005", "number": "SO-1005", "orderDate": "2026-01-10", "customerName": "Global Foods Ltd", "status": "Released", "totalAmountIncludingVAT": 12300.00},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000006", "number": "SO-1006", "orderDate": "2026-01-15", "customerName": "MediPack Solutions", "status": "Open", "totalAmountIncludingVAT": 4560.25},
-    {"id": "a1b2c3d4-1111-0000-0000-000000000007", "number": "SO-1007", "orderDate": "2026-02-01", "customerName": "EuroPack GmbH", "status": "Open", "totalAmountIncludingVAT": 7800.00},
-]
-
+# ==================== MICROSOFT TOKEN HELPERS ====================
 async def get_graph_token():
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         return "mock-graph-token"

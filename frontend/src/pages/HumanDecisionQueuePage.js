@@ -344,6 +344,9 @@ function DecisionCard({
   const currentMailboxCategory =
     primary.current_state?.mailbox_category || '';
 
+  const currentSourceMailbox =
+    primary.current_state?.source_mailbox || '';
+
   const confirmableIssue = [
     'isolated_misroute',
     'ambiguous_classification',
@@ -475,7 +478,14 @@ function DecisionCard({
 
           <span>
             <span className="text-foreground font-medium">
-              Mailbox / lane
+              Source mailbox
+            </span>{' '}
+            {currentSourceMailbox || 'Not recorded'}
+          </span>
+
+          <span>
+            <span className="text-foreground font-medium">
+              Current lane
             </span>{' '}
             {currentMailboxCategory || 'Not set'}
           </span>

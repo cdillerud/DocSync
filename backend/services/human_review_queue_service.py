@@ -59,6 +59,172 @@ FOLDER_LABEL_CANDIDATES: Dict[str, List[str]] = {
     "ds international": ["Shipping_Document", "Warehouse_Receipt"],
 }
 
+BUSINESS_MAILBOX_ALIASES = {
+    "hub-ap-intake@gamerpackaging.com": (
+        "billing@gamerpackaging.com"
+    ),
+}
+
+ROOT_CAUSE_SOURCE_LANES = {
+    "operations_mailbox_captured_AP_invoice": (
+        "Operations"
+    ),
+    "sales_mailbox_captured_AP_invoice": "Sales",
+}
+
+
+def _display_mailbox_address(
+    address: Optional[str],
+) -> str:
+    normalized = (address or "").strip()
+
+    if not normalized:
+        return ""
+
+    return BUSINESS_MAILBOX_ALIASES.get(
+        normalized.lower(),
+        normalized,
+    )
+
+
+async def _load_source_mailboxes_by_lane(
+    db,
+) -> Dict[str, str]:
+    """Resolve currently active intake mailboxes by lane."""
+    result: Dict[str, str] = {}
+
+    sources = await db.mailbox_sources.find(
+        {
+            "enabled": {
+                "$ne": False,
+            },
+        },
+        {
+            "_id": 0,
+            "mailbox_address": 1,
+            "email_address": 1,
+            "address": 1,
+            "mailbox": 1,
+            "default_category": 1,
+            "mailbox_category": 1,
+            "category": 1,
+            "lane": 1,
+        },
+    ).to_list(100)
+
+    for source in sources:
+        address = (
+            source.get("mailbox_address")
+            or source.get("email_address")
+            or source.get("address")
+            or source.get("mailbox")
+            or ""
+        )
+
+        lane = (
+            source.get("default_category")
+            or source.get("mailbox_category")
+            or source.get("category")
+            or source.get("lane")
+            or ""
+        )
+
+        lane = str(lane).strip()
+
+        if lane and address:
+            result[lane] = _display_mailbox_address(
+                str(address)
+            )
+
+    environment_sources = (
+        (
+            "AP",
+            "EMAIL_POLLING_ENABLED",
+            "EMAIL_POLLING_USER",
+        ),
+        (
+            "Sales",
+            "SALES_EMAIL_POLLING_ENABLED",
+            "SALES_EMAIL_POLLING_USER",
+        ),
+    )
+
+    for (
+        lane,
+        enabled_variable,
+        address_variable,
+    ) in environment_sources:
+        enabled = os.getenv(
+            enabled_variable,
+            "",
+        ).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+        address = os.getenv(
+            address_variable,
+            "",
+        ).strip()
+
+        if enabled and address:
+            result[lane] = _display_mailbox_address(
+                address
+            )
+
+    return result
+
+
+def resolve_source_mailbox(
+    item: Dict[str, Any],
+    document: Dict[str, Any],
+    source_mailboxes_by_lane: Dict[str, str],
+) -> str:
+    """Resolve original intake mailbox without changing its lane."""
+    context = item.get("context") or {}
+
+    explicit_address = (
+        document.get("source_mailbox")
+        or document.get("intake_mailbox")
+        or document.get("mailbox_address")
+        or document.get("email_recipient")
+        or context.get("source_mailbox")
+    )
+
+    if explicit_address:
+        return _display_mailbox_address(
+            str(explicit_address)
+        )
+
+    root_cause = (
+        context.get("root_cause")
+        or ""
+    ).strip()
+
+    source_lane = (
+        ROOT_CAUSE_SOURCE_LANES.get(root_cause)
+        or document.get(
+            "original_mailbox_category"
+        )
+        or context.get(
+            "source_mailbox_category"
+        )
+        or document.get("mailbox_category")
+        or (
+            item.get("current_state")
+            or {}
+        ).get("mailbox_category")
+        or ""
+    )
+
+    return source_mailboxes_by_lane.get(
+        str(source_lane).strip(),
+        "",
+    )
+
+
 # root_cause values from bucket_A_root_cause_report.py that represent
 # a real, isolated misroute a human can resolve with a single yes/no:
 # "should this be mailbox_category=AP?" Excludes low_confidence_match_
@@ -102,6 +268,7 @@ def _bucket_a_items() -> List[Dict[str, Any]]:
             "square9_name": r.get("square9_name") or "",
             "square9_parent_root": r.get("square9_parent_root") or "",
             "match_reason": r.get("best_match_reason") or "",
+            "root_cause": root_cause,
         }
 
         if root_cause in ACTIONABLE_MISROUTE_CAUSES:
@@ -227,6 +394,10 @@ async def get_human_review_queue() -> Dict[str, Any]:
     if doc_ids:
         db = get_db()
 
+        source_mailboxes_by_lane = (
+            await _load_source_mailboxes_by_lane(db)
+        )
+
         documents = await db.hub_documents.find(
             {
                 "id": {"$in": doc_ids},
@@ -239,6 +410,11 @@ async def get_human_review_queue() -> Dict[str, Any]:
                 "document_type": 1,
                 "suggested_job_type": 1,
                 "mailbox_category": 1,
+                "original_mailbox_category": 1,
+                "source_mailbox": 1,
+                "intake_mailbox": 1,
+                "mailbox_address": 1,
+                "email_recipient": 1,
                 "email_sender": 1,
                 "vendor_raw": 1,
                 "vendor_canonical": 1,
@@ -285,6 +461,14 @@ async def get_human_review_queue() -> Dict[str, Any]:
                     document
                 ),
             }
+
+            item["current_state"][
+                "source_mailbox"
+            ] = resolve_source_mailbox(
+                item,
+                document,
+                source_mailboxes_by_lane,
+            )
 
             if document.get("file_name"):
                 item["file_name"] = (

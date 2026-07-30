@@ -249,11 +249,6 @@ from services.auto_post_service import (
 # ==================== SPIRO INTEGRATION ====================
 # Router registration is authoritative in main.py.
 from services.spiro.spiro_sync import set_spiro_db
-class DocumentUpdate(BaseModel):
-    document_type: Optional[str] = None
-    bc_record_type: Optional[str] = None
-    bc_record_id: Optional[str] = None
-    bc_document_no: Optional[str] = None
 
 # ==================== MICROSOFT SERVICES (MOCK/REAL) ====================
 

@@ -445,6 +445,34 @@ def should_skip_attachment(filename: str, content_type: str, size_bytes: int) ->
 
 async def poll_mailbox_for_attachments():
     """
+    Run one legacy AP mailbox poll at a time.
+
+    Both the scheduled worker and the manual trigger use this
+    wrapper. A second caller returns immediately instead of
+    waiting or starting an overlapping intake run.
+    """
+    if _email_polling_lock.locked():
+        logger.warning(
+            "[EmailPoll] Poll request skipped because another "
+            "AP mailbox poll is already running"
+        )
+        return {
+            "skipped": True,
+            "status": "already_running",
+            "reason": (
+                "An AP mailbox poll is already in progress"
+            ),
+            "mailbox": EMAIL_POLLING_USER,
+        }
+
+    async with _email_polling_lock:
+        return await (
+            _poll_mailbox_for_attachments_unlocked()
+        )
+
+
+async def _poll_mailbox_for_attachments_unlocked():
+    """
     Passive Graph 'Tap' - READ-ONLY polling.
     Reads inbox, ingests attachments, logs results. No mailbox mutations.
     """
@@ -762,9 +790,11 @@ async def _email_polling_worker_inner():
         try:
             config = await get_email_watcher_config()
             interval = config.get("interval_minutes", EMAIL_POLLING_INTERVAL_MINUTES)
-            async with _email_polling_lock:
-                if config.get("enabled", True) and EMAIL_POLLING_ENABLED:
-                    await poll_mailbox_for_attachments()
+            if (
+                config.get("enabled", True)
+                and EMAIL_POLLING_ENABLED
+            ):
+                await poll_mailbox_for_attachments()
         except Exception as e:
             logger.error("Email polling worker error: %s", str(e), exc_info=True)
         try:

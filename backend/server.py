@@ -406,26 +406,6 @@ from paths import UPLOAD_DIR
 # get_square9_status — moved to routers/documents.py (Domain 7)
 
 
-# retry_document — registered via add_api_route in routers/documents.py
-async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
-    """Reset retry counter for a document (after manual intervention)."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    update_dict = reset_retry_counter(doc, reason)
-    update_dict["updated_utc"] = datetime.now(timezone.utc).isoformat()
-    
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": update_dict})
-    
-    return {
-        "success": True,
-        "message": f"Retry counter reset: {reason}",
-        "document_id": doc_id,
-        "retry_count": 0,
-    }
-
-
 # ==================== DASHBOARD ====================
 
 

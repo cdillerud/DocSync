@@ -43,7 +43,6 @@ HELPERS_ALL: list[tuple[str, str]] = [
     ("classify_document_with_ai", "services.document_intel_helpers"),
     ("make_automation_decision", "services.document_intel_helpers"),
     ("classify_document_type", "services.classification_helpers"),
-    ("create_sharing_link", "services.sharepoint_service"),
     # Tier 3 (Step 4c.3 — future)
     ("lookup_vendor_alias", "services.vendor_matching"),
     ("check_duplicate_document", "services.vendor_matching"),
@@ -53,7 +52,6 @@ HELPERS_TIER_2: list[tuple[str, str]] = [
     ("classify_document_with_ai", "services.document_intel_helpers"),
     ("make_automation_decision", "services.document_intel_helpers"),
     ("classify_document_type", "services.classification_helpers"),
-    ("create_sharing_link", "services.sharepoint_service"),
 ]
 
 

@@ -291,58 +291,8 @@ async def get_bc_token():
             error_desc = data.get("error_description", data.get("error", "Unknown auth error"))
             raise Exception(f"BC token error: {error_desc}")
         return data["access_token"]
-
-async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
-    from services.sharepoint_service import upload_to_sharepoint as _impl
-    return await _impl(file_content, file_name, folder)
-
-
-async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
-    from services.sharepoint_service import ensure_sharepoint_folder_exists as _impl
-    return await _impl(folder_path)
-
-
-async def upload_to_sharepoint_with_routing(
-    file_content: bytes,
-    file_name: str,
-    doc: Dict[str, Any],
-    freight_direction: Optional[str] = None,
-    is_international: bool = False
-) -> Dict[str, Any]:
-    from services.sharepoint_service import upload_to_sharepoint_with_routing as _impl
-    return await _impl(file_content, file_name, doc, freight_direction, is_international)
-
-async def create_sharing_link(drive_id: str, item_id: str):
-    from services.sharepoint_service import create_sharing_link as _impl
-    return await _impl(drive_id, item_id)
-
-# ---------------------------------------------------------------------------
-# COMPATIBILITY WRAPPERS: BC API helpers
-# Authoritative source: services.bc_api_helpers
-# These wrappers exist because internal server.py orchestration code
-# (link_document, run_upload_and_link_workflow, match_vendor_in_bc, etc.)
 # still calls these functions directly.
 # ---------------------------------------------------------------------------
-async def get_bc_companies():
-    from services.bc_api_helpers import get_bc_companies as _get_bc_companies
-    return await _get_bc_companies()
-
-async def get_bc_sales_orders(order_no: str = None):
-    from services.bc_api_helpers import get_bc_sales_orders as _get_bc_sales_orders
-    return await _get_bc_sales_orders(order_no=order_no)
-
-async def link_document_to_bc(bc_record_id: str, share_link: str, file_name: str, file_content: bytes = None, content_type: str = None, bc_entity: str = "salesOrders"):
-    from services.bc_link_service import link_document_to_bc as _impl
-    return await _impl(bc_record_id, share_link, file_name, file_content, content_type, bc_entity)
-
-# ==================== PHASE 4: CREATE_DRAFT_HEADER ====================
-
-async def check_duplicate_purchase_invoice(vendor_no: str, external_doc_no: str, company_id: str, token: str) -> dict:
-    from services.bc_draft_service import check_duplicate_purchase_invoice as _impl
-    return await _impl(vendor_no, external_doc_no, company_id, token)
-
-
-from services.bc_draft_service import create_purchase_invoice_header
 
 
 # Direct canonical AP eligibility import

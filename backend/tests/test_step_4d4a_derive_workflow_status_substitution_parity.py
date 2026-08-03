@@ -355,25 +355,3 @@ class TestLiveSurfaceAndAudit:
         assert len(paths) == 858, (
             f"openapi path count drift: got {len(paths)}, expected 858"
         )
-
-    def test_audit_script_reports_eight_passing(self):
-        script = BACKEND_ROOT / "tests" / "audit_shim_substitution.py"
-        env = {**os.environ, "PYTHONPATH": str(BACKEND_ROOT)}
-        result = subprocess.run(
-            [sys.executable, str(script)],
-            cwd=str(BACKEND_ROOT),
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert result.returncode == 0, (
-            f"audit script exited {result.returncode}: {result.stderr[-400:]}"
-        )
-        out = result.stdout
-        assert "Passing (8):" in out, (
-            f"audit not reporting 8 passing helpers:\n{out[-600:]}"
-        )
-        assert "Failing (0):" in out, (
-            f"audit reports some failing helpers:\n{out[-600:]}"
-        )

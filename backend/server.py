@@ -596,12 +596,10 @@ from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_
 # implementations. Call sites below use these names unchanged.
 # ---------------------------------------------------------------------------
 from services.ap_computation import (
-    compute_ap_validation,
     compute_ap_status,
     compute_draft_candidate_flag,
 )
 from services.document_intel_helpers import (
-    compute_ap_normalized_fields,
     make_automation_decision as _make_automation_decision,
 )
 

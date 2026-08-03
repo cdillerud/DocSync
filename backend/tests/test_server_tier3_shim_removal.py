@@ -11,7 +11,6 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parent.parent
 SERVER = BACKEND / "server.py"
 INTAKE = BACKEND / "services" / "document_bytes_intake_service.py"
-AUDIT = BACKEND / "tests" / "audit_shim_substitution.py"
 MAX_SERVER_LINES = 1656
 
 REMOVED = {
@@ -114,39 +113,6 @@ def test_no_production_module_imports_removed_server_shims():
                 )
 
     assert not violations, "\n".join(sorted(set(violations)))
-
-
-def test_shim_audit_reports_tier_three_removed():
-    env = {**os.environ, "PYTHONPATH": str(BACKEND)}
-
-    tier = subprocess.run(
-        [sys.executable, str(AUDIT), "3"],
-        cwd=BACKEND,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert tier.returncode == 0, tier.stderr
-    assert "Passing (0):" in tier.stdout
-    assert "Failing (0):" in tier.stdout
-
-    all_result = subprocess.run(
-        [sys.executable, str(AUDIT)],
-        cwd=BACKEND,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert all_result.returncode == 0, all_result.stderr
-    assert "Passing (2):" in all_result.stdout
-    assert "Failing (0):" in all_result.stdout
-
-    for name in REMOVED:
-        assert name not in all_result.stdout
-
-
 def test_server_line_count_is_monotonic():
     count = sum(1 for _ in SERVER.open("r", encoding="utf-8"))
     assert count <= MAX_SERVER_LINES

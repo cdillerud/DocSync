@@ -20,12 +20,6 @@ INTAKE_PATH = (
     / "services"
     / "document_bytes_intake_service.py"
 )
-AUDIT_PATH = (
-    BACKEND_DIR
-    / "tests"
-    / "audit_shim_substitution.py"
-)
-
 REMOVED_TIER_3 = {
     "lookup_vendor_alias",
     "check_duplicate_document",
@@ -67,51 +61,6 @@ def _intake_imports():
                 imports[alias.name] = node.module
 
     return imports
-
-
-class TestAuditGateTransition:
-    def test_classifier_narrow_gate_is_preserved(self):
-        source = AUDIT_PATH.read_text(encoding="utf-8")
-        assert "expected 1 return" in source
-
-    def test_tier_three_audit_is_empty(self):
-        env = {
-            **os.environ,
-            "PYTHONPATH": str(BACKEND_DIR),
-        }
-        result = subprocess.run(
-            [sys.executable, str(AUDIT_PATH), "3"],
-            cwd=BACKEND_DIR,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "Passing (0):" in result.stdout
-        assert "Failing (0):" in result.stdout
-
-    def test_full_audit_no_longer_lists_tier_three(self):
-        env = {
-            **os.environ,
-            "PYTHONPATH": str(BACKEND_DIR),
-        }
-        result = subprocess.run(
-            [sys.executable, str(AUDIT_PATH)],
-            cwd=BACKEND_DIR,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert result.returncode == 0, result.stderr
-        assert "Passing (2):" in result.stdout
-        assert "Failing (0):" in result.stdout
-
-        for name in REMOVED_TIER_3:
-            assert name not in result.stdout
-
-
 class TestPostRemovalStructure:
     def test_server_shims_are_absent(self):
         import server

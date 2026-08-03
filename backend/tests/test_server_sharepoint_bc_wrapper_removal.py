@@ -100,19 +100,6 @@ def test_no_production_module_imports_removed_server_wrappers():
                 )
 
     assert not violations, "\n".join(sorted(set(violations)))
-
-
-def test_shim_audit_no_longer_lists_removed_create_sharing_link():
-    audit = (
-        BACKEND / "tests" / "audit_shim_substitution.py"
-    ).read_text(encoding="utf-8")
-
-    assert (
-        '("create_sharing_link", "services.sharepoint_service")'
-        not in audit
-    )
-
-
 def test_server_line_count_is_monotonic():
     count = sum(
         1

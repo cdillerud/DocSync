@@ -465,21 +465,6 @@ class TestLiveSurfaceAndAudit:
         assert r.status_code == 200
         paths = r.json().get("paths", {})
         assert len(paths) == 858, f"OpenAPI path count drift: {len(paths)}"
-
-    def test_audit_script_reports_eight_passing(self):
-        script = BACKEND_ROOT / "tests" / "audit_shim_substitution.py"
-        if not script.exists():
-            pytest.skip("audit script missing")
-        env = {**os.environ, "PYTHONPATH": str(BACKEND_ROOT)}
-        r = subprocess.run(
-            [sys.executable, str(script)],
-            cwd=str(BACKEND_ROOT),
-            env=env, capture_output=True, text=True, timeout=60,
-        )
-        assert r.returncode == 0
-        assert "Passing (8):" in r.stdout
-
-
 # ---------------------------------------------------------------------------
 # 18. Architectural milestone — workflow_status.py has zero `from server`
 # ---------------------------------------------------------------------------

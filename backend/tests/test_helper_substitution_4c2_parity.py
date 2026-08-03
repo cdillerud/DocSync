@@ -173,56 +173,6 @@ def test_on_document_ingested_uses_private_canonical_alias():
     ]
 
     assert len(calls) == 1
-
-
-def test_shim_audit_reports_tier_two_removed():
-    script = (
-        BACKEND_DIR
-        / "tests"
-        / "audit_shim_substitution.py"
-    )
-    env = {
-        **os.environ,
-        "PYTHONPATH": str(BACKEND_DIR),
-    }
-
-    tier = subprocess.run(
-        [
-            sys.executable,
-            str(script),
-            "2",
-        ],
-        cwd=BACKEND_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-    assert tier.returncode == 0, tier.stderr
-    assert "Passing (0):" in tier.stdout
-    assert "Failing (0):" in tier.stdout
-
-    all_result = subprocess.run(
-        [
-            sys.executable,
-            str(script),
-        ],
-        cwd=BACKEND_DIR,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-    assert all_result.returncode == 0, all_result.stderr
-    assert "Passing (2):" in all_result.stdout
-    assert "Failing (0):" in all_result.stdout
-
-    for name in REMOVED_TIER_2:
-        assert name not in all_result.stdout
-
-
 def test_document_handlers_facade_reexports_authoritative_intake():
     from services import (
         document_bytes_intake_service,

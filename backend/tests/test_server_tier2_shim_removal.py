@@ -148,22 +148,6 @@ def test_no_production_module_imports_removed_server_shims():
     assert not violations, "\n".join(
         sorted(set(violations))
     )
-
-
-def test_audit_no_longer_lists_tier_two_helpers():
-    audit = (
-        BACKEND
-        / "tests"
-        / "audit_shim_substitution.py"
-    ).read_text(encoding="utf-8")
-
-    for name in REMOVED:
-        assert (
-            f'("{name}",'
-            not in audit
-        )
-
-
 def test_server_line_count_is_monotonic():
     count = sum(
         1

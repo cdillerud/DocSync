@@ -577,12 +577,6 @@ class ValidationCheck(BaseModel):
     required: bool = True
 
 # ==================== AI CLASSIFICATION SERVICE ====================
-
-async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
-    """Compatibility wrapper — delegates to document_intel_helpers."""
-    from services.document_intel_helpers import classify_document_with_ai as _impl
-    return await _impl(file_path, file_name)
-
 # ==================== FIELD NORMALIZATION ====================
 
 def normalize_extracted_fields(fields: dict) -> dict:
@@ -622,7 +616,10 @@ from services.ap_computation import (
     compute_ap_status,
     compute_draft_candidate_flag,
 )
-from services.document_intel_helpers import compute_ap_normalized_fields
+from services.document_intel_helpers import (
+    compute_ap_normalized_fields,
+    make_automation_decision as _make_automation_decision,
+)
 
 # ---------------------------------------------------------------------------
 # COMPATIBILITY WRAPPER: match_vendor_in_bc
@@ -657,16 +654,6 @@ async def match_customer_in_bc(
 
 
 # ==================== AUTOMATION DECISION ENGINE ====================
-
-def make_automation_decision(
-    job_config: dict,
-    ai_confidence: float,
-    validation_results: dict
-) -> tuple:
-    """Compatibility wrapper — delegates to document_intel_helpers."""
-    from services.document_intel_helpers import make_automation_decision as _impl
-    return _impl(job_config, ai_confidence, validation_results)
-
 async def get_email_watcher_config() -> dict:
     """COMPATIBILITY WRAPPER — authoritative source: services.email_polling_service"""
     from services.email_polling_service import get_email_watcher_config as _impl
@@ -730,7 +717,7 @@ async def on_document_ingested(doc_id: str, source: str = "unknown"):
         
         # Make automation decision
         confidence = doc.get("ai_confidence") or 0.0
-        decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)
+        decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
         
         # Determine new status based on decision
         new_status = old_status
@@ -963,20 +950,6 @@ async def _update_ap_workflow_status(
         doc_id, confidence, normalized_fields,
         vendor_alias_result, validation_results, ap_validation,
     )
-
-
-async def classify_document_type(
-    document: Dict,
-    extracted_fields: Dict,
-    suggested_type: str,
-    confidence: float,
-    metadata: Optional[Dict] = None
-) -> Dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
-    from services.classification_helpers import classify_document_type as _impl
-    return await _impl(document, extracted_fields, suggested_type, confidence, metadata)
-
-
 def _derive_workflow_status(final_status: str, doc_type: str, decision: str) -> str:
     """COMPATIBILITY WRAPPER — authoritative source: services.classification_helpers"""
     from services.classification_helpers import derive_workflow_status as _impl

@@ -39,20 +39,14 @@ HELPERS_ALL: list[tuple[str, str]] = [
     # Tier 1 (Step 4c.1 — landed)
     ("compute_ap_normalized_fields", "services.document_intel_helpers"),
     ("compute_ap_validation", "services.ap_computation"),
-    # Tier 2 (Step 4c.2)
-    ("classify_document_with_ai", "services.document_intel_helpers"),
-    ("make_automation_decision", "services.document_intel_helpers"),
-    ("classify_document_type", "services.classification_helpers"),
+    # Tier 2 (Step 4c.2 — removed after caller migration)
     # Tier 3 (Step 4c.3 — future)
     ("lookup_vendor_alias", "services.vendor_matching"),
     ("check_duplicate_document", "services.vendor_matching"),
 ]
 
-HELPERS_TIER_2: list[tuple[str, str]] = [
-    ("classify_document_with_ai", "services.document_intel_helpers"),
-    ("make_automation_decision", "services.document_intel_helpers"),
-    ("classify_document_type", "services.classification_helpers"),
-]
+# Tier 2 was fully removed after all callers migrated to canonical services.
+HELPERS_TIER_2: list[tuple[str, str]] = []
 
 
 def classify_shim(srv_fn, svc_fn) -> tuple[str, dict[str, Any]]:

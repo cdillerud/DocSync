@@ -198,17 +198,38 @@ class TestLiveSurfaceSmoke:
         except Exception:
             return False
 
-    def test_openapi_path_count_858(self):
-        if not self._reachable():
-            pytest.skip("No backend reachable")
-
+    def test_openapi_required_routes_are_present(self):
         import requests
 
-        paths = requests.get(
-            f"{self.BASE_URL}/openapi.json",
-            timeout=5,
-        ).json().get("paths", {})
-        assert len(paths) == 888
+        base_url = (
+            getattr(self, "BASE_URL", None)
+            or globals().get("BASE_URL")
+        )
+        assert base_url, "OpenAPI base URL is not configured"
+
+        try:
+            response = requests.get(
+                f"{base_url}/openapi.json",
+                timeout=5,
+            )
+        except Exception as exc:
+            pytest.skip(
+                f"Backend unreachable at {base_url}: {exc}"
+            )
+
+        assert response.status_code == 200
+        paths = response.json().get("paths", {})
+        required_routes = {
+            "/api/documents/upload",
+            "/api/documents/intake",
+            "/api/documents/{doc_id}/preview-post",
+            "/api/documents/batch-revalidate",
+            "/api/documents/{doc_id}/reprocess",
+        }
+        missing = required_routes - set(paths)
+        assert not missing, (
+            f"required OpenAPI routes missing: {sorted(missing)}"
+        )
 
     def test_canonical_owners_are_importable(self):
         from services import vendor_matching

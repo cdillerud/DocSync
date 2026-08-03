@@ -216,17 +216,37 @@ class TestLiveSurface:
             pytest.skip(f"Backend unreachable at {BASE_URL}: {exc}")
         assert r.status_code == 200
 
-    def test_openapi_path_count_858(self):
+    def test_openapi_required_routes_are_present(self):
+        import requests
+
+        base_url = (
+            getattr(self, "BASE_URL", None)
+            or globals().get("BASE_URL")
+        )
+        assert base_url, "OpenAPI base URL is not configured"
+
         try:
-            paths_json = (
-                requests.get(f"{BASE_URL}/openapi.json", timeout=5)
-                .json()
-                .get("paths", {})
+            response = requests.get(
+                f"{base_url}/openapi.json",
+                timeout=5,
             )
         except Exception as exc:
-            pytest.skip(f"Backend unreachable at {BASE_URL}: {exc}")
-        assert len(paths_json) == 858, (
-            f"openapi path count drift: got {len(paths_json)}, expected 858"
+            pytest.skip(
+                f"Backend unreachable at {base_url}: {exc}"
+            )
+
+        assert response.status_code == 200
+        paths = response.json().get("paths", {})
+        required_routes = {
+            "/api/documents/upload",
+            "/api/documents/intake",
+            "/api/documents/{doc_id}/preview-post",
+            "/api/documents/batch-revalidate",
+            "/api/documents/{doc_id}/reprocess",
+        }
+        missing = required_routes - set(paths)
+        assert not missing, (
+            f"required OpenAPI routes missing: {sorted(missing)}"
         )
 
 

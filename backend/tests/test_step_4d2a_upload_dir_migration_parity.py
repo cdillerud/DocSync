@@ -75,11 +75,12 @@ class TestPathIdentity:
             f"server.UPLOAD_DIR ({server.UPLOAD_DIR})"
         )
 
-    def test_upload_dir_resolves_to_canonical_absolute_path(self):
+    def test_upload_dir_is_root_uploads_child(self):
         import paths
-        assert paths.UPLOAD_DIR.resolve() == Path("/app/backend/uploads"), (
+        expected = (paths.ROOT_DIR / "uploads").resolve()
+        assert paths.UPLOAD_DIR.resolve() == expected, (
             f"paths.UPLOAD_DIR resolves to {paths.UPLOAD_DIR.resolve()}, "
-            "expected /app/backend/uploads"
+            f"expected ROOT_DIR uploads child {expected}"
         )
 
 
@@ -146,11 +147,12 @@ class TestRootDirCoherence:
             f"server.ROOT_DIR ({server.ROOT_DIR})"
         )
 
-    def test_paths_root_dir_is_backend_directory(self):
+    def test_paths_root_dir_is_paths_module_directory(self):
         import paths
-        assert paths.ROOT_DIR.resolve() == Path("/app/backend"), (
+        expected = Path(paths.__file__).resolve().parent
+        assert paths.ROOT_DIR.resolve() == expected, (
             f"paths.ROOT_DIR resolves to {paths.ROOT_DIR.resolve()}, "
-            "expected /app/backend"
+            f"expected paths.py directory {expected}"
         )
 
 

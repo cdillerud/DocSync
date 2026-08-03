@@ -40,13 +40,14 @@ HELPERS_ALL: list[tuple[str, str]] = [
     ("compute_ap_normalized_fields", "services.document_intel_helpers"),
     ("compute_ap_validation", "services.ap_computation"),
     # Tier 2 (Step 4c.2 — removed after caller migration)
-    # Tier 3 (Step 4c.3 — future)
-    ("lookup_vendor_alias", "services.vendor_matching"),
-    ("check_duplicate_document", "services.vendor_matching"),
+    # Tier 3 (Step 4c.3 — removed after caller census)
 ]
 
 # Tier 2 was fully removed after all callers migrated to canonical services.
 HELPERS_TIER_2: list[tuple[str, str]] = []
+
+# Tier 3 was fully removed after the caller census proved it was unused.
+HELPERS_TIER_3: list[tuple[str, str]] = []
 
 
 def classify_shim(srv_fn, svc_fn) -> tuple[str, dict[str, Any]]:
@@ -173,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     tier = argv[0] if argv else "all"
     if tier == "2":
         helpers = HELPERS_TIER_2
+    elif tier == "3":
+        helpers = HELPERS_TIER_3
     else:
         helpers = HELPERS_ALL
 

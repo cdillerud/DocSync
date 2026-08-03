@@ -216,7 +216,7 @@ def test_shim_audit_reports_tier_two_removed():
     )
 
     assert all_result.returncode == 0, all_result.stderr
-    assert "Passing (4):" in all_result.stdout
+    assert "Passing (2):" in all_result.stdout
     assert "Failing (0):" in all_result.stdout
 
     for name in REMOVED_TIER_2:

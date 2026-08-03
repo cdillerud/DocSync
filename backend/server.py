@@ -583,22 +583,6 @@ def normalize_extracted_fields(fields: dict) -> dict:
     """Compatibility wrapper — delegates to document_intel_helpers."""
     from services.document_intel_helpers import normalize_extracted_fields as _impl
     return _impl(fields)
-
-
-async def lookup_vendor_alias(vendor_normalized: str) -> dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.vendor_matching"""
-    from services.vendor_matching import lookup_vendor_alias as _impl
-    return await _impl(vendor_normalized)
-
-
-async def check_duplicate_document(vendor_normalized: str, vendor_canonical: str, invoice_number_clean: str, current_doc_id: str) -> dict:
-    """COMPATIBILITY WRAPPER — authoritative source: services.vendor_matching"""
-    from services.vendor_matching import check_duplicate_document as _impl
-    return await _impl(vendor_normalized, vendor_canonical, invoice_number_clean, current_doc_id)
-
-
-# ---------------------------------------------------------------------------
-# COMPATIBILITY WRAPPERS: vendor name helpers
 # Authoritative source: services.vendor_name_helpers
 # These wrappers exist because internal server.py code (match_vendor_in_bc,
 # lookup_vendor_alias, etc.) still calls these functions directly.

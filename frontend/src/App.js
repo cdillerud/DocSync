@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
-import Layout from "@/components/Layout";
+import AppLayout from "@/components/AppLayout";
 import LoginPage from "@/pages/LoginPage";
 import DashboardPage from "@/pages/DashboardPage";
 import UploadPage from "@/pages/UploadPage";
@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import EmailParserPage from "@/pages/EmailParserPage";
 import FileImportPage from "@/pages/FileImportPage";
 import SharePointMigrationPage from "@/pages/SharePointMigrationPage";
+import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -25,13 +26,14 @@ function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
+      <Route path="/" element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route index element={<DashboardPage />} />
         <Route path="upload" element={<UploadPage />} />
         <Route path="queue" element={<UnifiedQueuePage />} />
         <Route path="file-import" element={<FileImportPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="email-parser" element={<EmailParserPage />} />
+        <Route path="sales/order-review" element={<SalesOrderReviewPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="migration/onegamer-poc" element={<SharePointMigrationPage />} />
       </Route>

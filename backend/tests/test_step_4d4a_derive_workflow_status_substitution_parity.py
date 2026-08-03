@@ -67,8 +67,8 @@ DERIVE_WORKFLOW_STATUS_PRE_4D4A_LEN = 667
 
 
 def _intake_func_node():
-    from services import document_handlers
-    tree = ast.parse(inspect.getsource(document_handlers))
+    from services import document_bytes_intake_service
+    tree = ast.parse(inspect.getsource(document_bytes_intake_service))
     for node in ast.walk(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) \
                 and node.name == INTAKE_FUNC_NAME:
@@ -77,8 +77,8 @@ def _intake_func_node():
 
 
 def _intake_func_source() -> str:
-    from services import document_handlers
-    func = getattr(document_handlers, INTAKE_FUNC_NAME)
+    from services import document_bytes_intake_service
+    func = getattr(document_bytes_intake_service, INTAKE_FUNC_NAME)
     return inspect.getsource(func)
 
 

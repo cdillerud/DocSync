@@ -44,20 +44,20 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstr
 
 
 def _intake_func_node():
-    """Return the AST node for the intake function in document_handlers.py."""
-    from services import document_handlers
-    tree = ast.parse(inspect.getsource(document_handlers))
+    """Return the AST node for the intake function in document_bytes_intake_service.py."""
+    from services import document_bytes_intake_service
+    tree = ast.parse(inspect.getsource(document_bytes_intake_service))
     for node in ast.walk(tree):
         if isinstance(node, (ast.AsyncFunctionDef, ast.FunctionDef)) \
                 and node.name == INTAKE_FUNC_NAME:
             return node
-    raise AssertionError(f"{INTAKE_FUNC_NAME} not found in document_handlers.py AST")
+    raise AssertionError(f"{INTAKE_FUNC_NAME} not found in document_bytes_intake_service.py AST")
 
 
 def _intake_func_source():
     """Return the raw source text of the intake function."""
-    from services import document_handlers
-    func = getattr(document_handlers, INTAKE_FUNC_NAME)
+    from services import document_bytes_intake_service
+    func = getattr(document_bytes_intake_service, INTAKE_FUNC_NAME)
     return inspect.getsource(func)
 
 

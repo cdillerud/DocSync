@@ -98,12 +98,12 @@ ALLOWED_PRELUDE_PLAIN_IMPORTS = {"logging"}
 
 
 def _intake_func_node():
-    from services import document_handlers
-    tree = ast.parse(inspect.getsource(document_handlers))
+    from services import document_bytes_intake_service
+    tree = ast.parse(inspect.getsource(document_bytes_intake_service))
     for node in ast.walk(tree):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == INTAKE_FUNC_NAME:
             return node
-    raise AssertionError(f"{INTAKE_FUNC_NAME} not found in document_handlers")
+    raise AssertionError(f"{INTAKE_FUNC_NAME} not found in document_bytes_intake_service")
 
 
 def _iter_importfroms(fn_node):

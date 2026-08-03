@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties><DataProvider>SQL</DataProvider><ConnectString /></ConnectionProperties>
+      <rd:DataSourceID>24db2350-4b89-4eab-81e9-11101a18f92d</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Query><DataSourceName>DataSource</DataSourceName><CommandText /></Query>
+      <Fields>
+        <Field Name="CompanyLogo"><DataField>CompanyLogo</DataField><rd:TypeName>System.Byte[]</rd:TypeName></Field>
+        <Field Name="CompanyName"><DataField>CompanyName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyAddress"><DataField>CompanyAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyCity"><DataField>CompanyCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyState"><DataField>CompanyState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyPostCode"><DataField>CompanyPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyPhone"><DataField>CompanyPhone</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CompanyHomePage"><DataField>CompanyHomePage</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerNo"><DataField>CustomerNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerName"><DataField>CustomerName</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerAddress"><DataField>CustomerAddress</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerAddress2"><DataField>CustomerAddress2</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerCity"><DataField>CustomerCity</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerState"><DataField>CustomerState</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="CustomerPostCode"><DataField>CustomerPostCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="StatementStartDate"><DataField>StatementStartDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="StatementEndDate"><DataField>StatementEndDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="OpeningBalance"><DataField>OpeningBalance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="EndingBalance"><DataField>EndingBalance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="OutstandingBalance"><DataField>OutstandingBalance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="CurrencyCode"><DataField>CurrencyCode</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="ContactLine"><DataField>ContactLine</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LinePostingDate"><DataField>LinePostingDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="LineDocumentType"><DataField>LineDocumentType</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDocumentNo"><DataField>LineDocumentNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineExternalDocumentNo"><DataField>LineExternalDocumentNo</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDescription"><DataField>LineDescription</DataField><rd:TypeName>System.String</rd:TypeName></Field>
+        <Field Name="LineDueDate"><DataField>LineDueDate</DataField><rd:TypeName>System.DateTime</rd:TypeName></Field>
+        <Field Name="LineAmount"><DataField>LineAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LineRemainingAmount"><DataField>LineRemainingAmount</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+        <Field Name="LineRunningBalance"><DataField>LineRunningBalance</DataField><rd:TypeName>System.Decimal</rd:TypeName></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Image Name="Logo">
+            <Source>Database</Source><Value>=First(Fields!CompanyLogo.Value,"DataSet_Result")</Value><MIMEType>image/jpeg</MIMEType><Sizing>FitProportional</Sizing>
+            <Top>0in</Top><Left>0in</Left><Height>0.65in</Height><Width>3.1in</Width><Style><Border><Style>None</Style></Border></Style>
+          </Image>
+          <Textbox Name="Title">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>CUSTOMER STATEMENT</Value><Style><FontFamily>Arial</FontFamily><FontSize>18pt</FontSize><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Top>0.18in</Top><Left>4.55in</Left><Height>0.35in</Height><Width>3.25in</Width><Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="CompanyLine">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CompanyName.Value,"DataSet_Result") &amp; " | " &amp; First(Fields!CompanyAddress.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CompanyState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!CompanyPostCode.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><Color>#444444</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>0.82in</Top><Left>0in</Left><Height>0.22in</Height><Width>7.8in</Width><Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+          <Textbox Name="CustomerBlock">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>STATEMENT FOR</Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>=First(Fields!CustomerName.Value,"DataSet_Result") &amp; vbCrLf &amp; First(Fields!CustomerAddress.Value,"DataSet_Result") &amp; IIF(First(Fields!CustomerAddress2.Value,"DataSet_Result")="","",vbCrLf &amp; First(Fields!CustomerAddress2.Value,"DataSet_Result")) &amp; vbCrLf &amp; First(Fields!CustomerCity.Value,"DataSet_Result") &amp; ", " &amp; First(Fields!CustomerState.Value,"DataSet_Result") &amp; " " &amp; First(Fields!CustomerPostCode.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>1.12in</Top><Left>0in</Left><Height>1.05in</Height><Width>3.8in</Width><Style><BackgroundColor>#FAFAFA</BackgroundColor><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.6pt</Width></Border><PaddingLeft>8pt</PaddingLeft><PaddingTop>6pt</PaddingTop></Style>
+          </Textbox>
+          <Textbox Name="PeriodBlock">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Customer No.: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CustomerNo.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>Statement Period: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=Format(First(Fields!StatementStartDate.Value,"DataSet_Result"),"MM/dd/yyyy") &amp; " through " &amp; Format(First(Fields!StatementEndDate.Value,"DataSet_Result"),"MM/dd/yyyy")</Value></TextRun></TextRuns></Paragraph><Paragraph><TextRuns><TextRun><Value>Currency: </Value><Style><FontWeight>Bold</FontWeight><Color>#8C1D18</Color></Style></TextRun><TextRun><Value>=First(Fields!CurrencyCode.Value,"DataSet_Result")</Value></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>1.12in</Top><Left>4.0in</Left><Height>1.05in</Height><Width>3.8in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><Border><Color>#8C1D18</Color><Style>Solid</Style><Width>0.8pt</Width></Border><PaddingLeft>9pt</PaddingLeft><PaddingTop>7pt</PaddingTop></Style>
+          </Textbox>
+          <Textbox Name="SummaryBlock">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Opening Balance: </Value><Style><FontWeight>Bold</FontWeight></Style></TextRun><TextRun><Value>=Format(First(Fields!OpeningBalance.Value,"DataSet_Result"),"C2")</Value></TextRun><TextRun><Value>     Ending Balance: </Value><Style><FontWeight>Bold</FontWeight></Style></TextRun><TextRun><Value>=Format(First(Fields!EndingBalance.Value,"DataSet_Result"),"C2")</Value></TextRun><TextRun><Value>     Current Outstanding: </Value><Style><FontWeight>Bold</FontWeight></Style></TextRun><TextRun><Value>=Format(First(Fields!OutstandingBalance.Value,"DataSet_Result"),"C2")</Value></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>2.32in</Top><Left>0in</Left><Height>0.35in</Height><Width>7.8in</Width><Style><FontFamily>Arial</FontFamily><FontSize>8.5pt</FontSize><BackgroundColor>#F2F2F2</BackgroundColor><Border><Color>#C8C8C8</Color><Style>Solid</Style><Width>0.5pt</Width></Border><PaddingLeft>6pt</PaddingLeft><PaddingTop>5pt</PaddingTop></Style>
+          </Textbox>
+          <Tablix Name="StatementLines">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+                <TablixColumn><Width>0.9in</Width></TablixColumn>
+                <TablixColumn><Width>1.05in</Width></TablixColumn>
+                <TablixColumn><Width>2.15in</Width></TablixColumn>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.28in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="HDate"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Date</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HType"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Type</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HDocument"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Document</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HDescription"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Description</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingLeft>3pt</PaddingLeft></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HAmount"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Amount</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HRemaining"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Remaining</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HBalance"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>Balance</Value><Style><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#8C1D18</BackgroundColor><PaddingRight>3pt</PaddingRight></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <TablixRow>
+                  <Height>0.25in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="DDate"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LinePostingDate.Value,"MM/dd/yy")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingLeft>3pt</PaddingLeft><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DType"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDocumentType.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingLeft>3pt</PaddingLeft><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DDocument"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDocumentNo.Value</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingLeft>3pt</PaddingLeft><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DDescription"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(Fields!LineExternalDocumentNo.Value="",Fields!LineDescription.Value,Fields!LineDescription.Value &amp; " (" &amp; Fields!LineExternalDocumentNo.Value &amp; ")")</Value></TextRun></TextRuns></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingLeft>3pt</PaddingLeft><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DAmount"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LineAmount.Value,"C2")</Value></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingRight>3pt</PaddingRight><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DRemaining"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LineRemainingAmount.Value,"C2")</Value></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingRight>3pt</PaddingRight><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DBalance"><CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Format(Fields!LineRunningBalance.Value,"C2")</Value></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><FontFamily>Arial</FontFamily><FontSize>7.5pt</FontSize><PaddingRight>3pt</PaddingRight><Border><Color>#DDDDDD</Color><Style>Solid</Style><Width>0.25pt</Width></Border></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup></TablixMember><TablixMember><Group Name="StatementLineDetails" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <DataSetName>DataSet_Result</DataSetName>
+            <Top>2.82in</Top><Left>0in</Left><Height>0.53in</Height><Width>7.8in</Width><Style><Border><Style>None</Style></Border></Style>
+          </Tablix>
+          <Textbox Name="ContactLineText">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether><Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!ContactLine.Value,"DataSet_Result")</Value><Style><FontFamily>Arial</FontFamily><FontSize>8pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns></Paragraph></Paragraphs>
+            <Top>9.45in</Top><Left>0in</Left><Height>0.25in</Height><Width>7.8in</Width><Style><Border><Style>None</Style></Border></Style>
+          </Textbox>
+        </ReportItems>
+        <Height>9.8in</Height><Style />
+      </Body>
+      <Width>7.8in</Width>
+      <Page>
+        <PageHeight>11in</PageHeight><PageWidth>8.5in</PageWidth><LeftMargin>0.35in</LeftMargin><RightMargin>0.35in</RightMargin><TopMargin>0.35in</TopMargin><BottomMargin>0.35in</BottomMargin><Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>499bd176-6dc6-4978-aa28-fef0d98604ea</rd:ReportID>
+  <ConsumeContainerWhitespace>true</ConsumeContainerWhitespace>
+</Report>

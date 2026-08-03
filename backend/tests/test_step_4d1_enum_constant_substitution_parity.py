@@ -174,20 +174,28 @@ class TestServerAliasRetained:
 # 3. Lazy block shrunk + new dedicated import block present
 # ---------------------------------------------------------------------------
 class TestLazyBlockShrunk:
-    def test_lazy_server_import_no_longer_lists_4d1_symbols(self):
-        intake = _intake_func_node()
-        server_imports = [
-            n for n in ast.walk(intake)
-            if isinstance(n, ast.ImportFrom) and n.module == "server"
-        ]
-        assert server_imports, (
-            f"lazy `from server import (...)` block missing in {INTAKE_FUNC_NAME}"
+    def test_intake_has_no_lazy_server_imports(self):
+        import ast
+        import inspect
+        from services import document_bytes_intake_service
+        source = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
         )
-        listed = {alias.name for node in server_imports for alias in node.names}
-        for name in SYMBOLS:
-            assert name not in listed, (
-                f"{name} still listed in `from server import (...)` block"
-            )
+        tree = ast.parse(source)
+        server_imports = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "server"
+        ]
+        assert not server_imports, (
+            "intake_document_from_bytes still imports names from server: "
+            + repr([
+                alias.name
+                for node in server_imports
+                for alias in node.names
+            ])
+        )
 
     def test_new_4d1_import_block_present(self):
         """All three new 4d.1 import statements live inside the intake body."""

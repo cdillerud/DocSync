@@ -147,28 +147,27 @@ class TestLazyBlockShrunk:
                     f"{BOUND_NAME} still imported from server: {sorted(names)}"
                 )
 
-    def test_lazy_tuple_now_four_private_helpers(self):
-        """
-        Post-4d.5 structural check: `_emit_intake_events` has been REMOVED
-        from the ``from server import (...)`` tuple.
-
-        Note: originally asserted the tuple was the exact set
-        ``{_attempt_llm_vendor_ranking, _build_vendor_resolution,
-        _update_ap_workflow_status, _update_standard_workflow_status}`` as a
-        cumulative-state proxy; rewritten to a name-removal invariant so the
-        probe remains valid as subsequent carve-outs continue to shrink the
-        tuple.
-        """
-        fn = _intake_func_node()
-        server_imports = [n for n in _iter_importfroms(fn) if n.module == "server"]
-        assert len(server_imports) == 1, (
-            f"expected exactly one `from server import (...)` in lazy cascade, "
-            f"found {len(server_imports)}"
+    def test_intake_has_no_lazy_server_imports(self):
+        import ast
+        import inspect
+        from services import document_bytes_intake_service
+        source = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
         )
-        names = {alias.name for alias in server_imports[0].names}
-        assert "_emit_intake_events" not in names, (
-            f"Expected `_emit_intake_events` removed from lazy tuple after "
-            f"Step 4d.5, got {sorted(names)}"
+        tree = ast.parse(source)
+        server_imports = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "server"
+        ]
+        assert not server_imports, (
+            "intake_document_from_bytes still imports names from server: "
+            + repr([
+                alias.name
+                for node in server_imports
+                for alias in node.names
+            ])
         )
 
     def test_new_4d5_import_line_with_alias_present(self):

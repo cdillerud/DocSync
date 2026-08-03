@@ -421,24 +421,28 @@ class TestAPInvoiceSiblingsUntouched:
 # 16. document_handlers.py lazy `from server` tuple unchanged at 2 entries
 # ---------------------------------------------------------------------------
 class TestIntakeLazyTupleUnchanged:
-    def test_lazy_tuple_still_two_entries(self):
-        from services import document_handlers
-        tree = ast.parse(inspect.getsource(document_handlers))
-        intake = next(
-            n for n in ast.walk(tree)
-            if isinstance(n, ast.AsyncFunctionDef)
-            and n.name == "intake_document_from_bytes"
+    def test_intake_has_no_lazy_server_imports(self):
+        import ast
+        import inspect
+        from services import document_bytes_intake_service
+        source = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
         )
+        tree = ast.parse(source)
         server_imports = [
-            n for n in ast.walk(intake)
-            if isinstance(n, ast.ImportFrom) and n.module == "server"
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and node.module == "server"
         ]
-        assert len(server_imports) == 1
-        names = {a.name for a in server_imports[0].names}
-        assert names == {
-            "_attempt_llm_vendor_ranking",
-            "_build_vendor_resolution",
-        }, f"intake lazy tuple drift: {sorted(names)}"
+        assert not server_imports, (
+            "intake_document_from_bytes still imports names from server: "
+            + repr([
+                alias.name
+                for node in server_imports
+                for alias in node.names
+            ])
+        )
 
 
 # ---------------------------------------------------------------------------

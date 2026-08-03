@@ -66,67 +66,48 @@ def _intake_func_source():
 # ---------------------------------------------------------------------------
 class TestObjectIdentity:
     @pytest.mark.parametrize("name", TIER3)
-    def test_document_handlers_resolves_to_vendor_matching(self, name):
-        """
-        The binding used inside the intake function after 4c.3 must come
-        from `services.vendor_matching`. We verify by locating the
-        `ImportFrom` nodes inside the function body.
-        """
+    def test_intake_imports_authoritative_vendor_matching_owner(self, name):
         intake = _intake_func_node()
         import_sources = {}
         for node in ast.walk(intake):
-            if isinstance(node, ast.ImportFrom):
-                for alias in node.names:
-                    import_sources[alias.name] = node.module
-        assert name in import_sources, (
-            f"{name} not imported anywhere inside {INTAKE_FUNC_NAME}"
-        )
-        assert import_sources[name] == "services.vendor_matching", (
-            f"{name} is imported from {import_sources[name]!r}, expected "
-            "'services.vendor_matching'"
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            for alias in node.names:
+                import_sources[alias.name] = node.module
+        assert import_sources.get(name) == "services.vendor_matching", (
+            f"{name} import owner is {import_sources.get(name)!r}, "
+            "expected 'services.vendor_matching'"
         )
 
     @pytest.mark.parametrize("name", TIER3)
-    def test_runtime_identity_server_shim_delegates(self, name):
-        """
-        `server.X` (the 4-line THIN_SHIM) must still resolve at runtime to
-        a callable, and `services.vendor_matching.X` must also be callable.
-        """
+    def test_runtime_owner_is_callable_and_server_shim_is_absent(self, name):
         import server
         from services import vendor_matching
-        svc_obj = getattr(vendor_matching, name)
-        srv_obj = getattr(server, name)
-        assert callable(svc_obj), f"services.vendor_matching.{name} not callable"
-        assert callable(srv_obj), f"server.{name} not callable"
+        owner = getattr(vendor_matching, name)
+        assert callable(owner), f"services.vendor_matching.{name} is not callable"
+        assert not hasattr(server, name), (
+            f"retired server.{name} shim unexpectedly remains importable"
+        )
 
 
 # ---------------------------------------------------------------------------
 # 2. Server shim parity retained (server.py untouched)
 # ---------------------------------------------------------------------------
-class TestServerShimUntouched:
+class TestServerShimRetired:
     @pytest.mark.parametrize("name", TIER3)
-    def test_server_shim_is_thin_shim_post_4c3(self, name):
-        """
-        The 4-line THIN_SHIM in server.py must remain structurally identical
-        to its post-4e state: exactly one reachable return statement and
-        exactly one local `from services.vendor_matching import ...`.
-        """
+    def test_server_shim_is_absent_from_runtime_and_source(self, name):
         import server
-        func = getattr(server, name)
-        src = inspect.getsource(func)
-        tree = ast.parse(src)
-        fn = tree.body[0]
-        returns = [s for s in fn.body if isinstance(s, ast.Return)]
-        imports = [s for s in fn.body if isinstance(s, ast.ImportFrom)]
-        assert len(returns) == 1, (
-            f"server.{name} expected exactly 1 reachable return, got {len(returns)}"
+        assert not hasattr(server, name), (
+            f"retired server.{name} shim unexpectedly remains importable"
         )
-        assert len(imports) == 1, (
-            f"server.{name} expected exactly 1 local ImportFrom, got {len(imports)}"
-        )
-        assert imports[0].module == "services.vendor_matching", (
-            f"server.{name} local import module is {imports[0].module!r}, "
-            "expected 'services.vendor_matching'"
+        tree = ast.parse(inspect.getsource(server))
+        top_level_defs = {
+            node.name
+            for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        assert name not in top_level_defs, (
+            f"retired server.{name} top-level definition remains"
         )
 
 
@@ -134,28 +115,27 @@ class TestServerShimUntouched:
 # 3. Lazy block shrunk + new direct-import line present
 # ---------------------------------------------------------------------------
 class TestLazyBlockShrunk:
-    def test_lazy_server_import_no_longer_lists_tier3(self):
+    def test_server_import_cascade_contains_no_tier3_names(self):
         intake = _intake_func_node()
-        server_imports = [
-            n for n in ast.walk(intake)
-            if isinstance(n, ast.ImportFrom) and n.module == "server"
-        ]
-        assert server_imports, (
-            f"lazy `from server import (...)` block missing in {INTAKE_FUNC_NAME}"
+        listed = {
+            alias.name
+            for node in ast.walk(intake)
+            if isinstance(node, ast.ImportFrom) and node.module == "server"
+            for alias in node.names
+        }
+        assert not (set(TIER3) & listed), (
+            f"Tier-3 names still imported from server: "
+            f"{sorted(set(TIER3) & listed)}"
         )
-        listed = {alias.name for node in server_imports for alias in node.names}
-        for name in TIER3:
-            assert name not in listed, (
-                f"{name} still listed in `from server import (...)` block"
-            )
 
     def test_direct_vendor_matching_import_line_present(self):
-        """The new 4c.3 direct-import line lives inside the intake body."""
         intake_src = _intake_func_source()
         assert (
             "from services.vendor_matching import "
             "lookup_vendor_alias, check_duplicate_document"
-        ) in intake_src, "4c.3 direct-import line missing from intake body"
+        ) in intake_src, (
+            "Tier-3 authoritative direct-import line missing from intake body"
+        )
 
 
 # ---------------------------------------------------------------------------

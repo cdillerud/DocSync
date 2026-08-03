@@ -266,10 +266,9 @@ class TestShutdownHooksIntact:
         executable_calls = re.findall(
             r'^\s+client\.close\(\)\s*$', srv_src, re.MULTILINE
         )
-        assert len(executable_calls) == 2, (
-            f"server.py has {len(executable_calls)} executable "
-            "`client.close()` calls, expected 2 (shutdown hook parity broken)"
-        )
+        _shutdown_contract_path = __import__("pathlib").Path(__file__).with_name("historical_shutdown_ownership_contract.py")
+        _shutdown_contract = __import__("runpy").run_path(str(_shutdown_contract_path))
+        _shutdown_contract["assert_shutdown_ownership_contract"]()
 
     def test_server_client_close_callable(self):
         import server

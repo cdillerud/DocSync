@@ -17,7 +17,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  AlertTriangle,
+  Info,
   Loader2,
 } from 'lucide-react';
 
@@ -41,7 +41,7 @@ const DOCUMENT_TYPES = [
 ];
 
 const MAILBOX_OPTIONS = [
-  ['__keep__', 'Keep current mailbox'],
+  ['__keep__', 'Keep current lane'],
   ['AP', 'AP'],
   ['Operations', 'Operations'],
   ['Sales', 'Sales'],
@@ -129,8 +129,8 @@ export default function DecisionQueueClassificationDialog({
           </DialogTitle>
 
           <DialogDescription>
-            Correct the document type and, when necessary,
-            its routing mailbox.
+            Correct this document&apos;s type and, when necessary,
+            its routing lane.
           </DialogDescription>
         </DialogHeader>
 
@@ -152,7 +152,7 @@ export default function DecisionQueueClassificationDialog({
 
               <div>
                 <p className="text-muted-foreground">
-                  Current mailbox
+                  Current lane
                 </p>
                 <p className="font-medium">
                   {displayValue(currentMailboxCategory)}
@@ -193,7 +193,7 @@ export default function DecisionQueueClassificationDialog({
 
           <div className="space-y-2">
             <Label htmlFor="decision-mailbox-category">
-              Routing mailbox
+              Routing lane
             </Label>
 
             <Select
@@ -221,24 +221,24 @@ export default function DecisionQueueClassificationDialog({
             </Select>
 
             <p className="text-xs text-muted-foreground">
-              Effective mailbox: {displayValue(selectedMailbox)}
+              Effective lane: {displayValue(selectedMailbox)}
             </p>
           </div>
 
           {mailboxWillChange && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+            <div className="rounded-md border border-sky-500/30 bg-sky-500/10 p-3">
               <div className="flex items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                <Info className="mt-0.5 h-4 w-4 shrink-0 text-sky-500" />
 
                 <div className="space-y-1 text-xs">
                   <p className="font-medium">
-                    This also teaches sender routing.
+                    This changes only this document.
                   </p>
 
                   <p className="text-muted-foreground">
-                    Future documents from this sender may be routed
-                    to {mailboxCategory}. Only change the mailbox
-                    when the sender itself was routed incorrectly.
+                    It does not create a sender-wide routing rule and
+                    will not change how future messages from this sender
+                    are routed.
                   </p>
                 </div>
               </div>
@@ -246,7 +246,7 @@ export default function DecisionQueueClassificationDialog({
           )}
 
           <div className="rounded-md border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-muted-foreground">
-            The classification correction is retained as human
+            The document-type correction is retained as human
             feedback so the classifier can learn from this decision.
           </div>
         </div>

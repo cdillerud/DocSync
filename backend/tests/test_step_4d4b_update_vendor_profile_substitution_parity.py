@@ -249,23 +249,46 @@ class TestCallSiteByteParity:
             "db, doc_id, vendor_name, update_data, final_status)"
         ) in src, "4d.4b call-site byte-drift"
 
-    def test_non_intake_direct_import_line_735_untouched(self):
+    def test_document_handlers_facade_has_no_vendor_profile_dependency(self):
         """
-        Fence: the pre-existing direct import at document_handlers.py:735
-        (in a non-intake code path, using the non-underscored name) must
-        remain exactly as it was.
+        Current ownership contract: document_handlers is a route-handler
+        compatibility facade. It no longer owns or imports vendor-profile
+        processing logic. Intake resolves the canonical function directly
+        through the preserved underscored alias.
         """
-        dh_src = (
-            BACKEND_ROOT / "services" / "document_handlers.py"
-        ).read_text()
+        from services import document_handlers
+        from workflows.ap_invoice.rules import vendor_profile
+
+        handlers_src = inspect.getsource(document_handlers)
         assert (
-            "from workflows.ap_invoice.rules.vendor_profile "
-            "import update_vendor_profile_incremental\n"
-            "            await update_vendor_profile_incremental("
-        ) in dh_src, (
-            "Pre-existing non-intake direct import at "
-            "document_handlers.py:735 drifted — out-of-scope fence violated"
+            "workflows.ap_invoice.rules.vendor_profile"
+            not in handlers_src
         )
+        assert "update_vendor_profile_incremental" not in handlers_src
+        assert not hasattr(
+            document_handlers,
+            "update_vendor_profile_incremental",
+        )
+
+        canonical = vendor_profile.update_vendor_profile_incremental
+        assert inspect.iscoroutinefunction(canonical)
+        assert list(inspect.signature(canonical).parameters) == [
+            "db",
+            "doc_id",
+            "vendor_name",
+            "update_data",
+            "final_status",
+        ]
+
+        intake_src = _intake_func_source()
+        assert (
+            "update_vendor_profile_incremental as "
+            "_update_vendor_profile_incremental"
+        ) in intake_src
+        assert (
+            "_update_vendor_profile_incremental("
+            "db, doc_id, vendor_name, update_data, final_status)"
+        ) in intake_src
 
 
 # ---------------------------------------------------------------------------

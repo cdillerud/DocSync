@@ -1,19 +1,13 @@
 """
-AP Path Consolidation tests — verifies AP_PATH_CONSOLIDATION.md Phase 2.
+AP Path consolidation regression tests.
 
-Phase 2 of the AP Path consolidation (2026-04-21) established:
-  1. /api/ap-review/documents/{doc_id}/{action} is the canonical Path A surface
-     for the six AP mutation endpoints (set-vendor, update-fields,
-     override-bc-validation, start-approval, approve, reject).
-  2. The six legacy /api/workflows/ap_invoice/{doc_id}/{action} endpoints
-     remain live for one release window but are flagged deprecated=True in
-     the OpenAPI schema and emit X-Deprecated response headers so callers
-     know to migrate.
+The canonical AP mutation surface is:
+  /api/ap-review/documents/{doc_id}/{action}
 
-These tests assert both:
-  * Path A exists, enforces JWT auth, and delegates correctly.
-  * Path B exists, is marked deprecated, and every response (including
-    HTTPException paths) carries the X-Deprecated headers.
+The six legacy /api/workflows/ap_invoice/{doc_id}/{action} routes completed
+their one-release compatibility window and are now retired. These tests assert
+that Path A remains registered and authenticated while Path B stays absent
+from OpenAPI and returns 404 without deprecation headers.
 """
 
 import os
@@ -75,23 +69,6 @@ class TestCanonicalPathARegistered:
         assert "post" in openapi["paths"][path], f"{path} must expose POST"
 
 
-class TestDeprecatedPathBFlagged:
-    """Path B legacy AP routes must stay live but be flagged deprecated."""
-
-    @pytest.mark.parametrize("action,_body", AP_MUTATION_ACTIONS)
-    def test_path_b_still_present(self, openapi, action, _body):
-        path = f"/api/workflows/ap_invoice/{{doc_id}}/{action}"
-        assert path in openapi["paths"], (
-            f"Path B route {path} must stay live for one release"
-        )
-
-    @pytest.mark.parametrize("action,_body", AP_MUTATION_ACTIONS)
-    def test_path_b_marked_deprecated(self, openapi, action, _body):
-        path = f"/api/workflows/ap_invoice/{{doc_id}}/{action}"
-        meta = openapi["paths"][path]["post"]
-        assert meta.get("deprecated") is True, (
-            f"{path} must have deprecated=True in OpenAPI"
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -131,21 +108,32 @@ class TestPathAAuthEnforcement:
 # X-Deprecated headers on Path B (success AND error paths)
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Retired Path B stays removed
+# ---------------------------------------------------------------------------
 
-class TestPathBDeprecationHeaders:
+
+class TestRetiredPathBRemoved:
+    # Path B completed its release window and must remain retired.
+
+    @pytest.mark.parametrize("action,_body", AP_MUTATION_ACTIONS)
+    def test_path_b_absent_from_openapi(self, openapi, action, _body):
+        path = f"/api/workflows/ap_invoice/{{doc_id}}/{action}"
+        assert path not in openapi["paths"], (
+            f"Retired Path B route unexpectedly registered: {path}"
+        )
+
     @pytest.mark.parametrize("action,body", AP_MUTATION_ACTIONS)
-    def test_error_response_carries_deprecation_headers(self, action, body):
+    def test_path_b_returns_404(self, action, body):
         r = requests.post(
             f"{BASE_URL}/api/workflows/ap_invoice/nonexistent-id/{action}",
             json=body,
             timeout=10,
         )
-        # Handler raises HTTPException for missing doc — wrapper must still
-        # attach deprecation headers.
-        assert r.headers.get("X-Deprecated") == "true", (
-            f"{action}: X-Deprecated header missing on error response"
+        assert r.status_code == 404, (
+            f"Retired Path B {action} must return 404, got "
+            f"{r.status_code}: {r.text}"
         )
-        assert r.headers.get("X-Deprecated-Use") == (
-            f"/api/ap-review/documents/{{doc_id}}/{action}"
-        ), f"{action}: X-Deprecated-Use must point at Path A"
-        assert r.headers.get("X-Deprecated-Sunset") == "next-release"
+        assert r.headers.get("X-Deprecated") is None
+        assert r.headers.get("X-Deprecated-Use") is None
+        assert r.headers.get("X-Deprecated-Sunset") is None

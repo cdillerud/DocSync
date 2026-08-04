@@ -12,15 +12,14 @@ from datetime import datetime, timezone
 
 # Import modules under test
 from services.spiro.spiro_client import (
-    SpiroClient, SpiroTokenManager, normalize_company_name,
-    is_spiro_enabled
+    SpiroClient, SpiroTokenManager, is_spiro_enabled
 )
 from services.spiro.spiro_sync import (
     SpiroSyncService, transform_contact, transform_company, transform_opportunity
 )
 from services.spiro.spiro_context import (
     SpiroContextGenerator, SpiroContext, calculate_name_similarity,
-    extract_email_domain, normalize_phone
+    extract_email_domain, normalize_company_name, normalize_phone
 )
 
 
@@ -133,6 +132,14 @@ MOCK_OPPORTUNITY_RESPONSE = {
 class TestUtilityFunctions:
     """Test utility/helper functions."""
     
+    def test_normalize_company_name_context_ownership(self):
+        """The context module owns company-name normalization."""
+        assert normalize_company_name("ACME Corporation") == "ACME"
+        assert (
+            normalize_company_name("Tumalo Creek Transportation, LLC")
+            == "TUMALO CREEK TRANSPORTATION"
+        )
+        assert normalize_company_name("") == ""
     def test_calculate_name_similarity_exact(self):
         """Test exact match after normalization."""
         score = calculate_name_similarity("ACME Corp", "Acme Corporation")
@@ -296,6 +303,15 @@ class TestSpiroSyncService:
 
 class TestSpiroContextGenerator:
     """Test Spiro context generator."""
+
+    @pytest.fixture(autouse=True)
+    def enable_spiro_context_feature(self):
+        """Enable the module-level context gate for generator tests."""
+        with patch(
+            "services.spiro.spiro_context.SPIRO_CONTEXT_ENABLED",
+            True,
+        ):
+            yield
     
     @pytest.fixture
     def mock_db(self):
@@ -342,12 +358,14 @@ class TestSpiroContextGenerator:
                 "assigned_isr": "Joey Smith"
             }
         ])
+        mock_contacts_cursor.limit.return_value = mock_contacts_cursor
         db.spiro_contacts = MagicMock()
         db.spiro_contacts.find = MagicMock(return_value=mock_contacts_cursor)
         
         # Mock opportunity collection
         mock_opps_cursor = MagicMock()
         mock_opps_cursor.to_list = AsyncMock(return_value=[])
+        mock_opps_cursor.limit.return_value = mock_opps_cursor
         db.spiro_opportunities = MagicMock()
         db.spiro_opportunities.find = MagicMock(return_value=mock_opps_cursor)
         

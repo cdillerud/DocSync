@@ -48,34 +48,50 @@ class TestWorkflowIntelligenceEndpoint:
     """Tests for GET /api/dashboard/workflow-intelligence"""
 
     def test_workflow_intelligence_includes_alias_metrics(self):
-        """alias_metrics section must be present with vendor_resolution_rate"""
+        """Dashboard keeps alias metrics separate from accurate vendor KPIs."""
         response = requests.get(f"{BASE_URL}/api/dashboard/workflow-intelligence")
         assert response.status_code == 200
         data = response.json()
-        
+
         assert "vendor_intelligence" in data
-        assert "alias_metrics" in data["vendor_intelligence"]
-        
-        alias_metrics = data["vendor_intelligence"]["alias_metrics"]
-        assert "vendor_resolution_rate" in alias_metrics, "vendor_resolution_rate missing in alias_metrics"
-        assert isinstance(alias_metrics["vendor_resolution_rate"], (int, float))
+        vendor_intelligence = data["vendor_intelligence"]
+        assert "alias_metrics" in vendor_intelligence
+
+        alias_metrics = vendor_intelligence["alias_metrics"]
+        assert "vendor_resolution_rate" not in alias_metrics
+        assert "auto_resolved_docs" not in alias_metrics
+
+        for field in (
+            "vendor_applicable_total",
+            "vendor_auto_resolve_rate",
+            "vendor_final_resolved_rate",
+        ):
+            assert field in vendor_intelligence, f"Missing vendor KPI field: {field}"
         
     def test_workflow_intelligence_alias_metrics_fields(self):
-        """Verify alias_metrics has all expected fields"""
+        """Alias metrics expose alias-only fields; vendor KPIs stay at parent level."""
         response = requests.get(f"{BASE_URL}/api/dashboard/workflow-intelligence")
         assert response.status_code == 200
         data = response.json()
-        
-        alias_metrics = data["vendor_intelligence"]["alias_metrics"]
-        
-        expected_fields = [
+
+        vendor_intelligence = data["vendor_intelligence"]
+        alias_metrics = vendor_intelligence["alias_metrics"]
+
+        for field in (
             "total_aliases",
             "auto_learned",
             "alias_match_rate",
-            "vendor_resolution_rate",
-        ]
-        for field in expected_fields:
+        ):
             assert field in alias_metrics, f"Missing alias_metrics field: {field}"
+
+        for field in (
+            "vendor_applicable_total",
+            "vendor_auto_resolved_total",
+            "vendor_auto_resolve_rate",
+            "vendor_final_resolved_total",
+            "vendor_final_resolved_rate",
+        ):
+            assert field in vendor_intelligence, f"Missing vendor KPI field: {field}"
 
 
 class TestVendorAliasesEndpoint:

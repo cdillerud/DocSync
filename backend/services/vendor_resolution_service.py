@@ -436,60 +436,159 @@ async def get_resolution_metrics() -> Dict[str, Any]:
 
     total = await db.hub_documents.count_documents({})
 
-    # Count by resolution status
+    # Vendor-applicable documents are the population where resolution is
+    # expected or has already been attempted.
+    vendor_applicable_types = [
+        "AP_Invoice",
+        "AP_INVOICE",
+        "PurchaseInvoice",
+        "PurchaseOrder",
+        "Remittance",
+        "REMITTANCE",
+        "Credit_Memo",
+        "CREDIT_MEMO",
+        "Purchase_Invoice",
+        "PURCHASE_INVOICE",
+    ]
+    vendor_applicable_filter = {
+        "$or": [
+            {"doc_type": {"$in": vendor_applicable_types}},
+            {"suggested_job_type": {"$in": vendor_applicable_types}},
+            {"vendor_resolution.status": {"$exists": True}},
+        ]
+    }
+    vendor_applicable_total = await db.hub_documents.count_documents(
+        vendor_applicable_filter
+    )
+
     status_pipeline = [
         {"$group": {
             "_id": "$vendor_resolution.status",
             "count": {"$sum": 1},
         }},
     ]
-    status_raw = await db.hub_documents.aggregate(status_pipeline).to_list(10)
-    status_counts = {r["_id"]: r["count"] for r in status_raw if r["_id"]}
+    status_raw = await db.hub_documents.aggregate(
+        status_pipeline
+    ).to_list(10)
+    status_counts = {
+        row["_id"]: row["count"]
+        for row in status_raw
+        if row["_id"]
+    }
 
     resolved = status_counts.get(STATUS_RESOLVED, 0)
     unresolved = status_counts.get(STATUS_UNRESOLVED, 0)
     ambiguous = status_counts.get(STATUS_AMBIGUOUS, 0)
     needs_review = status_counts.get(STATUS_NEEDS_REVIEW, 0)
-    no_resolution = total - resolved - unresolved - ambiguous - needs_review
+    no_resolution = (
+        total
+        - resolved
+        - unresolved
+        - ambiguous
+        - needs_review
+    )
 
-    resolution_rate = round((resolved / total * 100), 1) if total > 0 else 0
+    # Preserve the historical all-document rate for compatibility.
+    resolution_rate = (
+        round((resolved / total * 100), 1)
+        if total > 0
+        else 0
+    )
 
-    # Count by match method
+    vendor_resolved_total = await db.hub_documents.count_documents({
+        "$and": [
+            vendor_applicable_filter,
+            {"vendor_resolution.status": STATUS_RESOLVED},
+        ]
+    })
+    vendor_resolution_rate = (
+        round(
+            (
+                vendor_resolved_total
+                / vendor_applicable_total
+                * 100
+            ),
+            1,
+        )
+        if vendor_applicable_total > 0
+        else 0
+    )
+
     method_pipeline = [
-        {"$match": {"vendor_resolution.method": {"$exists": True, "$ne": None}}},
+        {"$match": {
+            "vendor_resolution.method": {
+                "$exists": True,
+                "$ne": None,
+            }
+        }},
         {"$group": {
             "_id": "$vendor_resolution.method",
             "count": {"$sum": 1},
         }},
     ]
-    method_raw = await db.hub_documents.aggregate(method_pipeline).to_list(20)
-    by_method = {r["_id"]: r["count"] for r in method_raw if r["_id"]}
+    method_raw = await db.hub_documents.aggregate(
+        method_pipeline
+    ).to_list(20)
+    by_method = {
+        row["_id"]: row["count"]
+        for row in method_raw
+        if row["_id"]
+    }
 
-    # Fuzzy score buckets
-    buckets = {"90-94": 0, "95-97": 0, "98-100": 0}
+    buckets = {
+        "60-79": 0,
+        "80-89": 0,
+        "90-94": 0,
+        "95-97": 0,
+        "98-100": 0,
+    }
+    fuzzy_methods = [
+        "fuzzy_candidate",
+        "fuzzy_match",
+        "fuzzy",
+        "fuzzy_bc",
+        "fuzzy_candidates",
+    ]
     fuzzy_pipeline = [
         {"$match": {
-            "vendor_resolution.method": "fuzzy_match",
-            "vendor_resolution.score": {"$exists": True, "$ne": None},
+            "vendor_resolution.method": {
+                "$in": fuzzy_methods,
+            },
+            "vendor_resolution.score": {
+                "$exists": True,
+                "$ne": None,
+            },
         }},
-        {"$project": {"score": "$vendor_resolution.score"}},
+        {"$project": {
+            "score": "$vendor_resolution.score",
+        }},
     ]
-    fuzzy_docs = await db.hub_documents.aggregate(fuzzy_pipeline).to_list(5000)
-    for fd in fuzzy_docs:
-        s = fd.get("score", 0)
-        if s is None:
+    fuzzy_docs = await db.hub_documents.aggregate(
+        fuzzy_pipeline
+    ).to_list(5000)
+
+    for fuzzy_doc in fuzzy_docs:
+        score = fuzzy_doc.get("score", 0)
+        if score is None:
             continue
-        pct = s * 100 if s <= 1 else s
-        if 90 <= pct < 95:
+
+        percent = score * 100 if score <= 1 else score
+
+        if 60 <= percent < 80:
+            buckets["60-79"] += 1
+        elif 80 <= percent < 90:
+            buckets["80-89"] += 1
+        elif 90 <= percent < 95:
             buckets["90-94"] += 1
-        elif 95 <= pct < 98:
+        elif 95 <= percent < 98:
             buckets["95-97"] += 1
-        elif pct >= 98:
+        elif percent >= 98:
             buckets["98-100"] += 1
 
-    # Top 25 unresolved raw vendor strings
     unresolved_pipeline = [
-        {"$match": {"vendor_resolution.status": STATUS_UNRESOLVED}},
+        {"$match": {
+            "vendor_resolution.status": STATUS_UNRESOLVED,
+        }},
         {"$group": {
             "_id": "$vendor_resolution.raw",
             "count": {"$sum": 1},
@@ -497,32 +596,60 @@ async def get_resolution_metrics() -> Dict[str, Any]:
         {"$sort": {"count": -1}},
         {"$limit": 25},
     ]
-    unresolved_raw = await db.hub_documents.aggregate(unresolved_pipeline).to_list(25)
-    top_unresolved = [{"raw": r["_id"], "count": r["count"]} for r in unresolved_raw if r["_id"]]
+    unresolved_raw = await db.hub_documents.aggregate(
+        unresolved_pipeline
+    ).to_list(25)
+    top_unresolved = [
+        {
+            "raw": row["_id"],
+            "count": row["count"],
+        }
+        for row in unresolved_raw
+        if row["_id"]
+    ]
 
-    # Top 25 manually corrected vendor strings (potential alias candidates)
     corrected_pipeline = [
-        {"$match": {"vendor_resolution.reviewed_override": True}},
+        {"$match": {
+            "vendor_resolution.reviewed_override": True,
+        }},
         {"$group": {
             "_id": "$vendor_resolution.raw",
             "count": {"$sum": 1},
-            "vendor_name": {"$first": "$vendor_canonical"},
-            "vendor_no": {"$first": "$vendor_resolution.matched_vendor_no"},
+            "vendor_name": {
+                "$first": "$vendor_canonical",
+            },
+            "vendor_no": {
+                "$first": (
+                    "$vendor_resolution.matched_vendor_no"
+                ),
+            },
         }},
         {"$sort": {"count": -1}},
         {"$limit": 25},
     ]
-    corrected_raw = await db.hub_documents.aggregate(corrected_pipeline).to_list(25)
+    corrected_raw = await db.hub_documents.aggregate(
+        corrected_pipeline
+    ).to_list(25)
     top_corrected = [
-        {"raw": r["_id"], "count": r["count"], "vendor_name": r.get("vendor_name"), "vendor_no": r.get("vendor_no")}
-        for r in corrected_raw if r["_id"]
+        {
+            "raw": row["_id"],
+            "count": row["count"],
+            "vendor_name": row.get("vendor_name"),
+            "vendor_no": row.get("vendor_no"),
+        }
+        for row in corrected_raw
+        if row["_id"]
     ]
 
-    # Rejection stats
-    total_rejections = await db.vendor_match_rejections.count_documents({})
+    total_rejections = (
+        await db.vendor_match_rejections.count_documents({})
+    )
 
     return {
         "total_documents": total,
+        "vendor_applicable_total": vendor_applicable_total,
+        "vendor_resolved_total": vendor_resolved_total,
+        "vendor_resolution_rate": vendor_resolution_rate,
         "resolved_count": resolved,
         "unresolved_count": unresolved,
         "ambiguous_count": ambiguous,

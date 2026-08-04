@@ -249,18 +249,40 @@ class TestVendorIntelligenceIntegration:
     """Integration tests for vendor intelligence flow"""
     
     def test_stats_match_profile_counts(self):
-        """Stats total_vendors should match profiles total"""
-        stats_resp = requests.get(f"{BASE_URL}/api/vendor-intelligence/stats")
-        profiles_resp = requests.get(f"{BASE_URL}/api/vendor-intelligence/profiles?limit=1")
-        
-        assert stats_resp.status_code == 200
-        assert profiles_resp.status_code == 200
-        
-        stats = stats_resp.json()
-        profiles_data = profiles_resp.json()
-        
-        assert stats['total_vendors'] == profiles_data['total'], \
-            f"Stats total_vendors ({stats['total_vendors']}) should match profiles total ({profiles_data['total']})"
+        """Stats and profile totals converge after asynchronous rebuild tasks."""
+        deadline = time.time() + 30
+        observations = []
+        previous_match = None
+
+        while time.time() < deadline:
+            stats_resp = requests.get(
+                f"{BASE_URL}/api/vendor-intelligence/stats"
+            )
+            profiles_resp = requests.get(
+                f"{BASE_URL}/api/vendor-intelligence/profiles?limit=1"
+            )
+
+            assert stats_resp.status_code == 200
+            assert profiles_resp.status_code == 200
+
+            stats_total = stats_resp.json()["total_vendors"]
+            profiles_total = profiles_resp.json()["total"]
+            observation = (stats_total, profiles_total)
+            observations.append(observation)
+
+            if stats_total == profiles_total:
+                if previous_match == observation:
+                    return
+                previous_match = observation
+            else:
+                previous_match = None
+
+            time.sleep(0.2)
+
+        pytest.fail(
+            "Vendor intelligence totals did not stabilize after asynchronous "
+            f"rebuilds. Last observations: {observations[-10:]}"
+        )
     
     def test_vendor_profile_data_consistency(self):
         """Profile from list should match profile from detail endpoint"""

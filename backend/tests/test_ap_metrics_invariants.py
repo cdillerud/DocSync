@@ -135,7 +135,7 @@ class _FakeDB:
 def _run(monkeypatch, docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     from routers import dashboard as mod
     monkeypatch.setattr(mod, "get_db", lambda: _FakeDB(docs))
-    return asyncio.get_event_loop().run_until_complete(mod.get_ap_metrics())
+    return asyncio.run(mod.get_ap_metrics())
 
 
 # ---------------------------------------------------------------------------

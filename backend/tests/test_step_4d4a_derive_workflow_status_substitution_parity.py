@@ -23,8 +23,8 @@ Nine probe classes form the acceptance gate:
 4. Signature-forwarding parity.
 5. Server shim retained (external callers undisturbed).
 6. Lazy block shrunk + new 4d.4a direct-import line present.
-7. Call-site byte parity + local `_derive_workflow_status_simple`
-   untouched (fence against name confusion).
+7. Call-site byte parity + retired `_derive_workflow_status_simple`
+   absence from the document_handlers compatibility facade.
 8. 4c.2 family-sibling invariant: classify_document_type binding holds +
    set of names pulled from services.classification_helpers equals
    exactly {classify_document_type, derive_workflow_status}.
@@ -248,7 +248,7 @@ class TestLazyBlockShrunk:
 
 
 # ---------------------------------------------------------------------------
-# 7. Call-site byte parity + _derive_workflow_status_simple fence
+# 7. Call-site byte parity + retired simple-helper facade fence
 # ---------------------------------------------------------------------------
 class TestCallSiteByteParity:
     def test_intake_use_site_intact(self):
@@ -258,24 +258,42 @@ class TestCallSiteByteParity:
             "_derive_workflow_status(final_status, doc_type_value, decision)"
         ) in src, "4d.4a call-site byte-drift"
 
-    def test_derive_workflow_status_simple_still_defined_locally(self):
+    def test_derive_workflow_status_simple_retired_from_facade(self):
         """
-        Fence against name confusion: the local 2-arg helper
-        `_derive_workflow_status_simple` in document_handlers.py must
-        remain unchanged and NOT be conflated with the migrated
-        3-arg helper.
+        Current ownership contract: document_handlers is a route-handler
+        compatibility facade and no longer owns the retired private
+        two-argument workflow-status helper. Intake resolves the canonical
+        three-argument helper from classification_helpers.
         """
-        from services import document_handlers
-        assert hasattr(document_handlers, "_derive_workflow_status_simple"), (
-            "_derive_workflow_status_simple no longer defined in "
-            "document_handlers — out-of-scope fence violated"
+        from services import classification_helpers, document_handlers
+
+        assert not hasattr(
+            document_handlers,
+            "_derive_workflow_status_simple",
+        ), (
+            "retired private helper leaked back into the "
+            "document_handlers compatibility facade"
         )
-        local_fn = document_handlers._derive_workflow_status_simple
-        sig = inspect.signature(local_fn)
-        assert len(sig.parameters) == 2, (
-            f"_derive_workflow_status_simple signature drifted: "
-            f"expected 2 params, got {len(sig.parameters)}"
-        )
+
+        handlers_src = inspect.getsource(document_handlers)
+        assert "_derive_workflow_status_simple" not in handlers_src
+
+        canonical = classification_helpers.derive_workflow_status
+        sig = inspect.signature(canonical)
+        assert list(sig.parameters) == [
+            "final_status",
+            "doc_type",
+            "decision",
+        ]
+
+        intake_src = _intake_func_source()
+        assert (
+            "from services.classification_helpers import "
+            "derive_workflow_status as _derive_workflow_status"
+        ) in intake_src
+        assert (
+            "_derive_workflow_status(final_status, doc_type_value, decision)"
+        ) in intake_src
 
 
 # ---------------------------------------------------------------------------

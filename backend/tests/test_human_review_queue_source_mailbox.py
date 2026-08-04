@@ -1,64 +1,46 @@
-from services.human_review_queue_service import (
-    resolve_source_mailbox,
-)
+from services.human_review_queue_service import resolve_source_mailbox
 
 
-def test_explicit_source_mailbox_wins():
+def test_explicit_source_mailbox_is_used():
     result = resolve_source_mailbox(
-        {
-            "current_state": {
-                "mailbox_category": "AP",
-            },
-            "context": {
-                "root_cause": (
-                    "operations_mailbox_captured_AP_invoice"
-                ),
-            },
-        },
-        {
-            "source_mailbox": (
-                "whdocuments@gamerpackaging.com"
-            ),
-            "mailbox_category": "AP",
-        },
-        {
-            "AP": "billing@gamerpackaging.com",
-            "Operations": (
-                "whdocuments@gamerpackaging.com"
-            ),
-        },
+        {"context": {}},
+        {"source_mailbox": "whdocuments@gamerpackaging.com"},
+        {"Operations": "whdocuments@gamerpackaging.com"},
     )
 
     assert result == "whdocuments@gamerpackaging.com"
 
 
-def test_root_cause_preserves_operations_source():
+def test_ap_service_mailbox_uses_business_alias():
+    result = resolve_source_mailbox(
+        {"context": {}},
+        {"source_mailbox": "hub-ap-intake@gamerpackaging.com"},
+        {},
+    )
+
+    assert result == "billing@gamerpackaging.com"
+
+
+def test_current_sales_lane_does_not_fabricate_sales_mailbox():
     result = resolve_source_mailbox(
         {
             "current_state": {
-                "mailbox_category": "AP",
+                "mailbox_category": "Sales",
             },
-            "context": {
-                "root_cause": (
-                    "operations_mailbox_captured_AP_invoice"
-                ),
-            },
+            "context": {},
         },
         {
-            "mailbox_category": "AP",
+            "mailbox_category": "Sales",
         },
         {
-            "AP": "billing@gamerpackaging.com",
-            "Operations": (
-                "whdocuments@gamerpackaging.com"
-            ),
+            "Sales": "hub-sales-intake@gamerpackaging.com",
         },
     )
 
-    assert result == "whdocuments@gamerpackaging.com"
+    assert result == ""
 
 
-def test_ap_lane_uses_business_mailbox_alias():
+def test_current_ap_lane_does_not_fabricate_ap_mailbox():
     result = resolve_source_mailbox(
         {
             "current_state": {
@@ -74,4 +56,24 @@ def test_ap_lane_uses_business_mailbox_alias():
         },
     )
 
-    assert result == "billing@gamerpackaging.com"
+    assert result == ""
+
+
+def test_historical_root_cause_can_resolve_original_mailbox():
+    result = resolve_source_mailbox(
+        {
+            "context": {
+                "root_cause": (
+                    "operations_mailbox_captured_AP_invoice"
+                ),
+            },
+        },
+        {
+            "mailbox_category": "AP",
+        },
+        {
+            "Operations": "whdocuments@gamerpackaging.com",
+        },
+    )
+
+    assert result == "whdocuments@gamerpackaging.com"

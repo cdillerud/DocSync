@@ -29,7 +29,7 @@ import NonTransactionalDispositionDialog from '@/components/NonTransactionalDisp
 import DecisionQueueClassificationDialog from '@/components/DecisionQueueClassificationDialog';
 
 const ISSUE_TYPE_META = {
-  isolated_misroute: { label: 'Wrong mailbox', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  isolated_misroute: { label: 'Wrong routing lane', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   ambiguous_classification: { label: 'Needs a type picked', icon: HelpCircle, cls: 'bg-sky-500/15 text-sky-400 border-sky-500/30' },
   ambiguous_match: { label: 'Match unclear', icon: HelpCircle, cls: 'bg-muted text-muted-foreground border-border' },
   square9_side_issue: { label: 'Square9-side', icon: Info, cls: 'bg-muted text-muted-foreground border-border' },
@@ -277,7 +277,7 @@ export default function HumanDecisionQueuePage() {
               Decision Queue
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Review the document, correct its type or mailbox, and browse the actual SharePoint destination folders. Every routing decision becomes reusable AI guidance.
+              Review the document, correct its type or routing lane, and browse the actual SharePoint destination folders. Classification corrections may inform AI learning; routing changes apply only to the current document.
             </p>
           </div>
         </div>

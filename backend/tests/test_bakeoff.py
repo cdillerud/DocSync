@@ -10,7 +10,7 @@ import os
 import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
-API = f"{BASE_URL}/api/bakeoff"
+API = f"{BASE_URL}/api/intake-benchmark"
 
 
 class TestBakeOffRuns:

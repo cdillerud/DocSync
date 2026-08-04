@@ -168,6 +168,7 @@ async def split_and_ingest_batch(
     """
     import asyncio
     from services.document_bytes_intake_service import intake_document_from_bytes
+    from services.intake_provenance_service import inherit_intake_provenance
 
     now = datetime.now(timezone.utc).isoformat()
     reader = PdfReader(io.BytesIO(file_content))
@@ -189,6 +190,13 @@ async def split_and_ingest_batch(
             "customer_canonical": 1,
             "customer_id": 1,
             "mailbox_category": 1,
+            "source_mailbox": 1,
+            "source_mailbox_id": 1,
+            "source_lane": 1,
+            "original_mailbox_category": 1,
+            "routing_override_applied": 1,
+            "routing_override_from": 1,
+            "routing_override_to": 1,
         },
     ) or {}
 
@@ -256,9 +264,13 @@ async def split_and_ingest_batch(
             )
 
             if child_doc_id:
+                child_provenance = inherit_intake_provenance(
+                    parent_doc
+                )
                 await db.hub_documents.update_one(
                     {"id": child_doc_id},
                     {"$set": {
+                        **child_provenance,
                         "batch_parent_id": parent_doc_id,
                         "batch_page_num": pages[0] if len(pages) == 1 else None,
                         "batch_pages": sorted(pages),

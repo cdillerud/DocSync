@@ -649,6 +649,7 @@ async def _poll_mailbox_for_attachments_unlocked():
                         try:
                             # Lazy import to avoid circular dependency
                             from services.document_bytes_intake_service import intake_document_from_bytes
+                            from services.intake_provenance_service import persist_intake_provenance
                             resolved_category = normalize_mailbox_category("AP")
                             logger.info(
                                 "[Intake:legacy_ap] mailbox=%s configured_category=%s resolved_category=%s filename=%s",
@@ -660,7 +661,20 @@ async def _poll_mailbox_for_attachments_unlocked():
                                 email_id=msg_id, subject=subject, sender=sender,
                                 mailbox_category=resolved_category,
                             )
-                            doc_id = intake_result.get("document", {}).get("id")
+                            await persist_intake_provenance(
+                                db,
+                                intake_result,
+                                source_mailbox=EMAIL_POLLING_USER,
+                                source_mailbox_id=None,
+                                source_lane=resolved_category,
+                                mailbox_category=resolved_category,
+                                routing_override_applied=False,
+                                email_id=msg_id,
+                            )
+                            doc_id = (
+                                intake_result.get("document_id")
+                                or intake_result.get("document", {}).get("id")
+                            )
                             await record_mail_intake_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=att_hash,
@@ -1107,7 +1121,10 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
 
                                 # Lazy import to avoid circular dependency
                                 from services.document_bytes_intake_service import intake_document_from_bytes
-                                resolved_category = normalize_mailbox_category(default_category)
+                                from services.intake_provenance_service import persist_intake_provenance
+                                configured_category = normalize_mailbox_category(default_category)
+                                resolved_category = configured_category
+                                routing_override_applied = False
                                 # Learned sender override (2026-07-17): if a
                                 # specific sender has been identified as a
                                 # confirmed AP-invoice source despite landing
@@ -1129,6 +1146,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                             sender, resolved_category, override_category, filename,
                                         )
                                         resolved_category = normalize_mailbox_category(override_category)
+                                        routing_override_applied = True
                                 except Exception as override_err:
                                     logger.warning(
                                         "[Intake:dynamic] sender routing override lookup failed "
@@ -1144,6 +1162,16 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                     source="email", sender=sender, subject=subject,
                                     email_id=internet_msg_id, content_type=content_type,
                                     mailbox_category=resolved_category,
+                                )
+                                await persist_intake_provenance(
+                                    db,
+                                    result,
+                                    source_mailbox=mailbox_address,
+                                    source_mailbox_id=source_id,
+                                    source_lane=configured_category,
+                                    mailbox_category=resolved_category,
+                                    routing_override_applied=routing_override_applied,
+                                    email_id=internet_msg_id,
                                 )
 
                                 doc_id = (

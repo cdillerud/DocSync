@@ -10,7 +10,7 @@ Pattern (per signed declaration):
    match the 6 sibling ``emit_*`` primitives already resident there).
 3. Leave a 4-line delegating shim at server.py:2712 so
    ``from server import _emit_intake_events`` continues to resolve.
-4. Rewire ``services.document_handlers.intake_document_from_bytes``
+4. Rewire ``services.document_bytes_intake_service.intake_document_from_bytes``
    lazy-import cascade with alias preservation:
    ``from services.event_service import emit_intake_events
     as _emit_intake_events``.
@@ -171,13 +171,15 @@ class TestLazyBlockShrunk:
         )
 
     def test_new_4d5_import_line_with_alias_present(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
-        ).read_text()
+        from services import document_bytes_intake_service
+
+        intake_src = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
+        )
         assert (
             "from services.event_service import "
             "emit_intake_events as _emit_intake_events"
-        ) in handlers_src, "Step 4d.5 alias-import line missing"
+        ) in intake_src, "Step 4d.5 alias-import line missing"
 
 
 # ---------------------------------------------------------------------------
@@ -289,10 +291,12 @@ class TestAuthoritativeBodyByteIdentical:
 # ---------------------------------------------------------------------------
 class TestCallSiteByteParity:
     def test_intake_use_site_intact(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
-        ).read_text()
-        assert "await _emit_intake_events(" in handlers_src, (
+        from services import document_bytes_intake_service
+
+        intake_src = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
+        )
+        assert "await _emit_intake_events(" in intake_src, (
             "intake call-site byte parity lost"
         )
         # Exact canonical argument spelling (byte-identical to pre-4d.5).
@@ -301,7 +305,7 @@ class TestCallSiteByteParity:
             "            doc_id, correlation_id, classification, validation_results,\n"
             "            sp_result, decision, auto_clear_result\n"
             "        )"
-        ) in handlers_src, "intake call-site arg-shape drift"
+        ) in intake_src, "intake call-site arg-shape drift"
 
 
 # ---------------------------------------------------------------------------

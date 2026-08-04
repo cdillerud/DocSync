@@ -2168,23 +2168,20 @@ async def bulk_classify_documents(
     doc_ids: List[str] = Query(..., description="Document IDs to classify"),
     doc_type: str = Query(..., description="Document type to assign (e.g. AP_Invoice, BOL, SHIPPING)"),
     mailbox_category: Optional[str] = Query(
-        None, description="If provided, also corrects the document's "
-                           "mailbox/routing lane (e.g. AP, Operations, "
-                           "Sales) and teaches the system this sender's "
-                           "correct routing for future documents."),
+        None, description="If provided, also corrects this document's "
+                           "routing lane (e.g. AP, Operations, Sales). "
+                           "This endpoint does not create a sender-wide "
+                           "routing rule."),
     reclassify_by: str = Query("admin", description="Who is performing the reclassification"),
 ):
     """
     Bulk assign/change document type for multiple documents.
     Records classification corrections for AI learning feedback.
 
-    When mailbox_category is also provided, this additionally corrects
-    routing and writes a sender routing override rule - a human
-    correction is the highest-trust signal in the system, so this
-    happens unconditionally (no confidence score, no cohort-size
-    threshold) and unconditionally overwrites any existing rule for
-    that sender, since a direct human correction supersedes an earlier
-    automated inference.
+    When mailbox_category is also provided, this corrects only the
+    selected document's routing lane. Sender-wide routing rules require
+    a separate explicit learning workflow and are not created by this
+    endpoint.
     """
     from datetime import datetime, timezone
     db = get_db()

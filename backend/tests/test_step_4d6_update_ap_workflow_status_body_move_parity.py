@@ -13,7 +13,7 @@ Pattern (per signed declaration):
    ``workflows.ap_invoice.rules.vendor_profile.update_vendor_profile_incremental``).
 3. Leave a 4-statement delegating shim at server.py:2253 so
    ``from server import _update_ap_workflow_status`` continues to resolve.
-4. Rewire ``services.document_handlers.intake_document_from_bytes`` lazy
+4. Rewire ``services.document_bytes_intake_service.intake_document_from_bytes`` lazy
    import cascade with alias preservation:
    ``from workflows.ap_invoice.rules.workflow_status import
       update_ap_workflow_status as _update_ap_workflow_status``.
@@ -187,14 +187,16 @@ class TestLazyBlockShrunk:
         )
 
     def test_new_4d6_import_line_with_alias_present(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
-        ).read_text()
+        from services import document_bytes_intake_service
+
+        intake_src = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
+        )
         assert (
             "from workflows.ap_invoice.rules.workflow_status import (\n"
             "        update_ap_workflow_status as _update_ap_workflow_status,\n"
             "    )"
-        ) in handlers_src, "Step 4d.6 alias-import block missing"
+        ) in intake_src, "Step 4d.6 alias-import block missing"
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +305,12 @@ class TestAuthoritativeBodyByteIdentical:
 # ---------------------------------------------------------------------------
 class TestCallSiteByteParity:
     def test_intake_use_site_intact(self):
-        handlers_src = Path(
-            BACKEND_ROOT / "services" / "document_handlers.py"
-        ).read_text()
-        assert "await _update_ap_workflow_status(" in handlers_src, (
+        from services import document_bytes_intake_service
+
+        intake_src = inspect.getsource(
+            document_bytes_intake_service.intake_document_from_bytes
+        )
+        assert "await _update_ap_workflow_status(" in intake_src, (
             "intake call-site byte parity lost"
         )
 

@@ -22,8 +22,11 @@ if not BASE:
             if line.startswith("REACT_APP_BACKEND_URL="):
                 BASE = line.split("=", 1)[1].strip().rstrip("/")
 
-MONGO_URL = "mongodb://localhost:27017"
-DB_NAME = "gpi_document_hub"
+MONGO_URL = os.environ.get(
+    "MONGO_URL",
+    "mongodb://localhost:27017",
+)
+DB_NAME = os.environ.get("DB_NAME", "gpi_document_hub")
 
 TEST_PREFIX = "TEST_iter231_"
 TEST_ACTOR = "TEST_iter231_actor"

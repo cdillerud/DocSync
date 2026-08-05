@@ -377,10 +377,10 @@ class TestShadowModePerformanceReport:
         
         # Verify factor names
         factor_names = [f["factor"] for f in factors]
-        assert "High Confidence Documents" in factor_names
+        assert "High Confidence Documents (≥0.92)" in factor_names
         assert "Alias Exception Rate" in factor_names
-        assert "Overall Automation Rate" in factor_names
-        assert "Data Volume" in factor_names
+        assert "Stable Vendors (≥0.94 avg score)" in factor_names
+        assert "Data Volume (Observed Docs)" in factor_names
     
     def test_shadow_mode_report_has_match_score_analysis(self):
         """Verify response contains match_score_analysis"""

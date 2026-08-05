@@ -8,8 +8,15 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone, timedelta
-from deps import get_db, ENABLE_CREATE_DRAFT_HEADER, DEMO_MODE
-from models.document_types import DEFAULT_JOB_TYPES, TransactionAction
+from deps import (
+    get_db,
+    ENABLE_CREATE_DRAFT_HEADER,
+    DEMO_MODE,
+    EMAIL_POLLING_ENABLED,
+    EMAIL_POLLING_INTERVAL_MINUTES,
+    EMAIL_POLLING_USER,
+)
+from models.document_types import DEFAULT_JOB_TYPES, DRAFT_CREATION_CONFIG, TransactionAction
 from services.vendor_name_helpers import normalize_vendor_name
 
 router = APIRouter(tags=["Metrics"])
@@ -1087,6 +1094,7 @@ async def get_shadow_mode_performance_report(days: int = 14):
             "recommendation_detail": recommendation_detail,
             "shadow_mode_days": shadow_status["shadow_mode"]["days_running"],
             "total_documents_processed": total_docs,
+            "automation_rate": automation_metrics["automation_rate"],
             "high_confidence_pct": high_conf_pct
         },
         "readiness_factors": readiness_factors,

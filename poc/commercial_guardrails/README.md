@@ -86,6 +86,8 @@ It joins posted Sales Invoice Header and Sales Invoice Line data and exposes:
 
 Because it is an `API` query and `DataAccessIntent = ReadOnly`, it does not expose BC write operations.
 
+The extension also defines assignable permission set `GPI COMM GUARD POC`. It grants only read access to posted Sales Invoice Header/Line data plus execute permission to the API query. Assign that permission set to the BC Entra application used for the POC rather than granting a broad functional role.
+
 ### Fallback source: Microsoft Analytics API
 
 The adapter can also read:

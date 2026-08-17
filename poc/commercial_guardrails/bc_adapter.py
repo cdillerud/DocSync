@@ -142,6 +142,9 @@ class BusinessCentralClient:
     @property
     def environment_root(self) -> str:
         env = quote(self.config.environment, safe="")
+        if self.config.tenant_id:
+            tenant = quote(self.config.tenant_id, safe="")
+            return f"{BC_API_HOST}/v2.0/{tenant}/{env}"
         return f"{BC_API_HOST}/v2.0/{env}"
 
     def _get_token(self) -> str:

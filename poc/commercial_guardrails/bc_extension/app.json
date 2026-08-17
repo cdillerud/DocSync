@@ -10,8 +10,8 @@
   "help": "",
   "url": "",
   "dependencies": [],
-  "platform": "25.0.0.0",
-  "application": "25.0.0.0",
+  "platform": "24.0.0.0",
+  "application": "24.0.0.0",
   "idRanges": [
     {
       "from": 70690,
@@ -19,6 +19,7 @@
     }
   ],
   "runtime": "14.0",
+  "target": "Cloud",
   "features": [
     "NoImplicitWith"
   ]

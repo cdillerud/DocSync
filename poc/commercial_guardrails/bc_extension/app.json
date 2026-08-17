@@ -1,0 +1,25 @@
+{
+  "id": "da9be07f-0ebb-4086-b949-bd86139a4547",
+  "name": "GPI Commercial Guardrails POC",
+  "publisher": "Gamer Packaging, Inc.",
+  "version": "0.1.0.0",
+  "brief": "Read-only historical sales API for the GPI Commercial Guardrail POC.",
+  "description": "POC extension exposing posted sales history through a read-only API query.",
+  "privacyStatement": "",
+  "EULA": "",
+  "help": "",
+  "url": "",
+  "dependencies": [],
+  "platform": "25.0.0.0",
+  "application": "25.0.0.0",
+  "idRanges": [
+    {
+      "from": 70690,
+      "to": 70699
+    }
+  ],
+  "runtime": "14.0",
+  "features": [
+    "NoImplicitWith"
+  ]
+}

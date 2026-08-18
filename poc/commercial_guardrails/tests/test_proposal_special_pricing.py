@@ -57,6 +57,20 @@ class ProposalSpecialPricingTests(unittest.TestCase):
         actionable = [e for e in exceptions if e.exception_type != "SPECIAL_PRICING_PROTECTED"]
         self.assertTrue(all("REVIEW SPECIAL PRICING RULE" in e.recommended_action for e in actionable))
 
+    def test_quote_exception_is_rewritten_by_special_pricing(self):
+        rules = [ProposalPricingRule("BRAGG", "RING12", "SPECIAL_PRICING", approver="Commercial Lead")]
+        quote_exc = price_exception("QUOTE_BELOW_CUSTOMER_HISTORY")
+        quote_exc.recommended_action = "REVIEW PROPOSED EXTRA PRICE AGAINST CUSTOMER HISTORY"
+
+        _, exceptions = apply_special_pricing_firewall(
+            proposal(),
+            [quote_exc],
+            rules,
+            as_of="2026-08-17",
+        )
+        rewritten = next(e for e in exceptions if e.exception_type == "QUOTE_BELOW_CUSTOMER_HISTORY")
+        self.assertEqual(rewritten.recommended_action, "REVIEW SPECIAL PRICING RULE WITH Commercial Lead")
+
     def test_item_substitution_action_is_not_rewritten(self):
         rules = [ProposalPricingRule("BRAGG", "RING12", "SPECIAL_PRICING", approver="Commercial Lead")]
         item_exc = price_exception("SIMILAR_ITEM_SUBSTITUTION")

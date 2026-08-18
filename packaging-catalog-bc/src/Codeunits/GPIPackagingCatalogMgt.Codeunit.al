@@ -1,6 +1,6 @@
-codeunit 71000 "GPI Packaging Catalog Mgt."
+codeunit 71000 "GPI Pack Catalog Mgt"
 {
-    Permissions = tabledata "GPI Pack Price History" = I;
+    Permissions = tabledata "GPI Pack Price Hist" = I;
 
     procedure CalculateMetricTonCost(UnitCost: Decimal; GramWeight: Decimal): Decimal
     begin
@@ -10,7 +10,7 @@ codeunit 71000 "GPI Packaging Catalog Mgt."
         exit(Round((1000000 / GramWeight) * UnitCost, 0.01, '='));
     end;
 
-    procedure RecalculateMetricTonCost(var Product: Record "GPI Packaging Product")
+    procedure RecalculateMetricTonCost(var Product: Record "GPI Pack Product")
     var
         NewMetricTonCost: Decimal;
     begin
@@ -22,9 +22,9 @@ codeunit 71000 "GPI Packaging Catalog Mgt."
         Product.Modify(true);
     end;
 
-    procedure LogPriceChange(Product: Record "GPI Packaging Product"; OldProduct: Record "GPI Packaging Product")
+    procedure LogPriceChange(Product: Record "GPI Pack Product"; OldProduct: Record "GPI Pack Product")
     var
-        PriceHistory: Record "GPI Pack Price History";
+        PriceHistory: Record "GPI Pack Price Hist";
         EffectiveDate: Date;
     begin
         if (Product."Current Supplier Unit Cost" = OldProduct."Current Supplier Unit Cost") and

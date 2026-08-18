@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .bc_adapter import BCConfig, BusinessCentralClient, BusinessCentralError
+from .bc_pricing_rules import fetch_bc_pricing_rules
 from .bc_standard import fetch_standard_customer_family_history, write_family_history_csv
 from .item_similarity import ItemCandidate, discover_related_items
 from .proposal_guard import Proposal, analyze_proposal
@@ -94,8 +95,16 @@ def main() -> int:
     parser.add_argument(
         "--guardrails",
         help=(
-            "Optional CSV of protected SPECIAL_PRICING/FIXED_PRICE rules. Supports customer_no, "
-            "item_no, rule_type, locked_sell_price, effective_from, effective_to, approver, notes."
+            "Optional local CSV override for protected SPECIAL_PRICING/FIXED_PRICE rules. "
+            "If omitted, enabled pricing rules are read from Business Central."
+        ),
+    )
+    parser.add_argument(
+        "--no-special-pricing",
+        action="store_true",
+        help=(
+            "Explicitly disable the special-pricing firewall. Intended only for troubleshooting; "
+            "Business Central is the default authoritative rule source."
         ),
     )
     parser.add_argument(
@@ -117,10 +126,15 @@ def main() -> int:
     parser.add_argument("--json-out", help="Optional local JSON proposal audit")
     args = parser.parse_args()
 
+    if args.no_special_pricing and args.guardrails:
+        parser.error("--guardrails cannot be combined with --no-special-pricing")
+
     discovered: list[ItemCandidate] = []
     proposed_master: dict = {}
     margin_transactions = []
     margin_error = ""
+    pricing_rules = []
+    pricing_source = "DISABLED" if args.no_special_pricing else "BUSINESS CENTRAL"
 
     try:
         config = BCConfig.from_env(source="custom")
@@ -158,8 +172,25 @@ def main() -> int:
                 )
             except BusinessCentralError as exc:
                 margin_error = str(exc)
+
+        if not args.no_special_pricing and not args.guardrails:
+            try:
+                pricing_rules = fetch_bc_pricing_rules(client)
+            except (BusinessCentralError, ValueError) as exc:
+                parser.error(
+                    "Special-pricing firewall could not read Business Central pricing rules. "
+                    "Refusing to continue without the authoritative protection layer. "
+                    f"Detail: {exc}"
+                )
     except BusinessCentralError as exc:
         parser.error(str(exc))
+
+    if args.guardrails:
+        pricing_source = "CSV OVERRIDE"
+        try:
+            pricing_rules = load_proposal_pricing_rules(args.guardrails)
+        except (OSError, ValueError) as exc:
+            parser.error(f"Unable to load guardrail rules: {exc}")
 
     if args.history_out:
         write_family_history_csv(history, args.history_out)
@@ -209,18 +240,19 @@ def main() -> int:
         "approvers": [],
         "notes": [],
         "rules": [],
+        "source": pricing_source,
+        "rules_loaded": len(pricing_rules),
     }
-    if args.guardrails:
-        try:
-            pricing_rules = load_proposal_pricing_rules(args.guardrails)
-        except (OSError, ValueError) as exc:
-            parser.error(f"Unable to load guardrail rules: {exc}")
+
+    if not args.no_special_pricing:
         special_pricing_context, exceptions = apply_special_pricing_firewall(
             proposal,
             exceptions,
             pricing_rules,
             as_of=proposal_date,
         )
+        special_pricing_context["source"] = pricing_source
+        special_pricing_context["rules_loaded"] = len(pricing_rules)
 
     status = "REVIEW REQUIRED" if exceptions else "PASS"
 
@@ -239,8 +271,11 @@ def main() -> int:
     print(f"Family items       : {len(family_items)}")
     print(f"BC history fetched : {len(history)} matching standard-API line(s)")
     print(f"Margin check       : {'OFF' if args.no_margin else ('UNAVAILABLE' if margin_error else 'ON')}")
-    if not args.guardrails:
-        pricing_status = "OFF"
+    print(f"Pricing rule source: {pricing_source}")
+    print(f"Pricing rules read : {len(pricing_rules)}")
+
+    if args.no_special_pricing:
+        pricing_status = "OFF BY EXPLICIT OVERRIDE"
     elif special_pricing_context["protected"]:
         pricing_status = f"PROTECTED ({special_pricing_context['matched_rule_count']} rule(s))"
     else:
@@ -272,11 +307,13 @@ def main() -> int:
     if profile.get("historical_uoms"):
         print(f"Historical UOM(s)  : {', '.join(profile['historical_uoms'])}")
 
-    if args.guardrails:
+    if not args.no_special_pricing:
         print("\nSPECIAL PRICING FIREWALL")
+        print(f"  Rule source        : {pricing_source}")
+        print(f"  Rules loaded       : {len(pricing_rules)}")
         print(f"  Proposal date      : {special_pricing_context['as_of']}")
         print(f"  Protected          : {'YES' if special_pricing_context['protected'] else 'NO'}")
-        print(f"  Active rules       : {special_pricing_context['matched_rule_count']}")
+        print(f"  Active matches     : {special_pricing_context['matched_rule_count']}")
         if special_pricing_context["rule_types"]:
             print(f"  Rule type(s)       : {', '.join(special_pricing_context['rule_types'])}")
         if special_pricing_context["approvers"]:

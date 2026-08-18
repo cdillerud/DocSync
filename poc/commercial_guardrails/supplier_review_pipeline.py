@@ -64,7 +64,9 @@ class SupplierReviewArtifacts:
 
 
 def _safe_source_name(name: str) -> str:
-    leaf = Path(str(name or "supplier_notice")).name
+    # Treat both Windows and POSIX separators as path separators regardless of host OS.
+    raw = str(name or "supplier_notice").replace("\\", "/")
+    leaf = raw.rsplit("/", 1)[-1]
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", leaf).strip("._")
     return cleaned or "supplier_notice"
 

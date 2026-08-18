@@ -72,22 +72,16 @@ def update_decision(
 
 
 def summarize_queue(records: Sequence[Mapping[str, object]]) -> dict:
-    def _num(value: object) -> float:
-        try:
-            return float(value or 0)
-        except (TypeError, ValueError):
-            return 0.0
-
     return {
         "items": len(records),
         "protected_items": sum(
             str(row.get("queue_status") or "").strip().upper() == "PROTECTED_REVIEW"
             for row in records
         ),
-        "affected_customers": sum(_num(row.get("affected_customers")) for row in records),
-        "protected_customers": sum(_num(row.get("protected_customers")) for row in records),
+        "affected_customers": sum(_float(row.get("affected_customers")) for row in records),
+        "protected_customers": sum(_float(row.get("protected_customers")) for row in records),
         "estimated_margin_erosion": sum(
-            _num(row.get("estimated_margin_erosion")) for row in records
+            _float(row.get("estimated_margin_erosion")) for row in records
         ),
     }
 
@@ -144,6 +138,59 @@ def _float(value: object) -> float:
         return float(value or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().casefold() in {"true", "1", "yes", "y"}
+
+
+def validate_detail_consistency(
+    queue_record: Mapping[str, object],
+    detail_rows: Sequence[Mapping[str, object]],
+    *,
+    erosion_tolerance: float = 0.02,
+) -> list[str]:
+    """Detect a stale or mismatched customer-detail snapshot before a reviewer can act.
+
+    The approval queue and customer detail are generated from the same margin analysis. If
+    their customer count, protected-customer count, erosion total, or top exposure disagree,
+    the cockpit must treat the detail file as stale rather than silently displaying mixed runs.
+    """
+    item = str(queue_record.get("gpi_item_no") or "selected item").strip()
+    expected_customers = int(round(_float(queue_record.get("affected_customers"))))
+    expected_protected = int(round(_float(queue_record.get("protected_customers"))))
+    expected_erosion = _float(queue_record.get("estimated_margin_erosion"))
+    expected_top = str(queue_record.get("top_customer_no") or "").strip().casefold()
+
+    actual_customers = len(detail_rows)
+    actual_protected = sum(_truthy(row.get("special_pricing_protected")) for row in detail_rows)
+    actual_erosion = sum(_float(row.get("estimated_margin_erosion")) for row in detail_rows)
+    actual_top = ""
+    if detail_rows:
+        actual_top_row = max(
+            detail_rows,
+            key=lambda row: _float(row.get("estimated_margin_erosion")),
+        )
+        actual_top = str(actual_top_row.get("customer_no") or "").strip().casefold()
+
+    errors: list[str] = []
+    if actual_customers != expected_customers:
+        errors.append(
+            f"{item}: customer detail has {actual_customers} row(s), but the approval queue expects {expected_customers}"
+        )
+    if actual_protected != expected_protected:
+        errors.append(
+            f"{item}: customer detail has {actual_protected} protected customer(s), but the approval queue expects {expected_protected}"
+        )
+    if abs(actual_erosion - expected_erosion) > max(erosion_tolerance, abs(expected_erosion) * 0.0001):
+        errors.append(
+            f"{item}: customer-detail erosion ${actual_erosion:,.2f} does not match queue erosion ${expected_erosion:,.2f}"
+        )
+    if expected_top and actual_top and actual_top != expected_top:
+        errors.append(
+            f"{item}: customer detail top exposure does not match the approval queue"
+        )
+    return errors
 
 
 def validate_decisions(records: Sequence[Mapping[str, object]]) -> list[str]:

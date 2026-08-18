@@ -6,6 +6,7 @@ page 71005 "GPI Pack Cost Works"
     UsageCategory = Tasks;
     Caption = 'GPI Packaging Landed Cost Worksheets';
     CardPageId = "GPI Pack Cost Calc";
+    Editable = false;
 
     layout
     {

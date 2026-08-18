@@ -262,6 +262,42 @@ page 71006 "GPI Pack Cost Calc"
                     ApplicationArea = All;
                 }
             }
+            group(Margin)
+            {
+                Caption = 'Margin and Sell Price';
+
+                field("Target Gross Margin %"; Rec."Target Gross Margin %")
+                {
+                    ApplicationArea = All;
+
+                    trigger OnValidate()
+                    begin
+                        CostMgt.Recalculate(Rec);
+                        CurrPage.Update(true);
+                    end;
+                }
+                field("Suggested Sell Price"; Rec."Suggested Sell Price")
+                {
+                    ApplicationArea = All;
+                    Style = Strong;
+                }
+                field("Gross Profit per Unit"; Rec."Gross Profit per Unit")
+                {
+                    ApplicationArea = All;
+                }
+                field("Extended Cost"; Rec."Extended Cost")
+                {
+                    ApplicationArea = All;
+                }
+                field("Extended Sell"; Rec."Extended Sell")
+                {
+                    ApplicationArea = All;
+                }
+                field("Gross Profit Total"; Rec."Gross Profit Total")
+                {
+                    ApplicationArea = All;
+                }
+            }
             group(Results)
             {
                 field("Landed Cost per Unit"; Rec."Landed Cost per Unit")

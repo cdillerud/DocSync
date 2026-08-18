@@ -11,6 +11,7 @@ from poc.commercial_guardrails.supplier_cockpit_core import (
     summarize_queue,
     update_decision,
     validate_decisions,
+    validate_detail_consistency,
     write_decision_csv,
 )
 
@@ -153,6 +154,70 @@ class SupplierCockpitCoreTests(unittest.TestCase):
         self.assertEqual(updated[0]["decision"], "APPROVE")
         self.assertEqual(updated[0]["decision_by"], "Chad")
         self.assertEqual(updated[1]["decision"], "")
+
+    def test_detail_consistency_passes_for_same_snapshot(self):
+        queue = {
+            "gpi_item_no": "ITEM1",
+            "affected_customers": "2",
+            "protected_customers": "0",
+            "estimated_margin_erosion": "150.00",
+            "top_customer_no": "A",
+        }
+        detail = [
+            {
+                "customer_no": "A",
+                "estimated_margin_erosion": "100.00",
+                "special_pricing_protected": "False",
+            },
+            {
+                "customer_no": "B",
+                "estimated_margin_erosion": "50.00",
+                "special_pricing_protected": "False",
+            },
+        ]
+        self.assertEqual(validate_detail_consistency(queue, detail), [])
+
+    def test_detail_consistency_detects_stale_protection_state(self):
+        queue = {
+            "gpi_item_no": "ITEM1",
+            "affected_customers": "2",
+            "protected_customers": "0",
+            "estimated_margin_erosion": "150.00",
+            "top_customer_no": "A",
+        }
+        detail = [
+            {
+                "customer_no": "A",
+                "estimated_margin_erosion": "100.00",
+                "special_pricing_protected": "True",
+            },
+            {
+                "customer_no": "B",
+                "estimated_margin_erosion": "50.00",
+                "special_pricing_protected": "False",
+            },
+        ]
+        errors = validate_detail_consistency(queue, detail)
+        self.assertTrue(any("protected customer" in error for error in errors))
+
+    def test_detail_consistency_detects_customer_and_erosion_mismatch(self):
+        queue = {
+            "gpi_item_no": "ITEM1",
+            "affected_customers": "2",
+            "protected_customers": "0",
+            "estimated_margin_erosion": "150.00",
+            "top_customer_no": "A",
+        }
+        detail = [
+            {
+                "customer_no": "A",
+                "estimated_margin_erosion": "99.00",
+                "special_pricing_protected": "False",
+            }
+        ]
+        errors = validate_detail_consistency(queue, detail)
+        self.assertTrue(any("customer detail has 1 row" in error for error in errors))
+        self.assertTrue(any("does not match queue erosion" in error for error in errors))
 
 
 if __name__ == "__main__":

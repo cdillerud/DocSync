@@ -43,7 +43,7 @@ Freight-rate matching prioritizes the most specific active rate and then falls b
 
 ## Milestone 3: deterministic margin guidance
 
-Version `0.3.0.0` adds deterministic gross-margin and sell-price calculations on the landed-cost worksheet:
+Validated in UAT:
 
 - target gross margin percent
 - suggested sell price per unit calculated as landed cost divided by one minus target gross margin
@@ -54,15 +54,35 @@ Version `0.3.0.0` adds deterministic gross-margin and sell-price calculations on
 
 These calculations remain Business Central logic. AI is not allowed to invent, override, or independently determine pricing.
 
+## Milestone 4: commercial guardrail integration
+
+Version `0.4.0.0` absorbs the useful Business Central portion of the existing `GPI Commercial Guardrails POC` into this extension rather than creating a competing pricing-rule design.
+
+Integrated objects preserve the existing read-only API contract under `gpi/commercialGuardrails/v1.0`:
+
+- enabled customer/item pricing guardrails
+- special-pricing and fixed-price rule types
+- effective dating
+- configured approver and notes
+- historical posted sales-line API
+- item cost and UOM context API
+- in-BC guardrail maintenance page
+
+The uploaded Commercial Guardrail Python source remains the behavioral regression oracle. Its 102 unit tests pass as supplied. Important retained behaviors include exact item/UOM matching, customer-specific history, protected special pricing, fixed-price mismatch detection, supplier-cost margin impact, and explicit review/reject states rather than invented replacement prices.
+
+The standalone `GPI Commercial Guardrails POC` BC app should only be retired from the sandbox after this integrated version compiles and the preserved API endpoints are validated. Both apps should not remain installed with the same API entity routes.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
 
-## Deferred until margin guidance is validated
+## Next BC-only work
 
-- customer-specific pricing guardrails
-- saved packaging quotes and quote lines
+- connect packaging products to authoritative BC item/customer pricing history where applicable
+- evaluate proposed packaging sell prices through the ported guardrail semantics
+- add saved packaging quote header and lines
+- add auditable quote approval state and consequential pricing history
 - best-price comparison and route/mileage automation
 - bulk import of the real packaging catalog once a non-empty source export is available
-- Spiro integration
-- Copilot Studio orchestration
+
+Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules and quote workflow are validated.

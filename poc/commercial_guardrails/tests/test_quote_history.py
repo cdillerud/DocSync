@@ -43,7 +43,14 @@ class QuoteHistoryTests(unittest.TestCase):
         self.assertEqual(stats["customers"], 2)
         self.assertAlmostEqual(stats["median_price"], 950.0, places=2)
         self.assertAlmostEqual(stats["average_price"], 950.0, places=2)
-        self.assertEqual([row["customer_no"] for row in profile["by_customer"]], ["HUMMKOM", "TALKING"])
+
+        # by_customer is intentionally ranked by line count and then recency for the
+        # live history probe. This test cares that each customer's own price remains
+        # visible, not about the presentation order of equal-sized customer groups.
+        by_customer = {row["customer_no"]: row for row in profile["by_customer"]}
+        self.assertEqual(set(by_customer), {"HUMMKOM", "TALKING"})
+        self.assertAlmostEqual(by_customer["HUMMKOM"]["median_price"], 1000.0, places=2)
+        self.assertAlmostEqual(by_customer["TALKING"]["median_price"], 900.0, places=2)
 
     def test_customer_specific_summary_does_not_borrow_other_customer_price(self):
         profile = summarize_quote_history(

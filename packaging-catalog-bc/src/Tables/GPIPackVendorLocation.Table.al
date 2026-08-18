@@ -1,9 +1,9 @@
-table 71001 "GPI Pack Vendor Location"
+table 71001 "GPI Pack Vendor Loc"
 {
     Caption = 'GPI Packaging Vendor Location';
     DataClassification = CustomerContent;
-    LookupPageId = "GPI Pack Vendor Locations";
-    DrillDownPageId = "GPI Pack Vendor Locations";
+    LookupPageId = "GPI Pack Vendor Locs";
+    DrillDownPageId = "GPI Pack Vendor Locs";
 
     fields
     {

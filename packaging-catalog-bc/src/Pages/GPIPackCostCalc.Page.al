@@ -24,7 +24,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.InitializeFromProduct(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Calculation Date"; Rec."Calculation Date")
@@ -34,7 +34,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.ClearFreightRate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Vendor No."; Rec."Vendor No.")
@@ -45,7 +45,7 @@ page 71006 "GPI Pack Cost Calc"
                     begin
                         Rec."Vendor Location Code" := '';
                         CostMgt.ClearFreightRate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Vendor Name"; Rec."Vendor Name")
@@ -59,7 +59,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.ClearFreightRate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("FOB City"; Rec."FOB City")
@@ -77,7 +77,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.ClearFreightRate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field(Mode; Rec.Mode)
@@ -87,7 +87,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.ClearFreightRate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
             }
@@ -100,7 +100,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Gram Weight"; Rec."Gram Weight")
@@ -110,7 +110,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Shipment CWT"; Rec."Shipment CWT")
@@ -124,7 +124,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Unit Cost"; Rec."Unit Cost")
@@ -134,7 +134,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Pallet Cost per Pallet"; Rec."Pallet Cost per Pallet")
@@ -144,7 +144,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Pallet Cost per Unit"; Rec."Pallet Cost per Unit")
@@ -161,7 +161,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Freight Rate Entry No."; Rec."Freight Rate Entry No.")
@@ -191,7 +191,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Domestic Freight Total"; Rec."Domestic Freight Total")
@@ -212,7 +212,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Tariff per Unit"; Rec."Tariff per Unit")
@@ -226,7 +226,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Intl Freight per Unit"; Rec."Intl Freight per Unit")
@@ -240,7 +240,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Customs per Unit"; Rec."Customs per Unit")
@@ -254,7 +254,7 @@ page 71006 "GPI Pack Cost Calc"
                     trigger OnValidate()
                     begin
                         CostMgt.Recalculate(Rec);
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Delivery per Unit"; Rec."Delivery per Unit")
@@ -286,7 +286,7 @@ page 71006 "GPI Pack Cost Calc"
                 trigger OnAction()
                 begin
                     CostMgt.ApplyBestFreightRate(Rec);
-                    CurrPage.Update(false);
+                    CurrPage.Update(true);
                 end;
             }
             action(Recalculate)
@@ -298,7 +298,7 @@ page 71006 "GPI Pack Cost Calc"
                 trigger OnAction()
                 begin
                     CostMgt.Recalculate(Rec);
-                    CurrPage.Update(false);
+                    CurrPage.Update(true);
                 end;
             }
             action(FreightRates)

@@ -89,6 +89,9 @@ table 71005 "GPI Pricing Guard"
 
     local procedure ValidateRule()
     begin
+        if ("Customer No." = '') and ("Item No." = '') then
+            Error('Customer No. or Item No. must be specified. A guardrail cannot apply to every customer and every item.');
+
         if ("Effective From" <> 0D) and ("Effective To" <> 0D) and ("Effective To" < "Effective From") then
             Error('Effective To cannot be before Effective From.');
 

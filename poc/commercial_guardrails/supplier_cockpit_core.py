@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 from io import StringIO
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -25,6 +26,21 @@ def record_key(record: Mapping[str, object]) -> tuple[str, str, str]:
         str(record.get("supplier_item_no") or "").strip().casefold(),
         str(record.get("effective_date") or "").strip(),
     )
+
+
+def decision_widget_scope(
+    decision_path: str | Path,
+    key: tuple[str, str, str],
+) -> str:
+    """Return a stable widget scope unique to one review run and one queue item.
+
+    Two separate supplier-review runs can legitimately contain the same GPI item,
+    supplier item, and effective date. The decision-log path identifies the run so
+    Streamlit widget state cannot leak from one run into another.
+    """
+    run_identity = str(Path(decision_path).resolve()).casefold()
+    payload = "\x1f".join((run_identity, *key))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
 
 
 def merge_saved_decisions(

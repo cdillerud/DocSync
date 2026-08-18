@@ -188,7 +188,7 @@ def main() -> None:
 
     st.dataframe(
         _queue_view(filtered),
-        width="stretch",
+        use_container_width=True,
         hide_index=True,
         column_config={
             "Status": st.column_config.TextColumn("Status", width="medium"),
@@ -253,7 +253,7 @@ def main() -> None:
         if customer_rows:
             st.dataframe(
                 _customer_view(customer_rows),
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "Customer": st.column_config.TextColumn("Customer", width="small"),
@@ -303,7 +303,7 @@ def main() -> None:
             key=f"decision_notes:{key_text}",
         )
 
-        if st.button("Save decision", type="primary", width="stretch"):
+        if st.button("Save decision", type="primary", use_container_width=True):
             try:
                 candidate = update_decision(
                     working_records,
@@ -328,7 +328,7 @@ def main() -> None:
             data=records_to_csv(working_records),
             file_name=Path(decision_path).name,
             mime="text/csv",
-            width="stretch",
+            use_container_width=True,
         )
         st.caption("Saving here updates only the local decision log CSV.")
 

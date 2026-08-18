@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from poc.commercial_guardrails.supplier_cockpit_core import (
+    decision_widget_scope,
     detail_rows_for_item,
     load_csv_records,
     merge_saved_decisions,
@@ -101,6 +102,18 @@ class SupplierCockpitCoreTests(unittest.TestCase):
             "effective_date": "2026-09-01",
         }
         self.assertEqual(record_key(row), ("item1", "sup-1", "2026-09-01"))
+
+    def test_decision_widget_scope_is_stable_within_same_run(self):
+        key = ("item1", "sup-1", "2026-09-01")
+        first = decision_widget_scope("runs/run-a/decisions.csv", key)
+        second = decision_widget_scope("runs/run-a/decisions.csv", key)
+        self.assertEqual(first, second)
+
+    def test_decision_widget_scope_changes_between_runs(self):
+        key = ("item1", "sup-1", "2026-09-01")
+        first = decision_widget_scope("runs/run-a/decisions.csv", key)
+        second = decision_widget_scope("runs/run-b/decisions.csv", key)
+        self.assertNotEqual(first, second)
 
     def test_saved_decisions_overlay_fresh_queue_without_replacing_new_analysis(self):
         queue = [

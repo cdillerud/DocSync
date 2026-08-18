@@ -62,6 +62,18 @@ page 71005 "GPI Pack Cost Works"
                 {
                     ApplicationArea = All;
                 }
+                field("Target Gross Margin %"; Rec."Target Gross Margin %")
+                {
+                    ApplicationArea = All;
+                }
+                field("Suggested Sell Price"; Rec."Suggested Sell Price")
+                {
+                    ApplicationArea = All;
+                }
+                field("Gross Profit Total"; Rec."Gross Profit Total")
+                {
+                    ApplicationArea = All;
+                }
             }
         }
     }

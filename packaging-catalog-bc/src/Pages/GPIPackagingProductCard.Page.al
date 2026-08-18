@@ -72,6 +72,11 @@ page 71000 "GPI Pack Prod Card"
                 field("Vendor No."; Rec."Vendor No.")
                 {
                     ApplicationArea = All;
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(false);
+                    end;
                 }
                 field("Vendor Name"; Rec."Vendor Name")
                 {
@@ -80,6 +85,11 @@ page 71000 "GPI Pack Prod Card"
                 field("Vendor Location Code"; Rec."Vendor Location Code")
                 {
                     ApplicationArea = All;
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(false);
+                    end;
                 }
                 field("FOB City"; Rec."FOB City")
                 {
@@ -174,6 +184,33 @@ page 71000 "GPI Pack Prod Card"
                     CatalogMgt.RecalculateMetricTonCost(Rec);
                     CurrPage.Update(false);
                 end;
+            }
+            action(NewLandedCost)
+            {
+                ApplicationArea = All;
+                Caption = 'New Landed Cost';
+                Image = Calculate;
+
+                trigger OnAction()
+                var
+                    CostWork: Record "GPI Pack Cost Work";
+                    CostMgt: Codeunit "GPI Pack Cost Mgt";
+                begin
+                    Rec.TestField("No.");
+                    CostWork.Init();
+                    CostWork."Product No." := Rec."No.";
+                    CostWork."Calculation Date" := WorkDate();
+                    CostMgt.InitializeFromProduct(CostWork);
+                    CostWork.Insert(true);
+                    Page.Run(Page::"GPI Pack Cost Calc", CostWork);
+                end;
+            }
+            action(LandedCosts)
+            {
+                ApplicationArea = All;
+                Caption = 'Landed Cost Worksheets';
+                RunObject = page "GPI Pack Cost Works";
+                RunPageLink = "Product No." = field("No.");
             }
             action(VendorLocations)
             {

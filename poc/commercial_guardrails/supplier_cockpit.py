@@ -22,6 +22,7 @@ from poc.commercial_guardrails.supplier_cockpit_core import (
     summarize_queue,
     update_decision,
     validate_decisions,
+    validate_detail_consistency,
     write_decision_csv,
 )
 
@@ -220,12 +221,20 @@ def main() -> None:
     selected_key = record_key(selected)
     selected_status = str(selected.get("queue_status") or "").strip().upper()
     customer_rows = detail_rows_for_item(detail_records, selected_item)
+    detail_errors = validate_detail_consistency(selected, customer_rows)
 
     st.subheader(f"Item review: {selected_item}")
     st.caption(
         f"{selected.get('supplier_name', '')} | supplier item {selected.get('supplier_item_no', '') or 'n/a'} "
         f"| effective {selected.get('effective_date', '') or 'n/a'} | {selected.get('uom', '')}"
     )
+
+    if detail_errors:
+        st.error(
+            "Customer detail is out of sync with the approval queue. A decision is disabled until the "
+            "queue and detail files are regenerated from the same analysis snapshot.\n\n"
+            + "\n".join(f"- {error}" for error in detail_errors)
+        )
 
     review_col, decision_col = st.columns([3, 1])
 
@@ -263,7 +272,12 @@ def main() -> None:
             st.write(f"**Pricing approver:** {selected.get('pricing_approvers')}")
 
         st.markdown("#### Customer margin impact")
-        if customer_rows:
+        if detail_errors:
+            st.warning(
+                "Customer detail is suppressed because it was generated from a different analysis snapshot. "
+                "Regenerate the approval queue to refresh the matching margin-detail sidecar."
+            )
+        elif customer_rows:
             st.dataframe(
                 _customer_view(customer_rows),
                 use_container_width=True,
@@ -294,6 +308,8 @@ def main() -> None:
             f"{_status_label(selected_status)} | top exposure "
             f"{selected.get('top_customer_no', '')} {_money(selected.get('top_customer_erosion'))}"
         )
+        if detail_errors:
+            st.warning("Decision saving is disabled until the customer detail matches the approval queue.")
         current_decision = str(selected.get("decision") or "").strip().upper()
         options = list(DECISION_OPTIONS)
         if selected_status == "PROTECTED_REVIEW":
@@ -320,7 +336,12 @@ def main() -> None:
             key=f"decision_notes:{key_text}",
         )
 
-        if st.button("Save decision", type="primary", use_container_width=True):
+        if st.button(
+            "Save decision",
+            type="primary",
+            use_container_width=True,
+            disabled=bool(detail_errors),
+        ):
             try:
                 candidate = update_decision(
                     working_records,

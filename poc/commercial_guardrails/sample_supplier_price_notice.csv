@@ -1,0 +1,7 @@
+Vendor,Vendor Item No,GPI Item No,Product Description,Current Price,New Price,Effective Date,UOM,Min Qty,Freight Included,Currency
+Synthetic Glass Co,RG12-HF,20041936-P4305,"12oz PET ring neck hot fill bottle",160.00,169.60,2026-09-01,M,1,Yes,USD
+Synthetic Glass Co,RG12-CF,8404730008,"12oz PET ring neck cold fill bottle",240.00,252.00,09/15/2026,M,1,No,USD
+Synthetic Glass Co,ART-SET,BALLARTWORK,"Artwork setup charge",900.00,975.00,2026-10-01,EA,1,Yes,USD
+Synthetic Glass Co,NO-CURRENT,PAK06662,"12oz PET ring neck bulk bottle",,178.50,2026-09-01,M,1,Yes,USD
+Synthetic Glass Co,BAD-DATE,8404730003,"12oz PET cold fill bottle",300.00,315.00,TBD,M,1,Yes,USD
+Synthetic Glass Co,,,,100.00,,2026-09-01,EA,1,Yes,USD

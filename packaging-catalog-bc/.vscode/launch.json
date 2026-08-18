@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Sandbox_NoZetadocs_UAT",
+      "type": "al",
+      "request": "launch",
+      "environmentType": "Sandbox",
+      "environmentName": "Sandbox_NoZetadocs_UAT",
+      "startupObjectId": 71001,
+      "startupObjectType": "Page",
+      "schemaUpdateMode": "Synchronize",
+      "breakOnError": "All",
+      "launchBrowser": true
+    }
+  ]
+}

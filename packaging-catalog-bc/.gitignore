@@ -1,0 +1,5 @@
+.alpackages/
+.snapshots/
+*.app
+*.rad
+*.alcache

@@ -1,4 +1,4 @@
-customer_no,item_no,rule_type,min_gp_pct,min_sell_price,locked_sell_price,approver,notes
-CUST-GIO,RING12,SPECIAL_PRICING,,,,Charlie,Strategic customer pricing; do not auto-recommend a price change
-CUST-GIO,RING12,FIXED_PRICE,,,1.2500,Charlie,POC fixed-price example
-CUST-A,RING12,MIN_GP,18.0,,,Megan,POC minimum GP rule
+customer_no,item_no,rule_type,min_gp_pct,min_sell_price,locked_sell_price,effective_from,effective_to,approver,notes
+CUST-GIO,RING12,SPECIAL_PRICING,,,,2026-01-01,2026-12-31,Charlie,Strategic customer pricing; POC example only; do not auto-recommend a price change
+CUST-GIO,RING12,FIXED_PRICE,,,1.2500,2026-01-01,2026-12-31,Charlie,POC fixed-price example only
+CUST-A,RING12,MIN_GP,18.0,,,,,Megan,POC minimum GP rule

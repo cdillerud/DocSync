@@ -56,7 +56,7 @@ These calculations remain Business Central logic. AI is not allowed to invent, o
 
 ## Milestone 4: commercial guardrail integration
 
-Version `0.4.0.0` absorbs the useful Business Central portion of the existing `GPI Commercial Guardrails POC` into this extension rather than creating a competing pricing-rule design.
+Version `0.4.1.0` absorbs the useful Business Central portion of the existing `GPI Commercial Guardrails POC` into this extension rather than creating a competing pricing-rule design.
 
 Integrated objects preserve the existing read-only API contract under `gpi/commercialGuardrails/v1.0`:
 
@@ -71,6 +71,12 @@ Integrated objects preserve the existing read-only API contract under `gpi/comme
 The uploaded Commercial Guardrail Python source remains the behavioral regression oracle. Its 102 unit tests pass as supplied. Important retained behaviors include exact item/UOM matching, customer-specific history, protected special pricing, fixed-price mismatch detection, supplier-cost margin impact, and explicit review/reject states rather than invented replacement prices.
 
 The standalone `GPI Commercial Guardrails POC` BC app should only be retired from the sandbox after this integrated version compiles and the preserved API endpoints are validated. Both apps should not remain installed with the same API entity routes.
+
+### Guardrail scope safety
+
+A guardrail may leave Customer No. blank to apply the rule to all customers for a specific item, or leave Item No. blank to apply the rule to all items for a specific customer. Customer No. and Item No. cannot both be blank. This prevents an accidentally saved empty line from becoming a global special-pricing rule.
+
+The current POC export contained one enabled Special Pricing row with both Customer No. and Item No. blank and no other commercial values. That row is treated as an accidental blank record and is not intended for migration into the integrated extension.
 
 ## Important semantic choice
 

@@ -1,17 +1,17 @@
-permissionset 71000 "GPI PACKAGING CATALOG"
+permissionset 71000 "GPI PACK CATALOG"
 {
     Assignable = true;
     Caption = 'GPI Packaging Catalog';
 
     Permissions =
-        tabledata "GPI Packaging Product" = RIMD,
-        tabledata "GPI Pack Vendor Location" = RIMD,
-        tabledata "GPI Pack Price History" = R,
-        tabledata "GPI Pack Freight Rate" = RIMD,
-        page "GPI Packaging Product Card" = X,
-        page "GPI Packaging Products" = X,
-        page "GPI Pack Vendor Locations" = X,
-        page "GPI Pack Price History" = X,
-        page "GPI Pack Freight Rates" = X,
-        codeunit "GPI Packaging Catalog Mgt." = X;
+        tabledata "GPI Pack Product" = RIMD,
+        tabledata "GPI Pack Vendor Loc" = RIMD,
+        tabledata "GPI Pack Price Hist" = R,
+        tabledata "GPI Pack Frt Rate" = RIMD,
+        page "GPI Pack Prod Card" = X,
+        page "GPI Pack Products" = X,
+        page "GPI Pack Vendor Locs" = X,
+        page "GPI Pack Price Hist" = X,
+        page "GPI Pack Frt Rates" = X,
+        codeunit "GPI Pack Catalog Mgt" = X;
 }

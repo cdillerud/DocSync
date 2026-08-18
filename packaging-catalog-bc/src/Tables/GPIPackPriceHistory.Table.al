@@ -1,8 +1,8 @@
-table 71002 "GPI Pack Price History"
+table 71002 "GPI Pack Price Hist"
 {
     Caption = 'GPI Packaging Price History';
     DataClassification = CustomerContent;
-    DrillDownPageId = "GPI Pack Price History";
+    DrillDownPageId = "GPI Pack Price Hist";
 
     fields
     {
@@ -14,7 +14,7 @@ table 71002 "GPI Pack Price History"
         field(2; "Product No."; Code[20])
         {
             Caption = 'Product No.';
-            TableRelation = "GPI Packaging Product"."No.";
+            TableRelation = "GPI Pack Product"."No.";
         }
         field(3; "Vendor No."; Code[20])
         {

@@ -177,10 +177,15 @@ def main() -> int:
             print(f"   Latest posted cost: {_money4(row.latest_posted_cost)}/{staged_row.uom or 'UOM'}")
         if row.supplier_current_vs_posted_pct is not None:
             print(f"   Current vs posted: {_pct(row.supplier_current_vs_posted_pct)}")
-        print(f"   Trailing quantity: {row.trailing_quantity:,.2f} {staged_row.uom or ''}".rstrip())
-        print(f"   Trailing sales   : {_money(row.trailing_sales)}")
-        label = "Est. erosion" if row.status == "IMPACT_READY" else "Review-only erosion"
-        print(f"   {label:<17}: {_money(row.estimated_margin_erosion)}")
+
+        if row.customer_impacts:
+            print(f"   Trailing quantity: {row.trailing_quantity:,.2f} {staged_row.uom or ''}".rstrip())
+            print(f"   Trailing sales   : {_money(row.trailing_sales)}")
+            label = "Est. erosion" if row.status == "IMPACT_READY" else "Review-only erosion"
+            print(f"   {label:<17}: {_money(row.estimated_margin_erosion)}")
+        elif row.status == "REVIEW":
+            print("   Customer impact : SUPPRESSED until row reaches IMPACT_READY")
+
         if row.warnings:
             print(f"   Review notes     : {'; '.join(row.warnings)}")
 

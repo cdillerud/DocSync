@@ -16,6 +16,12 @@ table 71003 "GPI Pack Frt Rate"
         {
             Caption = 'Origin Vendor No.';
             TableRelation = Vendor."No.";
+
+            trigger OnValidate()
+            begin
+                if "Origin Vendor No." <> xRec."Origin Vendor No." then
+                    "Origin Location Code" := '';
+            end;
         }
         field(3; "Origin Location Code"; Code[20])
         {
@@ -25,10 +31,22 @@ table 71003 "GPI Pack Frt Rate"
         field(4; "Destination State"; Code[20])
         {
             Caption = 'Destination State';
+
+            trigger OnValidate()
+            begin
+                if "Destination State" <> '' then
+                    "Default Destination" := false;
+            end;
         }
         field(5; "Default Destination"; Boolean)
         {
             Caption = 'Default Destination';
+
+            trigger OnValidate()
+            begin
+                if "Default Destination" then
+                    "Destination State" := '';
+            end;
         }
         field(6; Mode; Enum "GPI Pack Transport")
         {
@@ -38,11 +56,13 @@ table 71003 "GPI Pack Frt Rate"
         {
             Caption = 'Rate per CWT';
             AutoFormatType = 2;
+            MinValue = 0;
         }
         field(11; "Minimum Charge"; Decimal)
         {
             Caption = 'Minimum Charge';
             AutoFormatType = 2;
+            MinValue = 0;
         }
         field(12; "Fuel Surcharge %"; Decimal)
         {

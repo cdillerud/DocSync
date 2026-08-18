@@ -61,7 +61,7 @@ Get-ChildItem -LiteralPath (Join-Path $AppPath 'src') -Filter '*.al' -File -Recu
     $Key = "$Type/$Id"
 
     if (($Id -lt $ObjectFrom) -or ($Id -gt $ObjectTo)) {
-        $Errors.Add("Object is outside $ObjectFrom..$ObjectTo: $Key $Name")
+        $Errors.Add("Object is outside $ObjectFrom..${ObjectTo}: $Key $Name")
     }
 
     if ($Seen.ContainsKey($Key)) {

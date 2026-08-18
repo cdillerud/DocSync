@@ -1,4 +1,4 @@
-enum 71000 "GPI Pack Transport Mode"
+enum 71000 "GPI Pack Transport"
 {
     Extensible = true;
     Caption = 'Packaging Transport Mode';

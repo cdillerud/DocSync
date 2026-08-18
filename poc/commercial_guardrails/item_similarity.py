@@ -179,7 +179,7 @@ def rank_related_items(
     proposed_item_no: str,
     proposed_description: str,
     items: Sequence[Mapping[str, object]],
-    min_score: float = 55.0,
+    min_score: float = 90.0,
     max_results: int = 12,
     include_blocked: bool = False,
 ) -> List[ItemCandidate]:
@@ -231,7 +231,7 @@ def fetch_item_master(client: BusinessCentralClient) -> List[dict]:
 def discover_related_items(
     client: BusinessCentralClient,
     proposed_item_no: str,
-    min_score: float = 55.0,
+    min_score: float = 90.0,
     max_results: int = 12,
     include_blocked: bool = False,
 ) -> tuple[dict, List[ItemCandidate]]:

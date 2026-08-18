@@ -208,6 +208,43 @@ table 71004 "GPI Pack Cost Work"
             AutoFormatType = 2;
             Editable = false;
         }
+        field(70; "Target Gross Margin %"; Decimal)
+        {
+            Caption = 'Target Gross Margin %';
+            DecimalPlaces = 0 : 5;
+            MinValue = 0;
+            MaxValue = 99.99999;
+        }
+        field(71; "Suggested Sell Price"; Decimal)
+        {
+            Caption = 'Suggested Sell Price per Unit';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(72; "Extended Cost"; Decimal)
+        {
+            Caption = 'Extended Landed Cost';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(73; "Extended Sell"; Decimal)
+        {
+            Caption = 'Extended Sell';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(74; "Gross Profit per Unit"; Decimal)
+        {
+            Caption = 'Gross Profit per Unit';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(75; "Gross Profit Total"; Decimal)
+        {
+            Caption = 'Gross Profit Total';
+            AutoFormatType = 2;
+            Editable = false;
+        }
     }
 
     keys

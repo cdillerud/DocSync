@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from poc.commercial_guardrails.supplier_review_pipeline import (
     _safe_source_name,
     analyze_supplier_review,
     create_manual_supplier_review_run,
+    validate_manual_supplier_upload,
     write_supplier_review_artifacts,
 )
 
@@ -18,6 +20,17 @@ class SupplierReviewPipelineTests(unittest.TestCase):
     def test_safe_source_name_strips_directories_and_unsafe_characters(self):
         self.assertEqual(_safe_source_name(r"..\..\Supplier Notice (Sept).xlsx"), "Supplier_Notice_Sept_.xlsx")
         self.assertEqual(_safe_source_name("../../evil.csv"), "evil.csv")
+
+    def test_manual_upload_accepts_only_supported_nonempty_files(self):
+        self.assertEqual(validate_manual_supplier_upload("notice.CSV", b"a,b\n1,2\n"), "notice.CSV")
+        with self.assertRaisesRegex(ValueError, "Unsupported supplier notice type"):
+            validate_manual_supplier_upload("notice.pdf", b"pdf")
+        with self.assertRaisesRegex(ValueError, "empty"):
+            validate_manual_supplier_upload("notice.csv", b"")
+
+    def test_manual_upload_enforces_size_limit(self):
+        with self.assertRaisesRegex(ValueError, "too large"):
+            validate_manual_supplier_upload("notice.csv", b"12345", max_bytes=4)
 
     @patch("poc.commercial_guardrails.supplier_review_pipeline.analyze_supplier_margin_impact")
     @patch("poc.commercial_guardrails.supplier_review_pipeline.fetch_bc_pricing_rules")
@@ -69,22 +82,27 @@ class SupplierReviewPipelineTests(unittest.TestCase):
         self.assertEqual(result.queue, ("QUEUE",))
 
     def test_write_supplier_review_artifacts_creates_manifest_and_sidecars(self):
-        run = SupplierReviewRun(
-            environment="Sandbox_NoZetadocs_UAT",
-            source_path=Path("sample_supplier_price_notice.csv"),
-            staged=(),
-            comparisons=(),
-            impacts=(),
-            queue=(),
-            pricing_rule_count=0,
-        )
+        source_bytes = b"synthetic supplier notice"
         with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "sample_supplier_price_notice.csv"
+            source.write_bytes(source_bytes)
+            run = SupplierReviewRun(
+                environment="Sandbox_NoZetadocs_UAT",
+                source_path=source,
+                staged=(),
+                comparisons=(),
+                impacts=(),
+                queue=(),
+                pricing_rule_count=0,
+            )
             artifacts = write_supplier_review_artifacts(run, folder)
             manifest = json.loads(artifacts.manifest_path.read_text(encoding="utf-8"))
 
             self.assertTrue(artifacts.queue_path.exists())
             self.assertTrue(artifacts.detail_path.exists())
             self.assertEqual(manifest["environment"], "Sandbox_NoZetadocs_UAT")
+            self.assertEqual(manifest["source_size_bytes"], len(source_bytes))
+            self.assertEqual(manifest["source_sha256"], hashlib.sha256(source_bytes).hexdigest())
             self.assertFalse(manifest["safety"]["business_central_writes"])
             self.assertTrue(manifest["safety"]["human_approval_required"])
 

@@ -1,7 +1,7 @@
-page 71004 "GPI Pack Freight Rates"
+page 71004 "GPI Pack Frt Rates"
 {
     PageType = List;
-    SourceTable = "GPI Pack Freight Rate";
+    SourceTable = "GPI Pack Frt Rate";
     ApplicationArea = All;
     UsageCategory = Lists;
     Caption = 'GPI Packaging Freight Rates';

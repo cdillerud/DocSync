@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from poc.commercial_guardrails.supplier_cockpit_core import (
     DECISION_OPTIONS,
+    decision_widget_scope,
     detail_rows_for_item,
     filter_records,
     load_csv_records,
@@ -407,7 +408,7 @@ def main() -> None:
             options = [option for option in options if option != "APPROVE"]
         if current_decision not in options:
             current_decision = ""
-        key_text = "|".join(selected_key)
+        key_text = decision_widget_scope(decision_path, selected_key)
         decision = st.selectbox(
             "Decision",
             options=options,

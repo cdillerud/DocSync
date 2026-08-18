@@ -1,7 +1,7 @@
-page 71002 "GPI Pack Vendor Locations"
+page 71002 "GPI Pack Vendor Locs"
 {
     PageType = List;
-    SourceTable = "GPI Pack Vendor Location";
+    SourceTable = "GPI Pack Vendor Loc";
     ApplicationArea = All;
     UsageCategory = Lists;
     Caption = 'GPI Packaging Vendor Locations';

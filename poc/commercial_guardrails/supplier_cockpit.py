@@ -25,11 +25,18 @@ from poc.commercial_guardrails.supplier_cockpit_core import (
     validate_detail_consistency,
     write_decision_csv,
 )
+from poc.commercial_guardrails.supplier_review_pipeline import (
+    SUPPORTED_SUPPLIER_NOTICE_EXTENSIONS,
+    create_manual_supplier_review_run,
+)
 
 
 DEFAULT_QUEUE = "poc/commercial_guardrails/live_supplier_approval_queue.csv"
 DEFAULT_DETAIL = "poc/commercial_guardrails/live_supplier_margin_impact.csv"
 DEFAULT_DECISIONS = "poc/commercial_guardrails/live_supplier_approval_decisions.csv"
+QUEUE_PATH_KEY = "_supplier_cockpit_queue_path"
+DETAIL_PATH_KEY = "_supplier_cockpit_detail_path"
+DECISION_PATH_KEY = "_supplier_cockpit_decision_path"
 
 
 def _float(value: object) -> float:
@@ -107,29 +114,99 @@ def _customer_view(records: list[dict]) -> list[dict]:
     return output
 
 
+def _initialize_path_state() -> None:
+    st.session_state.setdefault(QUEUE_PATH_KEY, DEFAULT_QUEUE)
+    st.session_state.setdefault(DETAIL_PATH_KEY, DEFAULT_DETAIL)
+    st.session_state.setdefault(DECISION_PATH_KEY, DEFAULT_DECISIONS)
+
+
+def _activate_run(artifacts) -> None:
+    st.session_state[QUEUE_PATH_KEY] = str(artifacts.queue_path)
+    st.session_state[DETAIL_PATH_KEY] = str(artifacts.detail_path)
+    st.session_state[DECISION_PATH_KEY] = str(artifacts.decision_path)
+    st.session_state["_supplier_cockpit_signature"] = None
+    st.session_state.pop("_supplier_cockpit_records", None)
+    summary = artifacts.review_run.summary
+    st.session_state["_supplier_cockpit_flash"] = (
+        f"Analyzed {artifacts.source_path.name}. "
+        f"{summary['items']} approval item(s), {summary['review_rows']} review row(s), "
+        f"{summary['reject_rows']} rejected row(s), {_money(summary['estimated_margin_erosion'])} actionable erosion."
+    )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="GPI Supplier Cost Cockpit",
         layout="wide",
         initial_sidebar_state="collapsed",
     )
+    _initialize_path_state()
+
     st.title("GPI Commercial Guardrail")
     st.caption("Supplier Cost Review Cockpit | human approval required | no Business Central writes")
 
+    flash = st.session_state.pop("_supplier_cockpit_flash", "")
+    if flash:
+        st.success(flash)
+
+    # Manual intake is intentionally the first real-source workflow. It creates a
+    # self-contained local run folder and performs only read operations against BC.
+    with st.expander("New supplier notice", expanded=False):
+        st.write("Upload a supplier CSV or Excel notice and run the validated read-only analysis pipeline.")
+        uploaded_notice = st.file_uploader(
+            "Supplier notice",
+            type=[suffix.lstrip(".") for suffix in SUPPORTED_SUPPLIER_NOTICE_EXTENSIONS],
+            accept_multiple_files=False,
+            key="_supplier_cockpit_upload",
+        )
+        u1, u2, u3 = st.columns([2, 2, 2])
+        start_date = u1.text_input("History start", value="2024-01-01")
+        default_supplier = u2.text_input("Default supplier", value="")
+        sheet_name = u3.text_input("Excel sheet (optional)", value="")
+        st.caption(
+            "The uploaded source is copied into an auditable local run folder with its queue, margin detail, manifest, and decision log. "
+            "This does not monitor email and does not write to Business Central."
+        )
+
+        if st.button(
+            "Analyze and open review",
+            type="primary",
+            disabled=uploaded_notice is None,
+            key="_supplier_cockpit_analyze_upload",
+        ):
+            try:
+                with st.spinner("Reading Business Central history and building the review queue..."):
+                    artifacts = create_manual_supplier_review_run(
+                        uploaded_notice.name,
+                        uploaded_notice.getvalue(),
+                        start_date=start_date.strip() or "2024-01-01",
+                        default_supplier=default_supplier.strip(),
+                        sheet_name=sheet_name.strip(),
+                    )
+            except (OSError, RuntimeError, ValueError) as exc:
+                st.error(str(exc))
+            else:
+                _activate_run(artifacts)
+                st.rerun()
+
     with st.sidebar:
         st.header("Data sources")
-        queue_path = st.text_input("Approval queue CSV", value=DEFAULT_QUEUE)
-        detail_path = st.text_input("Margin impact detail CSV", value=DEFAULT_DETAIL)
-        decision_path = st.text_input("Decision log CSV", value=DEFAULT_DECISIONS)
-        st.caption("These are local POC files. The cockpit does not query or update Business Central.")
+        queue_path = st.text_input("Approval queue CSV", key=QUEUE_PATH_KEY)
+        detail_path = st.text_input("Margin impact detail CSV", key=DETAIL_PATH_KEY)
+        decision_path = st.text_input("Decision log CSV", key=DECISION_PATH_KEY)
+        st.caption("These are local POC files. The cockpit does not update Business Central.")
         if st.button("Reload local files"):
             st.session_state["_supplier_cockpit_signature"] = None
             st.rerun()
 
+    queue_parent = Path(queue_path).parent
+    if Path(queue_path).name == "approval_queue.csv" and queue_parent.name:
+        st.caption(f"Active review run: {queue_parent.name}")
+
     queue_records = load_csv_records(queue_path)
     if not queue_records:
         st.warning(
-            "No approval queue rows were found. Run bc_supplier_approval_queue_cli first or select a queue CSV in the sidebar."
+            "No approval queue rows were found. Upload a new supplier notice above, or select an existing queue CSV in the sidebar."
         )
         return
 
@@ -205,8 +282,6 @@ def main() -> None:
         else:
             st.info("No queue rows match the current filters.")
 
-    # Item selection is the primary navigation. It intentionally stays outside the
-    # queue browser so a reviewer can get directly to the decision without scrolling.
     item_index = st.selectbox(
         "Review item",
         options=list(range(len(working_records))),

@@ -10,21 +10,23 @@ It deliberately starts **without AI and without write access from the Python gua
 - Supplier cost increases where the customer's sell price stayed flat
 - Sell prices materially below or above the customer's historical price
 - Related items the customer buys when the proposed exact item has no history
-- Explicit minimum-GP and minimum-sell rules in the historical engine
+- Quote/extra prices materially outside a customer's own posted exact-item/UOM history
 - Fixed-price mismatches
 - Special-pricing customers/items
 - Read-only ingestion of posted Business Central sales history
-- Live proposal checks that combine price, item-family, margin, and special-pricing protection
+- Live proposal checks that combine price, item-family, margin, quote/extra, and special-pricing protection
 
 ## Safety principle
 
 `SPECIAL_PRICING` and `FIXED_PRICE` rules act as a firewall.
 
-The engine may calculate and display price or margin exposure, but any normal pricing action on a protected proposal is replaced with **REVIEW SPECIAL PRICING RULE** and, when configured, the named approver. The guardrail does not infer or recommend a replacement price from general history for protected pricing.
+The engine may calculate and display price or margin variance, but any normal pricing action on a protected proposal is replaced with **REVIEW SPECIAL PRICING RULE** and, when configured, the named approver. The guardrail does not infer or recommend a replacement price from general history for protected pricing.
 
 A `FIXED_PRICE` mismatch is surfaced as `CRITICAL`. If multiple equally specific active fixed-price rules disagree, the POC surfaces a configuration conflict instead of choosing one.
 
 Family-level special pricing is intentionally **not inferred** from description similarity. Protected pricing must match an exact item or an explicit wildcard maintained in the authoritative rule table.
+
+For quote/extras guidance, customer-specific exact-item/UOM history is the only historical benchmark allowed to trigger a price exception. All-customer history is context only. If the customer does not have enough history, the guard returns a low-confidence context view rather than creating an automatic price exception from a global median.
 
 ## Business Central integration
 
@@ -40,7 +42,7 @@ The live proposal checker also uses standard Business Central v2 APIs for posted
 
 ### Authoritative pricing guardrails
 
-The POC extension now includes Business Central table:
+The POC extension includes Business Central table:
 
 `GPI Pricing Guardrail`
 
@@ -108,9 +110,9 @@ python -m poc.commercial_guardrails.bc_pricing_rule_probe `
 
 Business Central may encode enum captions over OData, for example `Special_x0020_Pricing`. The adapter decodes those values before applying the firewall.
 
-## Live proposal check
+## Live commercial proposal check
 
-Business Central pricing rules are now loaded **automatically by default**:
+Business Central pricing rules are loaded automatically by default:
 
 ```powershell
 python -m poc.commercial_guardrails.bc_proposal_cli `
@@ -123,23 +125,46 @@ python -m poc.commercial_guardrails.bc_proposal_cli `
   --proposal-date 2026-08-17
 ```
 
-The output shows:
-
-- `Pricing rule source: BUSINESS CENTRAL`
-- count of enabled rules read from BC
-- whether the exact proposal is protected
-- matching rule type, approver, and notes
-- historical price evidence
-- historical GP evidence
-- item-family/substitution evidence
-
 If the Business Central pricing-rule API cannot be read, the command **fails closed** rather than returning a false `PASS` without the special-pricing protection layer.
 
-### Explicit troubleshooting overrides
+## Quote / extras history probe
 
-`--guardrails <file.csv>` remains available only as a local CSV override for testing/offline development.
+Use the read-only discovery probe before setting thresholds for a quote/extra item:
 
-`--no-special-pricing` explicitly disables the firewall and should be used only for intentional troubleshooting. It cannot be combined with `--guardrails`.
+```powershell
+python -m poc.commercial_guardrails.bc_quote_history_probe `
+  --item "BALLARTWORK" `
+  --start-date 2024-01-01
+```
+
+The probe shows customer-specific and all-customer medians, averages, ranges, recent prices, and individual posted lines without recommending a price.
+
+## Live quote / extras guard
+
+The live quote guard prefers customer-specific exact-item/UOM history and uses broader item history only as context:
+
+```powershell
+python -m poc.commercial_guardrails.bc_quote_guard_cli `
+  --customer "HUMMKOM" `
+  --item "BALLARTWORK" `
+  --price 900 `
+  --quantity 1 `
+  --uom "EA" `
+  --start-date 2024-01-01 `
+  --proposal-date 2026-08-17
+```
+
+Default behavior:
+
+- requires at least 3 customer-specific exact-item/UOM history lines before historical quote pricing can trigger a review
+- uses the most recent 5 customer transactions as the primary median baseline
+- flags a proposal 7.5% or more below that recent customer median
+- flags a proposal 15% or more above that recent customer median
+- raises confidence when the customer has at least 5 lines or a highly concentrated dominant price
+- never turns the all-customer median into an authoritative replacement price
+- uses the same Business Central special-pricing/fixed-price firewall as the commercial proposal checker
+
+The action is **REVIEW PROPOSED EXTRA PRICE AGAINST CUSTOMER HISTORY**, not “set price to historical median.”
 
 ## POC validations completed
 
@@ -150,13 +175,15 @@ Using real posted BC history in `Sandbox_NoZetadocs_UAT`:
 3. GRUMPY proposed on a related hot-fill ringneck item with no exact-item history produced `SIMILAR_ITEM_SUBSTITUTION` while refusing to invent a margin baseline.
 4. Historical TRIPLEH transactions themselves produced zero margin exceptions, demonstrating a stable baseline rather than a noisy detector.
 5. A synthetic protected TRIPLEH rule correctly redirected both price and GP actions to the configured approver.
-6. The same synthetic rule was moved into Business Central and successfully read back through the read-only `pricingGuardrails` API.
+6. The synthetic rule was moved into Business Central and successfully read back through the read-only `pricingGuardrails` API.
+7. A synthetic Business Central fixed-price rule produced `CRITICAL FIXED_PRICE_MISMATCH` while preserving price and GP history as supporting evidence.
+8. `BALLARTWORK` history was profiled across 266 posted usable lines and 52 customers before quote thresholds were introduced.
 
 ## Current next slice
 
-1. Validate the live proposal checker with **Business Central**, not CSV, as the special-pricing source.
-2. Remove the synthetic TRIPLEH rule after that proof.
-3. Do not enter real Bragg, Giovanni, or other protected agreements until ownership and authoritative pricing data are reviewed.
-4. Then move to quote/extras guidance and supplier-price ingestion.
+1. Remove the synthetic TRIPLEH pricing rule from the sandbox after fixed-price validation.
+2. Validate `BALLARTWORK` quote behavior with one stable-price control customer and one deliberately low proposed price.
+3. Tune quote thresholds only if those live results show the customer-specific rules are too noisy or too permissive.
+4. Then move to supplier-price ingestion.
 
 Supplier-email/PDF ingestion and rep-facing workflow remain out of scope until these core commercial safety controls are accepted.

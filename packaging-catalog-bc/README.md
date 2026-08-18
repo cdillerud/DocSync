@@ -11,9 +11,9 @@ This is the isolated Business Central foundation for the replacement of `my-pack
 - No Production deployment without explicit approval
 - Do not merge to `main` without explicit approval
 
-## Milestone 1 scope
+## Milestone 1: catalog foundation
 
-The first milestone intentionally stops at the Business Central catalog foundation:
+Validated in UAT:
 
 - packaging product master
 - vendor/FOB locations
@@ -24,8 +24,33 @@ The first milestone intentionally stops at the Business Central catalog foundati
 - product list and card pages
 - vendor-location and freight-rate maintenance pages
 
-Spiro and Copilot Studio are deliberately out of scope until the BC data model and deterministic logic are validated.
+## Milestone 2: landed cost foundation
+
+Version `0.2.0.0` adds deterministic Business Central landed-cost logic:
+
+- immediate Vendor Name and FOB FlowField refresh on the product card
+- persistent landed-cost worksheets
+- product defaults for vendor, FOB, mode, quantity, gram weight, pallets, and supplier unit cost
+- manual domestic freight input
+- CWT freight-rate lookup using vendor, FOB, destination state, mode, effective date, and controlled fallbacks
+- minimum-charge and fuel-surcharge handling
+- pallet cost per unit
+- tariff per unit
+- international freight, customs, and delivery allocations per unit
+- calculated landed cost per unit
+
+Freight-rate matching prioritizes the most specific active rate and then falls back through vendor/location scope, `Any` mode, and default-destination rates. Blank origin vendor/location values are used for broader fallback rows.
 
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
+
+## Deferred until the BC cost foundation is validated
+
+- gross-margin and customer sell-price logic
+- customer-specific pricing guardrails
+- saved packaging quotes and quote lines
+- best-price comparison and route/mileage automation
+- bulk import of the real packaging catalog once a non-empty source export is available
+- Spiro integration
+- Copilot Studio orchestration

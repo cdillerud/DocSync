@@ -46,6 +46,12 @@ def main() -> int:
         help="Maximum supplier-current variance from recent posted cost median before review",
     )
     parser.add_argument(
+        "--max-recent-cost-spread-pct",
+        type=float,
+        default=15.0,
+        help="Maximum recent posted cost range as a percentage of median before the item is treated as heterogeneous",
+    )
+    parser.add_argument(
         "--recent-item-cost-count",
         type=int,
         default=10,
@@ -62,6 +68,14 @@ def main() -> int:
         type=int,
         default=365,
         help="Historical volume window used for estimated margin-dollar erosion",
+    )
+    parser.add_argument(
+        "--include-review-scenarios",
+        action="store_true",
+        help=(
+            "Also calculate customer-level what-if scenarios for REVIEW rows. These remain excluded "
+            "from actionable headline totals."
+        ),
     )
     parser.add_argument("--show-customers", type=int, default=25, help="Maximum customer impacts per item")
     parser.add_argument("--out", default="", help="Optional flattened supplier/customer impact CSV")
@@ -100,7 +114,9 @@ def main() -> int:
             recent_item_cost_count=args.recent_item_cost_count,
             recent_customer_count=args.recent_customer_count,
             history_alignment_tolerance_pct=args.history_alignment_tolerance_pct,
+            max_recent_cost_spread_pct=args.max_recent_cost_spread_pct,
             trailing_days=args.trailing_days,
+            include_review_scenarios=args.include_review_scenarios,
         )
         for comparison in comparisons
     ]
@@ -109,17 +125,20 @@ def main() -> int:
     print("\n============================================================")
     print("GPI COMMERCIAL GUARDRAIL - SUPPLIER COST MARGIN IMPACT")
     print("============================================================")
-    print(f"BC environment     : {config.environment}")
-    print(f"Input file         : {Path(args.input).resolve()}")
-    print(f"History window     : {args.start_date} through {args.end_date or 'latest'}")
-    print(f"Supplier rows      : {summary['rows']}")
-    print(f"IMPACT_READY       : {summary['impact_ready']}")
-    print(f"REVIEW             : {summary['review']}")
-    print(f"REJECT             : {summary['reject']}")
-    print(f"Customer impacts   : {summary['customers']}")
-    print(f"Protected impacts  : {summary['protected_customers']}")
-    print(f"Est. margin erosion: {_money(summary['estimated_margin_erosion'])}")
-    print(f"Pricing rules read : {len(pricing_rules)}")
+    print(f"BC environment       : {config.environment}")
+    print(f"Input file           : {Path(args.input).resolve()}")
+    print(f"History window       : {args.start_date} through {args.end_date or 'latest'}")
+    print(f"Supplier rows        : {summary['rows']}")
+    print(f"IMPACT_READY         : {summary['impact_ready']}")
+    print(f"REVIEW               : {summary['review']}")
+    print(f"REJECT               : {summary['reject']}")
+    print(f"Actionable customers : {summary['customers']}")
+    print(f"Protected actionable : {summary['protected_customers']}")
+    print(f"Actionable erosion   : {_money(summary['estimated_margin_erosion'])}")
+    if summary["review_scenario_customers"]:
+        print(f"Review scenarios     : {summary['review_scenario_customers']} customer(s)")
+        print(f"Review-only erosion  : {_money(summary['review_scenario_margin_erosion'])}")
+    print(f"Pricing rules read   : {len(pricing_rules)}")
 
     for index, row in enumerate(impacts, start=1):
         staged_row = row.comparison.staged
@@ -145,6 +164,13 @@ def main() -> int:
             f"   Recent posted cost: {_money4(row.recent_posted_cost_median)}/"
             f"{staged_row.uom or 'UOM'}"
         )
+        if row.recent_posted_cost_min is not None and row.recent_posted_cost_max is not None:
+            print(
+                f"   Recent cost range : {_money4(row.recent_posted_cost_min)} to "
+                f"{_money4(row.recent_posted_cost_max)}/{staged_row.uom or 'UOM'}"
+            )
+        if row.recent_posted_cost_spread_pct is not None:
+            print(f"   Recent cost spread: {row.recent_posted_cost_spread_pct:.1f}% of median")
         if row.latest_posted_sale is not None:
             print(f"   Latest posted sale: {row.latest_posted_sale.date().isoformat()}")
         if row.latest_posted_cost is not None:
@@ -153,12 +179,14 @@ def main() -> int:
             print(f"   Current vs posted: {_pct(row.supplier_current_vs_posted_pct)}")
         print(f"   Trailing quantity: {row.trailing_quantity:,.2f} {staged_row.uom or ''}".rstrip())
         print(f"   Trailing sales   : {_money(row.trailing_sales)}")
-        print(f"   Est. erosion     : {_money(row.estimated_margin_erosion)}")
+        label = "Est. erosion" if row.status == "IMPACT_READY" else "Review-only erosion"
+        print(f"   {label:<17}: {_money(row.estimated_margin_erosion)}")
         if row.warnings:
             print(f"   Review notes     : {'; '.join(row.warnings)}")
 
         if row.customer_impacts and args.show_customers > 0:
-            print("\n   CUSTOMER MARGIN IMPACT")
+            heading = "CUSTOMER MARGIN IMPACT" if row.status == "IMPACT_READY" else "REVIEW-ONLY CUSTOMER SCENARIOS"
+            print(f"\n   {heading}")
             print(
                 f"   {'Customer':<12} {'Lines':>5} {'Last':<10} {'Sell':>10} {'Cost':>10} "
                 f"{'ProjCost':>10} {'GP Now':>8} {'GP New':>8} {'Drop':>7} "
@@ -177,9 +205,7 @@ def main() -> int:
                 )
                 if customer.special_pricing_protected and customer.pricing_approvers:
                     print(
-                        "   "
-                        + " " * 12
-                        + f"Special-pricing approver: {', '.join(customer.pricing_approvers)}"
+                        "   " + " " * 12 + f"Special-pricing approver: {', '.join(customer.pricing_approvers)}"
                     )
 
     if args.out:
@@ -188,18 +214,16 @@ def main() -> int:
 
     print("\nINTERPRETATION NOTE")
     print(
-        "  This is a scenario analysis, not a pricing recommendation. When the supplier current cost "
-        "aligns to recent posted Unit Cost (LCY), the tool applies only the supplier-provided cost "
-        "delta to each customer's recent posted cost baseline and assumes sell price remains unchanged. "
-        "The trailing margin-dollar erosion uses historical quantity, not a forecast. BC Item Unit Cost "
-        "remains comparison context and is not substituted for posted customer history."
+        "  Actionable erosion includes IMPACT_READY rows only. REVIEW rows are excluded from headline "
+        "customer and erosion totals. Recent posted cost must be both aligned to the supplier-stated "
+        "current cost and sufficiently stable across recent transactions before one supplier delta is "
+        "applied across customers. Use --include-review-scenarios only for explicit what-if analysis."
     )
 
     print("\nSAFETY NOTE")
     print(
-        "  No Business Central record is created or changed. Special-pricing matches are surfaced so "
-        "protected customers can be routed for review rather than receiving a history-derived sell-price "
-        "recommendation."
+        "  This is a scenario analysis, not a pricing recommendation. Historical volume is not a forecast. "
+        "BC Item Unit Cost remains comparison context. No Business Central record is created or changed."
     )
 
     return 1 if summary["review"] or summary["reject"] else 0

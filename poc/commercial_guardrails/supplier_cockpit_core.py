@@ -18,6 +18,59 @@ def load_csv_records(path: str | Path) -> list[dict[str, str]]:
         return [dict(row) for row in csv.DictReader(handle)]
 
 
+def record_key(record: Mapping[str, object]) -> tuple[str, str, str]:
+    """Return a stable queue-item identity for merging local review decisions."""
+    return (
+        str(record.get("gpi_item_no") or "").strip().casefold(),
+        str(record.get("supplier_item_no") or "").strip().casefold(),
+        str(record.get("effective_date") or "").strip(),
+    )
+
+
+def merge_saved_decisions(
+    queue_records: Sequence[Mapping[str, object]],
+    saved_records: Sequence[Mapping[str, object]],
+) -> list[dict]:
+    """Overlay locally saved decision fields onto a freshly generated approval queue."""
+    saved_by_key = {
+        record_key(record): record
+        for record in saved_records
+        if any(record_key(record))
+    }
+    merged: list[dict] = []
+    for record in queue_records:
+        row = dict(record)
+        saved = saved_by_key.get(record_key(record), {})
+        for field in EDITABLE_FIELDS:
+            row[field] = str(saved.get(field, row.get(field, "")) or "")
+        merged.append(row)
+    return merged
+
+
+def update_decision(
+    records: Sequence[Mapping[str, object]],
+    key: tuple[str, str, str],
+    *,
+    decision: str,
+    decision_by: str,
+    decision_notes: str,
+) -> list[dict]:
+    """Return queue records with one item's local human decision updated."""
+    output: list[dict] = []
+    found = False
+    for record in records:
+        row = dict(record)
+        if record_key(row) == key:
+            row["decision"] = str(decision or "").strip().upper()
+            row["decision_by"] = str(decision_by or "").strip()
+            row["decision_notes"] = str(decision_notes or "").strip()
+            found = True
+        output.append(row)
+    if not found:
+        raise ValueError("The selected approval item is no longer present in the queue.")
+    return output
+
+
 def summarize_queue(records: Sequence[Mapping[str, object]]) -> dict:
     def _num(value: object) -> float:
         try:

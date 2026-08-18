@@ -222,6 +222,9 @@ def main() -> None:
     selected_status = str(selected.get("queue_status") or "").strip().upper()
     customer_rows = detail_rows_for_item(detail_records, selected_item)
     detail_errors = validate_detail_consistency(selected, customer_rows)
+    total_erosion = _float(selected.get("estimated_margin_erosion"))
+    top_erosion = _float(selected.get("top_customer_erosion"))
+    top_exposure_share = (top_erosion / total_erosion * 100.0) if total_erosion > 0 else 0.0
 
     st.subheader(f"Item review: {selected_item}")
     st.caption(
@@ -254,6 +257,7 @@ def main() -> None:
                 f"+{_money4(selected.get('supplier_cost_delta'))} / "
                 f"{_pct(selected.get('supplier_cost_delta_pct'))}"
             ),
+            delta_color="inverse",
         )
         m2.metric("Actionable erosion", _money(selected.get("estimated_margin_erosion")))
         m3.metric("Lowest projected GP", _pct(selected.get("min_projected_gp_pct")))
@@ -265,7 +269,8 @@ def main() -> None:
         )
         st.write(
             f"**Top exposure:** {selected.get('top_customer_no', '')} / "
-            f"{_money(selected.get('top_customer_erosion'))}"
+            f"{_money(selected.get('top_customer_erosion'))} "
+            f"({top_exposure_share:.1f}% of item exposure)"
         )
         st.write(f"**Review action:** {selected.get('action', '')}")
         if str(selected.get("pricing_approvers") or "").strip():
@@ -306,7 +311,8 @@ def main() -> None:
         st.markdown("### Decision required")
         st.caption(
             f"{_status_label(selected_status)} | top exposure "
-            f"{selected.get('top_customer_no', '')} {_money(selected.get('top_customer_erosion'))}"
+            f"{selected.get('top_customer_no', '')} {_money(selected.get('top_customer_erosion'))} "
+            f"({top_exposure_share:.1f}%)"
         )
         if detail_errors:
             st.warning("Decision saving is disabled until the customer detail matches the approval queue.")

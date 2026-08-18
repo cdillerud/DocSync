@@ -12,6 +12,11 @@ page 71004 "GPI Pack Frt Rates"
         {
             repeater(Rates)
             {
+                field("Entry No."; Rec."Entry No.")
+                {
+                    ApplicationArea = All;
+                    Editable = false;
+                }
                 field("Origin Vendor No."; Rec."Origin Vendor No.")
                 {
                     ApplicationArea = All;

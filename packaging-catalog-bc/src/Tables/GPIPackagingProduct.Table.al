@@ -1,9 +1,9 @@
-table 71000 "GPI Packaging Product"
+table 71000 "GPI Pack Product"
 {
     Caption = 'GPI Packaging Product';
     DataClassification = CustomerContent;
-    LookupPageId = "GPI Packaging Products";
-    DrillDownPageId = "GPI Packaging Products";
+    LookupPageId = "GPI Pack Products";
+    DrillDownPageId = "GPI Pack Products";
 
     fields
     {
@@ -74,23 +74,23 @@ table 71000 "GPI Packaging Product"
         field(32; "Vendor Location Code"; Code[20])
         {
             Caption = 'Vendor FOB Location';
-            TableRelation = "GPI Pack Vendor Location".Code where("Vendor No." = field("Vendor No."));
+            TableRelation = "GPI Pack Vendor Loc".Code where("Vendor No." = field("Vendor No."));
         }
         field(33; "FOB City"; Text[50])
         {
             Caption = 'FOB City';
             FieldClass = FlowField;
-            CalcFormula = lookup("GPI Pack Vendor Location".City where("Vendor No." = field("Vendor No."), Code = field("Vendor Location Code")));
+            CalcFormula = lookup("GPI Pack Vendor Loc".City where("Vendor No." = field("Vendor No."), Code = field("Vendor Location Code")));
             Editable = false;
         }
         field(34; "FOB State/Province"; Code[20])
         {
             Caption = 'FOB State/Province';
             FieldClass = FlowField;
-            CalcFormula = lookup("GPI Pack Vendor Location"."State/Province" where("Vendor No." = field("Vendor No."), Code = field("Vendor Location Code")));
+            CalcFormula = lookup("GPI Pack Vendor Loc"."State/Province" where("Vendor No." = field("Vendor No."), Code = field("Vendor Location Code")));
             Editable = false;
         }
-        field(40; "Transport Mode"; Enum "GPI Pack Transport Mode")
+        field(40; "Transport Mode"; Enum "GPI Pack Transport")
         {
             Caption = 'TL or CNTR';
         }
@@ -126,7 +126,7 @@ table 71000 "GPI Packaging Product"
 
             trigger OnValidate()
             var
-                CatalogMgt: Codeunit "GPI Packaging Catalog Mgt.";
+                CatalogMgt: Codeunit "GPI Pack Catalog Mgt";
             begin
                 "Metric Ton Cost" := CatalogMgt.CalculateMetricTonCost("Current Supplier Unit Cost", "Gram Weight");
             end;
@@ -138,7 +138,7 @@ table 71000 "GPI Packaging Product"
 
             trigger OnValidate()
             var
-                CatalogMgt: Codeunit "GPI Packaging Catalog Mgt.";
+                CatalogMgt: Codeunit "GPI Pack Catalog Mgt";
             begin
                 if "Price Effective Date" = 0D then
                     "Price Effective Date" := WorkDate();
@@ -193,7 +193,7 @@ table 71000 "GPI Packaging Product"
 
     trigger OnModify()
     var
-        CatalogMgt: Codeunit "GPI Packaging Catalog Mgt.";
+        CatalogMgt: Codeunit "GPI Pack Catalog Mgt";
     begin
         if ("Current Supplier Unit Cost" <> xRec."Current Supplier Unit Cost") or
            ("Metric Ton Cost" <> xRec."Metric Ton Cost")

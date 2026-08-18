@@ -100,6 +100,34 @@ codeunit 71001 "GPI Pack Cost Mgt"
           Work."Intl Freight per Unit" +
           Work."Customs per Unit" +
           Work."Delivery per Unit";
+
+        RecalculateMargin(Work);
+    end;
+
+    local procedure RecalculateMargin(var Work: Record "GPI Pack Cost Work")
+    var
+        MarginFactor: Decimal;
+    begin
+        Work."Suggested Sell Price" := 0;
+        Work."Extended Cost" := Round(Work."Landed Cost per Unit" * Work.Quantity, 0.01, '=');
+        Work."Extended Sell" := 0;
+        Work."Gross Profit per Unit" := 0;
+        Work."Gross Profit Total" := 0;
+
+        if Work."Landed Cost per Unit" <= 0 then
+            exit;
+
+        if Work."Target Gross Margin %" >= 100 then
+            Error('Target Gross Margin %% must be less than 100.');
+
+        MarginFactor := 1 - (Work."Target Gross Margin %" / 100);
+        if MarginFactor <= 0 then
+            exit;
+
+        Work."Suggested Sell Price" := Round(Work."Landed Cost per Unit" / MarginFactor, 0.00001, '=');
+        Work."Gross Profit per Unit" := Round(Work."Suggested Sell Price" - Work."Landed Cost per Unit", 0.00001, '=');
+        Work."Extended Sell" := Round(Work."Suggested Sell Price" * Work.Quantity, 0.01, '=');
+        Work."Gross Profit Total" := Round(Work."Gross Profit per Unit" * Work.Quantity, 0.01, '=');
     end;
 
     local procedure FindBestFreightRate(Work: Record "GPI Pack Cost Work"; var Rate: Record "GPI Pack Frt Rate"): Boolean

@@ -31,7 +31,7 @@ class ItemSimilarityTests(unittest.TestCase):
         self.assertEqual(score, 0)
         self.assertIn("different ounce size", reasons)
 
-    def test_rank_prefers_same_finish_pet_ringneck(self):
+    def test_rank_prefers_high_confidence_ringneck_family(self):
         items = [
             {
                 "number": "20041936-P4305",
@@ -48,6 +48,12 @@ class ItemSimilarityTests(unittest.TestCase):
             {
                 "number": "8404730005",
                 "displayName": "12oz, 38-400, CT, Clear, PET, Cold Fill Ring Neck, Bottle, 40g, Tray Packed",
+                "blocked": False,
+                "baseUnitOfMeasureCode": "EA",
+            },
+            {
+                "number": "ACTIVEHINGE",
+                "displayName": "12oz, 38-400, CT, Clear, PET, Active Hinge, Bottle",
                 "blocked": False,
                 "baseUnitOfMeasureCode": "EA",
             },
@@ -69,12 +75,12 @@ class ItemSimilarityTests(unittest.TestCase):
             "20041936-P4305",
             PROPOSED,
             items,
-            min_score=55,
             max_results=10,
         )
         numbers = [candidate.item_no for candidate in ranked]
         self.assertIn("8404730008", numbers)
         self.assertIn("8404730005", numbers)
+        self.assertNotIn("ACTIVEHINGE", numbers)
         self.assertNotIn("11328-869254", numbers)
         self.assertNotIn("BLOCKEDPET", numbers)
 

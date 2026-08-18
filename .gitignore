@@ -212,6 +212,10 @@ frontend/node_modules/.cache/default-development/7.pack
 # Environment files
 *.env
 *.env.*
+-e 
+# Environment files
+*.env
+*.env.*
 frontend/node_modules/.cache/default-development/2.pack_
 -e 
 # Environment files
@@ -370,3 +374,7 @@ frontend/node_modules/.cache/default-development/4.pack_
 # Environment files
 *.env
 *.env.*
+
+# Local commercial guardrail POC data and audit output
+poc/commercial_guardrails/live_*.csv
+poc/commercial_guardrails/proposal_audit_*.json

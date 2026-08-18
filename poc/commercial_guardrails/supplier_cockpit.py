@@ -156,7 +156,6 @@ def main() -> None:
     col4.metric("Protected customers", int(summary["protected_customers"]))
     col5.metric("Actionable erosion", _money(summary["estimated_margin_erosion"]))
 
-    st.subheader("Approval queue")
     statuses = sorted(
         {
             str(row.get("queue_status") or "").strip().upper()
@@ -164,91 +163,105 @@ def main() -> None:
             if row.get("queue_status")
         }
     )
-    f1, f2, f3 = st.columns([2, 2, 3])
-    status_choice = f1.segmented_control(
-        "Status",
-        ["ALL", *statuses],
-        default="ALL",
-        format_func=_status_label,
-    )
-    supplier_filter = f2.text_input("Supplier contains")
-    item_filter = f3.text_input("GPI item contains")
 
-    wanted_statuses = [] if not status_choice or status_choice == "ALL" else [status_choice]
-    filtered = filter_records(
-        working_records,
-        statuses=wanted_statuses,
-        supplier_text=supplier_filter,
-        item_text=item_filter,
-    )
+    with st.expander(f"Browse approval queue ({len(working_records)} item(s))", expanded=False):
+        f1, f2, f3 = st.columns([2, 2, 3])
+        status_choice = f1.segmented_control(
+            "Status",
+            ["ALL", *statuses],
+            default="ALL",
+            format_func=_status_label,
+        )
+        supplier_filter = f2.text_input("Supplier contains")
+        item_filter = f3.text_input("GPI item contains")
 
-    if not filtered:
-        st.info("No queue rows match the current filters.")
-        return
+        wanted_statuses = [] if not status_choice or status_choice == "ALL" else [status_choice]
+        filtered = filter_records(
+            working_records,
+            statuses=wanted_statuses,
+            supplier_text=supplier_filter,
+            item_text=item_filter,
+        )
 
-    st.dataframe(
-        _queue_view(filtered),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            "Status": st.column_config.TextColumn("Status", width="medium"),
-            "Supplier": st.column_config.TextColumn("Supplier", width="medium"),
-            "GPI Item": st.column_config.TextColumn("GPI Item", width="medium"),
-            "Effective": st.column_config.TextColumn("Effective", width="small"),
-            "Cost Change": st.column_config.NumberColumn("Cost Change", format="%.1f%%"),
-            "Customers": st.column_config.NumberColumn("Customers", format="%d"),
-            "Est. Erosion": st.column_config.NumberColumn("Est. Erosion", format="$%.2f"),
-            "Lowest GP": st.column_config.NumberColumn("Lowest GP", format="%.1f%%"),
-            "Top Exposure": st.column_config.TextColumn("Top Exposure", width="small"),
-            "Decision": st.column_config.TextColumn("Decision", width="small"),
-        },
-    )
+        if filtered:
+            st.dataframe(
+                _queue_view(filtered),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Status": st.column_config.TextColumn("Status", width="medium"),
+                    "Supplier": st.column_config.TextColumn("Supplier", width="medium"),
+                    "GPI Item": st.column_config.TextColumn("GPI Item", width="medium"),
+                    "Effective": st.column_config.TextColumn("Effective", width="small"),
+                    "Cost Change": st.column_config.NumberColumn("Cost Change", format="%.1f%%"),
+                    "Customers": st.column_config.NumberColumn("Customers", format="%d"),
+                    "Est. Erosion": st.column_config.NumberColumn("Est. Erosion", format="$%.2f"),
+                    "Lowest GP": st.column_config.NumberColumn("Lowest GP", format="%.1f%%"),
+                    "Top Exposure": st.column_config.TextColumn("Top Exposure", width="small"),
+                    "Decision": st.column_config.TextColumn("Decision", width="small"),
+                },
+            )
+        else:
+            st.info("No queue rows match the current filters.")
 
+    # Item selection is the primary navigation. It intentionally stays outside the
+    # queue browser so a reviewer can get directly to the decision without scrolling.
     item_index = st.selectbox(
         "Review item",
-        options=list(range(len(filtered))),
+        options=list(range(len(working_records))),
         format_func=lambda index: (
-            f"{filtered[index].get('gpi_item_no', '')}  |  "
-            f"{filtered[index].get('supplier_name', '')}  |  "
-            f"effective {filtered[index].get('effective_date', '')}"
+            f"{working_records[index].get('gpi_item_no', '')}  |  "
+            f"{working_records[index].get('supplier_name', '')}  |  "
+            f"effective {working_records[index].get('effective_date', '')}"
         ),
     )
-    selected = filtered[item_index]
+    selected = working_records[item_index]
     selected_item = str(selected.get("gpi_item_no") or "")
     selected_key = record_key(selected)
     selected_status = str(selected.get("queue_status") or "").strip().upper()
+    customer_rows = detail_rows_for_item(detail_records, selected_item)
 
-    st.divider()
     st.subheader(f"Item review: {selected_item}")
     st.caption(
         f"{selected.get('supplier_name', '')} | supplier item {selected.get('supplier_item_no', '') or 'n/a'} "
         f"| effective {selected.get('effective_date', '') or 'n/a'} | {selected.get('uom', '')}"
     )
 
-    if selected_status == "PROTECTED_REVIEW":
-        st.warning(
-            "Protected pricing is active for at least one affected customer. This item cannot be approved in the generic cockpit."
+    review_col, decision_col = st.columns([3, 1])
+
+    with review_col:
+        if selected_status == "PROTECTED_REVIEW":
+            st.warning(
+                "Protected pricing is active for at least one affected customer. This item cannot be approved in the generic cockpit."
+            )
+        else:
+            st.info("This item passed the supplier-cost validation pipeline and is waiting for a human commercial decision.")
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(
+            "Supplier cost",
+            f"{_money4(selected.get('supplier_new_cost'))}/{selected.get('uom', '')}",
+            delta=(
+                f"+{_money4(selected.get('supplier_cost_delta'))} / "
+                f"{_pct(selected.get('supplier_cost_delta_pct'))}"
+            ),
         )
-    else:
-        st.info("This item passed the supplier-cost validation pipeline and is waiting for a human commercial decision.")
+        m2.metric("Actionable erosion", _money(selected.get("estimated_margin_erosion")))
+        m3.metric("Lowest projected GP", _pct(selected.get("min_projected_gp_pct")))
+        m4.metric("Affected customers", int(_float(selected.get("affected_customers"))))
 
-    m1, m2, m3, m4, m5, m6 = st.columns(6)
-    m1.metric("Current supplier cost", f"{_money4(selected.get('supplier_current_cost'))}/{selected.get('uom', '')}")
-    m2.metric("Proposed supplier cost", f"{_money4(selected.get('supplier_new_cost'))}/{selected.get('uom', '')}")
-    m3.metric("Supplier increase", _pct(selected.get("supplier_cost_delta_pct")))
-    m4.metric("Actionable erosion", _money(selected.get("estimated_margin_erosion")))
-    m5.metric("Lowest projected GP", _pct(selected.get("min_projected_gp_pct")))
-    m6.metric("Affected customers", int(_float(selected.get("affected_customers"))))
+        st.write(
+            f"**Current supplier cost:** {_money4(selected.get('supplier_current_cost'))}/"
+            f"{selected.get('uom', '')}"
+        )
+        st.write(
+            f"**Top exposure:** {selected.get('top_customer_no', '')} / "
+            f"{_money(selected.get('top_customer_erosion'))}"
+        )
+        st.write(f"**Review action:** {selected.get('action', '')}")
+        if str(selected.get("pricing_approvers") or "").strip():
+            st.write(f"**Pricing approver:** {selected.get('pricing_approvers')}")
 
-    st.write(f"**Top exposure:** {selected.get('top_customer_no', '')} / {_money(selected.get('top_customer_erosion'))}")
-    st.write(f"**Review action:** {selected.get('action', '')}")
-    if str(selected.get("pricing_approvers") or "").strip():
-        st.write(f"**Pricing approver:** {selected.get('pricing_approvers')}")
-
-    customer_rows = detail_rows_for_item(detail_records, selected_item)
-    detail_col, decision_col = st.columns([3, 1])
-
-    with detail_col:
         st.markdown("#### Customer margin impact")
         if customer_rows:
             st.dataframe(
@@ -276,7 +289,11 @@ def main() -> None:
             )
 
     with decision_col:
-        st.markdown("#### Human decision")
+        st.markdown("### Decision required")
+        st.caption(
+            f"{_status_label(selected_status)} | top exposure "
+            f"{selected.get('top_customer_no', '')} {_money(selected.get('top_customer_erosion'))}"
+        )
         current_decision = str(selected.get("decision") or "").strip().upper()
         options = list(DECISION_OPTIONS)
         if selected_status == "PROTECTED_REVIEW":
@@ -299,7 +316,7 @@ def main() -> None:
         decision_notes = st.text_area(
             "Notes",
             value=str(selected.get("decision_notes") or ""),
-            height=120,
+            height=140,
             key=f"decision_notes:{key_text}",
         )
 
@@ -330,9 +347,8 @@ def main() -> None:
             mime="text/csv",
             use_container_width=True,
         )
-        st.caption("Saving here updates only the local decision log CSV.")
+        st.caption("Local review record only. No BC write.")
 
-    st.divider()
     with st.expander("Technical/source details"):
         st.write(f"**Queue status:** {_status_label(selected_status)}")
         st.write(f"**Source file:** {selected.get('source_file', '')} row {selected.get('source_row', '')}")

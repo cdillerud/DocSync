@@ -90,6 +90,12 @@ page 71001 "GPI Pack Products"
                 RunObject = page "GPI Pack Prod Card";
                 RunPageMode = Create;
             }
+            action(LandedCosts)
+            {
+                ApplicationArea = All;
+                Caption = 'Landed Cost Worksheets';
+                RunObject = page "GPI Pack Cost Works";
+            }
             action(VendorLocations)
             {
                 ApplicationArea = All;

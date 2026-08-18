@@ -9,11 +9,12 @@ from .bc_adapter import BCConfig, BusinessCentralClient, BusinessCentralError
 from .bc_standard import fetch_standard_customer_family_history, write_family_history_csv
 from .item_similarity import ItemCandidate, discover_related_items
 from .proposal_guard import Proposal, analyze_proposal
+from .proposal_margin import analyze_proposal_margin
 
 
 def _json_safe_profile(profile: dict) -> dict:
     safe = dict(profile)
-    for key in ("first_item_sale", "last_item_sale"):
+    for key in ("first_item_sale", "last_item_sale", "first_margin_sale", "last_margin_sale"):
         value = safe.get(key)
         if value is not None:
             safe[key] = value.date().isoformat()
@@ -34,8 +35,8 @@ def _candidate_dict(candidate: ItemCandidate) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Read a customer's posted Business Central sales history through the standard "
-            "v2 API and evaluate a proposed line without writing to BC."
+            "Read a customer's posted Business Central sales history through read-only APIs "
+            "and evaluate a proposed commercial line without writing to BC."
         )
     )
     parser.add_argument("--customer", required=True, help="Exact BC customer number")
@@ -68,6 +69,23 @@ def main() -> int:
         action="store_true",
         help="Allow blocked BC items to be considered as related-item candidates",
     )
+    parser.add_argument(
+        "--no-margin",
+        action="store_true",
+        help="Skip the custom historical-cost API and run only item/price checks",
+    )
+    parser.add_argument(
+        "--margin-recent-count",
+        type=int,
+        default=3,
+        help="Recent exact customer/item/UOM transactions used for GP baseline",
+    )
+    parser.add_argument(
+        "--gp-drop-points",
+        type=float,
+        default=5.0,
+        help="GP percentage-point drop below recent history that triggers review",
+    )
     parser.add_argument("--price", required=True, type=float, help="Proposed unit sell price")
     parser.add_argument("--quantity", required=True, type=float, help="Proposed quantity")
     parser.add_argument("--uom", required=True, help="Proposed unit of measure")
@@ -78,15 +96,16 @@ def main() -> int:
     parser.add_argument("--recent-count", type=int, default=3)
     parser.add_argument("--below-pct", type=float, default=7.5)
     parser.add_argument("--above-pct", type=float, default=10.0)
-    parser.add_argument("--history-out", help="Optional local CSV audit of fetched history")
+    parser.add_argument("--history-out", help="Optional local CSV audit of fetched standard history")
     parser.add_argument("--json-out", help="Optional local JSON proposal audit")
     args = parser.parse_args()
 
     discovered: list[ItemCandidate] = []
     proposed_master: dict = {}
+    margin_transactions = []
+    margin_error = ""
 
     try:
-        # Source is irrelevant here because this command calls only standard v2 GET APIs.
         config = BCConfig.from_env(source="custom")
         client = BusinessCentralClient(config)
 
@@ -111,6 +130,17 @@ def main() -> int:
             start_date=args.start_date,
             end_date=args.end_date,
         )
+
+        if not args.no_margin:
+            try:
+                margin_transactions = client.fetch_transactions(
+                    start_date=args.start_date,
+                    end_date=args.end_date,
+                    item_nos=[args.item],
+                    customer_nos=[args.customer],
+                )
+            except BusinessCentralError as exc:
+                margin_error = str(exc)
     except BusinessCentralError as exc:
         parser.error(str(exc))
 
@@ -127,7 +157,8 @@ def main() -> int:
         quantity=args.quantity,
         uom=args.uom,
     )
-    profile, exceptions = analyze_proposal(
+
+    profile, proposal_exceptions = analyze_proposal(
         history,
         proposal,
         thresholds={
@@ -137,6 +168,19 @@ def main() -> int:
         },
     )
 
+    margin_profile: dict = {}
+    margin_exceptions = []
+    if not args.no_margin and not margin_error:
+        margin_profile, margin_exceptions = analyze_proposal_margin(
+            margin_transactions,
+            proposal,
+            thresholds={
+                "recent_margin_count": args.margin_recent_count,
+                "low_gp_drop_points": args.gp_drop_points,
+            },
+        )
+
+    exceptions = [*proposal_exceptions, *margin_exceptions]
     status = "REVIEW REQUIRED" if exceptions else "PASS"
 
     print("\n============================================================")
@@ -152,7 +196,8 @@ def main() -> int:
     print(f"History window     : {args.start_date} through {args.end_date or 'latest'}")
     print(f"Auto related items : {'OFF' if args.no_auto_related else len(discovered)}")
     print(f"Family items       : {len(family_items)}")
-    print(f"BC history fetched : {len(history)} matching line(s)")
+    print(f"BC history fetched : {len(history)} matching standard-API line(s)")
+    print(f"Margin check       : {'OFF' if args.no_margin else ('UNAVAILABLE' if margin_error else 'ON')}")
     print(f"Result             : {status}")
 
     if discovered:
@@ -179,6 +224,42 @@ def main() -> int:
     if profile.get("historical_uoms"):
         print(f"Historical UOM(s)  : {', '.join(profile['historical_uoms'])}")
 
+    if args.no_margin:
+        print("\nMARGIN HISTORY")
+        print("  Margin check disabled by --no-margin.")
+    elif margin_error:
+        print("\nMARGIN HISTORY")
+        print("  Custom historical-cost API unavailable in this environment.")
+        print(f"  Detail: {margin_error}")
+    elif margin_profile:
+        print("\nMARGIN HISTORY")
+        print(f"  Matching cost lines : {margin_profile['margin_history_lines']}")
+        if margin_profile.get("last_margin_sale") is not None:
+            print(f"  Latest cost sale    : {margin_profile['last_margin_sale'].date().isoformat()}")
+        if margin_profile.get("latest_historical_cost") is not None:
+            print(
+                f"  Latest hist. cost   : ${margin_profile['latest_historical_cost']:.4f}/"
+                f"{proposal.uom}"
+            )
+        if margin_profile.get("all_time_median_gp_pct") is not None:
+            print(f"  All-history GP med. : {margin_profile['all_time_median_gp_pct']:.1f}%")
+        if margin_profile.get("recent_median_gp_pct") is not None:
+            print(
+                f"  Recent GP median    : {margin_profile['recent_median_gp_pct']:.1f}% "
+                f"({margin_profile['recent_margin_count']} transaction(s))"
+            )
+            print(
+                "  Recent GP values    : "
+                + ", ".join(f"{value:.1f}%" for value in margin_profile["recent_gp_pct"])
+            )
+        if margin_profile.get("estimated_proposal_gp_pct") is not None:
+            print(f"  Estimated prop. GP  : {margin_profile['estimated_proposal_gp_pct']:.1f}%")
+        if margin_profile.get("margin_history_lines", 0):
+            print(
+                "  Cost basis note     : proposal GP uses the latest posted historical cost as a proxy; "
+                "confirm current quote/order cost before acting."
+            )
+
     if exceptions:
         print("\nEXCEPTIONS")
         for index, exc in enumerate(exceptions, start=1):
@@ -190,7 +271,7 @@ def main() -> int:
             print(f"   Action   : {exc.recommended_action}")
             print(f"   Why      : {exc.explanation}")
     else:
-        print("\nNo proposal exceptions were detected against live BC history.")
+        print("\nNo proposal exceptions were detected against the available BC history.")
 
     payload = {
         "status": status,
@@ -206,6 +287,13 @@ def main() -> int:
         "history_lines": len(history),
         "proposal": asdict(proposal),
         "profile": _json_safe_profile(profile),
+        "margin": {
+            "enabled": not args.no_margin,
+            "available": not args.no_margin and not margin_error,
+            "error": margin_error or None,
+            "history_lines": len(margin_transactions),
+            "profile": _json_safe_profile(margin_profile) if margin_profile else None,
+        },
         "exceptions": [exc.to_dict() for exc in exceptions],
     }
 

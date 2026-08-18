@@ -10,6 +10,11 @@ from .bc_standard import fetch_standard_customer_family_history, write_family_hi
 from .item_similarity import ItemCandidate, discover_related_items
 from .proposal_guard import Proposal, analyze_proposal
 from .proposal_margin import analyze_proposal_margin
+from .proposal_special_pricing import (
+    apply_special_pricing_firewall,
+    load_proposal_pricing_rules,
+    parse_proposal_date,
+)
 
 
 def _json_safe_profile(profile: dict) -> dict:
@@ -85,6 +90,18 @@ def main() -> int:
         type=float,
         default=5.0,
         help="GP percentage-point drop below recent history that triggers review",
+    )
+    parser.add_argument(
+        "--guardrails",
+        help=(
+            "Optional CSV of protected SPECIAL_PRICING/FIXED_PRICE rules. Supports customer_no, "
+            "item_no, rule_type, locked_sell_price, effective_from, effective_to, approver, notes."
+        ),
+    )
+    parser.add_argument(
+        "--proposal-date",
+        default="",
+        help="Proposal date used for effective special-pricing rules, YYYY-MM-DD; defaults to today",
     )
     parser.add_argument("--price", required=True, type=float, help="Proposed unit sell price")
     parser.add_argument("--quantity", required=True, type=float, help="Proposed quantity")
@@ -181,6 +198,30 @@ def main() -> int:
         )
 
     exceptions = [*proposal_exceptions, *margin_exceptions]
+
+    proposal_date = parse_proposal_date(args.proposal_date or None)
+    special_pricing_context = {
+        "enabled": False,
+        "protected": False,
+        "as_of": proposal_date.isoformat(),
+        "matched_rule_count": 0,
+        "rule_types": [],
+        "approvers": [],
+        "notes": [],
+        "rules": [],
+    }
+    if args.guardrails:
+        try:
+            pricing_rules = load_proposal_pricing_rules(args.guardrails)
+        except (OSError, ValueError) as exc:
+            parser.error(f"Unable to load guardrail rules: {exc}")
+        special_pricing_context, exceptions = apply_special_pricing_firewall(
+            proposal,
+            exceptions,
+            pricing_rules,
+            as_of=proposal_date,
+        )
+
     status = "REVIEW REQUIRED" if exceptions else "PASS"
 
     print("\n============================================================")
@@ -198,6 +239,13 @@ def main() -> int:
     print(f"Family items       : {len(family_items)}")
     print(f"BC history fetched : {len(history)} matching standard-API line(s)")
     print(f"Margin check       : {'OFF' if args.no_margin else ('UNAVAILABLE' if margin_error else 'ON')}")
+    if not args.guardrails:
+        pricing_status = "OFF"
+    elif special_pricing_context["protected"]:
+        pricing_status = f"PROTECTED ({special_pricing_context['matched_rule_count']} rule(s))"
+    else:
+        pricing_status = "NO ACTIVE MATCH"
+    print(f"Special pricing    : {pricing_status}")
     print(f"Result             : {status}")
 
     if discovered:
@@ -223,6 +271,18 @@ def main() -> int:
         print(f"Recent prices      : {', '.join(f'${p:.2f}' for p in profile['recent_prices'])}")
     if profile.get("historical_uoms"):
         print(f"Historical UOM(s)  : {', '.join(profile['historical_uoms'])}")
+
+    if args.guardrails:
+        print("\nSPECIAL PRICING FIREWALL")
+        print(f"  Proposal date      : {special_pricing_context['as_of']}")
+        print(f"  Protected          : {'YES' if special_pricing_context['protected'] else 'NO'}")
+        print(f"  Active rules       : {special_pricing_context['matched_rule_count']}")
+        if special_pricing_context["rule_types"]:
+            print(f"  Rule type(s)       : {', '.join(special_pricing_context['rule_types'])}")
+        if special_pricing_context["approvers"]:
+            print(f"  Approver(s)        : {', '.join(special_pricing_context['approvers'])}")
+        for note in special_pricing_context["notes"]:
+            print(f"  Rule note          : {note}")
 
     if args.no_margin:
         print("\nMARGIN HISTORY")
@@ -287,6 +347,7 @@ def main() -> int:
         "history_lines": len(history),
         "proposal": asdict(proposal),
         "profile": _json_safe_profile(profile),
+        "special_pricing_firewall": special_pricing_context,
         "margin": {
             "enabled": not args.no_margin,
             "available": not args.no_margin and not margin_error,

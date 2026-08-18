@@ -5,8 +5,11 @@ from pathlib import Path
 from poc.commercial_guardrails.supplier_cockpit_core import (
     detail_rows_for_item,
     load_csv_records,
+    merge_saved_decisions,
+    record_key,
     records_to_csv,
     summarize_queue,
+    update_decision,
     validate_decisions,
     write_decision_csv,
 )
@@ -89,6 +92,67 @@ class SupplierCockpitCoreTests(unittest.TestCase):
             loaded = load_csv_records(path)
         self.assertEqual(loaded[0]["decision"], "APPROVE")
         self.assertEqual(loaded[0]["decision_by"], "Chad")
+
+    def test_record_key_uses_item_supplier_item_and_effective_date(self):
+        row = {
+            "gpi_item_no": " ITEM1 ",
+            "supplier_item_no": " SUP-1 ",
+            "effective_date": "2026-09-01",
+        }
+        self.assertEqual(record_key(row), ("item1", "sup-1", "2026-09-01"))
+
+    def test_saved_decisions_overlay_fresh_queue_without_replacing_new_analysis(self):
+        queue = [
+            {
+                "queue_status": "PENDING_APPROVAL",
+                "gpi_item_no": "ITEM1",
+                "supplier_item_no": "SUP-1",
+                "effective_date": "2026-09-01",
+                "estimated_margin_erosion": "150.00",
+            }
+        ]
+        saved = [
+            {
+                "queue_status": "PENDING_APPROVAL",
+                "gpi_item_no": "ITEM1",
+                "supplier_item_no": "SUP-1",
+                "effective_date": "2026-09-01",
+                "estimated_margin_erosion": "100.00",
+                "decision": "HOLD",
+                "decision_by": "Chad",
+                "decision_notes": "Check supplier scope",
+            }
+        ]
+        merged = merge_saved_decisions(queue, saved)
+        self.assertEqual(merged[0]["estimated_margin_erosion"], "150.00")
+        self.assertEqual(merged[0]["decision"], "HOLD")
+        self.assertEqual(merged[0]["decision_by"], "Chad")
+
+    def test_update_decision_changes_only_selected_queue_item(self):
+        rows = [
+            {
+                "gpi_item_no": "ITEM1",
+                "supplier_item_no": "SUP-1",
+                "effective_date": "2026-09-01",
+                "decision": "",
+            },
+            {
+                "gpi_item_no": "ITEM2",
+                "supplier_item_no": "SUP-2",
+                "effective_date": "2026-09-15",
+                "decision": "",
+            },
+        ]
+        updated = update_decision(
+            rows,
+            record_key(rows[0]),
+            decision="approve",
+            decision_by="Chad",
+            decision_notes="Validated",
+        )
+        self.assertEqual(updated[0]["decision"], "APPROVE")
+        self.assertEqual(updated[0]["decision_by"], "Chad")
+        self.assertEqual(updated[1]["decision"], "")
 
 
 if __name__ == "__main__":

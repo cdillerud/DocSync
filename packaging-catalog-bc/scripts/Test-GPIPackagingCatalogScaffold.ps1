@@ -7,7 +7,10 @@ param(
     [int]$ObjectFrom = 71000,
 
     [Parameter()]
-    [int]$ObjectTo = 71199
+    [int]$ObjectTo = 71199,
+
+    [Parameter()]
+    [int]$MaxObjectNameLength = 20
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,6 +67,10 @@ Get-ChildItem -LiteralPath (Join-Path $AppPath 'src') -Filter '*.al' -File -Recu
         $Errors.Add("Object is outside $ObjectFrom..${ObjectTo}: $Key $Name")
     }
 
+    if ($Name.Length -gt $MaxObjectNameLength) {
+        $Errors.Add("Object name exceeds $MaxObjectNameLength characters: $Key '$Name' ($($Name.Length))")
+    }
+
     if ($Seen.ContainsKey($Key)) {
         $Errors.Add("Duplicate object ID/type $Key in $($_.FullName) and $($Seen[$Key])")
     }
@@ -75,6 +82,7 @@ Get-ChildItem -LiteralPath (Join-Path $AppPath 'src') -Filter '*.al' -File -Recu
         Type = $Type
         Id = $Id
         Name = $Name
+        NameLength = $Name.Length
         File = $_.FullName
     }
 }
@@ -88,5 +96,6 @@ if ($Errors.Count -gt 0) {
 Write-Host 'GPI Packaging Catalog scaffold validation PASSED.' -ForegroundColor Green
 Write-Host "Environment : $($Launch.environmentName)"
 Write-Host "Object range : $ObjectFrom..$ObjectTo"
+Write-Host "Name limit   : $MaxObjectNameLength characters"
 Write-Host "AL objects   : $($Objects.Count)"
-$Objects | Sort-Object Id, Type | Format-Table Type, Id, Name -AutoSize
+$Objects | Sort-Object Id, Type | Format-Table Type, Id, Name, NameLength -AutoSize

@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import csv
+from io import StringIO
+from pathlib import Path
+from typing import Iterable, Mapping, Sequence
+
+
+EDITABLE_FIELDS = ("decision", "decision_by", "decision_notes")
+DECISION_OPTIONS = ("", "APPROVE", "HOLD", "REJECT")
+
+
+def load_csv_records(path: str | Path) -> list[dict[str, str]]:
+    source = Path(path)
+    if not source.exists():
+        return []
+    with source.open(newline="", encoding="utf-8-sig") as handle:
+        return [dict(row) for row in csv.DictReader(handle)]
+
+
+def summarize_queue(records: Sequence[Mapping[str, object]]) -> dict:
+    def _num(value: object) -> float:
+        try:
+            return float(value or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return {
+        "items": len(records),
+        "protected_items": sum(
+            str(row.get("queue_status") or "").strip().upper() == "PROTECTED_REVIEW"
+            for row in records
+        ),
+        "affected_customers": sum(_num(row.get("affected_customers")) for row in records),
+        "protected_customers": sum(_num(row.get("protected_customers")) for row in records),
+        "estimated_margin_erosion": sum(
+            _num(row.get("estimated_margin_erosion")) for row in records
+        ),
+    }
+
+
+def filter_records(
+    records: Sequence[Mapping[str, object]],
+    *,
+    statuses: Iterable[str] = (),
+    supplier_text: str = "",
+    item_text: str = "",
+) -> list[dict]:
+    wanted_statuses = {str(value).strip().upper() for value in statuses if str(value).strip()}
+    supplier_key = supplier_text.strip().casefold()
+    item_key = item_text.strip().casefold()
+    output: list[dict] = []
+    for record in records:
+        status = str(record.get("queue_status") or "").strip().upper()
+        supplier = str(record.get("supplier_name") or "").casefold()
+        item = str(record.get("gpi_item_no") or "").casefold()
+        if wanted_statuses and status not in wanted_statuses:
+            continue
+        if supplier_key and supplier_key not in supplier:
+            continue
+        if item_key and item_key not in item:
+            continue
+        output.append(dict(record))
+    return output
+
+
+def detail_rows_for_item(
+    detail_records: Sequence[Mapping[str, object]],
+    item_no: str,
+) -> list[dict]:
+    key = item_no.strip().casefold()
+    if not key:
+        return []
+    rows = [
+        dict(row)
+        for row in detail_records
+        if str(row.get("gpi_item_no") or "").strip().casefold() == key
+        and str(row.get("customer_no") or "").strip()
+    ]
+    rows.sort(
+        key=lambda row: (
+            -_float(row.get("estimated_margin_erosion")),
+            str(row.get("customer_no") or ""),
+        )
+    )
+    return rows
+
+
+def _float(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def validate_decisions(records: Sequence[Mapping[str, object]]) -> list[str]:
+    errors: list[str] = []
+    for index, record in enumerate(records, start=1):
+        item = str(record.get("gpi_item_no") or f"row {index}").strip()
+        status = str(record.get("queue_status") or "").strip().upper()
+        decision = str(record.get("decision") or "").strip().upper()
+        decision_by = str(record.get("decision_by") or "").strip()
+
+        if decision and decision not in DECISION_OPTIONS:
+            errors.append(f"{item}: unsupported decision {decision!r}")
+            continue
+        if decision and not decision_by:
+            errors.append(f"{item}: decision_by is required when a decision is entered")
+        if status == "PROTECTED_REVIEW" and decision == "APPROVE":
+            errors.append(
+                f"{item}: PROTECTED_REVIEW cannot be approved in the generic cockpit; resolve the pricing guardrail first"
+            )
+    return errors
+
+
+def records_to_csv(records: Sequence[Mapping[str, object]]) -> str:
+    if not records:
+        return ""
+
+    fieldnames: list[str] = []
+    for record in records:
+        for key in record.keys():
+            if key not in fieldnames:
+                fieldnames.append(str(key))
+    for field in EDITABLE_FIELDS:
+        if field not in fieldnames:
+            fieldnames.append(field)
+
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator="\n")
+    writer.writeheader()
+    for record in records:
+        row = {key: record.get(key, "") for key in fieldnames}
+        writer.writerow(row)
+    return buffer.getvalue()
+
+
+def write_decision_csv(records: Sequence[Mapping[str, object]], path: str | Path) -> None:
+    errors = validate_decisions(records)
+    if errors:
+        raise ValueError("; ".join(errors))
+    Path(path).write_text(records_to_csv(records), encoding="utf-8")

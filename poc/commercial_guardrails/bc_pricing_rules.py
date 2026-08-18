@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Mapping, Sequence
 
@@ -11,6 +12,8 @@ RULE_API_SELECT = (
     "id,entryNo,enabled,customerNo,itemNo,ruleType,lockedSellPrice,"
     "effectiveFrom,effectiveTo,approver,notes"
 )
+
+_ODATA_ESCAPE = re.compile(r"_x([0-9A-Fa-f]{4})_")
 
 
 def _bool(value: object, default: bool = True) -> bool:
@@ -39,6 +42,12 @@ def _date_or_none(value: object) -> date | None:
         raise ValueError(f"Unsupported BC guardrail effective date: {text!r}") from exc
 
 
+def _decode_odata_enum_text(value: object) -> str:
+    """Decode Business Central OData enum captions such as Special_x0020_Pricing."""
+    text = str(value if value is not None else "").strip()
+    return _ODATA_ESCAPE.sub(lambda match: chr(int(match.group(1), 16)), text)
+
+
 def _rule_type(value: object) -> str:
     if isinstance(value, (int, float)):
         if int(value) == 0:
@@ -46,14 +55,14 @@ def _rule_type(value: object) -> str:
         if int(value) == 1:
             return "FIXED_PRICE"
 
-    text = str(value if value is not None else "").strip()
+    text = _decode_odata_enum_text(value)
     if text in {"0", "1"}:
         return "SPECIAL_PRICING" if text == "0" else "FIXED_PRICE"
 
     normalized = text.upper().replace("-", "_").replace(" ", "_")
     if normalized in {"SPECIAL_PRICING", "FIXED_PRICE"}:
         return normalized
-    raise ValueError(f"Unsupported BC pricing rule type: {text!r}")
+    raise ValueError(f"Unsupported BC pricing rule type: {str(value if value is not None else '').strip()!r}")
 
 
 def pricing_rules_from_bc_rows(

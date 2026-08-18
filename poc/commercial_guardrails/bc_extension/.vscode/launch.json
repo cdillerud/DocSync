@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "GPI Guardrails - Sandbox_NoZetadocs_UAT",
+      "request": "launch",
+      "type": "al",
+      "environmentType": "Sandbox",
+      "environmentName": "Sandbox_NoZetadocs_UAT",
+      "tenant": "c7b2de14-71d9-4c49-a0b9-2bec103a6fdc",
+      "startupObjectType": "Page",
+      "startupObjectId": 22,
+      "breakOnError": "All",
+      "launchBrowser": false,
+      "schemaUpdateMode": "Synchronize"
+    }
+  ]
+}

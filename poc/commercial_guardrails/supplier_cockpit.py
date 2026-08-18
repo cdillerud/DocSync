@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import streamlit as st
 
-from .supplier_cockpit_core import (
+# Streamlit executes this file as a script. Ensure the repository root is importable
+# so package imports work reliably when launched from the repo root or another folder.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from poc.commercial_guardrails.supplier_cockpit_core import (
     DECISION_OPTIONS,
     detail_rows_for_item,
     filter_records,
@@ -206,7 +213,7 @@ def main() -> None:
     st.write(f"**Action:** {selected.get('action', '')}")
     st.write(
         "**Cost:** "
-        f"{_money(selected.get('supplier_current_cost'))}/{selected.get('uom', '')} → "
+        f"{_money(selected.get('supplier_current_cost'))}/{selected.get('uom', '')} to "
         f"{_money(selected.get('supplier_new_cost'))}/{selected.get('uom', '')}"
     )
     st.write(

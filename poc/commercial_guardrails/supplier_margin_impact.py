@@ -64,6 +64,9 @@ class SupplierMarginImpact:
     historical_lines: int
     historical_customers: int
     recent_posted_cost_median: float | None
+    recent_posted_cost_min: float | None
+    recent_posted_cost_max: float | None
+    recent_posted_cost_spread_pct: float | None
     latest_posted_cost: float | None
     latest_posted_sale: datetime | None
     supplier_current_vs_posted_pct: float | None
@@ -91,6 +94,12 @@ def _pct_delta(value: float | None, baseline: float | None) -> float | None:
     if value is None or baseline is None or baseline == 0:
         return None
     return ((value - baseline) / abs(baseline)) * 100.0
+
+
+def _spread_pct(values: Sequence[float], baseline: float | None) -> float | None:
+    if not values or baseline is None or baseline == 0:
+        return None
+    return ((max(values) - min(values)) / abs(baseline)) * 100.0
 
 
 def _gp_pct(sell: float, cost: float) -> float:
@@ -166,10 +175,7 @@ def _customer_impacts(
             as_of=effective_date,
         )
 
-        sales_rep = next(
-            (tx.sales_rep for tx in reversed(ordered) if tx.sales_rep),
-            "",
-        )
+        sales_rep = next((tx.sales_rep for tx in reversed(ordered) if tx.sales_rep), "")
         impacts.append(
             CustomerMarginImpact(
                 customer_no=customer_no,
@@ -193,11 +199,7 @@ def _customer_impacts(
         )
 
     impacts.sort(
-        key=lambda row: (
-            -row.estimated_margin_erosion,
-            row.projected_gp_pct,
-            row.customer_no,
-        )
+        key=lambda row: (-row.estimated_margin_erosion, row.projected_gp_pct, row.customer_no)
     )
     return impacts
 
@@ -210,48 +212,63 @@ def analyze_supplier_margin_impact(
     recent_item_cost_count: int = 10,
     recent_customer_count: int = 3,
     history_alignment_tolerance_pct: float = 5.0,
+    max_recent_cost_spread_pct: float = 15.0,
     trailing_days: int = 365,
+    include_review_scenarios: bool = False,
 ) -> SupplierMarginImpact:
     staged = comparison.staged
     warnings: list[str] = []
 
-    if comparison.status == "REJECT" or staged.new_cost is None or staged.new_cost <= 0:
+    def result(
+        *,
+        status: str,
+        cost_delta: float | None = None,
+        cost_delta_pct: float | None = None,
+        historical_lines: int = 0,
+        historical_customers: int = 0,
+        recent_posted_cost_median: float | None = None,
+        recent_posted_cost_min: float | None = None,
+        recent_posted_cost_max: float | None = None,
+        recent_posted_cost_spread_pct: float | None = None,
+        latest_posted_cost: float | None = None,
+        latest_posted_sale: datetime | None = None,
+        supplier_current_vs_posted_pct: float | None = None,
+        customer_impacts: Sequence[CustomerMarginImpact] = (),
+        notes: Sequence[str] = (),
+    ) -> SupplierMarginImpact:
         return SupplierMarginImpact(
             comparison=comparison,
-            status="REJECT",
-            cost_delta=None,
-            cost_delta_pct=None,
-            historical_lines=0,
-            historical_customers=0,
-            recent_posted_cost_median=None,
-            latest_posted_cost=None,
-            latest_posted_sale=None,
-            supplier_current_vs_posted_pct=None,
-            customer_impacts=(),
-            warnings=tuple(dict.fromkeys([*staged.warnings, *comparison.warnings])),
+            status=status,
+            cost_delta=cost_delta,
+            cost_delta_pct=cost_delta_pct,
+            historical_lines=historical_lines,
+            historical_customers=historical_customers,
+            recent_posted_cost_median=recent_posted_cost_median,
+            recent_posted_cost_min=recent_posted_cost_min,
+            recent_posted_cost_max=recent_posted_cost_max,
+            recent_posted_cost_spread_pct=recent_posted_cost_spread_pct,
+            latest_posted_cost=latest_posted_cost,
+            latest_posted_sale=latest_posted_sale,
+            supplier_current_vs_posted_pct=supplier_current_vs_posted_pct,
+            customer_impacts=tuple(customer_impacts),
+            warnings=tuple(dict.fromkeys(notes)),
         )
+
+    if comparison.status == "REJECT" or staged.new_cost is None or staged.new_cost <= 0:
+        return result(status="REJECT", notes=[*staged.warnings, *comparison.warnings])
 
     if not staged.gpi_item_no or comparison.bc_match != "EXACT_ITEM_UOM" or not staged.uom:
         warnings.extend(staged.warnings)
         warnings.append("exact BC item and supplier UOM match is required for margin impact analysis")
-        return SupplierMarginImpact(
-            comparison=comparison,
-            status="REVIEW",
-            cost_delta=None,
-            cost_delta_pct=None,
-            historical_lines=0,
-            historical_customers=0,
-            recent_posted_cost_median=None,
-            latest_posted_cost=None,
-            latest_posted_sale=None,
-            supplier_current_vs_posted_pct=None,
-            customer_impacts=(),
-            warnings=tuple(dict.fromkeys(warnings)),
-        )
+        return result(status="REVIEW", notes=warnings)
 
     history = _matching_history(transactions, staged.gpi_item_no, staged.uom)
     recent_item = history[-max(1, int(recent_item_cost_count)) :]
-    recent_posted_cost = median([tx.unit_cost for tx in recent_item]) if recent_item else None
+    recent_cost_values = [tx.unit_cost for tx in recent_item]
+    recent_posted_cost = median(recent_cost_values) if recent_cost_values else None
+    recent_cost_min = min(recent_cost_values) if recent_cost_values else None
+    recent_cost_max = max(recent_cost_values) if recent_cost_values else None
+    recent_cost_spread = _spread_pct(recent_cost_values, recent_posted_cost)
     latest_posted_cost = history[-1].unit_cost if history else None
     latest_posted_sale = history[-1].transaction_date if history else None
     current_vs_posted = _pct_delta(staged.current_cost, recent_posted_cost)
@@ -296,6 +313,17 @@ def analyze_supplier_margin_impact(
         )
         status = "REVIEW"
 
+    if (
+        recent_cost_spread is not None
+        and recent_cost_spread > max_recent_cost_spread_pct
+    ):
+        warnings.append(
+            "recent posted Unit Cost (LCY) is heterogeneous for this item/UOM; one supplier cost delta "
+            "must not be applied across customers until the underlying scope, vendor, tier, or charge "
+            "basis is separated"
+        )
+        status = "REVIEW"
+
     if comparison.status == "REVIEW" and status == "IMPACT_READY":
         warnings.append(
             "BC Item Unit Cost context is not aligned, but the supplier current cost aligns to recent "
@@ -303,7 +331,7 @@ def analyze_supplier_margin_impact(
         )
 
     customer_impacts: list[CustomerMarginImpact] = []
-    if cost_delta is not None and history:
+    if cost_delta is not None and history and (status == "IMPACT_READY" or include_review_scenarios):
         customer_impacts = _customer_impacts(
             history,
             item_no=staged.gpi_item_no,
@@ -314,36 +342,51 @@ def analyze_supplier_margin_impact(
             recent_customer_count=recent_customer_count,
             trailing_days=trailing_days,
         )
+        if status != "IMPACT_READY" and include_review_scenarios:
+            warnings.append(
+                "customer impacts below are REVIEW-ONLY scenarios and are excluded from actionable headline totals"
+            )
 
-    return SupplierMarginImpact(
-        comparison=comparison,
+    return result(
         status=status,
         cost_delta=cost_delta,
         cost_delta_pct=cost_delta_pct,
         historical_lines=len(history),
         historical_customers=len({tx.customer_no for tx in history if tx.customer_no}),
         recent_posted_cost_median=recent_posted_cost,
+        recent_posted_cost_min=recent_cost_min,
+        recent_posted_cost_max=recent_cost_max,
+        recent_posted_cost_spread_pct=recent_cost_spread,
         latest_posted_cost=latest_posted_cost,
         latest_posted_sale=latest_posted_sale,
         supplier_current_vs_posted_pct=current_vs_posted,
-        customer_impacts=tuple(customer_impacts),
-        warnings=tuple(dict.fromkeys(warnings)),
+        customer_impacts=customer_impacts,
+        notes=warnings,
     )
 
 
 def summarize_supplier_impacts(rows: Sequence[SupplierMarginImpact]) -> dict:
+    actionable = [row for row in rows if row.status == "IMPACT_READY"]
+    review = [row for row in rows if row.status == "REVIEW"]
     return {
         "rows": len(rows),
-        "impact_ready": sum(row.status == "IMPACT_READY" for row in rows),
-        "review": sum(row.status == "REVIEW" for row in rows),
+        "impact_ready": len(actionable),
+        "review": len(review),
         "reject": sum(row.status == "REJECT" for row in rows),
-        "customers": sum(len(row.customer_impacts) for row in rows),
+        "customers": sum(len(row.customer_impacts) for row in actionable),
+        "review_scenario_customers": sum(len(row.customer_impacts) for row in review),
         "protected_customers": sum(
             impact.special_pricing_protected
-            for row in rows
+            for row in actionable
             for impact in row.customer_impacts
         ),
-        "estimated_margin_erosion": sum(row.estimated_margin_erosion for row in rows),
+        "review_scenario_protected_customers": sum(
+            impact.special_pricing_protected
+            for row in review
+            for impact in row.customer_impacts
+        ),
+        "estimated_margin_erosion": sum(row.estimated_margin_erosion for row in actionable),
+        "review_scenario_margin_erosion": sum(row.estimated_margin_erosion for row in review),
     }
 
 
@@ -367,6 +410,9 @@ def write_supplier_impact_csv(rows: Sequence[SupplierMarginImpact], path: str | 
             "historical_lines": row.historical_lines,
             "historical_customers": row.historical_customers,
             "recent_posted_cost_median": row.recent_posted_cost_median,
+            "recent_posted_cost_min": row.recent_posted_cost_min,
+            "recent_posted_cost_max": row.recent_posted_cost_max,
+            "recent_posted_cost_spread_pct": row.recent_posted_cost_spread_pct,
             "latest_posted_cost": row.latest_posted_cost,
             "latest_posted_sale": row.latest_posted_sale.date().isoformat() if row.latest_posted_sale else "",
             "supplier_current_vs_posted_pct": row.supplier_current_vs_posted_pct,

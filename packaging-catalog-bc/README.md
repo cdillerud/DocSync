@@ -26,7 +26,7 @@ Validated in UAT:
 
 ## Milestone 2: landed cost foundation
 
-Version `0.2.0.0` adds deterministic Business Central landed-cost logic:
+Validated in UAT:
 
 - immediate Vendor Name and FOB FlowField refresh on the product card
 - persistent landed-cost worksheets
@@ -41,13 +41,25 @@ Version `0.2.0.0` adds deterministic Business Central landed-cost logic:
 
 Freight-rate matching prioritizes the most specific active rate and then falls back through vendor/location scope, `Any` mode, and default-destination rates. Blank origin vendor/location values are used for broader fallback rows.
 
+## Milestone 3: deterministic margin guidance
+
+Version `0.3.0.0` adds deterministic gross-margin and sell-price calculations on the landed-cost worksheet:
+
+- target gross margin percent
+- suggested sell price per unit calculated as landed cost divided by one minus target gross margin
+- extended landed cost
+- extended sell
+- gross profit per unit
+- gross profit total
+
+These calculations remain Business Central logic. AI is not allowed to invent, override, or independently determine pricing.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
 
-## Deferred until the BC cost foundation is validated
+## Deferred until margin guidance is validated
 
-- gross-margin and customer sell-price logic
 - customer-specific pricing guardrails
 - saved packaging quotes and quote lines
 - best-price comparison and route/mileage automation

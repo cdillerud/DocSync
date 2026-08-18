@@ -13,7 +13,7 @@ from .supplier_approval_queue import (
     summarize_supplier_approval_queue,
     write_supplier_approval_queue_csv,
 )
-from .supplier_margin_impact import analyze_supplier_margin_impact
+from .supplier_margin_impact import analyze_supplier_margin_impact, write_supplier_impact_csv
 from .supplier_price_compare import SupplierPriceComparison, compare_supplier_prices_to_bc
 from .supplier_price_ingest import load_supplier_notice
 
@@ -28,6 +28,20 @@ def _money4(value: float | None) -> str:
 
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.1f}%"
+
+
+def _resolve_detail_out(queue_out: str, detail_out: str) -> str:
+    """Return a cockpit detail sidecar path for the same analysis snapshot as the queue."""
+    explicit = str(detail_out or "").strip()
+    if explicit:
+        return explicit
+    queue_text = str(queue_out or "").strip()
+    if not queue_text:
+        return ""
+    queue_path = Path(queue_text)
+    if queue_path.name.casefold() == "live_supplier_approval_queue.csv":
+        return str(queue_path.with_name("live_supplier_margin_impact.csv"))
+    return str(queue_path.with_name(f"{queue_path.stem}_detail.csv"))
 
 
 def _build_impacts(
@@ -103,6 +117,14 @@ def main() -> int:
         help="Historical volume window used for margin-dollar erosion context",
     )
     parser.add_argument("--out", default="", help="Optional approval queue CSV")
+    parser.add_argument(
+        "--detail-out",
+        default="",
+        help=(
+            "Optional margin-impact detail CSV. When --out is supplied and this is omitted, a sidecar "
+            "detail path is derived automatically so the cockpit queue and customer detail stay in sync."
+        ),
+    )
     args = parser.parse_args()
 
     try:
@@ -191,6 +213,12 @@ def main() -> int:
         write_supplier_approval_queue_csv(queue, args.out)
         print(f"\nApproval queue CSV written to: {Path(args.out).resolve()}")
         print("  decision, decision_by, and decision_notes are intentionally blank for human completion.")
+
+    detail_out = _resolve_detail_out(args.out, args.detail_out)
+    if detail_out:
+        write_supplier_impact_csv(impacts, detail_out)
+        print(f"Margin detail CSV written to: {Path(detail_out).resolve()}")
+        print("  Queue and customer detail were written from the same analysis snapshot.")
 
     print("\nQUEUE RULE")
     print(

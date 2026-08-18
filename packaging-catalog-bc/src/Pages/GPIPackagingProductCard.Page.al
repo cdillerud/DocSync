@@ -1,7 +1,7 @@
-page 71000 "GPI Packaging Product Card"
+page 71000 "GPI Pack Prod Card"
 {
     PageType = Card;
-    SourceTable = "GPI Packaging Product";
+    SourceTable = "GPI Pack Product";
     ApplicationArea = All;
     Caption = 'GPI Packaging Product';
 
@@ -148,7 +148,7 @@ page 71000 "GPI Packaging Product Card"
                     ApplicationArea = All;
                 }
             }
-            part(PriceHistory; "GPI Pack Price History")
+            part(PriceHistory; "GPI Pack Price Hist")
             {
                 ApplicationArea = All;
                 Caption = 'Price History';
@@ -169,7 +169,7 @@ page 71000 "GPI Packaging Product Card"
 
                 trigger OnAction()
                 var
-                    CatalogMgt: Codeunit "GPI Packaging Catalog Mgt.";
+                    CatalogMgt: Codeunit "GPI Pack Catalog Mgt";
                 begin
                     CatalogMgt.RecalculateMetricTonCost(Rec);
                     CurrPage.Update(false);
@@ -179,14 +179,14 @@ page 71000 "GPI Packaging Product Card"
             {
                 ApplicationArea = All;
                 Caption = 'Vendor Locations';
-                RunObject = page "GPI Pack Vendor Locations";
+                RunObject = page "GPI Pack Vendor Locs";
                 RunPageLink = "Vendor No." = field("Vendor No.");
             }
             action(FreightRates)
             {
                 ApplicationArea = All;
                 Caption = 'Freight Rates';
-                RunObject = page "GPI Pack Freight Rates";
+                RunObject = page "GPI Pack Frt Rates";
                 RunPageLink = "Origin Vendor No." = field("Vendor No.");
             }
         }

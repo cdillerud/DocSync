@@ -2,7 +2,7 @@
 
 This is the executable proof-of-concept for the Hawkeye use cases discussed on August 17, 2026.
 
-It deliberately starts **without AI and without write access to Business Central**. The goal is to prove that Gamer-specific commercial rules and historical transaction patterns can reliably surface exceptions before any automated write-back is considered.
+It deliberately starts **without AI and without write access from the Python guardrail client to Business Central**. The goal is to prove that Gamer-specific commercial rules and historical transaction patterns can reliably surface exceptions before any automated write-back is considered.
 
 ## What the current POC detects
 
@@ -24,75 +24,50 @@ The engine may calculate and display price or margin exposure, but any normal pr
 
 A `FIXED_PRICE` mismatch is surfaced as `CRITICAL`. If multiple equally specific active fixed-price rules disagree, the POC surfaces a configuration conflict instead of choosing one.
 
-The BC adapter performs data GET requests only. The only POST request it can make is the Microsoft Entra OAuth token exchange. It contains no BC create, update, post, release, or delete operation.
+Family-level special pricing is intentionally **not inferred** from description similarity. Protected pricing must match an exact item or an explicit wildcard maintained in the authoritative rule table.
 
-## CSV inputs
+## Business Central integration
 
-### Transactions
+### Historical sales
 
-Required columns:
-
-`transaction_id, order_no, transaction_date, customer_no, customer_name, item_no, item_description, quantity, uom, unit_cost, unit_sell_price`
-
-Optional columns:
-
-`sales_rep, special_pricing`
-
-### Guardrails
-
-Columns:
-
-`customer_no, item_no, rule_type, min_gp_pct, min_sell_price, locked_sell_price, effective_from, effective_to, approver, notes`
-
-`customer_no` and `item_no` may use `*` as a wildcard. Effective dates are inclusive and optional. The live proposal firewall currently uses `SPECIAL_PRICING` and `FIXED_PRICE`; the historical engine also supports `MIN_GP` and `MIN_SELL`.
-
-The checked-in `sample_guardrails.csv` contains POC examples only. Do not treat those rows as authoritative Gamer pricing agreements.
-
-## Run the synthetic sample
-
-From the repository root:
-
-```powershell
-python -m poc.commercial_guardrails.cli `
-  --transactions poc/commercial_guardrails/sample_transactions.csv `
-  --guardrails poc/commercial_guardrails/sample_guardrails.csv `
-  --out poc/commercial_guardrails/exceptions.csv
-```
-
-## Business Central read-only ingestion
-
-### Preferred source: GPI custom API query
-
-The folder `bc_extension` contains a standalone POC AL extension with one API query:
+The standalone POC extension exposes:
 
 `gpi/commercialGuardrails/v1.0/historicalSalesLines`
 
-It joins posted Sales Invoice Header and Sales Invoice Line data and exposes:
+It joins posted Sales Invoice Header and Sales Invoice Line data and exposes invoice/order/date/customer/item/UOM/quantity/cost/sell information through a read-only API query.
 
-- invoice number
-- source order number
-- posting date
-- customer number/name
-- salesperson
-- item number/description
-- sales quantity
-- quantity base
-- unit of measure
-- Unit Cost (LCY)
-- unit price
-- net line amount
+The live proposal checker also uses standard Business Central v2 APIs for posted invoice/customer/item history and automatic related-item discovery.
 
-Because it is an `API` query and `DataAccessIntent = ReadOnly`, it does not expose BC write operations.
+### Authoritative pricing guardrails
 
-The extension also defines assignable permission set `GPI COMM GUARD POC`. It grants only read access to posted Sales Invoice Header/Line data plus execute permission to the API query. Assign that permission set to the BC Entra application used for the POC rather than granting a broad functional role.
+The POC extension now includes Business Central table:
 
-### Standard API usage
+`GPI Pricing Guardrail`
 
-The live proposal checker uses standard Business Central v2 APIs for posted sales invoice/customer/item history and the custom read-only query for historical cost/margin data. The standard root `salesInvoiceLines` endpoint is not used directly; invoice lines are expanded from posted sales invoices.
+Fields include:
 
-### Environment variables
+- Enabled
+- Customer No. (blank = all customers)
+- Item No. (blank = all items)
+- Rule Type: Special Pricing or Fixed Price
+- Locked Sell Price
+- Effective From / Effective To
+- Approver
+- Notes
 
-Use a dedicated Entra application with only the BC permissions required for read access.
+Business Central users maintain these records through the `GPI Pricing Guardrails` page.
+
+The Python client reads enabled rules through:
+
+`gpi/commercialGuardrails/v1.0/pricingGuardrails`
+
+That API page has `InsertAllowed = false`, `ModifyAllowed = false`, and `DeleteAllowed = false`. The Python client therefore treats Business Central as the authoritative rule source but cannot change pricing guardrails through the API.
+
+The assignable permission set `GPI COMM GUARD POC` grants the Entra application read access to posted Sales Invoice Header/Line data and `GPI Pricing Guardrail`, plus execute access to the two read-only API objects.
+
+## Authentication
+
+Environment variables:
 
 ```powershell
 $env:BC_ENVIRONMENT = "Sandbox_NoZetadocs_UAT"
@@ -102,15 +77,15 @@ $env:BC_CLIENT_SECRET = "<secret>"
 $env:BC_COMPANY_NAME = "<exact BC company display name>"
 ```
 
-Instead of client credentials, a temporary access token can be supplied as:
+A temporary token may be supplied instead:
 
 ```powershell
 $env:BC_ACCESS_TOKEN = "<token>"
 ```
 
-Never commit these values. Temporary access tokens expire and must be refreshed when BC returns `401 Unauthorized`.
+Never commit credentials. Temporary tokens expire and must be refreshed when BC returns `401 Unauthorized`.
 
-### Historical BC analysis
+## Historical BC analysis
 
 ```powershell
 python -m poc.commercial_guardrails.bc_cli `
@@ -120,33 +95,22 @@ python -m poc.commercial_guardrails.bc_cli `
   --item "<ITEM-NO>"
 ```
 
-The command writes normalized BC transactions and exceptions to CSV when output paths are supplied.
+## Pricing-rule probe
+
+Use this to prove the rule maintained in Business Central can be read and matched:
+
+```powershell
+python -m poc.commercial_guardrails.bc_pricing_rule_probe `
+  --customer "<CUSTOMER-NO>" `
+  --item "<ITEM-NO>" `
+  --proposal-date 2026-08-17
+```
+
+Business Central may encode enum captions over OData, for example `Special_x0020_Pricing`. The adapter decodes those values before applying the firewall.
 
 ## Live proposal check
 
-Example:
-
-```powershell
-python -m poc.commercial_guardrails.bc_proposal_cli `
-  --customer "<CUSTOMER-NO>" `
-  --item "<ITEM-NO>" `
-  --price 195.00 `
-  --quantity 10 `
-  --uom "M" `
-  --start-date 2024-01-01
-```
-
-The checker can combine:
-
-- exact customer/item price history
-- automatic related-item discovery
-- exact customer/item/UOM GP history
-- latest posted historical cost as a clearly labeled proposal-time proxy
-- special-pricing/fixed-price protection
-
-### Special-pricing firewall
-
-Pass a reviewed pricing-rule CSV and a proposal date:
+Business Central pricing rules are now loaded **automatically by default**:
 
 ```powershell
 python -m poc.commercial_guardrails.bc_proposal_cli `
@@ -156,28 +120,43 @@ python -m poc.commercial_guardrails.bc_proposal_cli `
   --quantity 10 `
   --uom "M" `
   --start-date 2024-01-01 `
-  --guardrails "<reviewed-pricing-rules.csv>" `
   --proposal-date 2026-08-17
 ```
 
-When an active `SPECIAL_PRICING` or `FIXED_PRICE` rule matches the exact customer/item or a configured wildcard, output includes a `SPECIAL PRICING FIREWALL` section and `SPECIAL_PRICING_PROTECTED`. Price and GP evidence remains visible, but pricing actions are redirected to the configured approver.
+The output shows:
 
-Family-level special pricing is intentionally **not inferred** from description similarity. Until Gamer defines an authoritative family mapping/rule source, protected pricing must match an exact item or an explicit `*` wildcard. This avoids silently extending a contract price to related but non-equivalent SKUs.
+- `Pricing rule source: BUSINESS CENTRAL`
+- count of enabled rules read from BC
+- whether the exact proposal is protected
+- matching rule type, approver, and notes
+- historical price evidence
+- historical GP evidence
+- item-family/substitution evidence
+
+If the Business Central pricing-rule API cannot be read, the command **fails closed** rather than returning a false `PASS` without the special-pricing protection layer.
+
+### Explicit troubleshooting overrides
+
+`--guardrails <file.csv>` remains available only as a local CSV override for testing/offline development.
+
+`--no-special-pricing` explicitly disables the firewall and should be used only for intentional troubleshooting. It cannot be combined with `--guardrails`.
 
 ## POC validations completed
 
 Using real posted BC history in `Sandbox_NoZetadocs_UAT`:
 
-1. TRIPLEH at `$195/M` correctly produced both `SELL_BELOW_CUSTOMER_HISTORY` and `LOW_GP_ANOMALY`.
-2. The same TRIPLEH item at its established `$224.81/M` price correctly passed with no proposal exceptions.
-3. GRUMPY proposed on a related hot-fill ringneck item with no exact-item history correctly produced `SIMILAR_ITEM_SUBSTITUTION` while refusing to invent a margin baseline.
+1. TRIPLEH at `$195/M` produced both `SELL_BELOW_CUSTOMER_HISTORY` and `LOW_GP_ANOMALY`.
+2. The same TRIPLEH item at its established `$224.81/M` price passed with no proposal exceptions.
+3. GRUMPY proposed on a related hot-fill ringneck item with no exact-item history produced `SIMILAR_ITEM_SUBSTITUTION` while refusing to invent a margin baseline.
 4. Historical TRIPLEH transactions themselves produced zero margin exceptions, demonstrating a stable baseline rather than a noisy detector.
+5. A synthetic protected TRIPLEH rule correctly redirected both price and GP actions to the configured approver.
+6. The same synthetic rule was moved into Business Central and successfully read back through the read-only `pricingGuardrails` API.
 
-## Next slice
+## Current next slice
 
-1. Populate a small **reviewed** special-pricing rule file from authoritative Gamer agreements/ownership, rather than guessing from history.
-2. Validate one protected customer/item and one fixed-price mismatch end to end.
-3. Decide where the authoritative rule table should live long term, likely Business Central rather than a local CSV.
+1. Validate the live proposal checker with **Business Central**, not CSV, as the special-pricing source.
+2. Remove the synthetic TRIPLEH rule after that proof.
+3. Do not enter real Bragg, Giovanni, or other protected agreements until ownership and authoritative pricing data are reviewed.
 4. Then move to quote/extras guidance and supplier-price ingestion.
 
 Supplier-email/PDF ingestion and rep-facing workflow remain out of scope until these core commercial safety controls are accepted.

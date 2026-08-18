@@ -71,6 +71,33 @@ class BCPricingRuleTests(unittest.TestCase):
         self.assertEqual(special.rule_type, "SPECIAL_PRICING")
         self.assertEqual(fixed.rule_type, "FIXED_PRICE")
 
+    def test_bc_odata_encoded_special_pricing_enum_is_supported(self):
+        rules = pricing_rules_from_bc_rows(
+            [
+                {
+                    "enabled": True,
+                    "customerNo": "TRIPLEH",
+                    "itemNo": "20041936-P4305",
+                    "ruleType": "Special_x0020_Pricing",
+                }
+            ]
+        )
+        self.assertEqual(rules[0].rule_type, "SPECIAL_PRICING")
+
+    def test_bc_odata_encoded_fixed_price_enum_is_supported(self):
+        rules = pricing_rules_from_bc_rows(
+            [
+                {
+                    "enabled": True,
+                    "customerNo": "TRIPLEH",
+                    "itemNo": "20041936-P4305",
+                    "ruleType": "Fixed_x0020_Price",
+                    "lockedSellPrice": 224.81,
+                }
+            ]
+        )
+        self.assertEqual(rules[0].rule_type, "FIXED_PRICE")
+
 
 if __name__ == "__main__":
     unittest.main()

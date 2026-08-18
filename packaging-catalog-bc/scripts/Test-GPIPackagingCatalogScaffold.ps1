@@ -41,7 +41,8 @@ if ($Launch.environmentName -ne 'Sandbox_NoZetadocs_UAT') {
     $Errors.Add("Unexpected launch environment: $($Launch.environmentName)")
 }
 
-$ObjectPattern = '^\s*(table|page|codeunit|enum|permissionset)\s+(\d+)\s+"([^\"]+)"'
+# Keep this list aligned with every numbered AL object type used by this app.
+$ObjectPattern = '^\s*(table|page|codeunit|enum|permissionset|query)\s+(\d+)\s+"([^\"]+)"'
 $Seen = @{}
 $Objects = @()
 

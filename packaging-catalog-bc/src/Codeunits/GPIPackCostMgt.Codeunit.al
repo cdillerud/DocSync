@@ -63,11 +63,15 @@ codeunit 71001 "GPI Pack Cost Mgt"
             Work."Shipment CWT" := Round(((Work.Quantity * Work."Gram Weight") / 453.59237) / 100, 0.00001, '=');
 
         if Work."Use Freight Rate" and (Work."Freight Rate Entry No." <> 0) then begin
-            BaseFreight := Work."Shipment CWT" * Work."Rate per CWT";
-            if BaseFreight < Work."Minimum Charge" then
-                BaseFreight := Work."Minimum Charge";
+            if Work."Shipment CWT" > 0 then begin
+                BaseFreight := Work."Shipment CWT" * Work."Rate per CWT";
+                if BaseFreight < Work."Minimum Charge" then
+                    BaseFreight := Work."Minimum Charge";
 
-            Work."Rate Freight Total" := Round(BaseFreight * (1 + (Work."Fuel Surcharge %" / 100)), 0.01, '=');
+                Work."Rate Freight Total" := Round(BaseFreight * (1 + (Work."Fuel Surcharge %" / 100)), 0.01, '=');
+            end else
+                Work."Rate Freight Total" := 0;
+
             Work."Domestic Freight Total" := Work."Rate Freight Total";
         end else
             Work."Domestic Freight Total" := Work."Manual Freight Total";

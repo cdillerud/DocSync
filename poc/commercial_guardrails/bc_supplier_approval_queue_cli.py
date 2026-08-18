@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import Sequence
 
 from .bc_adapter import BCConfig, BusinessCentralClient, BusinessCentralError
 from .bc_item_costs import fetch_bc_item_cost_contexts
 from .bc_pricing_rules import fetch_bc_pricing_rules
+from .proposal_special_pricing import ProposalPricingRule
 from .supplier_approval_queue import (
     build_supplier_approval_queue,
     summarize_supplier_approval_queue,
     write_supplier_approval_queue_csv,
 )
 from .supplier_margin_impact import analyze_supplier_margin_impact
-from .supplier_price_compare import compare_supplier_prices_to_bc
+from .supplier_price_compare import SupplierPriceComparison, compare_supplier_prices_to_bc
 from .supplier_price_ingest import load_supplier_notice
 
 
@@ -26,6 +28,33 @@ def _money4(value: float | None) -> str:
 
 def _pct(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.1f}%"
+
+
+def _build_impacts(
+    comparisons: Sequence[SupplierPriceComparison],
+    transactions,
+    pricing_rules: Sequence[ProposalPricingRule],
+    *,
+    recent_item_cost_count: int,
+    recent_customer_count: int,
+    history_alignment_tolerance_pct: float,
+    max_recent_cost_spread_pct: float,
+    trailing_days: int,
+):
+    """Apply the approval-queue analysis settings using the margin engine's public parameter names."""
+    return [
+        analyze_supplier_margin_impact(
+            comparison,
+            transactions,
+            pricing_rules=pricing_rules,
+            recent_item_cost_count=recent_item_cost_count,
+            recent_customer_count=recent_customer_count,
+            history_alignment_tolerance_pct=history_alignment_tolerance_pct,
+            max_recent_cost_spread_pct=max_recent_cost_spread_pct,
+            trailing_days=trailing_days,
+        )
+        for comparison in comparisons
+    ]
 
 
 def main() -> int:
@@ -48,7 +77,9 @@ def main() -> int:
         help="Maximum supplier-current variance from recent posted cost median before review",
     )
     parser.add_argument(
+        "--max-recent-cost-spread-pct",
         "--recent-cost-spread-tolerance-pct",
+        dest="max_recent_cost_spread_pct",
         type=float,
         default=15.0,
         help="Maximum recent posted cost spread as percent of median before review",
@@ -99,19 +130,16 @@ def main() -> int:
     except (BusinessCentralError, ValueError) as exc:
         parser.error(str(exc))
 
-    impacts = [
-        analyze_supplier_margin_impact(
-            comparison,
-            transactions,
-            pricing_rules=pricing_rules,
-            recent_item_cost_count=args.recent_item_cost_count,
-            recent_customer_count=args.recent_customer_count,
-            history_alignment_tolerance_pct=args.history_alignment_tolerance_pct,
-            recent_cost_spread_tolerance_pct=args.recent_cost_spread_tolerance_pct,
-            trailing_days=args.trailing_days,
-        )
-        for comparison in comparisons
-    ]
+    impacts = _build_impacts(
+        comparisons,
+        transactions,
+        pricing_rules,
+        recent_item_cost_count=args.recent_item_cost_count,
+        recent_customer_count=args.recent_customer_count,
+        history_alignment_tolerance_pct=args.history_alignment_tolerance_pct,
+        max_recent_cost_spread_pct=args.max_recent_cost_spread_pct,
+        trailing_days=args.trailing_days,
+    )
 
     queue = build_supplier_approval_queue(impacts)
     summary = summarize_supplier_approval_queue(queue)

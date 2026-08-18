@@ -54,7 +54,7 @@ def main() -> int:
     parser.add_argument(
         "--related-min-score",
         type=float,
-        default=55.0,
+        default=90.0,
         help="Minimum similarity score for automatically discovered related items",
     )
     parser.add_argument(
@@ -132,6 +132,8 @@ def main() -> int:
         proposal,
         thresholds={
             "recent_price_count": args.recent_count,
+            "sell_price_below_median_pct": args.below_pct,
+            "sell_price_above_median_pct": args.above_pct,
             "sell_below_recent_pct": args.below_pct,
             "sell_above_recent_pct": args.above_pct,
         },

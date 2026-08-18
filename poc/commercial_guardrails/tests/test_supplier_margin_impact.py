@@ -3,7 +3,10 @@ from datetime import date, datetime
 
 from poc.commercial_guardrails.engine import Transaction
 from poc.commercial_guardrails.proposal_special_pricing import ProposalPricingRule
-from poc.commercial_guardrails.supplier_margin_impact import analyze_supplier_margin_impact
+from poc.commercial_guardrails.supplier_margin_impact import (
+    analyze_supplier_margin_impact,
+    summarize_supplier_impacts,
+)
 from poc.commercial_guardrails.supplier_price_compare import SupplierPriceComparison
 from poc.commercial_guardrails.supplier_price_ingest import SupplierPriceChange
 
@@ -97,18 +100,20 @@ class SupplierMarginImpactTests(unittest.TestCase):
         self.assertAlmostEqual(impact.cost_delta, 9.6, places=2)
         self.assertTrue(any("BC Item Unit Cost context is not aligned" in note for note in impact.warnings))
 
-    def test_supplier_current_cost_misalignment_requires_review(self):
+    def test_supplier_current_cost_misalignment_requires_review_and_suppresses_impacts(self):
         row = staged(current=200.0, new=212.0)
         rows = [tx("1", "2026-01-01", "TRIPLEH", cost=160.0)]
         impact = analyze_supplier_margin_impact(comparison(row), rows)
         self.assertEqual(impact.status, "REVIEW")
         self.assertGreater(abs(impact.supplier_current_vs_posted_pct), 5.0)
+        self.assertEqual(impact.customer_impacts, ())
 
     def test_missing_supplier_current_cost_requires_review(self):
         row = staged(current=None, new=178.5)
         impact = analyze_supplier_margin_impact(comparison(row, bc_cost=0.0), [tx("1", "2026-01-01", "A")])
         self.assertEqual(impact.status, "REVIEW")
         self.assertIsNone(impact.cost_delta)
+        self.assertEqual(impact.customer_impacts, ())
 
     def test_no_exact_item_uom_history_requires_review(self):
         impact = analyze_supplier_margin_impact(
@@ -117,6 +122,7 @@ class SupplierMarginImpactTests(unittest.TestCase):
         )
         self.assertEqual(impact.status, "REVIEW")
         self.assertEqual(impact.historical_lines, 0)
+        self.assertEqual(impact.customer_impacts, ())
 
     def test_customer_gp_and_margin_erosion_are_calculated_from_supplier_delta(self):
         rows = [
@@ -169,6 +175,49 @@ class SupplierMarginImpactTests(unittest.TestCase):
         ]
         impact = analyze_supplier_margin_impact(comparison(), rows)
         self.assertEqual([row.customer_no for row in impact.customer_impacts], ["LARGE", "SMALL"])
+
+    def test_heterogeneous_recent_costs_require_review(self):
+        row = staged(current=900.0, new=975.0, item="BALLARTWORK", uom="EA")
+        rows = [
+            tx("1", "2026-01-01", "A", cost=500.0, sell=1000.0, item="BALLARTWORK", uom="EA"),
+            tx("2", "2026-02-01", "B", cost=900.0, sell=1000.0, item="BALLARTWORK", uom="EA"),
+            tx("3", "2026-03-01", "C", cost=1900.0, sell=1900.0, item="BALLARTWORK", uom="EA"),
+        ]
+        impact = analyze_supplier_margin_impact(comparison(row, bc_cost=1900.0), rows)
+        self.assertEqual(impact.status, "REVIEW")
+        self.assertGreater(impact.recent_posted_cost_spread_pct, 15.0)
+        self.assertEqual(impact.customer_impacts, ())
+        self.assertTrue(any("heterogeneous" in note for note in impact.warnings))
+
+    def test_review_scenarios_must_be_explicitly_enabled(self):
+        row = staged(current=200.0, new=212.0)
+        rows = [tx("1", "2026-01-01", "TRIPLEH", cost=160.0, qty=10.0)]
+        impact = analyze_supplier_margin_impact(
+            comparison(row),
+            rows,
+            include_review_scenarios=True,
+        )
+        self.assertEqual(impact.status, "REVIEW")
+        self.assertEqual(len(impact.customer_impacts), 1)
+        self.assertTrue(any("REVIEW-ONLY" in note for note in impact.warnings))
+
+    def test_summary_excludes_review_scenario_erosion_from_actionable_total(self):
+        ready_rows = [tx("r1", "2026-01-01", "READY", cost=160.0, qty=10.0)]
+        ready = analyze_supplier_margin_impact(comparison(), ready_rows)
+
+        review_row = staged(current=200.0, new=212.0)
+        review_rows = [tx("v1", "2026-01-01", "REVIEW", cost=160.0, qty=20.0)]
+        review = analyze_supplier_margin_impact(
+            comparison(review_row),
+            review_rows,
+            include_review_scenarios=True,
+        )
+
+        summary = summarize_supplier_impacts([ready, review])
+        self.assertAlmostEqual(summary["estimated_margin_erosion"], 96.0, places=2)
+        self.assertAlmostEqual(summary["review_scenario_margin_erosion"], 240.0, places=2)
+        self.assertEqual(summary["customers"], 1)
+        self.assertEqual(summary["review_scenario_customers"], 1)
 
 
 if __name__ == "__main__":

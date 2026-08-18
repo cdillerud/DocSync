@@ -120,12 +120,21 @@ def _initialize_path_state() -> None:
     st.session_state.setdefault(DECISION_PATH_KEY, DEFAULT_DECISIONS)
 
 
+def _clear_decision_widget_state() -> None:
+    """Prevent decision form values from leaking from one review snapshot into another."""
+    prefixes = ("decision:", "decision_by:", "decision_notes:")
+    for key in list(st.session_state.keys()):
+        if str(key).startswith(prefixes):
+            del st.session_state[key]
+
+
 def _activate_run(artifacts) -> None:
     st.session_state[QUEUE_PATH_KEY] = str(artifacts.queue_path)
     st.session_state[DETAIL_PATH_KEY] = str(artifacts.detail_path)
     st.session_state[DECISION_PATH_KEY] = str(artifacts.decision_path)
     st.session_state["_supplier_cockpit_signature"] = None
     st.session_state.pop("_supplier_cockpit_records", None)
+    _clear_decision_widget_state()
     summary = artifacts.review_run.summary
     st.session_state["_supplier_cockpit_flash"] = (
         f"Analyzed {artifacts.source_path.name}. "
@@ -218,6 +227,7 @@ def main() -> None:
         _file_stamp(decision_path),
     )
     if st.session_state.get("_supplier_cockpit_signature") != signature:
+        _clear_decision_widget_state()
         st.session_state["_supplier_cockpit_records"] = merge_saved_decisions(
             queue_records,
             saved_decisions,

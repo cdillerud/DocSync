@@ -1,7 +1,7 @@
-page 71003 "GPI Pack Price History"
+page 71003 "GPI Pack Price Hist"
 {
     PageType = ListPart;
-    SourceTable = "GPI Pack Price History";
+    SourceTable = "GPI Pack Price Hist";
     ApplicationArea = All;
     Caption = 'GPI Packaging Price History';
     Editable = false;

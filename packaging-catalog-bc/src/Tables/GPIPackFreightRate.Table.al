@@ -1,9 +1,9 @@
-table 71003 "GPI Pack Freight Rate"
+table 71003 "GPI Pack Frt Rate"
 {
     Caption = 'GPI Packaging Freight Rate';
     DataClassification = CustomerContent;
-    LookupPageId = "GPI Pack Freight Rates";
-    DrillDownPageId = "GPI Pack Freight Rates";
+    LookupPageId = "GPI Pack Frt Rates";
+    DrillDownPageId = "GPI Pack Frt Rates";
 
     fields
     {
@@ -20,7 +20,7 @@ table 71003 "GPI Pack Freight Rate"
         field(3; "Origin Location Code"; Code[20])
         {
             Caption = 'Origin Location Code';
-            TableRelation = "GPI Pack Vendor Location".Code where("Vendor No." = field("Origin Vendor No."));
+            TableRelation = "GPI Pack Vendor Loc".Code where("Vendor No." = field("Origin Vendor No."));
         }
         field(4; "Destination State"; Code[20])
         {
@@ -30,7 +30,7 @@ table 71003 "GPI Pack Freight Rate"
         {
             Caption = 'Default Destination';
         }
-        field(6; Mode; Enum "GPI Pack Transport Mode")
+        field(6; Mode; Enum "GPI Pack Transport")
         {
             Caption = 'Mode';
         }

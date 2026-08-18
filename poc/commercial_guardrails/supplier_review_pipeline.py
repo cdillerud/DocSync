@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -28,6 +29,8 @@ from .supplier_price_ingest import SupplierPriceChange, load_supplier_notice
 
 
 DEFAULT_RUN_ROOT = Path("poc/commercial_guardrails/runs")
+SUPPORTED_SUPPLIER_NOTICE_EXTENSIONS = (".csv", ".xlsx", ".xlsm")
+MAX_MANUAL_NOTICE_BYTES = 25 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -64,11 +67,32 @@ class SupplierReviewArtifacts:
 
 
 def _safe_source_name(name: str) -> str:
-    # Treat both Windows and POSIX separators as path separators regardless of host OS.
-    raw = str(name or "supplier_notice").replace("\\", "/")
-    leaf = raw.rsplit("/", 1)[-1]
+    # Normalize both path separators because uploaded filenames can originate on
+    # Windows while the cockpit may eventually run on Linux.
+    leaf = re.split(r"[\\/]", str(name or "supplier_notice"))[-1]
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", leaf).strip("._")
     return cleaned or "supplier_notice"
+
+
+def validate_manual_supplier_upload(
+    source_name: str,
+    content: bytes,
+    *,
+    max_bytes: int = MAX_MANUAL_NOTICE_BYTES,
+) -> str:
+    """Validate a manual cockpit/CLI upload and return its safe local filename."""
+    safe_name = _safe_source_name(source_name)
+    suffix = Path(safe_name).suffix.casefold()
+    if suffix not in SUPPORTED_SUPPLIER_NOTICE_EXTENSIONS:
+        allowed = ", ".join(SUPPORTED_SUPPLIER_NOTICE_EXTENSIONS)
+        raise ValueError(f"Unsupported supplier notice type {suffix or '<none>'}. Allowed: {allowed}")
+    if not content:
+        raise ValueError("Supplier notice is empty.")
+    if len(content) > max_bytes:
+        raise ValueError(
+            f"Supplier notice is too large ({len(content):,} bytes). Maximum allowed is {max_bytes:,} bytes."
+        )
+    return safe_name
 
 
 def _run_directory_name(source_name: str, *, now: datetime | None = None) -> str:
@@ -160,10 +184,13 @@ def write_supplier_review_artifacts(
     write_supplier_approval_queue_csv(review_run.queue, queue_path)
     write_supplier_impact_csv(review_run.impacts, detail_path)
 
+    source_bytes = review_run.source_path.read_bytes() if review_run.source_path.exists() else b""
     manifest = {
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "environment": review_run.environment,
         "source_file": review_run.source_path.name,
+        "source_size_bytes": len(source_bytes),
+        "source_sha256": hashlib.sha256(source_bytes).hexdigest() if source_bytes else "",
         "summary": review_run.summary,
         "safety": {
             "business_central_writes": False,
@@ -201,11 +228,12 @@ def create_manual_supplier_review_run(
     client: BusinessCentralClient | None = None,
 ) -> SupplierReviewArtifacts:
     """Persist a manually uploaded notice into its own auditable local run folder and analyze it."""
+    safe_name = validate_manual_supplier_upload(source_name, content)
     run_root_path = Path(run_root)
-    run_directory = run_root_path / _run_directory_name(source_name)
+    run_directory = run_root_path / _run_directory_name(safe_name)
     run_directory.mkdir(parents=True, exist_ok=False)
 
-    source_path = run_directory / _safe_source_name(source_name)
+    source_path = run_directory / safe_name
     source_path.write_bytes(content)
 
     try:

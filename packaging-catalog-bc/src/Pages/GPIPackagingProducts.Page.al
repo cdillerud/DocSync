@@ -1,11 +1,11 @@
-page 71001 "GPI Packaging Products"
+page 71001 "GPI Pack Products"
 {
     PageType = List;
-    SourceTable = "GPI Packaging Product";
+    SourceTable = "GPI Pack Product";
     ApplicationArea = All;
     UsageCategory = Lists;
     Caption = 'GPI Packaging Catalog';
-    CardPageId = "GPI Packaging Product Card";
+    CardPageId = "GPI Pack Prod Card";
     Editable = false;
 
     layout
@@ -87,20 +87,20 @@ page 71001 "GPI Packaging Products"
                 ApplicationArea = All;
                 Caption = 'New Product';
                 Image = New;
-                RunObject = page "GPI Packaging Product Card";
+                RunObject = page "GPI Pack Prod Card";
                 RunPageMode = Create;
             }
             action(VendorLocations)
             {
                 ApplicationArea = All;
                 Caption = 'Vendor Locations';
-                RunObject = page "GPI Pack Vendor Locations";
+                RunObject = page "GPI Pack Vendor Locs";
             }
             action(FreightRates)
             {
                 ApplicationArea = All;
                 Caption = 'Freight Rates';
-                RunObject = page "GPI Pack Freight Rates";
+                RunObject = page "GPI Pack Frt Rates";
             }
         }
     }

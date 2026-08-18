@@ -15,6 +15,7 @@ It deliberately starts **without AI and without write access from the Python gua
 - Special-pricing customers/items
 - Read-only ingestion of posted Business Central sales history
 - Live proposal checks that combine price, item-family, margin, quote/extra, and special-pricing protection
+- Local supplier price notice staging from CSV and Excel into a normalized, auditable format
 
 ## Safety principle
 
@@ -27,6 +28,8 @@ A `FIXED_PRICE` mismatch is surfaced as `CRITICAL`. If multiple equally specific
 Family-level special pricing is intentionally **not inferred** from description similarity. Protected pricing must match an exact item or an explicit wildcard maintained in the authoritative rule table.
 
 For quote/extras guidance, customer-specific exact-item/UOM history is the only historical benchmark allowed to trigger a price exception. All-customer history is context only. If the customer does not have enough history, the guard returns a low-confidence context view rather than creating an automatic price exception from a global median.
+
+Supplier price staging is also intentionally non-authoritative. A staged row marked `READY` only means the notice itself is structurally usable. It does **not** mean the supplier change has been approved, matched to the correct BC item/UOM, or authorized for write-back.
 
 ## Business Central integration
 
@@ -166,6 +169,49 @@ Default behavior:
 
 The action is **REVIEW PROPOSED EXTRA PRICE AGAINST CUSTOMER HISTORY**, not “set price to historical median.”
 
+## Supplier price staging
+
+The next Hawkeye use case starts with a deliberately local, non-email ingestion step. The current staging command accepts CSV, XLSX, and XLSM supplier notices and normalizes common supplier header variants such as `Vendor Item No`, `SKU`, `Current Price`, `New Price`, `Effective Date`, `UOM`, `Min Qty`, and `Freight Included`.
+
+Install the POC dependencies:
+
+```powershell
+python -m pip install -r poc/commercial_guardrails/requirements.txt
+```
+
+Run the checked-in synthetic sample:
+
+```powershell
+python -m poc.commercial_guardrails.supplier_price_cli `
+  --input "poc\commercial_guardrails\sample_supplier_price_notice.csv" `
+  --out "poc\commercial_guardrails\live_supplier_price_staging.csv"
+```
+
+The normalized staging schema includes:
+
+- supplier name
+- supplier item number
+- optional GPI/BC item number supplied by the notice
+- description
+- current supplier cost when supplied
+- new supplier cost
+- calculated dollar and percentage change
+- effective date
+- UOM
+- tier quantity
+- freight-included indicator
+- currency
+- source file, worksheet, and row number
+- `READY`, `REVIEW`, or `REJECT` status with explicit warnings
+
+Status meaning:
+
+- `READY`: the supplier notice row contains an item identifier, valid new cost, effective date, current cost, supplier, and UOM
+- `REVIEW`: the row is usable but is missing something that must be resolved before comparison, such as current cost, effective date, supplier, or UOM
+- `REJECT`: the notice row lacks an item identifier or a valid new cost
+
+This command does **not** read Gmail or any other mailbox. It does **not** write to Business Central. It only normalizes local files supplied to the command.
+
 ## POC validations completed
 
 Using real posted BC history in `Sandbox_NoZetadocs_UAT`:
@@ -178,12 +224,15 @@ Using real posted BC history in `Sandbox_NoZetadocs_UAT`:
 6. The synthetic rule was moved into Business Central and successfully read back through the read-only `pricingGuardrails` API.
 7. A synthetic Business Central fixed-price rule produced `CRITICAL FIXED_PRICE_MISMATCH` while preserving price and GP history as supporting evidence.
 8. `BALLARTWORK` history was profiled across 266 posted usable lines and 52 customers before quote thresholds were introduced.
+9. TALKING at `$900/EA` passed because its 15 exact `BALLARTWORK` lines were all `$900`, despite the broader all-customer median being `$1,000`.
+10. HUMMKOM at `$900/EA` produced `QUOTE_BELOW_CUSTOMER_HISTORY` against its own recent `$1,000` median, without turning that median into an automatic replacement price.
 
 ## Current next slice
 
-1. Remove the synthetic TRIPLEH pricing rule from the sandbox after fixed-price validation.
-2. Validate `BALLARTWORK` quote behavior with one stable-price control customer and one deliberately low proposed price.
-3. Tune quote thresholds only if those live results show the customer-specific rules are too noisy or too permissive.
-4. Then move to supplier-price ingestion.
+1. Validate the local synthetic supplier-price staging sample and Excel parsing.
+2. Add read-only BC item/cost matching for staged supplier rows, with exact GPI item matching first and supplier-item mapping only where Gamer has an authoritative cross-reference.
+3. Calculate impact against current BC cost/UOM and identify which customer/item margins are exposed by a supplier increase.
+4. Build an approval/staging view before considering any BC cost update path.
+5. Only after the local file workflow is proven should an actual Gamer mailbox source be connected, and only when explicitly authorized.
 
-Supplier-email/PDF ingestion and rep-facing workflow remain out of scope until these core commercial safety controls are accepted.
+PDF extraction and rep-facing workflow remain out of scope until the structured CSV/Excel staging and BC comparison are proven useful.

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .bc_adapter import BCConfig, BusinessCentralClient, BusinessCentralError
 from .bc_standard import fetch_standard_customer_family_history, write_family_history_csv
+from .item_similarity import ItemCandidate, discover_related_items
 from .proposal_guard import Proposal, analyze_proposal
 
 
@@ -17,6 +18,17 @@ def _json_safe_profile(profile: dict) -> dict:
         if value is not None:
             safe[key] = value.date().isoformat()
     return safe
+
+
+def _candidate_dict(candidate: ItemCandidate) -> dict:
+    return {
+        "item_no": candidate.item_no,
+        "description": candidate.description,
+        "score": candidate.score,
+        "reasons": list(candidate.reasons),
+        "blocked": candidate.blocked,
+        "base_uom": candidate.base_uom,
+    }
 
 
 def main() -> int:
@@ -32,13 +44,35 @@ def main() -> int:
         "--related-item",
         action="append",
         default=[],
-        help="Related/family BC item number; repeatable",
+        help="Additional related/family BC item number; repeatable",
+    )
+    parser.add_argument(
+        "--no-auto-related",
+        action="store_true",
+        help="Disable automatic related-item discovery from the BC item master",
+    )
+    parser.add_argument(
+        "--related-min-score",
+        type=float,
+        default=55.0,
+        help="Minimum similarity score for automatically discovered related items",
+    )
+    parser.add_argument(
+        "--max-related",
+        type=int,
+        default=12,
+        help="Maximum automatically discovered related items",
+    )
+    parser.add_argument(
+        "--include-blocked-related",
+        action="store_true",
+        help="Allow blocked BC items to be considered as related-item candidates",
     )
     parser.add_argument("--price", required=True, type=float, help="Proposed unit sell price")
     parser.add_argument("--quantity", required=True, type=float, help="Proposed quantity")
     parser.add_argument("--uom", required=True, help="Proposed unit of measure")
     parser.add_argument("--customer-name", default="", help="Optional customer name")
-    parser.add_argument("--description", default="", help="Optional proposed item description")
+    parser.add_argument("--description", default="", help="Optional proposed item description override")
     parser.add_argument("--start-date", default="2024-01-01", help="History start, YYYY-MM-DD")
     parser.add_argument("--end-date", default="", help="History end, YYYY-MM-DD")
     parser.add_argument("--recent-count", type=int, default=3)
@@ -48,15 +82,28 @@ def main() -> int:
     parser.add_argument("--json-out", help="Optional local JSON proposal audit")
     args = parser.parse_args()
 
-    family_items = []
-    for item in [args.item, *args.related_item]:
-        if item and item not in family_items:
-            family_items.append(item)
+    discovered: list[ItemCandidate] = []
+    proposed_master: dict = {}
 
     try:
-        # Source is irrelevant here because this command calls only the standard v2 GET API.
+        # Source is irrelevant here because this command calls only standard v2 GET APIs.
         config = BCConfig.from_env(source="custom")
         client = BusinessCentralClient(config)
+
+        if not args.no_auto_related:
+            proposed_master, discovered = discover_related_items(
+                client,
+                proposed_item_no=args.item,
+                min_score=args.related_min_score,
+                max_results=args.max_related,
+                include_blocked=args.include_blocked_related,
+            )
+
+        family_items: list[str] = []
+        for item in [args.item, *args.related_item, *(c.item_no for c in discovered)]:
+            if item and item not in family_items:
+                family_items.append(item)
+
         history = fetch_standard_customer_family_history(
             client,
             customer_no=args.customer,
@@ -70,11 +117,12 @@ def main() -> int:
     if args.history_out:
         write_family_history_csv(history, args.history_out)
 
+    proposal_description = args.description or str(proposed_master.get("displayName") or "").strip()
     proposal = Proposal(
         customer_no=args.customer,
         customer_name=args.customer_name,
         item_no=args.item,
-        description=args.description,
+        description=proposal_description,
         unit_price=args.price,
         quantity=args.quantity,
         uom=args.uom,
@@ -97,12 +145,25 @@ def main() -> int:
     print(f"BC environment     : {config.environment}")
     print(f"Customer           : {proposal.customer_no}")
     print(f"Proposed item      : {proposal.item_no}")
+    if proposal.description:
+        print(f"Item description   : {proposal.description}")
     print(f"Proposed price     : ${proposal.unit_price:.2f}/{proposal.uom}")
     print(f"Proposed quantity  : {proposal.quantity:g} {proposal.uom}")
     print(f"History window     : {args.start_date} through {args.end_date or 'latest'}")
-    print(f"Family items       : {', '.join(family_items)}")
+    print(f"Auto related items : {'OFF' if args.no_auto_related else len(discovered)}")
+    print(f"Family items       : {len(family_items)}")
     print(f"BC history fetched : {len(history)} matching line(s)")
     print(f"Result             : {status}")
+
+    if discovered:
+        print("\nAUTO-DISCOVERED RELATED ITEMS")
+        for candidate in discovered:
+            reason_text = ", ".join(candidate.reasons) or "description similarity"
+            print(
+                f"  {candidate.item_no:<18} score {candidate.score:>5.1f} | "
+                f"{candidate.description} | {reason_text}"
+            )
+
     print("------------------------------------------------------------")
     print(f"Family history     : {profile['customer_family_lines']} line(s)")
     print(f"Exact item history : {profile['customer_item_lines']} line(s)")
@@ -138,6 +199,9 @@ def main() -> int:
             "start_date": args.start_date,
             "end_date": args.end_date or None,
         },
+        "proposed_item_master": proposed_master or None,
+        "auto_related_enabled": not args.no_auto_related,
+        "auto_related_items": [_candidate_dict(candidate) for candidate in discovered],
         "family_items": family_items,
         "history_lines": len(history),
         "proposal": asdict(proposal),

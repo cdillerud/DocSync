@@ -68,6 +68,27 @@ table 71006 "GPI Pack Quote"
         {
             Caption = 'Notes';
         }
+        field(13; "Decision Note"; Text[250])
+        {
+            Caption = 'Approval / Rejection Note';
+        }
+        field(14; "Decision At"; DateTime)
+        {
+            Caption = 'Decision At';
+            Editable = false;
+        }
+        field(15; "Decision By"; Text[100])
+        {
+            Caption = 'Decision By';
+            Editable = false;
+        }
+        field(16; "Audit Count"; Integer)
+        {
+            Caption = 'Audit Entries';
+            FieldClass = FlowField;
+            CalcFormula = count("GPI Quote Audit" where("Quote Entry No." = field("Entry No.")));
+            Editable = false;
+        }
     }
 
     keys
@@ -89,17 +110,30 @@ table 71006 "GPI Pack Quote"
     end;
 
     trigger OnModify()
+    var
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
     begin
-        if "Customer No." <> xRec."Customer No." then
+        if "Customer No." <> xRec."Customer No." then begin
+            if xRec.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
+                Error('Reopen the quote to Draft before changing the customer.');
+
             InvalidateLineEvaluations();
+            AuditMgt.LogCustomerChange(Rec, xRec."Customer No.");
+        end;
     end;
 
     trigger OnDelete()
     var
         QuoteLine: Record "GPI Pack Quote Line";
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
+        EnvironmentInformation: Codeunit "Environment Information";
     begin
+        if (not EnvironmentInformation.IsSandbox()) and AuditMgt.HasDecisionAudit("Entry No.") then
+            Error('This quote has an approval or rejection audit trail and cannot be deleted.');
+
         QuoteLine.SetRange("Quote Entry No.", "Entry No.");
-        QuoteLine.DeleteAll(true);
+        QuoteLine.DeleteAll(false);
+        AuditMgt.DeleteQuoteAudit("Entry No.");
     end;
 
     local procedure InvalidateLineEvaluations()
@@ -123,5 +157,8 @@ table 71006 "GPI Pack Quote"
         Status := "GPI Pack Quote Stat"::Draft;
         "Last Evaluated At" := 0DT;
         "Last Evaluated By" := '';
+        "Decision Note" := '';
+        "Decision At" := 0DT;
+        "Decision By" := '';
     end;
 }

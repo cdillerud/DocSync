@@ -81,6 +81,25 @@ page 71012 "GPI Pack Quote API"
                 {
                     Caption = 'Notes';
                 }
+                field(decisionNote; Rec."Decision Note")
+                {
+                    Caption = 'Approval / Rejection Note';
+                }
+                field(decisionAt; Rec."Decision At")
+                {
+                    Caption = 'Decision At';
+                    Editable = false;
+                }
+                field(decisionBy; Rec."Decision By")
+                {
+                    Caption = 'Decision By';
+                    Editable = false;
+                }
+                field(auditCount; Rec."Audit Count")
+                {
+                    Caption = 'Audit Entries';
+                    Editable = false;
+                }
             }
         }
     }
@@ -100,6 +119,33 @@ page 71012 "GPI Pack Quote API"
         QuoteMgt: Codeunit "GPI Pack Quote Mgt";
     begin
         QuoteMgt.SetReadyForReview(Rec);
+        SetActionResponse(ActionContext);
+    end;
+
+    [ServiceEnabled]
+    procedure approve(var ActionContext: WebServiceActionContext)
+    var
+        QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+    begin
+        QuoteMgt.ApproveQuote(Rec);
+        SetActionResponse(ActionContext);
+    end;
+
+    [ServiceEnabled]
+    procedure reject(var ActionContext: WebServiceActionContext)
+    var
+        QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+    begin
+        QuoteMgt.RejectQuote(Rec);
+        SetActionResponse(ActionContext);
+    end;
+
+    [ServiceEnabled]
+    procedure reopen(var ActionContext: WebServiceActionContext)
+    var
+        QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+    begin
+        QuoteMgt.ReopenQuote(Rec);
         SetActionResponse(ActionContext);
     end;
 

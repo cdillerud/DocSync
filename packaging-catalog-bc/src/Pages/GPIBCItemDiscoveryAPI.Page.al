@@ -135,7 +135,20 @@ page 71028 "GPI BC Item API"
         DiscoveryMgt: Codeunit "GPI Item Disc Mgt";
     begin
         DiscoveryMgt.RefreshItemFieldMetadata();
+        SetActionResponse(ActionContext);
+    end;
 
+    [ServiceEnabled]
+    procedure profileCustomFields(var ActionContext: WebServiceActionContext)
+    var
+        DiscoveryMgt: Codeunit "GPI Item Disc Mgt";
+    begin
+        DiscoveryMgt.ProfileLikelyCustomItemFields();
+        SetActionResponse(ActionContext);
+    end;
+
+    local procedure SetActionResponse(var ActionContext: WebServiceActionContext)
+    begin
         ActionContext.SetObjectType(ObjectType::Page);
         ActionContext.SetObjectId(Page::"GPI BC Item API");
         ActionContext.AddEntityKey(Rec.FieldNo(SystemId), Rec.SystemId);

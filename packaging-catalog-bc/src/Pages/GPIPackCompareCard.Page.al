@@ -33,6 +33,14 @@ page 71018 "GPI Pack Comp Card"
                 {
                     ApplicationArea = All;
                 }
+                field("Destination Latitude"; Rec."Destination Latitude")
+                {
+                    ApplicationArea = All;
+                }
+                field("Destination Longitude"; Rec."Destination Longitude")
+                {
+                    ApplicationArea = All;
+                }
                 field("Target Gross Margin %"; Rec."Target Gross Margin %")
                 {
                     ApplicationArea = All;
@@ -61,6 +69,21 @@ page 71018 "GPI Pack Comp Card"
                 field("Delivery Total"; Rec."Delivery Total")
                 {
                     ApplicationArea = All;
+                }
+                field("Default Cost per Mile"; Rec."Default Cost per Mile")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Specifies the freight cost per route mile used only when no active stored freight rate exists and mileage fallback is enabled.';
+                }
+                field("Allow Mileage Fallback"; Rec."Allow Mileage Fallback")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Allows a candidate with no stored CWT freight rate to use route miles multiplied by the line cost per mile. Route mileage and a positive cost per mile are both required.';
+                }
+                field("Auto Route Mileage"; Rec."Auto Route Mileage")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Refreshes route mileage automatically during Calculate and Rank. Stored route cache is checked before an external route service is called.';
                 }
             }
             group(Status)
@@ -130,6 +153,21 @@ page 71018 "GPI Pack Comp Card"
                     CurrPage.Update(false);
                 end;
             }
+            action(RefreshRouteMileage)
+            {
+                ApplicationArea = All;
+                Caption = 'Refresh Route Mileage';
+                Image = Map;
+
+                trigger OnAction()
+                var
+                    CompareMgt: Codeunit "GPI Pack Compare Mgt";
+                begin
+                    CurrPage.SaveRecord();
+                    CompareMgt.RefreshRouteMileage(Rec);
+                    CurrPage.Update(false);
+                end;
+            }
             action(CalculateComparison)
             {
                 ApplicationArea = All;
@@ -144,6 +182,13 @@ page 71018 "GPI Pack Comp Card"
                     CompareMgt.CalculateComparison(Rec);
                     CurrPage.Update(false);
                 end;
+            }
+            action(RouteSetup)
+            {
+                ApplicationArea = All;
+                Caption = 'Route Setup';
+                Image = Setup;
+                RunObject = page "GPI Route Setup";
             }
         }
     }

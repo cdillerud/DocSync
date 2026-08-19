@@ -169,8 +169,6 @@ page 71011 "GPI Pack Quote Lines"
                 ApplicationArea = All;
                 Caption = 'Evaluate Guardrail';
                 Image = Calculate;
-                Promoted = true;
-                PromotedCategory = Process;
 
                 trigger OnAction()
                 var
@@ -193,8 +191,6 @@ page 71011 "GPI Pack Quote Lines"
                 Caption = 'Open Landed Cost Worksheet';
                 Image = Calculate;
                 Enabled = Rec."Cost Worksheet Entry No." <> 0;
-                Promoted = true;
-                PromotedCategory = Process;
 
                 trigger OnAction()
                 var

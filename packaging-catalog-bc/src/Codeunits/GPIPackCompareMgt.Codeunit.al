@@ -30,12 +30,15 @@ codeunit 71005 "GPI Pack Compare Mgt"
         Product: Record "GPI Pack Product";
         CompareLine: Record "GPI Pack Comp Line";
         CompareEntryNo: Integer;
+        NextLineNo: Integer;
     begin
         CompareHeader.TestField("Reference Product No.");
         CompareEntryNo := CompareHeader."Entry No.";
         ReferenceProduct.Get(CompareHeader."Reference Product No.");
         if ReferenceProduct.Blocked then
             Error('Reference product %1 is blocked.', ReferenceProduct."No.");
+
+        NextLineNo := GetNextCandidateLineNo(CompareEntryNo);
 
         Product.SetRange(Blocked, false);
         Product.SetRange(Material, ReferenceProduct.Material);
@@ -52,15 +55,18 @@ codeunit 71005 "GPI Pack Compare Mgt"
                 if CompareLine.IsEmpty() then begin
                     CompareLine.Init();
                     CompareLine."Compare Entry No." := CompareEntryNo;
+                    CompareLine."Line No." := NextLineNo;
+                    NextLineNo += 10000;
                     CompareLine."Product No." := Product."No.";
                     InitializeCandidate(CompareLine);
-                    CompareLine.Insert(true);
+
+                    // Bulk candidate creation is already controlled by this codeunit.
+                    // Bypass the line OnInsert trigger so it does not modify the API
+                    // source header during the bound action and invalidate the page row.
+                    CompareLine.Insert(false);
                 end;
             until Product.Next() = 0;
 
-        // Line inserts invalidate the header through their table trigger. Refresh the
-        // header record before modifying it so API actions do not write a stale row.
-        CompareHeader.Get(CompareEntryNo);
         CompareHeader."Last Calculated At" := 0DT;
         CompareHeader."Last Calculated By" := '';
         CompareHeader.Modify(false);
@@ -198,6 +204,17 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareLine."Is Complete" := true;
         CompareLine."Incomplete Reason" := '';
         CompareLine."Calculated At" := CurrentDateTime();
+    end;
+
+    local procedure GetNextCandidateLineNo(CompareEntryNo: Integer): Integer
+    var
+        CompareLine: Record "GPI Pack Comp Line";
+    begin
+        CompareLine.SetRange("Compare Entry No.", CompareEntryNo);
+        if CompareLine.FindLast() then
+            exit(CompareLine."Line No." + 10000);
+
+        exit(10000);
     end;
 
     local procedure CopyProductSource(Product: Record "GPI Pack Product"; var CompareLine: Record "GPI Pack Comp Line"; ResetQuantity: Boolean)

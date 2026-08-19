@@ -159,7 +159,7 @@ The validated customer-history case used 6 exact posted lines, a recent customer
 
 Version `0.8.0.2` is the validated Business Central-native best-price and sourcing comparison workflow.
 
-Validated in `Sandbox_NoZetadocs_UAT` on 2026-08-19 with 23 of 23 comparison checks passing. The final full regression set is 92 of 92 checks passing across quote/approval/audit, customer-history pricing, and sourcing comparison.
+Validated in `Sandbox_NoZetadocs_UAT` on 2026-08-19 with 23 of 23 comparison checks passing. The full regression set at this point was 92 of 92 checks passing across quote/approval/audit, customer-history pricing, and sourcing comparison.
 
 Validated comparison behavior:
 
@@ -186,6 +186,31 @@ Sandbox-only `gpi/packagingCompareUAT/v1.0` product, freight, and vendor-locatio
 
 `scripts/Test-GPIPackagingCompareAPIUAT.ps1` is the regression harness for Milestone 8.
 
+## Milestone 9: route and mileage freight automation
+
+Version `0.9.0.0` adds freight-aware route mileage support while preserving stored freight-rate priority.
+
+Validated in `Sandbox_NoZetadocs_UAT` on 2026-08-19 with 17 of 17 route-mileage checks passing. The existing quote, customer-history, and stored-rate comparison regressions also remained clean at 48 of 48, 21 of 21, and 23 of 23 respectively. The combined Business Central automated regression baseline is now 109 of 109 passing.
+
+Validated route and mileage behavior:
+
+- vendor FOB locations can supply origin latitude and longitude
+- sourcing comparisons can store destination latitude and longitude
+- route mileage and duration can be resolved from a deterministic cache
+- optional external route resolution is isolated behind Route Setup
+- stored freight rates remain the first-priority freight basis
+- mileage freight is only used as an explicit fallback when no active stored rate is available and mileage fallback is enabled
+- mileage freight total is route miles multiplied by configured cost per mile
+- mileage freight participates in landed cost and suggested-sell calculations
+- the freight basis records whether the calculation used a stored rate or mileage
+- changing destination coordinates clears stale route mileage, clears the freight basis, and invalidates rankability until recalculation
+- route cache records support expiration so stale routes are not silently reused
+- temporary route-cache, product, vendor-location, and comparison records are removed during UAT cleanup
+
+The validated route UAT used `12.5` miles at `2.5` per mile, producing `31.25` of domestic freight. The resulting candidate remained rankable, landed cost increased to `0.46065`, and deterministic suggested sell was `0.6142`.
+
+`scripts/Test-GPIPackagingRouteAPIUAT.ps1` is the regression harness for Milestone 9.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
@@ -194,13 +219,14 @@ The React field `current_price` is used by the existing app as the product's bas
 
 - quote, approval, and audit regression: 48 of 48 passing
 - customer historical pricing regression: 21 of 21 passing
-- sourcing comparison regression: 23 of 23 passing
-- combined current regression baseline: 92 of 92 passing
+- stored-rate sourcing comparison regression: 23 of 23 passing
+- route-mileage regression: 17 of 17 passing
+- combined current regression baseline: 109 of 109 passing
 
 ## Next BC-only work
 
-- route/mileage automation for freight-aware sourcing comparison
 - bulk import the real packaging catalog once a non-empty source export is available
+- validate realistic vendor, FOB, supplier-cost, freight, and comparison scenarios using imported data
 - keep all commercial pricing, freight, comparison, guardrail, and approval logic deterministic in Business Central
 
-Spiro integration and Copilot Studio orchestration remain deferred until the remaining Business Central sourcing and catalog data work is ready.
+Spiro integration and Copilot Studio orchestration remain deferred until the remaining Business Central catalog data work is ready.

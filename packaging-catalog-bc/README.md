@@ -103,7 +103,7 @@ A separate `gpi/packagingQuoteUAT/v1.0` pricing-rule endpoint exists only to cre
 
 ## Milestone 6: approval decisions and durable audit history
 
-Version `0.6.0.0` adds the commercial decision and audit layer on top of the validated quote workflow.
+Version `0.6.0.0` added the commercial decision and audit layer on top of the validated quote workflow.
 
 Validated in `Sandbox_NoZetadocs_UAT` with 48 of 48 API checks passing on 2026-08-19:
 
@@ -135,11 +135,13 @@ The quote API also exposes bound actions for approve, reject, and reopen. `scrip
 
 ## Milestone 7: customer historical pricing guardrails
 
-Version `0.7.0.0` adds Business Central-native customer price-history evaluation to quote lines. This milestone is ready for compile and UAT.
+Version `0.7.0.0` added Business Central-native customer price-history evaluation to quote lines.
 
-Deterministic history behavior:
+Validated in `Sandbox_NoZetadocs_UAT` on 2026-08-19:
 
-- only exact customer + BC item + UOM posted sales history can trigger a history review
+- the existing quote/approval regression remained clean at 48 of 48 checks
+- customer-history UAT passed 21 of 21 checks
+- exact customer + BC item + UOM posted history is the only history that can trigger a review
 - at least 3 matching posted sales lines are required before customer history can trigger review
 - the median of up to the 5 most recent matching posted sales lines is the customer baseline
 - a proposed sell price 7.5% or more below that median becomes `Below Customer History`
@@ -148,12 +150,35 @@ Deterministic history behavior:
 - all-customer item + UOM history is calculated and displayed as context only and never creates an approval by itself
 - posted history is limited through the quote date so future transactions cannot affect an earlier quote
 - historical evidence never writes or infers a replacement sell price
+- history evidence is preserved in the quote approval/audit snapshot
+- temporary history UAT quotes and audit rows are removed during cleanup
 
-Quote-line evidence now includes exact customer history line count, recent customer median, proposed-price variance, latest customer-history posting date, all-customer history line count, all-customer recent median, and a plain-language history message.
+The validated customer-history case used 6 exact posted lines, a recent customer median of `190.16`, and an independently matched all-customer recent median of `224.81`.
 
-The approval/audit snapshot now preserves the same historical evidence so a later reviewer can see the history context that existed when the quote was evaluated, approved, or rejected.
+## Milestone 8: deterministic sourcing comparison
 
-`scripts/Test-GPIPackagingHistoryAPIUAT.ps1` independently derives the expected median from the existing `historicalSalesLines` API, creates temporary quote scenarios 10% below and 20% above the exact customer-history median, verifies the Business Central result and audit snapshot, confirms the proposed price is retained, and removes its temporary quotes and audit rows during cleanup.
+Version `0.8.0.0` adds the first Business Central-native best-price and sourcing comparison workflow. It is ready for compile and UAT.
+
+Comparison behavior:
+
+- a saved sourcing-comparison header stores reference product, destination state, comparison date, target margin, and default cost assumptions
+- `Add Exact Spec Matches` adds nonblocked products matching the reference product on Material, Style, Capacity, Capacity UOM, and Color
+- specific candidate products can also be added manually
+- each candidate snapshots its current BC item, vendor, FOB, transport mode, gram weight, supplier unit cost, load quantity, and pallet count
+- the existing landed-cost engine is reused instead of duplicating freight or margin formulas
+- stored freight rates retain the existing vendor/FOB/destination/mode/effective-date fallback logic
+- delivered cost includes supplier cost, pallet cost, domestic freight, tariff, international freight, customs, and delivery allocations
+- suggested sell price remains deterministic from landed cost and target margin
+- complete candidates are ranked by landed cost per unit, lowest first
+- each ranked line shows cost above the best option per unit
+- a missing vendor, quantity, gram weight, supplier cost, or freight rate makes the option incomplete and unranked
+- missing freight never becomes zero freight and can never make an option appear artificially cheapest
+
+Comparison APIs are exposed under `gpi/packagingComparisons/v1.0`. Bound actions add exact spec matches, apply header defaults, and calculate/rank the comparison.
+
+Sandbox-only `gpi/packagingCompareUAT/v1.0` product and freight endpoints support controlled automated UAT setup and cleanup. They reject access outside a Business Central sandbox.
+
+`scripts/Test-GPIPackagingCompareAPIUAT.ps1` creates temporary exact-spec candidates plus a temporary destination-specific freight rate, calculates the sourcing comparison, verifies delivered-cost ranking and missing-freight safety, and cleans up the comparison, temporary candidates, and temporary rate.
 
 ## Important semantic choice
 
@@ -161,10 +186,11 @@ The React field `current_price` is used by the existing app as the product's bas
 
 ## Next BC-only work
 
-- compile and publish Packaging Catalog `0.7.0.0` only to `Sandbox_NoZetadocs_UAT`
-- rerun `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` to protect the validated 48-check quote/approval regression
-- run `scripts/Test-GPIPackagingHistoryAPIUAT.ps1` to validate the new customer-history rules and audit evidence
-- best-price comparison and route/mileage automation
-- bulk import of the real packaging catalog once a non-empty source export is available
+- compile Packaging Catalog `0.8.0.0`
+- publish only to `Sandbox_NoZetadocs_UAT` after a clean compile
+- rerun the validated quote/approval and customer-history regressions
+- run `scripts/Test-GPIPackagingCompareAPIUAT.ps1`
+- add route/mileage automation only after stored-rate sourcing comparison is validated
+- bulk import the real packaging catalog once a non-empty source export is available
 
-Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, approval controls, and historical-pricing guardrails are validated.
+Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, approval controls, historical-pricing guardrails, and sourcing comparison are validated.

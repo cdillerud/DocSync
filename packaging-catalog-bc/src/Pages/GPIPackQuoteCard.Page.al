@@ -80,7 +80,7 @@ page 71010 "GPI Pack Quote Card"
                     Editable = false;
                     Style = Attention;
                     StyleExpr = ReviewNeedsAttention;
-                    ToolTip = 'Summarizes whether pricing still needs evaluation, requires approval, is within policy, or has reached a final decision.';
+                    ToolTip = 'Summarizes the next commercial step, including missing customer or line inputs, guardrail evaluation, approval, or final decision status.';
                 }
                 field("Total Landed Cost"; Rec."Total Landed Cost")
                 {
@@ -94,10 +94,12 @@ page 71010 "GPI Pack Quote Card"
                     Editable = false;
                     Style = Strong;
                 }
-                field("Gross Profit Total"; Rec."Gross Profit Total")
+                field(DisplayGrossProfitTotal; DisplayGrossProfitTotal)
                 {
                     ApplicationArea = All;
+                    Caption = 'Gross Profit Total';
                     Editable = false;
+                    ToolTip = 'Shows quote gross profit after every quote line has a positive proposed sell price. It remains zero while pricing is incomplete.';
                 }
                 field(OverallGrossMarginPct; OverallGrossMarginPct)
                 {
@@ -106,7 +108,7 @@ page 71010 "GPI Pack Quote Card"
                     DecimalPlaces = 0 : 2;
                     Editable = false;
                     Style = Strong;
-                    ToolTip = 'Shows total quote gross profit divided by total proposed sell. It is calculated from the current quote lines.';
+                    ToolTip = 'Shows total quote gross profit divided by total proposed sell after every quote line has a positive proposed sell price.';
                 }
                 field("Last Evaluated At"; Rec."Last Evaluated At")
                 {
@@ -287,17 +289,36 @@ page 71010 "GPI Pack Quote Card"
 
     var
         OverallGrossMarginPct: Decimal;
+        DisplayGrossProfitTotal: Decimal;
         CommercialReviewStatus: Text[50];
         ReviewNeedsAttention: Boolean;
+        HasUnpricedLines: Boolean;
+        HasIncompleteLineInputs: Boolean;
 
     local procedure UpdateCommercialReview()
+    var
+        QuoteLine: Record "GPI Pack Quote Line";
     begin
-        Rec.CalcFields("Total Landed Cost", "Total Sell", "Gross Profit Total", "Approval Line Count");
+        Rec.CalcFields("Total Landed Cost", "Total Sell", "Gross Profit Total", "Approval Line Count", "Line Count");
 
-        if Rec."Total Sell" > 0 then
-            OverallGrossMarginPct := Round((Rec."Gross Profit Total" / Rec."Total Sell") * 100, 0.01)
-        else
+        HasUnpricedLines := false;
+        HasIncompleteLineInputs := false;
+        QuoteLine.SetRange("Quote Entry No.", Rec."Entry No.");
+        if QuoteLine.FindSet() then
+            repeat
+                if QuoteLine."Proposed Sell Price" <= 0 then
+                    HasUnpricedLines := true;
+                if (QuoteLine.Quantity <= 0) or (QuoteLine."Landed Cost per Unit" <= 0) then
+                    HasIncompleteLineInputs := true;
+            until QuoteLine.Next() = 0;
+
+        if (not HasUnpricedLines) and (Rec."Total Sell" > 0) then begin
+            DisplayGrossProfitTotal := Rec."Gross Profit Total";
+            OverallGrossMarginPct := Round((Rec."Gross Profit Total" / Rec."Total Sell") * 100, 0.01);
+        end else begin
+            DisplayGrossProfitTotal := 0;
             OverallGrossMarginPct := 0;
+        end;
 
         ReviewNeedsAttention := false;
 
@@ -323,15 +344,30 @@ page 71010 "GPI Pack Quote Card"
                         CommercialReviewStatus := 'Ready for review';
                 end;
             else begin
-                if Rec."Last Evaluated At" = 0DT then begin
-                    CommercialReviewStatus := 'Pricing not evaluated';
+                if Rec."Line Count" = 0 then begin
+                    CommercialReviewStatus := 'Add a quote line';
                     ReviewNeedsAttention := true;
                 end else
-                    if Rec."Approval Line Count" > 0 then begin
-                        CommercialReviewStatus := 'Approval required';
+                    if Rec."Customer No." = '' then begin
+                        CommercialReviewStatus := 'Customer required';
                         ReviewNeedsAttention := true;
                     end else
-                        CommercialReviewStatus := 'Within policy';
+                        if HasIncompleteLineInputs then begin
+                            CommercialReviewStatus := 'Line inputs incomplete';
+                            ReviewNeedsAttention := true;
+                        end else
+                            if HasUnpricedLines then begin
+                                CommercialReviewStatus := 'Proposed sell required';
+                                ReviewNeedsAttention := true;
+                            end else
+                                if Rec."Last Evaluated At" = 0DT then
+                                    CommercialReviewStatus := 'Ready to evaluate'
+                                else
+                                    if Rec."Approval Line Count" > 0 then begin
+                                        CommercialReviewStatus := 'Approval required';
+                                        ReviewNeedsAttention := true;
+                                    end else
+                                        CommercialReviewStatus := 'Within policy';
             end;
         end;
     end;

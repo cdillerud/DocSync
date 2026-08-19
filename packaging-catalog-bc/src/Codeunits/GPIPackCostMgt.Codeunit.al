@@ -34,17 +34,30 @@ codeunit 71001 "GPI Pack Cost Mgt"
     end;
 
     procedure ApplyBestFreightRate(var Work: Record "GPI Pack Cost Work")
-    var
-        Rate: Record "GPI Pack Frt Rate";
     begin
-        Work.TestField("Destination State");
-        Work.TestField(Quantity);
-        Work.TestField("Gram Weight");
-
-        if not FindBestFreightRate(Work, Rate) then
+        if not TryApplyBestFreightRate(Work) then
             Error(
               'No active freight rate was found for vendor %1, FOB %2, destination %3, mode %4, and calculation date %5.',
               Work."Vendor No.", Work."Vendor Location Code", Work."Destination State", Format(Work.Mode), Work."Calculation Date");
+    end;
+
+    procedure TryApplyBestFreightRate(var Work: Record "GPI Pack Cost Work"): Boolean
+    var
+        Rate: Record "GPI Pack Frt Rate";
+    begin
+        if (Work."Destination State" = '') or (Work.Quantity <= 0) or (Work."Gram Weight" <= 0) then
+            exit(false);
+
+        if not FindBestFreightRate(Work, Rate) then begin
+            Work."Use Freight Rate" := false;
+            Work."Freight Rate Entry No." := 0;
+            Work."Rate per CWT" := 0;
+            Work."Minimum Charge" := 0;
+            Work."Fuel Surcharge %" := 0;
+            Work."Rate Freight Total" := 0;
+            Recalculate(Work);
+            exit(false);
+        end;
 
         Work."Freight Rate Entry No." := Rate."Entry No.";
         Work."Rate per CWT" := Rate."Rate per CWT";
@@ -52,6 +65,7 @@ codeunit 71001 "GPI Pack Cost Mgt"
         Work."Fuel Surcharge %" := Rate."Fuel Surcharge %";
         Work."Use Freight Rate" := true;
         Recalculate(Work);
+        exit(true);
     end;
 
     procedure Recalculate(var Work: Record "GPI Pack Cost Work")

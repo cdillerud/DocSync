@@ -47,6 +47,14 @@ page 71020 "GPI Pack Compare API"
                 {
                     Caption = 'Destination State';
                 }
+                field(destinationLatitude; Rec."Destination Latitude")
+                {
+                    Caption = 'Destination Latitude';
+                }
+                field(destinationLongitude; Rec."Destination Longitude")
+                {
+                    Caption = 'Destination Longitude';
+                }
                 field(targetGrossMarginPct; Rec."Target Gross Margin %")
                 {
                     Caption = 'Target Gross Margin %';
@@ -70,6 +78,18 @@ page 71020 "GPI Pack Compare API"
                 field(deliveryTotal; Rec."Delivery Total")
                 {
                     Caption = 'Default Delivery Charge Total';
+                }
+                field(defaultCostPerMile; Rec."Default Cost per Mile")
+                {
+                    Caption = 'Default Cost per Mile';
+                }
+                field(allowMileageFallback; Rec."Allow Mileage Fallback")
+                {
+                    Caption = 'Allow Mileage Freight Fallback';
+                }
+                field(autoRouteMileage; Rec."Auto Route Mileage")
+                {
+                    Caption = 'Refresh Route Mileage During Calculation';
                 }
                 field(candidateCount; Rec."Candidate Count")
                 {
@@ -114,6 +134,15 @@ page 71020 "GPI Pack Compare API"
         CompareMgt: Codeunit "GPI Pack Compare Mgt";
     begin
         CompareMgt.ApplyHeaderDefaults(Rec);
+        SetActionResponse(ActionContext);
+    end;
+
+    [ServiceEnabled]
+    procedure refreshRouteMileage(var ActionContext: WebServiceActionContext)
+    var
+        CompareMgt: Codeunit "GPI Pack Compare Mgt";
+    begin
+        CompareMgt.RefreshRouteMileage(Rec);
         SetActionResponse(ActionContext);
     end;
 

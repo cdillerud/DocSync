@@ -5,13 +5,15 @@ codeunit 71003 "GPI Quote Audit Mgt"
     procedure LogQuoteSnapshot(QuoteHeader: Record "GPI Pack Quote"; EventType: Enum "GPI Quote Audit Type"; EventNote: Text)
     var
         QuoteLine: Record "GPI Pack Quote Line";
+        PreviousLine: Record "GPI Pack Quote Line";
     begin
         InsertHeaderAudit(QuoteHeader, EventType, EventNote, '');
+        Clear(PreviousLine);
 
         QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
         if QuoteLine.FindSet() then
             repeat
-                InsertLineAudit(QuoteHeader, QuoteLine, EventType, EventNote, QuoteLine);
+                InsertLineAudit(QuoteHeader, QuoteLine, EventType, EventNote, PreviousLine);
             until QuoteLine.Next() = 0;
     end;
 

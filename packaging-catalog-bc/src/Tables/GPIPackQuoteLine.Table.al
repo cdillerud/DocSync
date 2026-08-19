@@ -231,19 +231,31 @@ table 71007 "GPI Pack Quote Line"
     trigger OnModify()
     var
         QuoteHeader: Record "GPI Pack Quote";
+        QuoteMgt: Codeunit "GPI Pack Quote Mgt";
         AuditMgt: Codeunit "GPI Quote Audit Mgt";
+        PricingChanged: Boolean;
+        LineChanged: Boolean;
     begin
-        if not PricingInputsChanged() then
+        LineChanged := ReviewInputsChanged();
+        if not LineChanged then
             exit;
 
         if not QuoteHeader.Get("Quote Entry No.") then
             exit;
 
         if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
-            Error('Reopen the quote to Draft before changing pricing inputs.');
+            Error('Reopen the quote to Draft before changing quote line values.');
+
+        PricingChanged := PricingInputsChanged();
+
+        if not PricingChanged then
+            QuoteMgt.InvalidateLine(Rec);
 
         if (xRec."Evaluated At" <> 0DT) or (QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft) then
-            AuditMgt.LogPricingChange(Rec, xRec);
+            if PricingChanged then
+                AuditMgt.LogPricingChange(Rec, xRec)
+            else
+                AuditMgt.LogLineChange(Rec, xRec);
     end;
 
     trigger OnDelete()
@@ -266,5 +278,10 @@ table 71007 "GPI Pack Quote Line"
             ("Landed Cost per Unit" <> xRec."Landed Cost per Unit") or
             ("Proposed Sell Price" <> xRec."Proposed Sell Price") or
             ("Target Gross Margin %" <> xRec."Target Gross Margin %"));
+    end;
+
+    local procedure ReviewInputsChanged(): Boolean
+    begin
+        exit(PricingInputsChanged() or (Description <> xRec.Description));
     end;
 }

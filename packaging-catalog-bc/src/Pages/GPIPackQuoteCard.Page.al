@@ -85,7 +85,7 @@ page 71010 "GPI Pack Quote Card"
             {
                 ApplicationArea = All;
                 Caption = 'Evaluate All Guardrails';
-                Image = CheckRulesSyntax;
+                Image = Calculate;
 
                 trigger OnAction()
                 var
@@ -116,7 +116,7 @@ page 71010 "GPI Pack Quote Card"
                 ApplicationArea = All;
                 Caption = 'Reopen Draft';
                 Image = ReOpen;
-                Enabled = Rec.Status <> Rec.Status::Draft;
+                Enabled = Rec.Status <> "GPI Pack Quote Stat"::Draft;
 
                 trigger OnAction()
                 var

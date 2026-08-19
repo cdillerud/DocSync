@@ -133,15 +133,37 @@ The quote card embeds read-only Approval and Audit History. A read-only `packagi
 
 The quote API also exposes bound actions for approve, reject, and reopen. `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` is the regression harness for Milestones 5 and 6.
 
+## Milestone 7: customer historical pricing guardrails
+
+Version `0.7.0.0` adds Business Central-native customer price-history evaluation to quote lines. This milestone is ready for compile and UAT.
+
+Deterministic history behavior:
+
+- only exact customer + BC item + UOM posted sales history can trigger a history review
+- at least 3 matching posted sales lines are required before customer history can trigger review
+- the median of up to the 5 most recent matching posted sales lines is the customer baseline
+- a proposed sell price 7.5% or more below that median becomes `Below Customer History`
+- a proposed sell price 15% or more above that median becomes `Above Customer History`
+- both history states require human approval
+- all-customer item + UOM history is calculated and displayed as context only and never creates an approval by itself
+- posted history is limited through the quote date so future transactions cannot affect an earlier quote
+- historical evidence never writes or infers a replacement sell price
+
+Quote-line evidence now includes exact customer history line count, recent customer median, proposed-price variance, latest customer-history posting date, all-customer history line count, all-customer recent median, and a plain-language history message.
+
+The approval/audit snapshot now preserves the same historical evidence so a later reviewer can see the history context that existed when the quote was evaluated, approved, or rejected.
+
+`scripts/Test-GPIPackagingHistoryAPIUAT.ps1` independently derives the expected median from the existing `historicalSalesLines` API, creates temporary quote scenarios 10% below and 20% above the exact customer-history median, verifies the Business Central result and audit snapshot, confirms the proposed price is retained, and removes its temporary quotes and audit rows during cleanup.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
 
 ## Next BC-only work
 
-- port customer-specific posted-price-history anomaly checks into the BC quote workflow without allowing history to become an automatic replacement-price recommendation
-- preserve the existing POC behavior: exact customer/item/UOM history only can trigger a history review, at least 3 matching posted lines are required, the most recent 5 matching transactions provide the median baseline, proposals 7.5% or more below that median are reviewed, proposals 15% or more above that median are reviewed, and broader all-customer history remains context only
-- extend the API UAT harness so historical-pricing scenarios are automated rather than manually tested
+- compile and publish Packaging Catalog `0.7.0.0` only to `Sandbox_NoZetadocs_UAT`
+- rerun `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` to protect the validated 48-check quote/approval regression
+- run `scripts/Test-GPIPackagingHistoryAPIUAT.ps1` to validate the new customer-history rules and audit evidence
 - best-price comparison and route/mileage automation
 - bulk import of the real packaging catalog once a non-empty source export is available
 

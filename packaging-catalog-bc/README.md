@@ -105,16 +105,21 @@ A separate `gpi/packagingQuoteUAT/v1.0` pricing-rule endpoint exists only to cre
 
 Version `0.6.0.0` adds the commercial decision and audit layer on top of the validated quote workflow.
 
-New approval controls:
+Validated in `Sandbox_NoZetadocs_UAT` with 48 of 48 API checks passing on 2026-08-19:
 
 - explicit Approve Quote and Reject Quote actions from Ready for Review
 - Rejected quote status
-- approval/rejection note, decision timestamp, and actual Business Central decision user
+- approval/rejection note, decision timestamp, and Business Central decision user
 - pricing-exception approvals require a decision note
 - all rejections require a decision note
-- Approved, Rejected, and Expired quotes block pricing, customer, quote-date, expiration-date, and description changes until explicitly reopened to Draft
-- Reopen Draft clears the current evaluation and requires a fresh guardrail evaluation before review
+- Approved, Rejected, and Expired quotes block pricing and consequential quote changes until explicitly reopened to Draft
+- Reopen Draft clears current guardrail evaluation and requires a fresh evaluation before review
 - quote-date changes invalidate effective-dated guardrail results
+- approval and rejection create durable header and line audit snapshots
+- post-decision pricing edits and decision-note edits are blocked
+- pricing changes after evaluation preserve previous and new sell values plus the previous guardrail state
+- audit API returns the decision snapshots used by the automated regression
+- temporary UAT quotes, audit rows, and fixed-price rule are removed during cleanup
 
 Durable audit records capture:
 
@@ -126,7 +131,7 @@ Durable audit records capture:
 
 The quote card embeds read-only Approval and Audit History. A read-only `packagingQuoteAudits` API is exposed under `gpi/packagingQuotes/v1.0`.
 
-The quote API now also exposes bound actions for approve, reject, and reopen. The automated UAT runner verifies approval-note enforcement, approval and rejection snapshots, decision-user/timestamp capture, post-decision edit locks, reopen behavior, and pricing-change audit values in addition to the Milestone 5 guardrail matrix.
+The quote API also exposes bound actions for approve, reject, and reopen. `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` is the regression harness for Milestones 5 and 6.
 
 ## Important semantic choice
 
@@ -134,10 +139,10 @@ The React field `current_price` is used by the existing app as the product's bas
 
 ## Next BC-only work
 
-- compile and publish Packaging Catalog `0.6.0.0` to UAT
-- run `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` and validate the expanded approval/audit matrix
 - port customer-specific posted-price-history anomaly checks into the BC quote workflow without allowing history to become an automatic replacement-price recommendation
+- preserve the existing POC behavior: exact customer/item/UOM history only can trigger a history review, at least 3 matching posted lines are required, the most recent 5 matching transactions provide the median baseline, proposals 7.5% or more below that median are reviewed, proposals 15% or more above that median are reviewed, and broader all-customer history remains context only
+- extend the API UAT harness so historical-pricing scenarios are automated rather than manually tested
 - best-price comparison and route/mileage automation
 - bulk import of the real packaging catalog once a non-empty source export is available
 
-Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, and approval controls are validated.
+Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, approval controls, and historical-pricing guardrails are validated.

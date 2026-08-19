@@ -33,7 +33,19 @@ page 71015 "GPI Quote Audits"
                 {
                     ApplicationArea = All;
                 }
+                field("Quote Date"; Rec."Quote Date")
+                {
+                    ApplicationArea = All;
+                }
                 field("Customer No."; Rec."Customer No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Quote Description"; Rec."Quote Description")
+                {
+                    ApplicationArea = All;
+                }
+                field("Decision Note"; Rec."Decision Note")
                 {
                     ApplicationArea = All;
                 }
@@ -86,6 +98,26 @@ page 71015 "GPI Quote Audits"
                     ApplicationArea = All;
                 }
                 field("Event Note"; Rec."Event Note")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous Customer No."; Rec."Previous Customer No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous Quote Date"; Rec."Previous Quote Date")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous Product No."; Rec."Previous Product No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous BC Item No."; Rec."Previous BC Item No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous UOM Code"; Rec."Previous UOM Code")
                 {
                     ApplicationArea = All;
                 }

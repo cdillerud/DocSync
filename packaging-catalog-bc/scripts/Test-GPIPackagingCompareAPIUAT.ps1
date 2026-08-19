@@ -16,7 +16,10 @@ $Results = [System.Collections.Generic.List[object]]::new()
 $CreatedProductIds = [System.Collections.Generic.List[string]]::new()
 $CreatedRateIds = [System.Collections.Generic.List[string]]::new()
 $CreatedCompareIds = [System.Collections.Generic.List[string]]::new()
+$CreatedVendorLocationIds = [System.Collections.Generic.List[string]]::new()
 $RunId = "COMPARE-API-UAT-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+$Suffix = Get-Date -Format 'HHmmss'
+$DestinationState = "$DestinationState$Suffix"
 $Token = $null
 $Secret = $null
 $CompareBase = $null
@@ -146,13 +149,37 @@ function Get-ReferenceProduct {
     return @($response.value) | Select-Object -First 1
 }
 
+function New-UatVendorLocation {
+    param(
+        [Parameter(Mandatory)]$ReferenceProduct,
+        [Parameter(Mandatory)][string]$LocationCode
+    )
+
+    $location = Invoke-BcRequest -Method POST -Uri "$UatBase/vendorLocationsUAT" -Body @{
+        vendorNo = $ReferenceProduct.vendorNo
+        code = $LocationCode
+        description = "$RunId no freight"
+        city = "UAT"
+        stateProvince = "UAT"
+        defaultFob = $false
+        blocked = $false
+    }
+
+    $CreatedVendorLocationIds.Add([string]$location.id) | Out-Null
+    return $location
+}
+
 function New-UatProduct {
     param(
         [Parameter(Mandatory)][string]$ProductNo,
         [Parameter(Mandatory)]$ReferenceProduct,
         [Parameter(Mandatory)][decimal]$SupplierCost,
-        [switch]$MissingVendor
+        [AllowEmptyString()][string]$VendorLocationCode = ""
     )
+
+    if ([string]::IsNullOrWhiteSpace($VendorLocationCode)) {
+        $VendorLocationCode = [string]$ReferenceProduct.vendorLocationCode
+    }
 
     $body = @{
         productNo = $ProductNo
@@ -162,17 +189,14 @@ function New-UatProduct {
         capacityUom = $ReferenceProduct.capacityUom
         color = $ReferenceProduct.color
         bcItemNo = $ReferenceProduct.bcItemNo
+        vendorNo = $ReferenceProduct.vendorNo
+        vendorLocationCode = $VendorLocationCode
         transportMode = $ReferenceProduct.transportMode
         fullLoadQuantity = [decimal]$ReferenceProduct.fullLoadQuantity
         noOfPallets = [decimal]$ReferenceProduct.noOfPallets
         gramWeight = [decimal]$ReferenceProduct.gramWeight
         currentSupplierUnitCost = $SupplierCost
         blocked = $false
-    }
-
-    if (-not $MissingVendor) {
-        $body.vendorNo = $ReferenceProduct.vendorNo
-        $body.vendorLocationCode = $ReferenceProduct.vendorLocationCode
     }
 
     $product = Invoke-BcRequest -Method POST -Uri "$UatBase/packagingProductsUAT" -Body $body
@@ -300,23 +324,27 @@ try {
     if ([string]::IsNullOrWhiteSpace([string]$reference.vendorNo)) {
         throw "Reference product '$ReferenceProductNo' must have a Vendor No. for comparison UAT."
     }
+    if ([string]::IsNullOrWhiteSpace([string]$reference.vendorLocationCode)) {
+        throw "Reference product '$ReferenceProductNo' must have a Vendor FOB Location for comparison UAT."
+    }
     if ([decimal]$reference.currentSupplierUnitCost -le 0) {
         throw "Reference product '$ReferenceProductNo' must have a positive Current Supplier Unit Cost."
     }
 
-    $suffix = Get-Date -Format 'HHmmss'
-    $productA = "CMPA$suffix"
-    $productB = "CMPB$suffix"
-    $productMissing = "CMPM$suffix"
+    $productA = "CMPA$Suffix"
+    $productB = "CMPB$Suffix"
+    $productMissing = "CMPM$Suffix"
+    $missingLocationCode = "NR$Suffix"
 
     $costA = [decimal][math]::Round([double]([decimal]$reference.currentSupplierUnitCost * [decimal]0.50), 5)
     $costB = [decimal][math]::Round([double]([decimal]$reference.currentSupplierUnitCost * [decimal]1.50), 5)
     if ($costA -le 0) { $costA = [decimal]0.01 }
     if ($costB -le $costA) { $costB = $costA + [decimal]0.10 }
 
+    $null = New-UatVendorLocation -ReferenceProduct $reference -LocationCode $missingLocationCode
     $null = New-UatProduct -ProductNo $productA -ReferenceProduct $reference -SupplierCost $costA
     $null = New-UatProduct -ProductNo $productB -ReferenceProduct $reference -SupplierCost $costB
-    $null = New-UatProduct -ProductNo $productMissing -ReferenceProduct $reference -SupplierCost $costA -MissingVendor
+    $null = New-UatProduct -ProductNo $productMissing -ReferenceProduct $reference -SupplierCost $costA -VendorLocationCode $missingLocationCode
     $rate = New-UatFreightRate -ReferenceProduct $reference
 
     $compare = New-Comparison
@@ -333,7 +361,7 @@ try {
     $scenario = "Exact Spec Matching"
     Assert-Equal $scenario "Lower-cost candidate added" ($null -ne $lineA) $true
     Assert-Equal $scenario "Higher-cost candidate added" ($null -ne $lineB) $true
-    Assert-Equal $scenario "Incomplete candidate added" ($null -ne $lineMissing) $true
+    Assert-Equal $scenario "No-rate candidate added" ($null -ne $lineMissing) $true
     Assert-GreaterOrEqual $scenario "Candidate count" ([decimal]$compare.candidateCount) 3
 
     if ($lineA -and $lineB) {
@@ -348,23 +376,25 @@ try {
         Assert-LessThan $scenario "Lower delivered cost has better rank" ([decimal]$lineA.rank) ([decimal]$lineB.rank)
         Assert-GreaterThan $scenario "Suggested sell exceeds landed cost" ([decimal]$lineA.suggestedSellPrice) ([decimal]$lineA.landedCostPerUnit)
 
-        $expectedLandedA = [decimal]$lineA.supplierUnitCost +
+        $expectedLandedA = (
+            [decimal]$lineA.supplierUnitCost +
             [decimal]$lineA.palletCostPerUnit +
             [decimal]$lineA.domesticFreightPerUnit +
             [decimal]$lineA.tariffPerUnit +
             [decimal]$lineA.internationalFreightPerUnit +
             [decimal]$lineA.customsPerUnit +
             [decimal]$lineA.deliveryPerUnit
+        )
         Assert-DecimalNear $scenario "Delivered-cost formula" ([decimal]$lineA.landedCostPerUnit) $expectedLandedA 0.0001
         Assert-GreaterThan $scenario "Higher option has more cost above best" ([decimal]$lineB.costAboveBest) ([decimal]$lineA.costAboveBest)
     }
 
     if ($lineMissing) {
         $scenario = "Missing Freight Safety"
-        Assert-Equal $scenario "Missing-vendor candidate not rankable" $lineMissing.isComplete $false
-        Assert-Equal $scenario "Missing-vendor candidate rank" ([int]$lineMissing.rank) 0
-        Assert-DecimalNear $scenario "Missing-vendor landed cost not presented" ([decimal]$lineMissing.landedCostPerUnit) 0 0.0001
-        Assert-Contains $scenario "Incomplete reason identifies vendor" $lineMissing.incompleteReason "Vendor No."
+        Assert-Equal $scenario "No-rate candidate not rankable" $lineMissing.isComplete $false
+        Assert-Equal $scenario "No-rate candidate rank" ([int]$lineMissing.rank) 0
+        Assert-DecimalNear $scenario "No-rate landed cost not presented" ([decimal]$lineMissing.landedCostPerUnit) 0 0.0001
+        Assert-Contains $scenario "Incomplete reason identifies missing rate" $lineMissing.incompleteReason "No active freight rate"
     }
 
     $scenario = "Comparison Header"
@@ -403,6 +433,15 @@ finally {
                 Write-Warning "Could not delete UAT product $productId. $($_.Exception.Message)"
             }
         }
+
+        foreach ($locationId in $CreatedVendorLocationIds) {
+            try {
+                $null = Invoke-BcRequest -Method DELETE -Uri "$UatBase/vendorLocationsUAT($locationId)" -IfMatch -Body $null
+            }
+            catch {
+                Write-Warning "Could not delete UAT vendor location $locationId. $($_.Exception.Message)"
+            }
+        }
     }
 
     $Secret = $null
@@ -418,7 +457,7 @@ Write-Host ""
 Write-Host "Checks run : $($Results.Count)"
 Write-Host "Passed     : $($Results.Count - $failed.Count)"
 Write-Host "Failed     : $($failed.Count)"
-Write-Host "Cleanup    : temporary comparison, candidates, and freight rate removed"
+Write-Host "Cleanup    : temporary comparison, candidates, freight rate, and vendor location removed"
 
 if ($failed.Count -gt 0) {
     Write-Host "PACKAGING SOURCING COMPARISON API UAT FAILED" -ForegroundColor Red

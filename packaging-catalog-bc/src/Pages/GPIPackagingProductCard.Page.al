@@ -208,6 +208,10 @@ page 71000 "GPI Pack Prod Card"
             {
                 ApplicationArea = All;
                 Caption = 'Open BC Item';
+                Image = Item;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -222,6 +226,9 @@ page 71000 "GPI Pack Prod Card"
             {
                 ApplicationArea = All;
                 Caption = 'Open Vendor';
+                Image = Vendor;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 var
@@ -251,6 +258,9 @@ page 71000 "GPI Pack Prod Card"
                 ApplicationArea = All;
                 Caption = 'New Landed Cost';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -266,18 +276,14 @@ page 71000 "GPI Pack Prod Card"
                     Page.Run(Page::"GPI Pack Cost Calc", CostWork);
                 end;
             }
-            action(LandedCosts)
-            {
-                ApplicationArea = All;
-                Caption = 'Landed Cost Worksheets';
-                RunObject = page "GPI Pack Cost Works";
-                RunPageLink = "Product No." = field("No.");
-            }
             action(NewSourcingComparison)
             {
                 ApplicationArea = All;
                 Caption = 'New Sourcing Comparison';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -291,6 +297,32 @@ page 71000 "GPI Pack Prod Card"
                     CompareHeader.Insert(true);
                     Page.Run(Page::"GPI Pack Comp Card", CompareHeader);
                 end;
+            }
+            action(NewPackagingQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'New Packaging Quote';
+                Image = Quote;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+
+                trigger OnAction()
+                var
+                    QuoteHeader: Record "GPI Pack Quote";
+                    FlowMgt: Codeunit "GPI Pack Flow Mgt";
+                begin
+                    Rec.TestField("No.");
+                    FlowMgt.CreateQuoteFromProduct(Rec."No.", QuoteHeader);
+                    Page.Run(Page::"GPI Pack Quote Card", QuoteHeader);
+                end;
+            }
+            action(LandedCosts)
+            {
+                ApplicationArea = All;
+                Caption = 'Landed Cost Worksheets';
+                RunObject = page "GPI Pack Cost Works";
+                RunPageLink = "Product No." = field("No.");
             }
             action(SourcingComparisons)
             {

@@ -139,7 +139,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         end;
     end;
 
-    local procedure TryGetCachedRoute(OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; Mode: Enum "GPI Pack Transport"; var Cache: Record "GPI Route Cache"): Boolean
+    local procedure TryGetCachedRoute(OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; TransportMode: Enum "GPI Pack Transport"; var Cache: Record "GPI Route Cache"): Boolean
     begin
         Cache.Reset();
         Cache.SetCurrentKey("Origin Latitude", "Origin Longitude", "Destination Latitude", "Destination Longitude", Mode, "Expires At");
@@ -147,7 +147,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         Cache.SetRange("Origin Longitude", OriginLongitude);
         Cache.SetRange("Destination Latitude", DestinationLatitude);
         Cache.SetRange("Destination Longitude", DestinationLongitude);
-        Cache.SetRange(Mode, Mode);
+        Cache.SetRange(Mode, TransportMode);
         Cache.SetFilter("Expires At", '%1..', CurrentDateTime());
         exit(Cache.FindLast());
     end;
@@ -161,7 +161,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         CompareLine."Route Message" := CopyStr(StrSubstNo('Route mileage loaded from cache entry %1.', Cache."Entry No."), 1, MaxStrLen(CompareLine."Route Message"));
     end;
 
-    local procedure SaveRouteCache(Setup: Record "GPI Route Setup"; OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; Mode: Enum "GPI Pack Transport"; DistanceMiles: Decimal; DurationMinutes: Decimal; Provider: Enum "GPI Route Provider"; ProviderReference: Text[100]; Notes: Text[250])
+    local procedure SaveRouteCache(Setup: Record "GPI Route Setup"; OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; TransportMode: Enum "GPI Pack Transport"; DistanceMiles: Decimal; DurationMinutes: Decimal; Provider: Enum "GPI Route Provider"; ProviderReference: Text[100]; Notes: Text[250])
     var
         Cache: Record "GPI Route Cache";
         ExpiresAt: DateTime;
@@ -172,14 +172,14 @@ codeunit 71006 "GPI Pack Route Mgt"
         Cache.SetRange("Origin Longitude", OriginLongitude);
         Cache.SetRange("Destination Latitude", DestinationLatitude);
         Cache.SetRange("Destination Longitude", DestinationLongitude);
-        Cache.SetRange(Mode, Mode);
+        Cache.SetRange(Mode, TransportMode);
         if not Cache.FindFirst() then begin
             Cache.Init();
             Cache."Origin Latitude" := OriginLatitude;
             Cache."Origin Longitude" := OriginLongitude;
             Cache."Destination Latitude" := DestinationLatitude;
             Cache."Destination Longitude" := DestinationLongitude;
-            Cache.Mode := Mode;
+            Cache.Mode := TransportMode;
             Cache."Distance Miles" := DistanceMiles;
             Cache."Duration Minutes" := DurationMinutes;
             Cache.Provider := Provider;
@@ -201,7 +201,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         Cache.Modify(true);
     end;
 
-    local procedure CallAzureMaps(Setup: Record "GPI Route Setup"; OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; Mode: Enum "GPI Pack Transport"; var DistanceMiles: Decimal; var DurationMinutes: Decimal; var ProviderReference: Text[100]; var RouteMessage: Text[250]): Boolean
+    local procedure CallAzureMaps(Setup: Record "GPI Route Setup"; OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; TransportMode: Enum "GPI Pack Transport"; var DistanceMiles: Decimal; var DurationMinutes: Decimal; var ProviderReference: Text[100]; var RouteMessage: Text[250]): Boolean
     var
         Client: HttpClient;
         Content: HttpContent;
@@ -211,7 +211,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         RequestJson: JsonObject;
         RequestText: Text;
         ResponseText: Text;
-        ApiKey: Text;
+        ApiKey: SecretText;
         Endpoint: Text;
     begin
         DistanceMiles := 0;
@@ -230,7 +230,7 @@ codeunit 71006 "GPI Pack Route Mgt"
         if CopyStr(Endpoint, StrLen(Endpoint), 1) = '/' then
             Endpoint := CopyStr(Endpoint, 1, StrLen(Endpoint) - 1);
 
-        BuildAzureMapsRequest(OriginLatitude, OriginLongitude, DestinationLatitude, DestinationLongitude, Mode, RequestJson);
+        BuildAzureMapsRequest(OriginLatitude, OriginLongitude, DestinationLatitude, DestinationLongitude, TransportMode, RequestJson);
         RequestJson.WriteTo(RequestText);
 
         Content.WriteFrom(RequestText);
@@ -261,9 +261,10 @@ codeunit 71006 "GPI Pack Route Mgt"
         exit(true);
     end;
 
-    local procedure BuildAzureMapsRequest(OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; Mode: Enum "GPI Pack Transport"; var RequestJson: JsonObject)
+    local procedure BuildAzureMapsRequest(OriginLatitude: Decimal; OriginLongitude: Decimal; DestinationLatitude: Decimal; DestinationLongitude: Decimal; TransportMode: Enum "GPI Pack Transport"; var RequestJson: JsonObject)
     var
         Features: JsonArray;
+        RouteOutputOptions: JsonArray;
         OriginFeature: JsonObject;
         DestinationFeature: JsonObject;
     begin
@@ -272,11 +273,13 @@ codeunit 71006 "GPI Pack Route Mgt"
         BuildWaypointFeature(DestinationLatitude, DestinationLongitude, 1, DestinationFeature);
         Features.Add(OriginFeature);
         Features.Add(DestinationFeature);
+        RouteOutputOptions.Add('routePath');
 
         RequestJson.Add('type', 'FeatureCollection');
         RequestJson.Add('features', Features);
         RequestJson.Add('optimizeRoute', 'fastestWithoutTraffic');
-        RequestJson.Add('travelMode', GetAzureMapsTravelMode(Mode));
+        RequestJson.Add('routeOutputOptions', RouteOutputOptions);
+        RequestJson.Add('travelMode', GetAzureMapsTravelMode(TransportMode));
     end;
 
     local procedure BuildWaypointFeature(Latitude: Decimal; Longitude: Decimal; PointIndex: Integer; var Feature: JsonObject)
@@ -297,9 +300,9 @@ codeunit 71006 "GPI Pack Route Mgt"
         Feature.Add('properties', Properties);
     end;
 
-    local procedure GetAzureMapsTravelMode(Mode: Enum "GPI Pack Transport"): Text
+    local procedure GetAzureMapsTravelMode(TransportMode: Enum "GPI Pack Transport"): Text
     begin
-        case Mode of
+        case TransportMode of
             "GPI Pack Transport"::TL,
             "GPI Pack Transport"::CNTR:
                 exit('truck');

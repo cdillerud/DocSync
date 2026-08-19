@@ -96,6 +96,39 @@ page 71011 "GPI Pack Quote Lines"
                 {
                     ApplicationArea = All;
                 }
+                field("Customer Hist Lines"; Rec."Customer Hist Lines")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows exact posted sales history line count for this customer, BC item, and UOM through the quote date.';
+                }
+                field("Customer Hist Median"; Rec."Customer Hist Median")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the median sell price from up to the five most recent exact customer, item, and UOM posted sales lines.';
+                }
+                field("Customer Hist Var %"; Rec."Customer Hist Var %")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the proposed sell price variance from the customer recent-history median.';
+                }
+                field("Customer Hist Last Date"; Rec."Customer Hist Last Date")
+                {
+                    ApplicationArea = All;
+                }
+                field("All Cust Hist Lines"; Rec."All Cust Hist Lines")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows exact item and UOM history across all customers. This is context only and never drives an approval by itself.';
+                }
+                field("All Cust Hist Median"; Rec."All Cust Hist Median")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the recent all-customer median for this item and UOM. This is context only.';
+                }
+                field("History Message"; Rec."History Message")
+                {
+                    ApplicationArea = All;
+                }
                 field("Evaluated At"; Rec."Evaluated At")
                 {
                     ApplicationArea = All;

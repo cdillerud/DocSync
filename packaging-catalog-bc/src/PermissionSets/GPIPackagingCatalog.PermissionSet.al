@@ -76,5 +76,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Quote Hist Mgt" = X,
         codeunit "GPI Pack Compare Mgt" = X,
         codeunit "GPI Pack Route Mgt" = X,
-        codeunit "GPI Item Disc Mgt" = X;
+        codeunit "GPI Item Disc Mgt" = X,
+        codeunit "GPI Pack Flow Mgt" = X;
 }

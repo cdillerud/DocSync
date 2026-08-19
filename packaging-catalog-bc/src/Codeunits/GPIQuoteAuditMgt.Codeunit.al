@@ -32,6 +32,21 @@ codeunit 71003 "GPI Quote Audit Mgt"
             PreviousLine);
     end;
 
+    procedure LogLineChange(QuoteLine: Record "GPI Pack Quote Line"; PreviousLine: Record "GPI Pack Quote Line")
+    var
+        QuoteHeader: Record "GPI Pack Quote";
+    begin
+        if not QuoteHeader.Get(QuoteLine."Quote Entry No.") then
+            exit;
+
+        InsertLineAudit(
+            QuoteHeader,
+            QuoteLine,
+            "GPI Quote Audit Type"::"Quote Changed",
+            'Quote line content changed after a prior guardrail evaluation or review state.',
+            PreviousLine);
+    end;
+
     procedure LogCustomerChange(QuoteHeader: Record "GPI Pack Quote"; PreviousCustomerNo: Code[20])
     var
         EventNote: Text[250];

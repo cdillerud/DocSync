@@ -62,33 +62,8 @@ codeunit 71002 "GPI Pack Quote Mgt"
     end;
 
     procedure RecalculateLine(var QuoteLine: Record "GPI Pack Quote Line")
-    var
-        MarginFactor: Decimal;
     begin
-        QuoteLine."Suggested Sell Price" := 0;
-        QuoteLine."Calculated GP %" := 0;
-        QuoteLine."Extended Landed Cost" := 0;
-        QuoteLine."Extended Sell" := 0;
-        QuoteLine."Gross Profit Total" := 0;
-
-        if QuoteLine.Quantity > 0 then begin
-            QuoteLine."Extended Landed Cost" := Round(QuoteLine."Landed Cost per Unit" * QuoteLine.Quantity, 0.01, '=');
-            QuoteLine."Extended Sell" := Round(QuoteLine."Proposed Sell Price" * QuoteLine.Quantity, 0.01, '=');
-            QuoteLine."Gross Profit Total" := Round((QuoteLine."Proposed Sell Price" - QuoteLine."Landed Cost per Unit") * QuoteLine.Quantity, 0.01, '=');
-        end;
-
-        if QuoteLine."Proposed Sell Price" > 0 then
-            QuoteLine."Calculated GP %" := Round(
-                ((QuoteLine."Proposed Sell Price" - QuoteLine."Landed Cost per Unit") / QuoteLine."Proposed Sell Price") * 100,
-                0.00001,
-                '=');
-
-        if (QuoteLine."Landed Cost per Unit" > 0) and (QuoteLine."Target Gross Margin %" < 100) then begin
-            MarginFactor := 1 - (QuoteLine."Target Gross Margin %" / 100);
-            if MarginFactor > 0 then
-                QuoteLine."Suggested Sell Price" := Round(QuoteLine."Landed Cost per Unit" / MarginFactor, 0.00001, '=');
-        end;
-
+        CalculateLineAmounts(QuoteLine);
         InvalidateLine(QuoteLine);
     end;
 
@@ -106,10 +81,13 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteLine."Evaluated By" := '';
 
         if (QuoteLine."Quote Entry No." <> 0) and QuoteHeader.Get(QuoteLine."Quote Entry No.") then
-            if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then begin
+            if QuoteHeader.Status = "GPI Pack Quote Stat"::Ready then begin
                 QuoteHeader.Status := "GPI Pack Quote Stat"::Draft;
                 QuoteHeader."Last Evaluated At" := 0DT;
                 QuoteHeader."Last Evaluated By" := '';
+                QuoteHeader."Decision Note" := '';
+                QuoteHeader."Decision At" := 0DT;
+                QuoteHeader."Decision By" := '';
                 QuoteHeader.Modify(false);
             end;
     end;
@@ -132,7 +110,8 @@ codeunit 71002 "GPI Pack Quote Mgt"
         SpecialApprover: Text[100];
         CombinedApprover: Text[100];
     begin
-        RecalculateLine(QuoteLine);
+        CalculateLineAmounts(QuoteLine);
+        ClearEvaluation(QuoteLine);
 
         if not QuoteHeader.Get(QuoteLine."Quote Entry No.") then begin
             SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Quote header was not found.', '', 0);
@@ -287,7 +266,11 @@ codeunit 71002 "GPI Pack Quote Mgt"
     procedure EvaluateQuote(var QuoteHeader: Record "GPI Pack Quote")
     var
         QuoteLine: Record "GPI Pack Quote Line";
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
     begin
+        if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
+            Error('Reopen the quote to Draft before evaluating it again.');
+
         QuoteHeader.TestField("Customer No.");
 
         QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
@@ -302,33 +285,162 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteHeader."Last Evaluated At" := CurrentDateTime();
         QuoteHeader."Last Evaluated By" := CopyStr(UserId(), 1, MaxStrLen(QuoteHeader."Last Evaluated By"));
         QuoteHeader.Modify(false);
+        AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::Evaluated, 'Guardrails evaluated.');
     end;
 
     procedure SetReadyForReview(var QuoteHeader: Record "GPI Pack Quote")
     var
-        QuoteLine: Record "GPI Pack Quote Line";
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
     begin
-        EvaluateQuote(QuoteHeader);
+        if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then
+            Error('Only a Draft quote can be sent to Ready for Review.');
 
-        QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
-        if QuoteLine.FindSet() then
-            repeat
-                case QuoteLine."Guardrail Status" of
-                    "GPI Quote Guard Stat"::"Not Evaluated",
-                    "GPI Quote Guard Stat"::"Approval Required",
-                    "GPI Quote Guard Stat"::"Missing Cost":
-                        Error('Line %1 is incomplete: %2', QuoteLine."Line No.", QuoteLine."Guardrail Message");
-                end;
-            until QuoteLine.Next() = 0;
+        EvaluateQuote(QuoteHeader);
+        EnsureCompleteForDecision(QuoteHeader);
 
         QuoteHeader.Status := "GPI Pack Quote Stat"::Ready;
+        QuoteHeader."Decision Note" := '';
+        QuoteHeader."Decision At" := 0DT;
+        QuoteHeader."Decision By" := '';
         QuoteHeader.Modify(true);
+        AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::"Ready Review", 'Quote moved to Ready for Review.');
+    end;
+
+    procedure ApproveQuote(var QuoteHeader: Record "GPI Pack Quote")
+    var
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
+    begin
+        if QuoteHeader.Status <> "GPI Pack Quote Stat"::Ready then
+            Error('Only a quote that is Ready for Review can be approved.');
+
+        EvaluateQuote(QuoteHeader);
+        EnsureCompleteForDecision(QuoteHeader);
+
+        if HasApprovalLines(QuoteHeader) and (QuoteHeader."Decision Note" = '') then
+            Error('Enter an Approval / Rejection Note before approving a quote with pricing exceptions.');
+
+        QuoteHeader.Status := "GPI Pack Quote Stat"::Approved;
+        QuoteHeader."Decision At" := CurrentDateTime();
+        QuoteHeader."Decision By" := CopyStr(UserId(), 1, MaxStrLen(QuoteHeader."Decision By"));
+        QuoteHeader.Modify(true);
+        AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::Approved, QuoteHeader."Decision Note");
+    end;
+
+    procedure RejectQuote(var QuoteHeader: Record "GPI Pack Quote")
+    var
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
+    begin
+        if QuoteHeader.Status <> "GPI Pack Quote Stat"::Ready then
+            Error('Only a quote that is Ready for Review can be rejected.');
+
+        QuoteHeader.TestField("Decision Note");
+        EvaluateQuote(QuoteHeader);
+        EnsureCompleteForDecision(QuoteHeader);
+
+        QuoteHeader.Status := "GPI Pack Quote Stat"::Rejected;
+        QuoteHeader."Decision At" := CurrentDateTime();
+        QuoteHeader."Decision By" := CopyStr(UserId(), 1, MaxStrLen(QuoteHeader."Decision By"));
+        QuoteHeader.Modify(true);
+        AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::Rejected, QuoteHeader."Decision Note");
     end;
 
     procedure ReopenQuote(var QuoteHeader: Record "GPI Pack Quote")
+    var
+        QuoteLine: Record "GPI Pack Quote Line";
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
+        OldStatusText: Text[100];
+        EventNote: Text[250];
     begin
+        if QuoteHeader.Status = "GPI Pack Quote Stat"::Draft then
+            exit;
+
+        OldStatusText := CopyStr(Format(QuoteHeader.Status), 1, MaxStrLen(OldStatusText));
+
+        QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
+        if QuoteLine.FindSet(true) then
+            repeat
+                ClearEvaluation(QuoteLine);
+                QuoteLine.Modify(false);
+            until QuoteLine.Next() = 0;
+
         QuoteHeader.Status := "GPI Pack Quote Stat"::Draft;
+        QuoteHeader."Last Evaluated At" := 0DT;
+        QuoteHeader."Last Evaluated By" := '';
+        QuoteHeader."Decision Note" := '';
+        QuoteHeader."Decision At" := 0DT;
+        QuoteHeader."Decision By" := '';
         QuoteHeader.Modify(true);
+
+        EventNote := CopyStr(StrSubstNo('Quote reopened from %1. Guardrail evaluation is required again.', OldStatusText), 1, MaxStrLen(EventNote));
+        AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::Reopened, EventNote);
+    end;
+
+    local procedure CalculateLineAmounts(var QuoteLine: Record "GPI Pack Quote Line")
+    var
+        MarginFactor: Decimal;
+    begin
+        QuoteLine."Suggested Sell Price" := 0;
+        QuoteLine."Calculated GP %" := 0;
+        QuoteLine."Extended Landed Cost" := 0;
+        QuoteLine."Extended Sell" := 0;
+        QuoteLine."Gross Profit Total" := 0;
+
+        if QuoteLine.Quantity > 0 then begin
+            QuoteLine."Extended Landed Cost" := Round(QuoteLine."Landed Cost per Unit" * QuoteLine.Quantity, 0.01, '=');
+            QuoteLine."Extended Sell" := Round(QuoteLine."Proposed Sell Price" * QuoteLine.Quantity, 0.01, '=');
+            QuoteLine."Gross Profit Total" := Round((QuoteLine."Proposed Sell Price" - QuoteLine."Landed Cost per Unit") * QuoteLine.Quantity, 0.01, '=');
+        end;
+
+        if QuoteLine."Proposed Sell Price" > 0 then
+            QuoteLine."Calculated GP %" := Round(
+                ((QuoteLine."Proposed Sell Price" - QuoteLine."Landed Cost per Unit") / QuoteLine."Proposed Sell Price") * 100,
+                0.00001,
+                '=');
+
+        if (QuoteLine."Landed Cost per Unit" > 0) and (QuoteLine."Target Gross Margin %" < 100) then begin
+            MarginFactor := 1 - (QuoteLine."Target Gross Margin %" / 100);
+            if MarginFactor > 0 then
+                QuoteLine."Suggested Sell Price" := Round(QuoteLine."Landed Cost per Unit" / MarginFactor, 0.00001, '=');
+        end;
+    end;
+
+    local procedure ClearEvaluation(var QuoteLine: Record "GPI Pack Quote Line")
+    begin
+        QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
+        QuoteLine."Guardrail Message" := '';
+        QuoteLine."Guardrail Approver" := '';
+        QuoteLine."Pricing Rule Entry No." := 0;
+        QuoteLine."Policy Fixed Sell Price" := 0;
+        QuoteLine."Needs Approval" := false;
+        QuoteLine."Evaluated At" := 0DT;
+        QuoteLine."Evaluated By" := '';
+    end;
+
+    local procedure EnsureCompleteForDecision(QuoteHeader: Record "GPI Pack Quote")
+    var
+        QuoteLine: Record "GPI Pack Quote Line";
+    begin
+        QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
+        if not QuoteLine.FindSet() then
+            Error('Add at least one quote line before continuing.');
+
+        repeat
+            case QuoteLine."Guardrail Status" of
+                "GPI Quote Guard Stat"::"Not Evaluated",
+                "GPI Quote Guard Stat"::"Approval Required",
+                "GPI Quote Guard Stat"::"Missing Cost":
+                    Error('Line %1 is incomplete: %2', QuoteLine."Line No.", QuoteLine."Guardrail Message");
+            end;
+        until QuoteLine.Next() = 0;
+    end;
+
+    local procedure HasApprovalLines(QuoteHeader: Record "GPI Pack Quote"): Boolean
+    var
+        QuoteLine: Record "GPI Pack Quote Line";
+    begin
+        QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
+        QuoteLine.SetRange("Needs Approval", true);
+        exit(not QuoteLine.IsEmpty());
     end;
 
     local procedure RuleApplies(PricingGuard: Record "GPI Pricing Guard"; CustomerNo: Code[20]; ItemNo: Code[20]; AsOfDate: Date): Boolean

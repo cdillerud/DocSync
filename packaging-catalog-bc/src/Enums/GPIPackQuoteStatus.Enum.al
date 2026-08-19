@@ -19,4 +19,8 @@ enum 71002 "GPI Pack Quote Stat"
     {
         Caption = 'Expired';
     }
+    value(4; Rejected)
+    {
+        Caption = 'Rejected';
+    }
 }

@@ -22,6 +22,10 @@ page 71001 "GPI Pack Products"
                 {
                     ApplicationArea = All;
                 }
+                field("BC Item No."; Rec."BC Item No.")
+                {
+                    ApplicationArea = All;
+                }
                 field(Material; Rec.Material)
                 {
                     ApplicationArea = All;
@@ -89,6 +93,13 @@ page 71001 "GPI Pack Products"
                 Image = New;
                 RunObject = page "GPI Pack Prod Card";
                 RunPageMode = Create;
+            }
+            action(PackagingQuotes)
+            {
+                ApplicationArea = All;
+                Caption = 'Packaging Quotes';
+                Image = Quote;
+                RunObject = page "GPI Pack Quotes";
             }
             action(LandedCosts)
             {

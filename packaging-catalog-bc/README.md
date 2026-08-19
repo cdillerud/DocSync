@@ -56,9 +56,9 @@ These calculations remain Business Central logic. AI is not allowed to invent, o
 
 ## Milestone 4: commercial guardrail integration
 
-Version `0.4.1.0` absorbs the useful Business Central portion of the existing `GPI Commercial Guardrails POC` into this extension rather than creating a competing pricing-rule design.
+Version `0.4.1.0` absorbed the useful Business Central portion of the former `GPI Commercial Guardrails POC` into this extension rather than creating a competing pricing-rule design.
 
-Integrated objects preserve the existing read-only API contract under `gpi/commercialGuardrails/v1.0`:
+Validated in UAT:
 
 - enabled customer/item pricing guardrails
 - special-pricing and fixed-price rule types
@@ -67,16 +67,49 @@ Integrated objects preserve the existing read-only API contract under `gpi/comme
 - historical posted sales-line API
 - item cost and UOM context API
 - in-BC guardrail maintenance page
+- blank customer + blank item protection
+- live `TRIPLEH` special-pricing rule read through the preserved API contract
+- supplier-margin regression using pricing rules, historical sales, and item/UOM context together
+- Python commercial-guardrail regression suite: 102 tests passing
 
-The uploaded Commercial Guardrail Python source remains the behavioral regression oracle. Its 102 unit tests pass as supplied. Important retained behaviors include exact item/UOM matching, customer-specific history, protected special pricing, fixed-price mismatch detection, supplier-cost margin impact, and explicit review/reject states rather than invented replacement prices.
+The standalone `GPI Commercial Guardrails POC` Business Central extension has been retired from the sandbox. The Python project remains useful as a regression/UAT oracle.
 
-The standalone `GPI Commercial Guardrails POC` BC app should only be retired from the sandbox after this integrated version compiles and the preserved API endpoints are validated. Both apps should not remain installed with the same API entity routes.
+The read-only API contract remains under `gpi/commercialGuardrails/v1.0`.
 
 ### Guardrail scope safety
 
 A guardrail may leave Customer No. blank to apply the rule to all customers for a specific item, or leave Item No. blank to apply the rule to all items for a specific customer. Customer No. and Item No. cannot both be blank. This prevents an accidentally saved empty line from becoming a global special-pricing rule.
 
-The current POC export contained one enabled Special Pricing row with both Customer No. and Item No. blank and no other commercial values. That row is treated as an accidental blank record and is not intended for migration into the integrated extension.
+## Milestone 5: packaging quote workflow
+
+Version `0.5.0.0` adds the first saved packaging quote workflow. This milestone is ready for compile and UAT validation.
+
+New quote foundation:
+
+- saved packaging quote header and lines
+- quote date, expiration date, customer, description, notes, and status
+- product-to-BC-item mapping so packaging products can use authoritative BC pricing guardrails
+- optional link from a quote line to a saved landed-cost worksheet
+- landed cost, quantity, proposed sell price, target gross margin, suggested sell price, calculated GP, extended cost, extended sell, and gross profit
+- line-level deterministic guardrail evaluation
+- quote-level re-evaluation and Ready for Review action
+- automatic return to Draft when pricing inputs are changed after review
+- incomplete lines are blocked from Ready for Review
+
+Current deterministic quote guardrail results:
+
+- Not Evaluated
+- Within Policy
+- Special Pricing Protected
+- Fixed Price Match
+- Fixed Price Conflict
+- Below Target Margin
+- Approval Required
+- Missing Landed Cost
+
+Pricing-rule precedence remains deterministic. Active fixed-price rules are evaluated at the most specific customer/item scope. Equally specific conflicting fixed-price rules are treated as a conflict. Active special-pricing rules redirect the line to the configured approver rather than inferring a replacement sell price from broad history.
+
+A quote may move to Ready for Review with a valid commercial exception such as Special Pricing Protected, Fixed Price Conflict, or Below Target Margin because those states require human review. Missing required pricing inputs such as quantity, proposed sell price, or landed cost block the transition.
 
 ## Important semantic choice
 
@@ -84,10 +117,11 @@ The React field `current_price` is used by the existing app as the product's bas
 
 ## Next BC-only work
 
-- connect packaging products to authoritative BC item/customer pricing history where applicable
-- evaluate proposed packaging sell prices through the ported guardrail semantics
-- add saved packaging quote header and lines
-- add auditable quote approval state and consequential pricing history
+- compile and UAT-test Packaging Catalog `0.5.0.0`
+- validate product-to-BC-item mapping and quote-line UOM behavior with real BC items
+- validate Within Policy, Special Pricing Protected, Fixed Price Match/Conflict, Below Target Margin, and incomplete-line blocking scenarios
+- add auditable quote approval state and consequential pricing history after the basic quote workflow is accepted
+- port customer-specific posted-price-history anomaly checks into the BC quote workflow without allowing history to become an automatic replacement-price recommendation
 - best-price comparison and route/mileage automation
 - bulk import of the real packaging catalog once a non-empty source export is available
 

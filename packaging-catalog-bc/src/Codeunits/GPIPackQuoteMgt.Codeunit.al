@@ -93,6 +93,8 @@ codeunit 71002 "GPI Pack Quote Mgt"
     end;
 
     procedure InvalidateLine(var QuoteLine: Record "GPI Pack Quote Line")
+    var
+        QuoteHeader: Record "GPI Pack Quote";
     begin
         QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
         QuoteLine."Guardrail Message" := '';
@@ -102,6 +104,14 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteLine."Needs Approval" := false;
         QuoteLine."Evaluated At" := 0DT;
         QuoteLine."Evaluated By" := '';
+
+        if (QuoteLine."Quote Entry No." <> 0) and QuoteHeader.Get(QuoteLine."Quote Entry No.") then
+            if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then begin
+                QuoteHeader.Status := "GPI Pack Quote Stat"::Draft;
+                QuoteHeader."Last Evaluated At" := 0DT;
+                QuoteHeader."Last Evaluated By" := '';
+                QuoteHeader.Modify(false);
+            end;
     end;
 
     procedure EvaluateLine(var QuoteLine: Record "GPI Pack Quote Line")
@@ -295,8 +305,22 @@ codeunit 71002 "GPI Pack Quote Mgt"
     end;
 
     procedure SetReadyForReview(var QuoteHeader: Record "GPI Pack Quote")
+    var
+        QuoteLine: Record "GPI Pack Quote Line";
     begin
         EvaluateQuote(QuoteHeader);
+
+        QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
+        if QuoteLine.FindSet() then
+            repeat
+                case QuoteLine."Guardrail Status" of
+                    "GPI Quote Guard Stat"::"Not Evaluated",
+                    "GPI Quote Guard Stat"::"Approval Required",
+                    "GPI Quote Guard Stat"::"Missing Cost":
+                        Error('Line %1 is incomplete: %2', QuoteLine."Line No.", QuoteLine."Guardrail Message");
+                end;
+            until QuoteLine.Next() = 0;
+
         QuoteHeader.Status := "GPI Pack Quote Stat"::Ready;
         QuoteHeader.Modify(true);
     end;

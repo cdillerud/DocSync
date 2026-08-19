@@ -30,7 +30,7 @@ page 71010 "GPI Pack Quote Card"
 
                     trigger OnValidate()
                     begin
-                        CurrPage.Update(false);
+                        CurrPage.Update(true);
                     end;
                 }
                 field("Customer Name"; Rec."Customer Name")

@@ -31,4 +31,8 @@ enum 71005 "GPI Quote Audit Type"
     {
         Caption = 'Customer Changed';
     }
+    value(7; "Quote Changed")
+    {
+        Caption = 'Quote Changed';
+    }
 }

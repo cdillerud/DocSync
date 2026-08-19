@@ -82,43 +82,51 @@ A guardrail may leave Customer No. blank to apply the rule to all customers for 
 
 ## Milestone 5: packaging quote workflow
 
-Version `0.5.2.0` contains the saved packaging quote workflow plus controlled APIs for automated UAT and future integration work.
+Version `0.5.2.0` added the saved packaging quote workflow plus controlled APIs for automated UAT and future integration work.
 
-New quote foundation:
+Validated in UAT with 22 of 22 API checks passing:
 
 - saved packaging quote header and lines
-- quote date, expiration date, customer, description, notes, and status
-- product-to-BC-item mapping so packaging products can use authoritative BC pricing guardrails
-- optional link from a quote line to a saved landed-cost worksheet
-- landed cost, quantity, proposed sell price, target gross margin, suggested sell price, calculated GP, extended cost, extended sell, and gross profit
-- line-level deterministic guardrail evaluation
-- quote-level re-evaluation and Ready for Review action
-- automatic return to Draft when pricing inputs are changed after review
-- incomplete lines are blocked from Ready for Review
-- customer selection on the quote card is saved before page refresh
+- product-to-BC-item mapping
+- optional saved landed-cost worksheet linkage
+- proposed sell, target gross margin, suggested sell, calculated GP, extended cost, extended sell, and gross profit
+- deterministic Special Pricing, Fixed Price Match, Fixed Price Conflict, Below Target Margin, Within Policy, Approval Required, and Missing Cost states
+- Ready for Review transition for legitimate commercial exceptions
+- pricing edits invalidate stale guardrail evaluations
+- temporary UAT quote and fixed-price rule cleanup
 
-Current deterministic quote guardrail results:
+### Quote APIs
 
-- Not Evaluated
-- Within Policy
-- Special Pricing Protected
-- Fixed Price Match
-- Fixed Price Conflict
-- Below Target Margin
-- Approval Required
-- Missing Landed Cost
-
-Pricing-rule precedence remains deterministic. Active fixed-price rules are evaluated at the most specific customer/item scope. Equally specific conflicting fixed-price rules are treated as a conflict. Active special-pricing rules redirect the line to the configured approver rather than inferring a replacement sell price from broad history.
-
-A quote may move to Ready for Review with a valid commercial exception such as Special Pricing Protected, Fixed Price Conflict, or Below Target Margin because those states require human review. Missing required pricing inputs such as quantity, proposed sell price, or landed cost block the transition.
-
-### Quote APIs and automated UAT
-
-Version `0.5.2.0` adds custom quote header and quote-line APIs under `gpi/packagingQuotes/v1.0`. The quote API exposes bound actions for deterministic evaluation and Ready for Review so UAT can exercise the same Business Central code used by the UI.
+Custom quote header and quote-line APIs are exposed under `gpi/packagingQuotes/v1.0`. The quote API exposes bound actions for deterministic evaluation and Ready for Review.
 
 A separate `gpi/packagingQuoteUAT/v1.0` pricing-rule endpoint exists only to create and remove temporary UAT pricing rules. Its page enforces `Environment Information`.IsSandbox(), so it rejects access outside a Business Central sandbox.
 
-Run `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` after publishing `0.5.2.0` to `Sandbox_NoZetadocs_UAT`. The script retrieves the existing BC client secret from Azure Key Vault without displaying it, creates temporary quote records, tests Special Pricing, Within Policy, Below Target Margin, stale-evaluation invalidation, Missing Cost, Fixed Price Match, and Fixed Price Conflict, and removes the temporary quote records and fixed-price UAT rule in cleanup.
+## Milestone 6: approval decisions and durable audit history
+
+Version `0.6.0.0` adds the commercial decision and audit layer on top of the validated quote workflow.
+
+New approval controls:
+
+- explicit Approve Quote and Reject Quote actions from Ready for Review
+- Rejected quote status
+- approval/rejection note, decision timestamp, and actual Business Central decision user
+- pricing-exception approvals require a decision note
+- all rejections require a decision note
+- Approved, Rejected, and Expired quotes block pricing, customer, quote-date, expiration-date, and description changes until explicitly reopened to Draft
+- Reopen Draft clears the current evaluation and requires a fresh guardrail evaluation before review
+- quote-date changes invalidate effective-dated guardrail results
+
+Durable audit records capture:
+
+- evaluation, Ready for Review, approval, rejection, reopen, pricing-change, customer-change, and quote-date-change events
+- event timestamp and Business Central user
+- quote status, customer, quote date, expiration date, description, and decision note at the time of the event
+- line product, BC item, UOM, quantity, landed cost, proposed sell, target margin, calculated GP, guardrail state, approver, fixed-price policy value, and pricing rule entry
+- previous pricing values and previous guardrail state when pricing inputs change after evaluation or review
+
+The quote card embeds read-only Approval and Audit History. A read-only `packagingQuoteAudits` API is exposed under `gpi/packagingQuotes/v1.0`.
+
+The quote API now also exposes bound actions for approve, reject, and reopen. The automated UAT runner verifies approval-note enforcement, approval and rejection snapshots, decision-user/timestamp capture, post-decision edit locks, reopen behavior, and pricing-change audit values in addition to the Milestone 5 guardrail matrix.
 
 ## Important semantic choice
 
@@ -126,11 +134,10 @@ The React field `current_price` is used by the existing app as the product's bas
 
 ## Next BC-only work
 
-- compile and publish Packaging Catalog `0.5.2.0` to UAT
-- run the automated packaging quote API UAT matrix
-- add auditable quote approval state and consequential pricing history after the basic quote workflow is accepted
+- compile and publish Packaging Catalog `0.6.0.0` to UAT
+- run `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` and validate the expanded approval/audit matrix
 - port customer-specific posted-price-history anomaly checks into the BC quote workflow without allowing history to become an automatic replacement-price recommendation
 - best-price comparison and route/mileage automation
 - bulk import of the real packaging catalog once a non-empty source export is available
 
-Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules and quote workflow are validated.
+Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, and approval controls are validated.

@@ -115,6 +115,9 @@ page 71010 "GPI Pack Quote Card"
                 ApplicationArea = All;
                 Caption = 'Evaluate All Guardrails';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -131,6 +134,9 @@ page 71010 "GPI Pack Quote Card"
                 Caption = 'Ready for Review';
                 Image = SendApprovalRequest;
                 Enabled = Rec.Status = "GPI Pack Quote Stat"::Draft;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -145,7 +151,10 @@ page 71010 "GPI Pack Quote Card"
             {
                 ApplicationArea = All;
                 Caption = 'Approve Quote';
+                Image = Approve;
                 Enabled = Rec.Status = "GPI Pack Quote Stat"::Ready;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 var
@@ -160,7 +169,10 @@ page 71010 "GPI Pack Quote Card"
             {
                 ApplicationArea = All;
                 Caption = 'Reject Quote';
+                Image = Reject;
                 Enabled = Rec.Status = "GPI Pack Quote Stat"::Ready;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 var
@@ -177,6 +189,8 @@ page 71010 "GPI Pack Quote Card"
                 Caption = 'Reopen Draft';
                 Image = ReOpen;
                 Enabled = Rec.Status <> "GPI Pack Quote Stat"::Draft;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 var

@@ -123,6 +123,58 @@ table 71010 "GPI Pack Comp Line"
             AutoFormatType = 2;
             MinValue = 0;
         }
+        field(20; "Origin Latitude"; Decimal)
+        {
+            Caption = 'Origin Latitude';
+            DecimalPlaces = 0 : 8;
+            Editable = false;
+        }
+        field(21; "Origin Longitude"; Decimal)
+        {
+            Caption = 'Origin Longitude';
+            DecimalPlaces = 0 : 8;
+            Editable = false;
+        }
+        field(22; "Route Miles"; Decimal)
+        {
+            Caption = 'Route Miles';
+            DecimalPlaces = 0 : 2;
+            MinValue = 0;
+            Editable = false;
+        }
+        field(23; "Route Duration Minutes"; Decimal)
+        {
+            Caption = 'Route Duration Minutes';
+            DecimalPlaces = 0 : 1;
+            MinValue = 0;
+            Editable = false;
+        }
+        field(24; "Route Provider"; Enum "GPI Route Provider")
+        {
+            Caption = 'Route Provider';
+            Editable = false;
+        }
+        field(25; "Route Calculated At"; DateTime)
+        {
+            Caption = 'Route Calculated At';
+            Editable = false;
+        }
+        field(26; "Mileage Cost per Mile"; Decimal)
+        {
+            Caption = 'Mileage Cost per Mile';
+            AutoFormatType = 2;
+            MinValue = 0;
+        }
+        field(27; "Freight Basis"; Enum "GPI Freight Basis")
+        {
+            Caption = 'Freight Basis';
+            Editable = false;
+        }
+        field(28; "Route Message"; Text[250])
+        {
+            Caption = 'Route Message';
+            Editable = false;
+        }
         field(30; "Shipment CWT"; Decimal)
         {
             Caption = 'Shipment CWT';
@@ -290,7 +342,8 @@ table 71010 "GPI Pack Comp Line"
             ("Tariff %" <> xRec."Tariff %") or
             ("Intl Freight Total" <> xRec."Intl Freight Total") or
             ("Customs Total" <> xRec."Customs Total") or
-            ("Delivery Total" <> xRec."Delivery Total"));
+            ("Delivery Total" <> xRec."Delivery Total") or
+            ("Mileage Cost per Mile" <> xRec."Mileage Cost per Mile"));
     end;
 
     local procedure ClearResults()
@@ -309,6 +362,7 @@ table 71010 "GPI Pack Comp Line"
         "Delivery per Unit" := 0;
         "Landed Cost per Unit" := 0;
         "Suggested Sell Price" := 0;
+        "Freight Basis" := "GPI Freight Basis"::None;
         Rank := 0;
         "Cost Above Best" := 0;
         "Is Complete" := false;

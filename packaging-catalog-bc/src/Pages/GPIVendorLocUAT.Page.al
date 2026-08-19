@@ -30,7 +30,7 @@ page 71024 "GPI Vendor Loc UAT"
                 {
                     Caption = 'Vendor No.';
                 }
-                field(code; Rec.Code)
+                field(locationCode; Rec.Code)
                 {
                     Caption = 'Location Code';
                 }

@@ -2,7 +2,7 @@
   "id": "4bef0bb0-b310-405c-9e0b-67a016a725b4",
   "name": "GPI Packaging Catalog",
   "publisher": "Gamer Packaging Inc",
-  "version": "0.5.0.0",
+  "version": "0.5.1.0",
   "brief": "Business Central foundation for Gamer Packaging product catalog and commercial pricing logic",
   "description": "Isolated Business Central extension for packaging products, vendor locations, supplier cost history, freight rates, deterministic landed-cost calculations, gross-margin guidance, customer pricing guardrails, and saved packaging quote workflows. This extension is separate from the Zetadocs replacement extension.",
   "privacyStatement": "",

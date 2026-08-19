@@ -66,6 +66,30 @@ table 71009 "GPI Pack Compare"
             AutoFormatType = 2;
             MinValue = 0;
         }
+        field(12; "Destination Latitude"; Decimal)
+        {
+            Caption = 'Destination Latitude';
+            DecimalPlaces = 0 : 8;
+        }
+        field(13; "Destination Longitude"; Decimal)
+        {
+            Caption = 'Destination Longitude';
+            DecimalPlaces = 0 : 8;
+        }
+        field(14; "Default Cost per Mile"; Decimal)
+        {
+            Caption = 'Default Cost per Mile';
+            AutoFormatType = 2;
+            MinValue = 0;
+        }
+        field(15; "Allow Mileage Fallback"; Boolean)
+        {
+            Caption = 'Allow Mileage Freight Fallback';
+        }
+        field(16; "Auto Route Mileage"; Boolean)
+        {
+            Caption = 'Refresh Route Mileage During Calculation';
+        }
         field(20; "Candidate Count"; Integer)
         {
             Caption = 'Candidate Count';
@@ -133,12 +157,17 @@ table 71009 "GPI Pack Compare"
             ("Comparison Date" <> xRec."Comparison Date") or
             ("Reference Product No." <> xRec."Reference Product No.") or
             ("Destination State" <> xRec."Destination State") or
+            ("Destination Latitude" <> xRec."Destination Latitude") or
+            ("Destination Longitude" <> xRec."Destination Longitude") or
             ("Target Gross Margin %" <> xRec."Target Gross Margin %") or
             ("Pallet Cost per Pallet" <> xRec."Pallet Cost per Pallet") or
             ("Tariff %" <> xRec."Tariff %") or
             ("Intl Freight Total" <> xRec."Intl Freight Total") or
             ("Customs Total" <> xRec."Customs Total") or
-            ("Delivery Total" <> xRec."Delivery Total"));
+            ("Delivery Total" <> xRec."Delivery Total") or
+            ("Default Cost per Mile" <> xRec."Default Cost per Mile") or
+            ("Allow Mileage Fallback" <> xRec."Allow Mileage Fallback") or
+            ("Auto Route Mileage" <> xRec."Auto Route Mileage"));
     end;
 
     local procedure InvalidateResults()

@@ -50,6 +50,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Comp Line API" = X,
         page "GPI Product UAT API" = X,
         page "GPI Freight UAT API" = X,
+        page "GPI Vendor Loc UAT" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         codeunit "GPI Pack Catalog Mgt" = X,

@@ -82,7 +82,7 @@ A guardrail may leave Customer No. blank to apply the rule to all customers for 
 
 ## Milestone 5: packaging quote workflow
 
-Version `0.5.0.0` adds the first saved packaging quote workflow. This milestone is ready for compile and UAT validation.
+Version `0.5.2.0` contains the saved packaging quote workflow plus controlled APIs for automated UAT and future integration work.
 
 New quote foundation:
 
@@ -95,6 +95,7 @@ New quote foundation:
 - quote-level re-evaluation and Ready for Review action
 - automatic return to Draft when pricing inputs are changed after review
 - incomplete lines are blocked from Ready for Review
+- customer selection on the quote card is saved before page refresh
 
 Current deterministic quote guardrail results:
 
@@ -111,15 +112,22 @@ Pricing-rule precedence remains deterministic. Active fixed-price rules are eval
 
 A quote may move to Ready for Review with a valid commercial exception such as Special Pricing Protected, Fixed Price Conflict, or Below Target Margin because those states require human review. Missing required pricing inputs such as quantity, proposed sell price, or landed cost block the transition.
 
+### Quote APIs and automated UAT
+
+Version `0.5.2.0` adds custom quote header and quote-line APIs under `gpi/packagingQuotes/v1.0`. The quote API exposes bound actions for deterministic evaluation and Ready for Review so UAT can exercise the same Business Central code used by the UI.
+
+A separate `gpi/packagingQuoteUAT/v1.0` pricing-rule endpoint exists only to create and remove temporary UAT pricing rules. Its page enforces `Environment Information`.IsSandbox(), so it rejects access outside a Business Central sandbox.
+
+Run `scripts/Test-GPIPackagingQuoteAPIUAT.ps1` after publishing `0.5.2.0` to `Sandbox_NoZetadocs_UAT`. The script retrieves the existing BC client secret from Azure Key Vault without displaying it, creates temporary quote records, tests Special Pricing, Within Policy, Below Target Margin, stale-evaluation invalidation, Missing Cost, Fixed Price Match, and Fixed Price Conflict, and removes the temporary quote records and fixed-price UAT rule in cleanup.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
 
 ## Next BC-only work
 
-- compile and UAT-test Packaging Catalog `0.5.0.0`
-- validate product-to-BC-item mapping and quote-line UOM behavior with real BC items
-- validate Within Policy, Special Pricing Protected, Fixed Price Match/Conflict, Below Target Margin, and incomplete-line blocking scenarios
+- compile and publish Packaging Catalog `0.5.2.0` to UAT
+- run the automated packaging quote API UAT matrix
 - add auditable quote approval state and consequential pricing history after the basic quote workflow is accepted
 - port customer-specific posted-price-history anomaly checks into the BC quote workflow without allowing history to become an automatic replacement-price recommendation
 - best-price comparison and route/mileage automation

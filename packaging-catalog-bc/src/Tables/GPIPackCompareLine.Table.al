@@ -262,22 +262,22 @@ table 71010 "GPI Pack Comp Line"
             else
                 "Line No." := 10000;
         end;
+
+        InvalidateComparisonRanks("Compare Entry No.");
     end;
 
     trigger OnModify()
-    var
-        CompareHeader: Record "GPI Pack Compare";
     begin
         if not InputsChanged() then
             exit;
 
         ClearResults();
+        InvalidateComparisonRanks("Compare Entry No.");
+    end;
 
-        if CompareHeader.Get("Compare Entry No.") then begin
-            CompareHeader."Last Calculated At" := 0DT;
-            CompareHeader."Last Calculated By" := '';
-            CompareHeader.Modify(false);
-        end;
+    trigger OnDelete()
+    begin
+        InvalidateComparisonRanks("Compare Entry No.");
     end;
 
     local procedure InputsChanged(): Boolean
@@ -314,5 +314,27 @@ table 71010 "GPI Pack Comp Line"
         "Is Complete" := false;
         "Incomplete Reason" := '';
         "Calculated At" := 0DT;
+    end;
+
+    local procedure InvalidateComparisonRanks(CompareEntryNo: Integer)
+    var
+        CompareHeader: Record "GPI Pack Compare";
+        CompareLine: Record "GPI Pack Comp Line";
+    begin
+        CompareLine.SetRange("Compare Entry No.", CompareEntryNo);
+        if CompareLine.FindSet(true) then
+            repeat
+                if (CompareLine.Rank <> 0) or (CompareLine."Cost Above Best" <> 0) then begin
+                    CompareLine.Rank := 0;
+                    CompareLine."Cost Above Best" := 0;
+                    CompareLine.Modify(false);
+                end;
+            until CompareLine.Next() = 0;
+
+        if CompareHeader.Get(CompareEntryNo) then begin
+            CompareHeader."Last Calculated At" := 0DT;
+            CompareHeader."Last Calculated By" := '';
+            CompareHeader.Modify(false);
+        end;
     end;
 }

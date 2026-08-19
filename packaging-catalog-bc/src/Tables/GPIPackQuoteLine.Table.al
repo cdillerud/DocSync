@@ -220,6 +220,6 @@ table 71007 "GPI Pack Quote Line"
                 "Line No." := 10000;
         end;
 
-        "Guardrail Status" := "Guardrail Status"::"Not Evaluated";
+        "Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
     end;
 }

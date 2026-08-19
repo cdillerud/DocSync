@@ -157,7 +157,7 @@ function New-UatVendorLocation {
 
     $location = Invoke-BcRequest -Method POST -Uri "$UatBase/vendorLocationsUAT" -Body @{
         vendorNo = $ReferenceProduct.vendorNo
-        code = $LocationCode
+        locationCode = $LocationCode
         description = "$RunId no freight"
         city = "UAT"
         stateProvince = "UAT"

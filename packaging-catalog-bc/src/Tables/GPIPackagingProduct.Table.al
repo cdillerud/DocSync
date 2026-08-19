@@ -58,6 +58,34 @@ table 71000 "GPI Pack Product"
             Caption = 'BC Item No.';
             TableRelation = Item."No.";
         }
+        field(20; "BC Item Description"; Text[100])
+        {
+            Caption = 'BC Item Description';
+            FieldClass = FlowField;
+            CalcFormula = lookup(Item.Description where("No." = field("BC Item No.")));
+            Editable = false;
+        }
+        field(21; "BC Item Category"; Code[20])
+        {
+            Caption = 'BC Item Category';
+            FieldClass = FlowField;
+            CalcFormula = lookup(Item."Item Category Code" where("No." = field("BC Item No.")));
+            Editable = false;
+        }
+        field(22; "BC Base UOM"; Code[10])
+        {
+            Caption = 'BC Base UOM';
+            FieldClass = FlowField;
+            CalcFormula = lookup(Item."Base Unit of Measure" where("No." = field("BC Item No.")));
+            Editable = false;
+        }
+        field(23; "BC Item Blocked"; Boolean)
+        {
+            Caption = 'BC Item Blocked';
+            FieldClass = FlowField;
+            CalcFormula = lookup(Item.Blocked where("No." = field("BC Item No.")));
+            Editable = false;
+        }
         field(30; "Vendor No."; Code[20])
         {
             Caption = 'Vendor No.';

@@ -86,7 +86,7 @@ page 71031 "GPI Pack Prod Fact"
                 {
                     ApplicationArea = All;
                 }
-                field("BC Item Base UOM"; Rec."BC Item Base UOM")
+                field("BC Base UOM"; Rec."BC Base UOM")
                 {
                     ApplicationArea = All;
                     Caption = 'Base UOM';

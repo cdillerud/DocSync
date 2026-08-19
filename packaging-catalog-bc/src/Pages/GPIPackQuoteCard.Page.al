@@ -68,11 +68,40 @@ page 71010 "GPI Pack Quote Card"
                     MultiLine = true;
                 }
             }
+            group(Decision)
+            {
+                Caption = 'Approval Decision';
+
+                field("Decision Note"; Rec."Decision Note")
+                {
+                    ApplicationArea = All;
+                    MultiLine = true;
+                    ToolTip = 'Enter the commercial approval or rejection rationale. A note is required when approving a pricing exception and for all rejections.';
+                }
+                field("Decision At"; Rec."Decision At")
+                {
+                    ApplicationArea = All;
+                }
+                field("Decision By"; Rec."Decision By")
+                {
+                    ApplicationArea = All;
+                }
+                field("Audit Count"; Rec."Audit Count")
+                {
+                    ApplicationArea = All;
+                }
+            }
             part(Lines; "GPI Pack Quote Lines")
             {
                 ApplicationArea = All;
                 SubPageLink = "Quote Entry No." = field("Entry No.");
                 UpdatePropagation = Both;
+            }
+            part(AuditHistory; "GPI Quote Audits")
+            {
+                ApplicationArea = All;
+                Caption = 'Approval and Audit History';
+                SubPageLink = "Quote Entry No." = field("Entry No.");
             }
         }
     }
@@ -101,6 +130,7 @@ page 71010 "GPI Pack Quote Card"
                 ApplicationArea = All;
                 Caption = 'Ready for Review';
                 Image = SendApprovalRequest;
+                Enabled = Rec.Status = "GPI Pack Quote Stat"::Draft;
 
                 trigger OnAction()
                 var
@@ -108,6 +138,36 @@ page 71010 "GPI Pack Quote Card"
                 begin
                     CurrPage.SaveRecord();
                     QuoteMgt.SetReadyForReview(Rec);
+                    CurrPage.Update(false);
+                end;
+            }
+            action(ApproveQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'Approve Quote';
+                Enabled = Rec.Status = "GPI Pack Quote Stat"::Ready;
+
+                trigger OnAction()
+                var
+                    QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+                begin
+                    CurrPage.SaveRecord();
+                    QuoteMgt.ApproveQuote(Rec);
+                    CurrPage.Update(false);
+                end;
+            }
+            action(RejectQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'Reject Quote';
+                Enabled = Rec.Status = "GPI Pack Quote Stat"::Ready;
+
+                trigger OnAction()
+                var
+                    QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+                begin
+                    CurrPage.SaveRecord();
+                    QuoteMgt.RejectQuote(Rec);
                     CurrPage.Update(false);
                 end;
             }

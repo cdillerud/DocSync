@@ -53,6 +53,11 @@ table 71000 "GPI Pack Product"
         {
             Caption = 'Packout Type';
         }
+        field(19; "BC Item No."; Code[20])
+        {
+            Caption = 'BC Item No.';
+            TableRelation = Item."No.";
+        }
         field(30; "Vendor No."; Code[20])
         {
             Caption = 'Vendor No.';
@@ -184,6 +189,9 @@ table 71000 "GPI Pack Product"
             Clustered = true;
         }
         key(Vendor; "Vendor No.", "Vendor Location Code")
+        {
+        }
+        key(BCItem; "BC Item No.")
         {
         }
         key(Specification; Material, Style, Capacity, "Capacity UOM", Color)

@@ -105,6 +105,34 @@ page 71015 "GPI Quote Audits"
                 {
                     ApplicationArea = All;
                 }
+                field("Customer Hist Lines"; Rec."Customer Hist Lines")
+                {
+                    ApplicationArea = All;
+                }
+                field("Customer Hist Median"; Rec."Customer Hist Median")
+                {
+                    ApplicationArea = All;
+                }
+                field("Customer Hist Var %"; Rec."Customer Hist Var %")
+                {
+                    ApplicationArea = All;
+                }
+                field("Customer Hist Last Date"; Rec."Customer Hist Last Date")
+                {
+                    ApplicationArea = All;
+                }
+                field("All Cust Hist Lines"; Rec."All Cust Hist Lines")
+                {
+                    ApplicationArea = All;
+                }
+                field("All Cust Hist Median"; Rec."All Cust Hist Median")
+                {
+                    ApplicationArea = All;
+                }
+                field("History Message"; Rec."History Message")
+                {
+                    ApplicationArea = All;
+                }
                 field("Event Note"; Rec."Event Note")
                 {
                     ApplicationArea = All;

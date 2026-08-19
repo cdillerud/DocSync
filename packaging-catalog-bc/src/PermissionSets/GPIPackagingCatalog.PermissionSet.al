@@ -37,6 +37,7 @@ permissionset 71000 "GPI PACK CATALOG"
         table "GPI Item Field Stat" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
+        page "GPI Pack Prod Fact" = X,
         page "GPI Pack Vendor Locs" = X,
         page "GPI Pack Price Hist" = X,
         page "GPI Pack Frt Rates" = X,

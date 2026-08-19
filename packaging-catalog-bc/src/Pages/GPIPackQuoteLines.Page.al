@@ -79,7 +79,8 @@ page 71011 "GPI Pack Quote Lines"
                 field("Guardrail Status"; Rec."Guardrail Status")
                 {
                     ApplicationArea = All;
-                    StyleExpr = GuardrailStyle;
+                    Style = Attention;
+                    StyleExpr = Rec."Needs Approval";
                 }
                 field("Needs Approval"; Rec."Needs Approval")
                 {
@@ -113,7 +114,7 @@ page 71011 "GPI Pack Quote Lines"
             {
                 ApplicationArea = All;
                 Caption = 'Evaluate Guardrail';
-                Image = CheckRulesSyntax;
+                Image = Calculate;
 
                 trigger OnAction()
                 var
@@ -142,30 +143,4 @@ page 71011 "GPI Pack Quote Lines"
             }
         }
     }
-
-    trigger OnAfterGetRecord()
-    begin
-        SetGuardrailStyle();
-    end;
-
-    trigger OnAfterGetCurrRecord()
-    begin
-        SetGuardrailStyle();
-    end;
-
-    var
-        GuardrailStyle: Text;
-
-    local procedure SetGuardrailStyle()
-    begin
-        case Rec."Guardrail Status" of
-            Rec."Guardrail Status"::"Within Policy",
-            Rec."Guardrail Status"::"Fixed Price Match":
-                GuardrailStyle := 'Favorable';
-            Rec."Guardrail Status"::"Not Evaluated":
-                GuardrailStyle := 'Subordinate';
-            else
-                GuardrailStyle := 'Attention';
-        end;
-    end;
 }

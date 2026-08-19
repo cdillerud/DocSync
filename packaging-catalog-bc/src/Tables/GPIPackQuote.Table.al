@@ -182,6 +182,7 @@ table 71006 "GPI Pack Quote"
             ("Quote Date" <> xRec."Quote Date") or
             ("Expiration Date" <> xRec."Expiration Date") or
             ("Customer No." <> xRec."Customer No.") or
-            (Description <> xRec.Description));
+            (Description <> xRec.Description) or
+            (Notes <> xRec.Notes));
     end;
 }

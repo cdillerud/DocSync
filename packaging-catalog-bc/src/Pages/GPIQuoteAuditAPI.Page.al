@@ -81,6 +81,11 @@ page 71016 "GPI Quote Audit API"
                     Caption = 'Quote Description';
                     Editable = false;
                 }
+                field(quoteNotes; Rec."Quote Notes")
+                {
+                    Caption = 'Quote Notes';
+                    Editable = false;
+                }
                 field(decisionNote; Rec."Decision Note")
                 {
                     Caption = 'Decision Note';
@@ -89,6 +94,11 @@ page 71016 "GPI Quote Audit API"
                 field(productNo; Rec."Product No.")
                 {
                     Caption = 'Gamer ID';
+                    Editable = false;
+                }
+                field(lineDescription; Rec."Line Description")
+                {
+                    Caption = 'Line Description';
                     Editable = false;
                 }
                 field(bcItemNo; Rec."BC Item No.")
@@ -189,6 +199,11 @@ page 71016 "GPI Quote Audit API"
                 field(previousProductNo; Rec."Previous Product No.")
                 {
                     Caption = 'Previous Gamer ID';
+                    Editable = false;
+                }
+                field(previousLineDescription; Rec."Previous Line Desc.")
+                {
+                    Caption = 'Previous Line Description';
                     Editable = false;
                 }
                 field(previousBCItemNo; Rec."Previous BC Item No.")

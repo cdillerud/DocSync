@@ -140,7 +140,7 @@ table 71009 "GPI Pack Compare"
     trigger OnModify()
     begin
         if CalculationInputsChanged() then
-            InvalidateResults();
+            InvalidateResults(RouteInputsChanged());
     end;
 
     trigger OnDelete()
@@ -170,7 +170,14 @@ table 71009 "GPI Pack Compare"
             ("Auto Route Mileage" <> xRec."Auto Route Mileage"));
     end;
 
-    local procedure InvalidateResults()
+    local procedure RouteInputsChanged(): Boolean
+    begin
+        exit(
+            ("Destination Latitude" <> xRec."Destination Latitude") or
+            ("Destination Longitude" <> xRec."Destination Longitude"));
+    end;
+
+    local procedure InvalidateResults(ClearRouteMileage: Boolean)
     var
         CompareLine: Record "GPI Pack Comp Line";
     begin
@@ -179,9 +186,19 @@ table 71009 "GPI Pack Compare"
             repeat
                 CompareLine.Rank := 0;
                 CompareLine."Cost Above Best" := 0;
+                CompareLine."Freight Basis" := "GPI Freight Basis"::None;
                 CompareLine."Is Complete" := false;
                 CompareLine."Incomplete Reason" := 'Comparison inputs changed. Recalculate the comparison.';
                 CompareLine."Calculated At" := 0DT;
+
+                if ClearRouteMileage then begin
+                    CompareLine."Route Miles" := 0;
+                    CompareLine."Route Duration Minutes" := 0;
+                    CompareLine."Route Provider" := "GPI Route Provider"::Manual;
+                    CompareLine."Route Calculated At" := 0DT;
+                    CompareLine."Route Message" := '';
+                end;
+
                 CompareLine.Modify(false);
             until CompareLine.Next() = 0;
 

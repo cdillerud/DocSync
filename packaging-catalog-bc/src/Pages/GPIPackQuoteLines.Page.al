@@ -79,8 +79,6 @@ page 71011 "GPI Pack Quote Lines"
                 field("Guardrail Status"; Rec."Guardrail Status")
                 {
                     ApplicationArea = All;
-                    Style = Attention;
-                    StyleExpr = Rec."Needs Approval";
                 }
                 field("Needs Approval"; Rec."Needs Approval")
                 {

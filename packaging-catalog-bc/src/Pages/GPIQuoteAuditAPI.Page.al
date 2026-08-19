@@ -61,9 +61,29 @@ page 71016 "GPI Quote Audit API"
                     Caption = 'Quote Status';
                     Editable = false;
                 }
+                field(quoteDate; Rec."Quote Date")
+                {
+                    Caption = 'Quote Date';
+                    Editable = false;
+                }
+                field(expirationDate; Rec."Expiration Date")
+                {
+                    Caption = 'Expiration Date';
+                    Editable = false;
+                }
                 field(customerNo; Rec."Customer No.")
                 {
                     Caption = 'Customer No.';
+                    Editable = false;
+                }
+                field(quoteDescription; Rec."Quote Description")
+                {
+                    Caption = 'Quote Description';
+                    Editable = false;
+                }
+                field(decisionNote; Rec."Decision Note")
+                {
+                    Caption = 'Decision Note';
                     Editable = false;
                 }
                 field(productNo; Rec."Product No.")
@@ -136,6 +156,16 @@ page 71016 "GPI Quote Audit API"
                     Caption = 'Event Note';
                     Editable = false;
                 }
+                field(previousCustomerNo; Rec."Previous Customer No.")
+                {
+                    Caption = 'Previous Customer No.';
+                    Editable = false;
+                }
+                field(previousQuoteDate; Rec."Previous Quote Date")
+                {
+                    Caption = 'Previous Quote Date';
+                    Editable = false;
+                }
                 field(previousQuantity; Rec."Previous Quantity")
                 {
                     Caption = 'Previous Quantity';
@@ -174,11 +204,6 @@ page 71016 "GPI Quote Audit API"
                 field(previousGuardrailStatus; Rec."Previous Guard Status")
                 {
                     Caption = 'Previous Guardrail Status';
-                    Editable = false;
-                }
-                field(previousCustomerNo; Rec."Previous Customer No.")
-                {
-                    Caption = 'Previous Customer No.';
                     Editable = false;
                 }
             }

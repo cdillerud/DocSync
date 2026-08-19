@@ -75,6 +75,17 @@ function Assert-DecimalNear {
     Add-TestResult -Scenario $Scenario -Check $Check -Passed $passed -Actual $Actual -Expected "$Expected +/- $Tolerance"
 }
 
+function Assert-NotBlank {
+    param(
+        [string]$Scenario,
+        [string]$Check,
+        [AllowNull()]$Actual
+    )
+
+    $passed = -not [string]::IsNullOrWhiteSpace([string]$Actual)
+    Add-TestResult -Scenario $Scenario -Check $Check -Passed $passed -Actual $Actual -Expected "nonblank"
+}
+
 function Get-ErrorBody {
     param([System.Management.Automation.ErrorRecord]$ErrorRecord)
 
@@ -120,6 +131,23 @@ function Invoke-BcRequest {
     }
 }
 
+function Test-BcRequestFails {
+    param(
+        [Parameter(Mandatory)][ValidateSet("POST", "PATCH", "DELETE")][string]$Method,
+        [Parameter(Mandatory)][string]$Uri,
+        [AllowNull()]$Body,
+        [switch]$IfMatch
+    )
+
+    try {
+        $null = Invoke-BcRequest -Method $Method -Uri $Uri -Body $Body -IfMatch:$IfMatch
+        return $false
+    }
+    catch {
+        return $true
+    }
+}
+
 function New-QuoteScenario {
     param(
         [Parameter(Mandatory)][string]$Scenario,
@@ -154,14 +182,27 @@ function New-QuoteScenario {
 
 function Invoke-EvaluateQuote {
     param([Parameter(Mandatory)][string]$QuoteId)
-
     $null = Invoke-BcRequest -Method POST -Uri "$QuoteBase/packagingQuotes($QuoteId)/Microsoft.NAV.evaluate" -Body @{}
 }
 
 function Invoke-ReadyForReview {
     param([Parameter(Mandatory)][string]$QuoteId)
-
     $null = Invoke-BcRequest -Method POST -Uri "$QuoteBase/packagingQuotes($QuoteId)/Microsoft.NAV.readyForReview" -Body @{}
+}
+
+function Invoke-ApproveQuote {
+    param([Parameter(Mandatory)][string]$QuoteId)
+    $null = Invoke-BcRequest -Method POST -Uri "$QuoteBase/packagingQuotes($QuoteId)/Microsoft.NAV.approve" -Body @{}
+}
+
+function Invoke-RejectQuote {
+    param([Parameter(Mandatory)][string]$QuoteId)
+    $null = Invoke-BcRequest -Method POST -Uri "$QuoteBase/packagingQuotes($QuoteId)/Microsoft.NAV.reject" -Body @{}
+}
+
+function Invoke-ReopenQuote {
+    param([Parameter(Mandatory)][string]$QuoteId)
+    $null = Invoke-BcRequest -Method POST -Uri "$QuoteBase/packagingQuotes($QuoteId)/Microsoft.NAV.reopen" -Body @{}
 }
 
 function Get-Quote {
@@ -172,6 +213,14 @@ function Get-Quote {
 function Get-QuoteLine {
     param([Parameter(Mandatory)][string]$LineId)
     return Invoke-BcRequest -Method GET -Uri "$QuoteBase/packagingQuoteLines($LineId)" -Body $null
+}
+
+function Get-QuoteAudits {
+    param([Parameter(Mandatory)][int]$QuoteEntryNo)
+
+    $filterText = [uri]::EscapeDataString("quoteEntryNo eq $QuoteEntryNo")
+    $response = Invoke-BcRequest -Method GET -Uri "$QuoteBase/packagingQuoteAudits?`$filter=$filterText" -Body $null
+    return @($response.value)
 }
 
 function New-UatFixedRule {
@@ -205,7 +254,7 @@ function New-UatFixedRule {
 }
 
 try {
-    Write-Host "" 
+    Write-Host ""
     Write-Host "GPI PACKAGING QUOTE API UAT" -ForegroundColor Cyan
     Write-Host "Run ID      : $RunId"
     Write-Host "Environment : $EnvironmentName"
@@ -255,7 +304,7 @@ try {
     Write-Host "Company ID  : $CompanyId"
     Write-Host ""
 
-    # 1. Existing TRIPLEH Special Pricing rule and Ready for Review behavior.
+    # 1. Special Pricing, Ready for Review, approval-note enforcement, approval snapshot, decision lock, and reopen.
     $scenario = "Special Pricing"
     $s = New-QuoteScenario -Scenario $scenario -CustomerNo "TRIPLEH" -LandedCost 168.44 -ProposedSell 224.81 -TargetMargin 25
     Invoke-EvaluateQuote -QuoteId $s.Quote.id
@@ -265,9 +314,49 @@ try {
     Assert-Equal $scenario "Needs approval" $line.needsApproval $true
     Assert-Equal $scenario "Approver" $line.guardrailApprover "TEST ONLY"
     Assert-DecimalNear $scenario "Calculated GP %" ([decimal]$line.calculatedGrossMarginPct) 25.07451 0.0001
+
     Invoke-ReadyForReview -QuoteId $s.Quote.id
     $quote = Get-Quote -QuoteId $s.Quote.id
     Assert-Equal $scenario "Ready for Review transition" (ConvertFrom-BcEnum $quote.status) "Ready"
+
+    $approvalWithoutNoteBlocked = Test-BcRequestFails -Method POST -Uri "$QuoteBase/packagingQuotes($($s.Quote.id))/Microsoft.NAV.approve" -Body @{}
+    Assert-Equal $scenario "Pricing exception approval requires note" $approvalWithoutNoteBlocked $true
+
+    $approvalNote = "$RunId Special Pricing approved for UAT"
+    $null = Invoke-BcRequest -Method PATCH -Uri "$QuoteBase/packagingQuotes($($s.Quote.id))" -IfMatch -Body @{
+        decisionNote = $approvalNote
+    }
+    Invoke-ApproveQuote -QuoteId $s.Quote.id
+    $quote = Get-Quote -QuoteId $s.Quote.id
+    Assert-Equal $scenario "Approved status" (ConvertFrom-BcEnum $quote.status) "Approved"
+    Assert-Equal $scenario "Decision note retained" $quote.decisionNote $approvalNote
+    Assert-NotBlank $scenario "Decision timestamp" $quote.decisionAt
+    Assert-NotBlank $scenario "Decision user" $quote.decisionBy
+
+    $audits = Get-QuoteAudits -QuoteEntryNo ([int]$s.Quote.entryNo)
+    $approvedHeaderAudit = @($audits | Where-Object { (ConvertFrom-BcEnum $_.eventType) -eq "Approved" -and [int]$_.lineNo -eq 0 }) | Select-Object -First 1
+    $approvedLineAudit = @($audits | Where-Object { (ConvertFrom-BcEnum $_.eventType) -eq "Approved" -and [int]$_.lineNo -gt 0 }) | Select-Object -First 1
+    Assert-Equal $scenario "Approved header audit exists" ($null -ne $approvedHeaderAudit) $true
+    Assert-Equal $scenario "Approved line snapshot exists" ($null -ne $approvedLineAudit) $true
+    if ($approvedLineAudit) {
+        Assert-DecimalNear $scenario "Approved audit sell snapshot" ([decimal]$approvedLineAudit.proposedSellPrice) 224.81 0.0001
+        Assert-Equal $scenario "Approved audit guardrail" (ConvertFrom-BcEnum $approvedLineAudit.guardrailStatus) "Special Pricing"
+        Assert-Equal $scenario "Approved audit decision note" $approvedLineAudit.decisionNote $approvalNote
+    }
+
+    $approvedEditBlocked = Test-BcRequestFails -Method PATCH -Uri "$QuoteBase/packagingQuoteLines($($s.Line.id))" -IfMatch -Body @{
+        proposedSellPrice = 225
+    }
+    Assert-Equal $scenario "Approved pricing edit blocked" $approvedEditBlocked $true
+
+    Invoke-ReopenQuote -QuoteId $s.Quote.id
+    $quote = Get-Quote -QuoteId $s.Quote.id
+    $line = Get-QuoteLine -LineId $s.Line.id
+    Assert-Equal $scenario "Reopen returns Draft" (ConvertFrom-BcEnum $quote.status) "Draft"
+    Assert-Equal $scenario "Reopen invalidates guardrail" (ConvertFrom-BcEnum $line.guardrailStatus) "Not Evaluated"
+    $audits = Get-QuoteAudits -QuoteEntryNo ([int]$s.Quote.entryNo)
+    $reopenAudit = @($audits | Where-Object { (ConvertFrom-BcEnum $_.eventType) -eq "Reopened" }) | Select-Object -First 1
+    Assert-Equal $scenario "Reopen audit exists" ($null -ne $reopenAudit) $true
 
     # 2. Clean within-policy quote.
     $scenario = "Within Policy"
@@ -277,7 +366,7 @@ try {
     Assert-Equal $scenario "Guardrail status" (ConvertFrom-BcEnum $line.guardrailStatus) "Within Policy"
     Assert-Equal $scenario "Needs approval" $line.needsApproval $false
 
-    # 3. Below-target margin, then prove a sell-price edit invalidates stale evaluation.
+    # 3. Below-target margin, pricing-change audit, and re-evaluation.
     $scenario = "Below Target Margin"
     $s = New-QuoteScenario -Scenario $scenario -CustomerNo "POPSPEP" -LandedCost 168.44 -ProposedSell 200 -TargetMargin 25
     Invoke-EvaluateQuote -QuoteId $s.Quote.id
@@ -290,6 +379,16 @@ try {
     }
     $line = Get-QuoteLine -LineId $s.Line.id
     Assert-Equal $scenario "Pricing edit invalidates evaluation" (ConvertFrom-BcEnum $line.guardrailStatus) "Not Evaluated"
+
+    $audits = Get-QuoteAudits -QuoteEntryNo ([int]$s.Quote.entryNo)
+    $pricingAudit = @($audits | Where-Object { (ConvertFrom-BcEnum $_.eventType) -eq "Pricing Changed" -and [int]$_.lineNo -gt 0 }) | Select-Object -First 1
+    Assert-Equal $scenario "Pricing change audit exists" ($null -ne $pricingAudit) $true
+    if ($pricingAudit) {
+        Assert-DecimalNear $scenario "Previous sell captured" ([decimal]$pricingAudit.previousSellPrice) 200 0.0001
+        Assert-DecimalNear $scenario "New sell captured" ([decimal]$pricingAudit.proposedSellPrice) 240 0.0001
+        Assert-Equal $scenario "Previous guardrail captured" (ConvertFrom-BcEnum $pricingAudit.previousGuardrailStatus) "Below Target Margin"
+    }
+
     Invoke-EvaluateQuote -QuoteId $s.Quote.id
     $line = Get-QuoteLine -LineId $s.Line.id
     Assert-Equal $scenario "Re-evaluation after corrected sell" (ConvertFrom-BcEnum $line.guardrailStatus) "Within Policy"
@@ -302,7 +401,7 @@ try {
     Assert-Equal $scenario "Guardrail status" (ConvertFrom-BcEnum $line.guardrailStatus) "Missing Cost"
     Assert-Equal $scenario "Needs approval" $line.needsApproval $true
 
-    # 5. Create one sandbox-only temporary Fixed Price rule, test match and conflict, then delete it in finally.
+    # 5. Sandbox-only temporary Fixed Price rule, match and conflict, then rejection audit.
     $fixedCustomer = "ELDERBE"
     $null = New-UatFixedRule -CustomerNo $fixedCustomer -LockedPrice 250
 
@@ -323,6 +422,31 @@ try {
     Assert-Equal $scenario "Needs approval" $line.needsApproval $true
     Assert-DecimalNear $scenario "Policy fixed sell" ([decimal]$line.policyFixedSellPrice) 250 0.0001
     Assert-Equal $scenario "Approver" $line.guardrailApprover "TEST ONLY"
+
+    Invoke-ReadyForReview -QuoteId $s.Quote.id
+    $rejectNote = "$RunId Fixed price conflict rejected for UAT"
+    $null = Invoke-BcRequest -Method PATCH -Uri "$QuoteBase/packagingQuotes($($s.Quote.id))" -IfMatch -Body @{
+        decisionNote = $rejectNote
+    }
+    Invoke-RejectQuote -QuoteId $s.Quote.id
+    $quote = Get-Quote -QuoteId $s.Quote.id
+    Assert-Equal $scenario "Rejected status" (ConvertFrom-BcEnum $quote.status) "Rejected"
+    Assert-Equal $scenario "Rejection note retained" $quote.decisionNote $rejectNote
+    Assert-NotBlank $scenario "Rejection timestamp" $quote.decisionAt
+    Assert-NotBlank $scenario "Rejection user" $quote.decisionBy
+
+    $audits = Get-QuoteAudits -QuoteEntryNo ([int]$s.Quote.entryNo)
+    $rejectedLineAudit = @($audits | Where-Object { (ConvertFrom-BcEnum $_.eventType) -eq "Rejected" -and [int]$_.lineNo -gt 0 }) | Select-Object -First 1
+    Assert-Equal $scenario "Rejected line snapshot exists" ($null -ne $rejectedLineAudit) $true
+    if ($rejectedLineAudit) {
+        Assert-DecimalNear $scenario "Rejected audit sell snapshot" ([decimal]$rejectedLineAudit.proposedSellPrice) 245 0.0001
+        Assert-Equal $scenario "Rejected audit decision note" $rejectedLineAudit.decisionNote $rejectNote
+    }
+
+    $rejectedDecisionEditBlocked = Test-BcRequestFails -Method PATCH -Uri "$QuoteBase/packagingQuotes($($s.Quote.id))" -IfMatch -Body @{
+        decisionNote = "changed after rejection"
+    }
+    Assert-Equal $scenario "Rejected decision note locked" $rejectedDecisionEditBlocked $true
 }
 finally {
     if ($QuoteBase) {
@@ -360,7 +484,7 @@ Write-Host ""
 Write-Host "Checks run : $($Results.Count)"
 Write-Host "Passed     : $($Results.Count - $failed.Count)"
 Write-Host "Failed     : $($failed.Count)"
-Write-Host "Cleanup    : temporary quotes and fixed-price UAT rule removed"
+Write-Host "Cleanup    : temporary quotes, audit rows, and fixed-price UAT rule removed"
 
 if ($failed.Count -gt 0) {
     Write-Host "PACKAGING QUOTE API UAT FAILED" -ForegroundColor Red

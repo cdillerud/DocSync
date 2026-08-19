@@ -7,7 +7,7 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteLine: Record "GPI Pack Quote Line";
         PreviousLine: Record "GPI Pack Quote Line";
     begin
-        InsertHeaderAudit(QuoteHeader, EventType, EventNote, '');
+        InsertHeaderAudit(QuoteHeader, EventType, EventNote, '', 0D);
         Clear(PreviousLine);
 
         QuoteLine.SetRange("Quote Entry No.", QuoteHeader."Entry No.");
@@ -40,7 +40,18 @@ codeunit 71003 "GPI Quote Audit Mgt"
             StrSubstNo('Customer changed from %1 to %2. Existing line evaluations were invalidated.', PreviousCustomerNo, QuoteHeader."Customer No."),
             1,
             MaxStrLen(EventNote));
-        InsertHeaderAudit(QuoteHeader, "GPI Quote Audit Type"::"Customer Changed", EventNote, PreviousCustomerNo);
+        InsertHeaderAudit(QuoteHeader, "GPI Quote Audit Type"::"Customer Changed", EventNote, PreviousCustomerNo, 0D);
+    end;
+
+    procedure LogQuoteDateChange(QuoteHeader: Record "GPI Pack Quote"; PreviousQuoteDate: Date)
+    var
+        EventNote: Text[250];
+    begin
+        EventNote := CopyStr(
+            StrSubstNo('Quote Date changed from %1 to %2. Effective-dated guardrail evaluations were invalidated.', PreviousQuoteDate, QuoteHeader."Quote Date"),
+            1,
+            MaxStrLen(EventNote));
+        InsertHeaderAudit(QuoteHeader, "GPI Quote Audit Type"::"Quote Changed", EventNote, '', PreviousQuoteDate);
     end;
 
     procedure HasDecisionAudit(QuoteEntryNo: Integer): Boolean
@@ -60,7 +71,7 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit.DeleteAll(false);
     end;
 
-    local procedure InsertHeaderAudit(QuoteHeader: Record "GPI Pack Quote"; EventType: Enum "GPI Quote Audit Type"; EventNote: Text; PreviousCustomerNo: Code[20])
+    local procedure InsertHeaderAudit(QuoteHeader: Record "GPI Pack Quote"; EventType: Enum "GPI Quote Audit Type"; EventNote: Text; PreviousCustomerNo: Code[20]; PreviousQuoteDate: Date)
     var
         QuoteAudit: Record "GPI Quote Audit";
     begin
@@ -72,8 +83,13 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Event By" := CopyStr(UserId(), 1, MaxStrLen(QuoteAudit."Event By"));
         QuoteAudit."Quote Status" := QuoteHeader.Status;
         QuoteAudit."Customer No." := QuoteHeader."Customer No.";
+        QuoteAudit."Quote Date" := QuoteHeader."Quote Date";
+        QuoteAudit."Expiration Date" := QuoteHeader."Expiration Date";
+        QuoteAudit."Quote Description" := QuoteHeader.Description;
+        QuoteAudit."Decision Note" := QuoteHeader."Decision Note";
         QuoteAudit."Event Note" := CopyStr(EventNote, 1, MaxStrLen(QuoteAudit."Event Note"));
         QuoteAudit."Previous Customer No." := PreviousCustomerNo;
+        QuoteAudit."Previous Quote Date" := PreviousQuoteDate;
         QuoteAudit.Insert(true);
     end;
 
@@ -89,6 +105,10 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Event By" := CopyStr(UserId(), 1, MaxStrLen(QuoteAudit."Event By"));
         QuoteAudit."Quote Status" := QuoteHeader.Status;
         QuoteAudit."Customer No." := QuoteHeader."Customer No.";
+        QuoteAudit."Quote Date" := QuoteHeader."Quote Date";
+        QuoteAudit."Expiration Date" := QuoteHeader."Expiration Date";
+        QuoteAudit."Quote Description" := QuoteHeader.Description;
+        QuoteAudit."Decision Note" := QuoteHeader."Decision Note";
         QuoteAudit."Product No." := QuoteLine."Product No.";
         QuoteAudit."BC Item No." := QuoteLine."BC Item No.";
         QuoteAudit."UOM Code" := QuoteLine."UOM Code";

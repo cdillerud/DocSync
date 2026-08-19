@@ -140,6 +140,13 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Guardrail Approver" := QuoteLine."Guardrail Approver";
         QuoteAudit."Pricing Rule Entry No." := QuoteLine."Pricing Rule Entry No.";
         QuoteAudit."Policy Fixed Sell Price" := QuoteLine."Policy Fixed Sell Price";
+        QuoteAudit."Customer Hist Lines" := QuoteLine."Customer Hist Lines";
+        QuoteAudit."Customer Hist Median" := QuoteLine."Customer Hist Median";
+        QuoteAudit."Customer Hist Var %" := QuoteLine."Customer Hist Var %";
+        QuoteAudit."Customer Hist Last Date" := QuoteLine."Customer Hist Last Date";
+        QuoteAudit."All Cust Hist Lines" := QuoteLine."All Cust Hist Lines";
+        QuoteAudit."All Cust Hist Median" := QuoteLine."All Cust Hist Median";
+        QuoteAudit."History Message" := QuoteLine."History Message";
         QuoteAudit."Event Note" := CopyStr(EventNote, 1, MaxStrLen(QuoteAudit."Event Note"));
         QuoteAudit."Previous Quantity" := PreviousLine.Quantity;
         QuoteAudit."Previous Landed Cost" := PreviousLine."Landed Cost per Unit";

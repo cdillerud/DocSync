@@ -53,6 +53,18 @@ page 71009 "GPI Pack Quotes"
                 {
                     ApplicationArea = All;
                 }
+                field("Decision At"; Rec."Decision At")
+                {
+                    ApplicationArea = All;
+                }
+                field("Decision By"; Rec."Decision By")
+                {
+                    ApplicationArea = All;
+                }
+                field("Audit Count"; Rec."Audit Count")
+                {
+                    ApplicationArea = All;
+                }
             }
         }
     }

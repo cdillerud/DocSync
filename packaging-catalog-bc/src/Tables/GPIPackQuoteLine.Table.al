@@ -50,9 +50,9 @@ table 71007 "GPI Pack Quote Line"
 
             trigger OnValidate()
             var
-                QuoteMgt: Codeunit "GPI Pack Quote Mgt";
+                UOMMgt: Codeunit "GPI Pack UOM Mgt";
             begin
-                QuoteMgt.RecalculateLine(Rec);
+                UOMMgt.ConvertQuoteLineUOM(Rec, xRec."UOM Code");
             end;
         }
         field(7; Quantity; Decimal)

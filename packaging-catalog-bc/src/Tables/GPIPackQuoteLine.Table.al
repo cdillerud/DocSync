@@ -210,8 +210,13 @@ table 71007 "GPI Pack Quote Line"
 
     trigger OnInsert()
     var
+        QuoteHeader: Record "GPI Pack Quote";
         QuoteLine: Record "GPI Pack Quote Line";
     begin
+        if QuoteHeader.Get("Quote Entry No.") then
+            if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then
+                Error('Reopen the quote to Draft before adding lines.');
+
         if "Line No." = 0 then begin
             QuoteLine.SetRange("Quote Entry No.", "Quote Entry No.");
             if QuoteLine.FindLast() then
@@ -221,5 +226,45 @@ table 71007 "GPI Pack Quote Line"
         end;
 
         "Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
+    end;
+
+    trigger OnModify()
+    var
+        QuoteHeader: Record "GPI Pack Quote";
+        AuditMgt: Codeunit "GPI Quote Audit Mgt";
+    begin
+        if not PricingInputsChanged() then
+            exit;
+
+        if not QuoteHeader.Get("Quote Entry No.") then
+            exit;
+
+        if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
+            Error('Reopen the quote to Draft before changing pricing inputs.');
+
+        if (xRec."Evaluated At" <> 0DT) or (QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft) then
+            AuditMgt.LogPricingChange(Rec, xRec);
+    end;
+
+    trigger OnDelete()
+    var
+        QuoteHeader: Record "GPI Pack Quote";
+    begin
+        if QuoteHeader.Get("Quote Entry No.") then
+            if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then
+                Error('Reopen the quote to Draft before deleting lines.');
+    end;
+
+    local procedure PricingInputsChanged(): Boolean
+    begin
+        exit(
+            ("Product No." <> xRec."Product No.") or
+            ("BC Item No." <> xRec."BC Item No.") or
+            ("UOM Code" <> xRec."UOM Code") or
+            (Quantity <> xRec.Quantity) or
+            ("Cost Worksheet Entry No." <> xRec."Cost Worksheet Entry No.") or
+            ("Landed Cost per Unit" <> xRec."Landed Cost per Unit") or
+            ("Proposed Sell Price" <> xRec."Proposed Sell Price") or
+            ("Target Gross Margin %" <> xRec."Target Gross Margin %"));
     end;
 }

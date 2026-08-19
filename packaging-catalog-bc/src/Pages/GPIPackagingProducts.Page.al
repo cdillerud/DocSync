@@ -19,11 +19,6 @@ page 71001 "GPI Pack Products"
                     ApplicationArea = All;
                     ToolTip = 'Specifies the Gamer packaging product ID.';
                 }
-                field("BC Item No."; Rec."BC Item No.")
-                {
-                    ApplicationArea = All;
-                    ToolTip = 'Specifies the linked Business Central item.';
-                }
                 field("BC Item Description"; Rec."BC Item Description")
                 {
                     ApplicationArea = All;
@@ -50,10 +45,6 @@ page 71001 "GPI Pack Products"
                 {
                     ApplicationArea = All;
                 }
-                field("Finish Type"; Rec."Finish Type")
-                {
-                    ApplicationArea = All;
-                }
                 field(Color; Rec.Color)
                 {
                     ApplicationArea = All;
@@ -62,27 +53,7 @@ page 71001 "GPI Pack Products"
                 {
                     ApplicationArea = All;
                 }
-                field("Supplier Mold No."; Rec."Supplier Mold No.")
-                {
-                    ApplicationArea = All;
-                }
-                field("Vendor No."; Rec."Vendor No.")
-                {
-                    ApplicationArea = All;
-                }
                 field("Vendor Name"; Rec."Vendor Name")
-                {
-                    ApplicationArea = All;
-                }
-                field("Vendor Location Code"; Rec."Vendor Location Code")
-                {
-                    ApplicationArea = All;
-                }
-                field("FOB City"; Rec."FOB City")
-                {
-                    ApplicationArea = All;
-                }
-                field("FOB State/Province"; Rec."FOB State/Province")
                 {
                     ApplicationArea = All;
                 }
@@ -90,20 +61,68 @@ page 71001 "GPI Pack Products"
                 {
                     ApplicationArea = All;
                 }
+                field("BC Item No."; Rec."BC Item No.")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                    ToolTip = 'Specifies the linked Business Central item.';
+                }
+                field("Finish Type"; Rec."Finish Type")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Supplier Mold No."; Rec."Supplier Mold No.")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Vendor No."; Rec."Vendor No.")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Vendor Location Code"; Rec."Vendor Location Code")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("FOB City"; Rec."FOB City")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("FOB State/Province"; Rec."FOB State/Province")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
                 field("Metric Ton Cost"; Rec."Metric Ton Cost")
                 {
                     ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
                 }
                 field("BC Item Blocked"; Rec."BC Item Blocked")
                 {
                     ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
                     ToolTip = 'Shows whether the linked Business Central item is currently blocked.';
                 }
                 field(Blocked; Rec.Blocked)
                 {
                     ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
                     ToolTip = 'Specifies whether this packaging catalog record is blocked.';
                 }
+            }
+        }
+        area(FactBoxes)
+        {
+            part(ProductSnapshot; "GPI Pack Prod Fact")
+            {
+                ApplicationArea = All;
+                Caption = 'Product Snapshot';
+                SubPageLink = "No." = field("No.");
             }
         }
     }
@@ -116,6 +135,10 @@ page 71001 "GPI Pack Products"
             {
                 ApplicationArea = All;
                 Caption = 'Open BC Item';
+                Image = Item;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -130,6 +153,9 @@ page 71001 "GPI Pack Products"
             {
                 ApplicationArea = All;
                 Caption = 'Open Vendor';
+                Image = Vendor;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 var
@@ -145,6 +171,9 @@ page 71001 "GPI Pack Products"
                 ApplicationArea = All;
                 Caption = 'New Landed Cost';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -165,6 +194,9 @@ page 71001 "GPI Pack Products"
                 ApplicationArea = All;
                 Caption = 'New Sourcing Comparison';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 var
@@ -183,6 +215,7 @@ page 71001 "GPI Pack Products"
             {
                 ApplicationArea = All;
                 Caption = 'Supplier Price History';
+                Image = History;
 
                 trigger OnAction()
                 var
@@ -191,6 +224,17 @@ page 71001 "GPI Pack Products"
                     Rec.TestField("No.");
                     PriceHist.SetRange("Product No.", Rec."No.");
                     Page.Run(Page::"GPI Pack Price Hist", PriceHist);
+                end;
+            }
+            action(ToggleExtendedColumns)
+            {
+                ApplicationArea = All;
+                Caption = 'Show/Hide More Columns';
+
+                trigger OnAction()
+                begin
+                    ShowExtendedColumns := not ShowExtendedColumns;
+                    CurrPage.Update(false);
                 end;
             }
             action(NewProduct)
@@ -234,4 +278,7 @@ page 71001 "GPI Pack Products"
             }
         }
     }
+
+    var
+        ShowExtendedColumns: Boolean;
 }

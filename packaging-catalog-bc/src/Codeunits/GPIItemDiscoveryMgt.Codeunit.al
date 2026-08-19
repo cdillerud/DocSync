@@ -79,14 +79,14 @@ codeunit 71007 "GPI Item Disc Mgt"
             ValueFieldRef := ItemRef.Field(ItemFieldMeta."Field No.");
             ItemNoFieldRef := ItemRef.Field(Item.FieldNo("No."));
 
-            if ItemRef.FindSet() then
+            if ItemRef.FindSet(false) then
                 repeat
-                    ValueText := Format(ValueFieldRef.Value());
+                    ValueText := Format(ValueFieldRef);
                     if HasMeaningfulValue(ItemFieldMeta."Data Type", ValueText) then begin
                         NondefaultCount += 1;
                         if SampleCount < 8 then begin
                             AppendSample(SampleValues, ValueText, 2048);
-                            AppendSample(SampleItemNos, Format(ItemNoFieldRef.Value()), 500);
+                            AppendSample(SampleItemNos, Format(ItemNoFieldRef), 500);
                             SampleCount += 1;
                         end;
                     end;

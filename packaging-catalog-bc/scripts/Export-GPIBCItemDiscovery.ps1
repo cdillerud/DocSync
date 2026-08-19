@@ -141,6 +141,10 @@ try {
     $null = Invoke-BcRequest -Method POST -Uri "$discoveryBase/bcItems($firstItemId)/Microsoft.NAV.refreshFieldMetadata" -Body @{}
     $itemFields = @(Get-BcPagedCollection -Uri "$discoveryBase/bcItemFields")
 
+    Write-Host "Profiling custom Item fields. This reads Item values but does not modify Item records..." -ForegroundColor DarkCyan
+    $null = Invoke-BcRequest -Method POST -Uri "$discoveryBase/bcItems($firstItemId)/Microsoft.NAV.profileCustomFields" -Body @{}
+    $fieldProfiles = @(Get-BcPagedCollection -Uri "$discoveryBase/bcItemFieldProfiles")
+
     $packagingProducts = @()
     try {
         $packagingProducts = @(Get-BcPagedCollection -Uri "$uatBase/packagingProductsUAT")
@@ -203,6 +207,7 @@ try {
     $itemCsv = Join-Path $runFolder "BC_Items.csv"
     $fieldCsv = Join-Path $runFolder "BC_Item_Fields.csv"
     $customFieldCsv = Join-Path $runFolder "BC_Item_Fields_Likely_Custom.csv"
+    $profileCsv = Join-Path $runFolder "BC_Item_Custom_Field_Profile.csv"
     $categoryCsv = Join-Path $runFolder "BC_Item_Category_Summary.csv"
     $packagingCsv = Join-Path $runFolder "Existing_GPI_Packaging_Products.csv"
     $summaryPath = Join-Path $runFolder "BC_Item_Discovery_Summary.txt"
@@ -220,6 +225,10 @@ try {
     )
     $likelyCustomFields | Export-Csv -LiteralPath $customFieldCsv -NoTypeInformation -Encoding UTF8
 
+    $fieldProfiles |
+        Sort-Object @{ Expression = { [bool]$_.packagingRelevant }; Descending = $true }, @{ Expression = { [int]$_.nondefaultCount }; Descending = $true } |
+        Export-Csv -LiteralPath $profileCsv -NoTypeInformation -Encoding UTF8
+
     $categorySummary = @(
         $itemExport |
             Group-Object ItemCategoryCode |
@@ -236,7 +245,7 @@ try {
                     PackagingCatalogMappedCount = @($_.Group | Where-Object { $_.PackagingCatalogMapped }).Count
                 }
             } |
-            Sort-Object ItemCount -Descending
+            Sort-Object ActiveCount -Descending
     )
     $categorySummary | Export-Csv -LiteralPath $categoryCsv -NoTypeInformation -Encoding UTF8
 
@@ -253,6 +262,8 @@ try {
     $withLastDirectCost = @($itemExport | Where-Object { $_.LastDirectCost -gt 0 }).Count
     $withNetWeight = @($itemExport | Where-Object { $_.NetWeight -gt 0 }).Count
     $mappedItems = @($itemExport | Where-Object { $_.PackagingCatalogMapped }).Count
+    $populatedCustomFields = @($fieldProfiles | Where-Object { [int]$_.nondefaultCount -gt 0 }).Count
+    $packagingRelevantFields = @($fieldProfiles | Where-Object { [bool]$_.packagingRelevant -and [int]$_.nondefaultCount -gt 0 }).Count
 
     $summary = @(
         "GPI BUSINESS CENTRAL ITEM DISCOVERY",
@@ -269,6 +280,8 @@ try {
         "Already mapped to GPI catalog: $mappedItems",
         "Item table fields found  : $($itemFields.Count)",
         "Likely custom fields     : $($likelyCustomFields.Count)",
+        "Populated custom fields  : $populatedCustomFields",
+        "Packaging-relevant populated custom fields: $packagingRelevantFields",
         "",
         "NOTE: 'Likely custom fields' uses field number >= 50000 and < 2000000000 as a discovery heuristic only.",
         "No BC Item data was modified by this script."
@@ -284,7 +297,29 @@ try {
     Write-Host "Already catalog-mapped   : $mappedItems"
     Write-Host "Item fields discovered   : $($itemFields.Count)"
     Write-Host "Likely custom fields     : $($likelyCustomFields.Count)"
+    Write-Host "Populated custom fields  : $populatedCustomFields"
+    Write-Host "Packaging-relevant fields: $packagingRelevantFields"
+
     Write-Host ""
+    Write-Host "TOP ACTIVE ITEM CATEGORIES" -ForegroundColor Cyan
+    $categorySummary |
+        Select-Object -First 15 ItemCategoryCode, ItemCount, ActiveCount, WithVendorCount, WithLastDirectCostCount |
+        Format-Table -AutoSize
+
+    Write-Host "PACKAGING-RELEVANT CUSTOM ITEM FIELDS" -ForegroundColor Cyan
+    $fieldProfiles |
+        Where-Object { [bool]$_.packagingRelevant -and [int]$_.nondefaultCount -gt 0 } |
+        Sort-Object { [int]$_.nondefaultCount } -Descending |
+        Select-Object fieldNo, fieldCaption, dataType, nondefaultCount, nondefaultPercent, matchedKeyword, sampleValues |
+        Format-Table -AutoSize -Wrap
+
+    Write-Host "TOP OTHER POPULATED CUSTOM ITEM FIELDS" -ForegroundColor Cyan
+    $fieldProfiles |
+        Where-Object { -not [bool]$_.packagingRelevant -and [int]$_.nondefaultCount -gt 0 } |
+        Sort-Object { [int]$_.nondefaultCount } -Descending |
+        Select-Object -First 20 fieldNo, fieldCaption, dataType, nondefaultCount, nondefaultPercent, sampleValues |
+        Format-Table -AutoSize -Wrap
+
     Write-Host "Output folder: $runFolder" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "No Business Central Item records were changed."

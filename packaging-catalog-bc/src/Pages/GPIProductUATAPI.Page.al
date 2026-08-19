@@ -30,13 +30,13 @@ page 71022 "GPI Product UAT API"
                 {
                     Caption = 'Gamer ID';
                 }
+                field(supplierMoldNo; Rec."Supplier Mold No.")
+                {
+                    Caption = 'Supplier Mold No.';
+                }
                 field(material; Rec.Material)
                 {
                     Caption = 'Material';
-                }
-                field(style; Rec.Style)
-                {
-                    Caption = 'Style';
                 }
                 field(capacity; Rec.Capacity)
                 {
@@ -46,9 +46,25 @@ page 71022 "GPI Product UAT API"
                 {
                     Caption = 'Capacity UOM';
                 }
+                field(finish; Rec.Finish)
+                {
+                    Caption = 'Finish';
+                }
+                field(finishType; Rec."Finish Type")
+                {
+                    Caption = 'Finish Type';
+                }
                 field(color; Rec.Color)
                 {
                     Caption = 'Color';
+                }
+                field(style; Rec.Style)
+                {
+                    Caption = 'Style';
+                }
+                field(packout; Rec.Packout)
+                {
+                    Caption = 'Packout';
                 }
                 field(bcItemNo; Rec."BC Item No.")
                 {
@@ -74,6 +90,18 @@ page 71022 "GPI Product UAT API"
                 {
                     Caption = 'No. of Pallets';
                 }
+                field(palletQuantity; Rec."Pallet Quantity")
+                {
+                    Caption = 'Pallet Quantity';
+                }
+                field(qtyPerLayer; Rec."Qty. per Layer")
+                {
+                    Caption = 'Qty. per Layer';
+                }
+                field(noOfLayers; Rec."No. of Layers")
+                {
+                    Caption = 'No. of Layers';
+                }
                 field(gramWeight; Rec."Gram Weight")
                 {
                     Caption = 'Gram Weight';
@@ -81,6 +109,19 @@ page 71022 "GPI Product UAT API"
                 field(currentSupplierUnitCost; Rec."Current Supplier Unit Cost")
                 {
                     Caption = 'Current Supplier Unit Cost';
+                }
+                field(metricTonCost; Rec."Metric Ton Cost")
+                {
+                    Caption = 'Metric Ton Cost';
+                    Editable = false;
+                }
+                field(priceEffectiveDate; Rec."Price Effective Date")
+                {
+                    Caption = 'Price Effective Date';
+                }
+                field(priceChangeNote; Rec."Price Change Note")
+                {
+                    Caption = 'Price Change Note';
                 }
                 field(blocked; Rec.Blocked)
                 {

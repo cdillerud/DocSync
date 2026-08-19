@@ -45,11 +45,19 @@ page 71015 "GPI Quote Audits"
                 {
                     ApplicationArea = All;
                 }
+                field("Quote Notes"; Rec."Quote Notes")
+                {
+                    ApplicationArea = All;
+                }
                 field("Decision Note"; Rec."Decision Note")
                 {
                     ApplicationArea = All;
                 }
                 field("Product No."; Rec."Product No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Line Description"; Rec."Line Description")
                 {
                     ApplicationArea = All;
                 }
@@ -110,6 +118,10 @@ page 71015 "GPI Quote Audits"
                     ApplicationArea = All;
                 }
                 field("Previous Product No."; Rec."Previous Product No.")
+                {
+                    ApplicationArea = All;
+                }
+                field("Previous Line Desc."; Rec."Previous Line Desc.")
                 {
                     ApplicationArea = All;
                 }

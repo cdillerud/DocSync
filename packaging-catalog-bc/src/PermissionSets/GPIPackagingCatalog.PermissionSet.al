@@ -6,6 +6,7 @@ permissionset 71000 "GPI PACK CATALOG"
     Permissions =
         tabledata Customer = R,
         tabledata Item = R,
+        tabledata Field = R,
         tabledata "Item Unit of Measure" = R,
         tabledata "Sales Invoice Header" = R,
         tabledata "Sales Invoice Line" = R,
@@ -22,6 +23,7 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Pack Comp Line" = RIMD,
         tabledata "GPI Route Setup" = RIMD,
         tabledata "GPI Route Cache" = RIMD,
+        tabledata "GPI Item Field Meta" = RIMD,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
         table "GPI Pack Quote Line" = X,
@@ -30,6 +32,7 @@ permissionset 71000 "GPI PACK CATALOG"
         table "GPI Pack Comp Line" = X,
         table "GPI Route Setup" = X,
         table "GPI Route Cache" = X,
+        table "GPI Item Field Meta" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Vendor Locs" = X,
@@ -58,6 +61,8 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Route Setup" = X,
         page "GPI Route Cache" = X,
         page "GPI Route UAT API" = X,
+        page "GPI BC Item API" = X,
+        page "GPI Item Field API" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         codeunit "GPI Pack Catalog Mgt" = X,
@@ -66,5 +71,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Quote Audit Mgt" = X,
         codeunit "GPI Quote Hist Mgt" = X,
         codeunit "GPI Pack Compare Mgt" = X,
-        codeunit "GPI Pack Route Mgt" = X;
+        codeunit "GPI Pack Route Mgt" = X,
+        codeunit "GPI Item Disc Mgt" = X;
 }

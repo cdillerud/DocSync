@@ -161,6 +161,41 @@ page 71016 "GPI Quote Audit API"
                     Caption = 'Policy Fixed Sell Price';
                     Editable = false;
                 }
+                field(customerHistoryLineCount; Rec."Customer Hist Lines")
+                {
+                    Caption = 'Customer History Line Count';
+                    Editable = false;
+                }
+                field(customerHistoryMedian; Rec."Customer Hist Median")
+                {
+                    Caption = 'Customer Recent Median Sell Price';
+                    Editable = false;
+                }
+                field(customerHistoryVariancePct; Rec."Customer Hist Var %")
+                {
+                    Caption = 'Proposed vs Customer History %';
+                    Editable = false;
+                }
+                field(customerHistoryLatestDate; Rec."Customer Hist Last Date")
+                {
+                    Caption = 'Latest Customer History Date';
+                    Editable = false;
+                }
+                field(allCustomerHistoryLineCount; Rec."All Cust Hist Lines")
+                {
+                    Caption = 'All-Customer History Line Count';
+                    Editable = false;
+                }
+                field(allCustomerHistoryMedian; Rec."All Cust Hist Median")
+                {
+                    Caption = 'All-Customer Recent Median Sell Price';
+                    Editable = false;
+                }
+                field(historyMessage; Rec."History Message")
+                {
+                    Caption = 'Historical Pricing Context';
+                    Editable = false;
+                }
                 field(eventNote; Rec."Event Note")
                 {
                     Caption = 'Event Note';

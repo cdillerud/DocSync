@@ -45,22 +45,41 @@ page 71010 "GPI Pack Quote Card"
                 {
                     ApplicationArea = All;
                     Editable = false;
+                    Style = Strong;
                 }
                 field("Line Count"; Rec."Line Count")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
                 field("Approval Line Count"; Rec."Approval Line Count")
                 {
                     ApplicationArea = All;
+                    Editable = false;
+                    Style = Attention;
+                    StyleExpr = Rec."Approval Line Count" > 0;
                 }
+            }
+            part(Lines; "GPI Pack Quote Lines")
+            {
+                ApplicationArea = All;
+                Caption = 'Packaging Quote Lines';
+                SubPageLink = "Quote Entry No." = field("Entry No.");
+                UpdatePropagation = Both;
+            }
+            group(Review)
+            {
+                Caption = 'Commercial Review';
+
                 field("Last Evaluated At"; Rec."Last Evaluated At")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
                 field("Last Evaluated By"; Rec."Last Evaluated By")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
                 field(Notes; Rec.Notes)
                 {
@@ -81,21 +100,18 @@ page 71010 "GPI Pack Quote Card"
                 field("Decision At"; Rec."Decision At")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
                 field("Decision By"; Rec."Decision By")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
                 field("Audit Count"; Rec."Audit Count")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                 }
-            }
-            part(Lines; "GPI Pack Quote Lines")
-            {
-                ApplicationArea = All;
-                SubPageLink = "Quote Entry No." = field("Entry No.");
-                UpdatePropagation = Both;
             }
             part(AuditHistory; "GPI Quote Audits")
             {

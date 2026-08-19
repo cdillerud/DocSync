@@ -30,6 +30,8 @@ page 71011 "GPI Pack Quote Lines"
                 field(Quantity; Rec.Quantity)
                 {
                     ApplicationArea = All;
+                    ShowMandatory = true;
+                    ToolTip = 'Specifies the quoted quantity. A positive quantity is required before pricing guardrails can be evaluated.';
                 }
                 field("UOM Code"; Rec."UOM Code")
                 {
@@ -38,24 +40,34 @@ page 71011 "GPI Pack Quote Lines"
                 field("Landed Cost per Unit"; Rec."Landed Cost per Unit")
                 {
                     ApplicationArea = All;
+                    ShowMandatory = true;
                     Style = Strong;
+                    ToolTip = 'Specifies the landed cost per unit used for gross-margin calculations. This can be entered directly or copied from a landed-cost worksheet.';
                 }
                 field("Proposed Sell Price"; Rec."Proposed Sell Price")
                 {
                     ApplicationArea = All;
-                    Style = Strong;
+                    ShowMandatory = true;
+                    Style = Attention;
+                    StyleExpr = Rec."Proposed Sell Price" <= 0;
+                    ToolTip = 'Enter the proposed customer sell price per unit. Business Central evaluates this price but does not choose it automatically.';
                 }
                 field("Target Gross Margin %"; Rec."Target Gross Margin %")
                 {
                     ApplicationArea = All;
+                    ToolTip = 'Specifies the target gross margin used for deterministic sell-price guidance and margin exception review.';
                 }
                 field("Suggested Sell Price"; Rec."Suggested Sell Price")
                 {
                     ApplicationArea = All;
+                    Style = Strong;
+                    ToolTip = 'Shows deterministic guidance calculated from landed cost and target gross margin. It does not replace the user-entered proposed sell price.';
                 }
                 field("Calculated GP %"; Rec."Calculated GP %")
                 {
                     ApplicationArea = All;
+                    Style = Strong;
+                    ToolTip = 'Shows the gross margin produced by the current landed cost and proposed sell price.';
                 }
                 field("Guardrail Status"; Rec."Guardrail Status")
                 {

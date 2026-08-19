@@ -49,6 +49,34 @@ page 71019 "GPI Pack Comp Lines"
                 {
                     ApplicationArea = All;
                 }
+                field("Origin Latitude"; Rec."Origin Latitude")
+                {
+                    ApplicationArea = All;
+                }
+                field("Origin Longitude"; Rec."Origin Longitude")
+                {
+                    ApplicationArea = All;
+                }
+                field("Route Miles"; Rec."Route Miles")
+                {
+                    ApplicationArea = All;
+                }
+                field("Route Duration Minutes"; Rec."Route Duration Minutes")
+                {
+                    ApplicationArea = All;
+                }
+                field("Route Provider"; Rec."Route Provider")
+                {
+                    ApplicationArea = All;
+                }
+                field("Route Calculated At"; Rec."Route Calculated At")
+                {
+                    ApplicationArea = All;
+                }
+                field("Route Message"; Rec."Route Message")
+                {
+                    ApplicationArea = All;
+                }
                 field(Quantity; Rec.Quantity)
                 {
                     ApplicationArea = All;
@@ -65,6 +93,10 @@ page 71019 "GPI Pack Comp Lines"
                 {
                     ApplicationArea = All;
                 }
+                field("Mileage Cost per Mile"; Rec."Mileage Cost per Mile")
+                {
+                    ApplicationArea = All;
+                }
                 field("Tariff %"; Rec."Tariff %")
                 {
                     ApplicationArea = All;
@@ -78,6 +110,10 @@ page 71019 "GPI Pack Comp Lines"
                     ApplicationArea = All;
                 }
                 field("Delivery Total"; Rec."Delivery Total")
+                {
+                    ApplicationArea = All;
+                }
+                field("Freight Basis"; Rec."Freight Basis")
                 {
                     ApplicationArea = All;
                 }

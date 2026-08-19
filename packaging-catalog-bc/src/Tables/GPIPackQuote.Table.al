@@ -85,7 +85,7 @@ table 71006 "GPI Pack Quote"
     begin
         if "Quote Date" = 0D then
             "Quote Date" := WorkDate();
-        Status := Status::Draft;
+        Status := "GPI Pack Quote Stat"::Draft;
     end;
 
     trigger OnModify()
@@ -109,19 +109,19 @@ table 71006 "GPI Pack Quote"
         QuoteLine.SetRange("Quote Entry No.", "Entry No.");
         if QuoteLine.FindSet(true) then
             repeat
-                QuoteLine."Guardrail Status" := QuoteLine."Guardrail Status"::"Not Evaluated";
+                QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
                 QuoteLine."Guardrail Message" := 'Customer changed. Re-evaluate this line.';
                 QuoteLine."Guardrail Approver" := '';
                 QuoteLine."Pricing Rule Entry No." := 0;
                 QuoteLine."Policy Fixed Sell Price" := 0;
                 QuoteLine."Needs Approval" := false;
-                Clear(QuoteLine."Evaluated At");
+                QuoteLine."Evaluated At" := 0DT;
                 QuoteLine."Evaluated By" := '';
                 QuoteLine.Modify(false);
             until QuoteLine.Next() = 0;
 
-        Status := Status::Draft;
-        Clear("Last Evaluated At");
+        Status := "GPI Pack Quote Stat"::Draft;
+        "Last Evaluated At" := 0DT;
         "Last Evaluated By" := '';
     end;
 }

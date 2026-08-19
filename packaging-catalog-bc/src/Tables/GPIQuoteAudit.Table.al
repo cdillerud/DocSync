@@ -141,6 +141,26 @@ table 71008 "GPI Quote Audit"
         {
             Caption = 'Previous Customer No.';
         }
+        field(32; "Quote Date"; Date)
+        {
+            Caption = 'Quote Date';
+        }
+        field(33; "Expiration Date"; Date)
+        {
+            Caption = 'Expiration Date';
+        }
+        field(34; "Quote Description"; Text[100])
+        {
+            Caption = 'Quote Description';
+        }
+        field(35; "Decision Note"; Text[250])
+        {
+            Caption = 'Decision Note';
+        }
+        field(36; "Previous Quote Date"; Date)
+        {
+            Caption = 'Previous Quote Date';
+        }
     }
 
     keys

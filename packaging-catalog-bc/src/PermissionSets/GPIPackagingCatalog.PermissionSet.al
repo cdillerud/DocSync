@@ -4,6 +4,7 @@ permissionset 71000 "GPI PACK CATALOG"
     Caption = 'GPI Packaging Catalog';
 
     Permissions =
+        tabledata Customer = R,
         tabledata Item = R,
         tabledata "Item Unit of Measure" = R,
         tabledata "Sales Invoice Header" = R,
@@ -14,7 +15,11 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Pack Frt Rate" = RIMD,
         tabledata "GPI Pack Cost Work" = RIMD,
         tabledata "GPI Pricing Guard" = RIMD,
+        tabledata "GPI Pack Quote" = RIMD,
+        tabledata "GPI Pack Quote Line" = RIMD,
         table "GPI Pricing Guard" = X,
+        table "GPI Pack Quote" = X,
+        table "GPI Pack Quote Line" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Vendor Locs" = X,
@@ -24,8 +29,12 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Pack Cost Calc" = X,
         page "GPI Pricing Guards" = X,
         page "GPI Pricing GuardAPI" = X,
+        page "GPI Pack Quotes" = X,
+        page "GPI Pack Quote Card" = X,
+        page "GPI Pack Quote Lines" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         codeunit "GPI Pack Catalog Mgt" = X,
-        codeunit "GPI Pack Cost Mgt" = X;
+        codeunit "GPI Pack Cost Mgt" = X,
+        codeunit "GPI Pack Quote Mgt" = X;
 }

@@ -173,6 +173,37 @@ table 71008 "GPI Quote Audit"
         {
             Caption = 'Quote Notes';
         }
+        field(40; "Customer Hist Lines"; Integer)
+        {
+            Caption = 'Customer History Lines';
+        }
+        field(41; "Customer Hist Median"; Decimal)
+        {
+            Caption = 'Customer Recent Median Sell Price';
+            AutoFormatType = 2;
+        }
+        field(42; "Customer Hist Var %"; Decimal)
+        {
+            Caption = 'Proposed vs Customer History %';
+            DecimalPlaces = 0 : 5;
+        }
+        field(43; "Customer Hist Last Date"; Date)
+        {
+            Caption = 'Latest Customer History Date';
+        }
+        field(44; "All Cust Hist Lines"; Integer)
+        {
+            Caption = 'All-Customer History Lines';
+        }
+        field(45; "All Cust Hist Median"; Decimal)
+        {
+            Caption = 'All-Customer Recent Median Sell Price';
+            AutoFormatType = 2;
+        }
+        field(46; "History Message"; Text[250])
+        {
+            Caption = 'Historical Pricing Context';
+        }
     }
 
     keys

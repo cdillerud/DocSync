@@ -263,7 +263,7 @@ table 71010 "GPI Pack Comp Line"
                 "Line No." := 10000;
         end;
 
-        InvalidateComparisonRanks("Compare Entry No.");
+        InvalidateComparisonRanks("Compare Entry No.", 0);
     end;
 
     trigger OnModify()
@@ -272,12 +272,12 @@ table 71010 "GPI Pack Comp Line"
             exit;
 
         ClearResults();
-        InvalidateComparisonRanks("Compare Entry No.");
+        InvalidateComparisonRanks("Compare Entry No.", 0);
     end;
 
     trigger OnDelete()
     begin
-        InvalidateComparisonRanks("Compare Entry No.");
+        InvalidateComparisonRanks("Compare Entry No.", "Line No.");
     end;
 
     local procedure InputsChanged(): Boolean
@@ -316,7 +316,7 @@ table 71010 "GPI Pack Comp Line"
         "Calculated At" := 0DT;
     end;
 
-    local procedure InvalidateComparisonRanks(CompareEntryNo: Integer)
+    local procedure InvalidateComparisonRanks(CompareEntryNo: Integer; ExcludeLineNo: Integer)
     var
         CompareHeader: Record "GPI Pack Compare";
         CompareLine: Record "GPI Pack Comp Line";
@@ -324,7 +324,9 @@ table 71010 "GPI Pack Comp Line"
         CompareLine.SetRange("Compare Entry No.", CompareEntryNo);
         if CompareLine.FindSet(true) then
             repeat
-                if (CompareLine.Rank <> 0) or (CompareLine."Cost Above Best" <> 0) then begin
+                if ((ExcludeLineNo = 0) or (CompareLine."Line No." <> ExcludeLineNo)) and
+                   ((CompareLine.Rank <> 0) or (CompareLine."Cost Above Best" <> 0))
+                then begin
                     CompareLine.Rank := 0;
                     CompareLine."Cost Above Best" := 0;
                     CompareLine.Modify(false);

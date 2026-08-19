@@ -192,6 +192,44 @@ table 71007 "GPI Pack Quote Line"
             Caption = 'Evaluated By';
             Editable = false;
         }
+        field(28; "Customer Hist Lines"; Integer)
+        {
+            Caption = 'Customer History Lines';
+            Editable = false;
+        }
+        field(29; "Customer Hist Median"; Decimal)
+        {
+            Caption = 'Customer Recent Median Sell Price';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(30; "Customer Hist Var %"; Decimal)
+        {
+            Caption = 'Proposed vs Customer History %';
+            DecimalPlaces = 0 : 5;
+            Editable = false;
+        }
+        field(31; "Customer Hist Last Date"; Date)
+        {
+            Caption = 'Latest Customer History Date';
+            Editable = false;
+        }
+        field(32; "All Cust Hist Lines"; Integer)
+        {
+            Caption = 'All-Customer History Lines';
+            Editable = false;
+        }
+        field(33; "All Cust Hist Median"; Decimal)
+        {
+            Caption = 'All-Customer Recent Median Sell Price';
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(34; "History Message"; Text[250])
+        {
+            Caption = 'Historical Pricing Context';
+            Editable = false;
+        }
     }
 
     keys

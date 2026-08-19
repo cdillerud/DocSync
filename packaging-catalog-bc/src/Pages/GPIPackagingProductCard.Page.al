@@ -217,6 +217,32 @@ page 71000 "GPI Pack Prod Card"
                 RunObject = page "GPI Pack Cost Works";
                 RunPageLink = "Product No." = field("No.");
             }
+            action(NewSourcingComparison)
+            {
+                ApplicationArea = All;
+                Caption = 'New Sourcing Comparison';
+                Image = Calculate;
+
+                trigger OnAction()
+                var
+                    CompareHeader: Record "GPI Pack Compare";
+                begin
+                    Rec.TestField("No.");
+                    CompareHeader.Init();
+                    CompareHeader."Comparison Date" := WorkDate();
+                    CompareHeader."Reference Product No." := Rec."No.";
+                    CompareHeader.Description := CopyStr('Sourcing comparison for ' + Rec."No.", 1, MaxStrLen(CompareHeader.Description));
+                    CompareHeader.Insert(true);
+                    Page.Run(Page::"GPI Pack Comp Card", CompareHeader);
+                end;
+            }
+            action(SourcingComparisons)
+            {
+                ApplicationArea = All;
+                Caption = 'Sourcing Comparisons';
+                RunObject = page "GPI Pack Compares";
+                RunPageLink = "Reference Product No." = field("No.");
+            }
             action(VendorLocations)
             {
                 ApplicationArea = All;

@@ -70,6 +70,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
     procedure InvalidateLine(var QuoteLine: Record "GPI Pack Quote Line")
     var
         QuoteHeader: Record "GPI Pack Quote";
+        HistMgt: Codeunit "GPI Quote Hist Mgt";
     begin
         QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
         QuoteLine."Guardrail Message" := '';
@@ -79,6 +80,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteLine."Needs Approval" := false;
         QuoteLine."Evaluated At" := 0DT;
         QuoteLine."Evaluated By" := '';
+        HistMgt.ClearHistory(QuoteLine);
 
         if (QuoteLine."Quote Entry No." <> 0) and QuoteHeader.Get(QuoteLine."Quote Entry No.") then
             if QuoteHeader.Status = "GPI Pack Quote Stat"::Ready then begin
@@ -96,6 +98,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
     var
         QuoteHeader: Record "GPI Pack Quote";
         PricingGuard: Record "GPI Pricing Guard";
+        HistMgt: Codeunit "GPI Quote Hist Mgt";
         AsOfDate: Date;
         RuleSpec: Integer;
         FixedSpec: Integer;
@@ -144,6 +147,8 @@ codeunit 71002 "GPI Pack Quote Mgt"
         AsOfDate := QuoteHeader."Quote Date";
         if AsOfDate = 0D then
             AsOfDate := WorkDate();
+
+        HistMgt.EvaluateHistory(QuoteLine, QuoteHeader);
 
         PricingGuard.SetRange(Enabled, true);
         if PricingGuard.FindSet() then
@@ -257,11 +262,33 @@ codeunit 71002 "GPI Pack Quote Mgt"
             exit;
         end;
 
+        if HistMgt.IsBelowCustomerHistory(QuoteLine) then begin
+            SetEvaluation(
+                QuoteLine,
+                "GPI Quote Guard Stat"::"Below Customer History",
+                true,
+                QuoteLine."History Message",
+                '',
+                0);
+            exit;
+        end;
+
+        if HistMgt.IsAboveCustomerHistory(QuoteLine) then begin
+            SetEvaluation(
+                QuoteLine,
+                "GPI Quote Guard Stat"::"Above Customer History",
+                true,
+                QuoteLine."History Message",
+                '',
+                0);
+            exit;
+        end;
+
         SetEvaluation(
             QuoteLine,
             "GPI Quote Guard Stat"::"Within Policy",
             false,
-            'No active protected pricing conflict was found and the proposed margin is at or above target.',
+            'No active protected pricing conflict, margin exception, or customer-history anomaly was found.',
             '',
             0);
     end;
@@ -408,6 +435,8 @@ codeunit 71002 "GPI Pack Quote Mgt"
     end;
 
     local procedure ClearEvaluation(var QuoteLine: Record "GPI Pack Quote Line")
+    var
+        HistMgt: Codeunit "GPI Quote Hist Mgt";
     begin
         QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
         QuoteLine."Guardrail Message" := '';
@@ -417,6 +446,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteLine."Needs Approval" := false;
         QuoteLine."Evaluated At" := 0DT;
         QuoteLine."Evaluated By" := '';
+        HistMgt.ClearHistory(QuoteLine);
     end;
 
     local procedure EnsureCompleteForDecision(QuoteHeader: Record "GPI Pack Quote")

@@ -29,8 +29,10 @@ codeunit 71005 "GPI Pack Compare Mgt"
         ReferenceProduct: Record "GPI Pack Product";
         Product: Record "GPI Pack Product";
         CompareLine: Record "GPI Pack Comp Line";
+        CompareEntryNo: Integer;
     begin
         CompareHeader.TestField("Reference Product No.");
+        CompareEntryNo := CompareHeader."Entry No.";
         ReferenceProduct.Get(CompareHeader."Reference Product No.");
         if ReferenceProduct.Blocked then
             Error('Reference product %1 is blocked.', ReferenceProduct."No.");
@@ -45,17 +47,20 @@ codeunit 71005 "GPI Pack Compare Mgt"
         if Product.FindSet() then
             repeat
                 CompareLine.Reset();
-                CompareLine.SetRange("Compare Entry No.", CompareHeader."Entry No.");
+                CompareLine.SetRange("Compare Entry No.", CompareEntryNo);
                 CompareLine.SetRange("Product No.", Product."No.");
                 if CompareLine.IsEmpty() then begin
                     CompareLine.Init();
-                    CompareLine."Compare Entry No." := CompareHeader."Entry No.";
+                    CompareLine."Compare Entry No." := CompareEntryNo;
                     CompareLine."Product No." := Product."No.";
                     InitializeCandidate(CompareLine);
                     CompareLine.Insert(true);
                 end;
             until Product.Next() = 0;
 
+        // Line inserts invalidate the header through their table trigger. Refresh the
+        // header record before modifying it so API actions do not write a stale row.
+        CompareHeader.Get(CompareEntryNo);
         CompareHeader."Last Calculated At" := 0DT;
         CompareHeader."Last Calculated By" := '';
         CompareHeader.Modify(false);

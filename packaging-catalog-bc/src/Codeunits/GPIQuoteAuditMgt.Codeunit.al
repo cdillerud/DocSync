@@ -101,6 +101,7 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Quote Date" := QuoteHeader."Quote Date";
         QuoteAudit."Expiration Date" := QuoteHeader."Expiration Date";
         QuoteAudit."Quote Description" := QuoteHeader.Description;
+        QuoteAudit."Quote Notes" := QuoteHeader.Notes;
         QuoteAudit."Decision Note" := QuoteHeader."Decision Note";
         QuoteAudit."Event Note" := CopyStr(EventNote, 1, MaxStrLen(QuoteAudit."Event Note"));
         QuoteAudit."Previous Customer No." := PreviousCustomerNo;
@@ -123,8 +124,10 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Quote Date" := QuoteHeader."Quote Date";
         QuoteAudit."Expiration Date" := QuoteHeader."Expiration Date";
         QuoteAudit."Quote Description" := QuoteHeader.Description;
+        QuoteAudit."Quote Notes" := QuoteHeader.Notes;
         QuoteAudit."Decision Note" := QuoteHeader."Decision Note";
         QuoteAudit."Product No." := QuoteLine."Product No.";
+        QuoteAudit."Line Description" := QuoteLine.Description;
         QuoteAudit."BC Item No." := QuoteLine."BC Item No.";
         QuoteAudit."UOM Code" := QuoteLine."UOM Code";
         QuoteAudit.Quantity := QuoteLine.Quantity;
@@ -143,6 +146,7 @@ codeunit 71003 "GPI Quote Audit Mgt"
         QuoteAudit."Previous Sell Price" := PreviousLine."Proposed Sell Price";
         QuoteAudit."Previous Target GM %" := PreviousLine."Target Gross Margin %";
         QuoteAudit."Previous Product No." := PreviousLine."Product No.";
+        QuoteAudit."Previous Line Desc." := PreviousLine.Description;
         QuoteAudit."Previous BC Item No." := PreviousLine."BC Item No.";
         QuoteAudit."Previous UOM Code" := PreviousLine."UOM Code";
         QuoteAudit."Previous Guard Status" := PreviousLine."Guardrail Status";

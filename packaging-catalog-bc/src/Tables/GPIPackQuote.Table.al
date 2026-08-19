@@ -112,14 +112,28 @@ table 71006 "GPI Pack Quote"
     trigger OnModify()
     var
         AuditMgt: Codeunit "GPI Quote Audit Mgt";
+        CustomerChanged: Boolean;
+        QuoteDateChanged: Boolean;
     begin
-        if "Customer No." <> xRec."Customer No." then begin
-            if xRec.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
-                Error('Reopen the quote to Draft before changing the customer.');
+        CustomerChanged := "Customer No." <> xRec."Customer No.";
+        QuoteDateChanged := "Quote Date" <> xRec."Quote Date";
 
-            InvalidateLineEvaluations();
-            AuditMgt.LogCustomerChange(Rec, xRec."Customer No.");
+        if xRec.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then begin
+            if LockedHeaderInputsChanged() then
+                Error('Reopen the quote to Draft before changing approved, rejected, or expired quote values.');
+
+            if "Decision Note" <> xRec."Decision Note" then
+                Error('Reopen the quote to Draft before changing the recorded decision note.');
         end;
+
+        if CustomerChanged or QuoteDateChanged then
+            InvalidateLineEvaluations();
+
+        if CustomerChanged then
+            AuditMgt.LogCustomerChange(Rec, xRec."Customer No.");
+
+        if QuoteDateChanged then
+            AuditMgt.LogQuoteDateChange(Rec, xRec."Quote Date");
     end;
 
     trigger OnDelete()
@@ -144,7 +158,7 @@ table 71006 "GPI Pack Quote"
         if QuoteLine.FindSet(true) then
             repeat
                 QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
-                QuoteLine."Guardrail Message" := 'Customer changed. Re-evaluate this line.';
+                QuoteLine."Guardrail Message" := 'Quote header changed. Re-evaluate this line.';
                 QuoteLine."Guardrail Approver" := '';
                 QuoteLine."Pricing Rule Entry No." := 0;
                 QuoteLine."Policy Fixed Sell Price" := 0;
@@ -160,5 +174,14 @@ table 71006 "GPI Pack Quote"
         "Decision Note" := '';
         "Decision At" := 0DT;
         "Decision By" := '';
+    end;
+
+    local procedure LockedHeaderInputsChanged(): Boolean
+    begin
+        exit(
+            ("Quote Date" <> xRec."Quote Date") or
+            ("Expiration Date" <> xRec."Expiration Date") or
+            ("Customer No." <> xRec."Customer No.") or
+            (Description <> xRec.Description));
     end;
 }

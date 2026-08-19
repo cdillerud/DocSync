@@ -21,6 +21,7 @@ codeunit 71005 "GPI Pack Compare Mgt"
             CompareLine."Intl Freight Total" := CompareHeader."Intl Freight Total";
             CompareLine."Customs Total" := CompareHeader."Customs Total";
             CompareLine."Delivery Total" := CompareHeader."Delivery Total";
+            CompareLine."Mileage Cost per Mile" := CompareHeader."Default Cost per Mile";
         end;
     end;
 
@@ -59,10 +60,6 @@ codeunit 71005 "GPI Pack Compare Mgt"
                     NextLineNo += 10000;
                     CompareLine."Product No." := Product."No.";
                     InitializeCandidate(CompareLine);
-
-                    // Bulk candidate creation is already controlled by this codeunit.
-                    // Bypass the line OnInsert trigger so it does not modify the API
-                    // source header during the bound action and invalidate the page row.
                     CompareLine.Insert(false);
                 end;
             until Product.Next() = 0;
@@ -84,6 +81,7 @@ codeunit 71005 "GPI Pack Compare Mgt"
                 CompareLine."Intl Freight Total" := CompareHeader."Intl Freight Total";
                 CompareLine."Customs Total" := CompareHeader."Customs Total";
                 CompareLine."Delivery Total" := CompareHeader."Delivery Total";
+                CompareLine."Mileage Cost per Mile" := CompareHeader."Default Cost per Mile";
                 ClearCalculatedFields(CompareLine);
                 CompareLine.Modify(false);
             until CompareLine.Next() = 0;
@@ -91,6 +89,13 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareHeader."Last Calculated At" := 0DT;
         CompareHeader."Last Calculated By" := '';
         CompareHeader.Modify(false);
+    end;
+
+    procedure RefreshRouteMileage(var CompareHeader: Record "GPI Pack Compare")
+    var
+        RouteMgt: Codeunit "GPI Pack Route Mgt";
+    begin
+        RouteMgt.RefreshComparisonRoutes(CompareHeader);
     end;
 
     procedure CalculateComparison(var CompareHeader: Record "GPI Pack Compare")
@@ -121,6 +126,8 @@ codeunit 71005 "GPI Pack Compare Mgt"
         Product: Record "GPI Pack Product";
         Work: Record "GPI Pack Cost Work" temporary;
         CostMgt: Codeunit "GPI Pack Cost Mgt";
+        RouteMgt: Codeunit "GPI Pack Route Mgt";
+        FreightRateFound: Boolean;
     begin
         ClearCalculatedFields(CompareLine);
 
@@ -161,6 +168,9 @@ codeunit 71005 "GPI Pack Compare Mgt"
             exit;
         end;
 
+        if CompareHeader."Auto Route Mileage" then
+            RouteMgt.ResolveRouteForLine(CompareHeader, CompareLine);
+
         Work.Init();
         Work."Product No." := CompareLine."Product No.";
         Work."Calculation Date" := CompareHeader."Comparison Date";
@@ -184,20 +194,49 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CostMgt.Recalculate(Work);
         CompareLine."Shipment CWT" := Work."Shipment CWT";
 
-        if not CostMgt.TryApplyBestFreightRate(Work) then begin
-            SetIncomplete(
-                CompareLine,
-                CopyStr(
-                    StrSubstNo(
-                        'No active freight rate was found for vendor %1, FOB %2, destination %3, mode %4, and comparison date %5. This option is not ranked.',
-                        CompareLine."Vendor No.",
-                        CompareLine."Vendor Location Code",
-                        CompareHeader."Destination State",
-                        Format(CompareLine.Mode),
-                        Work."Calculation Date"),
-                    1,
-                    MaxStrLen(CompareLine."Incomplete Reason")));
-            exit;
+        FreightRateFound := CostMgt.TryApplyBestFreightRate(Work);
+        if FreightRateFound then
+            CompareLine."Freight Basis" := "GPI Freight Basis"::"Stored Rate"
+        else begin
+            if CompareHeader."Allow Mileage Fallback" then begin
+                if CompareLine."Route Miles" <= 0 then
+                    RouteMgt.ResolveRouteForLine(CompareHeader, CompareLine);
+
+                if CompareLine."Route Miles" <= 0 then begin
+                    SetIncomplete(
+                        CompareLine,
+                        CopyStr(
+                            StrSubstNo(
+                                'No active freight rate was found and route mileage is unavailable. %1',
+                                CompareLine."Route Message"),
+                            1,
+                            MaxStrLen(CompareLine."Incomplete Reason")));
+                    exit;
+                end;
+
+                if CompareLine."Mileage Cost per Mile" <= 0 then begin
+                    SetIncomplete(CompareLine, 'No active freight rate was found and Mileage Cost per Mile is not greater than zero.');
+                    exit;
+                end;
+
+                Work."Manual Freight Total" := Round(CompareLine."Route Miles" * CompareLine."Mileage Cost per Mile", 0.01, '=');
+                CostMgt.Recalculate(Work);
+                CompareLine."Freight Basis" := "GPI Freight Basis"::Mileage;
+            end else begin
+                SetIncomplete(
+                    CompareLine,
+                    CopyStr(
+                        StrSubstNo(
+                            'No active freight rate was found for vendor %1, FOB %2, destination %3, mode %4, and comparison date %5. This option is not ranked.',
+                            CompareLine."Vendor No.",
+                            CompareLine."Vendor Location Code",
+                            CompareHeader."Destination State",
+                            Format(CompareLine.Mode),
+                            Work."Calculation Date"),
+                        1,
+                        MaxStrLen(CompareLine."Incomplete Reason")));
+                exit;
+            end;
         end;
 
         CopyWorkResults(Work, CompareLine);
@@ -218,6 +257,10 @@ codeunit 71005 "GPI Pack Compare Mgt"
     end;
 
     local procedure CopyProductSource(Product: Record "GPI Pack Product"; var CompareLine: Record "GPI Pack Comp Line"; ResetQuantity: Boolean)
+    var
+        VendorLocation: Record "GPI Pack Vendor Loc";
+        NewOriginLatitude: Decimal;
+        NewOriginLongitude: Decimal;
     begin
         CompareLine."BC Item No." := Product."BC Item No.";
         CompareLine."Vendor No." := Product."Vendor No.";
@@ -225,6 +268,22 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareLine.Mode := Product."Transport Mode";
         CompareLine."Gram Weight" := Product."Gram Weight";
         CompareLine."Supplier Unit Cost" := Product."Current Supplier Unit Cost";
+
+        NewOriginLatitude := 0;
+        NewOriginLongitude := 0;
+        if (Product."Vendor No." <> '') and (Product."Vendor Location Code" <> '') then
+            if VendorLocation.Get(Product."Vendor No.", Product."Vendor Location Code") then begin
+                NewOriginLatitude := VendorLocation.Latitude;
+                NewOriginLongitude := VendorLocation.Longitude;
+            end;
+
+        if (CompareLine."Origin Latitude" <> NewOriginLatitude) or
+           (CompareLine."Origin Longitude" <> NewOriginLongitude)
+        then
+            ClearRouteFields(CompareLine);
+
+        CompareLine."Origin Latitude" := NewOriginLatitude;
+        CompareLine."Origin Longitude" := NewOriginLongitude;
 
         if ResetQuantity or (CompareLine.Quantity <= 0) then
             CompareLine.Quantity := Product."Full Load Quantity";
@@ -242,6 +301,18 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareLine."Gram Weight" := 0;
         CompareLine."No. of Pallets" := 0;
         CompareLine."Supplier Unit Cost" := 0;
+        CompareLine."Origin Latitude" := 0;
+        CompareLine."Origin Longitude" := 0;
+        ClearRouteFields(CompareLine);
+    end;
+
+    local procedure ClearRouteFields(var CompareLine: Record "GPI Pack Comp Line")
+    begin
+        CompareLine."Route Miles" := 0;
+        CompareLine."Route Duration Minutes" := 0;
+        CompareLine."Route Provider" := "GPI Route Provider"::Manual;
+        CompareLine."Route Calculated At" := 0DT;
+        CompareLine."Route Message" := '';
     end;
 
     local procedure ClearCalculatedFields(var CompareLine: Record "GPI Pack Comp Line")
@@ -260,6 +331,7 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareLine."Delivery per Unit" := 0;
         CompareLine."Landed Cost per Unit" := 0;
         CompareLine."Suggested Sell Price" := 0;
+        CompareLine."Freight Basis" := "GPI Freight Basis"::None;
         CompareLine.Rank := 0;
         CompareLine."Cost Above Best" := 0;
         CompareLine."Is Complete" := false;
@@ -274,6 +346,7 @@ codeunit 71005 "GPI Pack Compare Mgt"
         CompareLine."Cost Above Best" := 0;
         CompareLine."Landed Cost per Unit" := 0;
         CompareLine."Suggested Sell Price" := 0;
+        CompareLine."Freight Basis" := "GPI Freight Basis"::None;
         CompareLine."Incomplete Reason" := CopyStr(ReasonText, 1, MaxStrLen(CompareLine."Incomplete Reason"));
         CompareLine."Calculated At" := CurrentDateTime();
     end;

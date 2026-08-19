@@ -116,8 +116,13 @@ page 71011 "GPI Pack Quote Lines"
 
                 trigger OnAction()
                 var
+                    QuoteHeader: Record "GPI Pack Quote";
                     QuoteMgt: Codeunit "GPI Pack Quote Mgt";
                 begin
+                    if QuoteHeader.Get(Rec."Quote Entry No.") then
+                        if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
+                            Error('Reopen the quote to Draft before evaluating a decided quote line.');
+
                     CurrPage.SaveRecord();
                     QuoteMgt.EvaluateLine(Rec);
                     Rec.Modify(false);

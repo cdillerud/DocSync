@@ -14,15 +14,11 @@ page 71000 "GPI Pack Prod Card"
                 field("No."; Rec."No.")
                 {
                     ApplicationArea = All;
+                    ToolTip = 'Specifies the Gamer packaging product ID.';
                 }
                 field("Supplier Mold No."; Rec."Supplier Mold No.")
                 {
                     ApplicationArea = All;
-                }
-                field("BC Item No."; Rec."BC Item No.")
-                {
-                    ApplicationArea = All;
-                    ToolTip = 'Links this packaging product to the Business Central item used for posted-sales pricing context and customer pricing guardrails.';
                 }
                 field(Material; Rec.Material)
                 {
@@ -39,6 +35,37 @@ page 71000 "GPI Pack Prod Card"
                 field(Blocked; Rec.Blocked)
                 {
                     ApplicationArea = All;
+                    ToolTip = 'Specifies whether this packaging catalog record is blocked.';
+                }
+            }
+            group(BCSource)
+            {
+                Caption = 'Business Central Item';
+
+                field("BC Item No."; Rec."BC Item No.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Links this packaging product to the Business Central item used as the source item and for posted-sales pricing context.';
+                }
+                field("BC Item Description"; Rec."BC Item Description")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the current description from the linked Business Central item.';
+                }
+                field("BC Item Category"; Rec."BC Item Category")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the current item category from the linked Business Central item.';
+                }
+                field("BC Base UOM"; Rec."BC Base UOM")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows the current base unit of measure from the linked Business Central item.';
+                }
+                field("BC Item Blocked"; Rec."BC Item Blocked")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Shows whether the linked Business Central item is currently blocked.';
                 }
             }
             group(Specifications)
@@ -134,6 +161,7 @@ page 71000 "GPI Pack Prod Card"
                 field("Current Supplier Unit Cost"; Rec."Current Supplier Unit Cost")
                 {
                     ApplicationArea = All;
+                    ToolTip = 'Specifies the current supplier unit cost used by deterministic landed-cost and margin calculations.';
                 }
                 field("Metric Ton Cost"; Rec."Metric Ton Cost")
                 {
@@ -166,7 +194,7 @@ page 71000 "GPI Pack Prod Card"
             part(PriceHistory; "GPI Pack Price Hist")
             {
                 ApplicationArea = All;
-                Caption = 'Price History';
+                Caption = 'Supplier Price History';
                 SubPageLink = "Product No." = field("No.");
             }
         }
@@ -176,6 +204,34 @@ page 71000 "GPI Pack Prod Card"
     {
         area(Processing)
         {
+            action(OpenBCItem)
+            {
+                ApplicationArea = All;
+                Caption = 'Open BC Item';
+
+                trigger OnAction()
+                var
+                    ItemRec: Record Item;
+                begin
+                    Rec.TestField("BC Item No.");
+                    ItemRec.Get(Rec."BC Item No.");
+                    Page.Run(Page::"Item Card", ItemRec);
+                end;
+            }
+            action(OpenVendor)
+            {
+                ApplicationArea = All;
+                Caption = 'Open Vendor';
+
+                trigger OnAction()
+                var
+                    VendorRec: Record Vendor;
+                begin
+                    Rec.TestField("Vendor No.");
+                    VendorRec.Get(Rec."Vendor No.");
+                    Page.Run(Page::"Vendor Card", VendorRec);
+                end;
+            }
             action(RecalculateMetricTon)
             {
                 ApplicationArea = All;

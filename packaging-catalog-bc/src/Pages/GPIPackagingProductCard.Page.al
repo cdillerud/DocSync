@@ -19,6 +19,11 @@ page 71000 "GPI Pack Prod Card"
                 {
                     ApplicationArea = All;
                 }
+                field("BC Item No."; Rec."BC Item No.")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Links this packaging product to the Business Central item used for posted-sales pricing context and customer pricing guardrails.';
+                }
                 field(Material; Rec.Material)
                 {
                     ApplicationArea = All;
@@ -225,6 +230,13 @@ page 71000 "GPI Pack Prod Card"
                 Caption = 'Freight Rates';
                 RunObject = page "GPI Pack Frt Rates";
                 RunPageLink = "Origin Vendor No." = field("Vendor No.");
+            }
+            action(PackagingQuotes)
+            {
+                ApplicationArea = All;
+                Caption = 'Packaging Quotes';
+                Image = Quote;
+                RunObject = page "GPI Pack Quotes";
             }
         }
     }

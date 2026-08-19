@@ -211,6 +211,25 @@ page 71001 "GPI Pack Products"
                     Page.Run(Page::"GPI Pack Comp Card", CompareHeader);
                 end;
             }
+            action(NewPackagingQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'New Packaging Quote';
+                Image = Quote;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+
+                trigger OnAction()
+                var
+                    QuoteHeader: Record "GPI Pack Quote";
+                    FlowMgt: Codeunit "GPI Pack Flow Mgt";
+                begin
+                    Rec.TestField("No.");
+                    FlowMgt.CreateQuoteFromProduct(Rec."No.", QuoteHeader);
+                    Page.Run(Page::"GPI Pack Quote Card", QuoteHeader);
+                end;
+            }
             action(PriceHistory)
             {
                 ApplicationArea = All;

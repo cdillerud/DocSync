@@ -89,6 +89,30 @@ table 71006 "GPI Pack Quote"
             CalcFormula = count("GPI Quote Audit" where("Quote Entry No." = field("Entry No.")));
             Editable = false;
         }
+        field(17; "Total Landed Cost"; Decimal)
+        {
+            Caption = 'Total Landed Cost';
+            FieldClass = FlowField;
+            CalcFormula = sum("GPI Pack Quote Line"."Extended Landed Cost" where("Quote Entry No." = field("Entry No.")));
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(18; "Total Sell"; Decimal)
+        {
+            Caption = 'Total Proposed Sell';
+            FieldClass = FlowField;
+            CalcFormula = sum("GPI Pack Quote Line"."Extended Sell" where("Quote Entry No." = field("Entry No.")));
+            AutoFormatType = 2;
+            Editable = false;
+        }
+        field(19; "Gross Profit Total"; Decimal)
+        {
+            Caption = 'Gross Profit Total';
+            FieldClass = FlowField;
+            CalcFormula = sum("GPI Pack Quote Line"."Gross Profit Total" where("Quote Entry No." = field("Entry No.")));
+            AutoFormatType = 2;
+            Editable = false;
+        }
     }
 
     keys

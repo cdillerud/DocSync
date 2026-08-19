@@ -157,9 +157,11 @@ The validated customer-history case used 6 exact posted lines, a recent customer
 
 ## Milestone 8: deterministic sourcing comparison
 
-Version `0.8.0.0` adds the first Business Central-native best-price and sourcing comparison workflow. It is ready for compile and UAT.
+Version `0.8.0.2` is the validated Business Central-native best-price and sourcing comparison workflow.
 
-Comparison behavior:
+Validated in `Sandbox_NoZetadocs_UAT` on 2026-08-19 with 23 of 23 comparison checks passing. The final full regression set is 92 of 92 checks passing across quote/approval/audit, customer-history pricing, and sourcing comparison.
+
+Validated comparison behavior:
 
 - a saved sourcing-comparison header stores reference product, destination state, comparison date, target margin, and default cost assumptions
 - `Add Exact Spec Matches` adds nonblocked products matching the reference product on Material, Style, Capacity, Capacity UOM, and Color
@@ -173,24 +175,32 @@ Comparison behavior:
 - each ranked line shows cost above the best option per unit
 - a missing vendor, quantity, gram weight, supplier cost, or freight rate makes the option incomplete and unranked
 - missing freight never becomes zero freight and can never make an option appear artificially cheapest
+- bulk exact-spec candidate creation works through the comparison API without stale-header write failures
+- temporary comparison, candidate products, freight rate, and vendor location are removed during UAT cleanup
+
+The validated comparison case ranked the lower-cost candidate first at `0.23941` landed cost per unit. The higher-cost candidate remained above it, and the no-rate candidate stayed unranked with rank `0` and no landed cost presented.
 
 Comparison APIs are exposed under `gpi/packagingComparisons/v1.0`. Bound actions add exact spec matches, apply header defaults, and calculate/rank the comparison.
 
-Sandbox-only `gpi/packagingCompareUAT/v1.0` product and freight endpoints support controlled automated UAT setup and cleanup. They reject access outside a Business Central sandbox.
+Sandbox-only `gpi/packagingCompareUAT/v1.0` product, freight, and vendor-location endpoints support controlled automated UAT setup and cleanup. They reject access outside a Business Central sandbox.
 
-`scripts/Test-GPIPackagingCompareAPIUAT.ps1` creates temporary exact-spec candidates plus a temporary destination-specific freight rate, calculates the sourcing comparison, verifies delivered-cost ranking and missing-freight safety, and cleans up the comparison, temporary candidates, and temporary rate.
+`scripts/Test-GPIPackagingCompareAPIUAT.ps1` is the regression harness for Milestone 8.
 
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.
 
+## Current automated UAT baseline
+
+- quote, approval, and audit regression: 48 of 48 passing
+- customer historical pricing regression: 21 of 21 passing
+- sourcing comparison regression: 23 of 23 passing
+- combined current regression baseline: 92 of 92 passing
+
 ## Next BC-only work
 
-- compile Packaging Catalog `0.8.0.0`
-- publish only to `Sandbox_NoZetadocs_UAT` after a clean compile
-- rerun the validated quote/approval and customer-history regressions
-- run `scripts/Test-GPIPackagingCompareAPIUAT.ps1`
-- add route/mileage automation only after stored-rate sourcing comparison is validated
+- route/mileage automation for freight-aware sourcing comparison
 - bulk import the real packaging catalog once a non-empty source export is available
+- keep all commercial pricing, freight, comparison, guardrail, and approval logic deterministic in Business Central
 
-Spiro integration and Copilot Studio orchestration remain deferred until the Business Central commercial rules, quote workflow, approval controls, historical-pricing guardrails, and sourcing comparison are validated.
+Spiro integration and Copilot Studio orchestration remain deferred until the remaining Business Central sourcing and catalog data work is ready.

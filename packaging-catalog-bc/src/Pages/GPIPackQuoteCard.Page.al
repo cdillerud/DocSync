@@ -27,6 +27,8 @@ page 71010 "GPI Pack Quote Card"
                 field("Customer No."; Rec."Customer No.")
                 {
                     ApplicationArea = All;
+                    ShowMandatory = true;
+                    ToolTip = 'Specifies the customer whose protected pricing and exact posted sales history are evaluated for this quote.';
 
                     trigger OnValidate()
                     begin
@@ -71,6 +73,41 @@ page 71010 "GPI Pack Quote Card"
             {
                 Caption = 'Commercial Review';
 
+                field(CommercialReviewStatus; CommercialReviewStatus)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Review Status';
+                    Editable = false;
+                    Style = Attention;
+                    StyleExpr = ReviewNeedsAttention;
+                    ToolTip = 'Summarizes whether pricing still needs evaluation, requires approval, is within policy, or has reached a final decision.';
+                }
+                field("Total Landed Cost"; Rec."Total Landed Cost")
+                {
+                    ApplicationArea = All;
+                    Editable = false;
+                    Style = Strong;
+                }
+                field("Total Sell"; Rec."Total Sell")
+                {
+                    ApplicationArea = All;
+                    Editable = false;
+                    Style = Strong;
+                }
+                field("Gross Profit Total"; Rec."Gross Profit Total")
+                {
+                    ApplicationArea = All;
+                    Editable = false;
+                }
+                field(OverallGrossMarginPct; OverallGrossMarginPct)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Overall Gross Margin %';
+                    DecimalPlaces = 0 : 2;
+                    Editable = false;
+                    Style = Strong;
+                    ToolTip = 'Shows total quote gross profit divided by total proposed sell. It is calculated from the current quote lines.';
+                }
                 field("Last Evaluated At"; Rec."Last Evaluated At")
                 {
                     ApplicationArea = All;
@@ -141,6 +178,7 @@ page 71010 "GPI Pack Quote Card"
                 begin
                     CurrPage.SaveRecord();
                     QuoteMgt.EvaluateQuote(Rec);
+                    UpdateCommercialReview();
                     CurrPage.Update(false);
                 end;
             }
@@ -160,6 +198,7 @@ page 71010 "GPI Pack Quote Card"
                 begin
                     CurrPage.SaveRecord();
                     QuoteMgt.SetReadyForReview(Rec);
+                    UpdateCommercialReview();
                     CurrPage.Update(false);
                 end;
             }
@@ -178,6 +217,7 @@ page 71010 "GPI Pack Quote Card"
                 begin
                     CurrPage.SaveRecord();
                     QuoteMgt.ApproveQuote(Rec);
+                    UpdateCommercialReview();
                     CurrPage.Update(false);
                 end;
             }
@@ -196,6 +236,7 @@ page 71010 "GPI Pack Quote Card"
                 begin
                     CurrPage.SaveRecord();
                     QuoteMgt.RejectQuote(Rec);
+                    UpdateCommercialReview();
                     CurrPage.Update(false);
                 end;
             }
@@ -213,6 +254,7 @@ page 71010 "GPI Pack Quote Card"
                     QuoteMgt: Codeunit "GPI Pack Quote Mgt";
                 begin
                     QuoteMgt.ReopenQuote(Rec);
+                    UpdateCommercialReview();
                     CurrPage.Update(false);
                 end;
             }
@@ -232,4 +274,65 @@ page 71010 "GPI Pack Quote Card"
             }
         }
     }
+
+    trigger OnAfterGetRecord()
+    begin
+        UpdateCommercialReview();
+    end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        UpdateCommercialReview();
+    end;
+
+    var
+        OverallGrossMarginPct: Decimal;
+        CommercialReviewStatus: Text[50];
+        ReviewNeedsAttention: Boolean;
+
+    local procedure UpdateCommercialReview()
+    begin
+        Rec.CalcFields("Total Landed Cost", "Total Sell", "Gross Profit Total", "Approval Line Count");
+
+        if Rec."Total Sell" > 0 then
+            OverallGrossMarginPct := Round((Rec."Gross Profit Total" / Rec."Total Sell") * 100, 0.01)
+        else
+            OverallGrossMarginPct := 0;
+
+        ReviewNeedsAttention := false;
+
+        case Rec.Status of
+            "GPI Pack Quote Stat"::Approved:
+                CommercialReviewStatus := 'Approved';
+            "GPI Pack Quote Stat"::Rejected:
+                begin
+                    CommercialReviewStatus := 'Rejected';
+                    ReviewNeedsAttention := true;
+                end;
+            "GPI Pack Quote Stat"::Expired:
+                begin
+                    CommercialReviewStatus := 'Expired';
+                    ReviewNeedsAttention := true;
+                end;
+            "GPI Pack Quote Stat"::Ready:
+                begin
+                    if Rec."Approval Line Count" > 0 then begin
+                        CommercialReviewStatus := 'Ready, approval required';
+                        ReviewNeedsAttention := true;
+                    end else
+                        CommercialReviewStatus := 'Ready for review';
+                end;
+            else begin
+                if Rec."Last Evaluated At" = 0DT then begin
+                    CommercialReviewStatus := 'Pricing not evaluated';
+                    ReviewNeedsAttention := true;
+                end else
+                    if Rec."Approval Line Count" > 0 then begin
+                        CommercialReviewStatus := 'Approval required';
+                        ReviewNeedsAttention := true;
+                    end else
+                        CommercialReviewStatus := 'Within policy';
+            end;
+        end;
+    end;
 }

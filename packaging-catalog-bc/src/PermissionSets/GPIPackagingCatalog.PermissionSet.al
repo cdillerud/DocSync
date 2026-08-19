@@ -17,9 +17,11 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Pricing Guard" = RIMD,
         tabledata "GPI Pack Quote" = RIMD,
         tabledata "GPI Pack Quote Line" = RIMD,
+        tabledata "GPI Quote Audit" = R,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
         table "GPI Pack Quote Line" = X,
+        table "GPI Quote Audit" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Vendor Locs" = X,
@@ -35,9 +37,12 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Pack Quote API" = X,
         page "GPI Quote Line API" = X,
         page "GPI Guard UAT API" = X,
+        page "GPI Quote Audits" = X,
+        page "GPI Quote Audit API" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         codeunit "GPI Pack Catalog Mgt" = X,
         codeunit "GPI Pack Cost Mgt" = X,
-        codeunit "GPI Pack Quote Mgt" = X;
+        codeunit "GPI Pack Quote Mgt" = X,
+        codeunit "GPI Quote Audit Mgt" = X;
 }

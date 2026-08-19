@@ -35,6 +35,10 @@ codeunit 71001 "GPI Pack Cost Mgt"
 
     procedure ApplyBestFreightRate(var Work: Record "GPI Pack Cost Work")
     begin
+        Work.TestField("Destination State");
+        Work.TestField(Quantity);
+        Work.TestField("Gram Weight");
+
         if not TryApplyBestFreightRate(Work) then
             Error(
               'No active freight rate was found for vendor %1, FOB %2, destination %3, mode %4, and calculation date %5.',

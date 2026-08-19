@@ -118,6 +118,9 @@ codeunit 71002 "GPI Pack Quote Mgt"
             exit;
         end;
 
+        if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
+            Error('Reopen the quote to Draft before evaluating a decided quote line.');
+
         if QuoteHeader."Customer No." = '' then begin
             SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Customer No. is required before pricing can be evaluated.', '', 0);
             exit;
@@ -369,7 +372,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
         QuoteHeader."Decision Note" := '';
         QuoteHeader."Decision At" := 0DT;
         QuoteHeader."Decision By" := '';
-        QuoteHeader.Modify(true);
+        QuoteHeader.Modify(false);
 
         EventNote := CopyStr(StrSubstNo('Quote reopened from %1. Guardrail evaluation is required again.', OldStatusText), 1, MaxStrLen(EventNote));
         AuditMgt.LogQuoteSnapshot(QuoteHeader, "GPI Quote Audit Type"::Reopened, EventNote);

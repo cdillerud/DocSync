@@ -35,4 +35,12 @@ enum 71004 "GPI Quote Guard Stat"
     {
         Caption = 'Missing Landed Cost';
     }
+    value(8; "Below Customer History")
+    {
+        Caption = 'Below Customer History';
+    }
+    value(9; "Above Customer History")
+    {
+        Caption = 'Above Customer History';
+    }
 }

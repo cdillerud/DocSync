@@ -32,10 +32,20 @@ page 71011 "GPI Pack Quote Lines"
                     ApplicationArea = All;
                     ShowMandatory = true;
                     ToolTip = 'Specifies the quoted quantity. A positive quantity is required before pricing guardrails can be evaluated.';
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(true);
+                    end;
                 }
                 field("UOM Code"; Rec."UOM Code")
                 {
                     ApplicationArea = All;
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(true);
+                    end;
                 }
                 field("Landed Cost per Unit"; Rec."Landed Cost per Unit")
                 {
@@ -43,6 +53,11 @@ page 71011 "GPI Pack Quote Lines"
                     ShowMandatory = true;
                     Style = Strong;
                     ToolTip = 'Specifies the landed cost per unit used for gross-margin calculations. This can be entered directly or copied from a landed-cost worksheet.';
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(true);
+                    end;
                 }
                 field("Proposed Sell Price"; Rec."Proposed Sell Price")
                 {
@@ -51,11 +66,21 @@ page 71011 "GPI Pack Quote Lines"
                     Style = Attention;
                     StyleExpr = Rec."Proposed Sell Price" <= 0;
                     ToolTip = 'Enter the proposed customer sell price per unit. Business Central evaluates this price but does not choose it automatically.';
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(true);
+                    end;
                 }
                 field("Target Gross Margin %"; Rec."Target Gross Margin %")
                 {
                     ApplicationArea = All;
                     ToolTip = 'Specifies the target gross margin used for deterministic sell-price guidance and margin exception review.';
+
+                    trigger OnValidate()
+                    begin
+                        CurrPage.Update(true);
+                    end;
                 }
                 field("Suggested Sell Price"; Rec."Suggested Sell Price")
                 {

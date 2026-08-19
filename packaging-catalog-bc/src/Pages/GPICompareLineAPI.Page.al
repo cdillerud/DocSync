@@ -74,6 +74,41 @@ page 71021 "GPI Comp Line API"
                     Caption = 'Transport Mode';
                     Editable = false;
                 }
+                field(originLatitude; Rec."Origin Latitude")
+                {
+                    Caption = 'Origin Latitude';
+                    Editable = false;
+                }
+                field(originLongitude; Rec."Origin Longitude")
+                {
+                    Caption = 'Origin Longitude';
+                    Editable = false;
+                }
+                field(routeMiles; Rec."Route Miles")
+                {
+                    Caption = 'Route Miles';
+                    Editable = false;
+                }
+                field(routeDurationMinutes; Rec."Route Duration Minutes")
+                {
+                    Caption = 'Route Duration Minutes';
+                    Editable = false;
+                }
+                field(routeProvider; Rec."Route Provider")
+                {
+                    Caption = 'Route Provider';
+                    Editable = false;
+                }
+                field(routeCalculatedAt; Rec."Route Calculated At")
+                {
+                    Caption = 'Route Calculated At';
+                    Editable = false;
+                }
+                field(routeMessage; Rec."Route Message")
+                {
+                    Caption = 'Route Message';
+                    Editable = false;
+                }
                 field(quantity; Rec.Quantity)
                 {
                     Caption = 'Comparison Quantity';
@@ -96,6 +131,10 @@ page 71021 "GPI Comp Line API"
                 {
                     Caption = 'Pallet Cost per Pallet';
                 }
+                field(mileageCostPerMile; Rec."Mileage Cost per Mile")
+                {
+                    Caption = 'Mileage Cost per Mile';
+                }
                 field(tariffPct; Rec."Tariff %")
                 {
                     Caption = 'Tariff %';
@@ -111,6 +150,11 @@ page 71021 "GPI Comp Line API"
                 field(deliveryTotal; Rec."Delivery Total")
                 {
                     Caption = 'Delivery Charge Total';
+                }
+                field(freightBasis; Rec."Freight Basis")
+                {
+                    Caption = 'Freight Basis';
+                    Editable = false;
                 }
                 field(shipmentCwt; Rec."Shipment CWT")
                 {

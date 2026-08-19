@@ -153,6 +153,7 @@ table 71006 "GPI Pack Quote"
     local procedure InvalidateLineEvaluations()
     var
         QuoteLine: Record "GPI Pack Quote Line";
+        HistMgt: Codeunit "GPI Quote Hist Mgt";
     begin
         QuoteLine.SetRange("Quote Entry No.", "Entry No.");
         if QuoteLine.FindSet(true) then
@@ -165,6 +166,7 @@ table 71006 "GPI Pack Quote"
                 QuoteLine."Needs Approval" := false;
                 QuoteLine."Evaluated At" := 0DT;
                 QuoteLine."Evaluated By" := '';
+                HistMgt.ClearHistory(QuoteLine);
                 QuoteLine.Modify(false);
             until QuoteLine.Next() = 0;
 

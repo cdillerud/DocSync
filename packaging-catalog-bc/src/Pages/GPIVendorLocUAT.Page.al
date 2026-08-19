@@ -46,6 +46,14 @@ page 71024 "GPI Vendor Loc UAT"
                 {
                     Caption = 'State/Province';
                 }
+                field(latitude; Rec.Latitude)
+                {
+                    Caption = 'Latitude';
+                }
+                field(longitude; Rec.Longitude)
+                {
+                    Caption = 'Longitude';
+                }
                 field(defaultFob; Rec."Default FOB")
                 {
                     Caption = 'Default FOB';

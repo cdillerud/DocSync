@@ -318,6 +318,9 @@ page 71006 "GPI Pack Cost Calc"
                 ApplicationArea = All;
                 Caption = 'Find Best Freight Rate';
                 Image = Calculate;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
 
                 trigger OnAction()
                 begin
@@ -330,11 +333,38 @@ page 71006 "GPI Pack Cost Calc"
                 ApplicationArea = All;
                 Caption = 'Recalculate';
                 Image = Refresh;
+                Promoted = true;
+                PromotedCategory = Process;
 
                 trigger OnAction()
                 begin
                     CostMgt.Recalculate(Rec);
                     CurrPage.Update(true);
+                end;
+            }
+            action(CreatePackagingQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'Create Packaging Quote';
+                Image = Quote;
+                Promoted = true;
+                PromotedCategory = Process;
+                PromotedIsBig = true;
+
+                trigger OnAction()
+                var
+                    QuoteHeader: Record "GPI Pack Quote";
+                    FlowMgt: Codeunit "GPI Pack Flow Mgt";
+                begin
+                    CurrPage.SaveRecord();
+                    Rec.TestField("Product No.");
+                    if Rec.Quantity <= 0 then
+                        Error('Enter a quantity greater than zero before creating a packaging quote.');
+                    if Rec."Landed Cost per Unit" <= 0 then
+                        Error('Calculate a positive landed cost per unit before creating a packaging quote.');
+
+                    FlowMgt.CreateQuoteFromCostWork(Rec."Entry No.", QuoteHeader);
+                    Page.Run(Page::"GPI Pack Quote Card", QuoteHeader);
                 end;
             }
             action(FreightRates)

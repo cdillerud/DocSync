@@ -94,7 +94,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
 
     procedure InvalidateLine(var QuoteLine: Record "GPI Pack Quote Line")
     begin
-        QuoteLine."Guardrail Status" := QuoteLine."Guardrail Status"::"Not Evaluated";
+        QuoteLine."Guardrail Status" := "GPI Quote Guard Stat"::"Not Evaluated";
         QuoteLine."Guardrail Message" := '';
         QuoteLine."Guardrail Approver" := '';
         QuoteLine."Pricing Rule Entry No." := 0;
@@ -125,27 +125,27 @@ codeunit 71002 "GPI Pack Quote Mgt"
         RecalculateLine(QuoteLine);
 
         if not QuoteHeader.Get(QuoteLine."Quote Entry No.") then begin
-            SetEvaluation(QuoteLine, QuoteLine."Guardrail Status"::"Approval Required", true, 'Quote header was not found.', '', 0);
+            SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Quote header was not found.', '', 0);
             exit;
         end;
 
         if QuoteHeader."Customer No." = '' then begin
-            SetEvaluation(QuoteLine, QuoteLine."Guardrail Status"::"Approval Required", true, 'Customer No. is required before pricing can be evaluated.', '', 0);
+            SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Customer No. is required before pricing can be evaluated.', '', 0);
             exit;
         end;
 
         if QuoteLine.Quantity <= 0 then begin
-            SetEvaluation(QuoteLine, QuoteLine."Guardrail Status"::"Approval Required", true, 'Quantity must be greater than zero.', '', 0);
+            SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Quantity must be greater than zero.', '', 0);
             exit;
         end;
 
         if QuoteLine."Proposed Sell Price" <= 0 then begin
-            SetEvaluation(QuoteLine, QuoteLine."Guardrail Status"::"Approval Required", true, 'Proposed Sell Price must be greater than zero.', '', 0);
+            SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Approval Required", true, 'Proposed Sell Price must be greater than zero.', '', 0);
             exit;
         end;
 
         if QuoteLine."Landed Cost per Unit" <= 0 then begin
-            SetEvaluation(QuoteLine, QuoteLine."Guardrail Status"::"Missing Cost", true, 'Landed Cost per Unit is required before the quote can be released.', '', 0);
+            SetEvaluation(QuoteLine, "GPI Quote Guard Stat"::"Missing Cost", true, 'Landed Cost per Unit is required before the quote can be released.', '', 0);
             exit;
         end;
 
@@ -160,7 +160,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
                     RuleSpec := RuleSpecificity(PricingGuard);
 
                     case PricingGuard."Rule Type" of
-                        PricingGuard."Rule Type"::"Fixed Price":
+                        "GPI Price Rule Type"::"Fixed Price":
                             begin
                                 if RuleSpec > FixedSpec then begin
                                     FixedSpec := RuleSpec;
@@ -183,7 +183,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
                                         end;
                                     end;
                             end;
-                        PricingGuard."Rule Type"::"Special Pricing":
+                        "GPI Price Rule Type"::"Special Pricing":
                             begin
                                 if RuleSpec > SpecialSpec then begin
                                     SpecialSpec := RuleSpec;
@@ -208,7 +208,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
             if FixedConflict then begin
                 SetEvaluation(
                     QuoteLine,
-                    QuoteLine."Guardrail Status"::"Fixed Price Conflict",
+                    "GPI Quote Guard Stat"::"Fixed Price Conflict",
                     true,
                     'Multiple equally specific Fixed Price guardrails disagree. Resolve the pricing rules before approval.',
                     CombinedApprover,
@@ -219,7 +219,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
             if Abs(QuoteLine."Proposed Sell Price" - FixedPrice) > 0.0001 then begin
                 SetEvaluation(
                     QuoteLine,
-                    QuoteLine."Guardrail Status"::"Fixed Price Conflict",
+                    "GPI Quote Guard Stat"::"Fixed Price Conflict",
                     true,
                     CopyStr(StrSubstNo('Proposed sell %1 conflicts with protected fixed price %2.', QuoteLine."Proposed Sell Price", FixedPrice), 1, MaxStrLen(QuoteLine."Guardrail Message")),
                     CombinedApprover,
@@ -233,7 +233,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
             AddApprover(CombinedApprover, FixedApprover);
             SetEvaluation(
                 QuoteLine,
-                QuoteLine."Guardrail Status"::"Special Pricing",
+                "GPI Quote Guard Stat"::"Special Pricing",
                 true,
                 'Active Special Pricing protects this customer/item. Review pricing with the configured approver instead of inferring a replacement price.',
                 CombinedApprover,
@@ -246,7 +246,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
         then begin
             SetEvaluation(
                 QuoteLine,
-                QuoteLine."Guardrail Status"::"Below Target Margin",
+                "GPI Quote Guard Stat"::"Below Target Margin",
                 true,
                 CopyStr(StrSubstNo('Calculated GP %1%% is below target GP %2%%.', QuoteLine."Calculated GP %", QuoteLine."Target Gross Margin %"), 1, MaxStrLen(QuoteLine."Guardrail Message")),
                 '',
@@ -257,7 +257,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
         if FixedFound then begin
             SetEvaluation(
                 QuoteLine,
-                QuoteLine."Guardrail Status"::"Fixed Price Match",
+                "GPI Quote Guard Stat"::"Fixed Price Match",
                 false,
                 'Proposed sell price matches the active Fixed Price guardrail.',
                 FixedApprover,
@@ -267,7 +267,7 @@ codeunit 71002 "GPI Pack Quote Mgt"
 
         SetEvaluation(
             QuoteLine,
-            QuoteLine."Guardrail Status"::"Within Policy",
+            "GPI Quote Guard Stat"::"Within Policy",
             false,
             'No active protected pricing conflict was found and the proposed margin is at or above target.',
             '',
@@ -297,13 +297,13 @@ codeunit 71002 "GPI Pack Quote Mgt"
     procedure SetReadyForReview(var QuoteHeader: Record "GPI Pack Quote")
     begin
         EvaluateQuote(QuoteHeader);
-        QuoteHeader.Status := QuoteHeader.Status::Ready;
+        QuoteHeader.Status := "GPI Pack Quote Stat"::Ready;
         QuoteHeader.Modify(true);
     end;
 
     procedure ReopenQuote(var QuoteHeader: Record "GPI Pack Quote")
     begin
-        QuoteHeader.Status := QuoteHeader.Status::Draft;
+        QuoteHeader.Status := "GPI Pack Quote Stat"::Draft;
         QuoteHeader.Modify(true);
     end;
 
@@ -332,9 +332,9 @@ codeunit 71002 "GPI Pack Quote Mgt"
         Specificity: Integer;
     begin
         if PricingGuard."Customer No." <> '' then
-            Specificity += 1;
+            Specificity := Specificity + 1;
         if PricingGuard."Item No." <> '' then
-            Specificity += 1;
+            Specificity := Specificity + 1;
         exit(Specificity);
     end;
 

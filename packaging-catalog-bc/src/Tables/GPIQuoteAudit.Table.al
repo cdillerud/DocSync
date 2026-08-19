@@ -161,6 +161,18 @@ table 71008 "GPI Quote Audit"
         {
             Caption = 'Previous Quote Date';
         }
+        field(37; "Line Description"; Text[100])
+        {
+            Caption = 'Line Description';
+        }
+        field(38; "Previous Line Desc."; Text[100])
+        {
+            Caption = 'Previous Line Description';
+        }
+        field(39; "Quote Notes"; Text[250])
+        {
+            Caption = 'Quote Notes';
+        }
     }
 
     keys

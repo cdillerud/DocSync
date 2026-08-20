@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition" xmlns:rd="http://schemas.microsoft.com/SQLServer/reporting/reportdesigner">
+  <AutoRefresh>0</AutoRefresh>
+  <DataSources>
+    <DataSource Name="DataSource">
+      <ConnectionProperties>
+        <DataProvider>SQL</DataProvider>
+        <ConnectString />
+      </ConnectionProperties>
+      <rd:DataSourceID>2c423e55-c7c1-4ba2-b1cc-d792bbb8e241</rd:DataSourceID>
+    </DataSource>
+  </DataSources>
+  <DataSets>
+    <DataSet Name="DataSet_Result">
+      <Query>
+        <DataSourceName>DataSource</DataSourceName>
+        <CommandText />
+      </Query>
+      <Fields>
+        <Field Name="CompanyName"><DataField>CompanyName</DataField></Field>
+        <Field Name="CompanyAddress"><DataField>CompanyAddress</DataField></Field>
+        <Field Name="CompanyAddress2"><DataField>CompanyAddress2</DataField></Field>
+        <Field Name="CompanyCityStateZip"><DataField>CompanyCityStateZip</DataField></Field>
+        <Field Name="CompanyPhone"><DataField>CompanyPhone</DataField></Field>
+        <Field Name="CompanyEmail"><DataField>CompanyEmail</DataField></Field>
+        <Field Name="CompanyWeb"><DataField>CompanyWeb</DataField></Field>
+        <Field Name="QuoteNo"><DataField>QuoteNo</DataField></Field>
+        <Field Name="QuoteDate"><DataField>QuoteDate</DataField></Field>
+        <Field Name="ExpirationDate"><DataField>ExpirationDate</DataField></Field>
+        <Field Name="CustomerNo"><DataField>CustomerNo</DataField></Field>
+        <Field Name="CustomerName"><DataField>CustomerName</DataField></Field>
+        <Field Name="CustomerAddress"><DataField>CustomerAddress</DataField></Field>
+        <Field Name="CustomerAddress2"><DataField>CustomerAddress2</DataField></Field>
+        <Field Name="CustomerCityStateZip"><DataField>CustomerCityStateZip</DataField></Field>
+        <Field Name="QuoteDescription"><DataField>QuoteDescription</DataField></Field>
+        <Field Name="TotalSell"><DataField>TotalSell</DataField></Field>
+        <Field Name="LineNo"><DataField>LineNo</DataField></Field>
+        <Field Name="ProductNo"><DataField>ProductNo</DataField></Field>
+        <Field Name="BCItemNo"><DataField>BCItemNo</DataField></Field>
+        <Field Name="LineDescription"><DataField>LineDescription</DataField></Field>
+        <Field Name="Quantity"><DataField>Quantity</DataField></Field>
+        <Field Name="UOMCode"><DataField>UOMCode</DataField></Field>
+        <Field Name="UnitSellPrice"><DataField>UnitSellPrice</DataField></Field>
+        <Field Name="ExtendedSell"><DataField>ExtendedSell</DataField></Field>
+      </Fields>
+    </DataSet>
+  </DataSets>
+  <ReportSections>
+    <ReportSection>
+      <Body>
+        <ReportItems>
+          <Textbox Name="BrandName">
+            <CanGrow>true</CanGrow>
+            <KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CompanyName.Value, "DataSet_Result")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>18pt</FontSize><FontWeight>Bold</FontWeight><Color>#B5121B</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <rd:DefaultName>BrandName</rd:DefaultName>
+            <Top>0in</Top><Left>0in</Left><Height>0.32in</Height><Width>4.5in</Width><Style />
+          </Textbox>
+          <Textbox Name="QuoteTitle">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>PACKAGING QUOTE</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>16pt</FontSize><FontWeight>Bold</FontWeight><Color>#333333</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Top>0in</Top><Left>4.7in</Left><Height>0.32in</Height><Width>2.3in</Width><Style />
+          </Textbox>
+          <Textbox Name="CompanyAddressBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Trim(First(Fields!CompanyAddress.Value, "DataSet_Result") &amp; " " &amp; First(Fields!CompanyAddress2.Value, "DataSet_Result") &amp; " " &amp; First(Fields!CompanyCityStateZip.Value, "DataSet_Result"))</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><Color>#666666</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>0.35in</Top><Left>0in</Left><Height>0.22in</Height><Width>4.6in</Width><Style />
+          </Textbox>
+          <Textbox Name="CompanyContactBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Trim(First(Fields!CompanyPhone.Value, "DataSet_Result") &amp; "  " &amp; First(Fields!CompanyEmail.Value, "DataSet_Result") &amp; "  " &amp; First(Fields!CompanyWeb.Value, "DataSet_Result"))</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><Color>#666666</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>0.58in</Top><Left>0in</Left><Height>0.22in</Height><Width>6.9in</Width><Style />
+          </Textbox>
+          <Textbox Name="QuoteNumber">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Quote #: " &amp; CStr(First(Fields!QuoteNo.Value, "DataSet_Result"))</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>0.92in</Top><Left>4.7in</Left><Height>0.22in</Height><Width>2.3in</Width><Style />
+          </Textbox>
+          <Textbox Name="QuoteDateBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>="Quote Date: " &amp; Format(First(Fields!QuoteDate.Value, "DataSet_Result"), "MM/dd/yyyy")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>1.15in</Top><Left>4.7in</Left><Height>0.22in</Height><Width>2.3in</Width><Style />
+          </Textbox>
+          <Textbox Name="ExpirationBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=IIF(IsNothing(First(Fields!ExpirationDate.Value, "DataSet_Result")), "", "Valid Through: " &amp; Format(First(Fields!ExpirationDate.Value, "DataSet_Result"), "MM/dd/yyyy"))</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>1.38in</Top><Left>4.7in</Left><Height>0.22in</Height><Width>2.3in</Width><Style />
+          </Textbox>
+          <Textbox Name="QuoteForLabel">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>QUOTE FOR</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>#B5121B</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>0.92in</Top><Left>0in</Left><Height>0.2in</Height><Width>1.5in</Width><Style />
+          </Textbox>
+          <Textbox Name="CustomerNameBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!CustomerName.Value, "DataSet_Result")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>11pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>1.13in</Top><Left>0in</Left><Height>0.24in</Height><Width>4.2in</Width><Style />
+          </Textbox>
+          <Textbox Name="CustomerAddressBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Trim(First(Fields!CustomerAddress.Value, "DataSet_Result") &amp; " " &amp; First(Fields!CustomerAddress2.Value, "DataSet_Result") &amp; " " &amp; First(Fields!CustomerCityStateZip.Value, "DataSet_Result"))</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><Color>#555555</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>1.39in</Top><Left>0in</Left><Height>0.25in</Height><Width>4.3in</Width><Style />
+          </Textbox>
+          <Textbox Name="DescriptionBox">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=First(Fields!QuoteDescription.Value, "DataSet_Result")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><FontStyle>Italic</FontStyle><Color>#555555</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>1.72in</Top><Left>0in</Left><Height>0.25in</Height><Width>7in</Width><Style />
+          </Textbox>
+          <Tablix Name="QuoteLines">
+            <TablixBody>
+              <TablixColumns>
+                <TablixColumn><Width>0.95in</Width></TablixColumn>
+                <TablixColumn><Width>3.05in</Width></TablixColumn>
+                <TablixColumn><Width>0.75in</Width></TablixColumn>
+                <TablixColumn><Width>0.55in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+                <TablixColumn><Width>0.85in</Width></TablixColumn>
+              </TablixColumns>
+              <TablixRows>
+                <TablixRow>
+                  <Height>0.28in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="HItem"><Paragraphs><Paragraph><TextRuns><TextRun><Value>ITEM</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HDescription"><Paragraphs><Paragraph><TextRuns><TextRun><Value>DESCRIPTION / SPECIFICATIONS</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingLeft>4pt</PaddingLeft><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HQty"><Paragraphs><Paragraph><TextRuns><TextRun><Value>QTY</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingRight>4pt</PaddingRight><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HUOM"><Paragraphs><Paragraph><TextRuns><TextRun><Value>UOM</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HPrice"><Paragraphs><Paragraph><TextRuns><TextRun><Value>UNIT PRICE</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingRight>4pt</PaddingRight><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="HTotal"><Paragraphs><Paragraph><TextRuns><TextRun><Value>EXTENDED</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8pt</FontSize><FontWeight>Bold</FontWeight><Color>White</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><BackgroundColor>#B5121B</BackgroundColor><PaddingRight>4pt</PaddingRight><PaddingTop>3pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+                <TablixRow>
+                  <Height>0.42in</Height>
+                  <TablixCells>
+                    <TablixCell><CellContents><Textbox Name="DItem"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!BCItemNo.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingLeft>4pt</PaddingLeft><PaddingTop>4pt</PaddingTop><PaddingBottom>4pt</PaddingBottom></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DDescription"><CanGrow>true</CanGrow><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!LineDescription.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingLeft>4pt</PaddingLeft><PaddingTop>4pt</PaddingTop><PaddingBottom>4pt</PaddingBottom></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DQty"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!Quantity.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize><Format>#,##0.#####</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingRight>4pt</PaddingRight><PaddingTop>4pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DUOM"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UOMCode.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize></Style></TextRun></TextRuns><Style><TextAlign>Center</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingTop>4pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DPrice"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!UnitSellPrice.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize><Format>$#,##0.00</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingRight>4pt</PaddingRight><PaddingTop>4pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                    <TablixCell><CellContents><Textbox Name="DExtended"><Paragraphs><Paragraph><TextRuns><TextRun><Value>=Fields!ExtendedSell.Value</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>8.5pt</FontSize><Format>$#,##0.00</Format></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs><Style><Border><Style>Solid</Style><Color>#DDDDDD</Color></Border><PaddingRight>4pt</PaddingRight><PaddingTop>4pt</PaddingTop></Style></Textbox></CellContents></TablixCell>
+                  </TablixCells>
+                </TablixRow>
+              </TablixRows>
+            </TablixBody>
+            <TablixColumnHierarchy><TablixMembers><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /><TablixMember /></TablixMembers></TablixColumnHierarchy>
+            <TablixRowHierarchy><TablixMembers><TablixMember><KeepWithGroup>After</KeepWithGroup><RepeatOnNewPage>true</RepeatOnNewPage></TablixMember><TablixMember><Group Name="Details" /></TablixMember></TablixMembers></TablixRowHierarchy>
+            <DataSetName>DataSet_Result</DataSetName>
+            <Top>2.08in</Top><Left>0in</Left><Height>0.7in</Height><Width>7in</Width>
+            <Style />
+          </Tablix>
+          <Textbox Name="TotalLabel">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>QUOTE TOTAL</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>10pt</FontSize><FontWeight>Bold</FontWeight></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Top>2.92in</Top><Left>4.8in</Left><Height>0.26in</Height><Width>1.2in</Width><Style />
+          </Textbox>
+          <Textbox Name="TotalValue">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>=Sum(Fields!ExtendedSell.Value, "DataSet_Result")</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>11pt</FontSize><FontWeight>Bold</FontWeight><Format>$#,##0.00</Format><Color>#B5121B</Color></Style></TextRun></TextRuns><Style><TextAlign>Right</TextAlign></Style></Paragraph></Paragraphs>
+            <Top>2.92in</Top><Left>6.02in</Left><Height>0.26in</Height><Width>0.98in</Width><Style />
+          </Textbox>
+          <Textbox Name="ThankYou">
+            <CanGrow>true</CanGrow><KeepTogether>true</KeepTogether>
+            <Paragraphs><Paragraph><TextRuns><TextRun><Value>Thank you for the opportunity to quote your packaging requirements.</Value><Style><FontFamily>Segoe UI</FontFamily><FontSize>9pt</FontSize><FontStyle>Italic</FontStyle><Color>#555555</Color></Style></TextRun></TextRuns><Style /></Paragraph></Paragraphs>
+            <Top>3.35in</Top><Left>0in</Left><Height>0.28in</Height><Width>7in</Width><Style />
+          </Textbox>
+        </ReportItems>
+        <Height>3.75in</Height>
+        <Style />
+      </Body>
+      <Width>7in</Width>
+      <Page>
+        <PageHeight>11in</PageHeight>
+        <PageWidth>8.5in</PageWidth>
+        <LeftMargin>0.75in</LeftMargin>
+        <RightMargin>0.75in</RightMargin>
+        <TopMargin>0.6in</TopMargin>
+        <BottomMargin>0.6in</BottomMargin>
+        <Style />
+      </Page>
+    </ReportSection>
+  </ReportSections>
+  <rd:ReportUnitType>Inch</rd:ReportUnitType>
+  <rd:ReportID>9c91c2c1-17a4-4ea0-8198-9ec66d7f94e8</rd:ReportID>
+</Report>

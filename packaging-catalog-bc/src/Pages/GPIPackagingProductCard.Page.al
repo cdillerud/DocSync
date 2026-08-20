@@ -276,6 +276,23 @@ page 71000 "GPI Pack Prod Card"
                     Page.Run(Page::"GPI Pack Cost Calc", CostWork);
                 end;
             }
+            action(HistoricalCostEvidence)
+            {
+                ApplicationArea = All;
+                Caption = 'Historical Cost Evidence';
+                Image = History;
+                Promoted = true;
+                PromotedCategory = Process;
+
+                trigger OnAction()
+                var
+                    HistCostPage: Page "GPI Hist Cost Evid";
+                begin
+                    Rec.TestField("BC Item No.");
+                    HistCostPage.SetItemNo(Rec."BC Item No.");
+                    HistCostPage.RunModal();
+                end;
+            }
             action(NewSourcingComparison)
             {
                 ApplicationArea = All;

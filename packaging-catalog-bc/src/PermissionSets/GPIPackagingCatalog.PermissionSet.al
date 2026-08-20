@@ -12,6 +12,7 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "Sales Invoice Line" = R,
         tabledata "Value Entry" = R,
         tabledata "GPI Pack Product" = RIMD,
+        tabledata "GPI Pack Product Doc" = RIMD,
         tabledata "GPI Pack Vendor Loc" = RIMD,
         tabledata "GPI Pack Price Hist" = R,
         tabledata "GPI Pack Frt Rate" = RIMD,
@@ -27,6 +28,7 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Item Field Meta" = RIMD,
         tabledata "GPI Item Field Stat" = RIMD,
         tabledata "GPI Hist Cost Buf" = RIMD,
+        table "GPI Pack Product Doc" = X,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
         table "GPI Pack Quote Line" = X,
@@ -41,6 +43,8 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Prod Fact" = X,
+        page "GPI Pack Doc Part" = X,
+        page "GPI Pack Doc List" = X,
         page "GPI Pack Vendor Locs" = X,
         page "GPI Pack Price Hist" = X,
         page "GPI Pack Frt Rates" = X,
@@ -84,5 +88,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Item Disc Mgt" = X,
         codeunit "GPI Pack Flow Mgt" = X,
         codeunit "GPI Pack UOM Mgt" = X,
-        codeunit "GPI Hist Cost Mgt" = X;
+        codeunit "GPI Hist Cost Mgt" = X,
+        codeunit "GPI Pack Doc Mgt" = X;
 }

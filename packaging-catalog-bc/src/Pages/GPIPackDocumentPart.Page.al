@@ -5,7 +5,7 @@ page 71101 "GPI Pack Doc Part"
     SourceTableView = sorting("Product No.", "Document Type", "Entry No.");
     ApplicationArea = All;
     Caption = 'Product Documents';
-    DelayedInsert = true;
+    InsertAllowed = false;
 
     layout
     {

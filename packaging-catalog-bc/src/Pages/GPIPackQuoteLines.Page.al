@@ -206,6 +206,7 @@ page 71011 "GPI Pack Quote Lines"
                 ApplicationArea = All;
                 Caption = 'Evaluate Guardrail';
                 Image = Calculate;
+                Enabled = LineEvaluationEnabled;
 
                 trigger OnAction()
                 var
@@ -213,8 +214,8 @@ page 71011 "GPI Pack Quote Lines"
                     QuoteMgt: Codeunit "GPI Pack Quote Mgt";
                 begin
                     if QuoteHeader.Get(Rec."Quote Entry No.") then
-                        if QuoteHeader.Status in ["GPI Pack Quote Stat"::Approved, "GPI Pack Quote Stat"::Rejected, "GPI Pack Quote Stat"::Expired] then
-                            Error('Reopen the quote to Draft before evaluating a decided quote line.');
+                        if QuoteHeader.Status <> "GPI Pack Quote Stat"::Draft then
+                            Error('Reopen the quote to Draft before evaluating a quote line.');
 
                     CurrPage.SaveRecord();
                     QuoteMgt.EvaluateLine(Rec);
@@ -251,6 +252,30 @@ page 71011 "GPI Pack Quote Lines"
         }
     }
 
+    trigger OnAfterGetRecord()
+    begin
+        UpdateLineEvaluationEnabled();
+    end;
+
+    trigger OnAfterGetCurrRecord()
+    begin
+        UpdateLineEvaluationEnabled();
+    end;
+
     var
         ShowReviewDetails: Boolean;
+        LineEvaluationEnabled: Boolean;
+
+    local procedure UpdateLineEvaluationEnabled()
+    var
+        QuoteHeader: Record "GPI Pack Quote";
+    begin
+        LineEvaluationEnabled := false;
+        if Rec."Quote Entry No." = 0 then
+            exit;
+        if not QuoteHeader.Get(Rec."Quote Entry No.") then
+            exit;
+
+        LineEvaluationEnabled := QuoteHeader.Status = "GPI Pack Quote Stat"::Draft;
+    end;
 }

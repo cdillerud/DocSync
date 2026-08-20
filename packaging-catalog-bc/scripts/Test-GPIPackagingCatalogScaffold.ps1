@@ -42,7 +42,7 @@ if ($Launch.environmentName -ne 'Sandbox_NoZetadocs_UAT') {
 }
 
 # Keep this list aligned with every numbered AL object type used by this app.
-$ObjectPattern = '^\s*(table|page|codeunit|enum|permissionset|query)\s+(\d+)\s+"([^\"]+)"'
+$ObjectPattern = '^\s*(table|page|pageextension|codeunit|enum|permissionset|query)\s+(\d+)\s+"([^\"]+)"'
 $Seen = @{}
 $Objects = @()
 

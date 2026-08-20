@@ -1,4 +1,4 @@
-pageextension 71101 "GPI Pack Prod Docs" extends "GPI Pack Prod Card"
+pageextension 71102 "GPI Pack Prod Docs" extends "GPI Pack Prod Card"
 {
     layout
     {

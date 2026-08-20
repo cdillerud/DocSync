@@ -26,6 +26,7 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Route Cache" = RIMD,
         tabledata "GPI Item Field Meta" = RIMD,
         tabledata "GPI Item Field Stat" = RIMD,
+        tabledata "GPI Hist Cost Buf" = RIMD,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
         table "GPI Pack Quote Line" = X,
@@ -36,6 +37,7 @@ permissionset 71000 "GPI PACK CATALOG"
         table "GPI Route Cache" = X,
         table "GPI Item Field Meta" = X,
         table "GPI Item Field Stat" = X,
+        table "GPI Hist Cost Buf" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Prod Fact" = X,
@@ -68,6 +70,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI BC Item API" = X,
         page "GPI Item Field API" = X,
         page "GPI Item Stat API" = X,
+        page "GPI Hist Cost Evid" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         query "GPI Item Cost Evid" = X,
@@ -80,5 +83,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Pack Route Mgt" = X,
         codeunit "GPI Item Disc Mgt" = X,
         codeunit "GPI Pack Flow Mgt" = X,
-        codeunit "GPI Pack UOM Mgt" = X;
+        codeunit "GPI Pack UOM Mgt" = X,
+        codeunit "GPI Hist Cost Mgt" = X;
 }

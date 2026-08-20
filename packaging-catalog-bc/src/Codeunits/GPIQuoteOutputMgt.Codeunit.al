@@ -12,12 +12,22 @@ codeunit 71103 "GPI Quote Output Mgt"
 
     procedure DownloadCustomerQuotePdf(QuoteHeader: Record "GPI Pack Quote")
     var
-        QuoteToPrint: Record "GPI Pack Quote";
         TempBlob: Codeunit "Temp Blob";
-        RecRef: RecordRef;
-        OutStr: OutStream;
         InStr: InStream;
         FileName: Text;
+    begin
+        CreateCustomerQuotePdf(QuoteHeader, TempBlob, FileName);
+        TempBlob.CreateInStream(InStr);
+
+        if not DownloadFromStream(InStr, '', '', '', FileName) then
+            Error('The customer quote PDF could not be downloaded.');
+    end;
+
+    procedure CreateCustomerQuotePdf(QuoteHeader: Record "GPI Pack Quote"; var TempBlob: Codeunit "Temp Blob"; var FileName: Text)
+    var
+        QuoteToPrint: Record "GPI Pack Quote";
+        RecRef: RecordRef;
+        OutStr: OutStream;
     begin
         EnsureApproved(QuoteHeader);
 
@@ -25,13 +35,10 @@ codeunit 71103 "GPI Quote Output Mgt"
         QuoteToPrint.SetRecFilter();
         RecRef.GetTable(QuoteToPrint);
 
+        Clear(TempBlob);
         TempBlob.CreateOutStream(OutStr);
         Report.SaveAs(Report::"GPI Pack Quote Rpt", '', ReportFormat::Pdf, OutStr, RecRef);
-        TempBlob.CreateInStream(InStr);
-
         FileName := StrSubstNo('Gamer-Packaging-Quote-%1.pdf', QuoteHeader."Entry No.");
-        if not DownloadFromStream(InStr, '', '', '', FileName) then
-            Error('The customer quote PDF could not be downloaded.');
     end;
 
     local procedure EnsureApproved(QuoteHeader: Record "GPI Pack Quote")

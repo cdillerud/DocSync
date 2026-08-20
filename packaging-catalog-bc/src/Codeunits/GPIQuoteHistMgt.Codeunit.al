@@ -131,45 +131,54 @@ codeunit 71004 "GPI Quote Hist Mgt"
         RecentLineNos: array[5] of Integer;
         RecentPrices: array[5] of Decimal;
         RecentCount: Integer;
+        CurrentDocumentNo: Code[20];
+        HeaderMatches: Boolean;
     begin
         TotalLines := 0;
         RecentMedian := 0;
         LatestPostingDate := 0D;
+        CurrentDocumentNo := '';
+        HeaderMatches := false;
 
-        SalesHeader.Reset();
-        if CustomerNo <> '' then
-            SalesHeader.SetRange("Sell-to Customer No.", CustomerNo);
-        if AsOfDate <> 0D then
-            SalesHeader.SetFilter("Posting Date", '..%1', AsOfDate);
+        SalesLine.Reset();
+        SalesLine.SetRange(Type, SalesLine.Type::Item);
+        SalesLine.SetRange("No.", ItemNo);
+        SalesLine.SetRange("Unit of Measure Code", UOMCode);
+        SalesLine.SetFilter(Quantity, '>0');
+        SalesLine.SetFilter("Unit Price", '>0');
 
-        if SalesHeader.FindSet() then
+        if SalesLine.FindSet() then
             repeat
-                SalesLine.Reset();
-                SalesLine.SetRange("Document No.", SalesHeader."No.");
-                SalesLine.SetRange(Type, SalesLine.Type::Item);
-                SalesLine.SetRange("No.", ItemNo);
-                SalesLine.SetRange("Unit of Measure Code", UOMCode);
-                SalesLine.SetFilter(Quantity, '>0');
-                SalesLine.SetFilter("Unit Price", '>0');
+                if SalesLine."Document No." <> CurrentDocumentNo then begin
+                    CurrentDocumentNo := SalesLine."Document No.";
+                    HeaderMatches := false;
 
-                if SalesLine.FindSet() then
-                    repeat
-                        TotalLines := TotalLines + 1;
-                        if SalesHeader."Posting Date" > LatestPostingDate then
-                            LatestPostingDate := SalesHeader."Posting Date";
+                    if SalesHeader.Get(CurrentDocumentNo) then begin
+                        HeaderMatches := true;
+                        if (CustomerNo <> '') and (SalesHeader."Sell-to Customer No." <> CustomerNo) then
+                            HeaderMatches := false;
+                        if (AsOfDate <> 0D) and (SalesHeader."Posting Date" > AsOfDate) then
+                            HeaderMatches := false;
+                    end;
+                end;
 
-                        AddRecentPrice(
-                            RecentDates,
-                            RecentDocs,
-                            RecentLineNos,
-                            RecentPrices,
-                            RecentCount,
-                            SalesHeader."Posting Date",
-                            SalesHeader."No.",
-                            SalesLine."Line No.",
-                            SalesLine."Unit Price");
-                    until SalesLine.Next() = 0;
-            until SalesHeader.Next() = 0;
+                if HeaderMatches then begin
+                    TotalLines := TotalLines + 1;
+                    if SalesHeader."Posting Date" > LatestPostingDate then
+                        LatestPostingDate := SalesHeader."Posting Date";
+
+                    AddRecentPrice(
+                        RecentDates,
+                        RecentDocs,
+                        RecentLineNos,
+                        RecentPrices,
+                        RecentCount,
+                        SalesHeader."Posting Date",
+                        SalesHeader."No.",
+                        SalesLine."Line No.",
+                        SalesLine."Unit Price");
+                end;
+            until SalesLine.Next() = 0;
 
         RecentMedian := CalculateMedian(RecentPrices, RecentCount);
     end;

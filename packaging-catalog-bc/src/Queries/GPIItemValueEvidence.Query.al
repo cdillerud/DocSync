@@ -1,4 +1,4 @@
-query 71002 "GPI Item Value Evidence"
+query 71002 "GPI Item Cost Evid"
 {
     QueryType = API;
     APIPublisher = 'gpi';

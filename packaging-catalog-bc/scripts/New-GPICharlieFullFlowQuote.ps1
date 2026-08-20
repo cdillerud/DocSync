@@ -309,7 +309,13 @@ try {
         }) | Out-Null
     }
 
-    $latestEvidence = @($evidenceGroups | Sort-Object PostingDate -Descending, ItemLedgerEntryNo -Descending | Select-Object -First 1)[0]
+    $latestEvidence = @(
+        $evidenceGroups |
+            Sort-Object `
+                @{ Expression = { [datetime]$_.PostingDate }; Descending = $true }, `
+                @{ Expression = { [int]$_.ItemLedgerEntryNo }; Descending = $true } |
+            Select-Object -First 1
+    )[0]
     if (-not $latestEvidence) {
         throw "Historical landed-cost evidence could not be reconstructed for $BCItemNo."
     }

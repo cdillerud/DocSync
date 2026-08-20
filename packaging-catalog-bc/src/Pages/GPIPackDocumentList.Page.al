@@ -6,7 +6,7 @@ page 71102 "GPI Pack Doc List"
     ApplicationArea = All;
     UsageCategory = Lists;
     Caption = 'Packaging Product Documents';
-    DelayedInsert = true;
+    InsertAllowed = false;
 
     layout
     {
@@ -17,6 +17,7 @@ page 71102 "GPI Pack Doc List"
                 field("Product No."; Rec."Product No.")
                 {
                     ApplicationArea = All;
+                    Editable = false;
                     ToolTip = 'Specifies the packaging product associated with the document.';
                 }
                 field("Document Type"; Rec."Document Type")

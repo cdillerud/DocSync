@@ -42,6 +42,32 @@ function Invoke-BcGetAll {
     return @($rows)
 }
 
+function Get-DecimalSum {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Rows,
+        [Parameter(Mandatory)][string]$PropertyName
+    )
+
+    [decimal]$total = 0
+    foreach ($row in @($Rows)) {
+        if ($null -eq $row) {
+            continue
+        }
+
+        $property = $row.PSObject.Properties[$PropertyName]
+        if ($null -eq $property -or $null -eq $property.Value) {
+            continue
+        }
+
+        [decimal]$value = 0
+        if ([decimal]::TryParse([string]$property.Value, [ref]$value)) {
+            $total += $value
+        }
+    }
+
+    return $total
+}
+
 Write-Host ""
 Write-Host "GPI POSTED ITEM COST EVIDENCE" -ForegroundColor Cyan
 Write-Host "Environment : $EnvironmentName"
@@ -108,16 +134,46 @@ if ($rows.Count -eq 0) {
     exit 0
 }
 
-$positiveRows = @(
+$itemChargeRows = @(
     $rows | Where-Object {
-        ([decimal]$_.invoicedQuantity -gt 0) -or
-        ([decimal]$_.valuedQuantity -gt 0) -or
-        (([decimal]$_.costAmountActual -gt 0) -and -not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo))
+        -not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo)
     }
 )
 
-Write-Host "LATEST POSITIVE / ITEM-CHARGE VALUE ENTRIES" -ForegroundColor Cyan
-$positiveRows |
+$inboundRows = @(
+    $rows | Where-Object {
+        ([decimal]$_.invoicedQuantity -gt 0) -or
+        ([decimal]$_.valuedQuantity -gt 0) -or
+        (-not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo))
+    }
+)
+
+Write-Host "ITEM-CHARGE VALUE ENTRIES" -ForegroundColor Cyan
+Write-Host "Item-charge rows: $($itemChargeRows.Count)"
+if ($itemChargeRows.Count -gt 0) {
+    $itemChargeRows |
+        Sort-Object @{ Expression = { [datetime]$_.postingDate }; Descending = $true }, @{ Expression = { [int]$_.entryNo }; Descending = $true } |
+        Select-Object -First 50 `
+            postingDate,
+            documentNo,
+            documentLineNo,
+            itemLedgerEntryNo,
+            itemChargeNo,
+            valuedQuantity,
+            invoicedQuantity,
+            costPerUnit,
+            costAmountActual,
+            costAmountExpected,
+            purchaseAmountActual |
+        Format-Table -AutoSize
+}
+else {
+    Write-Host "No Value Entry row for $ItemNo has an Item Charge No." -ForegroundColor Yellow
+}
+
+Write-Host ""
+Write-Host "LATEST INBOUND / COST VALUE ENTRIES" -ForegroundColor Cyan
+$inboundRows |
     Sort-Object @{ Expression = { [datetime]$_.postingDate }; Descending = $true }, @{ Expression = { [int]$_.entryNo }; Descending = $true } |
     Select-Object -First 50 `
         postingDate,
@@ -134,7 +190,7 @@ $positiveRows |
     Format-Table -AutoSize
 
 $groups = @(
-    $positiveRows |
+    $inboundRows |
         Group-Object itemLedgerEntryNo |
         ForEach-Object {
             $groupRows = @($_.Group)
@@ -152,18 +208,26 @@ $groups = @(
                 )
             }
 
-            $quantity = if ($qtyCandidates.Count -gt 0) { [decimal](($qtyCandidates | Measure-Object -Maximum).Maximum) } else { [decimal]0 }
-            $directActual = [decimal](($groupRows | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo) } | Measure-Object -Property costAmountActual -Sum).Sum)
-            $chargeActual = [decimal](($groupRows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo) } | Measure-Object -Property costAmountActual -Sum).Sum)
-            $expected = [decimal](($groupRows | Measure-Object -Property costAmountExpected -Sum).Sum)
+            $quantity = if ($qtyCandidates.Count -gt 0) {
+                [decimal](($qtyCandidates | Measure-Object -Maximum).Maximum)
+            }
+            else {
+                [decimal]0
+            }
+
+            $directRows = @($groupRows | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo) })
+            $chargeRows = @($groupRows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo) })
+
+            $directActual = Get-DecimalSum -Rows $directRows -PropertyName 'costAmountActual'
+            $chargeActual = Get-DecimalSum -Rows $chargeRows -PropertyName 'costAmountActual'
+            $expected = Get-DecimalSum -Rows $groupRows -PropertyName 'costAmountExpected'
             $totalActual = $directActual + $chargeActual
-            $chargeCodes = @($groupRows | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.itemChargeNo) } | ForEach-Object { [string]$_.itemChargeNo } | Sort-Object -Unique)
-            $postingDate = @($groupRows | Sort-Object @{ Expression = { [datetime]$_.postingDate }; Descending = $true } | Select-Object -First 1)[0].postingDate
-            $documentNo = @($groupRows | Sort-Object @{ Expression = { [datetime]$_.postingDate }; Descending = $true } | Select-Object -First 1)[0].documentNo
+            $chargeCodes = @($chargeRows | ForEach-Object { [string]$_.itemChargeNo } | Sort-Object -Unique)
+            $latestRow = @($groupRows | Sort-Object @{ Expression = { [datetime]$_.postingDate }; Descending = $true }, @{ Expression = { [int]$_.entryNo }; Descending = $true } | Select-Object -First 1)[0]
 
             [pscustomobject]@{
-                PostingDate = $postingDate
-                DocumentNo = $documentNo
+                PostingDate = $latestRow.postingDate
+                DocumentNo = $latestRow.documentNo
                 ItemLedgerEntryNo = [int]$_.Name
                 Quantity = $quantity
                 DirectActual = $directActual
@@ -188,19 +252,25 @@ Write-Host ""
 Write-Host "LANDED-COST EVIDENCE SUMMARY" -ForegroundColor Cyan
 if ($withCharges.Count -gt 0) {
     $latest = $withCharges | Select-Object -First 1
-    Write-Host "Posted entries with item charges : $($withCharges.Count)"
-    Write-Host "Latest charged document          : $($latest.DocumentNo)"
-    Write-Host "Latest direct actual cost        : $($latest.DirectActual)"
-    Write-Host "Latest item-charge actual cost   : $($latest.ItemChargeActual)"
-    Write-Host "Latest total actual cost         : $($latest.TotalActual)"
-    Write-Host "Latest actual cost / EA          : $($latest.ActualCostPerEA)"
-    Write-Host "Latest actual cost / M           : $([decimal][math]::Round([double]($latest.ActualCostPerEA * 1000), 5))"
-    Write-Host "Item charge codes                : $($latest.ItemChargeCodes)"
+    Write-Host "Recent grouped entries with charges : $($withCharges.Count)"
+    Write-Host "Latest charged document             : $($latest.DocumentNo)"
+    Write-Host "Latest Item Ledger Entry            : $($latest.ItemLedgerEntryNo)"
+    Write-Host "Latest quantity                     : $($latest.Quantity) EA"
+    Write-Host "Latest direct actual cost           : $($latest.DirectActual)"
+    Write-Host "Latest item-charge actual cost      : $($latest.ItemChargeActual)"
+    Write-Host "Latest total actual cost            : $($latest.TotalActual)"
+    Write-Host "Latest actual cost / EA             : $($latest.ActualCostPerEA)"
+    Write-Host "Latest actual cost / M              : $([decimal][math]::Round([double]($latest.ActualCostPerEA * 1000), 5))"
+    Write-Host "Item charge codes                   : $($latest.ItemChargeCodes)"
     Write-Host ""
     Write-Host "This gives us posted Business Central evidence for costs beyond the supplier product line." -ForegroundColor Green
 }
+elseif ($itemChargeRows.Count -gt 0) {
+    Write-Host "Item-charge Value Entries exist, but none appeared in the most recent $MaxGroups inbound groups." -ForegroundColor Yellow
+    Write-Host "The item-charge table above is still authoritative evidence and can be inspected before choosing a demo receipt." -ForegroundColor Yellow
+}
 else {
-    Write-Host "No positive posted item-charge cost was found in the recent Value Entry groups for $ItemNo." -ForegroundColor Yellow
+    Write-Host "No posted Item Charge No. was found on Value Entries for $ItemNo." -ForegroundColor Yellow
     Write-Host "Do not manufacture a freight amount for the demo. We need another authoritative freight source or a clearly labeled UAT-only illustrative rate." -ForegroundColor Yellow
 }
 

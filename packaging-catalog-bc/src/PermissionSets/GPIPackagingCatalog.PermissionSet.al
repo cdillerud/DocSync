@@ -91,5 +91,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Pack UOM Mgt" = X,
         codeunit "GPI Hist Cost Mgt" = X,
         codeunit "GPI Pack Doc Mgt" = X,
-        codeunit "GPI Quote Output Mgt" = X;
+        codeunit "GPI Quote Output Mgt" = X,
+        codeunit "GPI Quote Email Mgt" = X;
 }

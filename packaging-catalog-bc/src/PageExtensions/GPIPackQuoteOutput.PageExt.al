@@ -41,6 +41,24 @@ pageextension 71103 "GPI Quote Output" extends "GPI Pack Quote Card"
                     OutputMgt.DownloadCustomerQuotePdf(Rec);
                 end;
             }
+            action(EmailCustomerQuote)
+            {
+                ApplicationArea = All;
+                Caption = 'Email Customer Quote';
+                Image = Email;
+                Enabled = Rec.Status = "GPI Pack Quote Stat"::Approved;
+                Promoted = true;
+                PromotedCategory = Report;
+                ToolTip = 'Prepares an email to the customer with the approved packaging quote PDF attached for review before sending.';
+
+                trigger OnAction()
+                var
+                    EmailMgt: Codeunit "GPI Quote Email Mgt";
+                begin
+                    CurrPage.SaveRecord();
+                    EmailMgt.PrepareCustomerQuoteEmail(Rec);
+                end;
+            }
         }
     }
 }

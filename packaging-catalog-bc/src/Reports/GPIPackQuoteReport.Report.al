@@ -98,12 +98,12 @@ report 71103 "GPI Pack Quote Rpt"
         Clear(Product);
 
         if Product.Get(QuoteLineRec."Product No.") then begin
-            AddSpec(ProductSpec, Product.Material);
+            AddSpecUnique(ProductSpec, Product.Material, QuoteLineRec.Description);
             if Product.Capacity <> 0 then
-                AddSpec(ProductSpec, StrSubstNo('%1 %2', Product.Capacity, Product."Capacity UOM"));
-            AddSpec(ProductSpec, Product.Style);
-            AddSpec(ProductSpec, Product.Color);
-            AddSpec(ProductSpec, Product.Finish);
+                AddSpecUnique(ProductSpec, StrSubstNo('%1 %2', Product.Capacity, Product."Capacity UOM"), QuoteLineRec.Description);
+            AddSpecUnique(ProductSpec, Product.Style, QuoteLineRec.Description);
+            AddSpecUnique(ProductSpec, Product.Color, QuoteLineRec.Description);
+            AddSpecUnique(ProductSpec, Product.Finish, QuoteLineRec.Description);
         end;
 
         if ProductSpec <> '' then begin
@@ -114,15 +114,50 @@ report 71103 "GPI Pack Quote Rpt"
         end;
     end;
 
-    local procedure AddSpec(var SpecText: Text[250]; Value: Text)
+    local procedure AddSpecUnique(var SpecText: Text[250]; Value: Text; BaseDescription: Text)
     begin
         if Value = '' then
+            exit;
+
+        if SameText(Value, BaseDescription) then
+            exit;
+
+        if SpecContainsValue(SpecText, Value) then
             exit;
 
         if SpecText = '' then
             SpecText := CopyStr(Value, 1, MaxStrLen(SpecText))
         else
             SpecText := CopyStr(SpecText + ' | ' + Value, 1, MaxStrLen(SpecText));
+    end;
+
+    local procedure SameText(LeftValue: Text; RightValue: Text): Boolean
+    begin
+        exit(LowerCase(DelChr(LeftValue, '<>', ' ')) = LowerCase(DelChr(RightValue, '<>', ' ')));
+    end;
+
+    local procedure SpecContainsValue(SpecText: Text; Value: Text): Boolean
+    var
+        Candidate: Text;
+        Remaining: Text;
+        SeparatorPos: Integer;
+    begin
+        Remaining := SpecText;
+        while Remaining <> '' do begin
+            SeparatorPos := StrPos(Remaining, ' | ');
+            if SeparatorPos = 0 then begin
+                Candidate := Remaining;
+                Remaining := '';
+            end else begin
+                Candidate := CopyStr(Remaining, 1, SeparatorPos - 1);
+                Remaining := CopyStr(Remaining, SeparatorPos + 3);
+            end;
+
+            if SameText(Candidate, Value) then
+                exit(true);
+        end;
+
+        exit(false);
     end;
 
     local procedure BuildCityStateZip(City: Text; StateCode: Text; PostCode: Text): Text[100]

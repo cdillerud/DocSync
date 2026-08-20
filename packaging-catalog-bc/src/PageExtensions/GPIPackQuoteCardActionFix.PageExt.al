@@ -14,6 +14,7 @@ pageextension 71190 "GPI Quote Action Fix" extends "GPI Pack Quote Card"
                 ApplicationArea = All;
                 Caption = 'Run Guardrail Evaluation';
                 Image = Calculate;
+                Enabled = Rec.Status = "GPI Pack Quote Stat"::Draft;
                 Promoted = true;
                 PromotedCategory = Process;
                 PromotedIsBig = true;

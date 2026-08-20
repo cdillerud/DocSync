@@ -33,6 +33,23 @@ pageextension 71102 "GPI Pack Prod Docs" extends "GPI Pack Prod Card"
     {
         addlast(Processing)
         {
+            action(UploadProductDocument)
+            {
+                ApplicationArea = All;
+                Caption = 'Upload Product Document';
+                Image = Import;
+                Promoted = true;
+                PromotedCategory = Process;
+
+                trigger OnAction()
+                var
+                    DocMgt: Codeunit "GPI Pack Doc Mgt";
+                begin
+                    Rec.TestField("No.");
+                    if DocMgt.UploadDocument(Rec."No.") then
+                        CurrPage.Update(false);
+                end;
+            }
             action(OpenProductDocuments)
             {
                 ApplicationArea = All;

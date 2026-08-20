@@ -49,21 +49,6 @@ page 71101 "GPI Pack Doc Part"
     {
         area(Processing)
         {
-            action(UploadFile)
-            {
-                ApplicationArea = All;
-                Caption = 'Upload File';
-
-                trigger OnAction()
-                var
-                    DocMgt: Codeunit "GPI Pack Doc Mgt";
-                    ProductNo: Code[20];
-                begin
-                    ProductNo := DocMgt.GetProductNoFromFilter(Rec);
-                    if DocMgt.UploadDocument(ProductNo) then
-                        CurrPage.Update(false);
-                end;
-            }
             action(DownloadFile)
             {
                 ApplicationArea = All;

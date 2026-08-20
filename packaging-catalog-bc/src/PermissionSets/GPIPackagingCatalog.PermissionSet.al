@@ -75,6 +75,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Item Field API" = X,
         page "GPI Item Stat API" = X,
         page "GPI Hist Cost Evid" = X,
+        report "GPI Pack Quote Rpt" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
         query "GPI Item Cost Evid" = X,
@@ -89,5 +90,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Pack Flow Mgt" = X,
         codeunit "GPI Pack UOM Mgt" = X,
         codeunit "GPI Hist Cost Mgt" = X,
-        codeunit "GPI Pack Doc Mgt" = X;
+        codeunit "GPI Pack Doc Mgt" = X,
+        codeunit "GPI Quote Output Mgt" = X;
 }

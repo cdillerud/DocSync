@@ -3,13 +3,13 @@ param(
     [string]$TokenStorePath = "$env:LOCALAPPDATA\GPI\SpiroOAuth\spiro-oauth-uat.clixml",
     [string]$ClientId = "",
     [string]$RedirectUri = "",
+    [switch]$UseStoredClientSecret,
     [int]$TimeoutSeconds = 30
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$AuthorizeUrl = 'https://engine.spiro.ai/oauth/authorize'
 $TokenUrl = 'https://engine.spiro.ai/oauth/token'
 $ApiTestUrl = 'https://api.spiro.ai/api/v1/companies?page[number]=1&page[size]=1'
 
@@ -156,13 +156,20 @@ if ([string]::IsNullOrWhiteSpace($resolvedRedirectUri)) {
     throw 'The exact redirect URI is required. It must match the value configured in Spiro.'
 }
 
-$secretValue = Get-PropertyValue -Object $root -Names @('ClientSecret','client_secret','SpiroClientSecret')
-$resolvedClientSecret = Convert-SecretToText -Value $secretValue
-if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
-    $resolvedClientSecret = [string]$env:SPIRO_CLIENT_SECRET
+$resolvedClientSecret = ''
+if ($UseStoredClientSecret) {
+    $secretValue = Get-PropertyValue -Object $root -Names @('ClientSecret','client_secret','SpiroClientSecret')
+    $resolvedClientSecret = Convert-SecretToText -Value $secretValue
+    if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
+        $resolvedClientSecret = [string]$env:SPIRO_CLIENT_SECRET
+    }
 }
+
 if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
-    $secureSecret = Read-Host 'Spiro OAuth client secret' -AsSecureString
+    Write-Host ''
+    Write-Host 'Enter the CURRENT client secret shown for this exact authorization in Spiro.' -ForegroundColor Yellow
+    Write-Host 'The previous stored secret was rejected with invalid_client, so it is not trusted by default.' -ForegroundColor Yellow
+    $secureSecret = Read-Host 'Current Spiro OAuth client secret' -AsSecureString
     $resolvedClientSecret = Convert-SecretToText -Value $secureSecret
 }
 if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
@@ -172,21 +179,15 @@ if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
 Write-Host "Token store  : $TokenStorePath"
 Write-Host "Client ID    : $resolvedClientId"
 Write-Host "Redirect URI : $resolvedRedirectUri"
-Write-Host 'Client secret: present, not displayed'
-
-$authUri = $AuthorizeUrl +
-    '?client_id=' + [uri]::EscapeDataString($resolvedClientId) +
-    '&redirect_uri=' + [uri]::EscapeDataString($resolvedRedirectUri) +
-    '&response_type=code'
+Write-Host 'Client secret: current value supplied, not displayed'
 
 Write-Section 'AUTHORIZE IN SPIRO'
-Write-Host 'A browser window will open to Spiro authorization.'
-Write-Host 'Authorize the application. When redirected, copy either:'
+Write-Host 'Do not use a hand-built engine.spiro.ai authorization URL.' -ForegroundColor Yellow
+Write-Host 'In Spiro, open Settings > API Tokens, find this exact Client ID, and click Authorize.'
+Write-Host 'Complete authorization, then copy either:'
 Write-Host '  1. the complete redirected URL, or'
 Write-Host '  2. only the code query-string value.'
 Write-Host ''
-
-Start-Process $authUri
 
 $redirectResult = Read-Host 'Paste the redirected URL or authorization code'
 $authorizationCode = Get-CodeFromInput -InputText $redirectResult
@@ -210,8 +211,14 @@ try {
         } | ConvertTo-Json -Compress) `
         -TimeoutSec $TimeoutSeconds
 }
+catch {
+    $message = $_.Exception.Message
+    if ($message -match 'invalid_client') {
+        throw 'Spiro rejected the client credentials. Verify that the Client ID and client secret come from the SAME API Token authorization in Spiro, then click Authorize again to obtain a new code.'
+    }
+    throw
+}
 finally {
-    $resolvedClientSecret = $null
     $authorizationCode = $null
     $redirectResult = $null
 }
@@ -238,9 +245,11 @@ Set-PropertyValue -Object $container -Aliases @('AccessToken','access_token','ac
 Set-PropertyValue -Object $container -Aliases @('RefreshToken','refresh_token','refreshToken') -PreferredName 'RefreshToken' -Value $refreshToken -Secure
 Set-PropertyValue -Object $container -Aliases @('ExpiresAtUtc','expires_at','ExpiresAt','ExpirationUtc') -PreferredName 'ExpiresAtUtc' -Value $expiresAtUtc
 Set-PropertyValue -Object $root -Aliases @('ClientId','client_id','SpiroClientId') -PreferredName 'ClientId' -Value $resolvedClientId
+Set-PropertyValue -Object $root -Aliases @('ClientSecret','client_secret','SpiroClientSecret') -PreferredName 'ClientSecret' -Value $resolvedClientSecret -Secure
 Set-PropertyValue -Object $root -Aliases @('RedirectUri','redirect_uri','SpiroRedirectUri') -PreferredName 'RedirectUri' -Value $resolvedRedirectUri
 
 $root | Export-Clixml -LiteralPath $TokenStorePath -Force
+$resolvedClientSecret = $null
 
 Write-Host 'OAuth exchange succeeded.' -ForegroundColor Green
 Write-Host "Protected token store updated: $TokenStorePath"

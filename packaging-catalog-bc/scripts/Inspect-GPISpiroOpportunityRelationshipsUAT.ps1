@@ -272,7 +272,7 @@ foreach ($rel in @($companyRel, $stageRel, $pipelineRel, $userRel)) {
 }
 
 Write-Section 'INCLUDE PROBE'
-$includePath = "opportunities/$OpportunityId?include=opportunity_stage,user,pipeline,company"
+$includePath = "opportunities/${OpportunityId}?include=opportunity_stage,user,pipeline,company"
 $includeResult = Invoke-SpiroGetSafe -RelativePath $includePath -Headers $headers
 Write-Host "GET $includePath"
 Write-Host "Success : $($includeResult.Success)"

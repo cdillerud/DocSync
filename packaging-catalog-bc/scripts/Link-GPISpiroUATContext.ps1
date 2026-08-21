@@ -12,7 +12,7 @@ param(
     [string]$SpiroClientId = "",
     [switch]$Apply,
     [int]$PageSize = 100,
-    [int]$MaxPages = 100,
+    [int]$MaxPages = 500,
     [int]$TimeoutSeconds = 30
 )
 
@@ -341,7 +341,7 @@ function Get-SpiroAllRecords {
     $rows = [System.Collections.Generic.List[object]]::new()
 
     for ($page = 1; $page -le $MaxPages; $page++) {
-        $uri = "$SpiroApiBase/$Resource?page[number]=$page&page[size]=$PageSize"
+        $uri = "$SpiroApiBase/${Resource}?page%5Bnumber%5D=$page&page%5Bsize%5D=$PageSize"
         $response = Invoke-SpiroGet -Uri $uri -AccessToken $AccessToken
 
         $data = @()
@@ -359,7 +359,35 @@ function Get-SpiroAllRecords {
             $rows.Add($row)
         }
 
-        if ($data.Count -lt $PageSize) {
+        $currentPage = $page
+        $totalPages = $null
+
+        if ($response.PSObject.Properties.Name -contains 'meta') {
+            $pagination = Get-PropertyValue -Object $response.meta -Names @('pagination')
+            if ($null -ne $pagination) {
+                $currentPageValue = Get-PropertyValue -Object $pagination -Names @('current_page', 'currentPage')
+                $totalPagesValue = Get-PropertyValue -Object $pagination -Names @('total_pages', 'totalPages')
+
+                if ($null -ne $currentPageValue) {
+                    $currentPage = [int]$currentPageValue
+                }
+
+                if ($null -ne $totalPagesValue) {
+                    $totalPages = [int]$totalPagesValue
+                }
+            }
+        }
+
+        if ($null -ne $totalPages) {
+            if ($totalPages -gt $MaxPages) {
+                throw "Spiro $Resource requires $totalPages pages, which exceeds MaxPages $MaxPages. Increase MaxPages explicitly."
+            }
+
+            if ($currentPage -ge $totalPages) {
+                break
+            }
+        }
+        elseif ($data.Count -lt $PageSize) {
             break
         }
     }
@@ -631,6 +659,7 @@ $spiroAccessToken = [string]$spiroTokenState.AccessToken
 
 Write-Section 'SPIRO COMPANY DISCOVERY'
 $companies = Get-SpiroAllRecords -Resource companies -AccessToken $spiroAccessToken
+Write-Host "Spiro companies retrieved: $($companies.Count)"
 
 $companyCandidates = @(
     foreach ($company in $companies) {

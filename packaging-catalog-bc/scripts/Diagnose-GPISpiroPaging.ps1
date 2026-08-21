@@ -128,33 +128,57 @@ function Show-PageSummary {
 
     if ($Response.PSObject.Properties.Name -contains 'meta') {
         Write-Host 'Meta:'
-        $Response.meta | ConvertTo-Json -Depth 10
+        $metaJson = $Response.meta | ConvertTo-Json -Depth 10
+        Write-Host $metaJson
     }
     else {
         Write-Host 'Meta               : <none>'
     }
 
+    if ($Response.PSObject.Properties.Name -contains 'links') {
+        Write-Host 'Links:'
+        $linksJson = $Response.links | ConvertTo-Json -Depth 10
+        Write-Host $linksJson
+    }
+    else {
+        Write-Host 'Links              : <none>'
+    }
+
     Write-Host 'First 5 rows:'
-    $rows |
-        Select-Object -First 5 |
-        ForEach-Object {
-            [pscustomobject]@{
-                Id = Get-RecordId -Record $_
-                Name = Get-CompanyName -Record $_
+    $firstRows = @(
+        $rows |
+            Select-Object -First 5 |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Id = Get-RecordId -Record $_
+                    Name = Get-CompanyName -Record $_
+                }
             }
-        } |
-        Format-Table -AutoSize
+    )
+    if ($firstRows.Count -eq 0) {
+        Write-Host '<none>'
+    }
+    else {
+        $firstRows | Format-Table -AutoSize | Out-Host
+    }
 
     Write-Host 'Last 5 rows:'
-    $rows |
-        Select-Object -Last 5 |
-        ForEach-Object {
-            [pscustomobject]@{
-                Id = Get-RecordId -Record $_
-                Name = Get-CompanyName -Record $_
+    $lastRows = @(
+        $rows |
+            Select-Object -Last 5 |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Id = Get-RecordId -Record $_
+                    Name = Get-CompanyName -Record $_
+                }
             }
-        } |
-        Format-Table -AutoSize
+    )
+    if ($lastRows.Count -eq 0) {
+        Write-Host '<none>'
+    }
+    else {
+        $lastRows | Format-Table -AutoSize | Out-Host
+    }
 
     return [pscustomobject]@{
         Rows = $rows
@@ -205,15 +229,17 @@ Write-Host '====================================================================
 Write-Host "Encoded page 1/page 2 overlap : $encodedOverlap of $($ids1.Count)"
 Write-Host "Plain page 1/page 2 overlap   : $plainOverlap of $($ids1.Count)"
 
-$sampleRows = @($p1.Rows + $p2e.Rows) |
-    ForEach-Object {
-        [pscustomobject]@{
-            Id = Get-RecordId -Record $_
-            Name = Get-CompanyName -Record $_
-        }
-    } |
-    Where-Object { $_.Name -match '(?i)wat|jr|j\.r\.' } |
-    Sort-Object Id -Unique
+$sampleRows = @(
+    @($p1.Rows + $p2e.Rows) |
+        ForEach-Object {
+            [pscustomobject]@{
+                Id = Get-RecordId -Record $_
+                Name = Get-CompanyName -Record $_
+            }
+        } |
+        Where-Object { $_.Name -match '(?i)wat|jr|j\.r\.' } |
+        Sort-Object Id -Unique
+)
 
 Write-Host ''
 Write-Host 'Wat/JR-like names found on encoded pages 1-2:'
@@ -221,7 +247,7 @@ if ($sampleRows.Count -eq 0) {
     Write-Host '<none>'
 }
 else {
-    $sampleRows | Format-Table -AutoSize
+    $sampleRows | Format-Table -AutoSize | Out-Host
 }
 
 $accessToken = $null

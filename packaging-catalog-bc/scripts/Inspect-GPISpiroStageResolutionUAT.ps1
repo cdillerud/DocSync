@@ -105,7 +105,7 @@ function Invoke-SpiroGetSafe {
             try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = '' }
         }
 
-        $detail = [string]$_.ErrorDetails.Message
+        $detail = [string](Get-PropertyValue -Object $_.ErrorDetails -Names @('Message'))
         if ([string]::IsNullOrWhiteSpace($detail)) { $detail = $_.Exception.Message }
         if ($detail.Length -gt 500) { $detail = $detail.Substring(0, 500) }
 

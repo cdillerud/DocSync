@@ -63,6 +63,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Pack Quote Lines" = X,
         page "GPI Pack Quote API" = X,
         page "GPI Quote Line API" = X,
+        page "GPI Quote Sum API" = X,
         page "GPI Guard UAT API" = X,
         page "GPI Quote Audits" = X,
         page "GPI Quote Audit API" = X,

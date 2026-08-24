@@ -55,15 +55,15 @@ Write-Step 'REPAIR 0.22 PERMISSIONS'
 $text = Get-Content -LiteralPath $permissionSet -Raw
 
 $anchor = '        tabledata "GPI Spiro Opp Cache" = RIMD,'
-$addition = "`r`n        tabledata \"" + 'GPI Spiro Push Queue' + "\" = RIMD,"
+$addition = "`r`n" + '        tabledata "GPI Spiro Push Queue" = RIMD,'
 $text = Add-AfterOnce -Text $text -Anchor $anchor -Addition $addition -Marker 'tabledata "GPI Spiro Push Queue" = RIMD' -Label 'queue tabledata permission'
 
 $anchor = '        table "GPI Spiro Opp Cache" = X,'
-$addition = "`r`n        table \"" + 'GPI Spiro Push Queue' + "\" = X,"
+$addition = "`r`n" + '        table "GPI Spiro Push Queue" = X,'
 $text = Add-AfterOnce -Text $text -Anchor $anchor -Addition $addition -Marker 'table "GPI Spiro Push Queue" = X' -Label 'queue table permission'
 
 $anchor = '        page "GPI Spiro Opp API" = X,'
-$addition = "`r`n        page \"" + 'GPI Spiro Push Q API' + "\" = X,"
+$addition = "`r`n" + '        page "GPI Spiro Push Q API" = X,'
 $text = Add-AfterOnce -Text $text -Anchor $anchor -Addition $addition -Marker 'page "GPI Spiro Push Q API" = X' -Label 'queue API permission'
 
 $anchor = '        codeunit "GPI Spiro Link Mgt" = X;'

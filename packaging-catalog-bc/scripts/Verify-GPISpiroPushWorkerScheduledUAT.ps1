@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
-    [string]$TaskName = 'GPI Spiro Push Worker UAT',
+    [string]$TaskName = 'GPI Spiro Push Worker UAT Unattended',
+    [string]$LegacyTaskName = 'GPI Spiro Push Worker UAT',
     [int]$WaitMinutes = 7,
     [string]$LogDirectory = "$env:LOCALAPPDATA\GPI\SpiroPushWorker\Logs"
 )
@@ -10,6 +11,11 @@ Set-StrictMode -Version Latest
 
 if ($WaitMinutes -lt 1 -or $WaitMinutes -gt 30) {
     throw 'WaitMinutes must be between 1 and 30.'
+}
+
+$legacy = Get-ScheduledTask -TaskName $LegacyTaskName -ErrorAction SilentlyContinue
+if ($legacy -and $legacy.State -ne 'Disabled') {
+    throw "Legacy task '$LegacyTaskName' must remain Disabled. Current state: $($legacy.State)"
 }
 
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
@@ -26,6 +32,7 @@ Write-Host "Last Run Before : $beforeRun"
 Write-Host "Last Result     : $($before.LastTaskResult)"
 Write-Host "Next Run Time   : $($before.NextRunTime)"
 Write-Host "Wait Minutes    : $WaitMinutes"
+if ($legacy) { Write-Host "Legacy Task     : $($legacy.State)" }
 
 if ($task.State -eq 'Disabled') {
     throw "Scheduled task '$TaskName' is disabled. Enable it before running unattended verification."
@@ -112,3 +119,4 @@ $tail
 
 Write-Host ''
 Write-Host 'PASS: unattended scheduled worker executed successfully.' -ForegroundColor Green
+

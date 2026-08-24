@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 
-APP_VERSION = "0.41.0"
+APP_VERSION = "0.43.0"
 EXPECTED_ENVIRONMENT = "Sandbox_NoZetadocs_UAT"
 PROTECTED_QUOTES = {67}
 
@@ -85,6 +85,7 @@ class PrepareRequest(BaseModel):
 
     quoteNo: int = Field(ge=1)
     action: ActionName
+    decisionNote: str | None = None
 
 
 class ExecuteRequest(BaseModel):
@@ -93,6 +94,7 @@ class ExecuteRequest(BaseModel):
     quoteNo: int = Field(ge=1)
     action: ActionName
     confirmationToken: str = Field(min_length=1)
+    decisionNote: str | None = None
 
 
 class ErrorBody(BaseModel):
@@ -178,6 +180,7 @@ def invoke_flow(
     quote_no: int,
     action: ActionName,
     confirmation_token: str | None = None,
+    decision_note: str | None = None,
 ) -> dict:
     validate_runtime_files()
 
@@ -201,6 +204,12 @@ def invoke_flow(
         escaped = confirmation_token.replace("'", "''")
         ps.append(
             f"$p.ConfirmationToken = '{escaped}'"
+        )
+
+    if decision_note is not None:
+        escaped_note = decision_note.replace("'", "''")
+        ps.append(
+            f"$p.DecisionNote = '{escaped_note}'"
         )
 
     ps.extend(
@@ -322,6 +331,7 @@ def prepare_action(request: PrepareRequest) -> dict:
         mode="Prepare",
         quote_no=request.quoteNo,
         action=request.action,
+        decision_note=request.decisionNote,
     )
 
 
@@ -351,4 +361,5 @@ def execute_action(request: ExecuteRequest) -> dict:
         quote_no=request.quoteNo,
         action=request.action,
         confirmation_token=request.confirmationToken,
+        decision_note=request.decisionNote,
     )

@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "GPI Packaging Quote Copilot Actions",
-    "version": "1.0.0",
-    "description": "Controlled Copilot-facing contract for preparing and executing Business Central packaging quote actions. Business Central remains authoritative for pricing, guardrails, approvals, quote status, and action eligibility."
+    "version": "1.1.0",
+    "description": "Controlled Copilot-facing contract for preparing and executing Business Central packaging quote actions. Business Central remains authoritative for pricing, guardrails, approvals, quote status, and action eligibility. Approval and rejection may include a confirmation-bound decision note."
   },
   "tags": [
     {
@@ -16,7 +16,7 @@
       "post": {
         "operationId": "PreparePackagingQuoteAction",
         "summary": "Prepare a packaging quote action",
-        "description": "Reads current Business Central state, validates whether the requested action is currently available, and returns the confirmation payload. This operation does not change Business Central or Spiro.",
+        "description": "Reads current Business Central state and prepares the requested action. For approve or reject, an optional decisionNote may be proposed and bound into the confirmation token without being written during Prepare. This operation does not change Business Central or Spiro.",
         "tags": [
           "Packaging Quote Actions"
         ],
@@ -57,7 +57,7 @@
       "post": {
         "operationId": "ExecutePackagingQuoteAction",
         "summary": "Execute a confirmed packaging quote action",
-        "description": "Revalidates live Business Central state and the state-bound confirmation token, then delegates the actual write to the controlled Business Central action executor.",
+        "description": "Revalidates live Business Central state and the confirmation token. When a confirmation-bound decisionNote is supplied for approve or reject, the controlled flow writes that note first, revalidates action eligibility, and then delegates the Business Central bound action.",
         "tags": [
           "Packaging Quote Actions"
         ],
@@ -124,11 +124,18 @@
           },
           "action": {
             "$ref": "#/components/schemas/PackagingQuoteAction"
+          },
+          "decisionNote": {
+            "type": "string",
+            "minLength": 1,
+            "nullable": true,
+            "description": "Optional decision note proposed for approve or reject. Prepare remains read-only; when required, the exact note is bound into the confirmation token."
           }
         },
         "example": {
           "quoteNo": 55,
-          "action": "reopen"
+          "action": "approve",
+          "decisionNote": "Approved after review of fixed price exception."
         }
       },
       "ExecuteActionRequest": {
@@ -152,12 +159,19 @@
             "type": "string",
             "minLength": 1,
             "description": "Exact state-bound token returned by the immediately preceding Prepare operation."
+          },
+          "decisionNote": {
+            "type": "string",
+            "minLength": 1,
+            "nullable": true,
+            "description": "For approve or reject when a decision note was supplied during Prepare, send the exact same note with the confirmation token. The note is part of the token-bound confirmation state."
           }
         },
         "example": {
           "quoteNo": 55,
-          "action": "reopen",
-          "confirmationToken": "GPI-Q55-REOPEN-example"
+          "action": "approve",
+          "confirmationToken": "GPI-Q55-APPROVE-example",
+          "decisionNote": "Approved after review of fixed price exception."
         }
       },
       "PrepareActionResponse": {
@@ -254,6 +268,27 @@
           },
           "writeExecution": {
             "$ref": "#/components/schemas/WriteExecutionPreparation"
+          },
+          "decisionNoteRequired": {
+            "type": "boolean",
+            "description": "True when the requested approve or reject action requires a decision note under the current Business Central rules."
+          },
+          "decisionNoteProvided": {
+            "type": "boolean",
+            "description": "True when the caller supplied a nonblank decisionNote with Prepare."
+          },
+          "decisionNote": {
+            "type": "string",
+            "nullable": true,
+            "description": "Normalized proposed decision note. Prepare does not persist this value."
+          },
+          "decisionNoteWillBeWritten": {
+            "type": "boolean",
+            "description": "True when confirmed Execute will persist the proposed decision note before invoking approve or reject."
+          },
+          "decisionNoteEnablesAction": {
+            "type": "boolean",
+            "description": "True when the supplied decision note satisfies the missing prerequisite that otherwise prevents approve or reject."
           }
         }
       },
@@ -338,6 +373,15 @@
           },
           "contractVersion": {
             "type": "string"
+          },
+          "decisionNoteWritten": {
+            "type": "boolean",
+            "description": "True when Execute persisted the confirmation-bound decision note before the Business Central action."
+          },
+          "decisionNote": {
+            "type": "string",
+            "nullable": true,
+            "description": "Decision note persisted by this Execute request, when applicable."
           }
         }
       },
@@ -410,7 +454,7 @@
     }
   },
   "x-gpi-implementation": {
-    "milestone": "0.40",
+    "milestone": "0.43",
     "environment": "Sandbox_NoZetadocs_UAT",
     "businessCentralAuthority": true,
     "prepareComponent": "Prepare-GPIPackagingQuoteActionUAT.ps1",
@@ -419,7 +463,9 @@
     "protectedQuoteNumbers": [
       67
     ],
-    "confirmationModel": "Prepare returns a state-bound confirmation token. Execute must receive that exact token and must revalidate live Business Central state before writing.",
-    "hostingStatus": "Contract only. No hosted HTTP endpoint is created by milestone 0.40."
+    "confirmationModel": "Prepare returns a state-bound confirmation token. When decisionNote is supplied, the normalized note is also bound into that token. Execute must receive the exact token and same decisionNote and must revalidate live Business Central state before writing.",
+    "hostingStatus": "Local UAT FastAPI HTTP adapter implemented. Execute is disabled by default and requires GPI_ENABLE_COPILOT_EXECUTE=1.",
+    "decisionNoteComponent": "Set-GPIPackagingQuoteDecisionNoteUAT.ps1",
+    "decisionNoteModel": "Prepare is read-only. For approve/reject, an optional decisionNote may satisfy the missing action prerequisite. Confirmed Execute writes the token-bound note only while the quote is Ready, verifies persistence, re-reads Business Central action eligibility, then delegates the bound action."
   }
 }

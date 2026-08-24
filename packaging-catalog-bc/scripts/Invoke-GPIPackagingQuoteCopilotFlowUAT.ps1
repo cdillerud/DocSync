@@ -19,6 +19,8 @@ param(
 
     [string]$ConfirmationToken,
 
+    [string]$DecisionNote,
+
     [ValidateSet('Object', 'Json')]
     [string]$OutputFormat = 'Json',
 
@@ -55,6 +57,9 @@ $PrepareScript =
 $ExecutorScript =
     Join-Path $ScriptRoot 'Invoke-GPIPackagingQuoteActionUAT.ps1'
 
+$DecisionNoteScript =
+    Join-Path $ScriptRoot 'Set-GPIPackagingQuoteDecisionNoteUAT.ps1'
+
 if (-not (Test-Path $PrepareScript)) {
     throw "STOP: 0.38 preparation component not found: $PrepareScript"
 }
@@ -63,13 +68,19 @@ if (-not (Test-Path $ExecutorScript)) {
     throw "STOP: 0.37 execution component not found: $ExecutorScript"
 }
 
+if (-not (Test-Path $DecisionNoteScript)) {
+    throw "STOP: 0.43 decision-note component not found: $DecisionNoteScript"
+}
+
 # ------------------------------------------------------------------------
 # HELPERS
 # ------------------------------------------------------------------------
 function New-ConfirmationToken {
     param(
         [Parameter(Mandatory)]
-        $Preparation
+        $Preparation,
+
+        [string]$DecisionNoteText = ''
     )
 
     $material =
@@ -80,6 +91,7 @@ function New-ConfirmationToken {
             [string]$Preparation.currentStatus
             [string]$Preparation.requestedAction
             [string]$Preparation.contractVersion
+            [string]$DecisionNoteText
         ) -join '|'
 
     $bytes =
@@ -152,9 +164,125 @@ function Write-FlowResult {
 $preparation =
     Get-LivePreparation
 
+$decisionNoteProvided =
+    $PSBoundParameters.ContainsKey('DecisionNote')
+
+$normalizedDecisionNote =
+    if ($decisionNoteProvided) {
+        ([string]$DecisionNote).Trim()
+    }
+    else {
+        ''
+    }
+
+if (
+    $decisionNoteProvided -and
+    ($Action -notin @('approve', 'reject'))
+) {
+    throw (
+        "STOP: DecisionNote may only be supplied with " +
+        "approve or reject."
+    )
+}
+
+if (
+    $decisionNoteProvided -and
+    [string]::IsNullOrWhiteSpace($normalizedDecisionNote)
+) {
+    throw 'STOP: supplied DecisionNote may not be blank.'
+}
+
+if ($normalizedDecisionNote -match '[\r\n]') {
+    throw 'STOP: DecisionNote must be a single line.'
+}
+
+$decisionNoteRequiredForAction =
+    switch ($Action) {
+        'approve' {
+            [bool]$preparation.decisionNoteRequired
+        }
+
+        'reject' {
+            [bool]$preparation.rejectDecisionNoteRequired
+        }
+
+        default {
+            $false
+        }
+    }
+
+$decisionNoteCanEnableAction =
+    (-not [bool]$preparation.isAllowed) -and
+    ([string]$preparation.currentStatus -eq 'Ready') -and
+    ($Action -in @('approve', 'reject')) -and
+    $decisionNoteRequiredForAction -and
+    $decisionNoteProvided
+
+$effectiveIsAllowed =
+    [bool]$preparation.isAllowed -or
+    $decisionNoteCanEnableAction
+
+$effectiveConfirmationRequired =
+    [bool]$effectiveIsAllowed
+
+$effectiveReason =
+    if ($decisionNoteCanEnableAction) {
+        $null
+    }
+    else {
+        $preparation.reason
+    }
+
+$decisionNoteWillBeWritten =
+    $decisionNoteProvided -and
+    ($Action -in @('approve', 'reject'))
+
+$effectiveExpectedResultStatus =
+    if ($effectiveIsAllowed) {
+        switch ($Action) {
+            'evaluate'       { [string]$preparation.currentStatus }
+            'readyForReview' { 'Ready' }
+            'approve'        { 'Approved' }
+            'reject'         { 'Rejected' }
+            'reopen'         { 'Draft' }
+        }
+    }
+    else {
+        $null
+    }
+
+$effectiveConfirmationText =
+    if ($effectiveConfirmationRequired) {
+        switch ($Action) {
+            'evaluate' {
+                "Evaluate Packaging Quote $QuoteNo using the current Business Central pricing and guardrail rules?"
+            }
+
+            'readyForReview' {
+                "Move Packaging Quote $QuoteNo to Ready for Review?"
+            }
+
+            'approve' {
+                "Approve Packaging Quote ${QuoteNo}?"
+            }
+
+            'reject' {
+                "Reject Packaging Quote ${QuoteNo}?"
+            }
+
+            'reopen' {
+                "Reopen Packaging Quote $QuoteNo and return it to Draft?"
+            }
+        }
+    }
+    else {
+        $null
+    }
+
 $token =
     New-ConfirmationToken `
-        -Preparation $preparation
+        -Preparation $preparation `
+        -DecisionNoteText $normalizedDecisionNote
 
 # ------------------------------------------------------------------------
 # PREPARE MODE
@@ -184,24 +312,24 @@ if ($Mode -eq 'Prepare') {
                 [string]$preparation.requestedAction
 
             isAllowed =
-                [bool]$preparation.isAllowed
+                [bool]$effectiveIsAllowed
 
             confirmationRequired =
-                [bool]$preparation.confirmationRequired
+                [bool]$effectiveConfirmationRequired
 
             confirmationText =
-                $preparation.confirmationText
+                $effectiveConfirmationText
 
             expectedResultStatus =
-                $preparation.expectedResultStatus
+                $effectiveExpectedResultStatus
 
             reason =
-                $preparation.reason
+                $effectiveReason
 
             confirmationToken =
                 if (
-                    $preparation.isAllowed -and
-                    $preparation.confirmationRequired
+                    $effectiveIsAllowed -and
+                    $effectiveConfirmationRequired
                 ) {
                     $token
                 }
@@ -230,12 +358,32 @@ if ($Mode -eq 'Prepare') {
             primaryApprover =
                 [string]$preparation.primaryApprover
 
+            decisionNoteRequired =
+                [bool]$decisionNoteRequiredForAction
+
+            decisionNoteProvided =
+                [bool]$decisionNoteProvided
+
+            decisionNote =
+                if ($decisionNoteProvided) {
+                    $normalizedDecisionNote
+                }
+                else {
+                    $null
+                }
+
+            decisionNoteWillBeWritten =
+                [bool]$decisionNoteWillBeWritten
+
+            decisionNoteEnablesAction =
+                [bool]$decisionNoteCanEnableAction
+
             writeExecution =
                 [pscustomobject][ordered]@{
                     permitted =
                         [bool](
-                            $preparation.isAllowed -and
-                            $preparation.confirmationRequired
+                            $effectiveIsAllowed -and
+                            $effectiveConfirmationRequired
                         )
 
                     executeMode =
@@ -243,8 +391,8 @@ if ($Mode -eq 'Prepare') {
 
                     confirmationTokenRequired =
                         [bool](
-                            $preparation.isAllowed -and
-                            $preparation.confirmationRequired
+                            $effectiveIsAllowed -and
+                            $effectiveConfirmationRequired
                         )
                 }
         }
@@ -256,15 +404,15 @@ if ($Mode -eq 'Prepare') {
 # ------------------------------------------------------------------------
 # EXECUTE MODE
 # ------------------------------------------------------------------------
-if (-not $preparation.isAllowed) {
+if (-not $effectiveIsAllowed) {
     throw (
         "STOP: action '$Action' is not currently allowed for " +
         "Packaging Quote $QuoteNo. " +
-        "Reason: $($preparation.reason)"
+        "Reason: $effectiveReason"
     )
 }
 
-if (-not $preparation.confirmationRequired) {
+if (-not $effectiveConfirmationRequired) {
     throw (
         "STOP: live preparation does not require explicit confirmation. " +
         "Execution is blocked by the 0.39 safety policy."
@@ -289,6 +437,30 @@ if (
         "STOP: confirmation token does not match the current live " +
         "quote/action state. Prepare the action again before executing."
     )
+}
+
+# ------------------------------------------------------------------------
+# OPTIONAL CONTROLLED DECISION-NOTE WRITE
+# ------------------------------------------------------------------------
+if ($decisionNoteWillBeWritten) {
+    $decisionNoteOutput =
+        & $DecisionNoteScript `
+            -QuoteNo $QuoteNo `
+            -DecisionNote $normalizedDecisionNote `
+            -Confirmed `
+            -TenantId $TenantId `
+            -EnvironmentName $EnvironmentName `
+            -CompanyId $CompanyId
+
+    $postNotePreparation =
+        Get-LivePreparation
+
+    if (-not [bool]$postNotePreparation.isAllowed) {
+        throw (
+            "STOP: decision note was written, but action '$Action' " +
+            "is still not permitted. Reason: $($postNotePreparation.reason)"
+        )
+    }
 }
 
 # ------------------------------------------------------------------------
@@ -334,7 +506,18 @@ $result =
             [string]$postPreparation.currentStatus
 
         expectedResultStatus =
-            $preparation.expectedResultStatus
+            $effectiveExpectedResultStatus
+
+        decisionNoteWritten =
+            [bool]$decisionNoteWillBeWritten
+
+        decisionNote =
+            if ($decisionNoteWillBeWritten) {
+                $normalizedDecisionNote
+            }
+            else {
+                $null
+            }
 
         resultingAllowedWriteActions =
             @($postPreparation.allowedWriteActions)

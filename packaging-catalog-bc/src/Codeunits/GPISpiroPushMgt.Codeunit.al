@@ -8,9 +8,13 @@ codeunit 71106 "GPI Spiro Push Mgt"
         Quote.TestField("GPI Spiro Opportunity ID");
 
         ExistingQueue.SetRange("Quote No.", Quote."Entry No.");
-        ExistingQueue.SetRange(Status, 'Queued');
+        ExistingQueue.SetFilter(Status, '%1|%2|%3', 'Queued', 'Retry', 'Processing');
         if ExistingQueue.FindFirst() then
-            Error('Packaging Quote %1 already has a queued Spiro writeback request.', Quote."Entry No.");
+            Error(
+                'Packaging Quote %1 already has an active Spiro writeback request (queue %2, status %3).',
+                Quote."Entry No.",
+                ExistingQueue."Entry No.",
+                ExistingQueue.Status);
 
         if not Confirm(
             'Queue the Business Central link for Packaging Quote %1 to Spiro opportunity %2? The external Spiro integration worker will perform the write.',

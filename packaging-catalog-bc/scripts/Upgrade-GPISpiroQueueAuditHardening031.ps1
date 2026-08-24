@@ -49,7 +49,7 @@ Write-Step 'PRECHECK 0.30'
 $app = Get-Content -LiteralPath $appJson -Raw | ConvertFrom-Json
 if ([string]$app.version -ne '0.30.0.0') { throw "Expected local app version 0.30.0.0. Found $($app.version)." }
 $batch = Get-Content -LiteralPath $batchWorker -Raw
-foreach ($marker in @("status = 'Processing'","status = 'Retry'","spiroPushRequests","$singleWorker")) {
+foreach ($marker in @("status = 'Processing'","status = 'Retry'",'spiroPushRequests','$singleWorker')) {
     if (-not $batch.Contains($marker)) { throw "Required 0.30 batch-worker marker not found: $marker" }
 }
 if ($batch.Contains('GPI 0.31 QUEUE AUDIT HARDENING')) { throw '0.31 queue audit hardening already appears to be present.' }

@@ -29,7 +29,7 @@ $new = 'New-ScheduledTaskPrincipal -UserId $currentIdentity -LogonType Interacti
 if ($text.Contains($old)) {
     $text = $text.Replace($old, $new)
 }
-elif ($text.Contains('-LogonType Interactive -RunLevel Highest')) {
+elseif ($text.Contains('-LogonType Interactive -RunLevel Highest')) {
     Write-Host 'Already present: valid Interactive logon type.' -ForegroundColor DarkYellow
 }
 else {

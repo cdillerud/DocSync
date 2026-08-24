@@ -697,6 +697,9 @@ $opportunityRows = @(
                 Name = Get-SpiroDisplayName -Record $opportunity -Kind opportunity
                 Stage = [string](Get-SpiroAttribute -Record $opportunity -Names @('stage_name', 'stage', 'status', 'sales_stage'))
                 Owner = [string](Get-SpiroAttribute -Record $opportunity -Names @('owner_name', 'owner', 'assigned_to_name', 'sales_rep_name'))
+                StageId = [string](Get-SpiroRelationshipId -Record $opportunity -RelationshipNames @('opportunity_stage') -AttributeNames @('opportunity_stage_id', 'opportunityStageId'))
+                OwnerUserId = [string](Get-SpiroRelationshipId -Record $opportunity -RelationshipNames @('user', 'owner') -AttributeNames @('user_id', 'userId', 'owner_id', 'ownerId'))
+                PipelineId = [string](Get-SpiroRelationshipId -Record $opportunity -RelationshipNames @('pipeline') -AttributeNames @('pipeline_id', 'pipelineId'))
                 Url = Get-SpiroBrowserUrl -Record $opportunity
                 Raw = $opportunity
             }
@@ -715,6 +718,71 @@ else {
     $selectedOpportunity = Select-RecordInteractively -Rows $opportunityRows -Label 'Spiro opportunity' -AllowNone
 }
 
+Write-Section 'SPIRO OPPORTUNITY ENRICHMENT'
+if ($null -eq $selectedOpportunity) {
+    Write-Host 'No opportunity selected. Stage and owner enrichment skipped.' -ForegroundColor Yellow
+}
+else {
+    Write-Host "Stage relationship ID : $($selectedOpportunity.StageId)"
+    Write-Host "Owner user ID         : $($selectedOpportunity.OwnerUserId)"
+    Write-Host "Pipeline ID           : $($selectedOpportunity.PipelineId)"
+
+    if (-not [string]::IsNullOrWhiteSpace($selectedOpportunity.OwnerUserId)) {
+        $detailUri = "$SpiroApiBase/opportunities/$($selectedOpportunity.Id)?include=user"
+        $detailResponse = Invoke-SpiroGet -Uri $detailUri -AccessToken $spiroAccessToken
+        $includedRecords = @()
+        if ($detailResponse.PSObject.Properties.Name -contains 'included') {
+            $includedRecords = @($detailResponse.included)
+        }
+
+        $ownerRecord = @(
+            $includedRecords |
+                Where-Object { (Get-SpiroRecordId -Record $_) -eq $selectedOpportunity.OwnerUserId }
+        ) | Select-Object -First 1
+
+        if ($ownerRecord) {
+            $ownerFirst = [string](Get-SpiroAttribute -Record $ownerRecord -Names @('first_name', 'firstName'))
+            $ownerLast = [string](Get-SpiroAttribute -Record $ownerRecord -Names @('last_name', 'lastName'))
+            $ownerName = (($ownerFirst, $ownerLast | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) -join ' ').Trim()
+
+            if ([string]::IsNullOrWhiteSpace($ownerName)) {
+                $ownerName = [string](Get-SpiroAttribute -Record $ownerRecord -Names @('name', 'display_name', 'email'))
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($ownerName)) {
+                $selectedOpportunity.Owner = $ownerName
+            }
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($selectedOpportunity.StageId) -and
+        -not [string]::IsNullOrWhiteSpace($selectedOpportunity.PipelineId)) {
+        $stageUri = "$SpiroApiBase/pipelines/$($selectedOpportunity.PipelineId)/opportunity_stages"
+        $stageResponse = Invoke-SpiroGet -Uri $stageUri -AccessToken $spiroAccessToken
+        $stageRecords = @()
+        if ($stageResponse.PSObject.Properties.Name -contains 'data') {
+            $stageRecords = @($stageResponse.data)
+        }
+        else {
+            $stageRecords = @($stageResponse)
+        }
+
+        $stageRecord = @(
+            $stageRecords |
+                Where-Object { (Get-SpiroRecordId -Record $_) -eq $selectedOpportunity.StageId }
+        ) | Select-Object -First 1
+
+        if ($stageRecord) {
+            $stageName = [string](Get-SpiroAttribute -Record $stageRecord -Names @('name', 'label', 'title', 'stage_name'))
+            if (-not [string]::IsNullOrWhiteSpace($stageName)) {
+                $selectedOpportunity.Stage = $stageName
+            }
+        }
+    }
+
+    Write-Host "Resolved stage       : $($selectedOpportunity.Stage)" -ForegroundColor Green
+    Write-Host "Resolved owner       : $($selectedOpportunity.Owner)" -ForegroundColor Green
+}
 Write-Section 'SPIRO CONTACT DISCOVERY'
 $allContacts = Get-SpiroAllRecords -Resource contacts -AccessToken $spiroAccessToken
 $contactRows = @(
@@ -888,3 +956,4 @@ Write-Host "Spiro synced at   : $($verifiedQuote.spiroLastSyncedAt)"
 Write-Host ''
 Write-Host 'SUCCESS: Spiro CRM context was linked to Business Central UAT.' -ForegroundColor Green
 Write-Host 'Refresh the packaging quote card to display the Spiro CRM Context section.'
+

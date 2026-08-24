@@ -205,6 +205,13 @@ page 71012 "GPI Pack Quote API"
                     Caption = 'Spiro Push Message';
                     Editable = false;
                 }
+            part(packagingQuoteLines; "GPI Quote Line API")
+            {
+                Caption = 'Packaging Quote Lines';
+                EntityName = 'packagingQuoteLine';
+                EntitySetName = 'packagingQuoteLines';
+                SubPageLink = "Quote Entry No." = field("Entry No.");
+            }
             }
         }
     }

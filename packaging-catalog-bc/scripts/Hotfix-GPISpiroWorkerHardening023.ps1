@@ -44,7 +44,7 @@ if ($text.Contains($old)) {
     [System.IO.File]::WriteAllText($singleWorker, $text, [System.Text.UTF8Encoding]::new($false))
     Write-Host "Patched: $singleWorker" -ForegroundColor DarkGreen
 }
-elif ($text.Contains("-notin @('Queued', 'Processing')")) {
+elseif ($text.Contains("-notin @('Queued', 'Processing')")) {
     Write-Host 'Already present: single-worker Processing handoff.' -ForegroundColor DarkYellow
 }
 else {
@@ -67,7 +67,7 @@ if ($text.Contains($old)) {
     [System.IO.File]::WriteAllText($batchWorker, $text, [System.Text.UTF8Encoding]::new($false))
     Write-Host "Patched: $batchWorker" -ForegroundColor DarkGreen
 }
-elif (-not $text.Contains('Single-entry worker exited with code $LASTEXITCODE.')) {
+elseif (-not $text.Contains('Single-entry worker exited with code $LASTEXITCODE.')) {
     Write-Host 'Already removed: stale LASTEXITCODE check.' -ForegroundColor DarkYellow
 }
 else {
@@ -80,7 +80,7 @@ $batchRaw = Get-Content -LiteralPath $batchWorker -Raw
 
 $checks = @(
     @{ Passed = $singleRaw.Contains("-notin @('Queued', 'Processing')"); Label = 'Processing handoff accepted by single worker' },
-    @{ Passed = $batchRaw.Contains("$newStatus = if ($terminal) { 'Failed' } else { 'Retry' }"); Label = 'Retry workflow present' },
+    @{ Passed = $batchRaw.Contains("`$newStatus = if (`$terminal) { 'Failed' } else { 'Retry' }"); Label = 'Retry workflow present' },
     @{ Passed = $batchRaw.Contains('nextAttemptAt = $nextAttempt'); Label = 'Retry scheduling present' },
     @{ Passed = $batchRaw.Contains("status = 'Processing'"); Label = 'Processing claim present' },
     @{ Passed = -not $batchRaw.Contains('Single-entry worker exited with code $LASTEXITCODE.'); Label = 'stale LASTEXITCODE check removed' }

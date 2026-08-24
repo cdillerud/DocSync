@@ -123,7 +123,7 @@ Write-Host "Opportunity Name     : $($quote.spiroOpportunityName)"
 $encodedCompany = [uri]::EscapeDataString($CompanyName)
 $filterText = "'Entry No.' IS '$QuoteNo'"
 $encodedFilter = [uri]::EscapeDataString($filterText)
-$quoteUrl = "https://businesscentral.dynamics.com/$TenantId/$EnvironmentName?company=$encodedCompany&page=71010&filter=$encodedFilter"
+$quoteUrl = "https://businesscentral.dynamics.com/$TenantId/${EnvironmentName}?company=$encodedCompany&page=71010&filter=$encodedFilter"
 
 Write-Host "BC Quote URL          : $quoteUrl"
 

@@ -9,6 +9,7 @@ page 71108 "GPI Spiro Opp API"
     EntitySetName = 'spiroOpportunityCandidates';
     SourceTable = "GPI Spiro Opp Cache";
     ODataKeyFields = SystemId;
+    DelayedInsert = true;
     InsertAllowed = true;
     ModifyAllowed = true;
     DeleteAllowed = true;

@@ -4,6 +4,7 @@ param(
     [string]$OpportunityId = '3463019',
     [string]$StageId = '58573',
     [string]$PipelineId = '7528',
+    [string]$SpiroClientId = '',
     [int]$TimeoutSeconds = 30
 )
 
@@ -11,6 +12,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $SpiroApiBase = 'https://api.spiro.ai/api/v1'
+$SpiroTokenUrl = 'https://engine.spiro.ai/oauth/token'
 
 function Write-Section {
     param([Parameter(Mandatory)][string]$Text)
@@ -65,6 +67,205 @@ function Get-TokenContainer {
     }
 
     return $Root
+}
+
+function Set-ObjectProperty {
+    param(
+        [Parameter(Mandatory)]$Object,
+        [Parameter(Mandatory)][string[]]$Aliases,
+        [Parameter(Mandatory)][string]$PreferredName,
+        [AllowNull()]$Value,
+        [switch]$Secure
+    )
+
+    $property = $null
+    foreach ($alias in $Aliases) {
+        $property = $Object.PSObject.Properties |
+            Where-Object { $_.Name -ieq $alias } |
+            Select-Object -First 1
+        if ($property) { break }
+    }
+
+    $storedValue = $Value
+    if ($Secure -and $null -ne $Value) {
+        $storedValue = ConvertTo-SecureString -String ([string]$Value) -AsPlainText -Force
+    }
+
+    if ($property) {
+        $property.Value = $storedValue
+    }
+    else {
+        $Object | Add-Member -NotePropertyName $PreferredName -NotePropertyValue $storedValue
+    }
+}
+
+function Convert-ToUtcDateTime {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [datetime]) { return ([datetime]$Value).ToUniversalTime() }
+
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse(
+        $text,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AssumeUniversal,
+        [ref]$parsed
+    )) {
+        return $parsed.ToUniversalTime()
+    }
+
+    return $null
+}
+
+function Save-RefreshedTokenStore {
+    param(
+        [Parameter(Mandatory)]$Root,
+        [Parameter(Mandatory)]$Container,
+        [Parameter(Mandatory)][string]$AccessToken,
+        [AllowNull()][string]$RefreshToken,
+        [Parameter(Mandatory)][datetime]$ExpiresAtUtc,
+        [Parameter(Mandatory)][string]$Path
+    )
+
+    $backupPath = "$Path.bak"
+    Copy-Item -LiteralPath $Path -Destination $backupPath -Force
+
+    Set-ObjectProperty -Object $Container `
+        -Aliases @('AccessToken', 'access_token', 'accessToken', 'Token') `
+        -PreferredName 'AccessToken' `
+        -Value $AccessToken `
+        -Secure
+
+    if (-not [string]::IsNullOrWhiteSpace($RefreshToken)) {
+        Set-ObjectProperty -Object $Container `
+            -Aliases @('RefreshToken', 'refresh_token', 'refreshToken') `
+            -PreferredName 'RefreshToken' `
+            -Value $RefreshToken `
+            -Secure
+    }
+
+    Set-ObjectProperty -Object $Container `
+        -Aliases @('ExpiresAtUtc', 'expires_at', 'ExpiresAt', 'ExpirationUtc') `
+        -PreferredName 'ExpiresAtUtc' `
+        -Value $ExpiresAtUtc
+
+    $Root | Export-Clixml -LiteralPath $Path -Force
+    Write-Host "Refreshed token store saved. Backup: $backupPath" -ForegroundColor DarkGreen
+}
+
+function Get-SpiroAccessToken {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "Spiro protected token store was not found: $Path"
+    }
+
+    $root = Import-Clixml -LiteralPath $Path
+    if ($null -eq $root) {
+        throw "Spiro token store could not be loaded: $Path"
+    }
+
+    $container = Get-TokenContainer -Root $root
+    $accessValue = Get-PropertyValue -Object $container -Names @('AccessToken', 'access_token', 'accessToken', 'Token')
+    $refreshValue = Get-PropertyValue -Object $container -Names @('RefreshToken', 'refresh_token', 'refreshToken')
+    $expiresValue = Get-PropertyValue -Object $container -Names @('ExpiresAtUtc', 'expires_at', 'ExpiresAt', 'ExpirationUtc')
+
+    $accessToken = Convert-SecretValueToText -Value $accessValue
+    $refreshToken = Convert-SecretValueToText -Value $refreshValue
+    $expiresAtUtc = Convert-ToUtcDateTime -Value $expiresValue
+
+    Write-Host "Token store           : $Path"
+    Write-Host "Access token present  : $(-not [string]::IsNullOrWhiteSpace($accessToken))"
+    Write-Host "Refresh token present : $(-not [string]::IsNullOrWhiteSpace($refreshToken))"
+    Write-Host "Expiration available  : $($null -ne $expiresAtUtc)"
+    if ($null -ne $expiresAtUtc) {
+        Write-Host "Expires at UTC        : $($expiresAtUtc.ToString('u'))"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($accessToken)) {
+        if ($null -eq $expiresAtUtc -or $expiresAtUtc -gt [datetime]::UtcNow.AddMinutes(2)) {
+            return $accessToken
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($refreshToken)) {
+        throw 'The Spiro access token is expired and no refresh token is available. Reauthorize Spiro before continuing.'
+    }
+
+    $resolvedClientId = $SpiroClientId
+    if ([string]::IsNullOrWhiteSpace($resolvedClientId)) {
+        $resolvedClientId = [string](Get-PropertyValue -Object $root -Names @('ClientId', 'client_id', 'SpiroClientId'))
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedClientId)) {
+        $resolvedClientId = [string]$env:SPIRO_CLIENT_ID
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedClientId)) {
+        $resolvedClientId = Read-Host 'Spiro OAuth client ID'
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedClientId)) {
+        throw 'Spiro OAuth client ID is required to refresh the token.'
+    }
+
+    $secretValue = Get-PropertyValue -Object $root -Names @('ClientSecret', 'client_secret', 'SpiroClientSecret')
+    $resolvedClientSecret = Convert-SecretValueToText -Value $secretValue
+    if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
+        $resolvedClientSecret = [string]$env:SPIRO_CLIENT_SECRET
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
+        $secureClientSecret = Read-Host 'Spiro OAuth client secret' -AsSecureString
+        $resolvedClientSecret = Convert-SecretValueToText -Value $secureClientSecret
+    }
+    if ([string]::IsNullOrWhiteSpace($resolvedClientSecret)) {
+        throw 'Spiro OAuth client secret is required to refresh the token.'
+    }
+
+    Write-Host 'Refreshing Spiro access token...' -ForegroundColor Yellow
+    try {
+        $refreshResponse = Invoke-RestMethod `
+            -Method POST `
+            -Uri $SpiroTokenUrl `
+            -ContentType 'application/json' `
+            -Body (@{
+                client_id = $resolvedClientId
+                client_secret = $resolvedClientSecret
+                refresh_token = $refreshToken
+                grant_type = 'refresh_token'
+            } | ConvertTo-Json -Compress) `
+            -TimeoutSec $TimeoutSeconds
+    }
+    finally {
+        $resolvedClientSecret = $null
+    }
+
+    $newAccessToken = [string]$refreshResponse.access_token
+    if ([string]::IsNullOrWhiteSpace($newAccessToken)) {
+        throw 'Spiro token refresh did not return an access token.'
+    }
+
+    $newRefreshToken = [string]$refreshResponse.refresh_token
+    if ([string]::IsNullOrWhiteSpace($newRefreshToken)) {
+        $newRefreshToken = $refreshToken
+    }
+
+    $expiresIn = 3600
+    if ($refreshResponse.PSObject.Properties.Name -contains 'expires_in') {
+        $expiresIn = [int]$refreshResponse.expires_in
+    }
+    $newExpiresAtUtc = [datetime]::UtcNow.AddSeconds($expiresIn)
+
+    Save-RefreshedTokenStore `
+        -Root $root `
+        -Container $container `
+        -AccessToken $newAccessToken `
+        -RefreshToken $newRefreshToken `
+        -ExpiresAtUtc $newExpiresAtUtc `
+        -Path $Path
+
+    return $newAccessToken
 }
 
 function Get-RecordId {
@@ -144,30 +345,21 @@ function Find-StageRecord {
     return $null
 }
 
-if (-not (Test-Path -LiteralPath $TokenStorePath)) {
-    throw "Spiro protected token store was not found: $TokenStorePath"
-}
-
-$root = Import-Clixml -LiteralPath $TokenStorePath
-$container = Get-TokenContainer -Root $root
-$accessValue = Get-PropertyValue -Object $container -Names @('AccessToken', 'access_token', 'accessToken', 'Token')
-$accessToken = Convert-SecretValueToText -Value $accessValue
-if ([string]::IsNullOrWhiteSpace($accessToken)) {
-    throw 'No Spiro access token was found in the protected token store.'
-}
-
-$headers = @{
-    Authorization = "Bearer $accessToken"
-    Accept = 'application/json'
-    'X-Api-Version' = '1'
-}
-
 Write-Section 'GPI SPIRO STAGE RESOLUTION UAT INSPECTOR'
 Write-Host "Opportunity ID  : $OpportunityId"
 Write-Host "Stage ID        : $StageId"
 Write-Host "Pipeline ID     : $PipelineId"
 Write-Host 'Business Central: no calls or writes' -ForegroundColor Green
 Write-Host 'Spiro           : GET only' -ForegroundColor Green
+
+Write-Section 'SPIRO TOKEN PREFLIGHT'
+$accessToken = Get-SpiroAccessToken -Path $TokenStorePath
+
+$headers = @{
+    Authorization = "Bearer $accessToken"
+    Accept = 'application/json'
+    'X-Api-Version' = '1'
+}
 
 $probePaths = @(
     "opportunities/${OpportunityId}?include=opportunity_stage",

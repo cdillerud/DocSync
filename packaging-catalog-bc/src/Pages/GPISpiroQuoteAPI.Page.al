@@ -78,6 +78,45 @@ page 71106 "GPI Spiro Quote API"
                 field(spiroOwner; Rec."GPI Spiro Owner")
                 {
                     Caption = 'Spiro Owner';
+                }                field(spiroAssignedIsr; Rec."GPI Spiro Assigned ISR")
+                {
+                    Caption = 'Spiro Assigned ISR';
+                    Editable = false;
+                }
+                field(spiroProbability; Rec."GPI Spiro Probability")
+                {
+                    Caption = 'Spiro Probability';
+                    Editable = false;
+                }
+                field(spiroEstimatedAnnualVolume; Rec."GPI Spiro Est. Annual Volume")
+                {
+                    Caption = 'Spiro Estimated Annual Volume';
+                    Editable = false;
+                }
+                field(spiroCloseDate; Rec."GPI Spiro Close Date")
+                {
+                    Caption = 'Spiro Close Date';
+                    Editable = false;
+                }
+                field(spiroRating; Rec."GPI Spiro Rating")
+                {
+                    Caption = 'Spiro Rating';
+                    Editable = false;
+                }                field(spiroPushStatus; Rec."GPI Spiro Push Status")
+                {
+                    Caption = 'Spiro Push Status';
+                }
+                field(spiroLastPushedAt; Rec."GPI Spiro Last Pushed At")
+                {
+                    Caption = 'Spiro Last Pushed At';
+                }
+                field(spiroLastPushedBy; Rec."GPI Spiro Last Pushed By")
+                {
+                    Caption = 'Spiro Last Pushed By';
+                }
+                field(spiroPushMessage; Rec."GPI Spiro Push Message")
+                {
+                    Caption = 'Spiro Push Message';
                 }
                 field(spiroOpportunityUrl; Rec."GPI Spiro Opp. URL")
                 {

@@ -96,7 +96,10 @@ $queueListUri = "$spiroBase/spiroPushRequests?`$filter=entryNo eq $EntryNo"
 $queueResponse = Invoke-BcRequest -Method GET -Uri $queueListUri -Token $bcToken -Body $null
 $queue = @($queueResponse.value) | Select-Object -First 1
 if (-not $queue) { throw "Spiro push queue entry $EntryNo was not found." }
-if ([string]$queue.status -ne 'Queued') { throw "Queue entry $EntryNo is not Queued. Current status: $($queue.status)" }
+$queueStatus = [string]$queue.status
+if ($queueStatus -notin @('Queued', 'Processing')) {
+    throw "Queue entry $EntryNo is not Queued or Processing. Current status: $queueStatus"
+}
 
 $quoteNo = [int]$queue.quoteNo
 $opportunityId = [string]$queue.spiroOpportunityId
@@ -117,11 +120,10 @@ $encodedFilter = [uri]::EscapeDataString($filterText)
 $quoteUrl = "https://businesscentral.dynamics.com/$TenantId/${EnvironmentName}?company=$encodedCompany&page=71010&filter=$encodedFilter"
 Write-Host "Desired BC Quote URL : $quoteUrl"
 
-if (-not (Test-Path -LiteralPath $TokenStorePath)) { throw "Spiro token store not found: $TokenStorePath" }
-$root = Import-Clixml -LiteralPath $TokenStorePath
-$container = Get-TokenContainer -Root $root
-$spiroToken = Convert-SecretValueToText -Value (Get-PropertyValue $container @('AccessToken','access_token','accessToken','Token'))
-if ([string]::IsNullOrWhiteSpace($spiroToken)) { throw 'No Spiro access token found.' }
+$spiroToken = (& az keyvault secret show --vault-name $KeyVaultName --name 'spiro-oauth-access-token' --query value --output tsv --only-show-errors).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($spiroToken)) {
+    throw 'No Spiro access token could be retrieved from Key Vault.'
+}
 
 $spiroHeaders = @{ Authorization = "Bearer $spiroToken"; Accept = 'application/json'; 'X-Api-Version' = '1' }
 $spiroUri = "https://api.spiro.ai/api/v1/opportunities/${opportunityId}"

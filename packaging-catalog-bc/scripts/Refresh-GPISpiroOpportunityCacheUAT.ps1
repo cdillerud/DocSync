@@ -388,6 +388,110 @@ function Get-SpiroAttribute {
     return Get-PropertyValue -Object $Record -Names $Names
 }
 
+function Get-SpiroCustomAttribute {
+    param(
+        [AllowNull()]$Record,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    if ($null -eq $Record) {
+        return $null
+    }
+
+    $attributes = Get-PropertyValue -Object $Record -Names @('attributes')
+    if ($null -ne $attributes) {
+        $custom = Get-PropertyValue -Object $attributes -Names @('custom', 'custom_fields', 'customFields')
+        if ($null -ne $custom) {
+            $value = Get-PropertyValue -Object $custom -Names $Names
+            if ($null -ne $value) {
+                return $value
+            }
+        }
+    }
+
+    return Get-SpiroAttribute -Record $Record -Names $Names
+}
+
+function Convert-ToSpiroDisplayText {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return '' }
+
+    if ($Value -is [string] -or $Value.GetType().IsPrimitive -or $Value -is [decimal]) {
+        return ([string]$Value).Trim()
+    }
+
+    foreach ($name in @('label', 'name', 'display_name', 'displayName', 'title')) {
+        $candidate = Get-PropertyValue -Object $Value -Names @($name)
+        if ($null -ne $candidate -and -not [string]::IsNullOrWhiteSpace([string]$candidate)) {
+            return ([string]$candidate).Trim()
+        }
+    }
+
+    $fallback = Get-PropertyValue -Object $Value -Names @('value')
+    if ($null -ne $fallback) {
+        return ([string]$fallback).Trim()
+    }
+
+    return ([string]$Value).Trim()
+}
+
+function Convert-ToDecimalOrZero {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return [decimal]0 }
+    $text = ([string]$Value).Trim().Replace(',', '')
+    if ([string]::IsNullOrWhiteSpace($text)) { return [decimal]0 }
+
+    $parsed = [decimal]0
+    if ([decimal]::TryParse(
+        $text,
+        [System.Globalization.NumberStyles]::Any,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsed
+    )) {
+        return $parsed
+    }
+
+    return [decimal]0
+}
+
+function Convert-ToBcDateText {
+    param([AllowNull()]$Value)
+
+    if ($null -eq $Value) { return '' }
+
+    $candidate = $Value
+    if (-not ($Value -is [string]) -and -not $Value.GetType().IsPrimitive) {
+        foreach ($name in @('value', 'date', 'date_value', 'dateValue', 'label')) {
+            $nested = Get-PropertyValue -Object $Value -Names @($name)
+            if ($null -ne $nested -and -not [string]::IsNullOrWhiteSpace([string]$nested)) {
+                $candidate = $nested
+                break
+            }
+        }
+    }
+
+    $text = ([string]$candidate).Trim()
+    if ([string]::IsNullOrWhiteSpace($text)) { return '' }
+
+    $parsed = [datetime]::MinValue
+    if ([datetime]::TryParse(
+        $text,
+        [System.Globalization.CultureInfo]::InvariantCulture,
+        [System.Globalization.DateTimeStyles]::AllowWhiteSpaces,
+        [ref]$parsed
+    )) {
+        return $parsed.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    if ([datetime]::TryParse($text, [ref]$parsed)) {
+        return $parsed.ToString('yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+
+    return ''
+}
+
 function Get-SpiroRecordId {
     param([AllowNull()]$Record)
     return [string](Get-PropertyValue -Object $Record -Names @('id', 'Id', '_id'))
@@ -779,6 +883,11 @@ foreach ($candidate in $baseCandidates) {
 
         $stageName = Get-StageName -StageId $stageId -PipelineId $pipelineId -AccessToken $spiroAccessToken -Cache $stageCache
         $ownerName = Get-OwnerDisplayName -OpportunityResponse $detailResponse -OwnerUserId $ownerId
+        $assignedIsr = Convert-ToSpiroDisplayText -Value (Get-SpiroCustomAttribute -Record $detail -Names @('assigned_isr', 'assignedISR', 'assignedIsr', 'assigned_isr_name', 'assignedISRName', 'isr', 'isr_name'))
+        $probability = Convert-ToDecimalOrZero -Value (Get-SpiroCustomAttribute -Record $detail -Names @('probability', 'win_probability', 'winProbability'))
+        $estimatedAnnualVolume = Convert-ToDecimalOrZero -Value (Get-SpiroCustomAttribute -Record $detail -Names @('estimated_annual_volume', 'est_annual_volume', 'annual_volume', 'estimatedAnnualVolume', 'estAnnualVolume'))
+        $closeDate = Convert-ToBcDateText -Value (Get-SpiroCustomAttribute -Record $detail -Names @('close_at', 'closeAt', 'close_date', 'closeDate', 'expected_close_date', 'expectedCloseDate', 'estimated_close_date', 'estimatedCloseDate', 'estimated_close', 'estimatedClose', 'forecast_close_date', 'forecastCloseDate', 'expected_close', 'expectedClose'))
+        $rating = Convert-ToSpiroDisplayText -Value (Get-SpiroCustomAttribute -Record $detail -Names @('rating', 'opportunity_rating', 'opportunityRating', 'temperature'))
         $opportunityName = Get-SpiroDisplayName -Record $detail
         if ([string]::IsNullOrWhiteSpace($opportunityName)) {
             $opportunityName = Get-SpiroDisplayName -Record $candidate.Raw
@@ -797,6 +906,11 @@ foreach ($candidate in $baseCandidates) {
             OpportunityName = $opportunityName
             Stage = $stageName
             Owner = $ownerName
+            AssignedIsr = $assignedIsr
+            Probability = $probability
+            EstimatedAnnualVolume = $estimatedAnnualVolume
+            CloseDate = $closeDate
+            Rating = $rating
             BrowserUrl = $browserUrl
         })
     }
@@ -808,7 +922,7 @@ foreach ($candidate in $baseCandidates) {
 
 $liveCandidates |
     Sort-Object CompanyName, OpportunityName |
-    Select-Object OpportunityId, CompanyName, OpportunityName, Stage, Owner |
+    Select-Object OpportunityId, CompanyName, OpportunityName, Stage, Owner, AssignedIsr, Probability, EstimatedAnnualVolume, CloseDate, Rating |
     Format-Table -AutoSize -Wrap
 
 Write-Section 'COMPARE WITH BUSINESS CENTRAL CACHE'
@@ -844,6 +958,11 @@ foreach ($live in $liveCandidates) {
             @{ Label = 'Opportunity Name'; Current = $existing.opportunityName; Desired = $live.OpportunityName },
             @{ Label = 'Stage'; Current = $existing.stage; Desired = $live.Stage },
             @{ Label = 'Owner'; Current = $existing.owner; Desired = $live.Owner },
+            @{ Label = 'Assigned ISR'; Current = (Get-PropertyValue -Object $existing -Names @('assignedIsr')); Desired = $live.AssignedIsr },
+            @{ Label = 'Probability'; Current = (Get-PropertyValue -Object $existing -Names @('probability')); Desired = $live.Probability },
+            @{ Label = 'Estimated Annual Volume'; Current = (Get-PropertyValue -Object $existing -Names @('estimatedAnnualVolume')); Desired = $live.EstimatedAnnualVolume },
+            @{ Label = 'Close Date'; Current = (Get-PropertyValue -Object $existing -Names @('closeDate')); Desired = $live.CloseDate },
+            @{ Label = 'Rating'; Current = (Get-PropertyValue -Object $existing -Names @('rating')); Desired = $live.Rating },
             @{ Label = 'Browser URL'; Current = $existing.browserUrl; Desired = $live.BrowserUrl }
         )) {
             if (-not (Test-TextEqual $comparison.Current $comparison.Desired)) {
@@ -866,6 +985,11 @@ foreach ($live in $liveCandidates) {
         OpportunityName = $live.OpportunityName
         Stage = $live.Stage
         Owner = $live.Owner
+        AssignedIsr = $live.AssignedIsr
+        Probability = $live.Probability
+        EstimatedAnnualVolume = $live.EstimatedAnnualVolume
+        CloseDate = $live.CloseDate
+        Rating = $live.Rating
         BrowserUrl = $live.BrowserUrl
         Status = $status
         Changes = if ($changes.Count -eq 0) { '(none)' } else { $changes -join '; ' }
@@ -883,6 +1007,11 @@ foreach ($existing in $existingTarget) {
             OpportunityName = [string]$existing.opportunityName
             Stage = [string]$existing.stage
             Owner = [string]$existing.owner
+            AssignedIsr = Convert-ToSpiroDisplayText -Value (Get-PropertyValue -Object $existing -Names @('assignedIsr'))
+            Probability = Convert-ToDecimalOrZero -Value (Get-PropertyValue -Object $existing -Names @('probability'))
+            EstimatedAnnualVolume = Convert-ToDecimalOrZero -Value (Get-PropertyValue -Object $existing -Names @('estimatedAnnualVolume'))
+            CloseDate = [string](Get-PropertyValue -Object $existing -Names @('closeDate'))
+            Rating = Convert-ToSpiroDisplayText -Value (Get-PropertyValue -Object $existing -Names @('rating'))
             BrowserUrl = [string]$existing.browserUrl
             Status = 'Remove'
             Changes = 'Opportunity no longer returned for the mapped company scope'
@@ -955,6 +1084,11 @@ foreach ($item in $plan) {
         opportunityName = $item.OpportunityName
         stage = $item.Stage
         owner = $item.Owner
+        assignedIsr = $item.AssignedIsr
+        probability = $item.Probability
+        estimatedAnnualVolume = $item.EstimatedAnnualVolume
+        closeDate = $item.CloseDate
+        rating = $item.Rating
         browserUrl = $item.BrowserUrl
         refreshedAt = $refreshTime
         refreshedBy = $refreshBy
@@ -999,6 +1133,21 @@ foreach ($live in $liveCandidates) {
     }
     if (-not (Test-TextEqual $verified.owner $live.Owner)) {
         $verificationFailures.Add("Owner mismatch for $($live.OpportunityId)")
+    }
+    if (-not (Test-TextEqual (Get-PropertyValue -Object $verified -Names @('assignedIsr')) $live.AssignedIsr)) {
+        $verificationFailures.Add("Assigned ISR mismatch for $($live.OpportunityId)")
+    }
+    if (-not (Test-TextEqual (Get-PropertyValue -Object $verified -Names @('probability')) $live.Probability)) {
+        $verificationFailures.Add("Probability mismatch for $($live.OpportunityId)")
+    }
+    if (-not (Test-TextEqual (Get-PropertyValue -Object $verified -Names @('estimatedAnnualVolume')) $live.EstimatedAnnualVolume)) {
+        $verificationFailures.Add("Estimated annual volume mismatch for $($live.OpportunityId)")
+    }
+    if (-not (Test-TextEqual (Get-PropertyValue -Object $verified -Names @('closeDate')) $live.CloseDate)) {
+        $verificationFailures.Add("Close date mismatch for $($live.OpportunityId)")
+    }
+    if (-not (Test-TextEqual (Get-PropertyValue -Object $verified -Names @('rating')) $live.Rating)) {
+        $verificationFailures.Add("Rating mismatch for $($live.OpportunityId)")
     }
     if (-not (Test-TextEqual $verified.browserUrl $live.BrowserUrl)) {
         $verificationFailures.Add("URL mismatch for $($live.OpportunityId)")

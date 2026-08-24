@@ -42,6 +42,27 @@ table 71105 "GPI Spiro Opp Cache"
         field(9; "Refreshed By"; Text[100])
         {
             Caption = 'Refreshed By';
+        }        field(10; "Assigned ISR"; Text[100])
+        {
+            Caption = 'Assigned ISR';
+        }
+        field(11; Probability; Decimal)
+        {
+            Caption = 'Probability';
+            DecimalPlaces = 0 : 5;
+        }
+        field(12; "Estimated Annual Volume"; Decimal)
+        {
+            Caption = 'Estimated Annual Volume';
+            DecimalPlaces = 0 : 5;
+        }
+        field(13; "Close Date"; Date)
+        {
+            Caption = 'Close Date';
+        }
+        field(14; Rating; Text[50])
+        {
+            Caption = 'Rating';
         }
     }
 

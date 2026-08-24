@@ -51,6 +51,42 @@ tableextension 71102 "GPI Spiro Quote" extends "GPI Pack Quote"
         field(71130; "GPI Spiro Synced By"; Text[100])
         {
             Caption = 'Spiro Last Synced By';
+        }        field(71131; "GPI Spiro Assigned ISR"; Text[100])
+        {
+            Caption = 'Spiro Assigned ISR';
+        }
+        field(71132; "GPI Spiro Probability"; Decimal)
+        {
+            Caption = 'Spiro Probability';
+            DecimalPlaces = 0 : 5;
+        }
+        field(71133; "GPI Spiro Est. Annual Volume"; Decimal)
+        {
+            Caption = 'Spiro Estimated Annual Volume';
+            DecimalPlaces = 0 : 5;
+        }
+        field(71134; "GPI Spiro Close Date"; Date)
+        {
+            Caption = 'Spiro Close Date';
+        }
+        field(71135; "GPI Spiro Rating"; Text[50])
+        {
+            Caption = 'Spiro Rating';
+        }        field(71136; "GPI Spiro Push Status"; Text[30])
+        {
+            Caption = 'Spiro Push Status';
+        }
+        field(71137; "GPI Spiro Last Pushed At"; DateTime)
+        {
+            Caption = 'Spiro Last Pushed At';
+        }
+        field(71138; "GPI Spiro Last Pushed By"; Text[100])
+        {
+            Caption = 'Spiro Last Pushed By';
+        }
+        field(71139; "GPI Spiro Push Message"; Text[250])
+        {
+            Caption = 'Spiro Push Message';
         }
     }
 }

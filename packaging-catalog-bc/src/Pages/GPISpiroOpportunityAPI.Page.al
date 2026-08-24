@@ -49,6 +49,25 @@ page 71108 "GPI Spiro Opp API"
                 field(owner; Rec.Owner)
                 {
                     Caption = 'Owner';
+                }                field(assignedIsr; Rec."Assigned ISR")
+                {
+                    Caption = 'Assigned ISR';
+                }
+                field(probability; Rec.Probability)
+                {
+                    Caption = 'Probability';
+                }
+                field(estimatedAnnualVolume; Rec."Estimated Annual Volume")
+                {
+                    Caption = 'Estimated Annual Volume';
+                }
+                field(closeDate; Rec."Close Date")
+                {
+                    Caption = 'Close Date';
+                }
+                field(rating; Rec.Rating)
+                {
+                    Caption = 'Rating';
                 }
                 field(browserUrl; Rec."Browser URL")
                 {

@@ -27,6 +27,26 @@ page 71107 "GPI Spiro Opp Lookup"
                 field(Owner; Rec.Owner)
                 {
                     ApplicationArea = All;
+                }                field("Assigned ISR"; Rec."Assigned ISR")
+                {
+                    ApplicationArea = All;
+                }
+                field(Probability; Rec.Probability)
+                {
+                    ApplicationArea = All;
+                    Caption = 'Probability %';
+                }
+                field("Estimated Annual Volume"; Rec."Estimated Annual Volume")
+                {
+                    ApplicationArea = All;
+                }
+                field("Close Date"; Rec."Close Date")
+                {
+                    ApplicationArea = All;
+                }
+                field(Rating; Rec.Rating)
+                {
+                    ApplicationArea = All;
                 }
                 field("Spiro Opportunity ID"; Rec."Spiro Opportunity ID")
                 {

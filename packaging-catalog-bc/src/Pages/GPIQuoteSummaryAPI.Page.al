@@ -175,6 +175,66 @@ page 71032 "GPI Quote Sum API"
                     Caption = 'Spiro Push Status';
                     Editable = false;
                 }
+                field(actionContractVersion; ActionContractVersion)
+                {
+                    Caption = 'Action Contract Version';
+                    Editable = false;
+                }
+                field(actionResource; ActionResource)
+                {
+                    Caption = 'Write Action Resource';
+                    Editable = false;
+                }
+                field(fullQuoteExpandName; FullQuoteExpandName)
+                {
+                    Caption = 'Full Quote Expand Name';
+                    Editable = false;
+                }
+                field(canEvaluate; CanEvaluate)
+                {
+                    Caption = 'Can Evaluate';
+                    Editable = false;
+                }
+                field(canMoveToReadyForReview; CanMoveToReadyForReview)
+                {
+                    Caption = 'Can Move to Ready for Review';
+                    Editable = false;
+                }
+                field(canApprove; CanApprove)
+                {
+                    Caption = 'Can Approve';
+                    Editable = false;
+                }
+                field(canReject; CanReject)
+                {
+                    Caption = 'Can Reject';
+                    Editable = false;
+                }
+                field(canReopen; CanReopen)
+                {
+                    Caption = 'Can Reopen';
+                    Editable = false;
+                }
+                field(rejectDecisionNoteRequired; RejectDecisionNoteRequired)
+                {
+                    Caption = 'Reject Decision Note Required';
+                    Editable = false;
+                }
+                field(allowedWriteActions; AllowedWriteActions)
+                {
+                    Caption = 'Allowed Write Actions';
+                    Editable = false;
+                }
+                field(writeConfirmationRequired; WriteConfirmationRequired)
+                {
+                    Caption = 'Write Confirmation Required';
+                    Editable = false;
+                }
+                field(actionContractNote; ActionContractNote)
+                {
+                    Caption = 'Action Contract Note';
+                    Editable = false;
+                }
                 field(recommendedNextAction; RecommendedNextAction)
                 {
                     Caption = 'Recommended Next Action';
@@ -198,6 +258,18 @@ page 71032 "GPI Quote Sum API"
         PrimaryExceptionStatus: Text[100];
         PrimaryExceptionMessage: Text[250];
         PrimaryApprover: Text[100];
+        ActionContractVersion: Text[20];
+        ActionResource: Text[50];
+        FullQuoteExpandName: Text[50];
+        CanEvaluate: Boolean;
+        CanMoveToReadyForReview: Boolean;
+        CanApprove: Boolean;
+        CanReject: Boolean;
+        CanReopen: Boolean;
+        RejectDecisionNoteRequired: Boolean;
+        AllowedWriteActions: Text[250];
+        WriteConfirmationRequired: Boolean;
+        ActionContractNote: Text[250];
         RecommendedNextAction: Text[250];
 
     local procedure BuildSummary()
@@ -252,7 +324,73 @@ page 71032 "GPI Quote Sum API"
                 CopyStr(QuoteLine."Guardrail Approver", 1, MaxStrLen(PrimaryApprover));
         end;
 
+        BuildActionContract();
+
         RecommendedNextAction := BuildRecommendedNextAction();
+    end;
+    local procedure BuildActionContract()
+    begin
+        ActionContractVersion := '1.0';
+        ActionResource := 'packagingQuotes';
+        FullQuoteExpandName := 'packagingQuoteLines';
+
+        CanEvaluate :=
+            (Rec.Status in ["GPI Pack Quote Stat"::Draft, "GPI Pack Quote Stat"::Ready]) and
+            (Rec."Customer No." <> '') and
+            (Rec."Line Count" > 0);
+
+        CanMoveToReadyForReview :=
+            (Rec.Status = "GPI Pack Quote Stat"::Draft) and
+            (Rec."Customer No." <> '') and
+            (Rec."Line Count" > 0);
+
+        CanApprove :=
+            (Rec.Status = "GPI Pack Quote Stat"::Ready) and
+            ((not HasPricingExceptions) or (Rec."Decision Note" <> ''));
+
+        RejectDecisionNoteRequired :=
+            (Rec.Status = "GPI Pack Quote Stat"::Ready) and
+            (Rec."Decision Note" = '');
+
+        CanReject :=
+            (Rec.Status = "GPI Pack Quote Stat"::Ready) and
+            (Rec."Decision Note" <> '');
+
+        CanReopen :=
+            Rec.Status <> "GPI Pack Quote Stat"::Draft;
+
+        AllowedWriteActions := '';
+
+        if CanEvaluate then
+            AddAllowedAction('evaluate');
+
+        if CanMoveToReadyForReview then
+            AddAllowedAction('readyForReview');
+
+        if CanApprove then
+            AddAllowedAction('approve');
+
+        if CanReject then
+            AddAllowedAction('reject');
+
+        if CanReopen then
+            AddAllowedAction('reopen');
+
+        WriteConfirmationRequired := AllowedWriteActions <> '';
+
+        ActionContractNote :=
+            'Action availability reflects current status and minimum prerequisites. Business Central revalidates guardrails, required fields, and decision rules when a write action executes.';
+    end;
+
+    local procedure AddAllowedAction(ActionName: Text[50])
+    begin
+        if AllowedWriteActions = '' then
+            AllowedWriteActions := ActionName
+        else
+            AllowedWriteActions := CopyStr(
+                AllowedWriteActions + ',' + ActionName,
+                1,
+                MaxStrLen(AllowedWriteActions));
     end;
 
     local procedure BuildRecommendedNextAction(): Text[250]

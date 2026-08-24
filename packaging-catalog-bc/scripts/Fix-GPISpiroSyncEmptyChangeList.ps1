@@ -22,7 +22,7 @@ $newParameter = '[Parameter(Mandatory)][AllowEmptyCollection()][System.Collectio
 if ($text.Contains($oldParameter)) {
     $text = $text.Replace($oldParameter, $newParameter)
 }
-elif (-not $text.Contains($newParameter)) {
+elseif (-not $text.Contains($newParameter)) {
     throw 'Could not find the Add-TextChange Changes parameter. Original file was not modified.'
 }
 

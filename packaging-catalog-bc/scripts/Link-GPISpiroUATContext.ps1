@@ -780,8 +780,14 @@ else {
         }
     }
 
+    if ([string]::IsNullOrWhiteSpace([string]$selectedOpportunity.Url) -and
+        -not [string]::IsNullOrWhiteSpace([string]$selectedOpportunity.Id)) {
+        $selectedOpportunity.Url = "https://app.spiro.ai/opportunities/$($selectedOpportunity.Id)"
+    }
+
     Write-Host "Resolved stage       : $($selectedOpportunity.Stage)" -ForegroundColor Green
     Write-Host "Resolved owner       : $($selectedOpportunity.Owner)" -ForegroundColor Green
+    Write-Host "Resolved browser URL : $($selectedOpportunity.Url)" -ForegroundColor Green
 }
 Write-Section 'SPIRO CONTACT DISCOVERY'
 $allContacts = Get-SpiroAllRecords -Resource contacts -AccessToken $spiroAccessToken
@@ -956,4 +962,3 @@ Write-Host "Spiro synced at   : $($verifiedQuote.spiroLastSyncedAt)"
 Write-Host ''
 Write-Host 'SUCCESS: Spiro CRM context was linked to Business Central UAT.' -ForegroundColor Green
 Write-Host 'Refresh the packaging quote card to display the Spiro CRM Context section.'
-

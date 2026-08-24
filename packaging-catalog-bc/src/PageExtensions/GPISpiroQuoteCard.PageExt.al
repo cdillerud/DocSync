@@ -69,6 +69,23 @@ pageextension 71104 "GPI Spiro Quote Card" extends "GPI Pack Quote Card"
     {
         addlast(Processing)
         {
+            action(SelectSpiroOpportunity)
+            {
+                ApplicationArea = All;
+                Caption = 'Select Spiro Opportunity';
+                Image = SelectEntries;
+                Promoted = true;
+                PromotedCategory = Process;
+                ToolTip = 'Selects a cached Spiro opportunity for the quote customer. The cache is populated by the external Spiro integration process.';
+
+                trigger OnAction()
+                var
+                    SpiroLinkMgt: Codeunit "GPI Spiro Link Mgt";
+                begin
+                    SpiroLinkMgt.SelectOpportunity(Rec);
+                    CurrPage.Update(false);
+                end;
+            }
             action(OpenSpiroOpportunity)
             {
                 ApplicationArea = All;

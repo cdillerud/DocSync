@@ -120,7 +120,7 @@ if ([string]::IsNullOrWhiteSpace($accessToken)) {
     throw 'No Spiro access token was found in the protected token store.'
 }
 
-$uri = "https://api.spiro.ai/api/v1/opportunities/$OpportunityId?include=user"
+$uri = "https://api.spiro.ai/api/v1/opportunities/${OpportunityId}?include=user"
 Write-Host ''
 Write-Host '========================================================================' -ForegroundColor Cyan
 Write-Host "SPIRO OPPORTUNITY RAW FIELD INSPECTION [$OpportunityId]" -ForegroundColor Cyan

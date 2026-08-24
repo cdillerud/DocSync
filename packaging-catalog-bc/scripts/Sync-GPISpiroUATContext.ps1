@@ -648,14 +648,14 @@ function Test-TextEqual {
 
 function Add-TextChange {
     param(
-        [Parameter(Mandatory)][System.Collections.Generic.List[string]]$Changes,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$Changes,
         [Parameter(Mandatory)][string]$Label,
         [AllowNull()]$Current,
         [AllowNull()]$Desired
     )
 
     if (-not (Test-TextEqual -Left $Current -Right $Desired)) {
-        $Changes.Add("$Label: '$(Convert-ToCompareText -Value $Current)' -> '$(Convert-ToCompareText -Value $Desired)'")
+        $Changes.Add("${Label}: '$(Convert-ToCompareText -Value $Current)' -> '$(Convert-ToCompareText -Value $Desired)'")
         return $true
     }
 
@@ -740,6 +740,16 @@ $quoteLinks = Get-BcCollection -Uri "$spiroBase/spiroQuoteLinks" -Token $bcToken
 
 if ($QuoteEntryNo -gt 0) {
     $quoteLinks = @($quoteLinks | Where-Object { [int](Get-PropertyValue -Object $_ -Names @('quoteNo')) -eq $QuoteEntryNo })
+}
+else {
+    $quoteLinks = @(
+        $quoteLinks |
+            Where-Object {
+                -not [string]::IsNullOrWhiteSpace(
+                    [string](Get-PropertyValue -Object $_ -Names @('spiroOpportunityId'))
+                )
+            }
+    )
 }
 
 Write-Host "Customer mappings  : $($mappings.Count)"

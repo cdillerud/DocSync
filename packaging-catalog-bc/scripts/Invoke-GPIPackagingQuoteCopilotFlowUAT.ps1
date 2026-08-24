@@ -295,17 +295,14 @@ if (
 # DELEGATE THE ACTUAL WRITE TO 0.37
 # 0.37 performs its own live contract revalidation before POST.
 # ------------------------------------------------------------------------
-& $ExecutorScript `
-    -QuoteNo $QuoteNo `
-    -Action $Action `
-    -Confirmed `
-    -TenantId $TenantId `
-    -EnvironmentName $EnvironmentName `
-    -CompanyId $CompanyId
-
-if (-not $?) {
-    throw 'STOP: 0.37 executor reported failure.'
-}
+$executorOutput =
+    & $ExecutorScript `
+        -QuoteNo $QuoteNo `
+        -Action $Action `
+        -Confirmed `
+        -TenantId $TenantId `
+        -EnvironmentName $EnvironmentName `
+        -CompanyId $CompanyId
 
 # ------------------------------------------------------------------------
 # READ FRESH POST-EXECUTION STATE

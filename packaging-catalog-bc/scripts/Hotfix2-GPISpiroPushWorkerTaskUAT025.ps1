@@ -52,8 +52,22 @@ $newDisable = 'Disable-ScheduledTask -TaskName $TaskName -ErrorAction Stop | Out
 if ($text.Contains($oldDisable)) {
     $text = $text.Replace($oldDisable, $newDisable)
 }
+elseif ($text.Contains($newDisable)) {
+    Write-Host 'Already present: fail-fast task disable.' -ForegroundColor DarkYellow
+}
+else {
+    throw 'Scheduled task disable anchor not found.'
+}
 
-$text = $text.Replace("Write-Host \"Interval Minutes   : $IntervalMinutes\"", "Write-Host \"Interval Minutes   : $IntervalMinutes\"`r`nWrite-Host 'Repetition Window  : 3650 days'")
+$intervalLine = 'Write-Host "Interval Minutes   : $IntervalMinutes"'
+$windowLine = "Write-Host 'Repetition Window  : 3650 days'"
+if (-not $text.Contains($windowLine)) {
+    if (-not $text.Contains($intervalLine)) {
+        throw 'Preview interval output anchor not found.'
+    }
+    $replacement = $intervalLine + [Environment]::NewLine + $windowLine
+    $text = $text.Replace($intervalLine, $replacement)
+}
 
 [System.IO.File]::WriteAllText($installer, $text, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Patched: $installer" -ForegroundColor DarkGreen
@@ -66,6 +80,7 @@ $checks = @(
     @{ Passed = $raw.Contains('Register-ScheduledTask -TaskName $TaskName -InputObject $task -ErrorAction Stop'); Label = 'registration fails fast' },
     @{ Passed = $raw.Contains('Disable-ScheduledTask -TaskName $TaskName -ErrorAction Stop'); Label = 'disable fails fast' },
     @{ Passed = $raw.Contains('-LogonType Interactive -RunLevel Highest'); Label = 'Interactive logon type preserved' },
+    @{ Passed = $raw.Contains('Repetition Window  : 3650 days'); Label = 'preview shows bounded repetition window' },
     @{ Passed = $raw.Contains('PREVIEW ONLY. No scheduled task was created or changed.'); Label = 'preview-only default preserved' }
 )
 

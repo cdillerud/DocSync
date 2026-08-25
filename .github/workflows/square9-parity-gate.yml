@@ -3,9 +3,11 @@ name: Square9 Parity Gate
 on:
   pull_request:
     paths:
+      - 'backend/routers/gpi_integration.py'
       - 'backend/services/sharepoint_service.py'
       - 'backend/services/bc_link_service.py'
       - 'backend/services/document_link_service.py'
+      - 'backend/services/document_link_visibility_service.py'
       - 'backend/services/document_orchestration_service.py'
       - 'backend/services/document_bytes_intake_service.py'
       - 'backend/services/email_polling_service.py'
@@ -16,6 +18,7 @@ on:
       - 'backend/tests/test_square9_parity_metadata.py'
       - 'backend/tests/test_bc_link_write_boundary.py'
       - 'backend/tests/test_document_link_entity_guard.py'
+      - 'backend/tests/test_document_link_visibility_service.py'
       - 'backend/tests/test_mailbox_provenance_service.py'
       - '.github/workflows/square9-parity-gate.yml'
   workflow_dispatch:
@@ -54,6 +57,7 @@ jobs:
             tests/test_square9_parity_metadata.py \
             tests/test_bc_link_write_boundary.py \
             tests/test_document_link_entity_guard.py \
+            tests/test_document_link_visibility_service.py \
             tests/test_mailbox_provenance_service.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
@@ -88,5 +92,20 @@ jobs:
         run: |
           grep -q 'persist_mailbox_provenance' backend/services/email_polling_service.py || {
             echo "::error::Email intake does not persist mailbox provenance"
+            exit 1
+          }
+
+      - name: Guardrail - Gamer Documents lookup binds BC entity and number
+        run: |
+          grep -q 'build_hub_document_link_query(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
+            echo "::error::Hub FactBox lookup is not bound to BC entity"
+            exit 1
+          }
+          grep -q '_fetch_bc_document_links(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
+            echo "::error::BC documentLinks lookup is not bound to BC entity"
+            exit 1
+          }
+          grep -q 'build_folder_match_query(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
+            echo "::error::BC-drop folder reuse is not bound to BC entity"
             exit 1
           }

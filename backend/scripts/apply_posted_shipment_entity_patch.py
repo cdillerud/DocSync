@@ -17,3 +17,5 @@ if "exit('postedSalesShipments');" not in text:
 
 path.write_text(text, encoding="utf-8")
 print("PASS: Posted Sales Shipment entity mapping applied")
+
+# trigger: workflow exists on branch

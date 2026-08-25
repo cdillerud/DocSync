@@ -9,12 +9,14 @@ on:
       - 'backend/services/document_orchestration_service.py'
       - 'backend/services/document_bytes_intake_service.py'
       - 'backend/services/email_polling_service.py'
+      - 'backend/services/mailbox_provenance_service.py'
       - 'backend/services/batch_po_splitter.py'
       - 'backend/services/document_retry_service.py'
       - 'backend/services/document_reprocess_service.py'
       - 'backend/tests/test_square9_parity_metadata.py'
       - 'backend/tests/test_bc_link_write_boundary.py'
       - 'backend/tests/test_document_link_entity_guard.py'
+      - 'backend/tests/test_mailbox_provenance_service.py'
       - '.github/workflows/square9-parity-gate.yml'
   workflow_dispatch:
 
@@ -34,7 +36,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio httpx python-dotenv fastapi
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor
 
       - name: Run focused parity tests
         working-directory: backend
@@ -50,7 +52,8 @@ jobs:
           pytest -q \
             tests/test_square9_parity_metadata.py \
             tests/test_bc_link_write_boundary.py \
-            tests/test_document_link_entity_guard.py
+            tests/test_document_link_entity_guard.py \
+            tests/test_mailbox_provenance_service.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -79,3 +82,10 @@ jobs:
             echo "::error::Retry path bypasses the parity delivery boundary"
             exit 1
           fi
+
+      - name: Guardrail - AP and dynamic mail intake persist mailbox provenance
+        run: |
+          grep -q 'persist_mailbox_provenance' backend/services/email_polling_service.py || {
+            echo "::error::Email intake does not persist mailbox provenance"
+            exit 1
+          }

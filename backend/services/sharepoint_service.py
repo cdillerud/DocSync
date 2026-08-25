@@ -421,7 +421,10 @@ def build_square9_parity_metadata(
         or ""
     ).strip()
 
-    source_table_id = ""
+    # Keep the payload compatible with either a SharePoint Number or Text
+    # column. An absent BC table is null, never a blank string masquerading as
+    # a number. Resolved table IDs below remain integers.
+    source_table_id = None
     source_document_type = ""
     source_party_type = ""
     source_party_no = ""

@@ -3381,7 +3381,40 @@ async def upload_document_to_bc_record(
     }
 
 
-# --- STEP 3: DELETE a document link (soft delete) ---
+# --- STEP 3: RECOVER a failed BC document link without re-uploading ---
+
+@router.post("/document-links/recover/{doc_id}")
+async def recover_document_link(doc_id: str):
+    """Retry only the missing BC link for an existing SharePoint document.
+
+    This path is intentionally re-link-only: it never uploads file bytes or
+    creates a replacement SharePoint item.
+    """
+    try:
+        from services.bc_document_link_recovery_service import recover_bc_document_link
+        result = await recover_bc_document_link(doc_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error("[DocLinks] BC link recovery failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=502, detail=f"BC link recovery failed: {str(e)}")
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "BC link recovery failed; SharePoint file was not re-uploaded",
+                "doc_id": doc_id,
+                "delivery_status": "bc_link_failed",
+                "error": result.get("error", "Unknown BC link recovery error"),
+            },
+        )
+    return result
+
+
+# --- STEP 4: DELETE a document link (soft delete) ---
 
 @router.delete("/document-links/{bc_entity}/{bc_document_no}/{doc_id_or_sp_item}")
 async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str):
@@ -3389,12 +3422,19 @@ async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Find by id or sharepoint_item_id
+    # Find only within the exact BC entity + document number.
+    from services.document_link_visibility_service import build_bc_identity_clause
     doc = await db.hub_documents.find_one(
-        {"$or": [
-            {"id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
-            {"sharepoint_item_id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
-        ]},
+        {
+            "bc_document_no": bc_document_no,
+            "$and": [
+                build_bc_identity_clause(bc_entity),
+                {"$or": [
+                    {"id": doc_id_or_sp_item},
+                    {"sharepoint_item_id": doc_id_or_sp_item},
+                ]},
+            ],
+        },
         {"_id": 0}
     )
     if not doc:

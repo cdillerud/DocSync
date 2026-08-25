@@ -11,9 +11,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from native_prepare import prepare_native
+from native_decision_note import write_decision_note_native
+from native_execute import execute_native
 
 
-APP_VERSION = "0.43.0"
+APP_VERSION = "0.44.0"
 EXPECTED_ENVIRONMENT = "Sandbox_NoZetadocs_UAT"
 PROTECTED_QUOTES = {67}
 
@@ -62,6 +64,24 @@ def execute_enabled() -> bool:
 def native_bc_prepare_enabled() -> bool:
     return (
         os.getenv("GPI_USE_NATIVE_BC_PREPARE", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def native_bc_decision_note_enabled() -> bool:
+    return (
+        os.getenv("GPI_USE_NATIVE_BC_DECISION_NOTE", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def native_bc_execute_enabled() -> bool:
+    return (
+        os.getenv("GPI_USE_NATIVE_BC_EXECUTE", "0")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
@@ -163,6 +183,10 @@ def classify_flow_error(
         "requires the confirmation token" in normalized
         or "protected" in normalized
         or "uat-only" in normalized
+        or "decisionnote may only be supplied" in normalized
+        or "decisionnote may not be blank" in normalized
+        or "decisionnote must be a single line" in normalized
+        or "decisionnotealreadywritten" in normalized
     ):
         status_code = 400
         error = "invalid_request"
@@ -192,6 +216,7 @@ def invoke_flow(
     action: ActionName,
     confirmation_token: str | None = None,
     decision_note: str | None = None,
+    decision_note_already_written: bool = False,
 ) -> dict:
     validate_runtime_files()
 
@@ -221,6 +246,11 @@ def invoke_flow(
         escaped_note = decision_note.replace("'", "''")
         ps.append(
             f"$p.DecisionNote = '{escaped_note}'"
+        )
+
+    if decision_note_already_written:
+        ps.append(
+            "$p.DecisionNoteAlreadyWritten = $true"
         )
 
     ps.extend(
@@ -330,6 +360,8 @@ def health() -> dict:
         "environment": EXPECTED_ENVIRONMENT,
         "executeEnabled": execute_enabled(),
         "nativeBcPrepareEnabled": native_bc_prepare_enabled(),
+        "nativeBcDecisionNoteEnabled": native_bc_decision_note_enabled(),
+        "nativeBcExecuteEnabled": native_bc_execute_enabled(),
         "flowScript": FLOW_SCRIPT.name,
         "openApiContract": OPENAPI_CONTRACT.name,
     }
@@ -380,6 +412,80 @@ def execute_action(request: ExecuteRequest) -> dict:
                 "action": request.action,
                 "retryPrepare": False,
             },
+        )
+
+    if native_bc_execute_enabled():
+        try:
+            return execute_native(
+                quote_no=request.quoteNo,
+                action=request.action,
+                confirmation_token=request.confirmationToken,
+                decision_note=request.decisionNote,
+            )
+        except Exception as exc:
+            raise classify_flow_error(
+                message=str(exc),
+                quote_no=request.quoteNo,
+                action=request.action,
+            ) from exc
+
+    if (
+        native_bc_decision_note_enabled()
+        and request.decisionNote is not None
+        and request.action in {"approve", "reject"}
+    ):
+        try:
+            preparation = prepare_native(
+                quote_no=request.quoteNo,
+                action=request.action,
+                decision_note=request.decisionNote,
+            )
+
+            if preparation.get("isAllowed") is not True:
+                raise RuntimeError(
+                    "STOP: action is not currently allowed. "
+                    f"Reason: {preparation.get('reason')}"
+                )
+
+            if (
+                preparation.get("confirmationRequired")
+                is not True
+            ):
+                raise RuntimeError(
+                    "STOP: live preparation does not require "
+                    "explicit confirmation."
+                )
+
+            expected_token = str(
+                preparation.get("confirmationToken") or ""
+            )
+
+            if request.confirmationToken != expected_token:
+                raise RuntimeError(
+                    "STOP: confirmation token does not match "
+                    "the current live quote/action state. "
+                    "Prepare the action again before executing."
+                )
+
+            write_decision_note_native(
+                quote_no=request.quoteNo,
+                decision_note=request.decisionNote,
+            )
+
+        except Exception as exc:
+            raise classify_flow_error(
+                message=str(exc),
+                quote_no=request.quoteNo,
+                action=request.action,
+            ) from exc
+
+        return invoke_flow(
+            mode="Execute",
+            quote_no=request.quoteNo,
+            action=request.action,
+            confirmation_token=request.confirmationToken,
+            decision_note=request.decisionNote,
+            decision_note_already_written=True,
         )
 
     return invoke_flow(

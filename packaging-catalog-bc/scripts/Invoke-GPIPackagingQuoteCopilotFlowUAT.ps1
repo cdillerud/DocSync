@@ -21,6 +21,8 @@ param(
 
     [string]$DecisionNote,
 
+    [switch]$DecisionNoteAlreadyWritten,
+
     [ValidateSet('Object', 'Json')]
     [string]$OutputFormat = 'Json',
 
@@ -194,6 +196,26 @@ if (
 
 if ($normalizedDecisionNote -match '[\r\n]') {
     throw 'STOP: DecisionNote must be a single line.'
+}
+
+if (
+    $DecisionNoteAlreadyWritten -and
+    $Mode -ne 'Execute'
+) {
+    throw (
+        'STOP: DecisionNoteAlreadyWritten is valid only ' +
+        'in Execute mode.'
+    )
+}
+
+if (
+    $DecisionNoteAlreadyWritten -and
+    -not $decisionNoteProvided
+) {
+    throw (
+        'STOP: DecisionNoteAlreadyWritten requires ' +
+        'DecisionNote.'
+    )
 }
 
 $decisionNoteRequiredForAction =
@@ -442,7 +464,10 @@ if (
 # ------------------------------------------------------------------------
 # OPTIONAL CONTROLLED DECISION-NOTE WRITE
 # ------------------------------------------------------------------------
-if ($decisionNoteWillBeWritten) {
+if (
+    $decisionNoteWillBeWritten -and
+    -not $DecisionNoteAlreadyWritten
+) {
     $decisionNoteOutput =
         & $DecisionNoteScript `
             -QuoteNo $QuoteNo `
@@ -451,13 +476,15 @@ if ($decisionNoteWillBeWritten) {
             -TenantId $TenantId `
             -EnvironmentName $EnvironmentName `
             -CompanyId $CompanyId
+}
 
+if ($decisionNoteWillBeWritten) {
     $postNotePreparation =
         Get-LivePreparation
 
     if (-not [bool]$postNotePreparation.isAllowed) {
         throw (
-            "STOP: decision note was written, but action '$Action' " +
+            "STOP: decision note is present, but action '$Action' " +
             "is still not permitted. Reason: $($postNotePreparation.reason)"
         )
     }

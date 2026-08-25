@@ -1,0 +1,41 @@
+name: Apply SharePoint Table ID Null Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - '.github/workflows/apply-sharepoint-tableid-null-patch.yml'
+      - 'backend/scripts/apply_sharepoint_tableid_null_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+
+      - name: Apply exact SharePoint table ID patch
+        run: python backend/scripts/apply_sharepoint_tableid_null_patch.py
+
+      - name: Verify only SharePoint service changed
+        run: |
+          git diff --exit-code -- .github/workflows/apply-sharepoint-tableid-null-patch.yml backend/scripts/apply_sharepoint_tableid_null_patch.py
+          changed="$(git diff --name-only)"
+          test "$changed" = "backend/services/sharepoint_service.py" || {
+            echo "::error::Unexpected changed files: $changed"
+            exit 1
+          }
+
+      - name: Commit type-safe SharePoint metadata payload
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/services/sharepoint_service.py
+          git commit -m "parity: keep absent SharePoint table ID type-safe"
+          git push origin HEAD:feature/square9-parity-systemid-gate

@@ -196,20 +196,23 @@ class MigrationJob:
         if mode == MigrationMode.REAL and self.db_collection is None:
             raise ValueError("db_collection is required for REAL mode migration")
         
-        # Get existing legacy IDs if skip_duplicates is enabled
-        existing_ids = set()
+        # Dedupe by source system + legacy ID. IDs are not globally unique
+        # across Square9 and Zetadocs, and the seen set is updated during the
+        # run so duplicates inside one export cannot be inserted twice.
+        existing_keys = set()
         if self.skip_duplicates and mode == MigrationMode.REAL:
-            existing_ids = await self._get_existing_legacy_ids()
-            logger.info(f"Found {len(existing_ids)} existing migrated documents")
+            existing_keys = await self._get_existing_legacy_keys()
+            logger.info(f"Found {len(existing_keys)} existing migrated source identities")
         
         # Process documents
         batch = []
         for legacy_doc in self.source.iter_documents(source_filter, doc_type_filter, limit):
             try:
+                source_key = self._legacy_identity_key(legacy_doc.metadata)
                 # Skip duplicates
-                if legacy_doc.metadata.legacy_id in existing_ids:
+                if self.skip_duplicates and source_key in existing_keys:
                     stats.record_skip(
-                        "Duplicate legacy_id",
+                        "Duplicate legacy source identity",
                         legacy_doc.metadata.legacy_id
                     )
                     continue
@@ -235,6 +238,12 @@ class MigrationJob:
                         gpi_doc.get("doc_type", "OTHER"),
                     )
                 
+                # Reserve the accepted source identity immediately. This
+                # prevents a duplicate later in the same source/run even before
+                # the current batch is written to MongoDB.
+                if self.skip_duplicates:
+                    existing_keys.add(source_key)
+
                 # Collect sample for dry-run review
                 if len(sample_documents) < 20:
                     sample_documents.append(gpi_doc)
@@ -533,22 +542,35 @@ class MigrationJob:
         if metadata.extra:
             gpi_doc["legacy_extra"] = metadata.extra
     
-    async def _get_existing_legacy_ids(self) -> set:
-        """Get set of legacy_ids already in the database."""
+    @staticmethod
+    def _legacy_identity_key(metadata: LegacyDocumentMetadata) -> tuple[str, str]:
+        """Return stable source-scoped legacy identity for dedupe."""
+        return (
+            str(metadata.legacy_system or "UNKNOWN").strip().upper(),
+            str(metadata.legacy_id or "").strip(),
+        )
+
+    async def _get_existing_legacy_keys(self) -> set:
+        """Get source-scoped legacy identities already in the database."""
         if self.db_collection is None:
             return set()
         
         cursor = self.db_collection.find(
             {"is_migrated": True},
-            {"legacy_id": 1, "_id": 0}
+            {"legacy_system": 1, "source_system": 1, "legacy_id": 1, "_id": 0}
         )
         
-        ids = set()
+        keys = set()
         async for doc in cursor:
-            if doc.get("legacy_id"):
-                ids.add(doc["legacy_id"])
+            legacy_id = str(doc.get("legacy_id") or "").strip()
+            if not legacy_id:
+                continue
+            legacy_system = str(
+                doc.get("legacy_system") or doc.get("source_system") or "UNKNOWN"
+            ).strip().upper()
+            keys.add((legacy_system, legacy_id))
         
-        return ids
+        return keys
     
     async def _write_batch(self, batch: List[Dict[str, Any]]) -> None:
         """Write a batch of documents to the database."""

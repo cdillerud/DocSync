@@ -33,9 +33,10 @@ codeunit 50105 "GPI Document Link Mgt"
     /// </summary>
     local procedure GetGPIHubUrl(): Text
     begin
-        // TODO: Read from a GPI Hub Setup table record.
-        // For now, return the configured URL.
-        exit('https://http://4.204.41.190:8080/');
+        // GPI Hub is externally exposed through nginx on port 80. nginx
+        // proxies /api/* to the FastAPI backend. Keep this URL free of a
+        // trailing slash because callers append /gpi-integration/...
+        exit('http://4.204.41.190/api');
     end;
 
     /// <summary>

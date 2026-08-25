@@ -4,11 +4,13 @@ on:
   pull_request:
     paths:
       - 'backend/routers/gpi_integration.py'
+      - 'backend/routers/ap_review.py'
       - 'backend/services/sharepoint_service.py'
       - 'backend/services/bc_link_service.py'
       - 'backend/services/gpi_integration_service.py'
       - 'backend/services/bc_document_identity_service.py'
       - 'backend/services/bc_document_link_recovery_service.py'
+      - 'backend/services/operator_identity_correction_service.py'
       - 'backend/services/document_link_service.py'
       - 'backend/services/document_link_visibility_service.py'
       - 'backend/services/document_orchestration_service.py'
@@ -28,6 +30,7 @@ on:
       - 'backend/tests/test_gpi_document_link_systemid_guard.py'
       - 'backend/tests/test_document_retry_existing_delivery.py'
       - 'backend/tests/test_batch_po_splitter_replay.py'
+      - 'backend/tests/test_operator_identity_correction_service.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
@@ -77,7 +80,8 @@ jobs:
             tests/test_bc_document_link_recovery_service.py \
             tests/test_gpi_document_link_systemid_guard.py \
             tests/test_document_retry_existing_delivery.py \
-            tests/test_batch_po_splitter_replay.py
+            tests/test_batch_po_splitter_replay.py \
+            tests/test_operator_identity_correction_service.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -171,6 +175,21 @@ jobs:
           fi
           grep -q '@router.post("/document-links/recover/{doc_id}")' backend/routers/gpi_integration.py || {
             echo "::error::Operator BC link recovery endpoint missing"
+            exit 1
+          }
+
+      - name: Guardrail - AP correction invalidates stale BC identity
+        run: |
+          grep -q 'build_identity_invalidation(' backend/routers/ap_review.py || {
+            echo "::error::AP review correction does not invalidate stale BC identity"
+            exit 1
+          }
+          grep -q 'identity_correction_history' backend/routers/ap_review.py || {
+            echo "::error::AP review correction does not preserve prior identity audit"
+            exit 1
+          }
+          grep -q 'sharepoint_parity_metadata_stale' backend/services/operator_identity_correction_service.py || {
+            echo "::error::AP identity correction does not mark SharePoint parity metadata stale"
             exit 1
           }
 

@@ -652,6 +652,7 @@ async def upload_to_sharepoint_with_routing(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
     is_international: bool = False,
+    parity_metadata_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Resolve, route, snapshot, upload, and persist the parity metadata contract."""
     from services.folder_routing_service import route_with_feedback
@@ -720,14 +721,32 @@ async def upload_to_sharepoint_with_routing(
         upload_file_name,
         full_folder_path,
     )
-    parity_metadata = build_square9_parity_metadata(
-        routing_doc,
-        po_result,
-        file_name,
-        upload_file_name,
-        full_folder_path,
-        result.get("web_url", ""),
-    )
+    if parity_metadata_override is not None:
+        # Historical migration may already have exact BC identity from the
+        # legacy linkage. Preserve that evidence instead of replacing it with
+        # a live PO re-resolution result. File/path/url are authoritative from
+        # this upload and are always refreshed here.
+        parity_metadata = dict(parity_metadata_override)
+        parity_metadata.update({
+            "GPI_OriginalFileName": file_name,
+            "GPI_SharePointFileName": upload_file_name,
+            "GPI_SharePointPath": full_folder_path,
+            "GPI_SharePointURL": result.get("web_url", ""),
+            "ImportReady": bool(parity_metadata_override.get("ImportReady")),
+        })
+        parity_metadata.setdefault(
+            "GPI_Status",
+            "ImportReady" if parity_metadata["ImportReady"] else "NotImportReady",
+        )
+    else:
+        parity_metadata = build_square9_parity_metadata(
+            routing_doc,
+            po_result,
+            file_name,
+            upload_file_name,
+            full_folder_path,
+            result.get("web_url", ""),
+        )
 
     try:
         metadata_result = await write_sharepoint_parity_metadata(

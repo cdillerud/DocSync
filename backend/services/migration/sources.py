@@ -183,6 +183,22 @@ class LegacyDocumentSource(ABC):
         """Return a descriptive name for this source."""
         pass
 
+    def read_binary(self, doc: LegacyDocument) -> bytes:
+        """Read the document body for migration. Local paths only by default."""
+        reference = str(doc.binary_reference or "").strip()
+        if not reference:
+            raise FileNotFoundError(
+                f"Legacy document {doc.metadata.legacy_id!r} has no binary_reference"
+            )
+        if reference.lower().startswith(("http://", "https://")):
+            raise ValueError(
+                "Remote legacy binary references require an explicit source implementation"
+            )
+        path = Path(reference)
+        if not path.is_file():
+            raise FileNotFoundError(f"Legacy document body not found: {reference}")
+        return path.read_bytes()
+
 
 class InMemorySource(LegacyDocumentSource):
     """
@@ -397,6 +413,24 @@ class JsonFileSource(LegacyDocumentSource):
     def get_source_name(self) -> str:
         self._load()
         return self._data.get("source_name", self._file_path.stem)
+
+    def read_binary(self, doc: LegacyDocument) -> bytes:
+        """Read a local body, resolving relative references beside the JSON export."""
+        reference = str(doc.binary_reference or "").strip()
+        if not reference:
+            raise FileNotFoundError(
+                f"Legacy document {doc.metadata.legacy_id!r} has no binary_reference"
+            )
+        if reference.lower().startswith(("http://", "https://")):
+            raise ValueError(
+                "Remote legacy binary references require an explicit source implementation"
+            )
+        path = Path(reference)
+        if not path.is_absolute():
+            path = self._file_path.parent / path
+        if not path.is_file():
+            raise FileNotFoundError(f"Legacy document body not found: {path}")
+        return path.read_bytes()
     
     def _get_doc_type_hint(self, metadata: LegacyDocumentMetadata) -> Optional[str]:
         """Get doc_type hint from metadata using the same logic as InMemorySource."""

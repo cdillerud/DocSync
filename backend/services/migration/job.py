@@ -26,6 +26,7 @@ from workflows.core.engine import (
 from .sources import LegacyDocumentSource, LegacyDocument, LegacyDocumentMetadata
 from .workflow_initializer import WorkflowInitializer
 from .parity_identity import stage_migration_parity_fields, resolve_migration_identity
+from .delivery import deliver_migrated_document
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +237,13 @@ class MigrationJob:
                         gpi_doc,
                         legacy_doc.metadata,
                         gpi_doc.get("doc_type", "OTHER"),
+                    )
+                    # Migration is not successful until the historical body is
+                    # actually delivered to SharePoint with parity metadata.
+                    # Missing/unreadable bodies raise here, are recorded as
+                    # migration errors, and are not inserted or dedupe-reserved.
+                    gpi_doc = await deliver_migrated_document(
+                        self.source, legacy_doc, gpi_doc
                     )
                 
                 # Reserve the accepted source identity immediately. This

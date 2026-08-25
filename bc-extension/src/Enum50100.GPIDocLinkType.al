@@ -35,4 +35,8 @@ enum 50100 "GPI Doc Link Type"
     {
         Caption = 'Purchase Order';
     }
+    value(7; "Posted Sales Shipment")
+    {
+        Caption = 'Posted Sales Shipment';
+    }
 }

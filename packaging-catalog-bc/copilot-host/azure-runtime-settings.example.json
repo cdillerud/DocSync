@@ -1,0 +1,42 @@
+{
+  "milestone": "0.44G",
+  "purpose": "Azure App Service configuration template. Example only; does not perform deployment.",
+  "runtime": {
+    "platform": "Azure App Service Linux",
+    "startupCommand": "./startup.sh",
+    "healthPath": "/health",
+    "readinessPath": "/ready"
+  },
+  "appSettings": {
+    "GPI_BC_TENANT_ID": "c7b2de14-71d9-4c49-a0b9-2bec103a6fdc",
+    "GPI_BC_ENVIRONMENT_NAME": "Sandbox_NoZetadocs_UAT",
+    "GPI_BC_COMPANY_ID": "7d84c6d5-81e2-eb11-86df-00224822baa7",
+    "GPI_BC_CLIENT_ID": "6ac62e44-8968-4ad9-b781-434507a5c83a",
+    "GPI_BC_CLIENT_SECRET": "__SET_AS_APP_SERVICE_SECRET__",
+    "GPI_USE_NATIVE_BC_PREPARE": "1",
+    "GPI_USE_NATIVE_BC_DECISION_NOTE": "1",
+    "GPI_USE_NATIVE_BC_EXECUTE": "1",
+    "GPI_ENABLE_COPILOT_EXECUTE": "0",
+    "GPI_REQUIRE_EASYAUTH_PRINCIPAL": "1",
+    "GPI_INBOUND_TENANT_ID": "c7b2de14-71d9-4c49-a0b9-2bec103a6fdc",
+    "GPI_INBOUND_ALLOWED_CLIENT_ID": "__SET_AFTER_COPILOT_CALLER_APP_IS_CREATED__",
+    "SCM_DO_BUILD_DURING_DEPLOYMENT": "true"
+  },
+  "appServiceAuthentication": {
+    "provider": "Microsoft Entra ID",
+    "requireAuthentication": true,
+    "unauthenticatedRequest": "HTTP 401",
+    "singleTenant": true,
+    "tenantId": "c7b2de14-71d9-4c49-a0b9-2bec103a6fdc",
+    "allowedTokenAudiences": [
+      "api://__INBOUND_API_APP_CLIENT_ID__"
+    ],
+    "note": "App Service Authentication is the bearer-token validation boundary. FastAPI additionally requires the EasyAuth principal and validates tenant/client."
+  },
+  "safety": {
+    "executeInitiallyEnabled": false,
+    "protectedQuote": 67,
+    "targetEnvironment": "Sandbox_NoZetadocs_UAT",
+    "secretsCommittedToGit": false
+  }
+}

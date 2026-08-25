@@ -7,12 +7,16 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
 from native_prepare import prepare_native
 from native_decision_note import write_decision_note_native
 from native_execute import execute_native
+from inbound_auth import (
+    easy_auth_principal_required,
+    require_inbound_principal,
+)
 
 
 APP_VERSION = "0.44.0"
@@ -386,6 +390,7 @@ def health() -> dict:
         "nativeBcExecuteEnabled": native_bc_execute_enabled(),
         "nativeCloudReady": native_cloud_ready(),
         "legacyFlowAvailable": legacy_flow_available(),
+        "inboundAuthRequired": easy_auth_principal_required(),
     }
 
 
@@ -413,7 +418,12 @@ def ready() -> dict:
     }
 
 
-@app.post("/packagingQuoteActions/prepare")
+@app.post(
+    "/packagingQuoteActions/prepare",
+    dependencies=[
+        Depends(require_inbound_principal)
+    ],
+)
 def prepare_action(request: PrepareRequest) -> dict:
     protected_quote_guard(request.quoteNo)
 
@@ -439,7 +449,12 @@ def prepare_action(request: PrepareRequest) -> dict:
     )
 
 
-@app.post("/packagingQuoteActions/execute")
+@app.post(
+    "/packagingQuoteActions/execute",
+    dependencies=[
+        Depends(require_inbound_principal)
+    ],
+)
 def execute_action(request: ExecuteRequest) -> dict:
     protected_quote_guard(request.quoteNo)
 

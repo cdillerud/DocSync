@@ -1,8 +1,9 @@
 """Type-safe selectors for Business Central Gamer Documents visibility.
 
-BC document numbers are not globally unique across entity types.  Every FactBox
-lookup therefore has to bind the number to the requested BC entity/document
-family; querying by number alone can surface a document from the wrong record.
+BC document numbers are not globally unique across entity types. Every FactBox
+lookup and BC-drop folder lookup therefore has to bind the number to the
+requested BC entity/document family; querying by number alone can surface or
+route a document against the wrong record.
 """
 
 from typing import Dict, List
@@ -35,28 +36,42 @@ def document_type_aliases(bc_entity: str) -> List[str]:
     return list(aliases)
 
 
+def build_bc_identity_clause(bc_entity: str) -> dict:
+    """Return a Mongo clause proving a row belongs to the requested BC family."""
+    aliases = document_type_aliases(bc_entity)
+    return {
+        "$or": [
+            {"bc_entity": bc_entity},
+            {"bc_entity_type": bc_entity},
+            {"document_type": {"$in": aliases}},
+            {"doc_type": {"$in": aliases}},
+            {"suggested_job_type": {"$in": aliases}},
+        ]
+    }
+
+
 def build_hub_document_link_query(bc_entity: str, bc_document_no: str) -> dict:
     """Build a fail-closed Mongo selector for one BC record's visible links.
 
     Untyped legacy rows are deliberately excluded: when numbers collide, an
     untyped row cannot be proven to belong to the requested BC record.
     """
-    aliases = document_type_aliases(bc_entity)
     return {
         "bc_document_no": bc_document_no,
         "sharepoint_web_url": {"$nin": [None, ""]},
         "$and": [
             {"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]},
-            {
-                "$or": [
-                    {"bc_entity": bc_entity},
-                    {"bc_entity_type": bc_entity},
-                    {"document_type": {"$in": aliases}},
-                    {"doc_type": {"$in": aliases}},
-                    {"suggested_job_type": {"$in": aliases}},
-                ]
-            },
+            build_bc_identity_clause(bc_entity),
         ],
+    }
+
+
+def build_folder_match_query(bc_entity: str, bc_document_no: str) -> dict:
+    """Build a type-safe selector for reusing an existing SharePoint folder."""
+    return {
+        "bc_document_no": bc_document_no,
+        "sharepoint_folder_path": {"$nin": [None, ""]},
+        "$and": [build_bc_identity_clause(bc_entity)],
     }
 
 
@@ -76,6 +91,8 @@ def build_bc_document_link_filter(bc_entity: str, bc_document_no: str) -> str:
 __all__ = [
     "canonical_document_type",
     "document_type_aliases",
+    "build_bc_identity_clause",
     "build_hub_document_link_query",
+    "build_folder_match_query",
     "build_bc_document_link_filter",
 ]

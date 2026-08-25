@@ -8,6 +8,7 @@ on:
       - 'bc-extension/src/Enum50100.GPIDocLinkType.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al'
+      - 'bc-extension/build.sh'
       - '.github/workflows/square9-warehouse-visibility-gate.yml'
   workflow_dispatch:
 
@@ -31,6 +32,9 @@ jobs:
       - name: Run visibility tests
         working-directory: backend
         run: pytest -q tests/test_document_link_visibility_service.py
+
+      - name: Validate AL project structure
+        run: bash bc-extension/build.sh
 
       - name: Guardrail - Hub supports posted shipment resolver identity
         run: |
@@ -79,5 +83,3 @@ jobs:
             echo "::error::Sales BC attachment write lane is not default-off"
             exit 1
           }
-
-# Triggered after workflow creation so GitHub evaluates this gate on PR #15.

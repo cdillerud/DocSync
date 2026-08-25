@@ -33,3 +33,5 @@ for needle in (
 
 path.write_text(text, encoding="utf-8")
 print("PASS: durable migration accounting patch applied")
+
+# trigger: workflow exists on branch

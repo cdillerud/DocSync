@@ -246,37 +246,43 @@ class MigrationJob:
                         self.source, legacy_doc, gpi_doc
                     )
                 
-                # Reserve the accepted source identity immediately. This
-                # prevents a duplicate later in the same source/run even before
-                # the current batch is written to MongoDB.
+                # Reserve the accepted source identity immediately for the
+                # current run, preventing an identical source item from being
+                # delivered twice before the batch commits. A failed batch keeps
+                # this in-memory reservation only for this run; a future run
+                # rebuilds durable identities from MongoDB and can reconcile it.
                 if self.skip_duplicates:
                     existing_keys.add(source_key)
 
                 # Collect sample for dry-run review
                 if len(sample_documents) < 20:
                     sample_documents.append(gpi_doc)
-                
-                # Record success stats
-                stats.record_success(
-                    gpi_doc.get("doc_type", "OTHER"),
-                    gpi_doc.get("source_system", "UNKNOWN"),
-                    gpi_doc.get("workflow_status", "unknown")
-                )
-                
-                # Batch for database insertion
+
                 if mode == MigrationMode.REAL:
-                    batch.append(gpi_doc)
-                    
+                    # Do not count success until MongoDB confirms persistence.
+                    batch.append({
+                        "doc": gpi_doc,
+                        "source_key": source_key,
+                        "legacy_id": legacy_doc.metadata.legacy_id,
+                    })
                     if len(batch) >= self.batch_size:
-                        await self._write_batch(batch)
+                        await self._commit_batch(batch, stats)
                         batch = []
+                else:
+                    stats.record_success(
+                        gpi_doc.get("doc_type", "OTHER"),
+                        gpi_doc.get("source_system", "UNKNOWN"),
+                        gpi_doc.get("workflow_status", "unknown")
+                    )
             
             except Exception as e:
                 stats.record_error(str(e), legacy_doc.metadata.legacy_id)
         
-        # Write remaining batch
+        # Commit the final partial batch through the same durable accounting
+        # boundary. Persistence failure is reconciled into per-document errors
+        # rather than escaping after earlier success counts were recorded.
         if mode == MigrationMode.REAL and batch:
-            await self._write_batch(batch)
+            await self._commit_batch(batch, stats)
         
         # Build result
         completed_at = datetime.now(timezone.utc)
@@ -580,6 +586,45 @@ class MigrationJob:
         
         return keys
     
+    async def _commit_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        stats: MigrationStats,
+    ) -> bool:
+        """Persist one delivered batch, then and only then record success.
+
+        SharePoint delivery occurs before this boundary. If MongoDB persistence
+        fails, every item in the affected batch is reported as an error and no
+        success is claimed. Source identities remain reserved only in memory for
+        the rest of this run, preventing a duplicate source row from immediately
+        re-uploading the same file. A future run reconstructs durable identities
+        from MongoDB and can reconcile the failed batch.
+        """
+        if not batch:
+            return True
+
+        docs = [entry["doc"] for entry in batch]
+        try:
+            await self._write_batch(docs)
+        except Exception as error:
+            message = (
+                "Mongo persistence failed after document delivery; "
+                "SharePoint delivery may already exist and must be reconciled: "
+                f"{error}"
+            )
+            for entry in batch:
+                stats.record_error(message, str(entry.get("legacy_id") or ""))
+            return False
+
+        for entry in batch:
+            doc = entry["doc"]
+            stats.record_success(
+                doc.get("doc_type", "OTHER"),
+                doc.get("source_system", "UNKNOWN"),
+                doc.get("workflow_status", "unknown"),
+            )
+        return True
+
     async def _write_batch(self, batch: List[Dict[str, Any]]) -> None:
         """Write a batch of documents to the database."""
         if not batch or self.db_collection is None:

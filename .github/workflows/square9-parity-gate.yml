@@ -48,6 +48,7 @@ jobs:
           BC_SALES_LINK_WRITE_ENABLED: 'false'
           MONGO_URL: mongodb://localhost:27017
           DB_NAME: gpi_hub_ci
+          UPLOAD_DIR: /tmp/gpi-hub-ci-uploads
         run: |
           pytest -q \
             tests/test_square9_parity_metadata.py \

@@ -64,3 +64,5 @@ sources_path.write_text(sources, encoding="utf-8")
 sharepoint_path.write_text(sharepoint, encoding="utf-8")
 job_path.write_text(job, encoding="utf-8")
 print("PASS: historical migration body delivery patch applied")
+
+# trigger: workflow now exists on branch

@@ -3122,9 +3122,12 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
     })
 
 
-async def _fetch_bc_document_links(bc_document_no: str) -> list:
-    """Fetch documentLinks from BC gpi/documents/v1.0 API for a given document number.
-    Returns list of dicts. In DEMO_MODE returns empty list."""
+async def _fetch_bc_document_links(bc_entity: str, bc_document_no: str) -> list:
+    """Fetch BC document links for one entity + document number.
+
+    Document numbers are not globally unique across BC entities, so this read
+    is intentionally type-bound and fails closed for unsupported entities.
+    """
     if DEMO_MODE or not HAS_CREDENTIALS:
         logger.info("[DocLinks] DEMO_MODE — skipping BC documentLinks read for %s", bc_document_no)
         return []
@@ -3133,15 +3136,16 @@ async def _fetch_bc_document_links(bc_document_no: str) -> list:
         from services.gpi_integration_service import _get_token, _get_company_id_standard_api, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT
         token = await _get_token()
         company_id = await _get_company_id_standard_api()
+        from services.document_link_visibility_service import build_bc_document_link_filter
         doc_link_api = "gpi/documents/v1.0"
         url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{doc_link_api}/"
-               f"companies({company_id})/documentLinks"
-               f"?$filter=bcDocumentNo eq '{bc_document_no}'")
+               f"companies({company_id})/documentLinks")
+        odata_filter = build_bc_document_link_filter(bc_entity, bc_document_no)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(url, headers={
                 "Authorization": f"Bearer {token}", "Accept": "application/json"
-            })
+            }, params={"$filter": odata_filter})
             if resp.status_code != 200:
                 logger.warning("[DocLinks] BC API returned %d for %s", resp.status_code, bc_document_no)
                 return []
@@ -3161,13 +3165,10 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
     """
     db = get_db()
 
-    # 1) Query hub_documents for docs linked to this BC document
+    # 1) Query hub_documents for docs proven to belong to this BC entity + number
+    from services.document_link_visibility_service import build_hub_document_link_query
     hub_docs = await db.hub_documents.find(
-        {
-            "bc_document_no": bc_document_no,
-            "sharepoint_web_url": {"$nin": [None, ""]},
-            "$or": [{"deleted": {"$exists": False}}, {"deleted": False}],
-        },
+        build_hub_document_link_query(bc_entity, bc_document_no),
         {"_id": 0}
     ).sort("created_utc", -1).to_list(200)
 
@@ -3191,8 +3192,8 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
             "source": d.get("source", "hub"),
         })
 
-    # 2) Query BC documentLinks API for this document number
-    bc_links = await _fetch_bc_document_links(bc_document_no)
+    # 2) Query BC documentLinks API for this exact entity + document number
+    bc_links = await _fetch_bc_document_links(bc_entity, bc_document_no)
     for link in bc_links:
         sp_url = link.get("sharePointUrl", "")
         if not sp_url or sp_url in seen_urls:
@@ -3259,12 +3260,10 @@ async def upload_document_to_bc_record(
     folder_source = "routing_rules"
     folder_path = ""
 
-    # Try to find existing folder from hub_documents for this BC record
+    # Try to find an existing folder from the same BC entity + record only.
+    from services.document_link_visibility_service import build_folder_match_query
     existing = await db.hub_documents.find_one(
-        {
-            "bc_document_no": bc_document_no,
-            "sharepoint_folder_path": {"$nin": [None, ""]},
-        },
+        build_folder_match_query(bc_entity, bc_document_no),
         {"sharepoint_folder_path": 1, "sharepoint_drive_id": 1, "_id": 0},
         sort=[("created_utc", -1)],
     )

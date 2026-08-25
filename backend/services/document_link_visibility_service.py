@@ -19,6 +19,26 @@ _ENTITY_DOC_TYPES: Dict[str, List[str]] = {
         "Purchase_Invoice",
     ],
     "salesOrders": ["Sales_Order", "SalesOrder", "Sales Order"],
+    "postedSalesShipments": [
+        "Posted_Sales_Shipment",
+        "Posted Sales Shipment",
+        "Warehouse_Receipt",
+        "Shipping_Document",
+        "Freight_Document",
+    ],
+}
+
+# Hub resolver/storage names are not always the same casing/pluralization used
+# by the BC API route segment. Keep these aliases explicit and fail closed.
+_ENTITY_STORAGE_ALIASES: Dict[str, List[str]] = {
+    "purchaseOrders": ["purchaseOrders", "purchase_order", "purchaseOrder"],
+    "purchaseInvoices": ["purchaseInvoices", "purchase_invoice", "purchaseInvoice"],
+    "salesOrders": ["salesOrders", "sales_order", "salesOrder"],
+    "postedSalesShipments": [
+        "postedSalesShipments",
+        "posted_sales_shipment",
+        "postedSalesShipment",
+    ],
 }
 
 
@@ -36,13 +56,20 @@ def document_type_aliases(bc_entity: str) -> List[str]:
     return list(aliases)
 
 
+def entity_storage_aliases(bc_entity: str) -> List[str]:
+    # document_type_aliases() performs the fail-closed validation first.
+    document_type_aliases(bc_entity)
+    return list(_ENTITY_STORAGE_ALIASES.get(bc_entity, [bc_entity]))
+
+
 def build_bc_identity_clause(bc_entity: str) -> dict:
     """Return a Mongo clause proving a row belongs to the requested BC family."""
     aliases = document_type_aliases(bc_entity)
+    entity_aliases = entity_storage_aliases(bc_entity)
     return {
         "$or": [
-            {"bc_entity": bc_entity},
-            {"bc_entity_type": bc_entity},
+            {"bc_entity": {"$in": entity_aliases}},
+            {"bc_entity_type": {"$in": entity_aliases}},
             {"document_type": {"$in": aliases}},
             {"doc_type": {"$in": aliases}},
             {"suggested_job_type": {"$in": aliases}},
@@ -91,6 +118,7 @@ def build_bc_document_link_filter(bc_entity: str, bc_document_no: str) -> str:
 __all__ = [
     "canonical_document_type",
     "document_type_aliases",
+    "entity_storage_aliases",
     "build_bc_identity_clause",
     "build_hub_document_link_query",
     "build_folder_match_query",

@@ -27,6 +27,7 @@ on:
       - 'backend/tests/test_bc_document_link_recovery_service.py'
       - 'backend/tests/test_gpi_document_link_systemid_guard.py'
       - 'backend/tests/test_document_retry_existing_delivery.py'
+      - 'backend/tests/test_batch_po_splitter_replay.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
@@ -52,7 +53,7 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor pypdf
 
       - name: Run focused parity tests
         working-directory: backend
@@ -75,7 +76,8 @@ jobs:
             tests/test_bc_document_identity_service.py \
             tests/test_bc_document_link_recovery_service.py \
             tests/test_gpi_document_link_systemid_guard.py \
-            tests/test_document_retry_existing_delivery.py
+            tests/test_document_retry_existing_delivery.py \
+            tests/test_batch_po_splitter_replay.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |

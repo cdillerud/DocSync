@@ -74,9 +74,11 @@ table 50100 "GPI Document Link"
         {
             Clustered = true;
         }
+        // A BC record can legitimately have many documents. This key is for
+        // lookup/filter performance only; document-level dedupe is enforced
+        // by the Hub using SharePoint/file identity rather than record identity.
         key(DocumentKey; "Document Type", "Target SystemId")
         {
-            Unique = true;
         }
         key(BCDocNo; "Document Type", "BC Document No.")
         {

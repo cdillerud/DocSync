@@ -76,6 +76,30 @@ async def _retry_existing_sharepoint_item(db, doc: dict) -> dict:
     }
 
 
+async def _retry_existing_delivery(db, doc: dict) -> dict:
+    """Repair an existing SharePoint delivery without requiring local file bytes."""
+    if doc.get("delivery_status") == "bc_link_failed":
+        from services.bc_document_link_recovery_service import recover_bc_document_link
+
+        recovery = await recover_bc_document_link(doc["id"])
+        if not recovery.get("success"):
+            raise RuntimeError(
+                recovery.get("error") or "BC document-link recovery failed"
+            )
+        return {
+            "drive_id": doc.get("sharepoint_drive_id", ""),
+            "item_id": doc.get("sharepoint_item_id", ""),
+            "web_url": doc.get("sharepoint_web_url", ""),
+            "import_ready": bool(recovery.get("import_ready")),
+            "delivery_status": recovery.get("delivery_status") or "delivered",
+            "reused_existing_sharepoint_item": True,
+            "recovered_bc_link": True,
+            "already_linked": bool(recovery.get("already_linked")),
+        }
+
+    return await _retry_existing_sharepoint_item(db, doc)
+
+
 async def retry_document(doc_id: str):
     """Retry delivery without bypassing parity metadata or duplicating a prior upload."""
     db = get_db()
@@ -98,10 +122,6 @@ async def retry_document(doc_id: str):
             "max_retries": max_retries,
         }
 
-    file_path = UPLOAD_DIR / doc_id
-    if not file_path.exists():
-        raise HTTPException(status_code=400, detail="Original file not found for retry")
-
     doc = increment_retry(doc)
     retry_started = datetime.now(timezone.utc).isoformat()
     workflow_id = str(uuid.uuid4())
@@ -119,8 +139,17 @@ async def retry_document(doc_id: str):
 
     try:
         if doc.get("sharepoint_drive_id") and doc.get("sharepoint_item_id"):
-            delivery = await _retry_existing_sharepoint_item(db, doc)
+            # Existing SharePoint identity is authoritative for retry. Repair
+            # metadata/linkage in place and never depend on local staging bytes.
+            delivery = await _retry_existing_delivery(db, doc)
         else:
+            file_path = UPLOAD_DIR / doc_id
+            if not file_path.exists():
+                raise HTTPException(
+                    status_code=400,
+                    detail="Original file not found and no existing SharePoint item is available for retry",
+                )
+
             from services.sharepoint_service import upload_to_sharepoint_with_routing
 
             delivery = await upload_to_sharepoint_with_routing(
@@ -166,6 +195,7 @@ async def retry_document(doc_id: str):
             "reused_existing_sharepoint_item": bool(
                 delivery.get("reused_existing_sharepoint_item")
             ),
+            "recovered_bc_link": bool(delivery.get("recovered_bc_link")),
         })
     except Exception as error:
         ended = datetime.now(timezone.utc).isoformat()
@@ -200,4 +230,5 @@ async def retry_document(doc_id: str):
         "reused_existing_sharepoint_item": bool(
             delivery.get("reused_existing_sharepoint_item")
         ),
+        "recovered_bc_link": bool(delivery.get("recovered_bc_link")),
     }

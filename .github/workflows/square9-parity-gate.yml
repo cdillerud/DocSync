@@ -26,6 +26,7 @@ on:
       - 'backend/tests/test_bc_document_identity_service.py'
       - 'backend/tests/test_bc_document_link_recovery_service.py'
       - 'backend/tests/test_gpi_document_link_systemid_guard.py'
+      - 'backend/tests/test_document_retry_existing_delivery.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
@@ -73,7 +74,8 @@ jobs:
             tests/test_mailbox_provenance_service.py \
             tests/test_bc_document_identity_service.py \
             tests/test_bc_document_link_recovery_service.py \
-            tests/test_gpi_document_link_systemid_guard.py
+            tests/test_gpi_document_link_systemid_guard.py \
+            tests/test_document_retry_existing_delivery.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -102,6 +104,17 @@ jobs:
             echo "::error::Retry path bypasses the parity delivery boundary"
             exit 1
           fi
+
+      - name: Guardrail - existing SharePoint retry cannot require local bytes
+        run: |
+          grep -q '_retry_existing_delivery(db, doc)' backend/services/document_retry_service.py || {
+            echo "::error::Existing SharePoint delivery does not use in-place recovery"
+            exit 1
+          }
+          grep -q 'Original file not found and no existing SharePoint item is available for retry' backend/services/document_retry_service.py || {
+            echo "::error::Local-file requirement is not scoped to documents without SharePoint identity"
+            exit 1
+          }
 
       - name: Guardrail - AP and dynamic mail intake persist mailbox provenance
         run: |

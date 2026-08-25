@@ -380,17 +380,24 @@ async def intake_document_from_bytes(
     # This runs for EVERY document, not just shipping docs.
     try:
         from services.po_resolution_service import resolve_po_from_document, attempt_bc_link
+        from services.resolved_bc_identity_persistence_service import build_resolved_bc_identity_update
         current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
         if current_doc:
             po_result = await resolve_po_from_document(current_doc)
             bc_link_result = await attempt_bc_link(doc_id, po_result)
             po_result["bc_link"] = bc_link_result
+            po_persist_update = {
+                "po_resolution": po_result,
+                "po_candidates": po_result.get("candidates_raw", []),
+            }
+            # The FactBox visibility contract queries durable top-level BC
+            # identity, not only nested resolution audit evidence. Promote only
+            # exact, SystemId-bearing PO/shipment matches; ambiguous/not-found
+            # and local-staging results remain fail-closed.
+            po_persist_update.update(build_resolved_bc_identity_update(po_result))
             await db.hub_documents.update_one(
                 {"id": doc_id},
-                {"$set": {
-                    "po_resolution": po_result,
-                    "po_candidates": po_result.get("candidates_raw", []),
-                }}
+                {"$set": po_persist_update}
             )
             # Feed best resolved PO into validation
             if po_result.get("po_number"):

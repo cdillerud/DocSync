@@ -35,19 +35,27 @@ class _Collection:
         return _Result()
 
 
+class _BinarySource(InMemorySource):
+    """In-memory migration source with an actual document body contract."""
+
+    def read_binary(self, doc):
+        return b"test-document-body"
+
+
 def _legacy(system, legacy_id):
     return LegacyDocument(
         metadata=LegacyDocumentMetadata(
             legacy_system=system,
             legacy_id=legacy_id,
             legacy_workflow_name="Statement",
-        )
+        ),
+        binary_reference=f"/{system.lower()}/{legacy_id}.pdf",
     )
 
 
 @pytest.mark.asyncio
 async def test_same_legacy_id_from_different_systems_does_not_collide():
-    source = InMemorySource("mixed")
+    source = _BinarySource("mixed")
     source.add_documents([
         _legacy("SQUARE9", "123"),
         _legacy("ZETADOCS", "123"),
@@ -64,7 +72,7 @@ async def test_same_legacy_id_from_different_systems_does_not_collide():
 
 @pytest.mark.asyncio
 async def test_duplicate_source_identity_inside_same_run_is_written_once():
-    source = InMemorySource("square9")
+    source = _BinarySource("square9")
     source.add_documents([
         _legacy("SQUARE9", "123"),
         _legacy("SQUARE9", "123"),
@@ -81,7 +89,7 @@ async def test_duplicate_source_identity_inside_same_run_is_written_once():
 
 @pytest.mark.asyncio
 async def test_existing_square9_id_does_not_block_same_zetadocs_id():
-    source = InMemorySource("zetadocs")
+    source = _BinarySource("zetadocs")
     source.add_document(_legacy("ZETADOCS", "123"))
     collection = _Collection(existing=[{
         "legacy_system": "SQUARE9",

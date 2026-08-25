@@ -25,6 +25,7 @@ from workflows.core.engine import (
 )
 from .sources import LegacyDocumentSource, LegacyDocument, LegacyDocumentMetadata
 from .workflow_initializer import WorkflowInitializer
+from .parity_identity import stage_migration_parity_fields, resolve_migration_identity
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,17 @@ class MigrationJob:
                         legacy_doc.metadata.legacy_id
                     )
                     continue
+
+                # REAL migration resolves exact Production BC identity before a
+                # historical AP/PO record can be considered ImportReady. A
+                # failed lookup remains staged/recoverable and does not stop
+                # the bulk run or falsely report downstream readiness.
+                if mode == MigrationMode.REAL:
+                    gpi_doc = await resolve_migration_identity(
+                        gpi_doc,
+                        legacy_doc.metadata,
+                        gpi_doc.get("doc_type", "OTHER"),
+                    )
                 
                 # Collect sample for dry-run review
                 if len(sample_documents) < 20:
@@ -344,6 +356,11 @@ class MigrationJob:
             "is_closed": metadata.is_closed,
             "is_reviewed": metadata.is_reviewed,
         }
+
+        # Stage normalized parity metadata for every migration mode. Legacy
+        # workflow state is preserved separately, but delivery readiness fails
+        # closed until exact BC identity is resolved where required.
+        gpi_doc = stage_migration_parity_fields(gpi_doc, metadata, doc_type)
         
         return gpi_doc
     

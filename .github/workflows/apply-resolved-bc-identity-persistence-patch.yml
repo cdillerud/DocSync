@@ -1,0 +1,41 @@
+name: Apply Resolved BC Identity Persistence Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - '.github/workflows/apply-resolved-bc-identity-persistence-patch.yml'
+      - 'backend/scripts/apply_resolved_bc_identity_persistence_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+
+      - name: Apply exact resolved identity persistence patch
+        run: python backend/scripts/apply_resolved_bc_identity_persistence_patch.py
+
+      - name: Verify only intake service changed
+        run: |
+          git diff --exit-code -- .github/workflows/apply-resolved-bc-identity-persistence-patch.yml backend/scripts/apply_resolved_bc_identity_persistence_patch.py
+          changed="$(git diff --name-only)"
+          test "$changed" = "backend/services/document_bytes_intake_service.py" || {
+            echo "::error::Unexpected changed files: $changed"
+            exit 1
+          }
+
+      - name: Commit resolved BC identity persistence
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/services/document_bytes_intake_service.py
+          git commit -m "parity: persist resolved BC identity for FactBox visibility"
+          git push origin HEAD:feature/square9-parity-systemid-gate

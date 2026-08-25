@@ -1,0 +1,430 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "GPI Packaging Quote Copilot Actions",
+    "version": "1.1.0",
+    "description": "Copilot Studio import contract for controlled Gamer Packaging Business Central packaging quote actions. Prepare is read-only. Execute requires explicit confirmation and live Business Central revalidation."
+  },
+  "schemes": [
+    "https"
+  ],
+  "basePath": "/",
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "tags": [
+    {
+      "name": "Packaging Quote Actions",
+      "description": "Prepare and execute controlled Business Central packaging quote actions."
+    }
+  ],
+  "paths": {
+    "/packagingQuoteActions/prepare": {
+      "post": {
+        "tags": [
+          "Packaging Quote Actions"
+        ],
+        "operationId": "PreparePackagingQuoteAction",
+        "summary": "Prepare a packaging quote action",
+        "description": "Read current Business Central quote state and prepare a controlled action. For approve or reject, decisionNote can be proposed and confirmation-bound. Prepare never writes the decision note or changes Business Central.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/PrepareActionRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current action preparation result.",
+            "schema": {
+              "$ref": "#/definitions/PrepareActionResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request or hard safety-boundary refusal.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "409": {
+            "description": "Current Business Central state conflicts with the requested operation.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "Unexpected integration failure.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/packagingQuoteActions/execute": {
+      "post": {
+        "tags": [
+          "Packaging Quote Actions"
+        ],
+        "operationId": "ExecutePackagingQuoteAction",
+        "summary": "Execute a confirmed packaging quote action",
+        "description": "Execute a previously prepared action using the exact confirmation token. For approve or reject with a proposed decision note, send the exact same decisionNote that was used during Prepare.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ExecuteActionRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed action executed and resulting Business Central state returned.",
+            "schema": {
+              "$ref": "#/definitions/ExecuteActionResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid request or hard safety-boundary refusal.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "403": {
+            "description": "Execute endpoint is administratively disabled.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "409": {
+            "description": "Confirmation state is stale or the Business Central action is no longer available.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          },
+          "500": {
+            "description": "Unexpected integration failure.",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "PackagingQuoteAction": {
+      "type": "string",
+      "enum": [
+        "evaluate",
+        "readyForReview",
+        "approve",
+        "reject",
+        "reopen"
+      ],
+      "description": "Business Central packaging quote action to prepare or execute."
+    },
+    "PrepareActionRequest": {
+      "type": "object",
+      "required": [
+        "quoteNo",
+        "action"
+      ],
+      "properties": {
+        "quoteNo": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 1,
+          "description": "Business Central packaging quote entry number."
+        },
+        "action": {
+          "$ref": "#/definitions/PackagingQuoteAction"
+        },
+        "decisionNote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional single-line decision note for approve or reject. Prepare is read-only; when relevant, the normalized note is bound into the confirmation token."
+        }
+      }
+    },
+    "ExecuteActionRequest": {
+      "type": "object",
+      "required": [
+        "quoteNo",
+        "action",
+        "confirmationToken"
+      ],
+      "properties": {
+        "quoteNo": {
+          "type": "integer",
+          "format": "int32",
+          "minimum": 1
+        },
+        "action": {
+          "$ref": "#/definitions/PackagingQuoteAction"
+        },
+        "confirmationToken": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Exact token returned by the immediately preceding Prepare operation."
+        },
+        "decisionNote": {
+          "type": "string",
+          "minLength": 1,
+          "description": "For approve or reject when Prepare used a decision note, the exact same decision note must accompany Execute."
+        }
+      }
+    },
+    "PrepareActionResponse": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "mode",
+        "quoteNo",
+        "currentStatus",
+        "requestedAction",
+        "isAllowed",
+        "confirmationRequired",
+        "allowedWriteActions",
+        "contractVersion",
+        "writeExecution"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "description": "Response schema version."
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "Prepare"
+          ]
+        },
+        "quoteNo": {
+          "type": "integer",
+          "format": "int32",
+          "description": "Business Central packaging quote entry number."
+        },
+        "quoteId": {
+          "type": "string",
+          "description": "Business Central packaging quote SystemId."
+        },
+        "customerNo": {
+          "type": "string"
+        },
+        "customerName": {
+          "type": "string"
+        },
+        "currentStatus": {
+          "type": "string",
+          "description": "Current Business Central quote status."
+        },
+        "requestedAction": {
+          "$ref": "#/definitions/PackagingQuoteAction"
+        },
+        "isAllowed": {
+          "type": "boolean",
+          "description": "True when the action can be confirmed from the effective current state."
+        },
+        "confirmationRequired": {
+          "type": "boolean"
+        },
+        "confirmationText": {
+          "type": "string",
+          "description": "Human-readable confirmation text when confirmation is required."
+        },
+        "expectedResultStatus": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason the requested action isn't currently available."
+        },
+        "confirmationToken": {
+          "type": "string",
+          "description": "State-bound confirmation token. When a decision note is supplied, the normalized note is also bound into this token."
+        },
+        "allowedWriteActions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackagingQuoteAction"
+          }
+        },
+        "contractVersion": {
+          "type": "string"
+        },
+        "recommendedNextAction": {
+          "type": "string"
+        },
+        "hasPricingExceptions": {
+          "type": "boolean"
+        },
+        "primaryPricingExceptionStatus": {
+          "type": "string"
+        },
+        "primaryPricingExceptionMessage": {
+          "type": "string"
+        },
+        "primaryApprover": {
+          "type": "string"
+        },
+        "decisionNoteRequired": {
+          "type": "boolean"
+        },
+        "decisionNoteProvided": {
+          "type": "boolean"
+        },
+        "decisionNote": {
+          "type": "string",
+          "description": "Normalized proposed decision note. Prepare does not persist it."
+        },
+        "decisionNoteWillBeWritten": {
+          "type": "boolean"
+        },
+        "decisionNoteEnablesAction": {
+          "type": "boolean"
+        },
+        "writeExecution": {
+          "$ref": "#/definitions/WriteExecutionPreparation"
+        }
+      }
+    },
+    "WriteExecutionPreparation": {
+      "type": "object",
+      "required": [
+        "permitted",
+        "executeMode",
+        "confirmationTokenRequired"
+      ],
+      "properties": {
+        "permitted": {
+          "type": "boolean",
+          "description": "True when confirmed execution is permitted."
+        },
+        "executeMode": {
+          "type": "string",
+          "enum": [
+            "Execute"
+          ]
+        },
+        "confirmationTokenRequired": {
+          "type": "boolean",
+          "description": "True when Execute must receive the Prepare confirmation token."
+        }
+      }
+    },
+    "ExecuteActionResponse": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "mode",
+        "quoteNo",
+        "requestedAction",
+        "executed",
+        "statusBefore",
+        "statusAfter",
+        "resultingAllowedWriteActions",
+        "contractVersion"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "Execute"
+          ]
+        },
+        "quoteNo": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "quoteId": {
+          "type": "string"
+        },
+        "requestedAction": {
+          "$ref": "#/definitions/PackagingQuoteAction"
+        },
+        "executed": {
+          "type": "boolean"
+        },
+        "statusBefore": {
+          "type": "string"
+        },
+        "statusAfter": {
+          "type": "string"
+        },
+        "expectedResultStatus": {
+          "type": "string"
+        },
+        "decisionNoteWritten": {
+          "type": "boolean"
+        },
+        "decisionNote": {
+          "type": "string"
+        },
+        "resultingAllowedWriteActions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackagingQuoteAction"
+          }
+        },
+        "recommendedNextAction": {
+          "type": "string"
+        },
+        "contractVersion": {
+          "type": "string"
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "required": [
+        "error",
+        "message"
+      ],
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "quoteNo": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "action": {
+          "$ref": "#/definitions/PackagingQuoteAction"
+        },
+        "retryPrepare": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "x-gpi-implementation": {
+    "milestone": "0.44",
+    "sourceContract": "GPI-PackagingQuoteAction.openapi.json",
+    "sourceContractVersion": "1.1.0",
+    "environment": "Sandbox_NoZetadocs_UAT",
+    "protectedQuoteNumbers": [
+      67
+    ],
+    "prepareReadOnly": true,
+    "executeDisabledByDefault": true,
+    "decisionNoteTokenBound": true,
+    "hostingStatus": "Host intentionally not specified until the secured UAT hosting endpoint is selected.",
+    "authenticationStatus": "Inbound production authentication not yet configured. Do not expose Execute anonymously."
+  }
+}

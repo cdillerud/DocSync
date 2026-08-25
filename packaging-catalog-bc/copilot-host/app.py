@@ -10,6 +10,8 @@ from typing import Literal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from native_prepare import prepare_native
+
 
 APP_VERSION = "0.43.0"
 EXPECTED_ENVIRONMENT = "Sandbox_NoZetadocs_UAT"
@@ -51,6 +53,15 @@ OPENAPI_CONTRACT = (
 def execute_enabled() -> bool:
     return (
         os.getenv("GPI_ENABLE_COPILOT_EXECUTE", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
+def native_bc_prepare_enabled() -> bool:
+    return (
+        os.getenv("GPI_USE_NATIVE_BC_PREPARE", "0")
         .strip()
         .lower()
         in {"1", "true", "yes", "on"}
@@ -318,6 +329,7 @@ def health() -> dict:
         "version": APP_VERSION,
         "environment": EXPECTED_ENVIRONMENT,
         "executeEnabled": execute_enabled(),
+        "nativeBcPrepareEnabled": native_bc_prepare_enabled(),
         "flowScript": FLOW_SCRIPT.name,
         "openApiContract": OPENAPI_CONTRACT.name,
     }
@@ -326,6 +338,20 @@ def health() -> dict:
 @app.post("/packagingQuoteActions/prepare")
 def prepare_action(request: PrepareRequest) -> dict:
     protected_quote_guard(request.quoteNo)
+
+    if native_bc_prepare_enabled():
+        try:
+            return prepare_native(
+                quote_no=request.quoteNo,
+                action=request.action,
+                decision_note=request.decisionNote,
+            )
+        except Exception as exc:
+            raise classify_flow_error(
+                message=str(exc),
+                quote_no=request.quoteNo,
+                action=request.action,
+            ) from exc
 
     return invoke_flow(
         mode="Prepare",

@@ -26,3 +26,5 @@ for needle in (
 
 path.write_text(text, encoding="utf-8")
 print("PASS: resolved BC identity persistence patch applied")
+
+# trigger: workflow exists on branch

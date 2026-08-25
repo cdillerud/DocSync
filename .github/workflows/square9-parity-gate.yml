@@ -21,7 +21,9 @@ on:
       - 'backend/services/document_retry_service.py'
       - 'backend/services/document_reprocess_service.py'
       - 'backend/services/migration/job.py'
+      - 'backend/services/migration/sources.py'
       - 'backend/services/migration/parity_identity.py'
+      - 'backend/services/migration/delivery.py'
       - 'backend/tests/test_square9_parity_metadata.py'
       - 'backend/tests/test_bc_link_write_boundary.py'
       - 'backend/tests/test_document_link_entity_guard.py'
@@ -35,6 +37,7 @@ on:
       - 'backend/tests/test_operator_identity_correction_service.py'
       - 'backend/tests/test_migration_parity_identity.py'
       - 'backend/tests/test_migration_dedupe_identity.py'
+      - 'backend/tests/test_migration_delivery.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
@@ -87,7 +90,8 @@ jobs:
             tests/test_batch_po_splitter_replay.py \
             tests/test_operator_identity_correction_service.py \
             tests/test_migration_parity_identity.py \
-            tests/test_migration_dedupe_identity.py
+            tests/test_migration_dedupe_identity.py \
+            tests/test_migration_delivery.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -226,6 +230,25 @@ jobs:
           }
           grep -q 'async def _get_existing_legacy_keys' backend/services/migration/job.py || {
             echo "::error::Historical migration still uses bare legacy-id persistence lookup"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration must deliver the document body
+        run: |
+          grep -q 'await deliver_migrated_document(' backend/services/migration/job.py || {
+            echo "::error::REAL historical migration can succeed without delivering the document body"
+            exit 1
+          }
+          grep -q 'def read_binary(self, doc: LegacyDocument) -> bytes:' backend/services/migration/sources.py || {
+            echo "::error::Legacy migration source has no binary reader contract"
+            exit 1
+          }
+          grep -q 'parity_metadata_override: Optional\[Dict\[str, Any\]\] = None' backend/services/sharepoint_service.py || {
+            echo "::error::SharePoint boundary cannot preserve historical parity identity"
+            exit 1
+          }
+          grep -q 'Legacy document body is empty' backend/services/migration/delivery.py || {
+            echo "::error::Historical body delivery does not fail closed on empty content"
             exit 1
           }
 

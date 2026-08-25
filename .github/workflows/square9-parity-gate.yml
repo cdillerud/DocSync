@@ -20,6 +20,11 @@ on:
       - 'backend/tests/test_document_link_entity_guard.py'
       - 'backend/tests/test_document_link_visibility_service.py'
       - 'backend/tests/test_mailbox_provenance_service.py'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
+      - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
+      - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/PageExt50104.GPIPurchOrderExt.al'
       - '.github/workflows/square9-parity-gate.yml'
   workflow_dispatch:
 
@@ -109,3 +114,14 @@ jobs:
             echo "::error::BC-drop folder reuse is not bound to BC entity"
             exit 1
           }
+
+      - name: Guardrail - BC FactBox uses deployed Hub proxy URL
+        run: |
+          grep -q "exit('http://4.204.41.190/api');" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::BC FactBox Hub URL does not match deployed nginx /api proxy"
+            exit 1
+          }
+          if grep -n 'https://http://\|4\.204\.41\.190:8080' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al; then
+            echo "::error::Malformed or internal Hub URL present in BC FactBox code"
+            exit 1
+          fi

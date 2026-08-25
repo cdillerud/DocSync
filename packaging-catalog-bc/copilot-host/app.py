@@ -111,6 +111,30 @@ def validate_runtime_files() -> None:
         )
 
 
+def legacy_flow_available() -> bool:
+    return (
+        FLOW_SCRIPT.is_file()
+        and OPENAPI_CONTRACT.is_file()
+        and any(
+            shutil.which(candidate)
+            for candidate in (
+                "pwsh.exe",
+                "pwsh",
+                "powershell.exe",
+                "powershell",
+            )
+        )
+    )
+
+
+def native_cloud_ready() -> bool:
+    return (
+        native_bc_prepare_enabled()
+        and native_bc_decision_note_enabled()
+        and native_bc_execute_enabled()
+    )
+
+
 class PrepareRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -140,8 +164,8 @@ app = FastAPI(
     title="GPI Packaging Quote Copilot Actions",
     version=APP_VERSION,
     description=(
-        "Local UAT HTTP adapter for the validated GPI Packaging Quote "
-        "Copilot action flow."
+        "GPI Packaging Quote Copilot action service for the validated "
+        "Business Central UAT action contract."
     ),
 )
 
@@ -352,8 +376,6 @@ def invoke_flow(
 
 @app.get("/health")
 def health() -> dict:
-    validate_runtime_files()
-
     return {
         "status": "ok",
         "version": APP_VERSION,
@@ -362,8 +384,32 @@ def health() -> dict:
         "nativeBcPrepareEnabled": native_bc_prepare_enabled(),
         "nativeBcDecisionNoteEnabled": native_bc_decision_note_enabled(),
         "nativeBcExecuteEnabled": native_bc_execute_enabled(),
-        "flowScript": FLOW_SCRIPT.name,
-        "openApiContract": OPENAPI_CONTRACT.name,
+        "nativeCloudReady": native_cloud_ready(),
+        "legacyFlowAvailable": legacy_flow_available(),
+    }
+
+
+@app.get("/ready")
+def ready() -> dict:
+    if not native_cloud_ready():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "native_cloud_not_ready",
+                "message": (
+                    "Native cloud runtime requires native Prepare, "
+                    "native Decision Note, and native Execute to be enabled."
+                ),
+                "retryPrepare": False,
+            },
+        )
+
+    return {
+        "status": "ready",
+        "version": APP_VERSION,
+        "environment": EXPECTED_ENVIRONMENT,
+        "nativeCloudReady": True,
+        "executeEnabled": execute_enabled(),
     }
 
 

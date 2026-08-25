@@ -6,6 +6,9 @@ on:
       - 'backend/routers/gpi_integration.py'
       - 'backend/services/sharepoint_service.py'
       - 'backend/services/bc_link_service.py'
+      - 'backend/services/gpi_integration_service.py'
+      - 'backend/services/bc_document_identity_service.py'
+      - 'backend/services/bc_document_link_recovery_service.py'
       - 'backend/services/document_link_service.py'
       - 'backend/services/document_link_visibility_service.py'
       - 'backend/services/document_orchestration_service.py'
@@ -20,6 +23,10 @@ on:
       - 'backend/tests/test_document_link_entity_guard.py'
       - 'backend/tests/test_document_link_visibility_service.py'
       - 'backend/tests/test_mailbox_provenance_service.py'
+      - 'backend/tests/test_bc_document_identity_service.py'
+      - 'backend/tests/test_bc_document_link_recovery_service.py'
+      - 'backend/tests/test_gpi_document_link_systemid_guard.py'
+      - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
       - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
@@ -63,7 +70,10 @@ jobs:
             tests/test_bc_link_write_boundary.py \
             tests/test_document_link_entity_guard.py \
             tests/test_document_link_visibility_service.py \
-            tests/test_mailbox_provenance_service.py
+            tests/test_mailbox_provenance_service.py \
+            tests/test_bc_document_identity_service.py \
+            tests/test_bc_document_link_recovery_service.py \
+            tests/test_gpi_document_link_systemid_guard.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -114,6 +124,47 @@ jobs:
             echo "::error::BC-drop folder reuse is not bound to BC entity"
             exit 1
           }
+          grep -q 'build_bc_identity_clause(bc_entity)' backend/routers/gpi_integration.py || {
+            echo "::error::Document unlink is not bound to BC entity"
+            exit 1
+          }
+
+      - name: Guardrail - BC document link requires exact SystemId
+        run: |
+          grep -q 'resolve_bc_document_system_id(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
+            echo "::error::BC-drop upload does not resolve exact BC SystemId before SharePoint upload"
+            exit 1
+          }
+          grep -q 'BC SystemId is required for GPI Document Link creation' backend/services/gpi_integration_service.py || {
+            echo "::error::BC document-link writer accepts blank SystemId"
+            exit 1
+          }
+          if grep -n 'bc_system_id=""' backend/routers/gpi_integration.py; then
+            echo "::error::Blank BC SystemId document-link call remains in router"
+            exit 1
+          fi
+
+      - name: Guardrail - BC link recovery never reuploads SharePoint file
+        run: |
+          grep -q 'recover_bc_document_link' backend/services/bc_document_link_recovery_service.py || {
+            echo "::error::BC link recovery service missing"
+            exit 1
+          }
+          if grep -n 'upload_to_sharepoint\|upload_to_sharepoint_with_routing' backend/services/bc_document_link_recovery_service.py; then
+            echo "::error::BC link recovery may duplicate SharePoint uploads"
+            exit 1
+          fi
+          grep -q '@router.post("/document-links/recover/{doc_id}")' backend/routers/gpi_integration.py || {
+            echo "::error::Operator BC link recovery endpoint missing"
+            exit 1
+          }
+
+      - name: Guardrail - BC record can hold multiple document links
+        run: |
+          if awk '/key\(DocumentKey;/{flag=1} flag{print} flag && /}/{exit}' bc-extension/src/Table50100.GPIDocumentLink.al | grep -q 'Unique = true'; then
+            echo "::error::GPI Document Link still restricts a BC record to one document"
+            exit 1
+          fi
 
       - name: Guardrail - BC FactBox uses deployed Hub proxy URL
         run: |

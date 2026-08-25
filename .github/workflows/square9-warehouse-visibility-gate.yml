@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - 'backend/services/document_link_visibility_service.py'
+      - 'backend/services/resolved_bc_identity_persistence_service.py'
+      - 'backend/services/document_bytes_intake_service.py'
       - 'backend/tests/test_document_link_visibility_service.py'
+      - 'backend/tests/test_resolved_bc_identity_persistence_service.py'
       - 'bc-extension/src/Enum50100.GPIDocLinkType.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al'
@@ -29,9 +32,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest
 
-      - name: Run visibility tests
+      - name: Run visibility and identity-persistence tests
         working-directory: backend
-        run: pytest -q tests/test_document_link_visibility_service.py
+        run: |
+          pytest -q \
+            tests/test_document_link_visibility_service.py \
+            tests/test_resolved_bc_identity_persistence_service.py
 
       - name: Validate AL project structure
         run: bash bc-extension/build.sh
@@ -44,6 +50,29 @@ jobs:
           }
           grep -q '"posted_sales_shipment"' backend/services/document_link_visibility_service.py || {
             echo "::error::Hub does not recognize resolver shipment storage identity"
+            exit 1
+          }
+
+      - name: Guardrail - resolved shipment identity is durable and top-level
+        run: |
+          grep -q 'build_resolved_bc_identity_update' backend/services/document_bytes_intake_service.py || {
+            echo "::error::Intake does not promote resolved BC identity"
+            exit 1
+          }
+          grep -q 'po_persist_update.update(build_resolved_bc_identity_update(po_result))' backend/services/document_bytes_intake_service.py || {
+            echo "::error::Resolved shipment identity remains nested-only"
+            exit 1
+          }
+          grep -q '"bc_entity": bc_entity' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC entity is not persisted"
+            exit 1
+          }
+          grep -q '"bc_document_no": document_no' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC document number is not persisted"
+            exit 1
+          }
+          grep -q '"bc_record_id": system_id' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC SystemId is not persisted"
             exit 1
           }
 

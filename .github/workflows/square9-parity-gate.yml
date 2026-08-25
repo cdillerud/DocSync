@@ -20,6 +20,8 @@ on:
       - 'backend/services/batch_po_splitter.py'
       - 'backend/services/document_retry_service.py'
       - 'backend/services/document_reprocess_service.py'
+      - 'backend/services/migration/job.py'
+      - 'backend/services/migration/parity_identity.py'
       - 'backend/tests/test_square9_parity_metadata.py'
       - 'backend/tests/test_bc_link_write_boundary.py'
       - 'backend/tests/test_document_link_entity_guard.py'
@@ -31,6 +33,8 @@ on:
       - 'backend/tests/test_document_retry_existing_delivery.py'
       - 'backend/tests/test_batch_po_splitter_replay.py'
       - 'backend/tests/test_operator_identity_correction_service.py'
+      - 'backend/tests/test_migration_parity_identity.py'
+      - 'backend/tests/test_migration_dedupe_identity.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
@@ -81,7 +85,9 @@ jobs:
             tests/test_gpi_document_link_systemid_guard.py \
             tests/test_document_retry_existing_delivery.py \
             tests/test_batch_po_splitter_replay.py \
-            tests/test_operator_identity_correction_service.py
+            tests/test_operator_identity_correction_service.py \
+            tests/test_migration_parity_identity.py \
+            tests/test_migration_dedupe_identity.py
 
       - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
         run: |
@@ -190,6 +196,36 @@ jobs:
           }
           grep -q 'sharepoint_parity_metadata_stale' backend/services/operator_identity_correction_service.py || {
             echo "::error::AP identity correction does not mark SharePoint parity metadata stale"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration fails closed until exact identity
+        run: |
+          grep -q 'stage_migration_parity_fields(gpi_doc, metadata, doc_type)' backend/services/migration/job.py || {
+            echo "::error::Historical migration does not stage normalized parity metadata"
+            exit 1
+          }
+          grep -q 'await resolve_migration_identity(' backend/services/migration/job.py || {
+            echo "::error::REAL historical migration does not resolve exact BC identity"
+            exit 1
+          }
+          grep -q 'ImportReady.*False' backend/services/migration/parity_identity.py || {
+            echo "::error::Historical migration does not default ImportReady to false"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration dedupe is source-scoped and same-run safe
+        run: |
+          grep -q 'source_key = self._legacy_identity_key(legacy_doc.metadata)' backend/services/migration/job.py || {
+            echo "::error::Historical migration dedupe is not source-scoped"
+            exit 1
+          }
+          grep -q 'existing_keys.add(source_key)' backend/services/migration/job.py || {
+            echo "::error::Historical migration does not reserve accepted identity during the same run"
+            exit 1
+          }
+          grep -q 'async def _get_existing_legacy_keys' backend/services/migration/job.py || {
+            echo "::error::Historical migration still uses bare legacy-id persistence lookup"
             exit 1
           }
 

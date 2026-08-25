@@ -1,0 +1,65 @@
+name: Square9 Parity Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/services/sharepoint_service.py'
+      - 'backend/services/bc_link_service.py'
+      - 'backend/services/document_bytes_intake_service.py'
+      - 'backend/services/email_polling_service.py'
+      - 'backend/services/batch_po_splitter.py'
+      - 'backend/services/document_retry_service.py'
+      - 'backend/services/document_reprocess_service.py'
+      - 'backend/tests/test_square9_parity_metadata.py'
+      - 'backend/tests/test_bc_link_write_boundary.py'
+      - '.github/workflows/square9-parity-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  parity-tests:
+    name: AP/Warehouse parity safety tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run focused parity tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: |
+          pytest -q \
+            tests/test_square9_parity_metadata.py \
+            tests/test_bc_link_write_boundary.py
+
+      - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
+        run: |
+          if grep -n "BC_ENVIRONMENT.*documentAttachments\|documentAttachments.*BC_ENVIRONMENT" backend/services/bc_link_service.py; then
+            echo "::error::BC attachment write path references generic BC_ENVIRONMENT"
+            exit 1
+          fi
+
+      - name: Guardrail - Sales BC attachment writes default off
+        run: |
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }

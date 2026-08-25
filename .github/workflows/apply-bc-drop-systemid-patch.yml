@@ -1,0 +1,42 @@
+name: Apply BC Drop SystemId Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - '.github/workflows/apply-bc-drop-systemid-patch.yml'
+      - 'backend/scripts/apply_bc_drop_systemid_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+
+      - name: Apply exact BC-drop SystemId patch
+        run: python backend/scripts/apply_bc_drop_systemid_patch.py
+
+      - name: Verify only intended production files changed
+        run: |
+          git diff --exit-code -- .github/workflows/apply-bc-drop-systemid-patch.yml backend/scripts/apply_bc_drop_systemid_patch.py
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' backend/routers/gpi_integration.py backend/services/gpi_integration_service.py | sort)"
+          test "$changed" = "$expected" || {
+            echo "::error::Unexpected changed files: $changed"
+            exit 1
+          }
+
+      - name: Commit SystemId-safe BC-drop boundary
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/routers/gpi_integration.py backend/services/gpi_integration_service.py
+          git commit -m "parity: require SystemId for BC document drops"
+          git push origin HEAD:feature/square9-parity-systemid-gate

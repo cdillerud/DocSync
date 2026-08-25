@@ -1,0 +1,41 @@
+name: Apply AP Review Identity Correction Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - '.github/workflows/apply-ap-review-identity-correction-patch.yml'
+      - 'backend/scripts/apply_ap_review_identity_correction_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+
+      - name: Apply exact AP identity correction patch
+        run: python backend/scripts/apply_ap_review_identity_correction_patch.py
+
+      - name: Verify only intended production file changed
+        run: |
+          git diff --exit-code -- .github/workflows/apply-ap-review-identity-correction-patch.yml backend/scripts/apply_ap_review_identity_correction_patch.py
+          changed="$(git diff --name-only)"
+          test "$changed" = "backend/routers/ap_review.py" || {
+            echo "::error::Unexpected changed files: $changed"
+            exit 1
+          }
+
+      - name: Commit AP identity correction guard
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- backend/routers/ap_review.py
+          git commit -m "parity: invalidate stale BC identity on AP correction"
+          git push origin HEAD:feature/square9-parity-systemid-gate

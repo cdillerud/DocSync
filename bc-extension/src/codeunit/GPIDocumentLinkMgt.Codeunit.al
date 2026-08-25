@@ -58,6 +58,8 @@ codeunit 50105 "GPI Document Link Mgt"
                 exit('purchaseInvoices');
             "GPI Doc Link Type"::"Purchase Order":
                 exit('purchaseOrders');
+            "GPI Doc Link Type"::"Posted Sales Shipment":
+                exit('postedSalesShipments');
             "GPI Doc Link Type"::"Sales Order",
             "GPI Doc Link Type"::"Posted Sales Order":
                 exit('salesOrders');

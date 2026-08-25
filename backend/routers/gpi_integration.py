@@ -3256,6 +3256,19 @@ async def upload_document_to_bc_record(
             detail=f"File exceeds 25MB limit ({len(file_content) / (1024*1024):.1f}MB)"
         )
 
+    # Resolve exact BC identity before creating any new SharePoint artifact.
+    # A document number alone is not a safe linkage key.
+    try:
+        from services.bc_document_identity_service import resolve_bc_document_system_id
+        identity = await resolve_bc_document_system_id(bc_entity, bc_document_no)
+        bc_system_id = identity["bc_system_id"]
+    except Exception as e:
+        logger.error("[DocLinks] BC identity resolution failed for %s/%s: %s", bc_entity, bc_document_no, e)
+        raise HTTPException(
+            status_code=409,
+            detail=f"BC record identity could not be resolved; no file was uploaded: {str(e)}",
+        )
+
     # --- FOLDER RESOLUTION ---
     folder_source = "routing_rules"
     folder_path = ""
@@ -3300,7 +3313,7 @@ async def upload_document_to_bc_record(
     bc_link_created = False
     try:
         link_result = await create_gpi_document_link(
-            bc_system_id="",
+            bc_system_id=bc_system_id,
             bc_document_no=bc_document_no,
             document_type=bc_entity_to_doc_type(bc_entity),
             sharepoint_url=sp_result.get("web_url", ""),
@@ -3310,8 +3323,10 @@ async def upload_document_to_bc_record(
             source="BCDrop",
         )
         bc_link_created = link_result.get("success", False)
+        bc_link_error = "" if bc_link_created else link_result.get("error", "BC document link creation failed")
     except Exception as e:
-        logger.warning("[DocLinks] BC link creation failed (non-blocking): %s", e)
+        bc_link_error = str(e)
+        logger.error("[DocLinks] BC link creation failed: %s", e)
 
     # --- CREATE HUB_DOCUMENTS RECORD ---
     now = datetime.now(timezone.utc).isoformat()
@@ -3321,6 +3336,7 @@ async def upload_document_to_bc_record(
         "file_name": file.filename,
         "bc_document_no": bc_document_no,
         "bc_entity_type": bc_entity,
+        "bc_system_id": bc_system_id,
         "sharepoint_folder_path": folder_path,
         "sharepoint_web_url": sp_result.get("web_url", ""),
         "sharepoint_drive_id": sp_result.get("drive_id", ""),
@@ -3332,12 +3348,27 @@ async def upload_document_to_bc_record(
         "document_type": bc_entity_to_doc_type(bc_entity),
         "folder_source": folder_source,
         "file_size_bytes": len(file_content),
+        "bc_link_created": bc_link_created,
+        "bc_link_error": bc_link_error if not bc_link_created else "",
+        "delivery_status": "delivered" if bc_link_created else "bc_link_failed",
+        "import_ready": bool(bc_link_created and bc_system_id),
     }
     await db.hub_documents.insert_one(hub_record)
     hub_record.pop("_id", None)
 
     logger.info("[DocLinks] Uploaded %s to %s for %s/%s (folder_source=%s, bc_link=%s)",
                 file.filename, folder_path, bc_entity, bc_document_no, folder_source, bc_link_created)
+
+    if not bc_link_created:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "SharePoint upload completed but BC link creation failed",
+                "doc_id": new_doc_id,
+                "delivery_status": "bc_link_failed",
+                "error": bc_link_error,
+            },
+        )
 
     return {
         "success": True,

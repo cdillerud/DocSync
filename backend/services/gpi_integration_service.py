@@ -430,6 +430,8 @@ async def create_gpi_document_link(
     This populates the GPI Documents factbox on the Purchase Invoice page.
     """
     _check_write_protection("create_gpi_document_link")
+    if not str(bc_system_id or "").strip():
+        raise ValueError("BC SystemId is required for GPI Document Link creation")
     if not HAS_CREDENTIALS:
         raise ValueError("BC credentials not configured")
 

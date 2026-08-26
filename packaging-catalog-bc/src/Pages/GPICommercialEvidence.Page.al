@@ -1,7 +1,7 @@
-page 71121 "GPI Commercial Evidence"
+page 71121 "GPI Comm Evidence"
 {
     PageType = ListPart;
-    SourceTable = "GPI Commercial Evidence";
+    SourceTable = "GPI Comm Evidence";
     ApplicationArea = All;
     Caption = 'Commercial Evidence';
     Editable = false;

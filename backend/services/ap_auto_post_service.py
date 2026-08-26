@@ -300,11 +300,20 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                     f"BC Purchase Invoice {bc_record_no or '?'} was not confirmed posted"
                 )
 
+            # The v2 purchaseInvoices aggregate id is not guaranteed to be the
+            # real Purch. Inv. Header SystemId after posting. The posting boundary
+            # reconciles through microsoft/automate/v1.0 and returns the actual
+            # table-122 identity plus final posted number.
+            posted_record_no = str(post_result.get("posted_number") or "").strip()
+            posted_system_id = str(post_result.get("posted_system_id") or "").strip()
+            if not posted_record_no or not posted_system_id:
+                raise RuntimeError("BC post succeeded without reconciled posted Purchase Invoice identity")
+
             from services.ap_purchase_invoice_identity_service import (
                 build_ap_purchase_invoice_identity_update,
             )
             posted_identity = build_ap_purchase_invoice_identity_update(
-                bc_record_no, bc_system_id, posted=True
+                posted_record_no, posted_system_id, posted=True
             )
             now = datetime.now(timezone.utc).isoformat()
             attempt = build_attempt(
@@ -315,8 +324,8 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 correlation_id=correlation_id,
                 started_utc=started_utc,
                 finished_utc=now,
-                bc_record_no=bc_record_no,
-                bc_document_id=bc_system_id,
+                bc_record_no=posted_record_no,
+                bc_document_id=posted_system_id,
             )
             await record_standalone_attempt(db, doc_id, attempt, also_set={
                 "status": "Posted",
@@ -325,34 +334,39 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "auto_post_attempted": True,
                 "auto_post_success": True,
                 "bc_posting_status": "posted",
-                "bc_record_no": bc_record_no,
-                "bc_purchase_invoice_no": bc_record_no,
-                "bc_system_id": bc_system_id,
+                "bc_api_id": bc_system_id,
+                "bc_draft_invoice_no": bc_record_no,
+                "bc_record_no": posted_record_no,
+                "bc_purchase_invoice_no": posted_record_no,
+                "bc_system_id": posted_system_id,
                 "posted_to_bc_at": now,
                 "bc_posting_error": None,
                 "bc_true_post_confirmed": True,
                 "bc_true_post_http_status": post_result.get("http_status"),
+                "bc_post_identity_resolution_attempts": post_result.get("identity_resolution_attempts"),
                 **posted_identity,
             })
             await _write_event(db, doc_id, "automation.decision.completed", {
                 "decision": "Posted",
                 "auto_clear": True,
                 "auto_post": True,
-                "reason": f"Auto-posted to BC: PI #{result.get('bc_record_no', 'N/A')}",
+                "reason": f"Auto-posted to BC: Posted PI #{posted_record_no}",
                 "source": source,
-                "bc_record_no": result.get("bc_record_no"),
+                "bc_record_no": posted_record_no,
+                "bc_system_id": posted_system_id,
+                "bc_api_id": bc_system_id,
             })
-            logger.info("[AP Auto-Post] SUCCESS for %s: BC PI #%s", doc_id[:8], result.get("bc_record_no"))
+            logger.info("[AP Auto-Post] SUCCESS for %s: Posted BC PI #%s", doc_id[:8], posted_record_no)
 
-            # Auto-confirm: Record successful BC post as positive feedback
             await _record_success_feedback(db, doc_id, "Posted", source)
 
             return {
                 "success": True, "posted": True,
-                "reason": f"Posted to BC as PI #{result.get('bc_record_no')}",
+                "reason": f"Posted to BC as PI #{posted_record_no}",
                 "status": "Posted",
-                "bc_record_no": bc_record_no,
-                "bc_system_id": bc_system_id,
+                "bc_record_no": posted_record_no,
+                "bc_system_id": posted_system_id,
+                "bc_api_id": bc_system_id,
             }
         else:
             error_msg = result.get("error", "Unknown BC API error")
@@ -403,6 +417,58 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     except Exception as e:
         error_msg = str(e)
         now = datetime.now(timezone.utc).isoformat()
+        from services.bc_posted_purchase_invoice_identity_service import (
+            PostedPurchaseInvoiceIdentityNotFound,
+        )
+        if isinstance(e, PostedPurchaseInvoiceIdentityNotFound):
+            # BC has already accepted/committed the post; only the real posted
+            # table-122 identity is missing. Never reclassify this as a draft
+            # posting retry and never retain the draft API id as SourceSystemId.
+            attempt = build_attempt(
+                attempt_n=attempt_n,
+                status="posted_needs_identity",
+                actor="engine:auto_post",
+                source="ap_auto_post_service",
+                correlation_id=correlation_id,
+                started_utc=started_utc,
+                finished_utc=now,
+                error=error_msg,
+                retry_reason="posted_identity_reconciliation",
+                bc_document_id=locals().get("bc_system_id", ""),
+            )
+            await record_standalone_attempt(db, doc_id, attempt, also_set={
+                "status": "PostedNeedsIdentity",
+                "workflow_status": "posted_needs_identity",
+                "auto_post_attempted": True,
+                "auto_post_success": True,
+                "auto_post_error": error_msg,
+                "bc_posting_status": "posted_needs_identity",
+                "bc_posting_error": error_msg,
+                "bc_true_post_confirmed": True,
+                "bc_api_id": locals().get("bc_system_id", ""),
+                "bc_system_id": None,
+                "bc_record_id": None,
+                "GPI_SourceSystemId": "",
+                "GPI_Status": "PostedNeedsIdentity",
+                "ImportReady": False,
+                "import_ready": False,
+                "delivery_status": "PostedNeedsIdentity",
+            })
+            await _write_event(db, doc_id, "automation.decision.completed", {
+                "decision": "PostedNeedsIdentity",
+                "auto_post": True,
+                "reason": f"BC posted invoice but posted identity reconciliation is pending: {error_msg}",
+                "source": source,
+            })
+            logger.error("[AP Auto-Post] Posted but identity unresolved for %s: %s", doc_id[:8], error_msg)
+            return {
+                "success": True,
+                "posted": True,
+                "import_ready": False,
+                "reason": error_msg,
+                "status": "PostedNeedsIdentity",
+            }
+
         # Distinguish transient errors (keep ReadyForPost) from permanent errors (revert to NeedsReview)
         from fastapi import HTTPException as _HTTPException
         is_permanent = isinstance(e, _HTTPException) and e.status_code in (404, 422)

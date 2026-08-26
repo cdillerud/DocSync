@@ -14,6 +14,7 @@ def _safe_env(monkeypatch):
         "SALES_EMAIL_POLLING_ENABLED": "false",
         "BC_SALES_LINK_WRITE_ENABLED": "false",
         "INSIDE_SALES_PILOT_ENABLED": "false",
+        "GRAPH_WEBHOOK_ENABLED": "false",
     }
     for key, value in values.items():
         monkeypatch.setenv(key, value)
@@ -53,9 +54,10 @@ def test_sales_auto_create_must_be_explicitly_false(monkeypatch):
         "SALES_EMAIL_POLLING_ENABLED",
         "BC_SALES_LINK_WRITE_ENABLED",
         "INSIDE_SALES_PILOT_ENABLED",
+        "GRAPH_WEBHOOK_ENABLED",
     ],
 )
-def test_sales_activation_flags_block_startup(monkeypatch, flag):
+def test_prohibited_parity_activation_flags_block_startup(monkeypatch, flag):
     _safe_env(monkeypatch)
     monkeypatch.setenv(flag, "true")
     with pytest.raises(RuntimeError, match=flag):

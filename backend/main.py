@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from services.startup_validator import validate_startup_secrets
+from services.parity_scope_guard import ParityScopeGuardMiddleware
 
 validate_startup_secrets()
 
@@ -109,10 +110,26 @@ from routers.admin_eod import router as admin_eod_router
 
 app = FastAPI(title="GPI Document Hub API")
 
+# Square9 cutover scope is AP/Warehouse only. Sales/Inside Sales routers remain
+# imported for post-parity compatibility, but their HTTP paths are fail-closed
+# unless an explicit post-parity override enables them.
+app.add_middleware(ParityScopeGuardMiddleware)
+
+# Same-origin frontend/API deployment does not require CORS. Explicit origins
+# may be configured for controlled clients, but wildcard + credentials is never
+# accepted outside DEMO_MODE.
+cors_origins = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ORIGINS", "").split(",")
+    if origin.strip()
+]
+if "*" in cors_origins and os.environ.get("DEMO_MODE", "true").lower() != "true":
+    raise RuntimeError("CORS_ORIGINS='*' is not allowed outside DEMO_MODE")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

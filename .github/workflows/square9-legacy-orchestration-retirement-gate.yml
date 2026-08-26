@@ -34,12 +34,38 @@ jobs:
       - name: Prove retired function fails closed
         working-directory: backend
         run: pytest -q tests/test_legacy_document_orchestration_retired.py
-      - name: Guardrail - retired service contains no delivery side effects
+      - name: Guardrail - retired service has no executable delivery dependencies
         run: |
-          if grep -nE 'upload_to_sharepoint|create_sharing_link|get_bc_sales_orders|link_document_to_bc|get_db\(' backend/services/document_orchestration_service.py; then
-            echo "::error::Retired orchestration regained an executable delivery dependency"
-            exit 1
-          fi
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+
+          path = Path('backend/services/document_orchestration_service.py')
+          tree = ast.parse(path.read_text(encoding='utf-8'))
+          forbidden = {
+              'upload_to_sharepoint',
+              'upload_to_sharepoint_with_routing',
+              'create_sharing_link',
+              'get_bc_sales_orders',
+              'link_document_to_bc',
+              'get_db',
+          }
+          imported = set()
+          called = set()
+          for node in ast.walk(tree):
+              if isinstance(node, ast.ImportFrom):
+                  imported.update(alias.name for alias in node.names)
+              elif isinstance(node, ast.Import):
+                  imported.update(alias.name for alias in node.names)
+              elif isinstance(node, ast.Call):
+                  if isinstance(node.func, ast.Name):
+                      called.add(node.func.id)
+                  elif isinstance(node.func, ast.Attribute):
+                      called.add(node.func.attr)
+          offenders = sorted((imported | called) & forbidden)
+          if offenders:
+              raise SystemExit(f'retired orchestration regained delivery dependencies: {offenders}')
+          PY
       - name: Guardrail - retry cannot call retired orchestration
         run: |
           if grep -n 'run_upload_and_link_workflow' backend/services/document_retry_service.py; then

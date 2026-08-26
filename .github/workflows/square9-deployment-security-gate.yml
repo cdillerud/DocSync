@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'docker-compose.yml'
+      - 'deploy.sh'
       - 'DEPLOYMENT.md'
       - 'backend/.env.example'
       - 'backend/services/config_service.py'
@@ -84,6 +85,48 @@ jobs:
         run: |
           grep -Fq 'os.environ.get("BC_READ_ENVIRONMENT")' backend/services/config_service.py || {
             echo '::error::Central config ignores explicit BC_READ_ENVIRONMENT'
+            exit 1
+          }
+
+      - name: Guardrail - Hub containers are loopback-only
+        run: |
+          grep -Fq '127.0.0.1:8005:8001' docker-compose.yml || {
+            echo '::error::Raw backend is not loopback-bound'
+            exit 1
+          }
+          grep -Fq '127.0.0.1:8080:3000' docker-compose.yml || {
+            echo '::error::Frontend origin is not loopback-bound behind TLS proxy'
+            exit 1
+          }
+          if grep -nE '^\s*-\s*"?(8005:8001|8080:3000)"?\s*$' docker-compose.yml; then
+            echo '::error::Externally reachable raw HTTP Hub port mapping detected'
+            exit 1
+          fi
+
+      - name: Guardrail - deploy script proves local health and external HTTPS separately
+        run: |
+          grep -Fq "health_url='http://127.0.0.1:8080/api/health'" deploy.sh || {
+            echo '::error::Deploy script local health check does not target loopback frontend proxy'
+            exit 1
+          }
+          grep -Fq 'PUBLIC_HUB_URL' deploy.sh || {
+            echo '::error::Deploy script does not require explicit external Hub URL proof'
+            exit 1
+          }
+          grep -Fq 'https://*/api' deploy.sh || {
+            echo '::error::Deploy script does not require HTTPS /api endpoint'
+            exit 1
+          }
+          grep -Fq "required_env_line 'BC_BLOCK_PRODUCTION_WRITES=true'" deploy.sh || {
+            echo '::error::Deploy script does not fail closed on BC Production write block'
+            exit 1
+          }
+          grep -Fq "required_env_line 'SHAREPOINT_BLOCK_PRODUCTION_WRITES=true'" deploy.sh || {
+            echo '::error::Deploy script does not fail closed on SharePoint Production write block'
+            exit 1
+          }
+          grep -Fq "required_env_line 'SALES_EMAIL_POLLING_ENABLED=false'" deploy.sh || {
+            echo '::error::Deploy script can start with Sales polling enabled'
             exit 1
           }
 

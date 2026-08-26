@@ -50,6 +50,10 @@ ADMIN_ONLY_PREFIXES = (
     "/api/vendor-profiles",
     "/api/auto-approve",
     "/api/file-integrity",
+    # Rule/profile/freight configuration changes alter routing/extraction behavior.
+    "/api/automation-rules",
+    "/api/vendor-extraction-profiles",
+    "/api/freight-routing",
     # Auto-clear policy changes and state-changing/batch routing are control-plane operations.
     "/api/auto-clear/config/threshold",
     "/api/auto-clear/apply",
@@ -93,6 +97,10 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/readiness",
     "/api/po-resolution",
     "/api/square9",
+    "/api/label-corrections",
+    "/api/vendor-resolution",
+    "/api/vendors",
+    "/api/bc-sandbox",
     "/api/gpi-integration/purchase-invoices",
     "/api/gpi-integration/factbox-ui",
 )

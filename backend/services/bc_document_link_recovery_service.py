@@ -2,7 +2,8 @@
 
 Recovery must never upload the file again. It reuses the existing SharePoint
 identity, resolves BC SystemId if needed, checks whether the link already exists,
-and only then creates the missing BC link.
+creates only the missing BC link, and then patches parity metadata on the same
+SharePoint item before declaring the document delivered/import-ready.
 """
 
 from datetime import datetime, timezone
@@ -61,8 +62,52 @@ async def _find_existing_link(bc_entity: str, bc_document_no: str, doc: dict) ->
     return None
 
 
+async def _finalize_existing_item_metadata(doc_id: str, db, doc: dict, system_id: str) -> dict:
+    """Patch readiness metadata on the existing SharePoint item only.
+
+    BC Drop records have a stricter lifecycle-aware metadata contract; other
+    document families use the generic existing-item parity resync boundary.
+    Neither path uploads bytes or creates a replacement SharePoint item.
+    """
+    source = str(doc.get("source") or "").strip().lower()
+    if source == "bc_drop" or doc.get("bc_source_table_id") or doc.get("bc_source_document_type"):
+        from services.bc_drop_parity_metadata_service import write_bc_drop_parity_metadata
+
+        ready_doc = dict(doc)
+        ready_doc["bc_system_id"] = system_id
+        ready_doc["bc_record_id"] = system_id
+        metadata = await write_bc_drop_parity_metadata(ready_doc, ready=True)
+        now = datetime.now(timezone.utc).isoformat()
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "sharepoint_parity_metadata": metadata,
+                "sharepoint_metadata_written_at": now,
+                "sharepoint_metadata_resynced_at": now,
+                "sharepoint_metadata_error": None,
+            }},
+        )
+        return metadata
+
+    from services.sharepoint_parity_resync_service import resync_existing_sharepoint_parity_metadata
+
+    identity_update = {
+        "GPI_SourceSystemId": system_id,
+        "GPI_Status": "ImportReady",
+        "ImportReady": True,
+        "import_ready": True,
+        "delivery_status": "ImportReady",
+    }
+    result = await resync_existing_sharepoint_parity_metadata(
+        doc_id,
+        db,
+        identity_update=identity_update,
+    )
+    return result["metadata"]
+
+
 async def recover_bc_document_link(doc_id: str) -> dict:
-    """Repair BC linkage for one already-uploaded Hub document without re-uploading."""
+    """Repair BC linkage and parity metadata without re-uploading file bytes."""
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -77,6 +122,8 @@ async def recover_bc_document_link(doc_id: str) -> dict:
         raise ValueError("BC entity and document number are required for link recovery")
     if not sharepoint_url:
         raise ValueError("Existing SharePoint URL is required for link recovery")
+    if not str(doc.get("sharepoint_drive_id") or "").strip() or not str(doc.get("sharepoint_item_id") or "").strip():
+        raise ValueError("Existing SharePoint drive/item identity is required for link recovery")
 
     system_id = str(doc.get("bc_system_id") or doc.get("bc_record_id") or "").strip()
     if not system_id:
@@ -107,29 +154,64 @@ async def recover_bc_document_link(doc_id: str) -> dict:
                     "bc_link_error": error,
                     "delivery_status": "bc_link_failed",
                     "import_ready": False,
+                    "ImportReady": False,
                     "bc_link_recovery_attempted_at": datetime.now(timezone.utc).isoformat(),
                 }},
             )
             return {"success": False, "recovered": False, "error": error}
         result = {"success": True, "recovered": True, "already_linked": False}
 
+    try:
+        metadata = await _finalize_existing_item_metadata(doc_id, db, doc, system_id)
+    except Exception as exc:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "bc_system_id": system_id,
+                "bc_record_id": system_id,
+                "bc_link_created": True,
+                "bc_link_error": "",
+                "delivery_status": "bc_link_recovered_metadata_failed",
+                "import_ready": False,
+                "ImportReady": False,
+                "sharepoint_metadata_error": str(exc),
+                "bc_link_recovery_attempted_at": now,
+            }},
+        )
+        return {
+            "success": False,
+            "recovered": False,
+            "bc_link_recovered": True,
+            "metadata_recovered": False,
+            "doc_id": doc_id,
+            "bc_system_id": system_id,
+            "delivery_status": "bc_link_recovered_metadata_failed",
+            "error": str(exc),
+        }
+
     recovered_at = datetime.now(timezone.utc).isoformat()
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
             "bc_system_id": system_id,
+            "bc_record_id": system_id,
             "bc_link_created": True,
             "bc_link_error": "",
-            "delivery_status": "delivered",
+            "delivery_status": "ImportReady",
             "import_ready": True,
+            "ImportReady": True,
+            "sharepoint_metadata_error": None,
             "bc_link_recovered_at": recovered_at,
         }},
     )
     result.update({
         "doc_id": doc_id,
         "bc_system_id": system_id,
-        "delivery_status": "delivered",
+        "delivery_status": "ImportReady",
         "import_ready": True,
+        "metadata_recovered": True,
+        "metadata": metadata,
     })
     return result
 

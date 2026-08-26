@@ -1,10 +1,10 @@
 """HTTP scope and access barrier for Square9 AP/Warehouse parity.
 
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
-Operational control-plane surfaces are admin-only. Normal AP/Warehouse operator
-surfaces require an authenticated user so anonymous callers cannot mutate
-workflow/document state. Legacy Graph webhook intake is disabled by default
-for the parity baseline and must be explicitly enabled.
+Operational control-plane and batch-maintenance surfaces are admin-only. Normal
+AP/Warehouse operator surfaces require an authenticated user so anonymous callers
+cannot mutate workflow/document state. Legacy Graph webhook intake is disabled by
+default for the parity baseline and must be explicitly enabled post-parity.
 """
 
 from __future__ import annotations
@@ -33,13 +33,22 @@ ADMIN_ONLY_PREFIXES = (
     "/api/dev",
     "/api/migration",
     "/api/sharepoint",
+    "/api/sharepoint-routing",
     "/api/email-polling",
+    "/api/vendor-reprocess",
+    "/api/auto-clear-reprocess",
+    "/api/workflow-fix",
+    "/api/dedup",
+    "/api/vendor-profiles",
+    "/api/auto-approve",
+    "/api/file-integrity",
 )
 
 AUTHENTICATED_ONLY_PREFIXES = (
     "/api/documents",
     "/api/workflows",
     "/api/ap-review",
+    "/api/human-routing-review",
 )
 
 LEGACY_WEBHOOK_PATH = "/api/graph/webhook"

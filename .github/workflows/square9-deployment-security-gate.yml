@@ -1,0 +1,72 @@
+name: Square9 Deployment Security Gate
+
+on:
+  pull_request:
+    paths:
+      - 'docker-compose.yml'
+      - 'DEPLOYMENT.md'
+      - 'frontend/Dockerfile'
+      - 'frontend/nginx.conf'
+      - 'frontend/src/lib/api.js'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - '.github/workflows/square9-deployment-security-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  deployment-security:
+    name: No committed secrets or insecure Hub endpoints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guardrail - compose contains no committed auth secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path('docker-compose.yml').read_text(encoding='utf-8')
+          forbidden_assignments = (
+              r'(?m)^\s*-\s*JWT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*ADMIN_PASSWORD\s*=\s*\S+',
+              r'(?m)^\s*-\s*BC_CLIENT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*GRAPH_CLIENT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*EMAIL_CLIENT_SECRET\s*=\s*\S+',
+          )
+          hits = [pattern for pattern in forbidden_assignments if re.search(pattern, text)]
+          if hits:
+              raise SystemExit('compose contains committed secret assignments: ' + ', '.join(hits))
+
+          if 'env_file:' not in text or './backend/.env' not in text:
+              raise SystemExit('backend runtime secret injection via backend/.env is missing')
+          PY
+
+      - name: Guardrail - no hard-coded external HTTP backend address
+        run: |
+          if grep -nE 'REACT_APP_BACKEND_URL=http://|4\.204\.41\.190' docker-compose.yml; then
+            echo '::error::Compose contains a hard-coded/insecure external backend URL'
+            exit 1
+          fi
+          grep -Fq 'REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL:-}' docker-compose.yml || {
+            echo '::error::Frontend backend URL is not environment-injected/same-origin safe'
+            exit 1
+          }
+
+      - name: Guardrail - Business Central Hub endpoint remains HTTPS-only
+        run: |
+          grep -Fq "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::Business Central Hub runtime no longer requires HTTPS'
+            exit 1
+          }
+          grep -Fq "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" bc-extension/src/table/GPIHubSetup.Table.al || {
+            echo '::error::GPI Hub Setup accepts a non-HTTPS base URL'
+            exit 1
+          }
+
+      - name: Guardrail - no known placeholder admin password patterns
+        run: |
+          if grep -RInE --exclude-dir=.git --exclude='*.md' 'ChangeMeOnFirstDeploy|ADMIN_PASSWORD=.*[^${}]' .; then
+            echo '::error::A committed/default admin password pattern is present'
+            exit 1
+          fi

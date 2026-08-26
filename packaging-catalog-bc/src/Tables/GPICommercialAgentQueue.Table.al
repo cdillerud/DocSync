@@ -118,4 +118,22 @@ table 71122 "GPI Commercial Agent Queue"
         {
         }
     }
+
+    trigger OnInsert()
+    begin
+        TestField("Agent Type");
+        TestField("Source Type");
+        TestField("Source Key");
+
+        if "Requested At" = 0DT then
+            "Requested At" := CurrentDateTime();
+        if "Next Attempt At" = 0DT then
+            "Next Attempt At" := "Requested At";
+        if "Max Attempts" <= 0 then
+            "Max Attempts" := 3;
+        if IsNullGuid("Correlation ID") then
+            "Correlation ID" := CreateGuid();
+        if "Requested By" = '' then
+            "Requested By" := CopyStr(UserId(), 1, MaxStrLen("Requested By"));
+    end;
 }

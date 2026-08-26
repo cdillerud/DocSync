@@ -1,0 +1,120 @@
+name: Square9 AP Draft Metadata Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/services/ap_draft_metadata_recovery_service.py'
+      - 'backend/services/ap_posted_recovery_dispatch_service.py'
+      - 'backend/services/document_retry_service.py'
+      - 'backend/services/sharepoint_parity_resync_service.py'
+      - 'backend/services/ap_purchase_invoice_identity_service.py'
+      - 'backend/tests/test_ap_draft_metadata_recovery_service.py'
+      - 'backend/tests/test_ap_posted_recovery_dispatch_service.py'
+      - '.github/workflows/square9-ap-draft-metadata-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  ap-draft-metadata:
+    name: AP draft identity and metadata durability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor
+
+      - name: Run AP draft metadata recovery tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: |
+          pytest -q \
+            tests/test_ap_draft_metadata_recovery_service.py \
+            tests/test_ap_posted_recovery_dispatch_service.py
+
+      - name: Guardrail - BC draft identity must sync existing SharePoint item
+        run: |
+          grep -q 'draft_identity = build_ap_purchase_invoice_identity_update' backend/routers/gpi_integration.py || {
+            echo "::error::Purchase Invoice draft identity is not explicitly captured"
+            exit 1
+          }
+          grep -q 'resync_existing_sharepoint_parity_metadata' backend/routers/gpi_integration.py || {
+            echo "::error::Purchase Invoice draft creation does not synchronize existing SharePoint metadata"
+            exit 1
+          }
+          grep -q 'result\["metadata_pending"\] = True' backend/routers/gpi_integration.py || {
+            echo "::error::Draft metadata failure is not surfaced distinctly from BC draft creation"
+            exit 1
+          }
+
+      - name: Guardrail - draft metadata failure fails readiness closed
+        run: |
+          grep -q '"status": "DraftNeedsMetadata"' backend/routers/gpi_integration.py || {
+            echo "::error::Draft SharePoint failure lacks DraftNeedsMetadata state"
+            exit 1
+          }
+          grep -q '"GPI_Status": "DraftNeedsMetadata"' backend/routers/gpi_integration.py || {
+            echo "::error::Draft SharePoint failure does not propagate GPI_Status"
+            exit 1
+          }
+          grep -q '"ImportReady": False' backend/routers/gpi_integration.py || {
+            echo "::error::Draft SharePoint failure may remain ImportReady"
+            exit 1
+          }
+          grep -q '"delivery_status": "DraftNeedsMetadata"' backend/routers/gpi_integration.py || {
+            echo "::error::Draft SharePoint failure lacks explicit delivery status"
+            exit 1
+          }
+
+      - name: Guardrail - draft recovery cannot create, post, or upload
+        run: |
+          file=backend/services/ap_draft_metadata_recovery_service.py
+          if grep -Eq 'create_purchase_invoice|post_purchase_invoice|Microsoft.NAV.post|upload_to_sharepoint|upload_file|createUploadSession' "$file"; then
+            echo "::error::Draft metadata recovery can mutate BC draft lifecycle or reupload file bytes"
+            exit 1
+          fi
+          grep -q 'resync_existing_sharepoint_parity_metadata' "$file" || {
+            echo "::error::Draft recovery does not use existing-item SharePoint PATCH boundary"
+            exit 1
+          }
+          grep -q 'DraftNeedsMetadata' backend/services/ap_posted_recovery_dispatch_service.py || {
+            echo "::error::Safe AP recovery dispatcher does not intercept DraftNeedsMetadata"
+            exit 1
+          }
+
+      - name: Guardrail - safe recovery dispatch precedes generic retry bookkeeping
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('backend/services/document_retry_service.py').read_text(encoding='utf-8')
+          dispatch = text.index('dispatch_ap_posted_recovery_if_needed(doc_id, db, doc)')
+          should_retry = text.index('if not should_retry(doc):')
+          retrying = text.index('"status": "Retrying"')
+          if not dispatch < should_retry < retrying:
+              raise SystemExit('AP BC-preserving recovery must run before should_retry/Retrying')
+          PY
+
+      - name: Guardrail - Sales and Production protections remain unchanged
+        run: |
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }
+          grep -q 'BC_BLOCK_PRODUCTION_WRITES' backend/services/business_central_service.py || {
+            echo "::error::Central Production write protection is missing"
+            exit 1
+          }

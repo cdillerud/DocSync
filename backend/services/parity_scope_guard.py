@@ -2,14 +2,14 @@
 
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
 Operational control-plane and batch-maintenance surfaces are admin-only. Normal
-AP/Warehouse operator surfaces require an authenticated user so anonymous callers
-cannot mutate workflow/document state. Legacy Graph webhook intake is disabled by
-default for the parity baseline and must be explicitly enabled post-parity.
+AP/Warehouse operator surfaces require an authenticated user. Business Central
+FactBox API calls use a dedicated machine-to-machine key over HTTPS.
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 from typing import Iterable
 
 from fastapi import HTTPException
@@ -23,7 +23,6 @@ OUT_OF_SCOPE_SALES_PREFIXES = (
     "/api/sales-dashboard",
     "/api/salesperson-dashboard",
     "/api/inside-sales-pilot",
-    # Hidden Sales writes under generic BC/GPI integration routers.
     "/api/bc/sales-orders/create",
     "/api/gpi-integration/sales-orders",
     "/api/gpi-integration/ds-purchase-orders",
@@ -45,8 +44,6 @@ ADMIN_ONLY_PREFIXES = (
     "/api/vendor-profiles",
     "/api/auto-approve",
     "/api/file-integrity",
-    # GPI integration control-plane operations. FactBox document-links are
-    # deliberately excluded here because Business Central requires M2M access.
     "/api/gpi-integration/status",
     "/api/gpi-integration/companies",
     "/api/gpi-integration/bc-api-schema",
@@ -65,12 +62,16 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/workflows",
     "/api/ap-review",
     "/api/human-routing-review",
-    # AP creation/preflight is an operator action. The more specific admin-only
-    # retry-lines prefix above wins because admin checks run first.
     "/api/gpi-integration/purchase-invoices",
+    "/api/gpi-integration/factbox-ui",
+)
+
+M2M_ONLY_PREFIXES = (
+    "/api/gpi-integration/document-links",
 )
 
 LEGACY_WEBHOOK_PATH = "/api/graph/webhook"
+M2M_HEADER_NAME = "X-GPI-Hub-Key"
 
 
 def _env_true(name: str, default: bool = False) -> bool:
@@ -81,12 +82,10 @@ def _env_true(name: str, default: bool = False) -> bool:
 
 
 def sales_routes_enabled() -> bool:
-    """Sales HTTP activation is explicit opt-in and defaults off."""
     return _env_true("ENABLE_OUT_OF_SCOPE_SALES_ROUTES", False)
 
 
 def graph_webhook_enabled() -> bool:
-    """Legacy Graph webhook intake is explicit opt-in and defaults off."""
     return _env_true("GRAPH_WEBHOOK_ENABLED", False)
 
 
@@ -112,6 +111,18 @@ def is_authenticated_only_path(path: str, prefixes: Iterable[str] = AUTHENTICATE
     return _path_matches(path, prefixes)
 
 
+def is_m2m_only_path(path: str, prefixes: Iterable[str] = M2M_ONLY_PREFIXES) -> bool:
+    return _path_matches(path, prefixes)
+
+
+def _valid_m2m_key(request: Request) -> bool:
+    expected = os.environ.get("BC_HUB_API_KEY", "")
+    supplied = request.headers.get(M2M_HEADER_NAME, "")
+    if not expected or not supplied:
+        return False
+    return secrets.compare_digest(supplied, expected)
+
+
 def _http_exception_response(exc: HTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
@@ -121,7 +132,7 @@ def _http_exception_response(exc: HTTPException) -> JSONResponse:
 
 
 class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
-    """Enforce parity scope, control-plane auth, operator auth, and webhook posture."""
+    """Enforce parity scope plus admin, operator, and BC machine authentication."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -144,18 +155,24 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Import lazily to avoid creating auth/config cycles at module load.
+        # Specific admin-only paths win over the broader document-links M2M prefix.
         if is_admin_only_path(path):
             from services.auth_deps import require_admin
-
             try:
                 await require_admin(request)
             except HTTPException as exc:
                 return _http_exception_response(exc)
 
+        elif is_m2m_only_path(path):
+            if not _valid_m2m_key(request):
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Valid Business Central Hub machine credential required"},
+                    headers={"WWW-Authenticate": "GPI-Hub-Key"},
+                )
+
         elif is_authenticated_only_path(path):
             from services.auth_deps import get_current_user
-
             try:
                 await get_current_user(request)
             except HTTPException as exc:
@@ -168,11 +185,14 @@ __all__ = [
     "ADMIN_ONLY_PREFIXES",
     "AUTHENTICATED_ONLY_PREFIXES",
     "LEGACY_WEBHOOK_PATH",
+    "M2M_HEADER_NAME",
+    "M2M_ONLY_PREFIXES",
     "OUT_OF_SCOPE_SALES_PREFIXES",
     "ParityScopeGuardMiddleware",
     "graph_webhook_enabled",
     "is_admin_only_path",
     "is_authenticated_only_path",
+    "is_m2m_only_path",
     "is_out_of_scope_sales_path",
     "sales_routes_enabled",
 ]

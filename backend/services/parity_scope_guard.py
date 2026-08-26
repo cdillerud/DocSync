@@ -3,7 +3,8 @@
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
 Operational control-plane surfaces are admin-only. Normal AP/Warehouse operator
 surfaces require an authenticated user so anonymous callers cannot mutate
-workflow/document state.
+workflow/document state. Legacy Graph webhook intake is disabled by default
+for the parity baseline and must be explicitly enabled.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ ADMIN_ONLY_PREFIXES = (
     "/api/dev",
     "/api/migration",
     "/api/sharepoint",
+    "/api/email-polling",
 )
 
 AUTHENTICATED_ONLY_PREFIXES = (
@@ -39,6 +41,8 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/workflows",
     "/api/ap-review",
 )
+
+LEGACY_WEBHOOK_PATH = "/api/graph/webhook"
 
 
 def _env_true(name: str, default: bool = False) -> bool:
@@ -51,6 +55,11 @@ def _env_true(name: str, default: bool = False) -> bool:
 def sales_routes_enabled() -> bool:
     """Sales HTTP activation is explicit opt-in and defaults off."""
     return _env_true("ENABLE_OUT_OF_SCOPE_SALES_ROUTES", False)
+
+
+def graph_webhook_enabled() -> bool:
+    """Legacy Graph webhook intake is explicit opt-in and defaults off."""
+    return _env_true("GRAPH_WEBHOOK_ENABLED", False)
 
 
 def _path_matches(path: str, prefixes: Iterable[str]) -> bool:
@@ -84,7 +93,7 @@ def _http_exception_response(exc: HTTPException) -> JSONResponse:
 
 
 class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
-    """Enforce parity scope, admin control-plane auth, and operator auth."""
+    """Enforce parity scope, control-plane auth, operator auth, and webhook posture."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -94,6 +103,15 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
                 status_code=404,
                 content={
                     "detail": "Route unavailable during AP/Warehouse Square9 parity phase",
+                    "parity_scope": "AP/Warehouse",
+                },
+            )
+
+        if path.rstrip("/") == LEGACY_WEBHOOK_PATH and not graph_webhook_enabled():
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "detail": "Graph webhook disabled for AP/Warehouse parity baseline",
                     "parity_scope": "AP/Warehouse",
                 },
             )
@@ -121,8 +139,10 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
 __all__ = [
     "ADMIN_ONLY_PREFIXES",
     "AUTHENTICATED_ONLY_PREFIXES",
+    "LEGACY_WEBHOOK_PATH",
     "OUT_OF_SCOPE_SALES_PREFIXES",
     "ParityScopeGuardMiddleware",
+    "graph_webhook_enabled",
     "is_admin_only_path",
     "is_authenticated_only_path",
     "is_out_of_scope_sales_path",

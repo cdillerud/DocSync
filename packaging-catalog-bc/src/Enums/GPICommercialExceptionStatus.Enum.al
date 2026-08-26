@@ -1,4 +1,4 @@
-enum 71121 "GPI Commercial Ex Status"
+enum 71121 "GPI Comm Ex Status"
 {
     Extensible = true;
     Caption = 'GPI Commercial Exception Status';

@@ -3,8 +3,9 @@
 This service is intentionally read-only toward BC and never uploads file bytes.
 It exists for the narrow ``PostedNeedsIdentity`` state: BC has already confirmed
 posting, but the real table-122 Purch. Inv. Header SystemId/final number was not
-yet visible through the automate API. Recovery re-runs only that identity lookup
-and finalizes the Hub/FactBox contract.
+yet visible through the automate API. Recovery re-runs only that identity lookup,
+then patches parity metadata on the *existing* SharePoint item before the Hub may
+become ImportReady/Posted.
 """
 
 from datetime import datetime, timezone
@@ -16,10 +17,25 @@ from services.ap_purchase_invoice_identity_service import (
 from services.bc_posted_purchase_invoice_identity_service import (
     resolve_posted_purchase_invoice_identity,
 )
+from services.sharepoint_parity_resync_service import (
+    resync_existing_sharepoint_parity_metadata,
+)
 
 
 class PostedIdentityRecoveryError(RuntimeError):
     pass
+
+
+def _metadata_blocked_identity(identity: Dict[str, Any]) -> Dict[str, Any]:
+    """Preserve the proven posted identity while failing readiness closed."""
+    blocked = dict(identity)
+    blocked.update({
+        "GPI_Status": "PostedNeedsMetadata",
+        "ImportReady": False,
+        "import_ready": False,
+        "delivery_status": "PostedNeedsMetadata",
+    })
+    return blocked
 
 
 async def recover_posted_purchase_invoice_identity(
@@ -75,6 +91,66 @@ async def recover_posted_purchase_invoice_identity(
         posted=True,
     )
     now = datetime.now(timezone.utc).isoformat()
+
+    # The real posted identity is now known, but the delivery contract is not
+    # complete until the already-uploaded SharePoint list item carries that same
+    # table-122 identity. This function only PATCHes metadata; it never uploads.
+    try:
+        await resync_existing_sharepoint_parity_metadata(
+            doc_id,
+            db,
+            identity_update=identity,
+        )
+    except Exception as exc:
+        blocked = _metadata_blocked_identity(identity)
+        audit_event = {
+            "timestamp": now,
+            "event": "posted_identity_recovered_metadata_pending",
+            "actor": "system",
+            "metadata": {
+                "bc_api_id": api_id,
+                "posted_number": posted_number,
+                "posted_system_id": posted_system_id,
+                "metadata_error": str(exc)[:1000],
+            },
+        }
+        await db.hub_documents.update_one(
+            {"id": doc_id, "status": "PostedNeedsIdentity", "bc_api_id": api_id},
+            {
+                "$set": {
+                    **blocked,
+                    "status": "PostedNeedsMetadata",
+                    "workflow_status": "posted_needs_metadata",
+                    "bc_posting_status": "posted_needs_metadata",
+                    "bc_posting_error": str(exc),
+                    "auto_post_error": str(exc),
+                    "bc_true_post_confirmed": True,
+                    "bc_api_id": api_id,
+                    "bc_record_no": posted_number,
+                    "bc_purchase_invoice_no": posted_number,
+                    "bc_system_id": posted_system_id,
+                    "bc_record_id": posted_system_id,
+                    "bc_post_identity_recovered_at": now,
+                    "bc_post_identity_resolution_attempts": resolved.get("attempts"),
+                    "sharepoint_metadata_error": str(exc),
+                    "updated_utc": now,
+                },
+                "$push": {"workflow_history": audit_event},
+            },
+        )
+        return {
+            "success": True,
+            "recovered": True,
+            "posted": True,
+            "document_id": doc_id,
+            "bc_api_id": api_id,
+            "bc_record_no": posted_number,
+            "bc_system_id": posted_system_id,
+            "import_ready": False,
+            "status": "PostedNeedsMetadata",
+            "metadata_error": str(exc),
+        }
+
     update = {
         **identity,
         "status": "Posted",
@@ -90,6 +166,7 @@ async def recover_posted_purchase_invoice_identity(
         "bc_record_id": posted_system_id,
         "bc_post_identity_recovered_at": now,
         "bc_post_identity_resolution_attempts": resolved.get("attempts"),
+        "sharepoint_metadata_error": None,
         "updated_utc": now,
     }
     audit_event = {
@@ -101,6 +178,7 @@ async def recover_posted_purchase_invoice_identity(
             "posted_number": posted_number,
             "posted_system_id": posted_system_id,
             "attempts": resolved.get("attempts"),
+            "sharepoint_metadata_resynced": True,
         },
     }
 

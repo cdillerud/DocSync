@@ -1,0 +1,35 @@
+name: Apply AP True Post Parity Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/scripts/apply_ap_true_post_parity_patch.py'
+      - '.github/workflows/apply-ap-true-post-parity-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+      - name: Apply exact AP true-post patch
+        run: python backend/scripts/apply_ap_true_post_parity_patch.py
+      - name: Verify intended files only
+        run: |
+          CHANGED="$(git diff --name-only)"
+          printf '%s\n' "$CHANGED"
+          test "$(printf '%s\n' "$CHANGED" | sort)" = "$(printf '%s\n' 'backend/routers/gpi_integration.py' 'backend/services/ap_auto_post_service.py' | sort)"
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/routers/gpi_integration.py backend/services/ap_auto_post_service.py
+          git commit -m 'parity: require true BC posting and AP invoice identity handoff'
+          git push origin HEAD:feature/square9-parity-systemid-gate

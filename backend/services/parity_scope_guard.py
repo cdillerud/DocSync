@@ -28,6 +28,11 @@ OUT_OF_SCOPE_SALES_PREFIXES = (
     "/api/gpi-integration/sales-orders",
     "/api/gpi-integration/ds-purchase-orders",
     "/api/gpi-integration/order-patterns",
+    # Sales FactBox/read surfaces are paused too, not only Sales writes.
+    "/api/gpi-integration/document-links/salesOrders",
+    "/api/gpi-integration/document-links/salesInvoices",
+    "/api/gpi-integration/factbox-ui/salesOrders",
+    "/api/gpi-integration/factbox-ui/salesInvoices",
 )
 
 ADMIN_ONLY_PREFIXES = (
@@ -156,7 +161,6 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Specific admin-only paths win over the broader document-links prefix.
         if is_admin_only_path(path):
             from services.auth_deps import require_admin
             try:

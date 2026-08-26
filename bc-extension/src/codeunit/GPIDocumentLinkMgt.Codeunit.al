@@ -1,8 +1,7 @@
 /// <summary>
 /// Codeunit 50105 "GPI Document Link Mgt"
-/// Handles HTTP calls to the GPI Hub API for document link operations.
+/// Handles authenticated HTTPS calls to the GPI Hub API for document link operations.
 /// Exact-record FactBox reads are performed by page 50100 with BC SystemId.
-/// Legacy two-key read/unlink procedures are retained only to fail closed.
 /// </summary>
 codeunit 50105 "GPI Document Link Mgt"
 {
@@ -18,13 +17,18 @@ codeunit 50105 "GPI Document Link Mgt"
         MaxUploadSizeMB := 25;
     end;
 
+    local procedure GetSetup(var HubSetup: Record "GPI Hub Setup")
+    begin
+        if not HubSetup.Get('SETUP') then
+            Error('GPI Hub is not configured. Open GPI Hub Setup and configure the HTTPS URL and API key.');
+    end;
+
     local procedure GetGPIHubUrl(): Text
     var
         HubSetup: Record "GPI Hub Setup";
         HubUrl: Text;
     begin
-        if not HubSetup.Get('SETUP') then
-            Error('GPI Hub URL is not configured. Open GPI Hub Setup and enter the HTTPS API base URL.');
+        GetSetup(HubSetup);
 
         HubUrl := DelChr(HubSetup."Hub Base URL", '>', '/');
         if HubUrl = '' then
@@ -34,6 +38,26 @@ codeunit 50105 "GPI Document Link Mgt"
             Error('GPI Hub URL must use HTTPS. Open GPI Hub Setup and correct the API base URL.');
 
         exit(HubUrl);
+    end;
+
+    local procedure GetGPIHubApiKey(): Text
+    var
+        HubSetup: Record "GPI Hub Setup";
+    begin
+        GetSetup(HubSetup);
+        if HubSetup."Hub API Key" = '' then
+            Error('GPI Hub API Key is not configured. Open GPI Hub Setup and enter the machine credential supplied for this environment.');
+        exit(HubSetup."Hub API Key");
+    end;
+
+    procedure ConfigureHubClient(var Client: HttpClient)
+    var
+        Headers: HttpHeaders;
+    begin
+        Client.DefaultRequestHeaders(Headers);
+        if Headers.Contains('X-GPI-Hub-Key') then
+            Headers.Remove('X-GPI-Hub-Key');
+        Headers.Add('X-GPI-Hub-Key', GetGPIHubApiKey());
     end;
 
     procedure GetHubBaseUrl(): Text
@@ -112,6 +136,7 @@ codeunit 50105 "GPI Document Link Mgt"
         FileContent.GetHeaders(ContentHeaders);
         ContentHeaders.Clear();
         ContentHeaders.Add('Content-Type', 'application/octet-stream');
+        ConfigureHubClient(Client);
 
         if not Client.Post(RequestUrl, FileContent, Response) then begin
             Message('Failed to connect to GPI Hub.');
@@ -125,6 +150,11 @@ codeunit 50105 "GPI Document Link Mgt"
                 begin
                     Message('File uploaded successfully to SharePoint.');
                     exit(true);
+                end;
+            401:
+                begin
+                    Message('GPI Hub authentication failed. Verify the Hub API Key in GPI Hub Setup.');
+                    exit(false);
                 end;
             409:
                 begin
@@ -159,24 +189,8 @@ codeunit 50105 "GPI Document Link Mgt"
     end;
 
     procedure MigrateZetadocsLinks(): Text
-    var
-        Client: HttpClient;
-        EmptyContent: HttpContent;
-        Response: HttpResponseMessage;
-        ResponseText: Text;
-        RequestUrl: Text;
     begin
-        Initialize();
-        RequestUrl := GPIHubBaseUrl + '/gpi-integration/document-links/migrate-from-zetadocs';
-
-        if not Client.Post(RequestUrl, EmptyContent, Response) then
-            exit('Failed to connect to GPI Hub.');
-
-        Response.Content().ReadAs(ResponseText);
-
-        if Response.IsSuccessStatusCode() then
-            exit(ResponseText);
-
-        exit('Migration failed: ' + CopyStr(ResponseText, 1, 200));
+        Error('Zetadocs migration is an authenticated Hub administrator operation and cannot be launched from Business Central.');
+        exit('Migration must be run from the authenticated GPI Hub administration surface.');
     end;
 }

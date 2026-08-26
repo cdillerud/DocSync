@@ -1,4 +1,4 @@
-page 71123 "GPI Commercial Ex API"
+page 71123 "GPI Comm Ex API"
 {
     PageType = API;
     APIPublisher = 'gpi';
@@ -7,7 +7,7 @@ page 71123 "GPI Commercial Ex API"
     Caption = 'commercialExceptions';
     EntityName = 'commercialException';
     EntitySetName = 'commercialExceptions';
-    SourceTable = "GPI Commercial Exception";
+    SourceTable = "GPI Comm Exception";
     ODataKeyFields = SystemId;
     InsertAllowed = false;
     ModifyAllowed = false;

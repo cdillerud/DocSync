@@ -2306,21 +2306,67 @@ async def create_purchase_invoice_from_document(
         "bc_purchase_invoice_no": result.get("bc_record_no", ""),
         "updated_utc": now,
     }
+    draft_identity = None
     if result.get("success") and result.get("bc_record_no"):
         from services.ap_purchase_invoice_identity_service import (
             build_ap_purchase_invoice_identity_update,
         )
-        pi_writeback.update(
-            build_ap_purchase_invoice_identity_update(
-                result.get("bc_record_no", ""),
-                result.get("bc_system_id", ""),
-                posted=False,
-            )
+        draft_identity = build_ap_purchase_invoice_identity_update(
+            result.get("bc_record_no", ""),
+            result.get("bc_system_id", ""),
+            posted=False,
         )
+        pi_writeback.update(draft_identity)
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": pi_writeback}
     )
+
+    # A BC draft is not a complete parity transition until the already-uploaded
+    # SharePoint item carries the same Purchase Invoice identity. Patch metadata
+    # only after preserving the BC draft/SystemId in Mongo so a Graph failure can
+    # never cause a later retry to create a second draft.
+    if draft_identity:
+        from services.sharepoint_parity_resync_service import (
+            resync_existing_sharepoint_parity_metadata,
+        )
+        try:
+            await resync_existing_sharepoint_parity_metadata(
+                doc_id, db, identity_update=draft_identity
+            )
+            result["metadata_synced"] = True
+            result["metadata_pending"] = False
+        except Exception as metadata_exc:
+            metadata_error = str(metadata_exc)
+            blocked_identity = dict(draft_identity)
+            blocked_identity.update({
+                "GPI_Status": "DraftNeedsMetadata",
+                "ImportReady": False,
+                "import_ready": False,
+                "delivery_status": "DraftNeedsMetadata",
+            })
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    **blocked_identity,
+                    "status": "DraftNeedsMetadata",
+                    "workflow_status": "draft_needs_metadata",
+                    "sharepoint_metadata_error": metadata_error,
+                    "draft_metadata_pending_since": datetime.now(timezone.utc).isoformat(),
+                    "updated_utc": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            # BC draft creation remains a success. Surface a distinct recoverable
+            # metadata state so no caller interprets this as permission to create
+            # another Purchase Invoice.
+            result["metadata_synced"] = False
+            result["metadata_pending"] = True
+            result["metadata_error"] = metadata_error
+            result["document_status"] = "DraftNeedsMetadata"
+            logger.error(
+                "[GPI Integration] Draft PI %s created/reused but SharePoint metadata sync failed for %s: %s",
+                result.get("bc_record_no", "?"), doc_id[:8], metadata_error
+            )
 
     # Emit event
     try:

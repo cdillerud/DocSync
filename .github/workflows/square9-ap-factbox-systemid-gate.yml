@@ -11,6 +11,10 @@ on:
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
       - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
       - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
       - 'bc-extension/build.sh'
       - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
   pull_request:
@@ -21,6 +25,10 @@ on:
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
       - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
       - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
       - 'bc-extension/build.sh'
       - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
   workflow_dispatch:
@@ -48,6 +56,37 @@ jobs:
 
       - name: Validate BC extension structure
         run: bash bc-extension/build.sh
+
+      - name: Guardrail - Hub endpoint is configurable and HTTPS-only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          mgt = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          table = Path('bc-extension/src/table/GPIHubSetup.Table.al').read_text(encoding='utf-8')
+          page = Path('bc-extension/src/page/GPIHubSetup.Page.al').read_text(encoding='utf-8')
+          perm = Path('bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al').read_text(encoding='utf-8')
+
+          combined = '\n'.join((mgt, table, page, perm)).lower()
+          forbidden = ('http://4.204.41.190', "exit('http://", 'hardcode for now')
+          for token in forbidden:
+              if token in combined:
+                  raise SystemExit(f'forbidden hard-coded Hub endpoint remains: {token}')
+
+          required = {
+              'management reads setup': 'Record "GPI Hub Setup"' in mgt and "HubSetup.Get('SETUP')" in mgt,
+              'runtime read-only permission': 'Permissions = tabledata "GPI Hub Setup" = R;' in mgt,
+              'runtime HTTPS check': "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" in mgt,
+              'field HTTPS validation': "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" in table,
+              'setup table object': 'table 50190 "GPI Hub Setup"' in table,
+              'setup page object': 'page 50190 "GPI Hub Setup"' in page,
+              'setup is administration': 'UsageCategory = Administration;' in page,
+              'admin permission set': 'permissionset 50190 "GPI HUB SETUP"' in perm and 'tabledata "GPI Hub Setup" = RIMD' in perm,
+          }
+          missing = [name for name, ok in required.items() if not ok]
+          if missing:
+              raise SystemExit('Hub endpoint setup contract incomplete: ' + ', '.join(missing))
+          PY
 
       - name: Guardrail - Hub visibility binds immutable SystemId when supplied
         run: |

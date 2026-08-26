@@ -1,0 +1,84 @@
+name: Square9 UAT Visibility Evidence Gate
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'scripts/Collect-Square9-UAT-Visibility-Evidence.ps1'
+      - '.github/workflows/square9-uat-visibility-evidence-gate.yml'
+  pull_request:
+    paths:
+      - 'scripts/Collect-Square9-UAT-Visibility-Evidence.ps1'
+      - '.github/workflows/square9-uat-visibility-evidence-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  read-only-evidence:
+    name: UAT visibility evidence remains read-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/Collect-Square9-UAT-Visibility-Evidence.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Guardrail - collector uses GET only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('scripts/Collect-Square9-UAT-Visibility-Evidence.ps1')
+          text = path.read_text(encoding='utf-8')
+
+          methods = re.findall(r'Invoke-WebRequest\b[^\n]*?-Method\s+([A-Za-z]+)', text, flags=re.I)
+          if not methods:
+              raise SystemExit('collector contains no explicit Invoke-WebRequest -Method call')
+          non_get = [m for m in methods if m.lower() != 'get']
+          if non_get:
+              raise SystemExit(f'write-capable HTTP method detected: {non_get}')
+
+          forbidden_commands = (
+              'Invoke-RestMethod',
+              'Remove-Item -LiteralPath $EvidencePath',
+              'POST /',
+              'PATCH /',
+              'DELETE /',
+          )
+          for token in forbidden_commands:
+              if token in text:
+                  raise SystemExit(f'forbidden mutation surface detected: {token}')
+
+          required = (
+              "-Entity 'purchaseInvoices'",
+              "-Entity 'postedSalesShipments'",
+              '?bc_system_id=',
+              "if ($uri.Scheme -ne 'https')",
+              "(?i)/api$",
+              'Get-FileHash',
+              "result = 'PASS'",
+          )
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('visibility evidence contract incomplete: ' + ', '.join(missing))
+          PY
+
+      - name: Guardrail - no Business Central or SharePoint mutation tooling
+        run: |
+          if grep -nE 'Publish-NAVApp|Publish-BcContainerApp|Invoke-BcContainer|upload_to_sharepoint|write_sharepoint|document-links/.*/upload|/recover/' scripts/Collect-Square9-UAT-Visibility-Evidence.ps1; then
+            echo "::error::UAT visibility collector contains a mutation-capable operation"
+            exit 1
+          fi

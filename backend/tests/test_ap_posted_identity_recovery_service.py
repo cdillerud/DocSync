@@ -27,9 +27,8 @@ class FakeDb:
         self.hub_documents = FakeCollection(document)
 
 
-@pytest.mark.asyncio
-async def test_identity_only_recovery_uses_api_id_and_makes_document_ready(monkeypatch):
-    db = FakeDb({
+def _pending_identity_doc():
+    return {
         "id": "doc-1",
         "status": "PostedNeedsIdentity",
         "workflow_status": "posted_needs_identity",
@@ -38,23 +37,42 @@ async def test_identity_only_recovery_uses_api_id_and_makes_document_ready(monke
         "bc_api_id": "draft-api-id",
         "bc_draft_invoice_no": "PI-DRAFT-1",
         "workflow_history": [],
-    })
+    }
+
+
+async def _fake_resolve(api_id):
+    return {
+        "posted_system_id": "real-posted-system-id",
+        "posted_number": "PPI-9001",
+        "api_id": api_id,
+        "attempts": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_identity_recovery_requires_existing_item_metadata_sync(monkeypatch):
+    db = FakeDb(_pending_identity_doc())
     captured = {}
 
     async def fake_resolve(api_id):
         captured["api_id"] = api_id
-        return {
-            "posted_system_id": "real-posted-system-id",
-            "posted_number": "PPI-9001",
-            "api_id": api_id,
-            "attempts": 2,
-        }
+        return await _fake_resolve(api_id)
+
+    async def fake_resync(document_id, db_arg, *, identity_update=None):
+        captured["resync_doc"] = document_id
+        captured["identity_update"] = dict(identity_update or {})
+        return {"success": True}
 
     monkeypatch.setattr(svc, "resolve_posted_purchase_invoice_identity", fake_resolve)
+    monkeypatch.setattr(svc, "resync_existing_sharepoint_parity_metadata", fake_resync)
 
     result = await svc.recover_posted_purchase_invoice_identity("doc-1", db)
 
     assert captured["api_id"] == "draft-api-id"
+    assert captured["resync_doc"] == "doc-1"
+    assert captured["identity_update"]["GPI_SourceTableID"] == 122
+    assert captured["identity_update"]["GPI_SourceSystemId"] == "real-posted-system-id"
+    assert captured["identity_update"]["ImportReady"] is True
     assert result["status"] == "Posted"
     assert result["bc_record_no"] == "PPI-9001"
     assert result["bc_system_id"] == "real-posted-system-id"
@@ -69,6 +87,32 @@ async def test_identity_only_recovery_uses_api_id_and_makes_document_ready(monke
     assert stored["ImportReady"] is True
     assert stored["delivery_status"] == "ImportReady"
     assert stored["workflow_history"][-1]["event"] == "posted_identity_recovered"
+
+
+@pytest.mark.asyncio
+async def test_metadata_sync_failure_moves_to_posted_needs_metadata_without_repost(monkeypatch):
+    db = FakeDb(_pending_identity_doc())
+
+    monkeypatch.setattr(svc, "resolve_posted_purchase_invoice_identity", _fake_resolve)
+
+    async def fake_resync(*args, **kwargs):
+        raise RuntimeError("Graph PATCH failed")
+
+    monkeypatch.setattr(svc, "resync_existing_sharepoint_parity_metadata", fake_resync)
+
+    result = await svc.recover_posted_purchase_invoice_identity("doc-1", db)
+
+    assert result["posted"] is True
+    assert result["status"] == "PostedNeedsMetadata"
+    assert result["import_ready"] is False
+    stored = db.hub_documents.document
+    assert stored["bc_true_post_confirmed"] is True
+    assert stored["bc_system_id"] == "real-posted-system-id"
+    assert stored["GPI_SourceSystemId"] == "real-posted-system-id"
+    assert stored["GPI_SourceTableID"] == 122
+    assert stored["ImportReady"] is False
+    assert stored["delivery_status"] == "PostedNeedsMetadata"
+    assert stored["workflow_history"][-1]["event"] == "posted_identity_recovered_metadata_pending"
 
 
 @pytest.mark.asyncio

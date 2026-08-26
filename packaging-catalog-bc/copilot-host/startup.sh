@@ -3,6 +3,6 @@ set -eu
 
 cd "$(dirname "$0")"
 
-exec python -m uvicorn app:app \
+exec python -m uvicorn commercial_app:app \
     --host 0.0.0.0 \
     --port "${PORT:-8000}"

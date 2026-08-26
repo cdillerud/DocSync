@@ -2783,14 +2783,22 @@ def bc_entity_to_doc_type(entity: str) -> str:
 # =========================================================================
 
 @router.get("/factbox-ui/{bc_entity}/{bc_document_no}", response_class=HTMLResponse)
-async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
+async def factbox_ui(
+    bc_entity: str,
+    bc_document_no: str,
+    request: Request,
+    bc_system_id: str = "",
+):
     """Serve a self-contained HTML page for embedding in a BC control add-in iframe.
 
     Shows linked documents with upload/delete capability. All CSS/JS inline.
     Works cross-origin (BC SaaS domain calling the hub domain).
     """
-    # Use relative API path so JS works from any origin
+    # Use a relative base path so JS works from any origin. The exact BC
+    # SystemId is attached only to list reads; upload independently resolves
+    # record identity server-side before creating any SharePoint artifact.
     api_path = f"/api/gpi-integration/document-links/{bc_entity}/{bc_document_no}"
+    identity_query = f"?bc_system_id={bc_system_id}" if bc_system_id else ""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2999,6 +3007,7 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
 <script>
 (function() {{
   const API = "{api_path}";
+  const LIST_API = API + "{identity_query}";
   const listWrap = document.getElementById("docListWrap");
   const countEl  = document.getElementById("docCount");
   const dropzone = document.getElementById("dropzone");
@@ -3042,7 +3051,7 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
   async function loadDocs() {{
     listWrap.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
     try {{
-      const resp = await fetch(API);
+      const resp = await fetch(LIST_API);
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const data = await resp.json();
       const docs = data.documents || [];
@@ -3180,8 +3189,12 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
     })
 
 
-async def _fetch_bc_document_links(bc_entity: str, bc_document_no: str) -> list:
-    """Fetch BC document links for one entity + document number.
+async def _fetch_bc_document_links(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+) -> list:
+    """Fetch BC document links for one entity + document number + optional SystemId.
 
     Document numbers are not globally unique across BC entities, so this read
     is intentionally type-bound and fails closed for unsupported entities.
@@ -3198,7 +3211,9 @@ async def _fetch_bc_document_links(bc_entity: str, bc_document_no: str) -> list:
         doc_link_api = "gpi/documents/v1.0"
         url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{doc_link_api}/"
                f"companies({company_id})/documentLinks")
-        odata_filter = build_bc_document_link_filter(bc_entity, bc_document_no)
+        odata_filter = build_bc_document_link_filter(
+            bc_entity, bc_document_no, bc_system_id
+        )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(url, headers={
@@ -3216,7 +3231,11 @@ async def _fetch_bc_document_links(bc_entity: str, bc_document_no: str) -> list:
 # --- STEP 1: GET document links for a BC record ---
 
 @router.get("/document-links/{bc_entity}/{bc_document_no}")
-async def get_document_links(bc_entity: str, bc_document_no: str):
+async def get_document_links(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+):
     """List all documents linked to a BC record (hub + BC API + legacy Zetadocs).
 
     Returns a combined, deduplicated list sorted by created_utc desc.
@@ -3226,7 +3245,7 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
     # 1) Query hub_documents for docs proven to belong to this BC entity + number
     from services.document_link_visibility_service import build_hub_document_link_query
     hub_docs = await db.hub_documents.find(
-        build_hub_document_link_query(bc_entity, bc_document_no),
+        build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id),
         {"_id": 0}
     ).sort("created_utc", -1).to_list(200)
 
@@ -3251,7 +3270,9 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
         })
 
     # 2) Query BC documentLinks API for this exact entity + document number
-    bc_links = await _fetch_bc_document_links(bc_entity, bc_document_no)
+    bc_links = await _fetch_bc_document_links(
+        bc_entity, bc_document_no, bc_system_id
+    )
     for link in bc_links:
         sp_url = link.get("sharePointUrl", "")
         if not sp_url or sp_url in seen_urls:
@@ -3280,6 +3301,7 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
     return {
         "bc_entity": bc_entity,
         "bc_document_no": bc_document_no,
+        "bc_system_id": bc_system_id,
         "documents": results,
         "total": len(results),
     }
@@ -3334,7 +3356,7 @@ async def upload_document_to_bc_record(
     # Try to find an existing folder from the same BC entity + record only.
     from services.document_link_visibility_service import build_folder_match_query
     existing = await db.hub_documents.find_one(
-        build_folder_match_query(bc_entity, bc_document_no),
+        build_folder_match_query(bc_entity, bc_document_no, bc_system_id),
         {"sharepoint_folder_path": 1, "sharepoint_drive_id": 1, "_id": 0},
         sort=[("created_utc", -1)],
     )

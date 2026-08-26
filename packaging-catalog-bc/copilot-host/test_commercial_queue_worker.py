@@ -49,6 +49,60 @@ class CommercialQueueWorkerTests(unittest.TestCase):
             correlation_id=None,
         )
 
+    def test_patch_queue_refreshes_etag_from_write_api(self) -> None:
+        queue = {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "@odata.etag": 'W/"stale-read-etag"',
+            "entryNo": 10,
+            "status": "Pending",
+        }
+        client = MagicMock()
+        client.get_api_json.return_value = {
+            "id": queue["id"],
+            "@odata.etag": 'W/"fresh-write-etag"',
+            "entryNo": 10,
+            "status": "Pending",
+        }
+        client.patch_api_json.return_value = {
+            "id": queue["id"],
+            "@odata.etag": 'W/"after-patch"',
+            "entryNo": 10,
+            "status": "Processing",
+        }
+
+        result = worker._patch_queue(
+            queue,
+            {"status": "Processing"},
+            client=client,
+        )
+
+        self.assertEqual(result["status"], "Processing")
+        client.patch_api_json.assert_called_once_with(
+            worker.WRITE_GROUP,
+            f"commercialAgentQueueWrites({queue['id']})",
+            body={"status": "Processing"},
+            etag='W/"fresh-write-etag"',
+        )
+
+    def test_write_snapshot_refuses_state_change(self) -> None:
+        queue = {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "entryNo": 10,
+            "status": "Pending",
+        }
+        client = MagicMock()
+        client.get_api_json.return_value = {
+            "id": queue["id"],
+            "@odata.etag": 'W/"2"',
+            "entryNo": 10,
+            "status": "Processing",
+        }
+
+        with self.assertRaises(worker.QueueWorkerError):
+            worker._write_queue_snapshot(queue, client=client)
+
+        client.patch_api_json.assert_not_called()
+
     @patch("commercial_queue_worker.persist_evaluation")
     @patch("commercial_queue_worker.evaluate_with_ai")
     @patch("commercial_queue_worker._persistence_enabled", return_value=False)
@@ -66,9 +120,10 @@ class CommercialQueueWorkerTests(unittest.TestCase):
     ) -> None:
         queue = {
             "id": "00000000-0000-0000-0000-000000000001",
-            "@odata.etag": 'W/"1"',
+            "@odata.etag": 'W/"read-1"',
             "entryNo": 10,
             "attemptCount": 0,
+            "status": "Pending",
         }
         get_next_mock.return_value = queue
 
@@ -82,14 +137,33 @@ class CommercialQueueWorkerTests(unittest.TestCase):
         build_mock.return_value = request
 
         client = MagicMock()
+        client.get_api_json.side_effect = [
+            {
+                "id": queue["id"],
+                "@odata.etag": 'W/"write-1"',
+                "entryNo": 10,
+                "status": "Pending",
+            },
+            {
+                "id": queue["id"],
+                "@odata.etag": 'W/"write-2"',
+                "entryNo": 10,
+                "status": "Processing",
+            },
+        ]
         client.patch_api_json.side_effect = [
             {
-                "@odata.etag": 'W/"2"',
+                "id": queue["id"],
+                "@odata.etag": 'W/"after-claim"',
+                "entryNo": 10,
                 "status": "Processing",
             },
             {
-                "@odata.etag": 'W/"3"',
+                "id": queue["id"],
+                "@odata.etag": 'W/"after-complete"',
+                "entryNo": 10,
                 "status": "Completed",
+                "exceptionEntryNo": 0,
             },
         ]
 
@@ -97,6 +171,7 @@ class CommercialQueueWorkerTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "completed_no_candidate")
         self.assertEqual(result["queueEntryNo"], 10)
+        self.assertEqual(client.get_api_json.call_count, 2)
         self.assertEqual(client.patch_api_json.call_count, 2)
         evaluate_mock.assert_not_called()
         persist_mock.assert_not_called()

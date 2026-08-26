@@ -10,12 +10,15 @@ on:
       - 'backend/services/ap_purchase_invoice_identity_service.py'
       - 'backend/services/ap_posted_identity_recovery_service.py'
       - 'backend/services/ap_posted_metadata_recovery_service.py'
+      - 'backend/services/ap_posted_recovery_dispatch_service.py'
       - 'backend/services/sharepoint_parity_resync_service.py'
+      - 'backend/services/document_retry_service.py'
       - 'backend/tests/test_bc_purchase_invoice_posting_service.py'
       - 'backend/tests/test_bc_posted_purchase_invoice_identity_service.py'
       - 'backend/tests/test_ap_purchase_invoice_identity_service.py'
       - 'backend/tests/test_ap_posted_identity_recovery_service.py'
       - 'backend/tests/test_ap_posted_metadata_recovery_service.py'
+      - 'backend/tests/test_ap_posted_recovery_dispatch_service.py'
       - 'backend/tests/test_sharepoint_parity_resync_service.py'
       - '.github/workflows/square9-ap-posting-parity-gate.yml'
   workflow_dispatch:
@@ -54,6 +57,7 @@ jobs:
             tests/test_ap_purchase_invoice_identity_service.py \
             tests/test_ap_posted_identity_recovery_service.py \
             tests/test_ap_posted_metadata_recovery_service.py \
+            tests/test_ap_posted_recovery_dispatch_service.py \
             tests/test_sharepoint_parity_resync_service.py
 
       - name: Guardrail - Posted requires the real BC bound action
@@ -150,6 +154,34 @@ jobs:
             echo "::error::Metadata recovery does not PATCH the existing SharePoint item"
             exit 1
           }
+
+      - name: Guardrail - post-success states dispatch before generic retry
+        run: |
+          grep -q 'dispatch_ap_posted_recovery_if_needed' backend/services/document_retry_service.py || {
+            echo "::error::Generic retry does not dispatch AP post-success recovery"
+            exit 1
+          }
+          grep -q 'PostedNeedsIdentity' backend/services/ap_posted_recovery_dispatch_service.py || {
+            echo "::error::AP recovery dispatcher does not recognize PostedNeedsIdentity"
+            exit 1
+          }
+          grep -q 'PostedNeedsMetadata' backend/services/ap_posted_recovery_dispatch_service.py || {
+            echo "::error::AP recovery dispatcher does not recognize PostedNeedsMetadata"
+            exit 1
+          }
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('backend/services/document_retry_service.py').read_text(encoding='utf-8')
+          dispatch = text.index('dispatch_ap_posted_recovery_if_needed(doc_id, db, doc)')
+          should_retry = text.index('if not should_retry(doc):')
+          retrying = text.index('"status": "Retrying"')
+          if not dispatch < should_retry < retrying:
+              raise SystemExit('AP post-success dispatch must occur before should_retry and Retrying state write')
+          PY
+          if grep -Eq 'post_purchase_invoice_system_id|upload_to_sharepoint' backend/services/ap_posted_recovery_dispatch_service.py; then
+            echo "::error::AP recovery dispatcher directly contains post/upload behavior"
+            exit 1
+          fi
 
       - name: Guardrail - Purchase Invoice identity is promoted for Gamer Documents
         run: |

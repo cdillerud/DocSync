@@ -15,7 +15,7 @@ on:
 
 jobs:
   read-only-evidence:
-    name: UAT visibility evidence remains read-only
+    name: UAT visibility evidence remains read-only and exact-record bound
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,6 +75,40 @@ jobs:
           if missing:
               raise SystemExit('visibility evidence contract incomplete: ' + ', '.join(missing))
           PY
+
+      - name: Guardrail - PASS requires exact response identity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path('scripts/Collect-Square9-UAT-Visibility-Evidence.ps1').read_text(encoding='utf-8')
+          required = (
+              '$payload.bc_entity',
+              '$payload.bc_document_no',
+              '$payload.bc_system_id',
+              'response entity mismatch',
+              'response document number mismatch',
+              'response SystemId mismatch',
+              'identity_match = $true',
+              'response_entity = $actualEntity',
+              'response_document_no = $actualDocumentNo',
+              'response_system_id = $actualSystemId',
+          )
+          missing = [token for token in required if token not in text]
+          if missing:
+              raise SystemExit('exact-record response proof can be weakened: ' + ', '.join(missing))
+          PY
+
+      - name: Guardrail - linked destinations are absolute HTTPS URLs
+        run: |
+          grep -Fq "[Uri]::TryCreate(\$webUrl, [UriKind]::Absolute" scripts/Collect-Square9-UAT-Visibility-Evidence.ps1 || {
+            echo '::error::Collector does not require absolute SharePoint URLs'
+            exit 1
+          }
+          grep -Fq "if (\$spUri.Scheme -ne 'https')" scripts/Collect-Square9-UAT-Visibility-Evidence.ps1 || {
+            echo '::error::Collector does not require HTTPS SharePoint URLs'
+            exit 1
+          }
 
       - name: Guardrail - no Business Central or SharePoint mutation tooling
         run: |

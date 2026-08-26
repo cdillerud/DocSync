@@ -90,6 +90,8 @@ page 50100 "GPI Document Link Factbox"
                     if not UploadIntoStream('Select file to upload', '', 'All Files (*.*)|*.*', FileName, FileInStream) then
                         exit;
 
+                    // Upload remains identity-safe on the server: the Hub resolves
+                    // the exact BC SystemId before creating any SharePoint artifact.
                     if GPILinkMgt.UploadFile(CurrentDocType, CurrentBCDocumentNo, FileName, FileInStream, CurrentVendorContext) then
                         FetchDocumentLinks();
                 end;
@@ -100,18 +102,46 @@ page 50100 "GPI Document Link Factbox"
     var
         CurrentDocType: Enum "GPI Doc Link Type";
         CurrentBCDocumentNo: Code[20];
+        CurrentBCSystemId: Guid;
         CurrentVendorContext: Text;
         DocumentCountText: Text;
         LatestFileName: Text;
         LatestDateText: Text;
         HasDocuments: Boolean;
 
+    /// <summary>
+    /// Backward-compatible context for document families not yet upgraded to
+    /// immutable record identity. AP pages use the SystemId overload below.
+    /// </summary>
     procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text)
+    begin
+        Clear(CurrentBCSystemId);
+        SetContextInternal(DocType, BCDocNo, VendorCtx);
+    end;
+
+    /// <summary>
+    /// Exact-record context. Business Central SystemId is immutable and prevents
+    /// draft/posted records in the same entity family from colliding by number.
+    /// </summary>
+    procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text; BCSystemId: Guid)
+    begin
+        CurrentBCSystemId := BCSystemId;
+        SetContextInternal(DocType, BCDocNo, VendorCtx);
+    end;
+
+    local procedure SetContextInternal(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text)
     begin
         CurrentDocType := DocType;
         CurrentBCDocumentNo := BCDocNo;
         CurrentVendorContext := VendorCtx;
         FetchDocumentLinks();
+    end;
+
+    local procedure AddSystemIdQuery(BaseUrl: Text): Text
+    begin
+        if IsNullGuid(CurrentBCSystemId) then
+            exit(BaseUrl);
+        exit(BaseUrl + '?bc_system_id=' + Format(CurrentBCSystemId, 0, 4));
     end;
 
     local procedure FetchDocumentLinks()
@@ -143,6 +173,7 @@ page 50100 "GPI Document Link Factbox"
         GPILinkMgt.Initialize();
         RequestUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/document-links/' +
                       GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
+        RequestUrl := AddSystemIdQuery(RequestUrl);
 
         if not Client.Get(RequestUrl, Response) then begin
             DocumentCountText := '-';
@@ -190,6 +221,7 @@ page 50100 "GPI Document Link Factbox"
         GPILinkMgt.Initialize();
         FactboxUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/factbox-ui/' +
                       GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
+        FactboxUrl := AddSystemIdQuery(FactboxUrl);
 
         Hyperlink(FactboxUrl);
     end;

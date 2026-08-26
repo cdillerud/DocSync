@@ -100,6 +100,16 @@ table 71122 "GPI Comm Agent Queue"
         {
             Caption = 'Requested By';
         }
+        field(23; "Previous Value"; Decimal)
+        {
+            Caption = 'Previous Numeric Value';
+            DecimalPlaces = 0 : 5;
+        }
+        field(24; "Current Value"; Decimal)
+        {
+            Caption = 'Current Numeric Value';
+            DecimalPlaces = 0 : 5;
+        }
     }
 
     keys

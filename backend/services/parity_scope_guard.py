@@ -23,8 +23,11 @@ OUT_OF_SCOPE_SALES_PREFIXES = (
     "/api/sales-dashboard",
     "/api/salesperson-dashboard",
     "/api/inside-sales-pilot",
-    # Hidden under the generic BC router; this is still a real Sales write.
+    # Hidden Sales writes under generic BC/GPI integration routers.
     "/api/bc/sales-orders/create",
+    "/api/gpi-integration/sales-orders",
+    "/api/gpi-integration/ds-purchase-orders",
+    "/api/gpi-integration/order-patterns",
 )
 
 ADMIN_ONLY_PREFIXES = (
@@ -42,6 +45,19 @@ ADMIN_ONLY_PREFIXES = (
     "/api/vendor-profiles",
     "/api/auto-approve",
     "/api/file-integrity",
+    # GPI integration control-plane operations. FactBox document-links are
+    # deliberately excluded here because Business Central requires M2M access.
+    "/api/gpi-integration/status",
+    "/api/gpi-integration/companies",
+    "/api/gpi-integration/bc-api-schema",
+    "/api/gpi-integration/logs",
+    "/api/gpi-integration/dashboard",
+    "/api/gpi-integration/item-mappings",
+    "/api/gpi-integration/catalog",
+    "/api/gpi-integration/customers",
+    "/api/gpi-integration/vendors",
+    "/api/gpi-integration/document-links/migrate-from-zetadocs",
+    "/api/gpi-integration/purchase-invoices/retry-lines",
 )
 
 AUTHENTICATED_ONLY_PREFIXES = (
@@ -49,6 +65,9 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/workflows",
     "/api/ap-review",
     "/api/human-routing-review",
+    # AP creation/preflight is an operator action. The more specific admin-only
+    # retry-lines prefix above wins because admin checks run first.
+    "/api/gpi-integration/purchase-invoices",
 )
 
 LEGACY_WEBHOOK_PATH = "/api/graph/webhook"

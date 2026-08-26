@@ -43,3 +43,5 @@ text = text.replace(anchor, guard + anchor, 1)
 
 path.write_text(text, encoding="utf-8")
 print("PASS: permanent parity gate now covers AP true-post + identity")
+
+# Triggered after workflow creation so GitHub evaluates this exact gate patch.

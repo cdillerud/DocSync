@@ -28,6 +28,7 @@ on:
       - 'backend/tests/test_bc_link_write_boundary.py'
       - 'backend/tests/test_document_link_entity_guard.py'
       - 'backend/tests/test_document_link_visibility_service.py'
+      - 'backend/tests/test_document_link_systemid_visibility.py'
       - 'backend/tests/test_mailbox_provenance_service.py'
       - 'backend/tests/test_bc_document_identity_service.py'
       - 'backend/tests/test_bc_document_link_recovery_service.py'
@@ -82,6 +83,7 @@ jobs:
             tests/test_bc_link_write_boundary.py \
             tests/test_document_link_entity_guard.py \
             tests/test_document_link_visibility_service.py \
+            tests/test_document_link_systemid_visibility.py \
             tests/test_mailbox_provenance_service.py \
             tests/test_bc_document_identity_service.py \
             tests/test_bc_document_link_recovery_service.py \
@@ -139,22 +141,26 @@ jobs:
             exit 1
           }
 
-      - name: Guardrail - Gamer Documents lookup binds BC entity and number
+      - name: Guardrail - Gamer Documents lookup and unlink bind exact BC identity
         run: |
-          grep -q 'build_hub_document_link_query(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
-            echo "::error::Hub FactBox lookup is not bound to BC entity"
+          grep -q 'build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::Hub FactBox lookup does not carry BC SystemId"
             exit 1
           }
-          grep -q '_fetch_bc_document_links(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
-            echo "::error::BC documentLinks lookup is not bound to BC entity"
+          grep -q 'bc_entity, bc_document_no, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::BC documentLinks lookup does not carry BC SystemId"
             exit 1
           }
-          grep -q 'build_folder_match_query(bc_entity, bc_document_no)' backend/routers/gpi_integration.py || {
-            echo "::error::BC-drop folder reuse is not bound to BC entity"
+          grep -q 'build_folder_match_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::BC-drop folder reuse does not carry BC SystemId"
             exit 1
           }
-          grep -q 'build_bc_identity_clause(bc_entity)' backend/routers/gpi_integration.py || {
-            echo "::error::Document unlink is not bound to BC entity"
+          grep -q 'build_hub_document_unlink_query' backend/routers/gpi_integration.py || {
+            echo "::error::Document unlink does not use exact-record selector"
+            exit 1
+          }
+          grep -q 'doc_id_or_sp_item, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::Document unlink drops BC SystemId"
             exit 1
           }
 

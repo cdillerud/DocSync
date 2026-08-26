@@ -1,4 +1,4 @@
-table 71121 "GPI Commercial Evidence"
+table 71121 "GPI Comm Evidence"
 {
     Caption = 'GPI Commercial Evidence';
     DataClassification = CustomerContent;
@@ -13,7 +13,7 @@ table 71121 "GPI Commercial Evidence"
         field(2; "Exception Entry No."; Integer)
         {
             Caption = 'Exception Entry No.';
-            TableRelation = "GPI Commercial Exception"."Entry No.";
+            TableRelation = "GPI Comm Exception"."Entry No.";
         }
         field(3; "Evidence Type"; Text[50])
         {

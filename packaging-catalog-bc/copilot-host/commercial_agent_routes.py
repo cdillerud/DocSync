@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +12,7 @@ from commercial_agent_service import (
     build_incorrect_item_request,
     build_low_margin_request,
 )
+from commercial_persistence import persist_evaluation
 from inbound_auth import require_inbound_principal
 
 
@@ -53,20 +55,39 @@ class IncorrectItemInput(BaseModel):
     sourceSystemId: UUID | None = None
 
 
+def persistence_enabled() -> bool:
+    return (
+        os.getenv("GPI_ENABLE_COMMERCIAL_PERSISTENCE", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"}
+    )
+
+
 def _evaluate_or_prepare(request):
     if not ai_provider_configured():
         return {
             "mode": "prepared",
             "aiProviderConfigured": False,
+            "persistenceEnabled": persistence_enabled(),
             "evaluationRequest": request.model_dump(mode="json"),
         }
 
     result = evaluate_with_ai(request)
+    persistence = {
+        "persisted": False,
+        "reason": "persistence_disabled",
+    }
+    if persistence_enabled():
+        persistence = persist_evaluation(request, result)
+
     return {
         "mode": "evaluated",
         "aiProviderConfigured": True,
+        "persistenceEnabled": persistence_enabled(),
         "evaluationRequest": request.model_dump(mode="json"),
         "evaluationResult": result.model_dump(mode="json"),
+        "persistence": persistence,
     }
 
 

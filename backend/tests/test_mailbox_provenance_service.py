@@ -93,6 +93,33 @@ async def test_later_observation_does_not_overwrite_original_source():
 
 
 @pytest.mark.asyncio
+async def test_append_only_observation_never_claims_first_seen_source():
+    db = FakeDB({"id": "doc-1"})
+
+    result = await persist_mailbox_provenance(
+        db,
+        "doc-1",
+        mailbox_address="warehouse@gamerpackaging.com",
+        mailbox_id="mbx-warehouse",
+        mailbox_category="Warehouse",
+        graph_message_id="graph-parent",
+        internet_message_id="<parent@example.com>",
+        attachment_id="att-parent",
+        source="batch_split_parent",
+        set_first_seen=False,
+    )
+
+    doc = db.hub_documents.doc
+    assert result["updated"] is True
+    assert result["set_first_seen"] is False
+    assert result["first_seen_fields_written"] == []
+    assert "source_mailbox_address" not in doc
+    assert "source_graph_message_id" not in doc
+    assert doc["provenance_observations"][-1]["mailbox_address"] == "warehouse@gamerpackaging.com"
+    assert doc["provenance_observations"][-1]["source"] == "batch_split_parent"
+
+
+@pytest.mark.asyncio
 async def test_missing_document_fails_without_fabricating_provenance():
     db = FakeDB(None)
     result = await persist_mailbox_provenance(

@@ -107,6 +107,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Agent Evid API" = X,
         page "GPI Agent Queue API" = X,
         page "GPI Agent Setup" = X,
+        page "GPI Agent Setup API" = X,
         report "GPI Pack Quote Rpt" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,

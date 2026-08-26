@@ -3,8 +3,8 @@ Startup secret and cutover-safety validation — fail loudly if the environment
 is misconfigured.
 
 The Square9 parity phase is AP/Warehouse only. In addition to refusing missing
-or insecure secrets, startup refuses any configuration that can activate Sales
-or Inside Sales writes/polling during this cutover.
+or insecure secrets, startup refuses configuration that can activate Sales,
+Inside Sales, or the legacy Graph webhook during this cutover.
 """
 
 from __future__ import annotations
@@ -85,11 +85,15 @@ def _validate_parity_scope(failures: List[str]) -> None:
         "SALES_EMAIL_POLLING_ENABLED",
         "BC_SALES_LINK_WRITE_ENABLED",
         "INSIDE_SALES_PILOT_ENABLED",
+        "GRAPH_WEBHOOK_ENABLED",
     ):
         if _is_truthy(name):
-            failures.append(
-                f"  - {name}: Sales/Inside Sales activation is prohibited during AP/Warehouse parity"
+            reason = (
+                "legacy Graph webhook is prohibited during AP/Warehouse parity"
+                if name == "GRAPH_WEBHOOK_ENABLED"
+                else "Sales/Inside Sales activation is prohibited during AP/Warehouse parity"
             )
+            failures.append(f"  - {name}: {reason}")
 
 
 def validate_startup_secrets() -> None:

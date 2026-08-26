@@ -87,15 +87,29 @@ class BusinessCentralClient:
             "/oauth2/v2.0/token"
         )
 
-    @property
-    def api_base_url(self) -> str:
+    def api_base_url_for(
+        self,
+        api_group: str,
+        api_version: str = "v1.0",
+    ) -> str:
+        group = api_group.strip("/")
+        version = api_version.strip("/")
+        if not group or not version:
+            raise BusinessCentralConfigurationError(
+                "Business Central API group and version are required."
+            )
+
         return (
             f"{BC_RESOURCE}/v2.0/"
             f"{self.settings.tenant_id}/"
             f"{self.settings.environment_name}/"
-            "api/gpi/packagingQuotes/v1.0/"
+            f"api/gpi/{group}/{version}/"
             f"companies({self.settings.company_id})"
         )
+
+    @property
+    def api_base_url(self) -> str:
+        return self.api_base_url_for("packagingQuotes")
 
     def acquire_access_token(self) -> str:
         response = requests.post(
@@ -132,12 +146,16 @@ class BusinessCentralClient:
             "Accept": "application/json",
         }
 
-    def get_json(
+    def get_api_json(
         self,
+        api_group: str,
         relative_path: str,
+        *,
+        api_version: str = "v1.0",
     ) -> dict[str, Any]:
         response = requests.get(
-            f"{self.api_base_url}/{relative_path.lstrip('/')}",
+            f"{self.api_base_url_for(api_group, api_version)}/"
+            f"{relative_path.lstrip('/')}",
             headers=self.headers(),
             timeout=self.timeout_seconds,
         )
@@ -157,6 +175,15 @@ class BusinessCentralClient:
             )
 
         return payload
+
+    def get_json(
+        self,
+        relative_path: str,
+    ) -> dict[str, Any]:
+        return self.get_api_json(
+            "packagingQuotes",
+            relative_path,
+        )
 
     def patch_json(
         self,

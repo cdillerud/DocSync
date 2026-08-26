@@ -280,8 +280,33 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=False)
 
         if result.get("success") or result.get("already_exists"):
-            now = datetime.now(timezone.utc).isoformat()
             bc_record_no = result.get("bc_record_no", "")
+            bc_system_id = result.get("bc_system_id", "")
+            if not bc_system_id:
+                raise ValueError(
+                    f"BC Purchase Invoice {bc_record_no or '?'} was created/reused without a SystemId; cannot post safely"
+                )
+
+            # Creating a purchaseInvoices resource only creates/reuses the BC
+            # invoice document. The explicit bound action is the proof that BC
+            # actually posted it. A retry reuses the existing draft above and
+            # calls this action again; it never creates a duplicate invoice.
+            from services.bc_purchase_invoice_posting_service import (
+                post_purchase_invoice_system_id,
+            )
+            post_result = await post_purchase_invoice_system_id(bc_system_id)
+            if not post_result.get("posted"):
+                raise RuntimeError(
+                    f"BC Purchase Invoice {bc_record_no or '?'} was not confirmed posted"
+                )
+
+            from services.ap_purchase_invoice_identity_service import (
+                build_ap_purchase_invoice_identity_update,
+            )
+            posted_identity = build_ap_purchase_invoice_identity_update(
+                bc_record_no, bc_system_id, posted=True
+            )
+            now = datetime.now(timezone.utc).isoformat()
             attempt = build_attempt(
                 attempt_n=attempt_n,
                 status="posted",
@@ -291,7 +316,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 started_utc=started_utc,
                 finished_utc=now,
                 bc_record_no=bc_record_no,
-                bc_document_id=result.get("bc_system_id", ""),
+                bc_document_id=bc_system_id,
             )
             await record_standalone_attempt(db, doc_id, attempt, also_set={
                 "status": "Posted",
@@ -302,9 +327,12 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "bc_posting_status": "posted",
                 "bc_record_no": bc_record_no,
                 "bc_purchase_invoice_no": bc_record_no,
-                "bc_system_id": result.get("bc_system_id", ""),
+                "bc_system_id": bc_system_id,
                 "posted_to_bc_at": now,
                 "bc_posting_error": None,
+                "bc_true_post_confirmed": True,
+                "bc_true_post_http_status": post_result.get("http_status"),
+                **posted_identity,
             })
             await _write_event(db, doc_id, "automation.decision.completed", {
                 "decision": "Posted",
@@ -323,8 +351,8 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "success": True, "posted": True,
                 "reason": f"Posted to BC as PI #{result.get('bc_record_no')}",
                 "status": "Posted",
-                "bc_record_no": result.get("bc_record_no"),
-                "bc_system_id": result.get("bc_system_id"),
+                "bc_record_no": bc_record_no,
+                "bc_system_id": bc_system_id,
             }
         else:
             error_msg = result.get("error", "Unknown BC API error")

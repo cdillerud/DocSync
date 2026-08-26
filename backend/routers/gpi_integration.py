@@ -2301,13 +2301,25 @@ async def create_purchase_invoice_from_document(
         "document_link_method": link_result.get("method", "") if link_result else "",
     }
 
+    pi_writeback = {
+        "bc_purchase_invoice": bc_purchase_invoice,
+        "bc_purchase_invoice_no": result.get("bc_record_no", ""),
+        "updated_utc": now,
+    }
+    if result.get("success") and result.get("bc_record_no"):
+        from services.ap_purchase_invoice_identity_service import (
+            build_ap_purchase_invoice_identity_update,
+        )
+        pi_writeback.update(
+            build_ap_purchase_invoice_identity_update(
+                result.get("bc_record_no", ""),
+                result.get("bc_system_id", ""),
+                posted=False,
+            )
+        )
     await db.hub_documents.update_one(
         {"id": doc_id},
-        {"$set": {
-            "bc_purchase_invoice": bc_purchase_invoice,
-            "bc_purchase_invoice_no": result.get("bc_record_no", ""),
-            "updated_utc": now,
-        }}
+        {"$set": pi_writeback}
     )
 
     # Emit event

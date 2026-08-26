@@ -1,4 +1,4 @@
-enum 71120 "GPI Commercial Agent Type"
+enum 71120 "GPI Comm Agent Type"
 {
     Extensible = true;
     Caption = 'GPI Commercial Agent Type';

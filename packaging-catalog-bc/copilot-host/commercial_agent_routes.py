@@ -13,6 +13,10 @@ from commercial_agent_service import (
     build_low_margin_request,
 )
 from commercial_persistence import persist_evaluation
+from commercial_queue_worker import (
+    execute_next_queue,
+    prepare_next_queue,
+)
 from commercial_screening import screen_request
 from inbound_auth import require_inbound_principal
 
@@ -172,6 +176,38 @@ def evaluate_incorrect_item(payload: IncorrectItemInput) -> dict:
             status_code=502,
             detail={
                 "error": "incorrect_item_evaluation_failure",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+@router.post("/queue/prepareNext")
+def prepare_next_commercial_queue() -> dict:
+    try:
+        return prepare_next_queue()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "commercial_queue_prepare_failure",
+                "message": str(exc),
+            },
+        ) from exc
+
+
+@router.post("/queue/executeNext")
+def execute_next_commercial_queue() -> dict:
+    try:
+        return execute_next_queue()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "commercial_queue_execute_refused_or_failed",
                 "message": str(exc),
             },
         ) from exc

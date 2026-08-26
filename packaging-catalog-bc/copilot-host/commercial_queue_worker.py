@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -40,6 +41,15 @@ def _rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, dict)]
+
+
+def _decode_odata_identifier(value: Any) -> str:
+    text = str(value or "").strip()
+
+    def replace_match(match: re.Match[str]) -> str:
+        return chr(int(match.group(1), 16))
+
+    return re.sub(r"_x([0-9A-Fa-f]{4})_", replace_match, text)
 
 
 def get_next_pending_queue(
@@ -94,7 +104,7 @@ def build_request_from_queue(
     client: BusinessCentralClient | None = None,
 ):
     bc = client or _client()
-    agent_type = str(queue.get("agentType") or "").strip()
+    agent_type = _decode_odata_identifier(queue.get("agentType"))
     customer_no = str(queue.get("customerNo") or "").strip()
     item_no = str(queue.get("itemNo") or "").strip()
     document_no = str(queue.get("documentNo") or "").strip()

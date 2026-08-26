@@ -68,8 +68,13 @@ def _is_truthy(name: str) -> bool:
 def _validate_parity_scope(failures: List[str]) -> None:
     """Enforce AP/Warehouse-only cutover scope at process startup."""
 
-    # This legacy service historically defaulted TRUE when the variable was
-    # missing, so require an explicit false rather than treating absence as safe.
+    # AP auto-post is in scope, but missing configuration must never mean
+    # "enabled". Set the process default before server/workflow modules import
+    # their feature flags. Controlled UAT may still explicitly set this true.
+    os.environ.setdefault("AUTO_POST_ENABLED", "false")
+
+    # This legacy Sales service historically defaulted TRUE when the variable
+    # was missing, so require an explicit false rather than treating absence as safe.
     if not _is_explicit_false("AUTO_CREATE_SALES_ORDER_ENABLED"):
         failures.append(
             "  - AUTO_CREATE_SALES_ORDER_ENABLED: must be explicitly false during AP/Warehouse parity"

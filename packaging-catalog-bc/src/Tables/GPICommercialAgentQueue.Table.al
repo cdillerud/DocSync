@@ -1,4 +1,4 @@
-table 71122 "GPI Commercial Agent Queue"
+table 71122 "GPI Comm Agent Queue"
 {
     Caption = 'GPI Commercial Agent Queue';
     DataClassification = CustomerContent;
@@ -10,7 +10,7 @@ table 71122 "GPI Commercial Agent Queue"
             Caption = 'Entry No.';
             AutoIncrement = true;
         }
-        field(2; "Agent Type"; Enum "GPI Commercial Agent Type")
+        field(2; "Agent Type"; Enum "GPI Comm Agent Type")
         {
             Caption = 'Agent Type';
         }
@@ -44,7 +44,7 @@ table 71122 "GPI Commercial Agent Queue"
         {
             Caption = 'Document No.';
         }
-        field(10; Status; Enum "GPI Agent Queue Status")
+        field(10; Status; Enum "GPI Agent Q Status")
         {
             Caption = 'Status';
         }
@@ -82,7 +82,7 @@ table 71122 "GPI Commercial Agent Queue"
         field(18; "Exception Entry No."; Integer)
         {
             Caption = 'Exception Entry No.';
-            TableRelation = "GPI Commercial Exception"."Entry No.";
+            TableRelation = "GPI Comm Exception"."Entry No.";
         }
         field(19; "Last Error"; Text[2048])
         {

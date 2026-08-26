@@ -57,6 +57,15 @@ codeunit 71131 "GPI Agent Trigger"
         EnqueueIncorrectItem(Rec);
     end;
 
+    [EventSubscriber(ObjectType::Table, Database::"Sales Line", 'OnAfterValidateEvent', 'No.', false, false)]
+    local procedure OnSalesLineNoValidated(var Rec: Record "Sales Line"; var xRec: Record "Sales Line"; CurrFieldNo: Integer)
+    begin
+        if Rec."No." = xRec."No." then
+            exit;
+
+        EnqueueIncorrectItem(Rec);
+    end;
+
     [EventSubscriber(ObjectType::Table, Database::"Sales Invoice Line", 'OnAfterInsertEvent', '', false, false)]
     local procedure OnSalesInvoiceLineInserted(var Rec: Record "Sales Invoice Line"; RunTrigger: Boolean)
     var

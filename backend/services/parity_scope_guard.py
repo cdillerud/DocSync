@@ -20,6 +20,8 @@ OUT_OF_SCOPE_SALES_PREFIXES = (
     "/api/sales-dashboard",
     "/api/salesperson-dashboard",
     "/api/inside-sales-pilot",
+    # Hidden under the generic BC router; this is still a real Sales write.
+    "/api/bc/sales-orders/create",
 )
 
 

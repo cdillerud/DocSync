@@ -48,6 +48,9 @@ def test_ap_and_warehouse_paths_are_not_sales_blocked():
         "/api/health",
         "/api/bc/companies",
         "/api/bc/sales-orders",
+        "/api/readiness/metrics",
+        "/api/po-resolution/metrics",
+        "/api/square9/readiness/latest",
     )
     for path in samples:
         assert is_out_of_scope_sales_path(path) is False, path
@@ -70,6 +73,23 @@ def test_operational_control_plane_is_admin_only():
         "/api/vendor-profiles/rebuild/run",
         "/api/auto-approve/run",
         "/api/file-integrity/scan",
+        "/api/auto-clear/config/threshold/AP_Invoice",
+        "/api/auto-clear/apply/doc1",
+        "/api/auto-clear/route/doc1",
+        "/api/auto-clear/route-batch",
+        "/api/readiness/batch",
+        "/api/readiness/reevaluate-all",
+        "/api/readiness/fix-validation-gaps",
+        "/api/readiness/sync-status",
+        "/api/readiness/retry-failed",
+        "/api/readiness/retry-captured",
+        "/api/readiness/retry-ready-to-post",
+        "/api/readiness/po-pending/park",
+        "/api/readiness/po-pending/retry",
+        "/api/po-resolution/batch-resolve",
+        "/api/square9/archive-stage-data",
+        "/api/square9/restore-stage-data",
+        "/api/square9/readiness/run",
         "/api/gpi-integration/status",
         "/api/gpi-integration/item-mappings",
         "/api/gpi-integration/catalog/sync",
@@ -84,6 +104,10 @@ def test_operational_control_plane_is_admin_only():
     for path in (
         "/api/health",
         "/api/documents/abc",
+        "/api/auto-clear/config",
+        "/api/readiness/metrics",
+        "/api/po-resolution/metrics",
+        "/api/square9/readiness/latest",
         "/api/gpi-integration/document-links/purchaseInvoices/PI100",
     ):
         assert is_admin_only_path(path) is False, path
@@ -96,12 +120,31 @@ def test_operator_document_and_ap_surfaces_require_login():
         "/api/workflows/abc/approve",
         "/api/ap-review/documents/abc/save",
         "/api/human-routing-review/document/abc/assign",
+        "/api/auto-clear/config",
+        "/api/auto-clear/evaluate/doc1",
+        "/api/readiness/metrics",
+        "/api/readiness/evaluate/doc1",
+        "/api/po-resolution/metrics",
+        "/api/square9/readiness/latest",
+        "/api/square9/readiness/run-status",
         "/api/gpi-integration/purchase-invoices",
         "/api/gpi-integration/purchase-invoices/preflight/doc1",
         "/api/gpi-integration/purchase-invoices/from-document/doc1",
         "/api/gpi-integration/factbox-ui/purchaseInvoices/PI100",
     )
     for path in samples:
+        assert is_authenticated_only_path(path) is True, path
+
+
+def test_admin_specific_paths_win_over_authenticated_parent_prefixes():
+    samples = (
+        "/api/auto-clear/apply/doc1",
+        "/api/readiness/sync-status",
+        "/api/po-resolution/batch-resolve",
+        "/api/square9/readiness/run",
+    )
+    for path in samples:
+        assert is_admin_only_path(path) is True, path
         assert is_authenticated_only_path(path) is True, path
 
 

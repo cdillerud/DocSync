@@ -9,6 +9,7 @@ page 71132 "GPI Agent Setup API"
     EntitySetName = 'commercialAgentSetups';
     SourceTable = "GPI Agent Setup";
     ODataKeyFields = SystemId;
+    DelayedInsert = true;
     InsertAllowed = true;
     ModifyAllowed = true;
     DeleteAllowed = false;

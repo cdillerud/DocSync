@@ -7,7 +7,10 @@ on:
       - 'deploy.sh'
       - 'DEPLOYMENT.md'
       - 'backend/.env.example'
+      - 'backend/main.py'
       - 'backend/services/config_service.py'
+      - 'backend/services/parity_scope_guard.py'
+      - 'backend/tests/test_parity_scope_guard.py'
       - 'frontend/Dockerfile'
       - 'frontend/nginx.conf'
       - 'frontend/src/lib/api.js'
@@ -67,6 +70,7 @@ jobs:
               'BC_WRITE_ENVIRONMENT': 'Sandbox_NoZetadocs_UAT',
               'BC_BLOCK_PRODUCTION_WRITES': 'true',
               'BC_SALES_LINK_WRITE_ENABLED': 'false',
+              'ENABLE_OUT_OF_SCOPE_SALES_ROUTES': 'false',
               'SHAREPOINT_TARGET': 'test',
               'SHAREPOINT_BLOCK_PRODUCTION_WRITES': 'true',
               'SHAREPOINT_SITE_PATH': '/sites/GPI-DocumentHub-Test',
@@ -85,6 +89,44 @@ jobs:
         run: |
           grep -Fq 'os.environ.get("BC_READ_ENVIRONMENT")' backend/services/config_service.py || {
             echo '::error::Central config ignores explicit BC_READ_ENVIRONMENT'
+            exit 1
+          }
+
+      - name: Guardrail - AP Warehouse HTTP scope is fail-closed
+        run: |
+          python -m pip install --quiet pytest starlette
+          cd backend
+          pytest -q tests/test_parity_scope_guard.py
+          cd ..
+          grep -Fq 'from services.parity_scope_guard import ParityScopeGuardMiddleware' backend/main.py || {
+            echo '::error::Authoritative app does not import parity scope guard'
+            exit 1
+          }
+          grep -Fq 'app.add_middleware(ParityScopeGuardMiddleware)' backend/main.py || {
+            echo '::error::Authoritative app does not enforce parity scope middleware'
+            exit 1
+          }
+          grep -Fq 'ENABLE_OUT_OF_SCOPE_SALES_ROUTES' backend/services/parity_scope_guard.py || {
+            echo '::error::Sales route activation is not explicit opt-in'
+            exit 1
+          }
+
+      - name: Guardrail - credentialed CORS is not wildcard in UAT
+        run: |
+          grep -Fq 'os.environ.get("CORS_ORIGINS", "")' backend/main.py || {
+            echo '::error::CORS does not default to same-origin only'
+            exit 1
+          }
+          grep -Fq 'CORS_ORIGINS=' backend/main.py && {
+            echo '::error::Unexpected literal CORS_ORIGINS assignment in app code'
+            exit 1
+          } || true
+          grep -Fq 'CORS_ORIGINS=' backend/.env.example && {
+            echo '::error::Committed UAT template should not enable cross-origin access by default'
+            exit 1
+          } || true
+          grep -Fq 'if "*" in cors_origins' backend/main.py || {
+            echo '::error::Non-demo wildcard CORS is not rejected'
             exit 1
           }
 

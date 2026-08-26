@@ -1,4 +1,4 @@
-table 71120 "GPI Commercial Exception"
+table 71120 "GPI Comm Exception"
 {
     Caption = 'GPI Commercial Exception';
     DataClassification = CustomerContent;
@@ -10,7 +10,7 @@ table 71120 "GPI Commercial Exception"
             Caption = 'Entry No.';
             AutoIncrement = true;
         }
-        field(2; "Agent Type"; Enum "GPI Commercial Agent Type")
+        field(2; "Agent Type"; Enum "GPI Comm Agent Type")
         {
             Caption = 'Agent Type';
         }
@@ -68,7 +68,7 @@ table 71120 "GPI Commercial Exception"
             MaxValue = 100;
             DecimalPlaces = 0 : 2;
         }
-        field(14; Status; Enum "GPI Commercial Ex Status")
+        field(14; Status; Enum "GPI Comm Ex Status")
         {
             Caption = 'Status';
         }

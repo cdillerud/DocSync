@@ -31,8 +31,10 @@ TENANT_ID = os.environ.get("TENANT_ID", "")
 # Business Central
 # ---------------------------------------------------------------------------
 BC_ENVIRONMENT = os.environ.get("BC_ENVIRONMENT", "")
-BC_READ_ENVIRONMENT = os.environ.get(
-    "BC_PROD_ENVIRONMENT", os.environ.get("BC_ENVIRONMENT", "")
+BC_READ_ENVIRONMENT = (
+    os.environ.get("BC_READ_ENVIRONMENT")
+    or os.environ.get("BC_PROD_ENVIRONMENT")
+    or os.environ.get("BC_ENVIRONMENT", "")
 )
 BC_COMPANY_NAME = os.environ.get("BC_COMPANY_NAME", "")
 BC_CLIENT_ID = os.environ.get("BC_CLIENT_ID", "")

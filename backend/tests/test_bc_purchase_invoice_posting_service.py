@@ -3,6 +3,15 @@ import pytest
 import services.bc_purchase_invoice_posting_service as svc
 
 
+async def _fake_posted_identity(api_id):
+    return {
+        "posted_system_id": "real-posted-system-id",
+        "posted_number": "PPI-9001",
+        "api_id": api_id,
+        "attempts": 1,
+    }
+
+
 @pytest.mark.asyncio
 async def test_missing_system_id_fails_before_network(monkeypatch):
     called = {"token": False}
@@ -18,7 +27,7 @@ async def test_missing_system_id_fails_before_network(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_true_post_uses_bound_action_and_204_is_success(monkeypatch):
+async def test_true_post_uses_bound_action_and_reconciles_real_posted_identity(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(svc, "HAS_CREDENTIALS", True)
@@ -60,16 +69,20 @@ async def test_true_post_uses_bound_action_and_204_is_success(monkeypatch):
     monkeypatch.setattr(svc, "_resolve_company_id", fake_company)
     monkeypatch.setattr(svc.httpx, "AsyncClient", Client)
     monkeypatch.setattr(svc, "bc_http_with_retry", fake_retry)
+    monkeypatch.setattr(svc, "resolve_posted_purchase_invoice_identity", _fake_posted_identity)
 
-    result = await svc.post_purchase_invoice_system_id("system-id")
+    result = await svc.post_purchase_invoice_system_id("draft-api-id")
 
     assert captured["guard"] == "post_purchase_invoice"
     assert captured["company_environment"] == "Sandbox_NoZetadocs_UAT"
     assert captured["retry_op"] == "post_purchase_invoice"
     assert captured["url"].endswith(
-        "/companies(company-id)/purchaseInvoices(system-id)/Microsoft.NAV.post"
+        "/companies(company-id)/purchaseInvoices(draft-api-id)/Microsoft.NAV.post"
     )
     assert result["posted"] is True
+    assert result["bc_api_id"] == "draft-api-id"
+    assert result["posted_system_id"] == "real-posted-system-id"
+    assert result["posted_number"] == "PPI-9001"
     assert result["http_status"] == 204
     assert result["recovery_verified"] is False
 
@@ -116,11 +129,11 @@ async def test_non_success_response_is_not_reported_posted(monkeypatch):
     monkeypatch.setattr(svc, "bc_http_with_retry", fake_retry)
 
     with pytest.raises(RuntimeError, match="HTTP 422"):
-        await svc.post_purchase_invoice_system_id("system-id")
+        await svc.post_purchase_invoice_system_id("draft-api-id")
 
 
 @pytest.mark.asyncio
-async def test_repeat_post_rejection_recovers_when_bc_proves_invoice_is_posted(monkeypatch):
+async def test_repeat_post_rejection_recovers_then_reconciles_real_posted_identity(monkeypatch):
     captured = {"verify_url": None}
     monkeypatch.setattr(svc, "HAS_CREDENTIALS", True)
     monkeypatch.setattr(svc, "BC_TENANT_ID", "tenant")
@@ -161,11 +174,14 @@ async def test_repeat_post_rejection_recovers_when_bc_proves_invoice_is_posted(m
     monkeypatch.setattr(svc, "_resolve_company_id", fake_company)
     monkeypatch.setattr(svc.httpx, "AsyncClient", Client)
     monkeypatch.setattr(svc, "bc_http_with_retry", fake_retry)
+    monkeypatch.setattr(svc, "resolve_posted_purchase_invoice_identity", _fake_posted_identity)
 
-    result = await svc.post_purchase_invoice_system_id("system-id")
+    result = await svc.post_purchase_invoice_system_id("draft-api-id")
 
     assert result["posted"] is True
     assert result["recovery_verified"] is True
+    assert result["posted_system_id"] == "real-posted-system-id"
+    assert result["posted_number"] == "PPI-9001"
     assert captured["verify_url"].endswith(
-        "/companies(company-id)/purchaseInvoices(system-id)/pdfDocument"
+        "/companies(company-id)/purchaseInvoices(draft-api-id)/pdfDocument"
     )

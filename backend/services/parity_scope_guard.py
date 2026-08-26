@@ -50,6 +50,27 @@ ADMIN_ONLY_PREFIXES = (
     "/api/vendor-profiles",
     "/api/auto-approve",
     "/api/file-integrity",
+    # Auto-clear policy changes and state-changing/batch routing are control-plane operations.
+    "/api/auto-clear/config/threshold",
+    "/api/auto-clear/apply",
+    "/api/auto-clear/route",
+    "/api/auto-clear/route-batch",
+    # Readiness batch repair/retry operations can rewrite many documents or post to BC.
+    "/api/readiness/batch",
+    "/api/readiness/reevaluate-all",
+    "/api/readiness/fix-validation-gaps",
+    "/api/readiness/sync-status",
+    "/api/readiness/retry-failed",
+    "/api/readiness/retry-captured",
+    "/api/readiness/retry-ready-to-post",
+    "/api/readiness/po-pending/park",
+    "/api/readiness/po-pending/retry",
+    # PO bulk resolution persists resolution/linkage decisions across the queue.
+    "/api/po-resolution/batch-resolve",
+    # Square9 cutover mutations and readiness subprocess execution are admin-only.
+    "/api/square9/archive-stage-data",
+    "/api/square9/restore-stage-data",
+    "/api/square9/readiness/run",
     "/api/gpi-integration/status",
     "/api/gpi-integration/companies",
     "/api/gpi-integration/bc-api-schema",
@@ -68,6 +89,10 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/workflows",
     "/api/ap-review",
     "/api/human-routing-review",
+    "/api/auto-clear",
+    "/api/readiness",
+    "/api/po-resolution",
+    "/api/square9",
     "/api/gpi-integration/purchase-invoices",
     "/api/gpi-integration/factbox-ui",
 )

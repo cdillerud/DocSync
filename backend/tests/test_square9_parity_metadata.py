@@ -120,3 +120,14 @@ def test_filename_path_url_and_match_evidence_are_preserved():
     assert metadata["GPI_MatchStatus"] == "resolved"
     assert metadata["GPI_MatchMethod"] == "bc_cache_exact"
     assert metadata["GPI_Candidates"] == "109204"
+
+
+def test_absent_bc_table_id_is_null_not_blank_text():
+    metadata = _build(
+        {"document_type": "STATEMENT"},
+        {"status": "not_run"},
+    )
+
+    assert metadata["GPI_SourceTableID"] is None
+    assert metadata["GPI_SourceSystemId"] == ""
+    assert metadata["ImportReady"] is True

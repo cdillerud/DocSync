@@ -177,6 +177,12 @@ async def split_and_ingest_batch(
             "customer_canonical": 1,
             "customer_id": 1,
             "mailbox_category": 1,
+            "source_mailbox_address": 1,
+            "source_mailbox_id": 1,
+            "source_mailbox_category": 1,
+            "source_graph_message_id": 1,
+            "source_internet_message_id": 1,
+            "source_attachment_id": 1,
         },
     ) or {}
 
@@ -275,6 +281,33 @@ async def split_and_ingest_batch(
                 group_num=unit_index + 1,
                 reused_existing=reused_existing,
             )
+
+            # Preserve the exact receiving mailbox/message provenance through the
+            # split boundary. New children inherit the parent as first-seen source;
+            # reused canonical children only append this parent observation.
+            if (
+                parent_doc.get("source_mailbox_address")
+                or parent_doc.get("source_mailbox_id")
+                or parent_doc.get("source_graph_message_id")
+                or parent_doc.get("source_internet_message_id")
+            ):
+                from services.mailbox_provenance_service import persist_mailbox_provenance
+
+                await persist_mailbox_provenance(
+                    db,
+                    child_doc_id,
+                    mailbox_address=parent_doc.get("source_mailbox_address"),
+                    mailbox_id=parent_doc.get("source_mailbox_id"),
+                    mailbox_category=(
+                        parent_doc.get("source_mailbox_category")
+                        or parent_doc.get("mailbox_category")
+                    ),
+                    graph_message_id=parent_doc.get("source_graph_message_id"),
+                    internet_message_id=parent_doc.get("source_internet_message_id"),
+                    attachment_id=parent_doc.get("source_attachment_id"),
+                    source="batch_split_parent",
+                    set_first_seen=not reused_existing,
+                )
 
             if not reused_existing:
                 await _inherit_parent_and_reevaluate(

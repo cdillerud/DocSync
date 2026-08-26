@@ -1,0 +1,31 @@
+name: Apply AP Permanent Parity Gate Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/scripts/apply_ap_parity_gate_patch.py'
+      - '.github/workflows/apply-ap-parity-gate-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+      - run: python backend/scripts/apply_ap_parity_gate_patch.py
+      - name: Verify intended file only
+        run: test "$(git diff --name-only)" = '.github/workflows/square9-parity-gate.yml'
+      - name: Commit gate update
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/square9-parity-gate.yml
+          git commit -m 'ci: enforce AP true-post and invoice identity parity'
+          git push origin HEAD:feature/square9-parity-systemid-gate

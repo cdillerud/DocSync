@@ -164,20 +164,50 @@ jobs:
             echo "::error::FactBox HTTP reads do not transmit BC SystemId"
             exit 1
           }
+          grep -q 'EscapeDataString(CurrentBCDocumentNo)' bc-extension/src/Page50100.GPIDocumentLinkFactbox.al || {
+            echo "::error::FactBox does not URL-encode the BC document-number path segment"
+            exit 1
+          }
 
-      - name: Guardrail - upload resolves identity before SharePoint artifact
+      - name: Guardrail - raw upload validates BC-provided identity before SharePoint artifact
         run: |
           python - <<'PY'
           from pathlib import Path
+
           text = Path('backend/routers/gpi_integration.py').read_text(encoding='utf-8')
-          start = text.index('async def upload_document_to_bc_record(')
-          block = text[start:text.index('# --- CREATE GPI DOCUMENT LINK IN BC ---', start)]
-          identity = block.index('resolve_bc_document_system_id')
-          upload = block.index('upload_to_sharepoint')
-          if not identity < upload:
-              raise SystemExit('BC SystemId resolution must occur before SharePoint upload')
-          if 'build_folder_match_query(bc_entity, bc_document_no, bc_system_id)' not in block:
-              raise SystemExit('folder reuse must bind resolved BC SystemId')
+          marker = '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")'
+          start = text.index(marker)
+          tail = text[start:]
+          end_marker = '# --- STEP 3: RECOVER'
+          block = tail[:tail.index(end_marker)] if end_marker in tail else tail
+
+          required = (
+              'validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)',
+              'normalize_system_id(bc_system_id)',
+              'await request.body()',
+              '_deliver_bc_drop_content(',
+          )
+          missing = [token for token in required if token not in block]
+          if missing:
+              raise SystemExit('raw BC Drop upload identity contract incomplete: ' + ', '.join(missing))
+
+          validate = block.index('validate_bc_drop_source_contract')
+          normalize = block.index('normalize_system_id')
+          read_body = block.index('await request.body()')
+          deliver = block.index('_deliver_bc_drop_content(')
+          if not (validate < read_body and normalize < read_body and read_body < deliver):
+              raise SystemExit('BC source contract/SystemId must validate before raw bytes enter delivery boundary')
+
+          al = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          for token in (
+              "UriHelper.EscapeDataString(BCDocumentNo)",
+              "'?bc_system_id='",
+              "'&source_table_id='",
+              "'&source_document_type='",
+              'FileContent.WriteFrom(FileInStream)',
+          ):
+              if token not in al:
+                  raise SystemExit('AL raw upload contract missing: ' + token)
           PY
 
       - name: Guardrail - Sales write lane remains disabled

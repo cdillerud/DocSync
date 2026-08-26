@@ -41,7 +41,6 @@ codeunit 71120 "GPI Commercial Agent Mgt"
     begin
         Candidate.SetCurrentKey(Status, Priority, "Requested At");
         Candidate.SetRange(Status, Candidate.Status::Pending);
-        Candidate.SetFilter("Attempt Count", '<%1', Candidate."Max Attempts");
         Candidate.SetFilter("Next Attempt At", '..%1', CurrentDateTime());
         Candidate.Ascending(false);
 
@@ -49,12 +48,14 @@ codeunit 71120 "GPI Commercial Agent Mgt"
             exit(false);
 
         repeat
-            Candidate.Status := Candidate.Status::Processing;
-            Candidate."Started At" := CurrentDateTime();
-            Candidate."Attempt Count" += 1;
-            Candidate.Modify(true);
-            Queue := Candidate;
-            exit(true);
+            if Candidate."Attempt Count" < Candidate."Max Attempts" then begin
+                Candidate.Status := Candidate.Status::Processing;
+                Candidate."Started At" := CurrentDateTime();
+                Candidate."Attempt Count" += 1;
+                Candidate.Modify(true);
+                Queue := Candidate;
+                exit(true);
+            end;
         until Candidate.Next() = 0;
 
         exit(false);

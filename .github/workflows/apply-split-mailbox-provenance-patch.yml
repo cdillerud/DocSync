@@ -1,9 +1,7 @@
 name: Apply Split Mailbox Provenance Patch
 
 on:
-  push:
-    branches:
-      - feature/square9-parity-systemid-gate
+  pull_request:
     paths:
       - 'backend/scripts/apply_split_mailbox_provenance_patch.py'
       - '.github/workflows/apply-split-mailbox-provenance-patch.yml'
@@ -13,6 +11,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event.pull_request.head.ref == 'feature/square9-parity-systemid-gate'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

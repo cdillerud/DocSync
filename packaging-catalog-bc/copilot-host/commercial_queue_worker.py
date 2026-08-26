@@ -190,15 +190,6 @@ def execute_next_queue(
     *,
     client: BusinessCentralClient | None = None,
 ) -> dict[str, Any]:
-    if not ai_provider_configured():
-        raise QueueWorkerError(
-            "AI provider is not configured; queue execution is refused."
-        )
-    if not _persistence_enabled():
-        raise QueueWorkerError(
-            "GPI_ENABLE_COMMERCIAL_PERSISTENCE is not 1; queue execution is refused."
-        )
-
     bc = client or _client()
     queue = get_next_pending_queue(client=bc)
     if queue is None:
@@ -207,6 +198,19 @@ def execute_next_queue(
     request = build_request_from_queue(queue, client=bc)
     screening = request.context.get("screening", {})
     should_evaluate = bool(screening.get("shouldEvaluate"))
+
+    # Deterministically screened-out work does not need an AI provider or
+    # exception/evidence persistence. Only candidates that actually require
+    # AI evaluation are gated on those runtime controls.
+    if should_evaluate:
+        if not ai_provider_configured():
+            raise QueueWorkerError(
+                "AI provider is not configured; candidate queue execution is refused."
+            )
+        if not _persistence_enabled():
+            raise QueueWorkerError(
+                "GPI_ENABLE_COMMERCIAL_PERSISTENCE is not 1; candidate queue execution is refused."
+            )
 
     claimed = _patch_queue(
         queue,

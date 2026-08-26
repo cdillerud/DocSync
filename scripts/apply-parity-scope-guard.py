@@ -1,3 +1,4 @@
+# Trigger the one-time PR patch runner after workflow registration.
 from pathlib import Path
 import subprocess
 

@@ -21,6 +21,11 @@ page 50190 "GPI Hub Setup"
                     ApplicationArea = All;
                     ToolTip = 'Specifies the HTTPS base URL of the GPI Document Hub API, including /api and without a trailing slash. Configure UAT and Production independently.';
                 }
+                field("Hub API Key"; Rec."Hub API Key")
+                {
+                    ApplicationArea = All;
+                    ToolTip = 'Machine credential used by Business Central when calling the GPI Hub document-link API. It must match BC_HUB_API_KEY on the Hub. Do not share this value.';
+                }
             }
         }
     }

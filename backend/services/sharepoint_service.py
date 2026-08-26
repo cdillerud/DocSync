@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+from services.sharepoint_write_guard_service import check_sharepoint_write_protection
+
 DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() == "true"
 GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
 SHAREPOINT_TARGET = os.environ.get("SHAREPOINT_TARGET", "test").strip().lower()
@@ -116,6 +118,11 @@ async def _resolve_site_and_drive(client: httpx.AsyncClient, token: str) -> Tupl
 
 
 async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
+    check_sharepoint_write_protection(
+        "upload_to_sharepoint",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     folder_for_url = str(folder or "").strip("/")
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         item_id = str(uuid.uuid4())
@@ -167,6 +174,11 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
 
 
 async def create_sharing_link(drive_id: str, item_id: str):
+    check_sharepoint_write_protection(
+        "create_sharing_link",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         return f"https://{SHAREPOINT_SITE_HOSTNAME}/:b:/s/GPI-DocumentHub-Test/{item_id[:8]}"
     token = await _get_graph_token()
@@ -198,6 +210,11 @@ async def write_sharepoint_parity_metadata(
     raised so the caller cannot report a successful, import-ready delivery when
     the file exists but its parity metadata does not.
     """
+    check_sharepoint_write_protection(
+        "write_sharepoint_parity_metadata",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         return {"updated": True, "demo": True, "fields": dict(metadata)}
 
@@ -223,6 +240,11 @@ async def write_sharepoint_parity_metadata(
 
 async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
     """Create the requested folder hierarchy when it does not already exist."""
+    check_sharepoint_write_protection(
+        "ensure_sharepoint_folder_exists",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     normalized_path = str(folder_path or "").strip("/")
     if not normalized_path or DEMO_MODE or not GRAPH_CLIENT_ID:
         return True

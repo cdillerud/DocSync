@@ -1,4 +1,4 @@
-enum 71122 "GPI Agent Queue Status"
+enum 71122 "GPI Agent Q Status"
 {
     Extensible = true;
     Caption = 'GPI Agent Queue Status';

@@ -1,7 +1,9 @@
 from services.parity_scope_guard import (
     ADMIN_ONLY_PREFIXES,
+    AUTHENTICATED_ONLY_PREFIXES,
     OUT_OF_SCOPE_SALES_PREFIXES,
     is_admin_only_path,
+    is_authenticated_only_path,
     is_out_of_scope_sales_path,
     sales_routes_enabled,
 )
@@ -25,7 +27,7 @@ def test_sales_route_families_are_blocked_by_default(monkeypatch):
         assert is_out_of_scope_sales_path(path) is True, path
 
 
-def test_ap_and_warehouse_paths_are_not_blocked():
+def test_ap_and_warehouse_paths_are_not_sales_blocked():
     samples = (
         "/api/gpi-integration/document-links/purchaseInvoices/PI100",
         "/api/gpi-integration/document-links/postedSalesShipments/S100",
@@ -73,6 +75,30 @@ def test_operational_control_plane_is_admin_only():
         assert is_admin_only_path(path) is False, path
 
 
+def test_operator_document_and_workflow_surfaces_require_login():
+    samples = (
+        "/api/documents",
+        "/api/documents/upload",
+        "/api/documents/abc/retry",
+        "/api/documents/abc/reprocess",
+        "/api/workflows",
+        "/api/workflows/abc/approve",
+        "/api/workflows/abc/export",
+        "/api/ap-review/vendors",
+        "/api/ap-review/documents/abc/save",
+        "/api/ap-review/documents/abc/post-to-bc",
+    )
+    for path in samples:
+        assert is_authenticated_only_path(path) is True, path
+
+    for path in (
+        "/api/health",
+        "/api/auth/login",
+        "/api/gpi-integration/document-links/purchaseInvoices/PI100",
+    ):
+        assert is_authenticated_only_path(path) is False, path
+
+
 def test_sales_route_activation_requires_explicit_true(monkeypatch):
     for value in ("", "false", "0", "no", "off"):
         monkeypatch.setenv("ENABLE_OUT_OF_SCOPE_SALES_ROUTES", value)
@@ -86,3 +112,4 @@ def test_sales_route_activation_requires_explicit_true(monkeypatch):
 def test_prefix_lists_have_no_broad_api_catchall():
     assert "/api" not in OUT_OF_SCOPE_SALES_PREFIXES
     assert "/api" not in ADMIN_ONLY_PREFIXES
+    assert "/api" not in AUTHENTICATED_ONLY_PREFIXES

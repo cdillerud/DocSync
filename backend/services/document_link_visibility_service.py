@@ -122,6 +122,36 @@ def build_hub_document_link_query(
     }
 
 
+def build_hub_document_unlink_query(
+    bc_entity: str,
+    bc_document_no: str,
+    doc_id_or_sp_item: str,
+    bc_system_id: str = "",
+) -> dict:
+    """Build a fail-closed selector for soft-removing one visible document link.
+
+    The link identifier already makes deletion narrow. When a SystemId is
+    supplied by an upgraded FactBox, it is additionally required so the delete
+    contract uses the same immutable record identity as the preceding read.
+    """
+    clauses = [
+        build_bc_identity_clause(bc_entity),
+        {
+            "$or": [
+                {"id": doc_id_or_sp_item},
+                {"sharepoint_item_id": doc_id_or_sp_item},
+            ]
+        },
+    ]
+    if str(bc_system_id or "").strip():
+        clauses.append(_hub_system_id_clause(bc_system_id))
+
+    return {
+        "bc_document_no": bc_document_no,
+        "$and": clauses,
+    }
+
+
 def build_folder_match_query(
     bc_entity: str,
     bc_document_no: str,
@@ -164,6 +194,7 @@ __all__ = [
     "entity_storage_aliases",
     "build_bc_identity_clause",
     "build_hub_document_link_query",
+    "build_hub_document_unlink_query",
     "build_folder_match_query",
     "build_bc_document_link_filter",
 ]

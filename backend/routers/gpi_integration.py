@@ -3007,7 +3007,8 @@ async def factbox_ui(
 <script>
 (function() {{
   const API = "{api_path}";
-  const LIST_API = API + "{identity_query}";
+  const IDENTITY_QUERY = "{identity_query}";
+  const LIST_API = API + IDENTITY_QUERY;
   const listWrap = document.getElementById("docListWrap");
   const countEl  = document.getElementById("docCount");
   const dropzone = document.getElementById("dropzone");
@@ -3092,7 +3093,7 @@ async def factbox_ui(
           this.disabled = true;
           this.textContent = "...";
           try {{
-            const resp = await fetch(API + "/" + encodeURIComponent(id), {{ method: "DELETE" }});
+            const resp = await fetch(API + "/" + encodeURIComponent(id) + IDENTITY_QUERY, {{ method: "DELETE" }});
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             loadDocs();
           }} catch(err) {{
@@ -3497,24 +3498,23 @@ async def recover_document_link(doc_id: str):
 # --- STEP 4: DELETE a document link (soft delete) ---
 
 @router.delete("/document-links/{bc_entity}/{bc_document_no}/{doc_id_or_sp_item}")
-async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str):
+async def delete_document_link(
+    bc_entity: str,
+    bc_document_no: str,
+    doc_id_or_sp_item: str,
+    bc_system_id: str = "",
+):
     """Soft-delete a document link. The SharePoint file remains for audit."""
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Find only within the exact BC entity + document number.
-    from services.document_link_visibility_service import build_bc_identity_clause
+    # Upgraded AP FactBoxes carry the immutable SystemId used for the read.
+    # Legacy callers retain typed entity + number + link-id behavior.
+    from services.document_link_visibility_service import build_hub_document_unlink_query
     doc = await db.hub_documents.find_one(
-        {
-            "bc_document_no": bc_document_no,
-            "$and": [
-                build_bc_identity_clause(bc_entity),
-                {"$or": [
-                    {"id": doc_id_or_sp_item},
-                    {"sharepoint_item_id": doc_id_or_sp_item},
-                ]},
-            ],
-        },
+        build_hub_document_unlink_query(
+            bc_entity, bc_document_no, doc_id_or_sp_item, bc_system_id
+        ),
         {"_id": 0}
     )
     if not doc:

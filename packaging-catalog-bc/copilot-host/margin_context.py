@@ -164,6 +164,19 @@ def historical_margin_context(
         else None
     )
 
+    total_sales = sum(
+        (_decimal(row.get("lineAmount")) for row in evaluated),
+        Decimal("0"),
+    )
+    total_cost = sum(
+        (
+            _decimal(row.get("deterministicCostAmount"))
+            for row in evaluated
+        ),
+        Decimal("0"),
+    )
+    weighted_margin = _margin_percent(total_sales, total_cost)
+
     return {
         "customerNo": customer_no,
         "itemNo": item_no,
@@ -173,7 +186,60 @@ def historical_margin_context(
             if average is not None
             else None
         ),
+        "weightedMarginPct": (
+            float(weighted_margin.quantize(Decimal("0.01")))
+            if weighted_margin is not None
+            else None
+        ),
+        "totalSalesAmount": float(total_sales),
+        "totalDeterministicCostAmount": float(total_cost),
         "minimumMarginPercent": float(min(margins)) if margins else None,
         "maximumMarginPercent": float(max(margins)) if margins else None,
         "rows": evaluated,
+    }
+
+
+def build_margin_context(
+    *,
+    customer_no: str,
+    item_no: str,
+    current_unit_price: float,
+    current_unit_cost: float,
+    current_quantity: float,
+    top: int = 250,
+) -> dict[str, Any]:
+    quantity = _decimal(current_quantity)
+    unit_price = _decimal(current_unit_price)
+    unit_cost = _decimal(current_unit_cost)
+    current_sales = quantity * unit_price
+    current_cost = quantity * unit_cost
+    current_margin = _margin_percent(current_sales, current_cost)
+
+    historical = historical_margin_context(
+        customer_no,
+        item_no,
+        top=top,
+    )
+
+    return {
+        "customerNo": customer_no,
+        "itemNo": item_no,
+        "current": {
+            "quantity": float(quantity),
+            "unitPrice": float(unit_price),
+            "unitCost": float(unit_cost),
+            "salesAmount": float(current_sales),
+            "costAmount": float(current_cost),
+            "grossProfit": float(current_sales - current_cost),
+            "marginPct": (
+                float(current_margin.quantize(Decimal("0.01")))
+                if current_margin is not None
+                else None
+            ),
+            "marginBasis": (
+                "Current Unit Price x Quantity less "
+                "Current Unit Cost x Quantity"
+            ),
+        },
+        "historical": historical,
     }

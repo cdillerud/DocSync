@@ -1,0 +1,33 @@
+name: Apply Parity Scope Guard
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/apply-parity-scope-guard.py'
+      - '.github/workflows/apply-parity-scope-guard.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'feature/square9-parity-systemid-gate'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact scope-guard patch
+        run: python scripts/apply-parity-scope-guard.py
+      - name: Commit production change only
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- backend/main.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'parity: block paused Sales HTTP routes'
+          git push origin HEAD:feature/square9-parity-systemid-gate

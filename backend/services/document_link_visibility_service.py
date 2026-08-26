@@ -1,12 +1,13 @@
 """Type-safe selectors for Business Central Gamer Documents visibility.
 
-BC document numbers are not globally unique across entity types. Every FactBox
-lookup and BC-drop folder lookup therefore has to bind the number to the
-requested BC entity/document family; querying by number alone can surface or
-route a document against the wrong record.
+BC document numbers are not globally unique across entity types, and lifecycle
+records can share an entity family. Every FactBox lookup therefore binds number
+to the requested BC entity/document family and, when the caller supplies it, the
+immutable Business Central SystemId of the exact record.
 """
 
 from typing import Dict, List
+from uuid import UUID
 
 
 _ENTITY_DOC_TYPES: Dict[str, List[str]] = {
@@ -28,8 +29,6 @@ _ENTITY_DOC_TYPES: Dict[str, List[str]] = {
     ],
 }
 
-# Hub resolver/storage names are not always the same casing/pluralization used
-# by the BC API route segment. Keep these aliases explicit and fail closed.
 _ENTITY_STORAGE_ALIASES: Dict[str, List[str]] = {
     "purchaseOrders": ["purchaseOrders", "purchase_order", "purchaseOrder"],
     "purchaseInvoices": ["purchaseInvoices", "purchase_invoice", "purchaseInvoice"],
@@ -57,7 +56,6 @@ def document_type_aliases(bc_entity: str) -> List[str]:
 
 
 def entity_storage_aliases(bc_entity: str) -> List[str]:
-    # document_type_aliases() performs the fail-closed validation first.
     document_type_aliases(bc_entity)
     return list(_ENTITY_STORAGE_ALIASES.get(bc_entity, [bc_entity]))
 
@@ -77,28 +75,66 @@ def build_bc_identity_clause(bc_entity: str) -> dict:
     }
 
 
-def build_hub_document_link_query(bc_entity: str, bc_document_no: str) -> dict:
-    """Build a fail-closed Mongo selector for one BC record's visible links.
+def _normalize_system_id(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    try:
+        return str(UUID(raw))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise ValueError(f"Invalid Business Central SystemId: {value!r}") from exc
 
-    Untyped legacy rows are deliberately excluded: when numbers collide, an
-    untyped row cannot be proven to belong to the requested BC record.
-    """
+
+def _hub_system_id_clause(bc_system_id: str) -> dict:
+    system_id = _normalize_system_id(bc_system_id)
     return {
-        "bc_document_no": bc_document_no,
-        "sharepoint_web_url": {"$nin": [None, ""]},
-        "$and": [
-            {"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]},
-            build_bc_identity_clause(bc_entity),
-        ],
+        "$or": [
+            {"bc_record_id": system_id},
+            {"bc_system_id": system_id},
+            {"GPI_SourceSystemId": system_id},
+        ]
     }
 
 
-def build_folder_match_query(bc_entity: str, bc_document_no: str) -> dict:
+def build_hub_document_link_query(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+) -> dict:
+    """Build a fail-closed Mongo selector for one BC record's visible links.
+
+    Untyped legacy rows are deliberately excluded. When an exact SystemId is
+    supplied, a row must match both the document number/family and immutable BC
+    record identity. Callers not yet upgraded retain the historical typed-number
+    behavior for backward compatibility.
+    """
+    clauses = [
+        {"$or": [{"deleted": {"$exists": False}}, {"deleted": False}]},
+        build_bc_identity_clause(bc_entity),
+    ]
+    if str(bc_system_id or "").strip():
+        clauses.append(_hub_system_id_clause(bc_system_id))
+
+    return {
+        "bc_document_no": bc_document_no,
+        "sharepoint_web_url": {"$nin": [None, ""]},
+        "$and": clauses,
+    }
+
+
+def build_folder_match_query(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+) -> dict:
     """Build a type-safe selector for reusing an existing SharePoint folder."""
+    clauses = [build_bc_identity_clause(bc_entity)]
+    if str(bc_system_id or "").strip():
+        clauses.append(_hub_system_id_clause(bc_system_id))
     return {
         "bc_document_no": bc_document_no,
         "sharepoint_folder_path": {"$nin": [None, ""]},
-        "$and": [build_bc_identity_clause(bc_entity)],
+        "$and": clauses,
     }
 
 
@@ -106,13 +142,20 @@ def _odata_quote(value: str) -> str:
     return str(value).replace("'", "''")
 
 
-def build_bc_document_link_filter(bc_entity: str, bc_document_no: str) -> str:
-    """Build an OData filter bound to both document number and document type."""
+def build_bc_document_link_filter(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+) -> str:
+    """Build an OData filter bound to number/type and optional exact SystemId."""
     document_type = canonical_document_type(bc_entity)
-    return (
-        f"bcDocumentNo eq '{_odata_quote(bc_document_no)}' and "
-        f"documentType eq '{_odata_quote(document_type)}'"
-    )
+    parts = [
+        f"bcDocumentNo eq '{_odata_quote(bc_document_no)}'",
+        f"documentType eq '{_odata_quote(document_type)}'",
+    ]
+    if str(bc_system_id or "").strip():
+        parts.append(f"targetSystemId eq {_normalize_system_id(bc_system_id)}")
+    return " and ".join(parts)
 
 
 __all__ = [

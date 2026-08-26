@@ -39,7 +39,7 @@ def test_ap_and_warehouse_paths_are_not_blocked():
         assert is_out_of_scope_sales_path(path) is False, path
 
 
-def test_settings_surface_is_admin_only():
+def test_operational_control_plane_is_admin_only():
     samples = (
         "/api/settings",
         "/api/settings/status",
@@ -49,11 +49,27 @@ def test_settings_surface_is_admin_only():
         "/api/settings/job-types/AP_Invoice",
         "/api/settings/email-watcher",
         "/api/settings/email-watcher/subscribe",
+        "/api/settings/mailbox-sources",
+        "/api/settings/mailbox-sources/mailbox_123",
+        "/api/admin",
+        "/api/admin/migrate-sales-to-unified",
+        "/api/admin/eod/run",
+        "/api/dev",
+        "/api/dev/bakeoff",
+        "/api/migration",
+        "/api/migration/run",
+        "/api/migration/generate-sample",
+        "/api/sharepoint",
+        "/api/sharepoint/initialize-folders",
     )
     for path in samples:
         assert is_admin_only_path(path) is True, path
 
-    for path in ("/api/health", "/api/documents/abc", "/api/gpi-integration/document-links/purchaseInvoices/PI100"):
+    for path in (
+        "/api/health",
+        "/api/documents/abc",
+        "/api/gpi-integration/document-links/purchaseInvoices/PI100",
+    ):
         assert is_admin_only_path(path) is False, path
 
 

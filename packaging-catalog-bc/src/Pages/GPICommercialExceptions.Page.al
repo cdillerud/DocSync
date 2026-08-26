@@ -1,7 +1,7 @@
-page 71120 "GPI Commercial Exceptions"
+page 71120 "GPI Comm Exceptions"
 {
     PageType = List;
-    SourceTable = "GPI Commercial Exception";
+    SourceTable = "GPI Comm Exception";
     ApplicationArea = All;
     UsageCategory = Lists;
     Caption = 'Commercial Exceptions';
@@ -34,7 +34,7 @@ page 71120 "GPI Commercial Exceptions"
         }
         area(FactBoxes)
         {
-            part(Evidence; "GPI Commercial Evidence")
+            part(Evidence; "GPI Comm Evidence")
             {
                 ApplicationArea = All;
                 SubPageLink = "Exception Entry No." = field("Entry No.");

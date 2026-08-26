@@ -12,7 +12,7 @@ from typing import Dict, Any
 import httpx
 
 from services.gpi_integration_service import (
-    BC_API_BASE,
+    GPI_API_BASE,
     BC_STANDARD_API,
     BC_TENANT_ID,
     BC_WRITE_ENVIRONMENT,
@@ -27,7 +27,7 @@ from services.business_central_service import bc_http_with_retry, BCRetriesExhau
 
 def _invoice_base_url(company_id: str, system_id: str) -> str:
     return (
-        f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/"
+        f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/"
         f"companies({company_id})/purchaseInvoices({system_id})"
     )
 

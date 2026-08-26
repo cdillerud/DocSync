@@ -1,9 +1,9 @@
 """HTTP scope and administration barrier for Square9 AP/Warehouse parity.
 
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
-The same middleware also protects the runtime settings surface so credentials,
-feature flags, job types, and watcher configuration cannot be mutated or read
-without an authenticated admin session.
+The same middleware protects operational control-plane surfaces so credentials,
+feature flags, mailbox sources, migration controls, SharePoint administration,
+and developer tools cannot be used without an authenticated admin session.
 """
 
 from __future__ import annotations
@@ -28,6 +28,10 @@ OUT_OF_SCOPE_SALES_PREFIXES = (
 
 ADMIN_ONLY_PREFIXES = (
     "/api/settings",
+    "/api/admin",
+    "/api/dev",
+    "/api/migration",
+    "/api/sharepoint",
 )
 
 
@@ -62,7 +66,7 @@ def is_admin_only_path(path: str, prefixes: Iterable[str] = ADMIN_ONLY_PREFIXES)
 
 
 class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
-    """Enforce AP/Warehouse scope and protect administrative settings."""
+    """Enforce AP/Warehouse scope and protect the operational control plane."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path

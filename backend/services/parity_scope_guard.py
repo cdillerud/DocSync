@@ -3,7 +3,8 @@
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
 Operational control-plane and batch-maintenance surfaces are admin-only. Normal
 AP/Warehouse operator surfaces require an authenticated user. Business Central
-FactBox API calls use a dedicated machine-to-machine key over HTTPS.
+FactBox API calls use a dedicated machine-to-machine key over HTTPS; authenticated
+Hub users may access the same document-link API from the browser experience.
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/gpi-integration/factbox-ui",
 )
 
-M2M_ONLY_PREFIXES = (
+M2M_OR_USER_PREFIXES = (
     "/api/gpi-integration/document-links",
 )
 
@@ -111,7 +112,7 @@ def is_authenticated_only_path(path: str, prefixes: Iterable[str] = AUTHENTICATE
     return _path_matches(path, prefixes)
 
 
-def is_m2m_only_path(path: str, prefixes: Iterable[str] = M2M_ONLY_PREFIXES) -> bool:
+def is_m2m_or_user_path(path: str, prefixes: Iterable[str] = M2M_OR_USER_PREFIXES) -> bool:
     return _path_matches(path, prefixes)
 
 
@@ -155,7 +156,7 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        # Specific admin-only paths win over the broader document-links M2M prefix.
+        # Specific admin-only paths win over the broader document-links prefix.
         if is_admin_only_path(path):
             from services.auth_deps import require_admin
             try:
@@ -163,13 +164,17 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
             except HTTPException as exc:
                 return _http_exception_response(exc)
 
-        elif is_m2m_only_path(path):
+        elif is_m2m_or_user_path(path):
             if not _valid_m2m_key(request):
-                return JSONResponse(
-                    status_code=401,
-                    content={"detail": "Valid Business Central Hub machine credential required"},
-                    headers={"WWW-Authenticate": "GPI-Hub-Key"},
-                )
+                from services.auth_deps import get_current_user
+                try:
+                    await get_current_user(request)
+                except HTTPException:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Valid Business Central machine credential or Hub user session required"},
+                        headers={"WWW-Authenticate": "GPI-Hub-Key, Bearer"},
+                    )
 
         elif is_authenticated_only_path(path):
             from services.auth_deps import get_current_user
@@ -186,13 +191,13 @@ __all__ = [
     "AUTHENTICATED_ONLY_PREFIXES",
     "LEGACY_WEBHOOK_PATH",
     "M2M_HEADER_NAME",
-    "M2M_ONLY_PREFIXES",
+    "M2M_OR_USER_PREFIXES",
     "OUT_OF_SCOPE_SALES_PREFIXES",
     "ParityScopeGuardMiddleware",
     "graph_webhook_enabled",
     "is_admin_only_path",
     "is_authenticated_only_path",
-    "is_m2m_only_path",
+    "is_m2m_or_user_path",
     "is_out_of_scope_sales_path",
     "sales_routes_enabled",
 ]

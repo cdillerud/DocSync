@@ -1,4 +1,4 @@
-page 71126 "GPI Commercial Product API"
+page 71126 "GPI Comm Product API"
 {
     PageType = API;
     APIPublisher = 'gpi';

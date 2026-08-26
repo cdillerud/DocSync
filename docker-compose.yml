@@ -38,12 +38,12 @@ services:
       - ./prod_reports:/app/prod_reports
     networks:
       - gpi-network
-    # Backend is reachable directly only for controlled host diagnostics. The
-    # browser and Business Central should use the HTTPS reverse-proxy endpoint.
     expose:
       - "8001"
+    # Host diagnostic access only. Do not expose the raw backend to the network;
+    # Business Central and browsers must use the HTTPS reverse-proxy endpoint.
     ports:
-      - "8005:8001"
+      - "127.0.0.1:8005:8001"
 
   # Frontend (React + Nginx)
   frontend:
@@ -58,8 +58,10 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    # Local origin consumed by the host TLS reverse proxy. External clients must
+    # not connect directly over HTTP to port 8080.
     ports:
-      - "8080:3000"
+      - "127.0.0.1:8080:3000"
     networks:
       - gpi-network
 

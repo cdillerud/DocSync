@@ -103,3 +103,5 @@ jobs:
             echo "::error::Sales BC attachment write lane is not default-off"
             exit 1
           }
+
+# Triggered after workflow creation so GitHub evaluates this gate on PR #15.

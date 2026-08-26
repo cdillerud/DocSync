@@ -1,9 +1,9 @@
 """Mailbox/message provenance persistence for authoritative document intake.
 
 The first observed intake source is immutable. Later observations (including
-content-hash duplicates, forwards, or replays) are appended without replacing
-original provenance. This gives AP/Warehouse cutover reconciliation both a
-canonical origin and a complete observed-source history.
+content-hash duplicates, forwards, split-parent inheritance, or replays) are
+appended without replacing original provenance. This gives AP/Warehouse cutover
+reconciliation both a canonical origin and a complete observed-source history.
 """
 
 from datetime import datetime, timezone
@@ -28,12 +28,14 @@ async def persist_mailbox_provenance(
     internet_message_id: Optional[str] = None,
     attachment_id: Optional[str] = None,
     source: Optional[str] = None,
+    set_first_seen: bool = True,
 ) -> dict:
     """Persist immutable first-seen provenance plus append-only observations.
 
-    Existing canonical source fields are never overwritten. This matters when
-    the same bytes are later received through another mailbox: dedup may reuse
-    the existing document, but the original intake source must remain truthful.
+    Existing canonical source fields are never overwritten. ``set_first_seen``
+    may be disabled when an already-existing canonical document is merely being
+    observed through another parent/replay path; in that mode only the
+    observation history is appended.
     """
     if not document_id:
         return {"updated": False, "reason": "missing_document_id"}
@@ -57,9 +59,6 @@ async def persist_mailbox_provenance(
         "attachment_id": attachment,
         "source": source_name,
     }
-
-    # Keep observations useful and deterministic: remove empty values but keep
-    # observed_utc. `$push` is intentional — repeated receipt is itself evidence.
     observation = {k: v for k, v in observation.items() if v is not None}
 
     existing = await db.hub_documents.find_one(
@@ -88,9 +87,10 @@ async def persist_mailbox_provenance(
         "source_attachment_id": attachment,
         "source_provenance_captured_utc": now,
     }
-    for field, value in canonical.items():
-        if value is not None and not existing.get(field):
-            first_seen[field] = value
+    if set_first_seen:
+        for field, value in canonical.items():
+            if value is not None and not existing.get(field):
+                first_seen[field] = value
 
     update = {
         "$push": {"provenance_observations": observation},
@@ -104,6 +104,7 @@ async def persist_mailbox_provenance(
         "updated": True,
         "first_seen_fields_written": sorted(first_seen.keys()),
         "observation": observation,
+        "set_first_seen": bool(set_first_seen),
     }
 
 

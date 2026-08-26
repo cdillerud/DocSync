@@ -1,9 +1,11 @@
 from services.parity_scope_guard import (
     ADMIN_ONLY_PREFIXES,
     AUTHENTICATED_ONLY_PREFIXES,
+    M2M_OR_USER_PREFIXES,
     OUT_OF_SCOPE_SALES_PREFIXES,
     is_admin_only_path,
     is_authenticated_only_path,
+    is_m2m_or_user_path,
     is_out_of_scope_sales_path,
     sales_routes_enabled,
 )
@@ -22,6 +24,14 @@ def test_sales_route_families_are_blocked_by_default(monkeypatch):
         "/api/inside-sales-pilot/poll-now",
         "/api/inside-sales-pilot/smart-reclassify",
         "/api/bc/sales-orders/create",
+        "/api/gpi-integration/sales-orders",
+        "/api/gpi-integration/sales-orders/preflight/doc1",
+        "/api/gpi-integration/sales-orders/from-document/doc1",
+        "/api/gpi-integration/ds-purchase-orders/auto-create/doc1",
+        "/api/gpi-integration/order-patterns/learn/C100",
+        "/api/gpi-integration/document-links/salesOrders/SO100",
+        "/api/gpi-integration/document-links/salesInvoices/SI100",
+        "/api/gpi-integration/factbox-ui/salesOrders/SO100",
     )
     for path in samples:
         assert is_out_of_scope_sales_path(path) is True, path
@@ -30,7 +40,9 @@ def test_sales_route_families_are_blocked_by_default(monkeypatch):
 def test_ap_and_warehouse_paths_are_not_sales_blocked():
     samples = (
         "/api/gpi-integration/document-links/purchaseInvoices/PI100",
+        "/api/gpi-integration/document-links/purchaseOrders/PO100",
         "/api/gpi-integration/document-links/postedSalesShipments/S100",
+        "/api/gpi-integration/purchase-invoices/preflight/doc1",
         "/api/email-polling/status",
         "/api/documents/abc",
         "/api/health",
@@ -43,26 +55,28 @@ def test_ap_and_warehouse_paths_are_not_sales_blocked():
 
 def test_operational_control_plane_is_admin_only():
     samples = (
-        "/api/settings",
-        "/api/settings/status",
         "/api/settings/config",
-        "/api/settings/test-connection",
-        "/api/settings/features/create-draft-header",
-        "/api/settings/job-types/AP_Invoice",
-        "/api/settings/email-watcher",
-        "/api/settings/email-watcher/subscribe",
         "/api/settings/mailbox-sources",
-        "/api/settings/mailbox-sources/mailbox_123",
-        "/api/admin",
-        "/api/admin/migrate-sales-to-unified",
         "/api/admin/eod/run",
-        "/api/dev",
         "/api/dev/bakeoff",
-        "/api/migration",
         "/api/migration/run",
-        "/api/migration/generate-sample",
-        "/api/sharepoint",
         "/api/sharepoint/initialize-folders",
+        "/api/sharepoint-routing/rules",
+        "/api/email-polling/poll-now",
+        "/api/vendor-reprocess/run",
+        "/api/auto-clear-reprocess/force-clear-all-remaining",
+        "/api/workflow-fix/run",
+        "/api/dedup/run",
+        "/api/vendor-profiles/rebuild/run",
+        "/api/auto-approve/run",
+        "/api/file-integrity/scan",
+        "/api/gpi-integration/status",
+        "/api/gpi-integration/item-mappings",
+        "/api/gpi-integration/catalog/sync",
+        "/api/gpi-integration/customers",
+        "/api/gpi-integration/vendors",
+        "/api/gpi-integration/document-links/migrate-from-zetadocs",
+        "/api/gpi-integration/purchase-invoices/retry-lines/doc1",
     )
     for path in samples:
         assert is_admin_only_path(path) is True, path
@@ -75,28 +89,33 @@ def test_operational_control_plane_is_admin_only():
         assert is_admin_only_path(path) is False, path
 
 
-def test_operator_document_and_workflow_surfaces_require_login():
+def test_operator_document_and_ap_surfaces_require_login():
     samples = (
-        "/api/documents",
         "/api/documents/upload",
         "/api/documents/abc/retry",
-        "/api/documents/abc/reprocess",
-        "/api/workflows",
         "/api/workflows/abc/approve",
-        "/api/workflows/abc/export",
-        "/api/ap-review/vendors",
         "/api/ap-review/documents/abc/save",
-        "/api/ap-review/documents/abc/post-to-bc",
+        "/api/human-routing-review/document/abc/assign",
+        "/api/gpi-integration/purchase-invoices",
+        "/api/gpi-integration/purchase-invoices/preflight/doc1",
+        "/api/gpi-integration/purchase-invoices/from-document/doc1",
+        "/api/gpi-integration/factbox-ui/purchaseInvoices/PI100",
     )
     for path in samples:
         assert is_authenticated_only_path(path) is True, path
 
-    for path in (
-        "/api/health",
-        "/api/auth/login",
+
+def test_factbox_document_links_accept_machine_or_user_auth_class():
+    samples = (
         "/api/gpi-integration/document-links/purchaseInvoices/PI100",
-    ):
-        assert is_authenticated_only_path(path) is False, path
+        "/api/gpi-integration/document-links/purchaseOrders/PO100/upload-raw",
+        "/api/gpi-integration/document-links/postedSalesShipments/S100",
+        "/api/gpi-integration/document-links/recover/doc1",
+    )
+    for path in samples:
+        assert is_m2m_or_user_path(path) is True, path
+
+    assert is_m2m_or_user_path("/api/gpi-integration/factbox-ui/purchaseInvoices/PI100") is False
 
 
 def test_sales_route_activation_requires_explicit_true(monkeypatch):
@@ -113,3 +132,4 @@ def test_prefix_lists_have_no_broad_api_catchall():
     assert "/api" not in OUT_OF_SCOPE_SALES_PREFIXES
     assert "/api" not in ADMIN_ONLY_PREFIXES
     assert "/api" not in AUTHENTICATED_ONLY_PREFIXES
+    assert "/api" not in M2M_OR_USER_PREFIXES

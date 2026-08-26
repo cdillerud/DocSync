@@ -39,14 +39,15 @@ replace_once(
     '''async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:\n    """Create the requested folder hierarchy when it does not already exist."""\n    check_sharepoint_write_protection(\n        "ensure_sharepoint_folder_exists",\n        target=SHAREPOINT_TARGET,\n        site_path=SHAREPOINT_SITE_PATH,\n    )\n    normalized_path = str(folder_path or "").strip("/")\n''',
 )
 
+normalized = text.replace("\r\n", "\n")
 for operation in (
     "upload_to_sharepoint",
     "create_sharing_link",
     "write_sharepoint_parity_metadata",
     "ensure_sharepoint_folder_exists",
 ):
-    needle = f'check_sharepoint_write_protection(\\n        "{operation}"'
-    if needle not in text.replace("\r\n", "\n"):
+    needle = f'check_sharepoint_write_protection(\n        "{operation}"'
+    if needle not in normalized:
         raise SystemExit(f"missing post-patch production guard for {operation}")
 
 path.write_text(text, encoding="utf-8")

@@ -6,8 +6,10 @@ on:
       - 'backend/routers/gpi_integration.py'
       - 'backend/services/ap_auto_post_service.py'
       - 'backend/services/bc_purchase_invoice_posting_service.py'
+      - 'backend/services/bc_posted_purchase_invoice_identity_service.py'
       - 'backend/services/ap_purchase_invoice_identity_service.py'
       - 'backend/tests/test_bc_purchase_invoice_posting_service.py'
+      - 'backend/tests/test_bc_posted_purchase_invoice_identity_service.py'
       - 'backend/tests/test_ap_purchase_invoice_identity_service.py'
       - '.github/workflows/square9-ap-posting-parity-gate.yml'
   workflow_dispatch:
@@ -42,6 +44,7 @@ jobs:
         run: |
           pytest -q \
             tests/test_bc_purchase_invoice_posting_service.py \
+            tests/test_bc_posted_purchase_invoice_identity_service.py \
             tests/test_ap_purchase_invoice_identity_service.py
 
       - name: Guardrail - Posted requires the real BC bound action
@@ -56,6 +59,44 @@ jobs:
           }
           grep -q 'bc_true_post_confirmed' backend/services/ap_auto_post_service.py || {
             echo "::error::AP audit does not persist true-post confirmation"
+            exit 1
+          }
+
+      - name: Guardrail - posted table 122 identity is reconciled, never guessed
+        run: |
+          grep -q 'microsoft/automate/v1.0' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice real-SystemId resolver is missing"
+            exit 1
+          }
+          grep -q 'postedPurchaseInvoices' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice resolver targets the wrong API"
+            exit 1
+          }
+          grep -q 'apiId eq' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice resolver is not bound to the v2 aggregate apiId"
+            exit 1
+          }
+          grep -q 'posted_system_id = str(post_result.get("posted_system_id")' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post does not consume the real posted header SystemId"
+            exit 1
+          }
+          grep -q 'posted_record_no = str(post_result.get("posted_number")' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post does not consume the final posted invoice number"
+            exit 1
+          }
+
+      - name: Guardrail - unresolved posted identity fails closed
+        run: |
+          grep -q 'PostedNeedsIdentity' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP lacks explicit post-success identity-recovery state"
+            exit 1
+          }
+          grep -q '"GPI_SourceSystemId": ""' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP may retain draft API identity as posted SourceSystemId"
+            exit 1
+          }
+          grep -q '"ImportReady": False' backend/services/ap_auto_post_service.py || {
+            echo "::error::Unresolved posted identity does not fail readiness closed"
             exit 1
           }
 
@@ -103,5 +144,3 @@ jobs:
             echo "::error::Sales BC attachment write lane is not default-off"
             exit 1
           }
-
-# Triggered after workflow creation so GitHub evaluates this gate on PR #15.

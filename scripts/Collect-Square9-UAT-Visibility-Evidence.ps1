@@ -107,6 +107,21 @@ function Invoke-VisibilityRead {
         Fail "$Label response was not valid JSON: $($_.Exception.Message)"
     }
 
+    $expectedSystemId = $SystemId.ToString().ToLowerInvariant()
+    $actualEntity = [string]$payload.bc_entity
+    $actualDocumentNo = [string]$payload.bc_document_no
+    $actualSystemId = ([string]$payload.bc_system_id).Trim().ToLowerInvariant()
+
+    if ($actualEntity -ne $Entity) {
+        Fail "$Label response entity mismatch. Expected '$Entity', received '$actualEntity'."
+    }
+    if ($actualDocumentNo -ne $DocumentNo) {
+        Fail "$Label response document number mismatch. Expected '$DocumentNo', received '$actualDocumentNo'."
+    }
+    if ($actualSystemId -ne $expectedSystemId) {
+        Fail "$Label response SystemId mismatch. Expected '$expectedSystemId', received '$actualSystemId'."
+    }
+
     if ($null -eq $payload.documents) {
         Fail "$Label response did not contain a documents collection."
     }
@@ -124,6 +139,13 @@ function Invoke-VisibilityRead {
         if ([string]::IsNullOrWhiteSpace($webUrl)) {
             Fail "$Label returned a linked document without a SharePoint URL."
         }
+        $spUri = $null
+        if (-not [Uri]::TryCreate($webUrl, [UriKind]::Absolute, [ref]$spUri)) {
+            Fail "$Label returned a non-absolute SharePoint URL: '$webUrl'."
+        }
+        if ($spUri.Scheme -ne 'https') {
+            Fail "$Label returned a non-HTTPS SharePoint URL: '$webUrl'."
+        }
     }
 
     $hash = (Get-FileHash -LiteralPath $EvidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -132,6 +154,10 @@ function Invoke-VisibilityRead {
         entity = $Entity
         document_no = $DocumentNo
         system_id = $SystemId.ToString()
+        response_entity = $actualEntity
+        response_document_no = $actualDocumentNo
+        response_system_id = $actualSystemId
+        identity_match = $true
         request_url = $url
         http_status = [int]$response.StatusCode
         document_count = $documents.Count
@@ -203,4 +229,4 @@ Set-Content -LiteralPath (Join-Path $evidenceDir 'manifest.sha256') -Value "$man
 
 Write-Host "Evidence folder : $evidenceDir"
 Write-Host "Manifest SHA256: $manifestHash"
-Write-Host 'PASS: AP and Warehouse exact-record FactBox visibility returned linked SharePoint documents.' -ForegroundColor Green
+Write-Host 'PASS: AP and Warehouse exact-record FactBox visibility returned linked HTTPS SharePoint documents with matching entity/document/SystemId.' -ForegroundColor Green

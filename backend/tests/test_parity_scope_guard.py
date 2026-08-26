@@ -80,6 +80,8 @@ def test_operational_control_plane_is_admin_only():
         "/api/freight-routing/update-gl-account",
         "/api/freight-routing/accounts",
         "/api/freight-routing/batch-classify",
+        "/api/pilot/send-daily-summary",
+        "/api/cache/sync",
         "/api/auto-clear/config/threshold/AP_Invoice",
         "/api/auto-clear/apply/doc1",
         "/api/auto-clear/route/doc1",
@@ -118,6 +120,11 @@ def test_operational_control_plane_is_admin_only():
         "/api/label-corrections/stats",
         "/api/vendor-resolution/metrics",
         "/api/vendors/match-stats",
+        "/api/aliases/vendors",
+        "/api/events/recent",
+        "/api/ap-validation/status/doc1",
+        "/api/cache/status",
+        "/api/bc/write-guard/status",
         "/api/bc-sandbox/status",
         "/api/gpi-integration/document-links/purchaseInvoices/PI100",
     ):
@@ -130,6 +137,7 @@ def test_operator_document_and_ap_surfaces_require_login():
         "/api/documents/abc/retry",
         "/api/workflows/abc/approve",
         "/api/ap-review/documents/abc/save",
+        "/api/ap-validation/validate/doc1",
         "/api/human-routing-review/document/abc/assign",
         "/api/auto-clear/config",
         "/api/auto-clear/evaluate/doc1",
@@ -141,6 +149,11 @@ def test_operator_document_and_ap_surfaces_require_login():
         "/api/label-corrections/stats",
         "/api/vendor-resolution/metrics",
         "/api/vendors/match",
+        "/api/aliases/vendors",
+        "/api/events/recent",
+        "/api/cache/status",
+        "/api/bc/write-guard/check",
+        "/api/bc/environment-status",
         "/api/bc-sandbox/purchase-orders/PO100",
         "/api/gpi-integration/purchase-invoices",
         "/api/gpi-integration/purchase-invoices/preflight/doc1",
@@ -153,6 +166,7 @@ def test_operator_document_and_ap_surfaces_require_login():
 
 def test_admin_specific_paths_win_over_authenticated_parent_prefixes():
     samples = (
+        "/api/cache/sync",
         "/api/auto-clear/apply/doc1",
         "/api/readiness/sync-status",
         "/api/po-resolution/batch-resolve",

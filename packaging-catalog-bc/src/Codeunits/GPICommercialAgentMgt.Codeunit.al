@@ -1,6 +1,6 @@
 codeunit 71120 "GPI Comm Agent Mgt"
 {
-    procedure Enqueue(AgentType: Enum "GPI Comm Agent Type"; SourceType: Text[50]; SourceSystemId: Guid; SourceKey: Text[100]; CustomerNo: Code[20]; ItemNo: Code[20]; DocumentType: Text[30]; DocumentNo: Code[20]; Priority: Integer; IdempotencyKey: Text[100]): Integer
+    procedure Enqueue(AgentType: Enum "GPI Comm Agent Type"; SourceType: Text[50]; SourceSystemId: Guid; SourceKey: Text[100]; CustomerNo: Code[20]; ItemNo: Code[20]; DocumentType: Text[30]; DocumentNo: Code[20]; Priority: Integer; IdempotencyKey: Text[100]; PreviousValue: Decimal; CurrentValue: Decimal): Integer
     var
         Queue: Record "GPI Comm Agent Queue";
         ExistingQueue: Record "GPI Comm Agent Queue";
@@ -30,6 +30,8 @@ codeunit 71120 "GPI Comm Agent Mgt"
         Queue."Correlation ID" := CreateGuid();
         Queue."Idempotency Key" := IdempotencyKey;
         Queue."Requested By" := CopyStr(UserId(), 1, MaxStrLen(Queue."Requested By"));
+        Queue."Previous Value" := PreviousValue;
+        Queue."Current Value" := CurrentValue;
         Queue.Insert(true);
 
         exit(Queue."Entry No.");

@@ -32,6 +32,12 @@ table 50190 "GPI Hub Setup"
                 "Hub Base URL" := CopyStr(NormalizedUrl, 1, MaxStrLen("Hub Base URL"));
             end;
         }
+        field(3; "Hub API Key"; Text[250])
+        {
+            Caption = 'Hub API Key';
+            DataClassification = SystemMetadata;
+            ExtendedDatatype = Masked;
+        }
     }
 
     keys

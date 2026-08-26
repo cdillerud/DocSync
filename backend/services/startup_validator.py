@@ -4,7 +4,8 @@ is misconfigured.
 
 The Square9 parity phase is AP/Warehouse only. In addition to refusing missing
 or insecure secrets, startup refuses configuration that can activate Sales,
-Inside Sales, or the legacy Graph webhook during this cutover.
+Inside Sales, or the legacy Graph webhook during this cutover. Non-demo runtime
+also requires the dedicated Business Central -> Hub machine credential.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ _REQUIRED_SECRETS: List[Tuple[str, set, str]] = [
 _OPTIONAL_SECRETS: List[Tuple[str, str]] = [
     ("BC_CLIENT_ID", "Business Central app registration — required for live BC writes"),
     ("BC_CLIENT_SECRET", "Business Central app registration secret"),
-    ("BC_TENANT_ID", "BC Azure tenant"),
+    ("TENANT_ID", "Microsoft Entra tenant used by Business Central and Graph"),
     ("GRAPH_CLIENT_ID", "Microsoft Graph app registration — required for email/SharePoint"),
     ("GRAPH_CLIENT_SECRET", "Graph app secret"),
     ("FRONTEND_URL", "Explicit frontend origin for CORS (same-origin is preferred)"),
@@ -68,13 +69,8 @@ def _is_truthy(name: str) -> bool:
 def _validate_parity_scope(failures: List[str]) -> None:
     """Enforce AP/Warehouse-only cutover scope at process startup."""
 
-    # AP auto-post is in scope, but missing configuration must never mean
-    # "enabled". Set the process default before server/workflow modules import
-    # their feature flags. Controlled UAT may still explicitly set this true.
     os.environ.setdefault("AUTO_POST_ENABLED", "false")
 
-    # This legacy Sales service historically defaulted TRUE when the variable
-    # was missing, so require an explicit false rather than treating absence as safe.
     if not _is_explicit_false("AUTO_CREATE_SALES_ORDER_ENABLED"):
         failures.append(
             "  - AUTO_CREATE_SALES_ORDER_ENABLED: must be explicitly false during AP/Warehouse parity"
@@ -96,6 +92,19 @@ def _validate_parity_scope(failures: List[str]) -> None:
             failures.append(f"  - {name}: {reason}")
 
 
+def _validate_machine_credential(failures: List[str]) -> None:
+    """Require a strong BC->Hub key in every non-demo runtime."""
+    if _is_truthy("DEMO_MODE"):
+        return
+
+    value = os.environ.get("BC_HUB_API_KEY", "")
+    insecure = {"", "changeme", "secret", "test", "gpi-hub-key", "gpi-document-hub-secret"}
+    if value.strip().lower() in insecure or len(value) < 32:
+        failures.append(
+            "  - BC_HUB_API_KEY: non-demo runtime requires a random machine credential of at least 32 characters"
+        )
+
+
 def validate_startup_secrets() -> None:
     """Validate required secrets and parity safety before app initialization."""
     failures: List[str] = []
@@ -108,6 +117,7 @@ def validate_startup_secrets() -> None:
             )
 
     _validate_parity_scope(failures)
+    _validate_machine_credential(failures)
 
     if failures:
         checklist = "\n".join(failures)

@@ -8,6 +8,7 @@ query 71000 "GPI Comm Hist Sales"
     EntityName = 'historicalSalesLine';
     EntitySetName = 'historicalSalesLines';
     DataAccessIntent = ReadOnly;
+    OrderBy = descending(postingDate);
 
     elements
     {

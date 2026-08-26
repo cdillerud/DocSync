@@ -1,4 +1,4 @@
-page 71125 "GPI Commercial Queue API"
+page 71125 "GPI Comm Queue API"
 {
     PageType = API;
     APIPublisher = 'gpi';
@@ -7,7 +7,7 @@ page 71125 "GPI Commercial Queue API"
     Caption = 'commercialAgentQueue';
     EntityName = 'commercialAgentQueueEntry';
     EntitySetName = 'commercialAgentQueueEntries';
-    SourceTable = "GPI Commercial Agent Queue";
+    SourceTable = "GPI Comm Agent Queue";
     ODataKeyFields = SystemId;
     InsertAllowed = false;
     ModifyAllowed = false;

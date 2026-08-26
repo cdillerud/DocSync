@@ -57,13 +57,9 @@ class BusinessCentralSettings:
                 + ", ".join(missing)
             )
 
-        if (
-            values["environment_name"]
-            != "Sandbox_NoZetadocs_UAT"
-        ):
+        if values["environment_name"] != "Sandbox_NoZetadocs_UAT":
             raise BusinessCentralConfigurationError(
-                "This client is UAT-only. "
-                "Expected Sandbox_NoZetadocs_UAT."
+                "This client is UAT-only. Expected Sandbox_NoZetadocs_UAT."
             )
 
         return cls(**values)
@@ -141,10 +137,42 @@ class BusinessCentralClient:
 
     def headers(self) -> dict[str, str]:
         return {
-            "Authorization":
-                f"Bearer {self.acquire_access_token()}",
+            "Authorization": f"Bearer {self.acquire_access_token()}",
             "Accept": "application/json",
         }
+
+    def _api_url(
+        self,
+        api_group: str,
+        relative_path: str,
+        api_version: str,
+    ) -> str:
+        return (
+            f"{self.api_base_url_for(api_group, api_version)}/"
+            f"{relative_path.lstrip('/')}"
+        )
+
+    def _decode_optional_object(
+        self,
+        response: requests.Response,
+        operation: str,
+    ) -> dict[str, Any] | None:
+        if not response.content:
+            return None
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise BusinessCentralApiError(
+                f"Business Central {operation} returned invalid JSON."
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise BusinessCentralApiError(
+                f"Business Central {operation} returned a non-object JSON payload."
+            )
+
+        return payload
 
     def get_api_json(
         self,
@@ -154,8 +182,7 @@ class BusinessCentralClient:
         api_version: str = "v1.0",
     ) -> dict[str, Any]:
         response = requests.get(
-            f"{self.api_base_url_for(api_group, api_version)}/"
-            f"{relative_path.lstrip('/')}",
+            self._api_url(api_group, relative_path, api_version),
             headers=self.headers(),
             timeout=self.timeout_seconds,
         )
@@ -167,73 +194,26 @@ class BusinessCentralClient:
                 f"{response.text[:500]}"
             )
 
-        payload = response.json()
-
-        if not isinstance(payload, dict):
+        payload = self._decode_optional_object(response, "GET")
+        if payload is None:
             raise BusinessCentralApiError(
-                "Business Central returned a non-object JSON payload."
+                "Business Central GET returned an empty response."
             )
-
         return payload
 
-    def get_json(
+    def post_api_json(
         self,
-        relative_path: str,
-    ) -> dict[str, Any]:
-        return self.get_api_json(
-            "packagingQuotes",
-            relative_path,
-        )
-
-    def patch_json(
-        self,
-        relative_path: str,
-        *,
-        body: dict[str, Any],
-        etag: str,
-    ) -> dict[str, Any] | None:
-        headers = self.headers()
-        headers["If-Match"] = etag
-        headers["Content-Type"] = "application/json"
-
-        response = requests.patch(
-            f"{self.api_base_url}/{relative_path.lstrip('/')}",
-            headers=headers,
-            json=body,
-            timeout=self.timeout_seconds,
-        )
-
-        if response.status_code >= 400:
-            raise BusinessCentralApiError(
-                "Business Central PATCH failed "
-                f"with HTTP {response.status_code}: "
-                f"{response.text[:500]}"
-            )
-
-        if not response.content:
-            return None
-
-        payload = response.json()
-
-        if not isinstance(payload, dict):
-            raise BusinessCentralApiError(
-                "Business Central PATCH returned "
-                "a non-object JSON payload."
-            )
-
-        return payload
-
-    def post_json(
-        self,
+        api_group: str,
         relative_path: str,
         *,
         body: dict[str, Any] | None = None,
+        api_version: str = "v1.0",
     ) -> dict[str, Any] | None:
         headers = self.headers()
         headers["Content-Type"] = "application/json"
 
         response = requests.post(
-            f"{self.api_base_url}/{relative_path.lstrip('/')}",
+            self._api_url(api_group, relative_path, api_version),
             headers=headers,
             json={} if body is None else body,
             timeout=self.timeout_seconds,
@@ -246,15 +226,65 @@ class BusinessCentralClient:
                 f"{response.text[:500]}"
             )
 
-        if not response.content:
-            return None
+        return self._decode_optional_object(response, "POST")
 
-        payload = response.json()
+    def patch_api_json(
+        self,
+        api_group: str,
+        relative_path: str,
+        *,
+        body: dict[str, Any],
+        etag: str,
+        api_version: str = "v1.0",
+    ) -> dict[str, Any] | None:
+        headers = self.headers()
+        headers["Content-Type"] = "application/json"
+        headers["If-Match"] = etag
 
-        if not isinstance(payload, dict):
+        response = requests.patch(
+            self._api_url(api_group, relative_path, api_version),
+            headers=headers,
+            json=body,
+            timeout=self.timeout_seconds,
+        )
+
+        if response.status_code >= 400:
             raise BusinessCentralApiError(
-                "Business Central POST returned "
-                "a non-object JSON payload."
+                "Business Central PATCH failed "
+                f"with HTTP {response.status_code}: "
+                f"{response.text[:500]}"
             )
 
-        return payload
+        return self._decode_optional_object(response, "PATCH")
+
+    def get_json(
+        self,
+        relative_path: str,
+    ) -> dict[str, Any]:
+        return self.get_api_json("packagingQuotes", relative_path)
+
+    def patch_json(
+        self,
+        relative_path: str,
+        *,
+        body: dict[str, Any],
+        etag: str,
+    ) -> dict[str, Any] | None:
+        return self.patch_api_json(
+            "packagingQuotes",
+            relative_path,
+            body=body,
+            etag=etag,
+        )
+
+    def post_json(
+        self,
+        relative_path: str,
+        *,
+        body: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        return self.post_api_json(
+            "packagingQuotes",
+            relative_path,
+            body=body,
+        )

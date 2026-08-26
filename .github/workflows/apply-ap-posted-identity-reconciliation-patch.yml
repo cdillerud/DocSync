@@ -1,0 +1,31 @@
+name: Apply AP Posted Identity Reconciliation Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/scripts/apply_ap_posted_identity_reconciliation_patch.py'
+      - '.github/workflows/apply-ap-posted-identity-reconciliation-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+      - run: python backend/scripts/apply_ap_posted_identity_reconciliation_patch.py
+      - name: Verify intended file only
+        run: test "$(git diff --name-only)" = 'backend/services/ap_auto_post_service.py'
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/services/ap_auto_post_service.py
+          git commit -m 'parity: reconcile AP to real posted invoice identity'
+          git push origin HEAD:feature/square9-parity-systemid-gate

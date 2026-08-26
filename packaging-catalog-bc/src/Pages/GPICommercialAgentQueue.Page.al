@@ -1,7 +1,7 @@
-page 71122 "GPI Commercial Agent Queue"
+page 71122 "GPI Comm Agent Queue"
 {
     PageType = List;
-    SourceTable = "GPI Commercial Agent Queue";
+    SourceTable = "GPI Comm Agent Queue";
     ApplicationArea = All;
     UsageCategory = Administration;
     Caption = 'Commercial Agent Queue';

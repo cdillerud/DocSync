@@ -24,6 +24,20 @@ def test_safe_ap_warehouse_scope_starts(monkeypatch):
     validate_startup_secrets()
 
 
+def test_missing_ap_auto_post_flag_is_forced_off(monkeypatch):
+    _safe_env(monkeypatch)
+    monkeypatch.delenv("AUTO_POST_ENABLED", raising=False)
+    validate_startup_secrets()
+    assert __import__("os").environ["AUTO_POST_ENABLED"] == "false"
+
+
+def test_explicit_ap_auto_post_can_be_enabled_for_controlled_uat(monkeypatch):
+    _safe_env(monkeypatch)
+    monkeypatch.setenv("AUTO_POST_ENABLED", "true")
+    validate_startup_secrets()
+    assert __import__("os").environ["AUTO_POST_ENABLED"] == "true"
+
+
 def test_sales_auto_create_must_be_explicitly_false(monkeypatch):
     _safe_env(monkeypatch)
     monkeypatch.delenv("AUTO_CREATE_SALES_ORDER_ENABLED")

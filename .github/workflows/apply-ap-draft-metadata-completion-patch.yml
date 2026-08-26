@@ -1,0 +1,31 @@
+name: Apply AP Draft Metadata Completion Patch
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/scripts/apply_ap_draft_metadata_completion_patch.py'
+      - '.github/workflows/apply-ap-draft-metadata-completion-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/square9-parity-systemid-gate
+          fetch-depth: 0
+      - run: python backend/scripts/apply_ap_draft_metadata_completion_patch.py
+      - name: Verify intended file only
+        run: test "$(git diff --name-only)" = 'backend/routers/gpi_integration.py'
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- backend/routers/gpi_integration.py
+          git commit -m 'parity: sync SharePoint metadata after AP draft creation'
+          git push origin HEAD:feature/square9-parity-systemid-gate

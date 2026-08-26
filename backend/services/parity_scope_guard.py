@@ -54,6 +54,10 @@ ADMIN_ONLY_PREFIXES = (
     "/api/automation-rules",
     "/api/vendor-extraction-profiles",
     "/api/freight-routing",
+    # Pilot controls can send mail/re-ingest and are not part of the parity operator surface.
+    "/api/pilot",
+    # Cache rebuilds are control-plane operations; read/status endpoints stay authenticated below.
+    "/api/cache/sync",
     # Auto-clear policy changes and state-changing/batch routing are control-plane operations.
     "/api/auto-clear/config/threshold",
     "/api/auto-clear/apply",
@@ -92,6 +96,7 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/documents",
     "/api/workflows",
     "/api/ap-review",
+    "/api/ap-validation",
     "/api/human-routing-review",
     "/api/auto-clear",
     "/api/readiness",
@@ -100,6 +105,11 @@ AUTHENTICATED_ONLY_PREFIXES = (
     "/api/label-corrections",
     "/api/vendor-resolution",
     "/api/vendors",
+    "/api/aliases",
+    "/api/events",
+    "/api/cache",
+    "/api/bc/write-guard",
+    "/api/bc/environment-status",
     "/api/bc-sandbox",
     "/api/gpi-integration/purchase-invoices",
     "/api/gpi-integration/factbox-ui",

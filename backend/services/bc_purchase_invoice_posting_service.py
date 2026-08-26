@@ -2,9 +2,9 @@
 
 Creating a ``purchaseInvoices`` resource creates/reuses the invoice document; it
 is not proof that the invoice was posted. This module owns the explicit BC v2.0
-bound ``Microsoft.NAV.post`` action so callers may only report ``Posted`` after
-Business Central accepts the posting request or a read-only posted-state check
-proves the prior request actually succeeded.
+bound ``Microsoft.NAV.post`` action and reconciles the aggregate API identity to
+the real posted ``Purch. Inv. Header`` SystemId before callers may report a
+fully-ready Posted state.
 """
 
 from typing import Dict, Any
@@ -23,6 +23,9 @@ from services.gpi_integration_service import (
     _resolve_company_id,
 )
 from services.business_central_service import bc_http_with_retry, BCRetriesExhausted
+from services.bc_posted_purchase_invoice_identity_service import (
+    resolve_posted_purchase_invoice_identity,
+)
 
 
 def _invoice_base_url(company_id: str, system_id: str) -> str:
@@ -33,12 +36,7 @@ def _invoice_base_url(company_id: str, system_id: str) -> str:
 
 
 async def _verify_posted_by_pdf(client, base_url: str, headers: Dict[str, str]) -> bool:
-    """Read-only proof that BC considers the invoice posted.
-
-    Business Central documents that the purchase-invoice ``pdfDocument``
-    navigation is unsupported for unposted invoices. A successful read is
-    therefore a strong recovery check after an ambiguous/lost post response.
-    """
+    """Read-only proof that BC considers the invoice posted."""
     try:
         response = await client.get(f"{base_url}/pdfDocument", headers=headers)
         return response.status_code == 200
@@ -47,12 +45,12 @@ async def _verify_posted_by_pdf(client, base_url: str, headers: Dict[str, str]) 
 
 
 async def post_purchase_invoice_system_id(bc_system_id: str) -> Dict[str, Any]:
-    """Post one existing BC Purchase Invoice in the configured write environment.
+    """Post one existing BC Purchase Invoice and reconcile its real posted identity.
 
-    Missing identity fails before any network call. Production targeting remains
-    blocked by the central write guard. Transient HTTP failures use bounded retry.
-    If the post response is ambiguous, a read-only posted-state probe prevents a
-    successfully posted invoice from being treated as failed or recreated.
+    ``bc_system_id`` is the v2 purchaseInvoices aggregate/draft API identity. It
+    is intentionally *not* returned as the table-122 source SystemId. After BC
+    confirms posting, the read-only automate API maps this apiId to the actual
+    posted Purchase Invoice Header ``id`` and final ``number``.
     """
     system_id = str(bc_system_id or "").strip()
     if not system_id:
@@ -83,8 +81,6 @@ async def post_purchase_invoice_system_id(bc_system_id: str) -> Dict[str, Any]:
             response = await bc_http_with_retry(_send, op="post_purchase_invoice")
             retry_meta = getattr(response, "extensions", {}).get("bc_retry", {})
         except BCRetriesExhausted as exc:
-            # The server may have committed the post while the client lost every
-            # response. Prove posted state before surfacing a retryable failure.
             recovery_verified = await _verify_posted_by_pdf(client, base_url, headers)
             if not recovery_verified:
                 raise
@@ -95,9 +91,6 @@ async def post_purchase_invoice_system_id(bc_system_id: str) -> Dict[str, Any]:
             }
 
         if response is not None and response.status_code not in (200, 204):
-            # A repeat post can be rejected because the first attempt already
-            # succeeded. Confirm actual state before treating the rejection as a
-            # failure; never infer success from error text alone.
             recovery_verified = await _verify_posted_by_pdf(client, base_url, headers)
             if not recovery_verified:
                 detail = response.text[:1000] if response.text else ""
@@ -105,10 +98,18 @@ async def post_purchase_invoice_system_id(bc_system_id: str) -> Dict[str, Any]:
                     f"BC Purchase Invoice post failed: HTTP {response.status_code}: {detail}"
                 )
 
+    # Critical parity boundary: the API aggregate/draft id may differ from the
+    # actual posted Purch. Inv. Header SystemId. Never label table 122 ready until
+    # Microsoft automate API gives us the real posted identity.
+    posted_identity = await resolve_posted_purchase_invoice_identity(system_id)
+
     return {
         "success": True,
         "posted": True,
-        "bc_system_id": system_id,
+        "bc_api_id": system_id,
+        "posted_system_id": posted_identity["posted_system_id"],
+        "posted_number": posted_identity["posted_number"],
+        "identity_resolution_attempts": posted_identity.get("attempts", 1),
         "http_status": response.status_code if response is not None else None,
         "environment": BC_WRITE_ENVIRONMENT,
         "retry": retry_meta,

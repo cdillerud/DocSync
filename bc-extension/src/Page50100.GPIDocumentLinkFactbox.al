@@ -1,7 +1,7 @@
 /// <summary>
 /// Page 50100 "GPI Document Link Factbox"
 /// Native CardPart factbox for BC SaaS — no control add-ins.
-/// Exact-record reads and uploads carry immutable BC SystemId.
+/// Exact-record reads and uploads carry immutable BC SystemId and Hub M2M auth.
 /// </summary>
 page 50100 "GPI Document Link Factbox"
 {
@@ -50,7 +50,7 @@ page 50100 "GPI Document Link Factbox"
             {
                 ApplicationArea = All;
                 Caption = 'View All';
-                ToolTip = 'Open linked documents in GPI Hub (browser).';
+                ToolTip = 'Open linked documents in the authenticated GPI Hub browser experience.';
                 Image = ViewDocumentLine;
 
                 trigger OnAction()
@@ -205,6 +205,7 @@ page 50100 "GPI Document Link Factbox"
     local procedure FetchDocumentLinks()
     var
         Client: HttpClient;
+        GPILinkMgt: Codeunit "GPI Document Link Mgt";
         Response: HttpResponseMessage;
         ResponseText: Text;
         RequestUrl: Text;
@@ -229,9 +230,15 @@ page 50100 "GPI Document Link Factbox"
 
         RequestUrl := BuildRecordUrl('/gpi-integration/document-links/');
         RequestUrl := AddIdentityQuery(RequestUrl);
+        GPILinkMgt.ConfigureHubClient(Client);
 
         if not Client.Get(RequestUrl, Response) then begin
             DocumentCountText := '-';
+            exit;
+        end;
+
+        if Response.HttpStatusCode() = 401 then begin
+            DocumentCountText := '!';
             exit;
         end;
 

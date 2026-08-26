@@ -1,6 +1,18 @@
 name: Square9 AP FactBox SystemId Gate
 
 on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/services/document_link_visibility_service.py'
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/tests/test_document_link_systemid_visibility.py'
+      - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
+      - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
+      - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/build.sh'
+      - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
   pull_request:
     paths:
       - 'backend/services/document_link_visibility_service.py'
@@ -9,6 +21,7 @@ on:
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
       - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
       - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/build.sh'
       - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
   workflow_dispatch:
 
@@ -32,6 +45,9 @@ jobs:
       - name: Run immutable identity selector tests
         working-directory: backend
         run: pytest -q tests/test_document_link_systemid_visibility.py
+
+      - name: Validate BC extension structure
+        run: bash bc-extension/build.sh
 
       - name: Guardrail - Hub visibility binds immutable SystemId when supplied
         run: |

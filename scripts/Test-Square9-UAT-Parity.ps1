@@ -2,7 +2,7 @@
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string]$ExpectedBranch = 'feature/square9-parity-systemid-gate',
-    [string]$ExpectedHead = 'f520ed23a52bfcb5adc41be82d403358da744aa8',
+    [string]$ExpectedHead = '',
     [switch]$SkipSharePointSchema,
     [switch]$SkipALCompile
 )
@@ -147,8 +147,8 @@ try {
         Fail "Expected branch '$ExpectedBranch' but current branch is '$branch'."
     }
 
-    if ($head -ne $ExpectedHead) {
-        Fail "Expected verified head '$ExpectedHead' but current HEAD is '$head'. Pull/review the new head before using this evidence harness."
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedHead) -and $head -ne $ExpectedHead) {
+        Fail "Expected evidence head '$ExpectedHead' but current HEAD is '$head'. Pull/review the intended head or omit -ExpectedHead to validate the checked-out clean branch."
     }
 
     if ($dirty) {

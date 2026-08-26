@@ -13,6 +13,7 @@ from commercial_agent_service import (
     build_low_margin_request,
 )
 from commercial_persistence import persist_evaluation
+from commercial_screening import screen_request
 from inbound_auth import require_inbound_principal
 
 
@@ -65,11 +66,24 @@ def persistence_enabled() -> bool:
 
 
 def _evaluate_or_prepare(request):
+    screening = screen_request(request)
+    screening_payload = screening.to_dict()
+
+    if not screening.should_evaluate:
+        return {
+            "mode": "screenedOut",
+            "aiProviderConfigured": ai_provider_configured(),
+            "persistenceEnabled": persistence_enabled(),
+            "screening": screening_payload,
+            "evaluationRequest": request.model_dump(mode="json"),
+        }
+
     if not ai_provider_configured():
         return {
             "mode": "prepared",
             "aiProviderConfigured": False,
             "persistenceEnabled": persistence_enabled(),
+            "screening": screening_payload,
             "evaluationRequest": request.model_dump(mode="json"),
         }
 
@@ -85,6 +99,7 @@ def _evaluate_or_prepare(request):
         "mode": "evaluated",
         "aiProviderConfigured": True,
         "persistenceEnabled": persistence_enabled(),
+        "screening": screening_payload,
         "evaluationRequest": request.model_dump(mode="json"),
         "evaluationResult": result.model_dump(mode="json"),
         "persistence": persistence,

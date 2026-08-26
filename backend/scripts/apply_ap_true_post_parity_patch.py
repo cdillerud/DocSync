@@ -33,7 +33,6 @@ if ap.count(old_also_set_tail) != 1:
     raise SystemExit(f"AP posted writeback: expected 1 match, found {ap.count(old_also_set_tail)}")
 ap = ap.replace(old_also_set_tail, new_also_set_tail, 1)
 
-# Make the operator-facing return use the exact identity variables too.
 ap = ap.replace('''                "bc_record_no": result.get("bc_record_no"),\n                "bc_system_id": result.get("bc_system_id"),\n''', '''                "bc_record_no": bc_record_no,\n                "bc_system_id": bc_system_id,\n''', 1)
 
 for needle in (
@@ -46,3 +45,5 @@ for needle in (
 
 ap_path.write_text(ap, encoding="utf-8")
 print("PASS: AP true-post + Purchase Invoice identity patch applied")
+
+# Triggered after workflow creation so GitHub evaluates this exact patch.

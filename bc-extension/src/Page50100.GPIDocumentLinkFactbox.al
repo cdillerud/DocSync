@@ -119,10 +119,6 @@ page 50100 "GPI Document Link Factbox"
         HasDocuments: Boolean;
         HasExactIdentity: Boolean;
 
-    /// <summary>
-    /// Backward-compatible context for document families not yet upgraded to
-    /// immutable record identity. Upload remains disabled for these contexts.
-    /// </summary>
     procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text)
     begin
         Clear(CurrentBCSystemId);
@@ -130,10 +126,6 @@ page 50100 "GPI Document Link Factbox"
         SetContextInternal(DocType, BCDocNo, VendorCtx);
     end;
 
-    /// <summary>
-    /// Exact-record context. Business Central SystemId is immutable and prevents
-    /// draft/posted records in the same entity family from colliding by number.
-    /// </summary>
     procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text; BCSystemId: Guid)
     begin
         CurrentBCSystemId := BCSystemId;
@@ -198,9 +190,20 @@ page 50100 "GPI Document Link Factbox"
             '&source_document_type=' + UriHelper.EscapeDataString(SourceDocumentType));
     end;
 
-    local procedure FetchDocumentLinks()
+    local procedure BuildRecordUrl(PathPrefix: Text): Text
     var
         GPILinkMgt: Codeunit "GPI Document Link Mgt";
+        UriHelper: Codeunit Uri;
+    begin
+        GPILinkMgt.Initialize();
+        exit(
+            GPILinkMgt.GetHubBaseUrl() + PathPrefix +
+            GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' +
+            UriHelper.EscapeDataString(CurrentBCDocumentNo));
+    end;
+
+    local procedure FetchDocumentLinks()
+    var
         Client: HttpClient;
         Response: HttpResponseMessage;
         ResponseText: Text;
@@ -224,9 +227,7 @@ page 50100 "GPI Document Link Factbox"
             exit;
         end;
 
-        GPILinkMgt.Initialize();
-        RequestUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/document-links/' +
-                      GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
+        RequestUrl := BuildRecordUrl('/gpi-integration/document-links/');
         RequestUrl := AddIdentityQuery(RequestUrl);
 
         if not Client.Get(RequestUrl, Response) then begin
@@ -266,17 +267,13 @@ page 50100 "GPI Document Link Factbox"
 
     local procedure OpenFactboxInBrowser()
     var
-        GPILinkMgt: Codeunit "GPI Document Link Mgt";
         FactboxUrl: Text;
     begin
         if CurrentBCDocumentNo = '' then
             exit;
 
-        GPILinkMgt.Initialize();
-        FactboxUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/factbox-ui/' +
-                      GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
+        FactboxUrl := BuildRecordUrl('/gpi-integration/factbox-ui/');
         FactboxUrl := AddIdentityQuery(FactboxUrl);
-
         Hyperlink(FactboxUrl);
     end;
 

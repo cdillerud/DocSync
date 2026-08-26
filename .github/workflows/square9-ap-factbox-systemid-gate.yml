@@ -74,8 +74,16 @@ jobs:
             echo "::error::FactBox browser UI drops BC SystemId"
             exit 1
           }
-          grep -q 'const LIST_API = API + "{identity_query}"' backend/routers/gpi_integration.py || {
+          grep -q 'const IDENTITY_QUERY = "{identity_query}"' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox iframe does not retain BC SystemId query"
+            exit 1
+          }
+          grep -q 'const LIST_API = API + IDENTITY_QUERY' backend/routers/gpi_integration.py || {
             echo "::error::FactBox iframe list read is not identity-bound"
+            exit 1
+          }
+          grep -q 'encodeURIComponent(id) + IDENTITY_QUERY' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox iframe delete is not identity-bound"
             exit 1
           }
           grep -q 'build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
@@ -88,6 +96,14 @@ jobs:
           }
           grep -q 'build_folder_match_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
             echo "::error::BC Drop folder reuse is not bound to resolved BC SystemId"
+            exit 1
+          }
+          grep -q 'build_hub_document_unlink_query' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox delete does not use the exact-record selector"
+            exit 1
+          }
+          grep -q 'doc_id_or_sp_item, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox delete drops BC SystemId before soft-delete"
             exit 1
           }
 

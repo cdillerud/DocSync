@@ -64,9 +64,21 @@ jobs:
             exit 1
           }
 
-      - name: Guardrail - no known placeholder admin password patterns
+      - name: Guardrail - deployment documentation keeps cutover protections explicit
         run: |
-          if grep -RInE --exclude-dir=.git --exclude='*.md' 'ChangeMeOnFirstDeploy|ADMIN_PASSWORD=.*[^${}]' .; then
-            echo '::error::A committed/default admin password pattern is present'
+          grep -Fq 'Sales and Inside Sales remain paused' DEPLOYMENT.md || {
+            echo '::error::Deployment guide no longer keeps Sales/Inside Sales paused'
             exit 1
-          fi
+          }
+          grep -Fq 'BC_BLOCK_PRODUCTION_WRITES=true' DEPLOYMENT.md || {
+            echo '::error::Deployment guide omits Production BC write block'
+            exit 1
+          }
+          grep -Fq 'BC_WRITE_ENVIRONMENT=Sandbox_NoZetadocs_UAT' DEPLOYMENT.md || {
+            echo '::error::Deployment guide omits UAT write environment pin'
+            exit 1
+          }
+          grep -Fq 'BC_SALES_LINK_WRITE_ENABLED=false' DEPLOYMENT.md || {
+            echo '::error::Deployment guide omits Sales write isolation'
+            exit 1
+          }

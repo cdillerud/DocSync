@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from decimal import Decimal
-from typing import Any
 from uuid import UUID, uuid4
 
+from candidate_screening import (
+    screen_cost_change,
+    screen_incorrect_item,
+    screen_low_margin,
+)
 from commercial_agent_contract import (
     CommercialEvaluationRequest,
     CommercialEvidence,
@@ -52,6 +55,18 @@ def build_low_margin_request(
     if current_margin_pct is not None and historical_margin_pct is not None:
         variance = float(current_margin_pct) - float(historical_margin_pct)
 
+    screening = screen_low_margin(
+        current_margin_pct=(
+            None if current_margin_pct is None else float(current_margin_pct)
+        ),
+        historical_margin_pct=(
+            None
+            if historical_margin_pct is None
+            else float(historical_margin_pct)
+        ),
+    )
+    context["screening"] = screening.to_dict()
+
     evidence = [
         CommercialEvidence(
             evidenceType="Margin",
@@ -92,6 +107,7 @@ def build_low_margin_request(
             "quantity": quantity,
             "lineAmount": line_amount,
             "currentMarginPct": current_margin_pct,
+            "deterministicCandidate": screening.should_evaluate,
         },
         context=context,
         evidence=evidence,
@@ -111,6 +127,11 @@ def build_cost_change_request(
     context = cost_change_context(item_no)
     change_pct = _pct_change(previous_unit_cost, current_unit_cost)
     source_key = source_key or item_no
+    screening = screen_cost_change(
+        previous_unit_cost=previous_unit_cost,
+        current_unit_cost=current_unit_cost,
+    )
+    context["screening"] = screening.to_dict()
 
     evidence = [
         CommercialEvidence(
@@ -144,6 +165,7 @@ def build_cost_change_request(
             "currentUnitCost": current_unit_cost,
             "costDelta": current_unit_cost - previous_unit_cost,
             "costChangePct": change_pct,
+            "deterministicCandidate": screening.should_evaluate,
         },
         context=context,
         evidence=evidence,
@@ -165,6 +187,19 @@ def build_incorrect_item_request(
 
     purchased_before = bool(context.get("candidatePurchasedBefore"))
     historical_count = int(context.get("candidateHistoricalLineCount") or 0)
+    candidates = similarity.get("candidates", [])
+    top_similarity_score = None
+    if candidates:
+        top_similarity_score = candidates[0].get("score")
+        if top_similarity_score is not None:
+            top_similarity_score = float(top_similarity_score)
+
+    screening = screen_incorrect_item(
+        candidate_purchased_before=purchased_before,
+        candidate_historical_line_count=historical_count,
+        top_similarity_score=top_similarity_score,
+    )
+    context["screening"] = screening.to_dict()
 
     evidence = [
         CommercialEvidence(
@@ -189,11 +224,13 @@ def build_incorrect_item_request(
             sourceSystem="Business Central",
             sourceRecordType="Packaging Catalog",
             sourceSystemId=source_system_id,
-            metric="PurchasedBefore",
-            currentValue=str(purchased_before).lower(),
+            metric="TopSimilarityScore",
+            currentValue=(
+                "" if top_similarity_score is None else str(top_similarity_score)
+            ),
             comparisonValue=None,
             variance=None,
-            unit=None,
+            unit="Percent",
             weight=90,
             explanation=(
                 "Deterministic Packaging Catalog similarity context for "
@@ -216,6 +253,8 @@ def build_incorrect_item_request(
         authoritativeFacts={
             "candidatePurchasedBefore": purchased_before,
             "candidateHistoricalLineCount": historical_count,
+            "topSimilarityScore": top_similarity_score,
+            "deterministicCandidate": screening.should_evaluate,
         },
         context=context,
         evidence=evidence,

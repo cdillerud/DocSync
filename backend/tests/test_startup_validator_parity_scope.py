@@ -5,10 +5,12 @@ from services.startup_validator import validate_startup_secrets
 
 def _safe_env(monkeypatch):
     values = {
+        "DEMO_MODE": "false",
         "JWT_SECRET": "a" * 64,
         "ADMIN_EMAIL": "hub-admin@gamerpackaging.com",
         "ADMIN_PASSWORD": "UAT-only-strong-placeholder-123!",
         "MONGO_URL": "mongodb://mongodb:27017",
+        "BC_HUB_API_KEY": "b" * 64,
         "AUTO_CREATE_SALES_ORDER_ENABLED": "false",
         "ENABLE_OUT_OF_SCOPE_SALES_ROUTES": "false",
         "SALES_EMAIL_POLLING_ENABLED": "false",
@@ -44,6 +46,21 @@ def test_sales_auto_create_must_be_explicitly_false(monkeypatch):
     monkeypatch.delenv("AUTO_CREATE_SALES_ORDER_ENABLED")
     with pytest.raises(RuntimeError, match="AUTO_CREATE_SALES_ORDER_ENABLED"):
         validate_startup_secrets()
+
+
+def test_non_demo_runtime_requires_bc_hub_machine_key(monkeypatch):
+    _safe_env(monkeypatch)
+    monkeypatch.delenv("BC_HUB_API_KEY")
+    with pytest.raises(RuntimeError, match="BC_HUB_API_KEY"):
+        validate_startup_secrets()
+
+
+def test_short_or_placeholder_machine_key_is_rejected(monkeypatch):
+    _safe_env(monkeypatch)
+    for value in ("changeme", "gpi-hub-key", "short"):
+        monkeypatch.setenv("BC_HUB_API_KEY", value)
+        with pytest.raises(RuntimeError, match="BC_HUB_API_KEY"):
+            validate_startup_secrets()
 
 
 @pytest.mark.parametrize(

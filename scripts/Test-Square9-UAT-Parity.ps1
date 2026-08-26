@@ -47,15 +47,27 @@ function Get-EnvFileValue {
     return $value
 }
 
+function Get-EffectiveSetting {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$EnvFile
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue.Trim()
+    }
+
+    return Get-EnvFileValue -Path $EnvFile -Name $Name
+}
+
 function Assert-TrueSetting {
     param(
         [string]$Name,
         [string]$EnvFile
     )
 
-    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
-    $fileValue = Get-EnvFileValue -Path $EnvFile -Name $Name
-    $effective = if (-not [string]::IsNullOrWhiteSpace($processValue)) { $processValue } else { $fileValue }
+    $effective = Get-EffectiveSetting -Name $Name -EnvFile $EnvFile
 
     if ([string]::IsNullOrWhiteSpace($effective)) {
         Write-Host "$Name : not explicitly set; application default must remain fail-closed" -ForegroundColor Yellow
@@ -72,12 +84,18 @@ function Assert-TrueSetting {
 function Find-Python {
     $python = Get-Command python -ErrorAction SilentlyContinue
     if ($python) {
-        return @($python.Source)
+        return [pscustomobject]@{
+            Command = $python.Source
+            PrefixArgs = @()
+        }
     }
 
     $py = Get-Command py -ErrorAction SilentlyContinue
     if ($py) {
-        return @($py.Source, '-3')
+        return [pscustomobject]@{
+            Command = $py.Source
+            PrefixArgs = @('-3')
+        }
     }
 
     Fail 'Python 3 was not found in PATH.'
@@ -165,9 +183,9 @@ Write-Section '2. PRODUCTION WRITE INTERLOCKS'
 Assert-TrueSetting -Name 'BC_BLOCK_PRODUCTION_WRITES' -EnvFile $EnvFile
 Assert-TrueSetting -Name 'SHAREPOINT_BLOCK_PRODUCTION_WRITES' -EnvFile $EnvFile
 
-$sharePointTarget = Get-EnvFileValue -Path $EnvFile -Name 'SHAREPOINT_TARGET'
-$sharePointPath = Get-EnvFileValue -Path $EnvFile -Name 'SHAREPOINT_SITE_PATH'
-$bcWriteEnvironment = Get-EnvFileValue -Path $EnvFile -Name 'BC_WRITE_ENVIRONMENT'
+$sharePointTarget = Get-EffectiveSetting -Name 'SHAREPOINT_TARGET' -EnvFile $EnvFile
+$sharePointPath = Get-EffectiveSetting -Name 'SHAREPOINT_SITE_PATH' -EnvFile $EnvFile
+$bcWriteEnvironment = Get-EffectiveSetting -Name 'BC_WRITE_ENVIRONMENT' -EnvFile $EnvFile
 
 if ($sharePointTarget -and $sharePointTarget.Trim().ToLowerInvariant() -eq 'production') {
     Fail 'SHAREPOINT_TARGET=production is not allowed in this UAT evidence harness.'
@@ -195,12 +213,8 @@ if (-not $SkipSharePointSchema) {
 
     Push-Location $BackendRoot
     try {
-        if ($python.Count -eq 1) {
-            & $python[0] $script
-        }
-        else {
-            & $python[0] $python[1] $script
-        }
+        $pythonArgs = @($python.PrefixArgs) + @($script)
+        & $python.Command @pythonArgs
         if ($LASTEXITCODE -ne 0) {
             Fail "Live SharePoint schema preflight returned exit code $LASTEXITCODE. Review missing/incompatible GPI columns above."
         }

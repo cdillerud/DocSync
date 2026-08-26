@@ -31,6 +31,9 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Spiro Cust Map" = RIMD,
         tabledata "GPI Spiro Opp Cache" = RIMD,
         tabledata "GPI Spiro Push Queue" = RIMD,
+        tabledata "GPI Commercial Exception" = RIMD,
+        tabledata "GPI Commercial Evidence" = RIMD,
+        tabledata "GPI Commercial Agent Queue" = RIMD,
         table "GPI Pack Product Doc" = X,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
@@ -46,6 +49,9 @@ permissionset 71000 "GPI PACK CATALOG"
         table "GPI Spiro Cust Map" = X,
         table "GPI Spiro Opp Cache" = X,
         table "GPI Spiro Push Queue" = X,
+        table "GPI Commercial Exception" = X,
+        table "GPI Commercial Evidence" = X,
+        table "GPI Commercial Agent Queue" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Prod Fact" = X,
@@ -88,6 +94,9 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Spiro Opp Lookup" = X,
         page "GPI Spiro Opp API" = X,
         page "GPI Spiro Push Q API" = X,
+        page "GPI Commercial Exceptions" = X,
+        page "GPI Commercial Evidence" = X,
+        page "GPI Commercial Agent Queue" = X,
         report "GPI Pack Quote Rpt" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
@@ -107,5 +116,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Quote Output Mgt" = X,
         codeunit "GPI Quote Email Mgt" = X,
         codeunit "GPI Spiro Link Mgt" = X,
-        codeunit "GPI Spiro Push Mgt" = X;
+        codeunit "GPI Spiro Push Mgt" = X,
+        codeunit "GPI Commercial Agent Mgt" = X;
 }

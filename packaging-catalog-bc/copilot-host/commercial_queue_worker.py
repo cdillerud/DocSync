@@ -168,16 +168,55 @@ def prepare_next_queue(
     }
 
 
+def _write_queue_snapshot(
+    queue: dict[str, Any],
+    *,
+    client: BusinessCentralClient,
+) -> dict[str, Any]:
+    queue_id = str(queue.get("id") or "").strip()
+    if not queue_id:
+        raise QueueWorkerError("Queue record is missing id.")
+
+    snapshot = client.get_api_json(
+        WRITE_GROUP,
+        f"commercialAgentQueueWrites({queue_id})",
+    )
+    if not isinstance(snapshot, dict):
+        raise QueueWorkerError("Queue write API returned an invalid record.")
+
+    snapshot_id = str(snapshot.get("id") or "").strip()
+    if snapshot_id != queue_id:
+        raise QueueWorkerError("Queue write API returned a different record id.")
+
+    expected_entry = int(queue.get("entryNo") or 0)
+    snapshot_entry = int(snapshot.get("entryNo") or 0)
+    if expected_entry and snapshot_entry != expected_entry:
+        raise QueueWorkerError("Queue write API returned a different queue entry.")
+
+    expected_status = _decode_odata_identifier(queue.get("status"))
+    snapshot_status = _decode_odata_identifier(snapshot.get("status"))
+    if expected_status and snapshot_status != expected_status:
+        raise QueueWorkerError(
+            "Queue state changed before write: "
+            f"expected {expected_status!r}, found {snapshot_status!r}."
+        )
+
+    etag = str(snapshot.get("@odata.etag") or "").strip()
+    if not etag:
+        raise QueueWorkerError("Queue write API record is missing @odata.etag.")
+
+    return snapshot
+
+
 def _patch_queue(
     queue: dict[str, Any],
     body: dict[str, Any],
     *,
     client: BusinessCentralClient,
 ) -> dict[str, Any] | None:
-    queue_id = str(queue.get("id") or "").strip()
-    etag = str(queue.get("@odata.etag") or "").strip()
-    if not queue_id or not etag:
-        raise QueueWorkerError("Queue record is missing id or @odata.etag.")
+    snapshot = _write_queue_snapshot(queue, client=client)
+    queue_id = str(snapshot.get("id") or "").strip()
+    etag = str(snapshot.get("@odata.etag") or "").strip()
     return client.patch_api_json(
         WRITE_GROUP,
         f"commercialAgentQueueWrites({queue_id})",

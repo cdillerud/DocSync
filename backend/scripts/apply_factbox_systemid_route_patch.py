@@ -70,3 +70,5 @@ for needle in (
 
 path.write_text(text, encoding="utf-8")
 print("PASS: FactBox SystemId route patch applied")
+
+# Explicit retrigger after the write-capable workflow exists.

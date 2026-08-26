@@ -1,4 +1,4 @@
-page 71124 "GPI Commercial Evid API"
+page 71124 "GPI Comm Evid API"
 {
     PageType = API;
     APIPublisher = 'gpi';
@@ -7,7 +7,7 @@ page 71124 "GPI Commercial Evid API"
     Caption = 'commercialEvidence';
     EntityName = 'commercialEvidence';
     EntitySetName = 'commercialEvidence';
-    SourceTable = "GPI Commercial Evidence";
+    SourceTable = "GPI Comm Evidence";
     ODataKeyFields = SystemId;
     InsertAllowed = false;
     ModifyAllowed = false;

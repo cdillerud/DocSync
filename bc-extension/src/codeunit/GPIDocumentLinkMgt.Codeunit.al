@@ -1,7 +1,7 @@
 /// <summary>
 /// Codeunit 50105 "GPI Document Link Mgt"
 /// Handles HTTP calls to the GPI Hub API for document link operations.
-/// Exact-record FactBox reads/uploads carry immutable BC SystemId.
+/// Exact-record FactBox reads are performed by page 50100 with BC SystemId.
 /// Legacy two-key read/unlink procedures are retained only to fail closed.
 /// </summary>
 codeunit 50105 "GPI Document Link Mgt"
@@ -100,7 +100,7 @@ codeunit 50105 "GPI Document Link Mgt"
             Error('Source document type is required before a document can be uploaded.');
 
         RequestUrl := GPIHubBaseUrl + '/gpi-integration/document-links/' +
-                      DocTypeToEntity(DocType) + '/' + BCDocumentNo + '/upload-raw' +
+                      DocTypeToEntity(DocType) + '/' + UriHelper.EscapeDataString(BCDocumentNo) + '/upload-raw' +
                       '?bc_system_id=' + UriHelper.EscapeDataString(Format(BCSystemId, 0, 4)) +
                       '&source_table_id=' + Format(SourceTableId) +
                       '&source_document_type=' + UriHelper.EscapeDataString(SourceDocumentType) +

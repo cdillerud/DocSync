@@ -113,6 +113,16 @@ async def retry_document(doc_id: str):
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    # AP post-success recovery states must be intercepted before ordinary retry
+    # bookkeeping. BC is already posted in both states, so generic retry must
+    # never rewrite them to Retrying, refresh PO identity, repost, or reupload.
+    from services.ap_posted_recovery_dispatch_service import (
+        dispatch_ap_posted_recovery_if_needed,
+    )
+    posted_recovery = await dispatch_ap_posted_recovery_if_needed(doc_id, db, doc)
+    if posted_recovery is not None:
+        return posted_recovery
+
     if not should_retry(doc):
         max_retries = DEFAULT_WORKFLOW_CONFIG.get("max_retries", 3)
         return {

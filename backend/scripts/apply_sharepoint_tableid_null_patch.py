@@ -17,3 +17,5 @@ if 'source_table_id = None' not in text:
 
 path.write_text(text, encoding="utf-8")
 print("PASS: absent SharePoint source table ID is now null")
+
+# Triggered after workflow creation so GitHub evaluates the one-time patch.

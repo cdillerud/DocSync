@@ -34,6 +34,7 @@ permissionset 71000 "GPI PACK CATALOG"
         tabledata "GPI Comm Exception" = RIMD,
         tabledata "GPI Comm Evidence" = RIMD,
         tabledata "GPI Comm Agent Queue" = RIMD,
+        tabledata "GPI Agent Setup" = RIMD,
         table "GPI Pack Product Doc" = X,
         table "GPI Pricing Guard" = X,
         table "GPI Pack Quote" = X,
@@ -52,6 +53,7 @@ permissionset 71000 "GPI PACK CATALOG"
         table "GPI Comm Exception" = X,
         table "GPI Comm Evidence" = X,
         table "GPI Comm Agent Queue" = X,
+        table "GPI Agent Setup" = X,
         page "GPI Pack Prod Card" = X,
         page "GPI Pack Products" = X,
         page "GPI Pack Prod Fact" = X,
@@ -104,6 +106,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Agent Ex API" = X,
         page "GPI Agent Evid API" = X,
         page "GPI Agent Queue API" = X,
+        page "GPI Agent Setup" = X,
         report "GPI Pack Quote Rpt" = X,
         query "GPI Comm Hist Sales" = X,
         query "GPI Item Cost Ctx" = X,
@@ -124,5 +127,6 @@ permissionset 71000 "GPI PACK CATALOG"
         codeunit "GPI Quote Email Mgt" = X,
         codeunit "GPI Spiro Link Mgt" = X,
         codeunit "GPI Spiro Push Mgt" = X,
-        codeunit "GPI Comm Agent Mgt" = X;
+        codeunit "GPI Comm Agent Mgt" = X,
+        codeunit "GPI Agent Trigger" = X;
 }

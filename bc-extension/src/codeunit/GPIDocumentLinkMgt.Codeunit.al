@@ -7,6 +7,8 @@
 /// </summary>
 codeunit 50105 "GPI Document Link Mgt"
 {
+    Permissions = tabledata "GPI Hub Setup" = R;
+
     var
         GPIHubBaseUrl: Text;
         MaxUploadSizeMB: Integer;
@@ -16,27 +18,31 @@ codeunit 50105 "GPI Document Link Mgt"
     /// Call this before any API operation.
     /// </summary>
     procedure Initialize()
-    var
-        SetupUrl: Text;
     begin
-        // Read from an application setup table or hardcode for now.
-        // In production, this should come from a GPI Hub Setup table.
-        SetupUrl := GetGPIHubUrl();
-        if SetupUrl = '' then
-            Error('GPI Hub URL is not configured. Go to GPI Hub Setup to set the API base URL.');
-        GPIHubBaseUrl := SetupUrl;
+        GPIHubBaseUrl := GetGPIHubUrl();
         MaxUploadSizeMB := 25;
     end;
 
     /// <summary>
-    /// Get the GPI Hub URL. Override this to read from a setup table.
+    /// Read the GPI Hub base URL from environment-specific Business Central setup.
+    /// The URL must use HTTPS and is normalized without a trailing slash.
     /// </summary>
     local procedure GetGPIHubUrl(): Text
+    var
+        HubSetup: Record "GPI Hub Setup";
+        HubUrl: Text;
     begin
-        // GPI Hub is externally exposed through nginx on port 80. nginx
-        // proxies /api/* to the FastAPI backend. Keep this URL free of a
-        // trailing slash because callers append /gpi-integration/...
-        exit('http://4.204.41.190/api');
+        if not HubSetup.Get('SETUP') then
+            Error('GPI Hub URL is not configured. Open GPI Hub Setup and enter the HTTPS API base URL.');
+
+        HubUrl := DelChr(HubSetup."Hub Base URL", '>', '/');
+        if HubUrl = '' then
+            Error('GPI Hub URL is not configured. Open GPI Hub Setup and enter the HTTPS API base URL.');
+
+        if LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://' then
+            Error('GPI Hub URL must use HTTPS. Open GPI Hub Setup and correct the API base URL.');
+
+        exit(HubUrl);
     end;
 
     /// <summary>

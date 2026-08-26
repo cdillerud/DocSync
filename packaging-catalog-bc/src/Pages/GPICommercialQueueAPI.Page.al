@@ -43,6 +43,8 @@ page 71125 "GPI Comm Queue API"
                 field(correlationId; Rec."Correlation ID") { Caption = 'Correlation ID'; }
                 field(idempotencyKey; Rec."Idempotency Key") { Caption = 'Idempotency Key'; }
                 field(requestedBy; Rec."Requested By") { Caption = 'Requested By'; }
+                field(previousValue; Rec."Previous Value") { Caption = 'Previous Value'; }
+                field(currentValue; Rec."Current Value") { Caption = 'Current Value'; }
             }
         }
     }

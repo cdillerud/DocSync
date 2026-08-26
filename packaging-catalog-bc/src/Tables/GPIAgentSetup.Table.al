@@ -74,6 +74,7 @@ table 71130 "GPI Agent Setup"
 
     trigger OnInsert()
     begin
+        EnsureSandbox();
         if "Primary Key" = '' then
             "Primary Key" := 'SETUP';
         Touch();
@@ -81,6 +82,7 @@ table 71130 "GPI Agent Setup"
 
     trigger OnModify()
     begin
+        EnsureSandbox();
         Touch();
     end;
 
@@ -88,5 +90,13 @@ table 71130 "GPI Agent Setup"
     begin
         "Last Modified At" := CurrentDateTime();
         "Last Modified By" := CopyStr(UserId(), 1, MaxStrLen("Last Modified By"));
+    end;
+
+    local procedure EnsureSandbox()
+    var
+        EnvironmentInformation: Codeunit "Environment Information";
+    begin
+        if not EnvironmentInformation.IsSandbox() then
+            Error('Commercial Agent Setup can only be changed in a Business Central sandbox environment.');
     end;
 }

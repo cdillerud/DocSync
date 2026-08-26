@@ -35,7 +35,9 @@ codeunit 71131 "GPI Agent Trigger"
             'PackagingProduct',
             Rec."No.",
             70,
-            IdempotencyKey);
+            IdempotencyKey,
+            xRec."Current Supplier Unit Cost",
+            Rec."Current Supplier Unit Cost");
     end;
 
     [EventSubscriber(ObjectType::Table, Database::"Sales Line", 'OnAfterInsertEvent', '', false, false)]
@@ -86,7 +88,9 @@ codeunit 71131 "GPI Agent Trigger"
             'SalesInvoice',
             Rec."Document No.",
             80,
-            IdempotencyKey);
+            IdempotencyKey,
+            Rec."Unit Cost (LCY)",
+            Rec."Unit Price");
     end;
 
     local procedure EnqueueIncorrectItem(SalesLine: Record "Sales Line")
@@ -125,7 +129,9 @@ codeunit 71131 "GPI Agent Trigger"
             'SalesOrder',
             SalesLine."Document No.",
             60,
-            IdempotencyKey);
+            IdempotencyKey,
+            0,
+            0);
     end;
 
     local procedure GetSetup(var Setup: Record "GPI Agent Setup"): Boolean

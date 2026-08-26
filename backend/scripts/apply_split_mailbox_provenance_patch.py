@@ -1,4 +1,5 @@
 """One-time exact patch to preserve parent mailbox provenance on split children."""
+# Triggered only after the workflow existed on the branch.
 from pathlib import Path
 
 path = Path("backend/services/batch_po_splitter.py")

@@ -1,9 +1,9 @@
-"""HTTP scope and administration barrier for Square9 AP/Warehouse parity.
+"""HTTP scope and access barrier for Square9 AP/Warehouse parity.
 
 Sales and Inside Sales remain paused until explicitly re-authorized after parity.
-The same middleware protects operational control-plane surfaces so credentials,
-feature flags, mailbox sources, migration controls, SharePoint administration,
-and developer tools cannot be used without an authenticated admin session.
+Operational control-plane surfaces are admin-only. Normal AP/Warehouse operator
+surfaces require an authenticated user so anonymous callers cannot mutate
+workflow/document state.
 """
 
 from __future__ import annotations
@@ -32,6 +32,12 @@ ADMIN_ONLY_PREFIXES = (
     "/api/dev",
     "/api/migration",
     "/api/sharepoint",
+)
+
+AUTHENTICATED_ONLY_PREFIXES = (
+    "/api/documents",
+    "/api/workflows",
+    "/api/ap-review",
 )
 
 
@@ -65,8 +71,20 @@ def is_admin_only_path(path: str, prefixes: Iterable[str] = ADMIN_ONLY_PREFIXES)
     return _path_matches(path, prefixes)
 
 
+def is_authenticated_only_path(path: str, prefixes: Iterable[str] = AUTHENTICATED_ONLY_PREFIXES) -> bool:
+    return _path_matches(path, prefixes)
+
+
+def _http_exception_response(exc: HTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
+
+
 class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
-    """Enforce AP/Warehouse scope and protect the operational control plane."""
+    """Enforce parity scope, admin control-plane auth, and operator auth."""
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -80,27 +98,33 @@ class ParityScopeGuardMiddleware(BaseHTTPMiddleware):
                 },
             )
 
+        # Import lazily to avoid creating auth/config cycles at module load.
         if is_admin_only_path(path):
-            # Import lazily to avoid creating an auth/config import cycle at module load.
             from services.auth_deps import require_admin
 
             try:
                 await require_admin(request)
             except HTTPException as exc:
-                return JSONResponse(
-                    status_code=exc.status_code,
-                    content={"detail": exc.detail},
-                    headers=getattr(exc, "headers", None),
-                )
+                return _http_exception_response(exc)
+
+        elif is_authenticated_only_path(path):
+            from services.auth_deps import get_current_user
+
+            try:
+                await get_current_user(request)
+            except HTTPException as exc:
+                return _http_exception_response(exc)
 
         return await call_next(request)
 
 
 __all__ = [
     "ADMIN_ONLY_PREFIXES",
+    "AUTHENTICATED_ONLY_PREFIXES",
     "OUT_OF_SCOPE_SALES_PREFIXES",
     "ParityScopeGuardMiddleware",
     "is_admin_only_path",
+    "is_authenticated_only_path",
     "is_out_of_scope_sales_path",
     "sales_routes_enabled",
 ]

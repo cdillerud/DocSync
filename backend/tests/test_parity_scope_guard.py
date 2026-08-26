@@ -19,6 +19,7 @@ def test_sales_route_families_are_blocked_by_default(monkeypatch):
         "/api/salesperson-dashboard/overview",
         "/api/inside-sales-pilot/poll-now",
         "/api/inside-sales-pilot/smart-reclassify",
+        "/api/bc/sales-orders/create",
     )
     for path in samples:
         assert is_out_of_scope_sales_path(path) is True, path
@@ -31,6 +32,8 @@ def test_ap_and_warehouse_paths_are_not_blocked():
         "/api/email-polling/status",
         "/api/documents/abc",
         "/api/health",
+        "/api/bc/companies",
+        "/api/bc/sales-orders",
     )
     for path in samples:
         assert is_out_of_scope_sales_path(path) is False, path

@@ -17,13 +17,48 @@ class FakeDb:
 
 
 @pytest.mark.asyncio
-async def test_non_post_success_state_is_not_intercepted(monkeypatch):
+async def test_normal_state_is_not_intercepted(monkeypatch):
     db = FakeDb()
     result = await svc.dispatch_ap_posted_recovery_if_needed(
         "doc-1", db, {"status": "ReadyForPost"}
     )
     assert result is None
     assert db.hub_workflow_runs.rows == []
+
+
+@pytest.mark.asyncio
+async def test_draft_needs_metadata_routes_only_to_draft_metadata_recovery(monkeypatch):
+    db = FakeDb()
+    called = {}
+
+    async def fake_draft(document_id, db_arg):
+        called["draft"] = document_id
+        return {
+            "recovered": True,
+            "drafted": True,
+            "status": "ReadyForPost",
+            "import_ready": True,
+            "bc_record_no": "PI-1001",
+            "bc_system_id": "draft-system-id",
+        }
+
+    import services.ap_draft_metadata_recovery_service as draft_svc
+    monkeypatch.setattr(draft_svc, "recover_draft_purchase_invoice_metadata", fake_draft)
+
+    result = await svc.dispatch_ap_posted_recovery_if_needed(
+        "doc-1", db, {"status": "DraftNeedsMetadata"}
+    )
+
+    assert called == {"draft": "doc-1"}
+    assert result["recovery_dispatched"] is True
+    assert result["recovery_type"] == "draft_metadata"
+    assert result["status"] == "ReadyForPost"
+    assert result["import_ready"] is True
+    row = db.hub_workflow_runs.rows[-1]
+    assert row["workflow_name"] == "ap_bc_preserving_recovery"
+    assert row["drafted"] is True
+    assert row["posted"] is False
+    assert row["status"] == "Completed"
 
 
 @pytest.mark.asyncio
@@ -103,7 +138,8 @@ async def test_recovery_failure_is_audited_and_propagates(monkeypatch):
         )
 
     row = db.hub_workflow_runs.rows[-1]
-    assert row["workflow_name"] == "ap_posted_recovery"
+    assert row["workflow_name"] == "ap_bc_preserving_recovery"
+    assert row["recovery_type"] == "posted_metadata"
     assert row["status"] == "Failed"
     assert row["posted"] is True
     assert row["import_ready"] is False

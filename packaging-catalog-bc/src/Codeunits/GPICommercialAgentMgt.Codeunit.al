@@ -1,9 +1,9 @@
-codeunit 71120 "GPI Commercial Agent Mgt"
+codeunit 71120 "GPI Comm Agent Mgt"
 {
-    procedure Enqueue(AgentType: Enum "GPI Commercial Agent Type"; SourceType: Text[50]; SourceSystemId: Guid; SourceKey: Text[100]; CustomerNo: Code[20]; ItemNo: Code[20]; DocumentType: Text[30]; DocumentNo: Code[20]; Priority: Integer; IdempotencyKey: Text[100]): Integer
+    procedure Enqueue(AgentType: Enum "GPI Comm Agent Type"; SourceType: Text[50]; SourceSystemId: Guid; SourceKey: Text[100]; CustomerNo: Code[20]; ItemNo: Code[20]; DocumentType: Text[30]; DocumentNo: Code[20]; Priority: Integer; IdempotencyKey: Text[100]): Integer
     var
-        Queue: Record "GPI Commercial Agent Queue";
-        ExistingQueue: Record "GPI Commercial Agent Queue";
+        Queue: Record "GPI Comm Agent Queue";
+        ExistingQueue: Record "GPI Comm Agent Queue";
     begin
         if IdempotencyKey <> '' then begin
             ExistingQueue.SetRange("Agent Type", AgentType);
@@ -35,9 +35,9 @@ codeunit 71120 "GPI Commercial Agent Mgt"
         exit(Queue."Entry No.");
     end;
 
-    procedure TryStartNext(var Queue: Record "GPI Commercial Agent Queue"): Boolean
+    procedure TryStartNext(var Queue: Record "GPI Comm Agent Queue"): Boolean
     var
-        Candidate: Record "GPI Commercial Agent Queue";
+        Candidate: Record "GPI Comm Agent Queue";
     begin
         Candidate.SetCurrentKey(Status, Priority, "Requested At");
         Candidate.SetRange(Status, Candidate.Status::Pending);
@@ -61,7 +61,7 @@ codeunit 71120 "GPI Commercial Agent Mgt"
         exit(false);
     end;
 
-    procedure CreateException(Queue: Record "GPI Commercial Agent Queue"; Severity: Integer; RiskScore: Decimal; ConfidenceScore: Decimal; Summary: Text[250]; Finding: Text[2048]; RecommendedAction: Text[2048]; AIModel: Text[100]; EvaluationVersion: Code[20]; var CommercialException: Record "GPI Commercial Exception")
+    procedure CreateException(Queue: Record "GPI Comm Agent Queue"; Severity: Integer; RiskScore: Decimal; ConfidenceScore: Decimal; Summary: Text[250]; Finding: Text[2048]; RecommendedAction: Text[2048]; AIModel: Text[100]; EvaluationVersion: Code[20]; var CommercialException: Record "GPI Comm Exception")
     begin
         CommercialException.Init();
         CommercialException."Agent Type" := Queue."Agent Type";
@@ -91,8 +91,8 @@ codeunit 71120 "GPI Commercial Agent Mgt"
 
     procedure AddEvidence(ExceptionEntryNo: Integer; EvidenceType: Text[50]; SourceSystem: Text[30]; SourceRecordType: Text[50]; SourceSystemId: Guid; Metric: Code[50]; CurrentValue: Text[250]; ComparisonValue: Text[250]; Variance: Decimal; Unit: Code[20]; Weight: Decimal; Explanation: Text[1024]; Provenance: Text[250])
     var
-        Evidence: Record "GPI Commercial Evidence";
-        CommercialException: Record "GPI Commercial Exception";
+        Evidence: Record "GPI Comm Evidence";
+        CommercialException: Record "GPI Comm Exception";
     begin
         CommercialException.Get(ExceptionEntryNo);
 
@@ -114,7 +114,7 @@ codeunit 71120 "GPI Commercial Agent Mgt"
         Evidence.Insert(true);
     end;
 
-    procedure MarkCompleted(var Queue: Record "GPI Commercial Agent Queue"; ExceptionEntryNo: Integer)
+    procedure MarkCompleted(var Queue: Record "GPI Comm Agent Queue"; ExceptionEntryNo: Integer)
     begin
         Queue.Status := Queue.Status::Completed;
         Queue."Completed At" := CurrentDateTime();
@@ -123,7 +123,7 @@ codeunit 71120 "GPI Commercial Agent Mgt"
         Queue.Modify(true);
     end;
 
-    procedure MarkFailed(var Queue: Record "GPI Commercial Agent Queue"; ErrorText: Text)
+    procedure MarkFailed(var Queue: Record "GPI Comm Agent Queue"; ErrorText: Text)
     begin
         Queue."Last Error" := CopyStr(ErrorText, 1, MaxStrLen(Queue."Last Error"));
         if Queue."Attempt Count" >= Queue."Max Attempts" then
@@ -135,7 +135,7 @@ codeunit 71120 "GPI Commercial Agent Mgt"
         Queue.Modify(true);
     end;
 
-    procedure RecordReview(var CommercialException: Record "GPI Commercial Exception"; NewStatus: Enum "GPI Commercial Ex Status"; Disposition: Text[50]; DecisionNote: Text[2048]; FalsePositive: Boolean)
+    procedure RecordReview(var CommercialException: Record "GPI Comm Exception"; NewStatus: Enum "GPI Comm Ex Status"; Disposition: Text[50]; DecisionNote: Text[2048]; FalsePositive: Boolean)
     begin
         CommercialException.Status := NewStatus;
         CommercialException.Disposition := Disposition;

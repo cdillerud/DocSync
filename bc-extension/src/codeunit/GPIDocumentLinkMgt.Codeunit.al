@@ -1,9 +1,8 @@
 /// <summary>
 /// Codeunit 50105 "GPI Document Link Mgt"
-/// Handles HTTP calls to the GPI Hub API for document link operations:
-///   - GET document links (list all linked docs for a BC record)
-///   - POST upload file (upload to SharePoint via Hub, create link)
-///   - DELETE document link (soft-delete via Hub)
+/// Handles HTTP calls to the GPI Hub API for document link operations.
+/// Exact-record FactBox reads are performed by page 50100 with BC SystemId.
+/// Legacy two-key read/unlink procedures are retained only to fail closed.
 /// </summary>
 codeunit 50105 "GPI Document Link Mgt"
 {
@@ -78,100 +77,18 @@ codeunit 50105 "GPI Document Link Mgt"
     end;
 
     /// <summary>
-    /// Fetch document links from the GPI Hub API and populate local records.
-    /// Merges Hub results with existing local GPI Document Link records.
+    /// Retired compatibility surface. Document number alone is not sufficient
+    /// immutable identity for parity reads. Page 50100 performs the active read
+    /// with BC SystemId in the query string.
     /// </summary>
     procedure RefreshDocumentLinks(DocType: Enum "GPI Doc Link Type"; BCDocumentNo: Code[20])
-    var
-        Client: HttpClient;
-        Response: HttpResponseMessage;
-        ResponseText: Text;
-        RequestUrl: Text;
-        JsonToken: JsonToken;
-        JsonArray: JsonArray;
-        JsonObj: JsonObject;
-        DocElement: JsonToken;
-        i: Integer;
-        DocLink: Record "GPI Document Link";
-        SPUrl: Text;
-        FileName: Text;
-        UploadedBy: Text;
-        SourceText: Text;
-        HubDocId: Text;
     begin
-        Initialize();
-        RequestUrl := GPIHubBaseUrl + '/gpi-integration/document-links/' +
-                      DocTypeToEntity(DocType) + '/' + BCDocumentNo;
-
-        if not Client.Get(RequestUrl, Response) then
-            exit; // Silent fail — local records still shown
-
-        if not Response.IsSuccessStatusCode() then
-            exit;
-
-        Response.Content().ReadAs(ResponseText);
-
-        // Parse response JSON
-        JsonObj.ReadFrom(ResponseText);
-        if not JsonObj.Get('documents', JsonToken) then
-            exit;
-
-        JsonArray := JsonToken.AsArray();
-
-        for i := 0 to JsonArray.Count() - 1 do begin
-            JsonArray.Get(i, DocElement);
-            JsonObj := DocElement.AsObject();
-
-            SPUrl := GetJsonText(JsonObj, 'sharepoint_web_url');
-            if SPUrl = '' then
-                SPUrl := GetJsonText(JsonObj, 'sharepoint_url');
-
-            if SPUrl <> '' then begin
-                // Check if this URL already exists in local table
-                DocLink.Reset();
-                DocLink.SetRange("Document Type", DocType);
-                DocLink.SetRange("BC Document No.", BCDocumentNo);
-                DocLink.SetFilter("SharePoint Url", '@' + SPUrl);
-                if not DocLink.FindFirst() then begin
-                    // Insert new record from Hub API response
-                    Clear(DocLink);
-                    DocLink.Init();
-                    DocLink."Document Type" := DocType;
-                    DocLink."BC Document No." := BCDocumentNo;
-                    DocLink."SharePoint Url" := CopyStr(SPUrl, 1, MaxStrLen(DocLink."SharePoint Url"));
-
-                    FileName := GetJsonText(JsonObj, 'file_name');
-                    DocLink."File Name" := CopyStr(FileName, 1, MaxStrLen(DocLink."File Name"));
-
-                    DocLink."SharePoint Drive Id" := CopyStr(
-                        GetJsonText(JsonObj, 'sharepoint_drive_id'), 1, MaxStrLen(DocLink."SharePoint Drive Id"));
-                    DocLink."SharePoint Item Id" := CopyStr(
-                        GetJsonText(JsonObj, 'sharepoint_item_id'), 1, MaxStrLen(DocLink."SharePoint Item Id"));
-
-                    UploadedBy := GetJsonText(JsonObj, 'uploaded_by');
-                    DocLink."Uploaded By" := CopyStr(UploadedBy, 1, MaxStrLen(DocLink."Uploaded By"));
-
-                    SourceText := GetJsonText(JsonObj, 'source');
-                    case SourceText of
-                        'hub':
-                            DocLink.Source := "GPI Doc Link Source"::GPIHub;
-                        'bc_drop':
-                            DocLink.Source := "GPI Doc Link Source"::BCDrop;
-                        'zetadocs_legacy':
-                            DocLink.Source := "GPI Doc Link Source"::ZetadocsLegacy;
-                        else
-                            DocLink.Source := "GPI Doc Link Source"::Manual;
-                    end;
-
-                    if DocLink.Insert(true) then;
-                end;
-            end;
-        end;
+        Error('BC SystemId is required for GPI document visibility. Use the SystemId-aware FactBox path.');
     end;
 
     /// <summary>
     /// Upload a file to SharePoint via the GPI Hub API.
-    /// The Hub handles SP upload, BC link creation, and hub_documents record.
+    /// The server resolves the exact BC SystemId before creating a SharePoint artifact.
     /// Returns true if successful.
     /// </summary>
     procedure UploadFile(
@@ -184,17 +101,12 @@ codeunit 50105 "GPI Document Link Mgt"
     var
         Client: HttpClient;
         MultipartContent: HttpContent;
-        FileContent: HttpContent;
-        UploadedByContent: HttpContent;
-        VendorContent: HttpContent;
         Response: HttpResponseMessage;
         ResponseText: Text;
         RequestUrl: Text;
         ContentHeaders: HttpHeaders;
         Boundary: Text;
         MultipartBody: TextBuilder;
-        TempBlob: Codeunit "Temp Blob";
-        OutStream: OutStream;
         Base64: Codeunit "Base64 Convert";
         FileBytes: Text;
         CRLF: Text[2];
@@ -207,26 +119,21 @@ codeunit 50105 "GPI Document Link Mgt"
         CRLF[1] := 13;
         CRLF[2] := 10;
 
-        // Build multipart body manually
-        // File part
         MultipartBody.Append('--' + Boundary + CRLF);
         MultipartBody.Append('Content-Disposition: form-data; name="file"; filename="' + FileName + '"' + CRLF);
         MultipartBody.Append('Content-Type: application/octet-stream' + CRLF);
         MultipartBody.Append(CRLF);
 
-        // Read file stream to base64 then to content
         FileBytes := Base64.ToBase64(FileInStream);
         MultipartBody.Append(FileBytes);
         MultipartBody.Append(CRLF);
 
-        // uploaded_by part
         MultipartBody.Append('--' + Boundary + CRLF);
         MultipartBody.Append('Content-Disposition: form-data; name="uploaded_by"' + CRLF);
         MultipartBody.Append(CRLF);
         MultipartBody.Append(CopyStr(UserId, 1, 50));
         MultipartBody.Append(CRLF);
 
-        // vendor_context part (if provided)
         if VendorContext <> '' then begin
             MultipartBody.Append('--' + Boundary + CRLF);
             MultipartBody.Append('Content-Disposition: form-data; name="vendor_context"' + CRLF);
@@ -235,10 +142,8 @@ codeunit 50105 "GPI Document Link Mgt"
             MultipartBody.Append(CRLF);
         end;
 
-        // Closing boundary
         MultipartBody.Append('--' + Boundary + '--' + CRLF);
 
-        // Set content
         MultipartContent.WriteFrom(MultipartBody.ToText());
         MultipartContent.GetHeaders(ContentHeaders);
         if ContentHeaders.Contains('Content-Type') then
@@ -276,37 +181,17 @@ codeunit 50105 "GPI Document Link Mgt"
     end;
 
     /// <summary>
-    /// Delete (soft-remove) a document link via the GPI Hub API.
-    /// The SharePoint file is preserved — only the link is removed.
+    /// Retired compatibility surface. Unlink must carry immutable BC SystemId,
+    /// which is enforced by the Hub FactBox DELETE route. No active BC action
+    /// calls this two-key procedure.
     /// </summary>
     procedure RemoveDocumentLink(
         DocType: Enum "GPI Doc Link Type";
         BCDocumentNo: Code[20];
         DocIdOrItemId: Text
     ): Boolean
-    var
-        Client: HttpClient;
-        Response: HttpResponseMessage;
-        ResponseText: Text;
-        RequestUrl: Text;
     begin
-        Initialize();
-        RequestUrl := GPIHubBaseUrl + '/gpi-integration/document-links/' +
-                      DocTypeToEntity(DocType) + '/' + BCDocumentNo + '/' + DocIdOrItemId;
-
-        if not Client.Delete(RequestUrl, Response) then begin
-            Message('Failed to connect to GPI Hub.');
-            exit(false);
-        end;
-
-        Response.Content().ReadAs(ResponseText);
-
-        if Response.IsSuccessStatusCode() then begin
-            Message('Link removed. SharePoint file preserved for audit.');
-            exit(true);
-        end;
-
-        Message('Failed to remove link (HTTP %1).', Response.HttpStatusCode());
+        Error('BC SystemId is required to remove a GPI document link. Use the SystemId-aware Hub FactBox path.');
         exit(false);
     end;
 
@@ -334,23 +219,5 @@ codeunit 50105 "GPI Document Link Mgt"
             exit(ResponseText);
 
         exit('Migration failed: ' + CopyStr(ResponseText, 1, 200));
-    end;
-
-    // === JSON Helpers ===
-
-    local procedure GetJsonText(JObj: JsonObject; FieldName: Text): Text
-    var
-        JToken: JsonToken;
-        JValue: JsonValue;
-    begin
-        if not JObj.Get(FieldName, JToken) then
-            exit('');
-        if JToken.IsValue() then begin
-            JValue := JToken.AsValue();
-            if JValue.IsNull() or JValue.IsUndefined() then
-                exit('');
-            exit(JValue.AsText());
-        end;
-        exit('');
     end;
 }

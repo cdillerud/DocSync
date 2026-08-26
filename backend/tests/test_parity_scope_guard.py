@@ -1,7 +1,7 @@
-import os
-
 from services.parity_scope_guard import (
+    ADMIN_ONLY_PREFIXES,
     OUT_OF_SCOPE_SALES_PREFIXES,
+    is_admin_only_path,
     is_out_of_scope_sales_path,
     sales_routes_enabled,
 )
@@ -39,6 +39,24 @@ def test_ap_and_warehouse_paths_are_not_blocked():
         assert is_out_of_scope_sales_path(path) is False, path
 
 
+def test_settings_surface_is_admin_only():
+    samples = (
+        "/api/settings",
+        "/api/settings/status",
+        "/api/settings/config",
+        "/api/settings/test-connection",
+        "/api/settings/features/create-draft-header",
+        "/api/settings/job-types/AP_Invoice",
+        "/api/settings/email-watcher",
+        "/api/settings/email-watcher/subscribe",
+    )
+    for path in samples:
+        assert is_admin_only_path(path) is True, path
+
+    for path in ("/api/health", "/api/documents/abc", "/api/gpi-integration/document-links/purchaseInvoices/PI100"):
+        assert is_admin_only_path(path) is False, path
+
+
 def test_sales_route_activation_requires_explicit_true(monkeypatch):
     for value in ("", "false", "0", "no", "off"):
         monkeypatch.setenv("ENABLE_OUT_OF_SCOPE_SALES_ROUTES", value)
@@ -49,5 +67,6 @@ def test_sales_route_activation_requires_explicit_true(monkeypatch):
         assert sales_routes_enabled() is True
 
 
-def test_prefix_list_has_no_broad_api_catchall():
+def test_prefix_lists_have_no_broad_api_catchall():
     assert "/api" not in OUT_OF_SCOPE_SALES_PREFIXES
+    assert "/api" not in ADMIN_ONLY_PREFIXES

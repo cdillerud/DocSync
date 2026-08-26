@@ -41,6 +41,9 @@ on:
       - 'backend/tests/test_migration_delivery.py'
       - 'bc-extension/src/Table50100.GPIDocumentLink.al'
       - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
       - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
       - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
       - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
@@ -265,13 +268,23 @@ jobs:
             exit 1
           fi
 
-      - name: Guardrail - BC FactBox uses deployed Hub proxy URL
+      - name: Guardrail - BC FactBox Hub endpoint is configured and HTTPS-only
         run: |
-          grep -q "exit('http://4.204.41.190/api');" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
-            echo "::error::BC FactBox Hub URL does not match deployed nginx /api proxy"
-            exit 1
-          }
-          if grep -n 'https://http://\|4\.204\.41\.190:8080' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al; then
-            echo "::error::Malformed or internal Hub URL present in BC FactBox code"
-            exit 1
-          fi
+          python - <<'PY'
+          from pathlib import Path
+          mgt = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          setup = Path('bc-extension/src/table/GPIHubSetup.Table.al').read_text(encoding='utf-8')
+          combined = (mgt + '\n' + setup).lower()
+          forbidden = ('http://4.204.41.190', "exit('http://", '4.204.41.190:8080')
+          for token in forbidden:
+              if token in combined:
+                  raise SystemExit(f'forbidden hard-coded/insecure Hub endpoint remains: {token}')
+          required = (
+              'Record "GPI Hub Setup"' in mgt,
+              "HubSetup.Get('SETUP')" in mgt,
+              "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" in mgt,
+              "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" in setup,
+          )
+          if not all(required):
+              raise SystemExit('BC FactBox Hub endpoint is not fail-closed, configurable, and HTTPS-only')
+          PY

@@ -7,6 +7,7 @@ on:
       - 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1'
       - 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
       - 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
+      - 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1'
       - '.github/workflows/parity-hardening-powershell-lint.yml'
   workflow_dispatch:
 
@@ -29,7 +30,8 @@ jobs:
             'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1',
             'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
             'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1',
-            'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
+            'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1',
+            'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1'
           )
 
           $Failed = $false
@@ -70,6 +72,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PublishScript = Get-Content -LiteralPath 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1' -Raw
           $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
+          $Recovery = Get-Content -LiteralPath 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1' -Raw
 
           foreach ($Marker in @(
             "Sandbox_08142026_GamerDocs",
@@ -86,7 +89,11 @@ jobs:
             throw 'Consolidated cutover gate is missing the Production hard-block marker.'
           }
 
-          if (($PublishScript + "`n" + $CutoverGate) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
+          if (-not $Recovery.Contains("Production     : NOT TOUCHED")) {
+            throw 'Bridge recovery build is missing Production safety marker.'
+          }
+
+          if (($PublishScript + "`n" + $CutoverGate + "`n" + $Recovery) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
             throw 'Production target assignment detected.'
           }
 
@@ -99,7 +106,8 @@ jobs:
           $Gate = Get-Content -LiteralPath 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1' -Raw
           $BurnDown = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1' -Raw
           $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
-          $Combined = $Gate + "`n" + $BurnDown + "`n" + $CutoverGate
+          $Recovery = Get-Content -LiteralPath 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1' -Raw
+          $Combined = $Gate + "`n" + $BurnDown + "`n" + $CutoverGate + "`n" + $Recovery
 
           foreach ($Marker in @('PARITY BLOCKER','PARITY RISK','VALIDATED PARITY')) {
             if (-not $Combined.Contains($Marker)) {
@@ -115,6 +123,17 @@ jobs:
           )) {
             if (-not $CutoverGate.Contains($Marker)) {
               throw "Cutover gate coverage marker missing: $Marker"
+            }
+          }
+
+          foreach ($Marker in @(
+            'StaleReferenceDateTime',
+            "StaleReferenceLabel := 'run start'",
+            'StaleThreshold := 60 * 60 * 1000',
+            'Scheduled Task ID'
+          )) {
+            if (-not $Recovery.Contains($Marker)) {
+              throw "First-batch recovery safety marker missing: $Marker"
             }
           }
 

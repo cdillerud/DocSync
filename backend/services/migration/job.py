@@ -25,6 +25,8 @@ from workflows.core.engine import (
 )
 from .sources import LegacyDocumentSource, LegacyDocument, LegacyDocumentMetadata
 from .workflow_initializer import WorkflowInitializer
+from .parity_identity import stage_migration_parity_fields, resolve_migration_identity
+from .delivery import deliver_migrated_document
 
 logger = logging.getLogger(__name__)
 
@@ -195,20 +197,23 @@ class MigrationJob:
         if mode == MigrationMode.REAL and self.db_collection is None:
             raise ValueError("db_collection is required for REAL mode migration")
         
-        # Get existing legacy IDs if skip_duplicates is enabled
-        existing_ids = set()
+        # Dedupe by source system + legacy ID. IDs are not globally unique
+        # across Square9 and Zetadocs, and the seen set is updated during the
+        # run so duplicates inside one export cannot be inserted twice.
+        existing_keys = set()
         if self.skip_duplicates and mode == MigrationMode.REAL:
-            existing_ids = await self._get_existing_legacy_ids()
-            logger.info(f"Found {len(existing_ids)} existing migrated documents")
+            existing_keys = await self._get_existing_legacy_keys()
+            logger.info(f"Found {len(existing_keys)} existing migrated source identities")
         
         # Process documents
         batch = []
         for legacy_doc in self.source.iter_documents(source_filter, doc_type_filter, limit):
             try:
+                source_key = self._legacy_identity_key(legacy_doc.metadata)
                 # Skip duplicates
-                if legacy_doc.metadata.legacy_id in existing_ids:
+                if self.skip_duplicates and source_key in existing_keys:
                     stats.record_skip(
-                        "Duplicate legacy_id",
+                        "Duplicate legacy source identity",
                         legacy_doc.metadata.legacy_id
                     )
                     continue
@@ -222,32 +227,62 @@ class MigrationJob:
                         legacy_doc.metadata.legacy_id
                     )
                     continue
+
+                # REAL migration resolves exact Production BC identity before a
+                # historical AP/PO record can be considered ImportReady. A
+                # failed lookup remains staged/recoverable and does not stop
+                # the bulk run or falsely report downstream readiness.
+                if mode == MigrationMode.REAL:
+                    gpi_doc = await resolve_migration_identity(
+                        gpi_doc,
+                        legacy_doc.metadata,
+                        gpi_doc.get("doc_type", "OTHER"),
+                    )
+                    # Migration is not successful until the historical body is
+                    # actually delivered to SharePoint with parity metadata.
+                    # Missing/unreadable bodies raise here, are recorded as
+                    # migration errors, and are not inserted or dedupe-reserved.
+                    gpi_doc = await deliver_migrated_document(
+                        self.source, legacy_doc, gpi_doc
+                    )
                 
+                # Reserve the accepted source identity immediately for the
+                # current run, preventing an identical source item from being
+                # delivered twice before the batch commits. A failed batch keeps
+                # this in-memory reservation only for this run; a future run
+                # rebuilds durable identities from MongoDB and can reconcile it.
+                if self.skip_duplicates:
+                    existing_keys.add(source_key)
+
                 # Collect sample for dry-run review
                 if len(sample_documents) < 20:
                     sample_documents.append(gpi_doc)
-                
-                # Record success stats
-                stats.record_success(
-                    gpi_doc.get("doc_type", "OTHER"),
-                    gpi_doc.get("source_system", "UNKNOWN"),
-                    gpi_doc.get("workflow_status", "unknown")
-                )
-                
-                # Batch for database insertion
+
                 if mode == MigrationMode.REAL:
-                    batch.append(gpi_doc)
-                    
+                    # Do not count success until MongoDB confirms persistence.
+                    batch.append({
+                        "doc": gpi_doc,
+                        "source_key": source_key,
+                        "legacy_id": legacy_doc.metadata.legacy_id,
+                    })
                     if len(batch) >= self.batch_size:
-                        await self._write_batch(batch)
+                        await self._commit_batch(batch, stats)
                         batch = []
+                else:
+                    stats.record_success(
+                        gpi_doc.get("doc_type", "OTHER"),
+                        gpi_doc.get("source_system", "UNKNOWN"),
+                        gpi_doc.get("workflow_status", "unknown")
+                    )
             
             except Exception as e:
                 stats.record_error(str(e), legacy_doc.metadata.legacy_id)
         
-        # Write remaining batch
+        # Commit the final partial batch through the same durable accounting
+        # boundary. Persistence failure is reconciled into per-document errors
+        # rather than escaping after earlier success counts were recorded.
         if mode == MigrationMode.REAL and batch:
-            await self._write_batch(batch)
+            await self._commit_batch(batch, stats)
         
         # Build result
         completed_at = datetime.now(timezone.utc)
@@ -344,6 +379,11 @@ class MigrationJob:
             "is_closed": metadata.is_closed,
             "is_reviewed": metadata.is_reviewed,
         }
+
+        # Stage normalized parity metadata for every migration mode. Legacy
+        # workflow state is preserved separately, but delivery readiness fails
+        # closed until exact BC identity is resolved where required.
+        gpi_doc = stage_migration_parity_fields(gpi_doc, metadata, doc_type)
         
         return gpi_doc
     
@@ -516,23 +556,75 @@ class MigrationJob:
         if metadata.extra:
             gpi_doc["legacy_extra"] = metadata.extra
     
-    async def _get_existing_legacy_ids(self) -> set:
-        """Get set of legacy_ids already in the database."""
+    @staticmethod
+    def _legacy_identity_key(metadata: LegacyDocumentMetadata) -> tuple[str, str]:
+        """Return stable source-scoped legacy identity for dedupe."""
+        return (
+            str(metadata.legacy_system or "UNKNOWN").strip().upper(),
+            str(metadata.legacy_id or "").strip(),
+        )
+
+    async def _get_existing_legacy_keys(self) -> set:
+        """Get source-scoped legacy identities already in the database."""
         if self.db_collection is None:
             return set()
         
         cursor = self.db_collection.find(
             {"is_migrated": True},
-            {"legacy_id": 1, "_id": 0}
+            {"legacy_system": 1, "source_system": 1, "legacy_id": 1, "_id": 0}
         )
         
-        ids = set()
+        keys = set()
         async for doc in cursor:
-            if doc.get("legacy_id"):
-                ids.add(doc["legacy_id"])
+            legacy_id = str(doc.get("legacy_id") or "").strip()
+            if not legacy_id:
+                continue
+            legacy_system = str(
+                doc.get("legacy_system") or doc.get("source_system") or "UNKNOWN"
+            ).strip().upper()
+            keys.add((legacy_system, legacy_id))
         
-        return ids
+        return keys
     
+    async def _commit_batch(
+        self,
+        batch: List[Dict[str, Any]],
+        stats: MigrationStats,
+    ) -> bool:
+        """Persist one delivered batch, then and only then record success.
+
+        SharePoint delivery occurs before this boundary. If MongoDB persistence
+        fails, every item in the affected batch is reported as an error and no
+        success is claimed. Source identities remain reserved only in memory for
+        the rest of this run, preventing a duplicate source row from immediately
+        re-uploading the same file. A future run reconstructs durable identities
+        from MongoDB and can reconcile the failed batch.
+        """
+        if not batch:
+            return True
+
+        docs = [entry["doc"] for entry in batch]
+        try:
+            await self._write_batch(docs)
+        except Exception as error:
+            message = (
+                "Mongo persistence failed after document delivery; "
+                "SharePoint delivery may already exist and must be reconciled: "
+                f"{error}"
+            )
+            for entry in batch:
+                stats.record_error(message, str(entry.get("legacy_id") or ""))
+            return False
+
+        for entry in batch:
+            doc = entry["doc"]
+            stats.record_success(
+                doc.get("doc_type", "OTHER"),
+                doc.get("source_system", "UNKNOWN"),
+                doc.get("workflow_status", "unknown"),
+            )
+        return True
+
     async def _write_batch(self, batch: List[Dict[str, Any]]) -> None:
         """Write a batch of documents to the database."""
         if not batch or self.db_collection is None:

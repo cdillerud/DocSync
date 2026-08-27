@@ -1,8 +1,7 @@
 /// <summary>
 /// Page 50100 "GPI Document Link Factbox"
 /// Native CardPart factbox for BC SaaS — no control add-ins.
-/// Fetches document links from the GPI Hub API via HttpClient.
-/// Opens the full document viewer in a browser tab via Hyperlink.
+/// Exact-record reads and uploads carry immutable BC SystemId and Hub M2M auth.
 /// </summary>
 page 50100 "GPI Document Link Factbox"
 {
@@ -51,7 +50,7 @@ page 50100 "GPI Document Link Factbox"
             {
                 ApplicationArea = All;
                 Caption = 'View All';
-                ToolTip = 'Open linked documents in GPI Hub (browser).';
+                ToolTip = 'Open linked documents in the authenticated GPI Hub browser experience.';
                 Image = ViewDocumentLine;
 
                 trigger OnAction()
@@ -75,8 +74,9 @@ page 50100 "GPI Document Link Factbox"
             {
                 ApplicationArea = All;
                 Caption = 'Upload File';
-                ToolTip = 'Upload a document to GPI Hub for this record.';
+                ToolTip = 'Upload a document to GPI Hub for this exact Business Central record.';
                 Image = Attach;
+                Enabled = HasExactIdentity;
 
                 trigger OnAction()
                 var
@@ -86,11 +86,22 @@ page 50100 "GPI Document Link Factbox"
                 begin
                     if CurrentBCDocumentNo = '' then
                         exit;
+                    if IsNullGuid(CurrentBCSystemId) then
+                        Error('BC SystemId is required before a document can be uploaded.');
 
                     if not UploadIntoStream('Select file to upload', '', 'All Files (*.*)|*.*', FileName, FileInStream) then
                         exit;
 
-                    if GPILinkMgt.UploadFile(CurrentDocType, CurrentBCDocumentNo, FileName, FileInStream, CurrentVendorContext) then
+                    if GPILinkMgt.UploadFile(
+                        CurrentDocType,
+                        CurrentBCDocumentNo,
+                        CurrentBCSystemId,
+                        GetSourceTableId(),
+                        GetSourceDocumentType(),
+                        FileName,
+                        FileInStream,
+                        CurrentVendorContext)
+                    then
                         FetchDocumentLinks();
                 end;
             }
@@ -100,13 +111,29 @@ page 50100 "GPI Document Link Factbox"
     var
         CurrentDocType: Enum "GPI Doc Link Type";
         CurrentBCDocumentNo: Code[20];
+        CurrentBCSystemId: Guid;
         CurrentVendorContext: Text;
         DocumentCountText: Text;
         LatestFileName: Text;
         LatestDateText: Text;
         HasDocuments: Boolean;
+        HasExactIdentity: Boolean;
 
     procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text)
+    begin
+        Clear(CurrentBCSystemId);
+        HasExactIdentity := false;
+        SetContextInternal(DocType, BCDocNo, VendorCtx);
+    end;
+
+    procedure SetContext(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text; BCSystemId: Guid)
+    begin
+        CurrentBCSystemId := BCSystemId;
+        HasExactIdentity := not IsNullGuid(CurrentBCSystemId);
+        SetContextInternal(DocType, BCDocNo, VendorCtx);
+    end;
+
+    local procedure SetContextInternal(DocType: Enum "GPI Doc Link Type"; BCDocNo: Code[20]; VendorCtx: Text)
     begin
         CurrentDocType := DocType;
         CurrentBCDocumentNo := BCDocNo;
@@ -114,10 +141,71 @@ page 50100 "GPI Document Link Factbox"
         FetchDocumentLinks();
     end;
 
-    local procedure FetchDocumentLinks()
+    local procedure GetSourceTableId(): Integer
+    begin
+        case CurrentDocType of
+            "GPI Doc Link Type"::"Purchase Invoice":
+                exit(38);
+            "GPI Doc Link Type"::"Posted Purchase Invoice":
+                exit(122);
+            "GPI Doc Link Type"::"Purchase Order":
+                exit(38);
+            "GPI Doc Link Type"::"Posted Sales Shipment":
+                exit(110);
+            else
+                exit(0);
+        end;
+    end;
+
+    local procedure GetSourceDocumentType(): Text
+    begin
+        case CurrentDocType of
+            "GPI Doc Link Type"::"Purchase Invoice":
+                exit('Purchase Invoice');
+            "GPI Doc Link Type"::"Posted Purchase Invoice":
+                exit('Posted Purchase Invoice');
+            "GPI Doc Link Type"::"Purchase Order":
+                exit('Purchase Order');
+            "GPI Doc Link Type"::"Posted Sales Shipment":
+                exit('Posted Sales Shipment');
+            else
+                exit('');
+        end;
+    end;
+
+    local procedure AddIdentityQuery(BaseUrl: Text): Text
+    var
+        UriHelper: Codeunit Uri;
+        SourceTableId: Integer;
+        SourceDocumentType: Text;
+    begin
+        if IsNullGuid(CurrentBCSystemId) then
+            exit(BaseUrl);
+
+        SourceTableId := GetSourceTableId();
+        SourceDocumentType := GetSourceDocumentType();
+        exit(
+            BaseUrl + '?bc_system_id=' + UriHelper.EscapeDataString(Format(CurrentBCSystemId, 0, 4)) +
+            '&source_table_id=' + Format(SourceTableId) +
+            '&source_document_type=' + UriHelper.EscapeDataString(SourceDocumentType));
+    end;
+
+    local procedure BuildRecordUrl(PathPrefix: Text): Text
     var
         GPILinkMgt: Codeunit "GPI Document Link Mgt";
+        UriHelper: Codeunit Uri;
+    begin
+        GPILinkMgt.Initialize();
+        exit(
+            GPILinkMgt.GetHubBaseUrl() + PathPrefix +
+            GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' +
+            UriHelper.EscapeDataString(CurrentBCDocumentNo));
+    end;
+
+    local procedure FetchDocumentLinks()
+    var
         Client: HttpClient;
+        GPILinkMgt: Codeunit "GPI Document Link Mgt";
         Response: HttpResponseMessage;
         ResponseText: Text;
         RequestUrl: Text;
@@ -140,12 +228,17 @@ page 50100 "GPI Document Link Factbox"
             exit;
         end;
 
-        GPILinkMgt.Initialize();
-        RequestUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/document-links/' +
-                      GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
+        RequestUrl := BuildRecordUrl('/gpi-integration/document-links/');
+        RequestUrl := AddIdentityQuery(RequestUrl);
+        GPILinkMgt.ConfigureHubClient(Client);
 
         if not Client.Get(RequestUrl, Response) then begin
             DocumentCountText := '-';
+            exit;
+        end;
+
+        if Response.HttpStatusCode() = 401 then begin
+            DocumentCountText := '!';
             exit;
         end;
 
@@ -181,16 +274,13 @@ page 50100 "GPI Document Link Factbox"
 
     local procedure OpenFactboxInBrowser()
     var
-        GPILinkMgt: Codeunit "GPI Document Link Mgt";
         FactboxUrl: Text;
     begin
         if CurrentBCDocumentNo = '' then
             exit;
 
-        GPILinkMgt.Initialize();
-        FactboxUrl := GPILinkMgt.GetHubBaseUrl() + '/gpi-integration/factbox-ui/' +
-                      GPILinkMgt.DocTypeToEntity(CurrentDocType) + '/' + CurrentBCDocumentNo;
-
+        FactboxUrl := BuildRecordUrl('/gpi-integration/factbox-ui/');
+        FactboxUrl := AddIdentityQuery(FactboxUrl);
         Hyperlink(FactboxUrl);
     end;
 

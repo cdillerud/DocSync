@@ -1,0 +1,83 @@
+name: Square9 Split Provenance Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/services/batch_po_splitter.py'
+      - 'backend/services/mailbox_provenance_service.py'
+      - 'backend/tests/test_mailbox_provenance_service.py'
+      - 'backend/tests/test_batch_po_splitter_replay.py'
+      - '.github/workflows/square9-split-provenance-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  split-provenance:
+    name: Split children preserve immutable mailbox provenance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio pypdf
+
+      - name: Run provenance and split replay tests
+        working-directory: backend
+        run: |
+          pytest -q \
+            tests/test_mailbox_provenance_service.py \
+            tests/test_batch_po_splitter_replay.py
+
+      - name: Guardrail - parent literal mailbox/message identity is projected
+        run: |
+          for token in \
+            '"source_mailbox_address": 1' \
+            '"source_mailbox_id": 1' \
+            '"source_mailbox_category": 1' \
+            '"source_graph_message_id": 1' \
+            '"source_internet_message_id": 1' \
+            '"source_attachment_id": 1'; do
+            grep -q "$token" backend/services/batch_po_splitter.py || {
+              echo "::error::Split parent projection drops provenance field $token"
+              exit 1
+            }
+          done
+
+      - name: Guardrail - split children persist parent observation
+        run: |
+          grep -q 'persist_mailbox_provenance(' backend/services/batch_po_splitter.py || {
+            echo '::error::Split child does not persist mailbox provenance'
+            exit 1
+          }
+          grep -q 'source="batch_split_parent"' backend/services/batch_po_splitter.py || {
+            echo '::error::Split provenance observation is not auditable as batch_split_parent'
+            exit 1
+          }
+          grep -q 'set_first_seen=not reused_existing' backend/services/batch_po_splitter.py || {
+            echo '::error::Reused split child can overwrite canonical first-seen provenance'
+            exit 1
+          }
+
+      - name: Guardrail - append-only mode cannot write canonical source
+        run: |
+          grep -q 'set_first_seen: bool = True' backend/services/mailbox_provenance_service.py || {
+            echo '::error::Mailbox provenance lacks explicit append-only mode'
+            exit 1
+          }
+          grep -q 'if set_first_seen:' backend/services/mailbox_provenance_service.py || {
+            echo '::error::Canonical provenance is not gated by set_first_seen'
+            exit 1
+          }
+
+      - name: Guardrail - destructive hash replay remains forbidden
+        run: |
+          if grep -q 'delete_many.*sha256_hash' backend/services/batch_po_splitter.py; then
+            echo '::error::Split replay can delete canonical children by content hash'
+            exit 1
+          fi

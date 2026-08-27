@@ -2301,14 +2301,72 @@ async def create_purchase_invoice_from_document(
         "document_link_method": link_result.get("method", "") if link_result else "",
     }
 
+    pi_writeback = {
+        "bc_purchase_invoice": bc_purchase_invoice,
+        "bc_purchase_invoice_no": result.get("bc_record_no", ""),
+        "updated_utc": now,
+    }
+    draft_identity = None
+    if result.get("success") and result.get("bc_record_no"):
+        from services.ap_purchase_invoice_identity_service import (
+            build_ap_purchase_invoice_identity_update,
+        )
+        draft_identity = build_ap_purchase_invoice_identity_update(
+            result.get("bc_record_no", ""),
+            result.get("bc_system_id", ""),
+            posted=False,
+        )
+        pi_writeback.update(draft_identity)
     await db.hub_documents.update_one(
         {"id": doc_id},
-        {"$set": {
-            "bc_purchase_invoice": bc_purchase_invoice,
-            "bc_purchase_invoice_no": result.get("bc_record_no", ""),
-            "updated_utc": now,
-        }}
+        {"$set": pi_writeback}
     )
+
+    # A BC draft is not a complete parity transition until the already-uploaded
+    # SharePoint item carries the same Purchase Invoice identity. Patch metadata
+    # only after preserving the BC draft/SystemId in Mongo so a Graph failure can
+    # never cause a later retry to create a second draft.
+    if draft_identity:
+        from services.sharepoint_parity_resync_service import (
+            resync_existing_sharepoint_parity_metadata,
+        )
+        try:
+            await resync_existing_sharepoint_parity_metadata(
+                doc_id, db, identity_update=draft_identity
+            )
+            result["metadata_synced"] = True
+            result["metadata_pending"] = False
+        except Exception as metadata_exc:
+            metadata_error = str(metadata_exc)
+            blocked_identity = dict(draft_identity)
+            blocked_identity.update({
+                "GPI_Status": "DraftNeedsMetadata",
+                "ImportReady": False,
+                "import_ready": False,
+                "delivery_status": "DraftNeedsMetadata",
+            })
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {
+                    **blocked_identity,
+                    "status": "DraftNeedsMetadata",
+                    "workflow_status": "draft_needs_metadata",
+                    "sharepoint_metadata_error": metadata_error,
+                    "draft_metadata_pending_since": datetime.now(timezone.utc).isoformat(),
+                    "updated_utc": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            # BC draft creation remains a success. Surface a distinct recoverable
+            # metadata state so no caller interprets this as permission to create
+            # another Purchase Invoice.
+            result["metadata_synced"] = False
+            result["metadata_pending"] = True
+            result["metadata_error"] = metadata_error
+            result["document_status"] = "DraftNeedsMetadata"
+            logger.error(
+                "[GPI Integration] Draft PI %s created/reused but SharePoint metadata sync failed for %s: %s",
+                result.get("bc_record_no", "?"), doc_id[:8], metadata_error
+            )
 
     # Emit event
     try:
@@ -2725,14 +2783,22 @@ def bc_entity_to_doc_type(entity: str) -> str:
 # =========================================================================
 
 @router.get("/factbox-ui/{bc_entity}/{bc_document_no}", response_class=HTMLResponse)
-async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
+async def factbox_ui(
+    bc_entity: str,
+    bc_document_no: str,
+    request: Request,
+    bc_system_id: str = "",
+):
     """Serve a self-contained HTML page for embedding in a BC control add-in iframe.
 
     Shows linked documents with upload/delete capability. All CSS/JS inline.
     Works cross-origin (BC SaaS domain calling the hub domain).
     """
-    # Use relative API path so JS works from any origin
+    # Use a relative base path so JS works from any origin. The exact BC
+    # SystemId is attached only to list reads; upload independently resolves
+    # record identity server-side before creating any SharePoint artifact.
     api_path = f"/api/gpi-integration/document-links/{bc_entity}/{bc_document_no}"
+    identity_query = f"?bc_system_id={bc_system_id}" if bc_system_id else ""
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -2941,6 +3007,8 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
 <script>
 (function() {{
   const API = "{api_path}";
+  const IDENTITY_QUERY = "{identity_query}";
+  const LIST_API = API + IDENTITY_QUERY;
   const listWrap = document.getElementById("docListWrap");
   const countEl  = document.getElementById("docCount");
   const dropzone = document.getElementById("dropzone");
@@ -2984,7 +3052,7 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
   async function loadDocs() {{
     listWrap.innerHTML = '<div class="loading"><span class="spinner"></span> Loading...</div>';
     try {{
-      const resp = await fetch(API);
+      const resp = await fetch(LIST_API);
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       const data = await resp.json();
       const docs = data.documents || [];
@@ -3025,7 +3093,7 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
           this.disabled = true;
           this.textContent = "...";
           try {{
-            const resp = await fetch(API + "/" + encodeURIComponent(id), {{ method: "DELETE" }});
+            const resp = await fetch(API + "/" + encodeURIComponent(id) + IDENTITY_QUERY, {{ method: "DELETE" }});
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             loadDocs();
           }} catch(err) {{
@@ -3122,9 +3190,16 @@ async def factbox_ui(bc_entity: str, bc_document_no: str, request: Request):
     })
 
 
-async def _fetch_bc_document_links(bc_document_no: str) -> list:
-    """Fetch documentLinks from BC gpi/documents/v1.0 API for a given document number.
-    Returns list of dicts. In DEMO_MODE returns empty list."""
+async def _fetch_bc_document_links(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+) -> list:
+    """Fetch BC document links for one entity + document number + optional SystemId.
+
+    Document numbers are not globally unique across BC entities, so this read
+    is intentionally type-bound and fails closed for unsupported entities.
+    """
     if DEMO_MODE or not HAS_CREDENTIALS:
         logger.info("[DocLinks] DEMO_MODE — skipping BC documentLinks read for %s", bc_document_no)
         return []
@@ -3133,15 +3208,18 @@ async def _fetch_bc_document_links(bc_document_no: str) -> list:
         from services.gpi_integration_service import _get_token, _get_company_id_standard_api, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT
         token = await _get_token()
         company_id = await _get_company_id_standard_api()
+        from services.document_link_visibility_service import build_bc_document_link_filter
         doc_link_api = "gpi/documents/v1.0"
         url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{doc_link_api}/"
-               f"companies({company_id})/documentLinks"
-               f"?$filter=bcDocumentNo eq '{bc_document_no}'")
+               f"companies({company_id})/documentLinks")
+        odata_filter = build_bc_document_link_filter(
+            bc_entity, bc_document_no, bc_system_id
+        )
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(url, headers={
                 "Authorization": f"Bearer {token}", "Accept": "application/json"
-            })
+            }, params={"$filter": odata_filter})
             if resp.status_code != 200:
                 logger.warning("[DocLinks] BC API returned %d for %s", resp.status_code, bc_document_no)
                 return []
@@ -3154,20 +3232,21 @@ async def _fetch_bc_document_links(bc_document_no: str) -> list:
 # --- STEP 1: GET document links for a BC record ---
 
 @router.get("/document-links/{bc_entity}/{bc_document_no}")
-async def get_document_links(bc_entity: str, bc_document_no: str):
+async def get_document_links(
+    bc_entity: str,
+    bc_document_no: str,
+    bc_system_id: str = "",
+):
     """List all documents linked to a BC record (hub + BC API + legacy Zetadocs).
 
     Returns a combined, deduplicated list sorted by created_utc desc.
     """
     db = get_db()
 
-    # 1) Query hub_documents for docs linked to this BC document
+    # 1) Query hub_documents for docs proven to belong to this BC entity + number
+    from services.document_link_visibility_service import build_hub_document_link_query
     hub_docs = await db.hub_documents.find(
-        {
-            "bc_document_no": bc_document_no,
-            "sharepoint_web_url": {"$nin": [None, ""]},
-            "$or": [{"deleted": {"$exists": False}}, {"deleted": False}],
-        },
+        build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id),
         {"_id": 0}
     ).sort("created_utc", -1).to_list(200)
 
@@ -3191,8 +3270,10 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
             "source": d.get("source", "hub"),
         })
 
-    # 2) Query BC documentLinks API for this document number
-    bc_links = await _fetch_bc_document_links(bc_document_no)
+    # 2) Query BC documentLinks API for this exact entity + document number
+    bc_links = await _fetch_bc_document_links(
+        bc_entity, bc_document_no, bc_system_id
+    )
     for link in bc_links:
         sp_url = link.get("sharePointUrl", "")
         if not sp_url or sp_url in seen_urls:
@@ -3221,6 +3302,7 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
     return {
         "bc_entity": bc_entity,
         "bc_document_no": bc_document_no,
+        "bc_system_id": bc_system_id,
         "documents": results,
         "total": len(results),
     }
@@ -3230,41 +3312,52 @@ async def get_document_links(bc_entity: str, bc_document_no: str):
 
 from fastapi import UploadFile, File, Form
 
-@router.post("/document-links/{bc_entity}/{bc_document_no}/upload")
-async def upload_document_to_bc_record(
+
+async def _deliver_bc_drop_content(
+    *,
     bc_entity: str,
     bc_document_no: str,
-    file: UploadFile = File(...),
-    uploaded_by: str = Form("BC Drop"),
-    vendor_context: str = Form(""),
+    bc_system_id: str,
+    source_table_id: int,
+    source_document_type: str,
+    file_content: bytes,
+    file_name: str,
+    uploaded_by: str,
+    vendor_context: str,
 ):
-    """Upload a file to SharePoint and link it to a BC record.
-
-    1. Resolve the SP folder from existing hub_documents or routing rules.
-    2. Upload to SharePoint.
-    3. Create GPI Document Link in BC factbox.
-    4. Create hub_documents record.
-    """
+    """Deliver one exact-record BC FactBox upload without identity or metadata bypasses."""
     db = get_db()
 
-    # Read file and enforce 25MB max
-    file_content = await file.read()
+    from services.bc_drop_parity_metadata_service import (
+        build_bc_drop_parity_metadata,
+        normalize_system_id,
+        validate_bc_drop_source_contract,
+        write_bc_drop_parity_metadata,
+    )
+
+    try:
+        validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)
+        bc_system_id = normalize_system_id(bc_system_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    file_name = str(file_name or "").strip()
+    if not file_name:
+        raise HTTPException(status_code=400, detail="BC Drop upload requires file_name")
+    if not file_content:
+        raise HTTPException(status_code=400, detail="BC Drop upload body is empty")
     if len(file_content) > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=413,
-            detail=f"File exceeds 25MB limit ({len(file_content) / (1024*1024):.1f}MB)"
+            detail=f"File exceeds 25MB limit ({len(file_content) / (1024*1024):.1f}MB)",
         )
 
-    # --- FOLDER RESOLUTION ---
+    # Resolve folder using exact entity + number + immutable SystemId.
     folder_source = "routing_rules"
     folder_path = ""
-
-    # Try to find existing folder from hub_documents for this BC record
+    from services.document_link_visibility_service import build_folder_match_query
     existing = await db.hub_documents.find_one(
-        {
-            "bc_document_no": bc_document_no,
-            "sharepoint_folder_path": {"$nin": [None, ""]},
-        },
+        build_folder_match_query(bc_entity, bc_document_no, bc_system_id),
         {"sharepoint_folder_path": 1, "sharepoint_drive_id": 1, "_id": 0},
         sort=[("created_utc", -1)],
     )
@@ -3272,9 +3365,8 @@ async def upload_document_to_bc_record(
     if existing and existing.get("sharepoint_folder_path"):
         folder_path = existing["sharepoint_folder_path"]
         folder_source = "matched"
-        logger.info("[DocLinks] Folder matched from existing doc for %s: %s", bc_document_no, folder_path)
+        logger.info("[DocLinks] Folder matched from exact existing doc for %s: %s", bc_document_no, folder_path)
     else:
-        # Fallback: use folder routing rules
         try:
             from services.folder_routing_service import determine_folder_path
             doc_type = bc_entity_to_doc_type(bc_entity)
@@ -3285,43 +3377,48 @@ async def upload_document_to_bc_record(
             }
             folder_path, _reason, _details = determine_folder_path(fake_doc)
             logger.info("[DocLinks] Folder from routing rules for %s: %s (%s)", bc_document_no, folder_path, _reason)
-        except Exception as e:
-            logger.warning("[DocLinks] Folder routing failed, using default: %s", e)
+        except Exception as exc:
+            logger.warning("[DocLinks] Folder routing failed, using default: %s", exc)
             folder_path = f"BC_Drops/{bc_entity}/{bc_document_no}"
 
-    # --- UPLOAD TO SHAREPOINT ---
+    # Upload original bytes once. Production SharePoint remains protected by the
+    # central write interlock inside upload_to_sharepoint.
     try:
         from services.sharepoint_service import upload_to_sharepoint
-        sp_result = await upload_to_sharepoint(file_content, file.filename, folder_path)
-    except Exception as e:
-        logger.error("[DocLinks] SharePoint upload failed for %s: %s", bc_document_no, e)
-        raise HTTPException(status_code=502, detail=f"SharePoint upload failed: {str(e)}")
+        sp_result = await upload_to_sharepoint(file_content, file_name, folder_path)
+    except Exception as exc:
+        logger.error("[DocLinks] SharePoint upload failed for %s: %s", bc_document_no, exc)
+        raise HTTPException(status_code=502, detail=f"SharePoint upload failed: {str(exc)}") from exc
 
-    # --- CREATE GPI DOCUMENT LINK IN BC ---
-    bc_link_created = False
-    try:
-        link_result = await create_gpi_document_link(
-            bc_system_id="",
-            bc_document_no=bc_document_no,
-            document_type=bc_entity_to_doc_type(bc_entity),
-            sharepoint_url=sp_result.get("web_url", ""),
-            sharepoint_drive_id=sp_result.get("drive_id", ""),
-            sharepoint_item_id=sp_result.get("item_id", ""),
-            uploaded_by=uploaded_by,
-            source="BCDrop",
-        )
-        bc_link_created = link_result.get("success", False)
-    except Exception as e:
-        logger.warning("[DocLinks] BC link creation failed (non-blocking): %s", e)
-
-    # --- CREATE HUB_DOCUMENTS RECORD ---
     now = datetime.now(timezone.utc).isoformat()
     new_doc_id = str(uuid.uuid4())
+    staged_metadata = build_bc_drop_parity_metadata(
+        bc_entity=bc_entity,
+        bc_document_no=bc_document_no,
+        bc_system_id=bc_system_id,
+        source_table_id=source_table_id,
+        source_document_type=source_document_type,
+        original_file_name=file_name,
+        sharepoint_file_name=sp_result.get("name", file_name),
+        sharepoint_path=folder_path,
+        sharepoint_url=sp_result.get("web_url", ""),
+        ready=False,
+    )
+
+    # Persist SharePoint identity immediately so every post-upload failure can be
+    # recovered against the same item rather than uploading a duplicate.
     hub_record = {
         "id": new_doc_id,
-        "file_name": file.filename,
+        "file_name": file_name,
+        "original_file_name": file_name,
+        "sharepoint_file_name": sp_result.get("name", file_name),
         "bc_document_no": bc_document_no,
         "bc_entity_type": bc_entity,
+        "bc_entity": bc_entity,
+        "bc_system_id": bc_system_id,
+        "bc_record_id": bc_system_id,
+        "bc_source_table_id": int(source_table_id),
+        "bc_source_document_type": source_document_type,
         "sharepoint_folder_path": folder_path,
         "sharepoint_web_url": sp_result.get("web_url", ""),
         "sharepoint_drive_id": sp_result.get("drive_id", ""),
@@ -3333,38 +3430,257 @@ async def upload_document_to_bc_record(
         "document_type": bc_entity_to_doc_type(bc_entity),
         "folder_source": folder_source,
         "file_size_bytes": len(file_content),
+        "bc_link_created": False,
+        "bc_link_error": "",
+        "delivery_status": "sharepoint_uploaded_pending_metadata",
+        "import_ready": False,
+        **staged_metadata,
     }
     await db.hub_documents.insert_one(hub_record)
     hub_record.pop("_id", None)
 
-    logger.info("[DocLinks] Uploaded %s to %s for %s/%s (folder_source=%s, bc_link=%s)",
-                file.filename, folder_path, bc_entity, bc_document_no, folder_source, bc_link_created)
+    # Stage normalized metadata before attempting the BC link. ImportReady stays
+    # false until both sides have succeeded.
+    try:
+        await write_bc_drop_parity_metadata(hub_record, ready=False)
+    except Exception as exc:
+        error = str(exc)
+        await db.hub_documents.update_one(
+            {"id": new_doc_id},
+            {"$set": {
+                "delivery_status": "sharepoint_metadata_failed",
+                "import_ready": False,
+                "ImportReady": False,
+                "GPI_Status": "NeedsMetadata",
+                "last_error": error,
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "SharePoint upload completed but parity metadata failed",
+                "doc_id": new_doc_id,
+                "delivery_status": "sharepoint_metadata_failed",
+                "error": error,
+            },
+        ) from exc
 
+    # Create the BC document link using the exact SystemId supplied by BC.
+    try:
+        link_result = await create_gpi_document_link(
+            bc_system_id=bc_system_id,
+            bc_document_no=bc_document_no,
+            document_type=source_document_type,
+            sharepoint_url=sp_result.get("web_url", ""),
+            sharepoint_drive_id=sp_result.get("drive_id", ""),
+            sharepoint_item_id=sp_result.get("item_id", ""),
+            uploaded_by=uploaded_by,
+            source="BCDrop",
+        )
+        bc_link_created = bool(link_result.get("success", False))
+        bc_link_error = "" if bc_link_created else link_result.get("error", "BC document link creation failed")
+    except Exception as exc:
+        bc_link_created = False
+        bc_link_error = str(exc)
+        logger.error("[DocLinks] BC link creation failed: %s", exc)
+
+    if not bc_link_created:
+        await db.hub_documents.update_one(
+            {"id": new_doc_id},
+            {"$set": {
+                "bc_link_created": False,
+                "bc_link_error": bc_link_error,
+                "delivery_status": "bc_link_failed",
+                "import_ready": False,
+                "ImportReady": False,
+                "GPI_Status": "NeedsBCLink",
+                "last_error": bc_link_error,
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "SharePoint upload completed but BC link creation failed",
+                "doc_id": new_doc_id,
+                "delivery_status": "bc_link_failed",
+                "error": bc_link_error,
+            },
+        )
+
+    # Finalize the same SharePoint item only after the exact BC link exists.
+    try:
+        final_metadata = await write_bc_drop_parity_metadata(hub_record, ready=True)
+    except Exception as exc:
+        error = str(exc)
+        await db.hub_documents.update_one(
+            {"id": new_doc_id},
+            {"$set": {
+                "bc_link_created": True,
+                "bc_link_error": "",
+                "delivery_status": "sharepoint_metadata_failed",
+                "import_ready": False,
+                "ImportReady": False,
+                "GPI_Status": "NeedsMetadata",
+                "last_error": error,
+                "updated_utc": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "BC link created but final SharePoint parity metadata failed",
+                "doc_id": new_doc_id,
+                "delivery_status": "sharepoint_metadata_failed",
+                "error": error,
+            },
+        ) from exc
+
+    delivered_at = datetime.now(timezone.utc).isoformat()
+    await db.hub_documents.update_one(
+        {"id": new_doc_id},
+        {"$set": {
+            **final_metadata,
+            "bc_link_created": True,
+            "bc_link_error": "",
+            "delivery_status": "delivered",
+            "import_ready": True,
+            "last_error": "",
+            "updated_utc": delivered_at,
+            "delivered_at": delivered_at,
+        }},
+    )
+
+    logger.info(
+        "[DocLinks] Delivered %s to %s for exact %s/%s/%s (folder_source=%s)",
+        file_name,
+        folder_path,
+        bc_entity,
+        bc_document_no,
+        bc_system_id,
+        folder_source,
+    )
     return {
         "success": True,
         "doc_id": new_doc_id,
-        "file_name": file.filename,
+        "file_name": file_name,
         "sharepoint_url": sp_result.get("web_url", ""),
         "folder_path": folder_path,
         "folder_source": folder_source,
-        "bc_link_created": bc_link_created,
+        "bc_link_created": True,
+        "import_ready": True,
     }
 
 
-# --- STEP 3: DELETE a document link (soft delete) ---
+@router.post("/document-links/{bc_entity}/{bc_document_no}/upload")
+async def upload_document_to_bc_record(
+    bc_entity: str,
+    bc_document_no: str,
+    file: UploadFile = File(...),
+    uploaded_by: str = Form("BC Drop"),
+    vendor_context: str = Form(""),
+    bc_system_id: str = Query(""),
+    source_table_id: int = Query(0),
+    source_document_type: str = Query(""),
+):
+    """Browser/multipart upload using the exact-record delivery boundary."""
+    return await _deliver_bc_drop_content(
+        bc_entity=bc_entity,
+        bc_document_no=bc_document_no,
+        bc_system_id=bc_system_id,
+        source_table_id=source_table_id,
+        source_document_type=source_document_type,
+        file_content=await file.read(),
+        file_name=file.filename or "",
+        uploaded_by=uploaded_by,
+        vendor_context=vendor_context,
+    )
+
+
+@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")
+async def upload_document_to_bc_record_raw(
+    bc_entity: str,
+    bc_document_no: str,
+    request: Request,
+    bc_system_id: str = Query(""),
+    source_table_id: int = Query(0),
+    source_document_type: str = Query(""),
+    file_name: str = Query(""),
+    uploaded_by: str = Query("BC Drop"),
+    vendor_context: str = Query(""),
+):
+    """Business Central native binary upload; the body is the original file bytes."""
+    content_type = str(request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if content_type != "application/octet-stream":
+        raise HTTPException(status_code=415, detail="BC raw upload requires application/octet-stream")
+
+    return await _deliver_bc_drop_content(
+        bc_entity=bc_entity,
+        bc_document_no=bc_document_no,
+        bc_system_id=bc_system_id,
+        source_table_id=source_table_id,
+        source_document_type=source_document_type,
+        file_content=await request.body(),
+        file_name=file_name,
+        uploaded_by=uploaded_by,
+        vendor_context=vendor_context,
+    )
+
+
+# --- STEP 3: RECOVER a failed BC document link without re-uploading ---
+
+@router.post("/document-links/recover/{doc_id}")
+async def recover_document_link(doc_id: str):
+    """Retry only the missing BC link for an existing SharePoint document.
+
+    This path is intentionally re-link-only: it never uploads file bytes or
+    creates a replacement SharePoint item.
+    """
+    try:
+        from services.bc_document_link_recovery_service import recover_bc_document_link
+        result = await recover_bc_document_link(doc_id)
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except Exception as e:
+        logger.error("[DocLinks] BC link recovery failed for %s: %s", doc_id, e)
+        raise HTTPException(status_code=502, detail=f"BC link recovery failed: {str(e)}")
+
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "BC link recovery failed; SharePoint file was not re-uploaded",
+                "doc_id": doc_id,
+                "delivery_status": "bc_link_failed",
+                "error": result.get("error", "Unknown BC link recovery error"),
+            },
+        )
+    return result
+
+
+# --- STEP 4: DELETE a document link (soft delete) ---
 
 @router.delete("/document-links/{bc_entity}/{bc_document_no}/{doc_id_or_sp_item}")
-async def delete_document_link(bc_entity: str, bc_document_no: str, doc_id_or_sp_item: str):
+async def delete_document_link(
+    bc_entity: str,
+    bc_document_no: str,
+    doc_id_or_sp_item: str,
+    bc_system_id: str = "",
+):
     """Soft-delete a document link. The SharePoint file remains for audit."""
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Find by id or sharepoint_item_id
+    # Upgraded AP FactBoxes carry the immutable SystemId used for the read.
+    # Legacy callers retain typed entity + number + link-id behavior.
+    from services.document_link_visibility_service import build_hub_document_unlink_query
     doc = await db.hub_documents.find_one(
-        {"$or": [
-            {"id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
-            {"sharepoint_item_id": doc_id_or_sp_item, "bc_document_no": bc_document_no},
-        ]},
+        build_hub_document_unlink_query(
+            bc_entity, bc_document_no, doc_id_or_sp_item, bc_system_id
+        ),
         {"_id": 0}
     )
     if not doc:

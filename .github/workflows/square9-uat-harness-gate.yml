@@ -1,0 +1,91 @@
+name: Square9 UAT Harness Gate
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'scripts/Test-Square9-UAT-Parity.ps1'
+      - '.github/workflows/square9-uat-harness-gate.yml'
+  pull_request:
+    paths:
+      - 'scripts/Test-Square9-UAT-Parity.ps1'
+      - '.github/workflows/square9-uat-harness-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  harness-safety:
+    name: UAT harness syntax and safety
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse PowerShell without executing it
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts/Test-Square9-UAT-Parity.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Guardrail - harness never publishes or mutates BC/SharePoint
+        shell: pwsh
+        run: |
+          $text = Get-Content 'scripts/Test-Square9-UAT-Parity.ps1' -Raw
+          $forbidden = @(
+            'Publish-NAVApp',
+            'Sync-NAVApp',
+            'Install-NAVApp',
+            'Publish-BCContainerApp',
+            'Invoke-BCContainerApp',
+            'New-BCContainer',
+            'Remove-BCContainer',
+            'git push',
+            'git reset --hard',
+            'SHAREPOINT_BLOCK_PRODUCTION_WRITES=false',
+            'BC_BLOCK_PRODUCTION_WRITES=false'
+          )
+          foreach ($needle in $forbidden) {
+            if ($text -match [regex]::Escape($needle)) {
+              throw "UAT harness contains forbidden mutation/publish operation: $needle"
+            }
+          }
+
+      - name: Guardrail - UAT production interlocks are mandatory
+        shell: pwsh
+        run: |
+          $text = Get-Content 'scripts/Test-Square9-UAT-Parity.ps1' -Raw
+          foreach ($needle in @(
+            "Assert-TrueSetting -Name 'BC_BLOCK_PRODUCTION_WRITES'",
+            "Assert-TrueSetting -Name 'SHAREPOINT_BLOCK_PRODUCTION_WRITES'",
+            "SHAREPOINT_TARGET=production is not allowed",
+            "SHAREPOINT_SITE_PATH points to GamerAccounting Production",
+            "BC_WRITE_ENVIRONMENT=Production is not allowed"
+          )) {
+            if ($text -notmatch [regex]::Escape($needle)) {
+              throw "Missing UAT safety check: $needle"
+            }
+          }
+
+      - name: Guardrail - live schema and true AL compile are both represented
+        shell: pwsh
+        run: |
+          $text = Get-Content 'scripts/Test-Square9-UAT-Parity.ps1' -Raw
+          foreach ($needle in @(
+            'validate_sharepoint_parity_schema.py',
+            'AL: Download Symbols',
+            '/packagecachepath:',
+            '/project:',
+            'No publish was attempted'
+          )) {
+            if ($text -notmatch [regex]::Escape($needle)) {
+              throw "UAT evidence step missing: $needle"
+            }
+          }

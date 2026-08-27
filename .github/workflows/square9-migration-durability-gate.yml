@@ -1,0 +1,53 @@
+name: Square9 Migration Durability Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/services/migration/job.py'
+      - 'backend/tests/test_migration_durable_commit.py'
+      - '.github/workflows/square9-migration-durability-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  durability:
+    name: Historical migration durable-commit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor pypdf
+
+      - name: Run durability tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: pytest -q tests/test_migration_durable_commit.py
+
+      - name: Guardrail - REAL success follows durable commit
+        run: |
+          grep -q 'await self._commit_batch(batch, stats)' backend/services/migration/job.py || {
+            echo "::error::REAL migration bypasses durable commit accounting"
+            exit 1
+          }
+          grep -q 'Mongo persistence failed after document delivery' backend/services/migration/job.py || {
+            echo "::error::Batch persistence failures are not reconciled visibly"
+            exit 1
+          }
+          grep -q 'for entry in batch:' backend/services/migration/job.py || {
+            echo "::error::Batch success/error accounting is not per document"
+            exit 1
+          }

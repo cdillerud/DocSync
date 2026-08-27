@@ -1,8 +1,10 @@
 """Human routing review endpoints.
 
-Provides folder-level routing options and turns a reviewer-selected destination
-into a live routing-learning signal. The learned rule is consulted before the
-hard-coded folder-routing rules on future documents.
+Provides folder-level routing options and records reviewer-selected destinations.
+During Square9 parity, one document-level correction must never silently become
+a reusable vendor/sender routing rule. Human decisions are therefore applied to
+the selected document and staged as pending learning candidates for separate
+admin promotion.
 """
 
 from __future__ import annotations
@@ -181,7 +183,7 @@ async def get_routing_suggestion(doc_id: str):
 
 @router.post("/document/{doc_id}/assign")
 async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment):
-    """Save a human folder decision and immediately teach the live routing learner."""
+    """Apply one human folder decision and stage reusable learning for admin review."""
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
@@ -201,25 +203,29 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
     decision_type = "folder_confirmation" if is_confirmation else "folder_correction"
     now = datetime.now(timezone.utc).isoformat()
 
-    learning_result: Dict[str, Any]
-    if profile["vendor"]:
-        from services.routing_feedback_service import init_feedback_db, record_correction
-
-        init_feedback_db(db)
-        learning_result = await record_correction(
-            vendor=profile["vendor"],
-            doc_type=profile["doc_type"],
-            has_po=profile["has_po"],
-            is_international=profile["is_international"],
-            correct_folder=selected_folder,
-            file_name=doc.get("file_name", ""),
-            source=assignment.source,
-        )
-    else:
-        learning_result = {
-            "status": "skipped_no_vendor",
-            "reason": "No vendor or sender signal was available for a safe reusable rule",
-        }
+    learning_candidate = {
+        "document_id": doc_id,
+        "file_name": doc.get("file_name", ""),
+        "vendor": profile["vendor"],
+        "doc_type": profile["doc_type"],
+        "has_po": profile["has_po"],
+        "is_international": profile["is_international"],
+        "previous_folder": profile["current_folder"],
+        "suggested_folder": suggested_folder,
+        "selected_folder": selected_folder,
+        "decision_type": decision_type,
+        "source": assignment.source,
+        "status": "pending_admin_promotion",
+        "created_at": now,
+        "promoted_at": None,
+        "promoted_by": None,
+    }
+    await db.routing_feedback_candidates.insert_one(dict(learning_candidate))
+    learning_result: Dict[str, Any] = {
+        "status": "staged_pending_admin_promotion",
+        "reusable_rule_created": False,
+        "reason": "Single-document routing decisions do not auto-create reusable vendor rules during parity",
+    }
 
     decision_record = {
         "document_id": doc_id,

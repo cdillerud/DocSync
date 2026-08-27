@@ -1,0 +1,229 @@
+name: Square9 AP Posting Parity Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/services/ap_auto_post_service.py'
+      - 'backend/services/bc_purchase_invoice_posting_service.py'
+      - 'backend/services/bc_posted_purchase_invoice_identity_service.py'
+      - 'backend/services/ap_purchase_invoice_identity_service.py'
+      - 'backend/services/ap_posted_identity_recovery_service.py'
+      - 'backend/services/ap_posted_metadata_recovery_service.py'
+      - 'backend/services/ap_posted_recovery_dispatch_service.py'
+      - 'backend/services/sharepoint_parity_resync_service.py'
+      - 'backend/services/document_retry_service.py'
+      - 'backend/tests/test_bc_purchase_invoice_posting_service.py'
+      - 'backend/tests/test_bc_posted_purchase_invoice_identity_service.py'
+      - 'backend/tests/test_ap_purchase_invoice_identity_service.py'
+      - 'backend/tests/test_ap_posted_identity_recovery_service.py'
+      - 'backend/tests/test_ap_posted_metadata_recovery_service.py'
+      - 'backend/tests/test_ap_posted_recovery_dispatch_service.py'
+      - 'backend/tests/test_sharepoint_parity_resync_service.py'
+      - '.github/workflows/square9-ap-posting-parity-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  ap-posting-parity:
+    name: AP true posting and FactBox identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor
+
+      - name: Run AP posting parity tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: |
+          pytest -q \
+            tests/test_bc_purchase_invoice_posting_service.py \
+            tests/test_bc_posted_purchase_invoice_identity_service.py \
+            tests/test_ap_purchase_invoice_identity_service.py \
+            tests/test_ap_posted_identity_recovery_service.py \
+            tests/test_ap_posted_metadata_recovery_service.py \
+            tests/test_ap_posted_recovery_dispatch_service.py \
+            tests/test_sharepoint_parity_resync_service.py
+
+      - name: Guardrail - Posted requires the real BC bound action
+        run: |
+          grep -q 'post_purchase_invoice_system_id(bc_system_id)' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post can report Posted without true BC posting"
+            exit 1
+          }
+          grep -q 'Microsoft.NAV.post' backend/services/bc_purchase_invoice_posting_service.py || {
+            echo "::error::BC purchase invoice bound post action is missing"
+            exit 1
+          }
+          grep -q 'bc_true_post_confirmed' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP audit does not persist true-post confirmation"
+            exit 1
+          }
+
+      - name: Guardrail - posted table 122 identity is reconciled, never guessed
+        run: |
+          grep -q 'microsoft/automate/v1.0' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice real-SystemId resolver is missing"
+            exit 1
+          }
+          grep -q 'postedPurchaseInvoices' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice resolver targets the wrong API"
+            exit 1
+          }
+          grep -q 'apiId eq' backend/services/bc_posted_purchase_invoice_identity_service.py || {
+            echo "::error::Posted Purchase Invoice resolver is not bound to the v2 aggregate apiId"
+            exit 1
+          }
+          grep -q 'posted_system_id = str(post_result.get("posted_system_id")' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post does not consume the real posted header SystemId"
+            exit 1
+          }
+          grep -q 'posted_record_no = str(post_result.get("posted_number")' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post does not consume the final posted invoice number"
+            exit 1
+          }
+
+      - name: Guardrail - unresolved posted identity fails closed
+        run: |
+          grep -q 'PostedNeedsIdentity' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP lacks explicit post-success identity-recovery state"
+            exit 1
+          }
+          grep -q '"GPI_SourceSystemId": ""' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP may retain draft API identity as posted SourceSystemId"
+            exit 1
+          }
+          grep -q '"ImportReady": False' backend/services/ap_auto_post_service.py || {
+            echo "::error::Unresolved posted identity does not fail readiness closed"
+            exit 1
+          }
+
+      - name: Guardrail - SharePoint metadata is part of AP completion
+        run: |
+          grep -q 'resync_existing_sharepoint_parity_metadata' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP auto-post can become ready without synchronizing the existing SharePoint item"
+            exit 1
+          }
+          grep -q 'PostedNeedsMetadata' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP lacks a fail-closed post-success metadata recovery state"
+            exit 1
+          }
+          grep -q 'retry_reason="sharepoint_metadata_resync"' backend/services/ap_auto_post_service.py || {
+            echo "::error::AP metadata failure is not distinguishable in posting audit history"
+            exit 1
+          }
+          grep -q 'write_sharepoint_parity_metadata' backend/services/sharepoint_parity_resync_service.py || {
+            echo "::error::Existing-item parity resync does not use the metadata PATCH boundary"
+            exit 1
+          }
+
+      - name: Guardrail - posted recovery never reposts or reuploads
+        run: |
+          for file in \
+            backend/services/ap_posted_identity_recovery_service.py \
+            backend/services/ap_posted_metadata_recovery_service.py; do
+            if grep -q 'post_purchase_invoice_system_id' "$file"; then
+              echo "::error::$file can repost an already-posted Purchase Invoice"
+              exit 1
+            fi
+            if grep -Eq 'upload_to_sharepoint|upload_file|createUploadSession' "$file"; then
+              echo "::error::$file can reupload an already-delivered document"
+              exit 1
+            fi
+          done
+          grep -q 'resync_existing_sharepoint_parity_metadata' backend/services/ap_posted_identity_recovery_service.py || {
+            echo "::error::Identity recovery does not finish SharePoint metadata"
+            exit 1
+          }
+          grep -q 'resync_existing_sharepoint_parity_metadata' backend/services/ap_posted_metadata_recovery_service.py || {
+            echo "::error::Metadata recovery does not PATCH the existing SharePoint item"
+            exit 1
+          }
+
+      - name: Guardrail - post-success states dispatch before generic retry
+        run: |
+          grep -q 'dispatch_ap_posted_recovery_if_needed' backend/services/document_retry_service.py || {
+            echo "::error::Generic retry does not dispatch AP post-success recovery"
+            exit 1
+          }
+          grep -q 'PostedNeedsIdentity' backend/services/ap_posted_recovery_dispatch_service.py || {
+            echo "::error::AP recovery dispatcher does not recognize PostedNeedsIdentity"
+            exit 1
+          }
+          grep -q 'PostedNeedsMetadata' backend/services/ap_posted_recovery_dispatch_service.py || {
+            echo "::error::AP recovery dispatcher does not recognize PostedNeedsMetadata"
+            exit 1
+          }
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('backend/services/document_retry_service.py').read_text(encoding='utf-8')
+          dispatch = text.index('dispatch_ap_posted_recovery_if_needed(doc_id, db, doc)')
+          should_retry = text.index('if not should_retry(doc):')
+          retrying = text.index('"status": "Retrying"')
+          if not dispatch < should_retry < retrying:
+              raise SystemExit('AP post-success dispatch must occur before should_retry and Retrying state write')
+          PY
+          if grep -Eq 'post_purchase_invoice_system_id|upload_to_sharepoint' backend/services/ap_posted_recovery_dispatch_service.py; then
+            echo "::error::AP recovery dispatcher directly contains post/upload behavior"
+            exit 1
+          fi
+
+      - name: Guardrail - Purchase Invoice identity is promoted for Gamer Documents
+        run: |
+          grep -q 'build_ap_purchase_invoice_identity_update' backend/routers/gpi_integration.py || {
+            echo "::error::Draft Purchase Invoice does not promote FactBox identity"
+            exit 1
+          }
+          grep -Fq '**posted_identity' backend/services/ap_auto_post_service.py || {
+            echo "::error::Posted Purchase Invoice does not promote posted identity"
+            exit 1
+          }
+          grep -q '"bc_entity": "purchaseInvoices"' backend/services/ap_purchase_invoice_identity_service.py || {
+            echo "::error::AP identity handoff targets the wrong Hub entity"
+            exit 1
+          }
+          grep -q 'source_table_id = 122 if posted else 38' backend/services/ap_purchase_invoice_identity_service.py || {
+            echo "::error::Draft/posted Purchase Invoice source-table distinction is missing"
+            exit 1
+          }
+
+      - name: Guardrail - lost post responses recover read-only
+        run: |
+          grep -q '_verify_posted_by_pdf' backend/services/bc_purchase_invoice_posting_service.py || {
+            echo "::error::AP post boundary cannot verify ambiguous successful posts"
+            exit 1
+          }
+          grep -q '/pdfDocument' backend/services/bc_purchase_invoice_posting_service.py || {
+            echo "::error::AP post recovery lacks read-only posted-state proof"
+            exit 1
+          }
+
+      - name: Guardrail - Production and Sales protections remain in force
+        run: |
+          grep -q '_check_write_protection("post_purchase_invoice")' backend/services/bc_purchase_invoice_posting_service.py || {
+            echo "::error::Purchase invoice posting bypasses the central Production write guard"
+            exit 1
+          }
+          grep -q 'BC_WRITE_ENVIRONMENT' backend/services/bc_purchase_invoice_posting_service.py || {
+            echo "::error::Purchase invoice posting does not use the configured write environment"
+            exit 1
+          }
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }

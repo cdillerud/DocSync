@@ -1,0 +1,197 @@
+name: Square9 Deployment Security Gate
+
+on:
+  pull_request:
+    paths:
+      - 'docker-compose.yml'
+      - 'deploy.sh'
+      - 'DEPLOYMENT.md'
+      - 'backend/.env.example'
+      - 'backend/main.py'
+      - 'backend/services/config_service.py'
+      - 'backend/services/startup_validator.py'
+      - 'backend/services/parity_scope_guard.py'
+      - 'backend/tests/test_parity_scope_guard.py'
+      - 'backend/tests/test_startup_validator_parity_scope.py'
+      - 'frontend/Dockerfile'
+      - 'frontend/nginx.conf'
+      - 'frontend/src/lib/api.js'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - '.github/workflows/square9-deployment-security-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  deployment-security:
+    name: No committed secrets or insecure Hub endpoints
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Guardrail - compose contains no committed auth secrets
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path('docker-compose.yml').read_text(encoding='utf-8')
+          forbidden_assignments = (
+              r'(?m)^\s*-\s*JWT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*ADMIN_PASSWORD\s*=\s*\S+',
+              r'(?m)^\s*-\s*BC_CLIENT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*GRAPH_CLIENT_SECRET\s*=\s*\S+',
+              r'(?m)^\s*-\s*EMAIL_CLIENT_SECRET\s*=\s*\S+',
+          )
+          hits = [pattern for pattern in forbidden_assignments if re.search(pattern, text)]
+          if hits:
+              raise SystemExit('compose contains committed secret assignments: ' + ', '.join(hits))
+          if 'env_file:' not in text or './backend/.env' not in text:
+              raise SystemExit('backend runtime secret injection via backend/.env is missing')
+          PY
+
+      - name: Guardrail - UAT env template is fail-closed and secret-free
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/.env.example')
+          if not path.exists():
+              raise SystemExit('backend/.env.example is missing')
+          values = {}
+          for raw in path.read_text(encoding='utf-8').splitlines():
+              line = raw.strip()
+              if not line or line.startswith('#') or '=' not in line:
+                  continue
+              key, value = line.split('=', 1)
+              values[key.strip()] = value.strip()
+          required = {
+              'DEMO_MODE': 'false',
+              'BC_READ_ENVIRONMENT': 'Production',
+              'BC_WRITE_ENVIRONMENT': 'Sandbox_NoZetadocs_UAT',
+              'BC_BLOCK_PRODUCTION_WRITES': 'true',
+              'BC_SALES_LINK_WRITE_ENABLED': 'false',
+              'AUTO_POST_ENABLED': 'false',
+              'AUTO_CREATE_SALES_ORDER_ENABLED': 'false',
+              'ENABLE_OUT_OF_SCOPE_SALES_ROUTES': 'false',
+              'INSIDE_SALES_PILOT_ENABLED': 'false',
+              'SHAREPOINT_TARGET': 'test',
+              'SHAREPOINT_BLOCK_PRODUCTION_WRITES': 'true',
+              'SHAREPOINT_SITE_PATH': '/sites/GPI-DocumentHub-Test',
+              'SALES_EMAIL_POLLING_ENABLED': 'false',
+          }
+          bad = [f'{k}={values.get(k)!r} expected {v!r}' for k, v in required.items() if values.get(k) != v]
+          if bad:
+              raise SystemExit('unsafe UAT template values: ' + '; '.join(bad))
+          for secret in ('JWT_SECRET', 'ADMIN_PASSWORD', 'BC_CLIENT_SECRET', 'GRAPH_CLIENT_SECRET', 'EMAIL_CLIENT_SECRET'):
+              if values.get(secret):
+                  raise SystemExit(f'{secret} must be blank in committed .env.example')
+          PY
+
+      - name: Guardrail - central config has no known JWT fallback
+        run: |
+          grep -Fq 'JWT_SECRET = os.environ.get("JWT_SECRET", "")' backend/services/config_service.py || {
+            echo '::error::Central config does not fail closed on missing JWT secret'
+            exit 1
+          }
+          if grep -Fq 'JWT_SECRET = os.environ.get("JWT_SECRET", "gpi-hub-secret-key")' backend/services/config_service.py; then
+            echo '::error::Known JWT fallback was reintroduced'
+            exit 1
+          fi
+          grep -Fq 'os.environ.get("BC_READ_ENVIRONMENT")' backend/services/config_service.py || {
+            echo '::error::Central config ignores explicit BC_READ_ENVIRONMENT'
+            exit 1
+          }
+
+      - name: Guardrail - startup refuses Sales and Inside Sales activation
+        run: |
+          python -m pip install --quiet pytest fastapi starlette
+          cd backend
+          pytest -q tests/test_parity_scope_guard.py tests/test_startup_validator_parity_scope.py
+          cd ..
+          for flag in AUTO_CREATE_SALES_ORDER_ENABLED ENABLE_OUT_OF_SCOPE_SALES_ROUTES SALES_EMAIL_POLLING_ENABLED BC_SALES_LINK_WRITE_ENABLED INSIDE_SALES_PILOT_ENABLED; do
+            grep -Fq "$flag" backend/services/startup_validator.py || {
+              echo "::error::Startup validator does not protect $flag"
+              exit 1
+            }
+          done
+
+      - name: Guardrail - AP Warehouse HTTP scope is fail-closed
+        run: |
+          grep -Fq 'from services.parity_scope_guard import ParityScopeGuardMiddleware' backend/main.py || {
+            echo '::error::Authoritative app does not import parity scope guard'
+            exit 1
+          }
+          grep -Fq 'app.add_middleware(ParityScopeGuardMiddleware)' backend/main.py || {
+            echo '::error::Authoritative app does not enforce parity scope middleware'
+            exit 1
+          }
+          grep -Fq '/api/bc/sales-orders/create' backend/services/parity_scope_guard.py || {
+            echo '::error::Hidden generic BC Sales-order write is not scope-blocked'
+            exit 1
+          }
+
+      - name: Guardrail - credentialed CORS is not wildcard in UAT
+        run: |
+          grep -Fq 'os.environ.get("CORS_ORIGINS", "")' backend/main.py || {
+            echo '::error::CORS does not default to same-origin only'
+            exit 1
+          }
+          grep -Fq 'if "*" in cors_origins' backend/main.py || {
+            echo '::error::Non-demo wildcard CORS is not rejected'
+            exit 1
+          }
+          if grep -Fq 'CORS_ORIGINS=' backend/.env.example; then
+            echo '::error::Committed UAT template should not enable cross-origin access by default'
+            exit 1
+          fi
+
+      - name: Guardrail - Hub containers are loopback-only
+        run: |
+          grep -Fq '127.0.0.1:8005:8001' docker-compose.yml || { echo '::error::Raw backend is not loopback-bound'; exit 1; }
+          grep -Fq '127.0.0.1:8080:3000' docker-compose.yml || { echo '::error::Frontend origin is not loopback-bound behind TLS proxy'; exit 1; }
+          if grep -nE '^\s*-\s*"?(8005:8001|8080:3000)"?\s*$' docker-compose.yml; then
+            echo '::error::Externally reachable raw HTTP Hub port mapping detected'; exit 1
+          fi
+
+      - name: Guardrail - deploy script keeps cutover interlocks
+        run: |
+          grep -Fq "health_url='http://127.0.0.1:8080/api/health'" deploy.sh || { echo '::error::Bad local health endpoint'; exit 1; }
+          grep -Fq 'PUBLIC_HUB_URL' deploy.sh || { echo '::error::External HTTPS proof missing'; exit 1; }
+          grep -Fq 'https://*/api' deploy.sh || { echo '::error::External URL is not HTTPS /api'; exit 1; }
+          for line in \
+            'BC_BLOCK_PRODUCTION_WRITES=true' \
+            'BC_SALES_LINK_WRITE_ENABLED=false' \
+            'AUTO_POST_ENABLED=false' \
+            'AUTO_CREATE_SALES_ORDER_ENABLED=false' \
+            'ENABLE_OUT_OF_SCOPE_SALES_ROUTES=false' \
+            'INSIDE_SALES_PILOT_ENABLED=false' \
+            'SHAREPOINT_BLOCK_PRODUCTION_WRITES=true' \
+            'SALES_EMAIL_POLLING_ENABLED=false'; do
+            grep -Fq "required_env_line '$line'" deploy.sh || {
+              echo "::error::Deploy script does not require $line"
+              exit 1
+            }
+          done
+
+      - name: Guardrail - no hard-coded external HTTP backend address
+        run: |
+          if grep -nE 'REACT_APP_BACKEND_URL=http://|4\.204\.41\.190' docker-compose.yml; then
+            echo '::error::Compose contains a hard-coded/insecure external backend URL'; exit 1
+          fi
+          grep -Fq 'REACT_APP_BACKEND_URL=${REACT_APP_BACKEND_URL:-}' docker-compose.yml || {
+            echo '::error::Frontend backend URL is not environment-injected/same-origin safe'; exit 1
+          }
+
+      - name: Guardrail - Business Central Hub endpoint remains HTTPS-only
+        run: |
+          grep -Fq "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::Business Central Hub runtime no longer requires HTTPS'; exit 1
+          }
+          grep -Fq "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" bc-extension/src/table/GPIHubSetup.Table.al || {
+            echo '::error::GPI Hub Setup accepts a non-HTTPS base URL'; exit 1
+          }
+
+      - name: Guardrail - deployment documentation keeps cutover protections explicit
+        run: |
+          grep -Fq 'Sales and Inside Sales remain paused' DEPLOYMENT.md || { echo '::error::Sales/Inside Sales pause missing'; exit 1; }
+          grep -Fq 'BC_BLOCK_PRODUCTION_WRITES=true' DEPLOYMENT.md || { echo '::error::Production BC write block missing'; exit 1; }
+          grep -Fq 'BC_WRITE_ENVIRONMENT=Sandbox_NoZetadocs_UAT' DEPLOYMENT.md || { echo '::error::UAT write pin missing'; exit 1; }
+          grep -Fq 'BC_SALES_LINK_WRITE_ENABLED=false' DEPLOYMENT.md || { echo '::error::Sales link isolation missing'; exit 1; }

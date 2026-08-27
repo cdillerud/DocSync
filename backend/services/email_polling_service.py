@@ -647,8 +647,9 @@ async def _poll_mailbox_for_attachments_unlocked():
                             continue
 
                         try:
-                            # Lazy import to avoid circular dependency
+                            # Lazy imports to avoid circular dependency
                             from services.document_bytes_intake_service import intake_document_from_bytes
+                            from services.mailbox_provenance_service import persist_mailbox_provenance
                             resolved_category = normalize_mailbox_category("AP")
                             logger.info(
                                 "[Intake:legacy_ap] mailbox=%s configured_category=%s resolved_category=%s filename=%s",
@@ -660,7 +661,21 @@ async def _poll_mailbox_for_attachments_unlocked():
                                 email_id=msg_id, subject=subject, sender=sender,
                                 mailbox_category=resolved_category,
                             )
-                            doc_id = intake_result.get("document", {}).get("id")
+                            doc_id = (
+                                intake_result.get("document_id")
+                                or intake_result.get("document", {}).get("id")
+                            )
+                            await persist_mailbox_provenance(
+                                db,
+                                doc_id,
+                                mailbox_address=EMAIL_POLLING_USER,
+                                mailbox_id="legacy_ap",
+                                mailbox_category=resolved_category,
+                                graph_message_id=msg_id,
+                                internet_message_id=internet_msg_id,
+                                attachment_id=att_id,
+                                source="email_poll",
+                            )
                             await record_mail_intake_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=att_hash,
@@ -1105,8 +1120,9 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                     stats["attachments_skipped_dup"] += 1
                                     continue
 
-                                # Lazy import to avoid circular dependency
+                                # Lazy imports to avoid circular dependency
                                 from services.document_bytes_intake_service import intake_document_from_bytes
+                                from services.mailbox_provenance_service import persist_mailbox_provenance
                                 resolved_category = normalize_mailbox_category(default_category)
                                 # Learned sender override (2026-07-17): if a
                                 # specific sender has been identified as a
@@ -1149,6 +1165,17 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                 doc_id = (
                                     result.get("document_id")
                                     or result.get("document", {}).get("id")
+                                )
+                                await persist_mailbox_provenance(
+                                    db,
+                                    doc_id,
+                                    mailbox_address=mailbox_address,
+                                    mailbox_id=source_id,
+                                    mailbox_category=resolved_category,
+                                    graph_message_id=msg_id,
+                                    internet_message_id=internet_msg_id,
+                                    attachment_id=att_id,
+                                    source="email",
                                 )
                                 await record_mail_intake_log(
                                     message_id=msg_id,

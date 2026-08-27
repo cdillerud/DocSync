@@ -1,0 +1,71 @@
+name: Square9 SharePoint Write Safety Gate
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/services/sharepoint_service.py'
+      - 'backend/services/sharepoint_write_guard_service.py'
+      - 'backend/tests/test_sharepoint_write_guard_service.py'
+      - 'backend/tests/test_sharepoint_write_boundary.py'
+      - '.github/workflows/square9-sharepoint-write-safety-gate.yml'
+  pull_request:
+    paths:
+      - 'backend/services/sharepoint_service.py'
+      - 'backend/services/sharepoint_write_guard_service.py'
+      - 'backend/tests/test_sharepoint_write_guard_service.py'
+      - 'backend/tests/test_sharepoint_write_boundary.py'
+      - '.github/workflows/square9-sharepoint-write-safety-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  write-safety:
+    name: SharePoint Production write interlock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv
+      - name: Run SharePoint write safety tests
+        working-directory: backend
+        run: |
+          pytest -q \
+            tests/test_sharepoint_write_guard_service.py \
+            tests/test_sharepoint_write_boundary.py
+      - name: Guardrail - production block defaults on
+        run: |
+          grep -q 'SHAREPOINT_BLOCK_PRODUCTION_WRITES", True' backend/services/sharepoint_write_guard_service.py || {
+            echo "::error::SharePoint Production write block is not fail-closed by default"
+            exit 1
+          }
+      - name: Guardrail - all SharePoint side effects are protected
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('backend/services/sharepoint_service.py').read_text(encoding='utf-8')
+          for fn, operation in (
+              ('async def upload_to_sharepoint(', 'upload_to_sharepoint'),
+              ('async def create_sharing_link(', 'create_sharing_link'),
+              ('async def write_sharepoint_parity_metadata(', 'write_sharepoint_parity_metadata'),
+              ('async def ensure_sharepoint_folder_exists(', 'ensure_sharepoint_folder_exists'),
+          ):
+              start = text.index(fn)
+              block = text[start:start + 1800]
+              guard = block.index(f'check_sharepoint_write_protection(\n        "{operation}"')
+              token = block.find('_get_graph_token()')
+              if token != -1 and not guard < token:
+                  raise SystemExit(f'{operation}: Production guard must execute before Graph token')
+          PY
+      - name: Guardrail - production path override cannot masquerade as test
+        run: |
+          grep -q 'effective_path == PRODUCTION_SITE_PATH.lower()' backend/services/sharepoint_write_guard_service.py || {
+            echo "::error::Manual GamerAccounting path override could bypass Production detection"
+            exit 1
+          }

@@ -27,7 +27,8 @@ pageextension 50100 "GPI Purch Invoice Extension" extends "Purchase Invoice"
         CurrPage.GPIDocuments.Page.SetContext(
             "GPI Doc Link Type"::"Purchase Invoice",
             Rec."No.",
-            VendorCtx
+            VendorCtx,
+            Rec.SystemId
         );
     end;
 }

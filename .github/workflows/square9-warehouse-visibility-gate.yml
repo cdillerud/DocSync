@@ -1,0 +1,114 @@
+name: Square9 Warehouse Visibility Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/services/document_link_visibility_service.py'
+      - 'backend/services/resolved_bc_identity_persistence_service.py'
+      - 'backend/services/document_bytes_intake_service.py'
+      - 'backend/tests/test_document_link_visibility_service.py'
+      - 'backend/tests/test_resolved_bc_identity_persistence_service.py'
+      - 'bc-extension/src/Enum50100.GPIDocLinkType.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al'
+      - 'bc-extension/build.sh'
+      - '.github/workflows/square9-warehouse-visibility-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  warehouse-visibility:
+    name: Posted shipment Gamer Documents wiring
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run visibility and identity-persistence tests
+        working-directory: backend
+        run: |
+          pytest -q \
+            tests/test_document_link_visibility_service.py \
+            tests/test_resolved_bc_identity_persistence_service.py
+
+      - name: Validate AL project structure
+        run: bash bc-extension/build.sh
+
+      - name: Guardrail - Hub supports posted shipment resolver identity
+        run: |
+          grep -q '"postedSalesShipments"' backend/services/document_link_visibility_service.py || {
+            echo "::error::Posted shipment visibility family missing in Hub"
+            exit 1
+          }
+          grep -q '"posted_sales_shipment"' backend/services/document_link_visibility_service.py || {
+            echo "::error::Hub does not recognize resolver shipment storage identity"
+            exit 1
+          }
+
+      - name: Guardrail - resolved shipment identity is durable and top-level
+        run: |
+          grep -q 'build_resolved_bc_identity_update' backend/services/document_bytes_intake_service.py || {
+            echo "::error::Intake does not promote resolved BC identity"
+            exit 1
+          }
+          grep -q 'po_persist_update.update(build_resolved_bc_identity_update(po_result))' backend/services/document_bytes_intake_service.py || {
+            echo "::error::Resolved shipment identity remains nested-only"
+            exit 1
+          }
+          grep -q '"bc_entity": bc_entity' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC entity is not persisted"
+            exit 1
+          }
+          grep -q '"bc_document_no": document_no' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC document number is not persisted"
+            exit 1
+          }
+          grep -q '"bc_record_id": system_id' backend/services/resolved_bc_identity_persistence_service.py || {
+            echo "::error::Durable BC SystemId is not persisted"
+            exit 1
+          }
+
+      - name: Guardrail - AL maps Posted Sales Shipment to Hub entity
+        run: |
+          grep -q 'value(7; "Posted Sales Shipment")' bc-extension/src/Enum50100.GPIDocLinkType.al || {
+            echo "::error::GPI document link enum lacks Posted Sales Shipment"
+            exit 1
+          }
+          grep -q '"GPI Doc Link Type"::"Posted Sales Shipment"' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::AL entity mapper lacks Posted Sales Shipment"
+            exit 1
+          }
+          grep -q "exit('postedSalesShipments');" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::Posted shipment is not mapped to the Hub route segment"
+            exit 1
+          }
+
+      - name: Guardrail - Posted Sales Shipment page has Gamer Documents FactBox
+        run: |
+          grep -q 'extends "Posted Sales Shipment"' bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al || {
+            echo "::error::Posted Sales Shipment page extension missing"
+            exit 1
+          }
+          grep -q 'part(GPIDocuments; "GPI Document Link Factbox")' bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al || {
+            echo "::error::Posted Sales Shipment does not expose Gamer Documents"
+            exit 1
+          }
+          grep -q '"GPI Doc Link Type"::"Posted Sales Shipment"' bc-extension/src/PageExt50105.GPIPostedSalesShipmentExt.al || {
+            echo "::error::Posted Sales Shipment FactBox uses the wrong document type"
+            exit 1
+          }
+
+      - name: Guardrail - Sales write lane remains disabled
+        run: |
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }

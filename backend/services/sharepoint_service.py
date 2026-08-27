@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 logger = logging.getLogger(__name__)
 
+from services.sharepoint_write_guard_service import check_sharepoint_write_protection
+
 DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() == "true"
 GRAPH_CLIENT_ID = os.environ.get("GRAPH_CLIENT_ID", "")
 SHAREPOINT_TARGET = os.environ.get("SHAREPOINT_TARGET", "test").strip().lower()
@@ -116,6 +118,11 @@ async def _resolve_site_and_drive(client: httpx.AsyncClient, token: str) -> Tupl
 
 
 async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
+    check_sharepoint_write_protection(
+        "upload_to_sharepoint",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     folder_for_url = str(folder or "").strip("/")
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         item_id = str(uuid.uuid4())
@@ -167,6 +174,11 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
 
 
 async def create_sharing_link(drive_id: str, item_id: str):
+    check_sharepoint_write_protection(
+        "create_sharing_link",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         return f"https://{SHAREPOINT_SITE_HOSTNAME}/:b:/s/GPI-DocumentHub-Test/{item_id[:8]}"
     token = await _get_graph_token()
@@ -187,8 +199,52 @@ async def create_sharing_link(drive_id: str, item_id: str):
         return data.get("link", {}).get("webUrl", "")
 
 
+async def write_sharepoint_parity_metadata(
+    drive_id: str,
+    item_id: str,
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Persist the normalized parity contract on the SharePoint list item.
+
+    This is part of delivery, not best-effort enrichment. A real Graph failure is
+    raised so the caller cannot report a successful, import-ready delivery when
+    the file exists but its parity metadata does not.
+    """
+    check_sharepoint_write_protection(
+        "write_sharepoint_parity_metadata",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
+    if DEMO_MODE or not GRAPH_CLIENT_ID:
+        return {"updated": True, "demo": True, "fields": dict(metadata)}
+
+    token = await _get_graph_token()
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.patch(
+            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/items/{item_id}/listItem/fields",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json=metadata,
+        )
+        data = resp.json() if resp.content else {}
+        if resp.status_code not in (200, 204):
+            error = data.get("error", {}) if isinstance(data, dict) else {}
+            raise Exception(
+                f"SharePoint parity metadata write failed (HTTP {resp.status_code}): "
+                f"{error.get('message', error.get('code', resp.text[:300]))}"
+            )
+        return {"updated": True, "demo": False, "fields": data or dict(metadata)}
+
+
 async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
     """Create the requested folder hierarchy when it does not already exist."""
+    check_sharepoint_write_protection(
+        "ensure_sharepoint_folder_exists",
+        target=SHAREPOINT_TARGET,
+        site_path=SHAREPOINT_SITE_PATH,
+    )
     normalized_path = str(folder_path or "").strip("/")
     if not normalized_path or DEMO_MODE or not GRAPH_CLIENT_ID:
         return True
@@ -367,6 +423,99 @@ def _structured_po_number(doc: Dict[str, Any]) -> str:
     return ""
 
 
+def build_square9_parity_metadata(
+    routing_doc: Dict[str, Any],
+    po_result: Optional[Dict[str, Any]],
+    original_file_name: str,
+    sharepoint_file_name: str,
+    sharepoint_path: str,
+    sharepoint_url: str,
+) -> Dict[str, Any]:
+    """Build the normalized SharePoint/BC contract and fail-closed readiness gate."""
+    resolution = po_result or routing_doc.get("po_resolution") or {}
+    status = str(resolution.get("status") or "not_run")
+    entity_type = str(resolution.get("bc_entity_type") or "")
+    source_system_id = str(resolution.get("bc_record_id") or "").strip()
+    source_document_no = str(
+        resolution.get("po_number")
+        or routing_doc.get("po_number_clean")
+        or routing_doc.get("po_number_extracted")
+        or ""
+    ).strip()
+
+    # Keep the payload compatible with either a SharePoint Number or Text
+    # column. An absent BC table is null, never a blank string masquerading as
+    # a number. Resolved table IDs below remain integers.
+    source_table_id = None
+    source_document_type = ""
+    source_party_type = ""
+    source_party_no = ""
+    if entity_type == "purchase_order" or (source_document_no and not entity_type):
+        source_table_id = 38
+        source_document_type = "Purchase Order"
+        source_party_type = "Vendor"
+        source_party_no = str(
+            resolution.get("bc_vendor_no")
+            or routing_doc.get("bc_vendor_number")
+            or (routing_doc.get("extracted_fields") or {}).get("vendor_no")
+            or ""
+        ).strip()
+    elif entity_type == "posted_sales_shipment":
+        # Existing resolver may surface this for warehouse evidence. Preserve the
+        # identity as metadata only; this does not activate Sales delivery.
+        source_table_id = 110
+        source_document_type = "Posted Sales Shipment"
+        source_party_type = "Customer"
+        source_party_no = str(resolution.get("bc_customer_no") or "").strip()
+
+    structured_po = _structured_po_number(routing_doc)
+    bc_identity_required = bool(
+        structured_po
+        or source_document_no
+        or status in ("resolved", "resolved_shipment", "ambiguous", "not_found")
+    )
+    resolved_status = status in ("resolved", "resolved_shipment")
+    import_ready = bool((not bc_identity_required) or (resolved_status and source_system_id))
+
+    if import_ready:
+        delivery_status = "ImportReady"
+    elif resolved_status and not source_system_id:
+        delivery_status = "NeedsSystemId"
+    elif status == "ambiguous":
+        delivery_status = "NeedsMatchReview"
+    elif status == "not_found":
+        delivery_status = "NeedsResolution"
+    else:
+        delivery_status = "NotImportReady"
+
+    candidates = resolution.get("candidates_raw") or routing_doc.get("po_candidates") or []
+    if isinstance(candidates, (list, tuple)):
+        candidate_text = ", ".join(str(value) for value in candidates[:20])
+    else:
+        candidate_text = str(candidates or "")
+
+    confidence = resolution.get("confidence")
+    metadata = {
+        "GPI_SourceTableID": source_table_id,
+        "GPI_SourceSystemId": source_system_id,
+        "GPI_SourceDocumentType": source_document_type,
+        "GPI_SourceDocumentNo": source_document_no,
+        "GPI_SourcePartyType": source_party_type,
+        "GPI_SourcePartyNo": source_party_no,
+        "GPI_OriginalFileName": original_file_name,
+        "GPI_SharePointFileName": sharepoint_file_name,
+        "GPI_SharePointPath": sharepoint_path,
+        "GPI_SharePointURL": sharepoint_url,
+        "GPI_Status": delivery_status,
+        "GPI_MatchStatus": status,
+        "GPI_MatchMethod": str(resolution.get("match_method") or ""),
+        "GPI_MatchConfidence": float(confidence) if confidence is not None else 0.0,
+        "GPI_Candidates": candidate_text,
+        "ImportReady": import_ready,
+    }
+    return metadata
+
+
 async def _prepare_routing_document(doc: Dict[str, Any]):
     """Refresh evidence and resolve a structured PO before a file is routed."""
     routing_doc = dict(doc or {})
@@ -528,8 +677,9 @@ async def upload_to_sharepoint_with_routing(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
     is_international: bool = False,
+    parity_metadata_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Resolve, route, snapshot, and only then upload the document."""
+    """Resolve, route, snapshot, upload, and persist the parity metadata contract."""
     from services.folder_routing_service import route_with_feedback
 
     routing_doc, db, po_result = await _prepare_routing_document(doc)
@@ -596,6 +746,64 @@ async def upload_to_sharepoint_with_routing(
         upload_file_name,
         full_folder_path,
     )
+    if parity_metadata_override is not None:
+        # Historical migration may already have exact BC identity from the
+        # legacy linkage. Preserve that evidence instead of replacing it with
+        # a live PO re-resolution result. File/path/url are authoritative from
+        # this upload and are always refreshed here.
+        parity_metadata = dict(parity_metadata_override)
+        parity_metadata.update({
+            "GPI_OriginalFileName": file_name,
+            "GPI_SharePointFileName": upload_file_name,
+            "GPI_SharePointPath": full_folder_path,
+            "GPI_SharePointURL": result.get("web_url", ""),
+            "ImportReady": bool(parity_metadata_override.get("ImportReady")),
+        })
+        parity_metadata.setdefault(
+            "GPI_Status",
+            "ImportReady" if parity_metadata["ImportReady"] else "NotImportReady",
+        )
+    else:
+        parity_metadata = build_square9_parity_metadata(
+            routing_doc,
+            po_result,
+            file_name,
+            upload_file_name,
+            full_folder_path,
+            result.get("web_url", ""),
+        )
+
+    try:
+        metadata_result = await write_sharepoint_parity_metadata(
+            result["drive_id"],
+            result["item_id"],
+            parity_metadata,
+        )
+    except Exception as error:
+        if db is not None and routing_doc.get("id"):
+            await db.hub_documents.update_one(
+                {"id": routing_doc["id"]},
+                {"$set": {
+                    "delivery_status": "sharepoint_metadata_failed",
+                    "import_ready": False,
+                    "sharepoint_parity_metadata": parity_metadata,
+                    "sharepoint_metadata_error": str(error)[:1000],
+                    "sharepoint_metadata_failed_at": datetime.now(timezone.utc).isoformat(),
+                }},
+            )
+        raise
+
+    if db is not None and routing_doc.get("id"):
+        await db.hub_documents.update_one(
+            {"id": routing_doc["id"]},
+            {"$set": {
+                "delivery_status": parity_metadata["GPI_Status"],
+                "import_ready": bool(parity_metadata["ImportReady"]),
+                "sharepoint_parity_metadata": parity_metadata,
+                "sharepoint_metadata_written_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+
     result.update({
         "folder_path": full_folder_path,
         "routing_reason": routing_reason,
@@ -604,5 +812,9 @@ async def upload_to_sharepoint_with_routing(
         "po_resolution_status": (po_result or {}).get("status", "not_run"),
         "uploaded_file_name": upload_file_name,
         "original_file_name": file_name,
+        "parity_metadata": parity_metadata,
+        "metadata_write": metadata_result,
+        "import_ready": bool(parity_metadata["ImportReady"]),
+        "delivery_status": parity_metadata["GPI_Status"],
     })
     return result

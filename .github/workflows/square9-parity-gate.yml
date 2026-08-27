@@ -1,0 +1,334 @@
+name: Square9 Parity Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/routers/ap_review.py'
+      - 'backend/services/sharepoint_service.py'
+      - 'backend/services/bc_link_service.py'
+      - 'backend/services/gpi_integration_service.py'
+      - 'backend/services/bc_document_identity_service.py'
+      - 'backend/services/bc_document_link_recovery_service.py'
+      - 'backend/services/bc_drop_parity_metadata_service.py'
+      - 'backend/services/operator_identity_correction_service.py'
+      - 'backend/services/document_link_service.py'
+      - 'backend/services/document_link_visibility_service.py'
+      - 'backend/services/document_orchestration_service.py'
+      - 'backend/services/document_bytes_intake_service.py'
+      - 'backend/services/email_polling_service.py'
+      - 'backend/services/mailbox_provenance_service.py'
+      - 'backend/services/batch_po_splitter.py'
+      - 'backend/services/document_retry_service.py'
+      - 'backend/services/document_reprocess_service.py'
+      - 'backend/services/migration/job.py'
+      - 'backend/services/migration/sources.py'
+      - 'backend/services/migration/parity_identity.py'
+      - 'backend/services/migration/delivery.py'
+      - 'backend/tests/test_square9_parity_metadata.py'
+      - 'backend/tests/test_bc_link_write_boundary.py'
+      - 'backend/tests/test_document_link_entity_guard.py'
+      - 'backend/tests/test_document_link_visibility_service.py'
+      - 'backend/tests/test_document_link_systemid_visibility.py'
+      - 'backend/tests/test_mailbox_provenance_service.py'
+      - 'backend/tests/test_bc_document_identity_service.py'
+      - 'backend/tests/test_bc_document_link_recovery_service.py'
+      - 'backend/tests/test_bc_document_link_recovery_metadata.py'
+      - 'backend/tests/test_bc_drop_parity_metadata.py'
+      - 'backend/tests/test_gpi_document_link_systemid_guard.py'
+      - 'backend/tests/test_document_retry_existing_delivery.py'
+      - 'backend/tests/test_batch_po_splitter_replay.py'
+      - 'backend/tests/test_operator_identity_correction_service.py'
+      - 'backend/tests/test_migration_parity_identity.py'
+      - 'backend/tests/test_migration_dedupe_identity.py'
+      - 'backend/tests/test_migration_delivery.py'
+      - 'bc-extension/src/Table50100.GPIDocumentLink.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
+      - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
+      - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
+      - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/PageExt50104.GPIPurchOrderExt.al'
+      - '.github/workflows/square9-parity-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  parity-tests:
+    name: AP/Warehouse parity safety tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused test dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor pypdf
+
+      - name: Run focused parity tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+          UPLOAD_DIR: /tmp/gpi-hub-ci-uploads
+        run: |
+          pytest -q \
+            tests/test_square9_parity_metadata.py \
+            tests/test_bc_link_write_boundary.py \
+            tests/test_document_link_entity_guard.py \
+            tests/test_document_link_visibility_service.py \
+            tests/test_document_link_systemid_visibility.py \
+            tests/test_mailbox_provenance_service.py \
+            tests/test_bc_document_identity_service.py \
+            tests/test_bc_document_link_recovery_service.py \
+            tests/test_bc_document_link_recovery_metadata.py \
+            tests/test_bc_drop_parity_metadata.py \
+            tests/test_gpi_document_link_systemid_guard.py \
+            tests/test_document_retry_existing_delivery.py \
+            tests/test_batch_po_splitter_replay.py \
+            tests/test_operator_identity_correction_service.py \
+            tests/test_migration_parity_identity.py \
+            tests/test_migration_dedupe_identity.py \
+            tests/test_migration_delivery.py
+
+      - name: Guardrail - no generic BC_ENVIRONMENT attachment writes
+        run: |
+          if grep -n "BC_ENVIRONMENT.*documentAttachments\|documentAttachments.*BC_ENVIRONMENT" backend/services/bc_link_service.py; then
+            echo "::error::BC attachment write path references generic BC_ENVIRONMENT"
+            exit 1
+          fi
+
+      - name: Guardrail - Sales BC attachment writes default off
+        run: |
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }
+
+      - name: Guardrail - split processing must never delete by content hash
+        run: |
+          if grep -n 'delete_many.*sha256_hash' backend/services/batch_po_splitter.py; then
+            echo "::error::Destructive split replay detected: child hashes must be idempotent, never deleted"
+            exit 1
+          fi
+
+      - name: Guardrail - retry cannot invoke legacy upload/link orchestration
+        run: |
+          if grep -n 'run_upload_and_link_workflow' backend/services/document_retry_service.py; then
+            echo "::error::Retry path bypasses the parity delivery boundary"
+            exit 1
+          fi
+
+      - name: Guardrail - existing SharePoint retry cannot require local bytes
+        run: |
+          grep -q '_retry_existing_delivery(db, doc)' backend/services/document_retry_service.py || {
+            echo "::error::Existing SharePoint delivery does not use in-place recovery"
+            exit 1
+          }
+          grep -q 'Original file not found and no existing SharePoint item is available for retry' backend/services/document_retry_service.py || {
+            echo "::error::Local-file requirement is not scoped to documents without SharePoint identity"
+            exit 1
+          }
+
+      - name: Guardrail - AP and dynamic mail intake persist mailbox provenance
+        run: |
+          grep -q 'persist_mailbox_provenance' backend/services/email_polling_service.py || {
+            echo "::error::Email intake does not persist mailbox provenance"
+            exit 1
+          }
+
+      - name: Guardrail - Gamer Documents lookup and unlink bind exact BC identity
+        run: |
+          grep -q 'build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::Hub FactBox lookup does not carry BC SystemId"
+            exit 1
+          }
+          grep -q 'bc_entity, bc_document_no, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::BC documentLinks lookup does not carry BC SystemId"
+            exit 1
+          }
+          grep -q 'build_folder_match_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::BC-drop folder reuse does not carry BC SystemId"
+            exit 1
+          }
+          grep -q 'build_hub_document_unlink_query' backend/routers/gpi_integration.py || {
+            echo "::error::Document unlink does not use exact-record selector"
+            exit 1
+          }
+          grep -q 'doc_id_or_sp_item, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::Document unlink drops BC SystemId"
+            exit 1
+          }
+
+      - name: Guardrail - BC Drop requires exact SystemId and lifecycle contract
+        run: |
+          grep -q 'validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)' backend/routers/gpi_integration.py || {
+            echo "::error::BC Drop upload does not validate exact AP/Warehouse lifecycle identity before SharePoint upload"
+            exit 1
+          }
+          grep -q 'normalize_system_id(bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::BC Drop upload does not require a valid immutable BC SystemId"
+            exit 1
+          }
+          grep -q '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")' backend/routers/gpi_integration.py || {
+            echo "::error::BC native raw-binary upload route is missing"
+            exit 1
+          }
+          grep -q 'content_type != "application/octet-stream"' backend/routers/gpi_integration.py || {
+            echo "::error::BC raw upload does not fail closed on content type"
+            exit 1
+          }
+          grep -q 'BC SystemId is required for GPI Document Link creation' backend/services/gpi_integration_service.py || {
+            echo "::error::BC document-link writer accepts blank SystemId"
+            exit 1
+          }
+          if grep -n 'bc_system_id=""' backend/routers/gpi_integration.py; then
+            echo "::error::Blank BC SystemId document-link call remains in router"
+            exit 1
+          fi
+
+      - name: Guardrail - AL sends original bytes and exact identity
+        run: |
+          grep -q 'FileContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::BC AL upload is not sending the original file InStream"
+            exit 1
+          }
+          grep -q "Content-Type', 'application/octet-stream'" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::BC AL raw upload is missing application/octet-stream"
+            exit 1
+          }
+          grep -q 'bc_system_id=' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::BC AL upload drops exact SystemId"
+            exit 1
+          }
+          grep -q 'source_table_id=' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo "::error::BC AL upload drops source table identity"
+            exit 1
+          }
+          if grep -Eq 'Base64 Convert|ToBase64\(FileInStream\)|multipart/form-data' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al; then
+            echo "::error::Legacy base64/multipart BC upload path remains"
+            exit 1
+          fi
+
+      - name: Guardrail - BC link recovery finalizes same SharePoint item and never reuploads
+        run: |
+          grep -q '_finalize_existing_item_metadata' backend/services/bc_document_link_recovery_service.py || {
+            echo "::error::BC link recovery does not finalize SharePoint parity metadata"
+            exit 1
+          }
+          grep -q 'bc_link_recovered_metadata_failed' backend/services/bc_document_link_recovery_service.py || {
+            echo "::error::BC link recovery can hide a final metadata failure"
+            exit 1
+          }
+          if grep -n 'upload_to_sharepoint\|upload_to_sharepoint_with_routing\|createUploadSession' backend/services/bc_document_link_recovery_service.py; then
+            echo "::error::BC link recovery may duplicate SharePoint uploads"
+            exit 1
+          fi
+          grep -q '@router.post("/document-links/recover/{doc_id}")' backend/routers/gpi_integration.py || {
+            echo "::error::Operator BC link recovery endpoint missing"
+            exit 1
+          }
+
+      - name: Guardrail - AP correction invalidates stale BC identity
+        run: |
+          grep -q 'build_identity_invalidation(' backend/routers/ap_review.py || {
+            echo "::error::AP review correction does not invalidate stale BC identity"
+            exit 1
+          }
+          grep -q 'identity_correction_history' backend/routers/ap_review.py || {
+            echo "::error::AP review correction does not preserve prior identity audit"
+            exit 1
+          }
+          grep -q 'sharepoint_parity_metadata_stale' backend/services/operator_identity_correction_service.py || {
+            echo "::error::AP identity correction does not mark SharePoint parity metadata stale"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration fails closed until exact identity
+        run: |
+          grep -q 'stage_migration_parity_fields(gpi_doc, metadata, doc_type)' backend/services/migration/job.py || {
+            echo "::error::Historical migration does not stage normalized parity metadata"
+            exit 1
+          }
+          grep -q 'await resolve_migration_identity(' backend/services/migration/job.py || {
+            echo "::error::REAL historical migration does not resolve exact BC identity"
+            exit 1
+          }
+          grep -q 'ImportReady.*False' backend/services/migration/parity_identity.py || {
+            echo "::error::Historical migration does not default ImportReady to false"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration dedupe is source-scoped and same-run safe
+        run: |
+          grep -q 'source_key = self._legacy_identity_key(legacy_doc.metadata)' backend/services/migration/job.py || {
+            echo "::error::Historical migration dedupe is not source-scoped"
+            exit 1
+          }
+          grep -q 'existing_keys.add(source_key)' backend/services/migration/job.py || {
+            echo "::error::Historical migration does not reserve accepted identity during the same run"
+            exit 1
+          }
+          grep -q 'async def _get_existing_legacy_keys' backend/services/migration/job.py || {
+            echo "::error::Historical migration still uses bare legacy-id persistence lookup"
+            exit 1
+          }
+
+      - name: Guardrail - historical migration must deliver the document body
+        run: |
+          grep -q 'await deliver_migrated_document(' backend/services/migration/job.py || {
+            echo "::error::REAL historical migration can succeed without delivering the document body"
+            exit 1
+          }
+          grep -q 'def read_binary(self, doc: LegacyDocument) -> bytes:' backend/services/migration/sources.py || {
+            echo "::error::Legacy migration source has no binary reader contract"
+            exit 1
+          }
+          grep -q 'parity_metadata_override: Optional\[Dict\[str, Any\]\] = None' backend/services/sharepoint_service.py || {
+            echo "::error::SharePoint boundary cannot preserve historical parity identity"
+            exit 1
+          }
+          grep -q 'Legacy document body is empty' backend/services/migration/delivery.py || {
+            echo "::error::Historical body delivery does not fail closed on empty content"
+            exit 1
+          }
+
+      - name: Guardrail - BC record can hold multiple document links
+        run: |
+          if awk '/key\(DocumentKey;/{flag=1} flag{print} flag && /}/{exit}' bc-extension/src/Table50100.GPIDocumentLink.al | grep -q 'Unique = true'; then
+            echo "::error::GPI Document Link still restricts a BC record to one document"
+            exit 1
+          fi
+
+      - name: Guardrail - BC FactBox Hub endpoint is configured and HTTPS-only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          mgt = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          setup = Path('bc-extension/src/table/GPIHubSetup.Table.al').read_text(encoding='utf-8')
+          combined = (mgt + '\n' + setup).lower()
+          forbidden = ('http://4.204.41.190', "exit('http://", '4.204.41.190:8080')
+          for token in forbidden:
+              if token in combined:
+                  raise SystemExit(f'forbidden hard-coded/insecure Hub endpoint remains: {token}')
+          required = (
+              'Record "GPI Hub Setup"' in mgt,
+              "HubSetup.Get('SETUP')" in mgt,
+              "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" in mgt,
+              "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" in setup,
+          )
+          if not all(required):
+              raise SystemExit('BC FactBox Hub endpoint is not fail-closed, configurable, and HTTPS-only')
+          PY

@@ -1,0 +1,64 @@
+name: Square9 SharePoint Schema Gate
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/services/sharepoint_parity_schema_service.py'
+      - 'backend/scripts/validate_sharepoint_parity_schema.py'
+      - 'backend/tests/test_sharepoint_parity_schema_service.py'
+      - '.github/workflows/square9-sharepoint-schema-gate.yml'
+  pull_request:
+    paths:
+      - 'backend/services/sharepoint_parity_schema_service.py'
+      - 'backend/scripts/validate_sharepoint_parity_schema.py'
+      - 'backend/tests/test_sharepoint_parity_schema_service.py'
+      - '.github/workflows/square9-sharepoint-schema-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  schema-contract:
+    name: SharePoint parity metadata schema contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest httpx python-dotenv
+      - name: Run schema contract tests
+        working-directory: backend
+        run: pytest -q tests/test_sharepoint_parity_schema_service.py
+      - name: Guardrail - diagnostic is read-only
+        run: |
+          if grep -nE 'client\.(post|put|patch|delete)\(' backend/services/sharepoint_parity_schema_service.py; then
+            echo "::error::SharePoint schema preflight must be GET-only"
+            exit 1
+          fi
+          grep -q 'client.get(' backend/services/sharepoint_parity_schema_service.py || {
+            echo "::error::SharePoint schema preflight does not read Graph schema"
+            exit 1
+          }
+      - name: Guardrail - full metadata contract is represented
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'backend')
+          from services.sharepoint_parity_schema_service import PARITY_COLUMN_TYPES
+          expected = {
+              'GPI_SourceTableID', 'GPI_SourceSystemId', 'GPI_SourceDocumentType',
+              'GPI_SourceDocumentNo', 'GPI_SourcePartyType', 'GPI_SourcePartyNo',
+              'GPI_OriginalFileName', 'GPI_SharePointFileName', 'GPI_SharePointPath',
+              'GPI_SharePointURL', 'GPI_Status', 'GPI_MatchStatus', 'GPI_MatchMethod',
+              'GPI_MatchConfidence', 'GPI_Candidates', 'ImportReady',
+          }
+          if set(PARITY_COLUMN_TYPES) != expected:
+              raise SystemExit(f'parity schema mismatch: {set(PARITY_COLUMN_TYPES) ^ expected}')
+          if PARITY_COLUMN_TYPES['ImportReady'] != {'boolean'}:
+              raise SystemExit('ImportReady must be a SharePoint Boolean column')
+          PY

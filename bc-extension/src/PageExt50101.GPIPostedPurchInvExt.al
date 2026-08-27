@@ -27,7 +27,8 @@ pageextension 50101 "GPI Posted Purch Inv Extension" extends "Posted Purchase In
         CurrPage.GPIDocuments.Page.SetContext(
             "GPI Doc Link Type"::"Posted Purchase Invoice",
             Rec."No.",
-            VendorCtx
+            VendorCtx,
+            Rec.SystemId
         );
     end;
 }

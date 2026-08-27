@@ -20,7 +20,9 @@ logger = logging.getLogger("config_service")
 # Core identity / tenant
 # ---------------------------------------------------------------------------
 DEMO_MODE = os.environ.get("DEMO_MODE", "true").lower() == "true"
-JWT_SECRET = os.environ.get("JWT_SECRET", "gpi-hub-secret-key")
+# Never advertise or return the historical publicly-known JWT fallback. The
+# authoritative startup validator/auth module fail closed when this is blank.
+JWT_SECRET = os.environ.get("JWT_SECRET", "")
 
 # ---------------------------------------------------------------------------
 # Azure AD / Entra
@@ -31,8 +33,10 @@ TENANT_ID = os.environ.get("TENANT_ID", "")
 # Business Central
 # ---------------------------------------------------------------------------
 BC_ENVIRONMENT = os.environ.get("BC_ENVIRONMENT", "")
-BC_READ_ENVIRONMENT = os.environ.get(
-    "BC_PROD_ENVIRONMENT", os.environ.get("BC_ENVIRONMENT", "")
+BC_READ_ENVIRONMENT = (
+    os.environ.get("BC_READ_ENVIRONMENT")
+    or os.environ.get("BC_PROD_ENVIRONMENT")
+    or os.environ.get("BC_ENVIRONMENT", "")
 )
 BC_COMPANY_NAME = os.environ.get("BC_COMPANY_NAME", "")
 BC_CLIENT_ID = os.environ.get("BC_CLIENT_ID", "")

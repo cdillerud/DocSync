@@ -285,10 +285,34 @@ async def save_ap_review(doc_id: str, data: APReviewData):
     except Exception as e:
         logger.debug("AP Review feedback recording skipped: %s", e)
     
-    # Update document
+    # Material vendor/PO corrections invalidate any previously derived BC
+    # identity/readiness. Preserve the prior identity in append-only audit.
+    identity_change = {"changed": False, "set": {}, "audit": None}
+    try:
+        from services.operator_identity_correction_service import (
+            build_identity_invalidation,
+        )
+        identity_change = build_identity_invalidation(
+            doc,
+            vendor_id=data.vendor_id,
+            po_number=data.po_number,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    if identity_change["changed"]:
+        update_data.update(identity_change["set"])
+
+    mongo_update = {"$set": update_data}
+    if identity_change["changed"]:
+        mongo_update["$push"] = {
+            "identity_correction_history": identity_change["audit"]
+        }
+
+    # Update corrected evidence + invalidated identity atomically.
     await db.hub_documents.update_one(
         {"id": doc_id},
-        {"$set": update_data}
+        mongo_update
     )
     
     # ── UNIFIED FEEDBACK LOOP: Record ALL AP review corrections ──

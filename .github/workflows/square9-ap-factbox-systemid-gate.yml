@@ -1,0 +1,234 @@
+name: Square9 AP FactBox SystemId Gate
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/services/document_link_visibility_service.py'
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/tests/test_document_link_systemid_visibility.py'
+      - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
+      - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
+      - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
+      - 'bc-extension/build.sh'
+      - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
+  pull_request:
+    paths:
+      - 'backend/services/document_link_visibility_service.py'
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/tests/test_document_link_systemid_visibility.py'
+      - 'bc-extension/src/Page50100.GPIDocumentLinkFactbox.al'
+      - 'bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al'
+      - 'bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/table/GPIHubSetup.Table.al'
+      - 'bc-extension/src/page/GPIHubSetup.Page.al'
+      - 'bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al'
+      - 'bc-extension/build.sh'
+      - '.github/workflows/square9-ap-factbox-systemid-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  ap-factbox-systemid:
+    name: AP FactBox immutable record identity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+
+      - name: Run immutable identity selector tests
+        working-directory: backend
+        run: pytest -q tests/test_document_link_systemid_visibility.py
+
+      - name: Validate BC extension structure
+        run: bash bc-extension/build.sh
+
+      - name: Guardrail - Hub endpoint is configurable and HTTPS-only
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          mgt = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          table = Path('bc-extension/src/table/GPIHubSetup.Table.al').read_text(encoding='utf-8')
+          page = Path('bc-extension/src/page/GPIHubSetup.Page.al').read_text(encoding='utf-8')
+          perm = Path('bc-extension/src/permissionset/GPIHubSetup.PermissionSet.al').read_text(encoding='utf-8')
+
+          combined = '\n'.join((mgt, table, page, perm)).lower()
+          forbidden = ('http://4.204.41.190', "exit('http://", 'hardcode for now')
+          for token in forbidden:
+              if token in combined:
+                  raise SystemExit(f'forbidden hard-coded Hub endpoint remains: {token}')
+
+          required = {
+              'management reads setup': 'Record "GPI Hub Setup"' in mgt and "HubSetup.Get('SETUP')" in mgt,
+              'runtime read-only permission': 'Permissions = tabledata "GPI Hub Setup" = R;' in mgt,
+              'runtime HTTPS check': "LowerCase(CopyStr(HubUrl, 1, 8)) <> 'https://'" in mgt,
+              'field HTTPS validation': "LowerCase(CopyStr(NormalizedUrl, 1, 8)) <> 'https://'" in table,
+              'setup table object': 'table 50190 "GPI Hub Setup"' in table,
+              'setup page object': 'page 50190 "GPI Hub Setup"' in page,
+              'setup is administration': 'UsageCategory = Administration;' in page,
+              'admin permission set': 'permissionset 50190 "GPI HUB SETUP"' in perm and 'tabledata "GPI Hub Setup" = RIMD' in perm,
+          }
+          missing = [name for name, ok in required.items() if not ok]
+          if missing:
+              raise SystemExit('Hub endpoint setup contract incomplete: ' + ', '.join(missing))
+          PY
+
+      - name: Guardrail - Hub visibility binds immutable SystemId when supplied
+        run: |
+          grep -q 'GPI_SourceSystemId' backend/services/document_link_visibility_service.py || {
+            echo "::error::Hub FactBox selector does not include normalized SourceSystemId"
+            exit 1
+          }
+          grep -q 'bc_record_id' backend/services/document_link_visibility_service.py || {
+            echo "::error::Hub FactBox selector does not include top-level BC record identity"
+            exit 1
+          }
+          grep -q 'targetSystemId eq' backend/services/document_link_visibility_service.py || {
+            echo "::error::BC documentLinks selector does not bind targetSystemId"
+            exit 1
+          }
+          grep -q 'UUID(raw)' backend/services/document_link_visibility_service.py || {
+            echo "::error::FactBox SystemId is not validated as a GUID"
+            exit 1
+          }
+
+      - name: Guardrail - backend routes carry SystemId end to end
+        run: |
+          grep -q 'identity_query = f"?bc_system_id={bc_system_id}"' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox browser UI drops BC SystemId"
+            exit 1
+          }
+          grep -q 'const IDENTITY_QUERY = "{identity_query}"' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox iframe does not retain BC SystemId query"
+            exit 1
+          }
+          grep -q 'const LIST_API = API + IDENTITY_QUERY' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox iframe list read is not identity-bound"
+            exit 1
+          }
+          grep -q 'encodeURIComponent(id) + IDENTITY_QUERY' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox iframe delete is not identity-bound"
+            exit 1
+          }
+          grep -q 'build_hub_document_link_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::Hub document selector does not receive BC SystemId"
+            exit 1
+          }
+          grep -q 'bc_entity, bc_document_no, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::BC documentLinks read does not receive BC SystemId"
+            exit 1
+          }
+          grep -q 'build_folder_match_query(bc_entity, bc_document_no, bc_system_id)' backend/routers/gpi_integration.py || {
+            echo "::error::BC Drop folder reuse is not bound to resolved BC SystemId"
+            exit 1
+          }
+          grep -q 'build_hub_document_unlink_query' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox delete does not use the exact-record selector"
+            exit 1
+          }
+          grep -q 'doc_id_or_sp_item, bc_system_id' backend/routers/gpi_integration.py || {
+            echo "::error::FactBox delete drops BC SystemId before soft-delete"
+            exit 1
+          }
+
+      - name: Guardrail - AP BC pages pass Rec.SystemId
+        run: |
+          grep -q 'Rec.SystemId' bc-extension/src/PageExt50100.GPIPurchInvoiceExt.al || {
+            echo "::error::Purchase Invoice FactBox does not receive draft SystemId"
+            exit 1
+          }
+          grep -q 'Rec.SystemId' bc-extension/src/PageExt50101.GPIPostedPurchInvExt.al || {
+            echo "::error::Posted Purchase Invoice FactBox does not receive posted SystemId"
+            exit 1
+          }
+          grep -q 'CurrentBCSystemId: Guid' bc-extension/src/Page50100.GPIDocumentLinkFactbox.al || {
+            echo "::error::FactBox does not retain immutable BC record identity"
+            exit 1
+          }
+          grep -q "'?bc_system_id='" bc-extension/src/Page50100.GPIDocumentLinkFactbox.al || {
+            echo "::error::FactBox HTTP reads do not transmit BC SystemId"
+            exit 1
+          }
+          grep -q 'EscapeDataString(CurrentBCDocumentNo)' bc-extension/src/Page50100.GPIDocumentLinkFactbox.al || {
+            echo "::error::FactBox does not URL-encode the BC document-number path segment"
+            exit 1
+          }
+
+      - name: Guardrail - raw upload validates BC identity at the artifact delivery boundary
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path('backend/routers/gpi_integration.py').read_text(encoding='utf-8')
+
+          helper_marker = 'async def _deliver_bc_drop_content('
+          helper_start = text.index(helper_marker)
+          helper_tail = text[helper_start:]
+          helper_end = helper_tail.index('\n\n@router.')
+          helper = helper_tail[:helper_end]
+
+          required_helper = (
+              'validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)',
+              'bc_system_id = normalize_system_id(bc_system_id)',
+              'staged_metadata = build_bc_drop_parity_metadata(',
+              'await write_bc_drop_parity_metadata(hub_record, ready=False)',
+          )
+          missing = [token for token in required_helper if token not in helper]
+          if missing:
+              raise SystemExit('BC Drop artifact boundary identity contract incomplete: ' + ', '.join(missing))
+
+          validate = helper.index('validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)')
+          normalize = helper.index('bc_system_id = normalize_system_id(bc_system_id)')
+          upload = helper.index('await upload_to_sharepoint(file_content, file_name, folder_path)')
+          metadata = helper.index('staged_metadata = build_bc_drop_parity_metadata(')
+          if not (validate < upload and normalize < upload and upload < metadata):
+              raise SystemExit('BC source contract/SystemId must validate before SharePoint artifact creation')
+
+          raw_marker = '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")'
+          raw_start = text.index(raw_marker)
+          raw_tail = text[raw_start:]
+          end_marker = '# --- STEP 3: RECOVER'
+          raw = raw_tail[:raw_tail.index(end_marker)] if end_marker in raw_tail else raw_tail
+          for token in (
+              'await request.body()',
+              '_deliver_bc_drop_content(',
+              'bc_system_id=bc_system_id',
+              'source_table_id=source_table_id',
+              'source_document_type=source_document_type',
+          ):
+              if token not in raw:
+                  raise SystemExit('raw BC Drop route does not delegate exact identity into guarded delivery boundary: ' + token)
+
+          al = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
+          for token in (
+              "UriHelper.EscapeDataString(BCDocumentNo)",
+              "'?bc_system_id='",
+              "'&source_table_id='",
+              "'&source_document_type='",
+              'FileContent.WriteFrom(FileInStream)',
+          ):
+              if token not in al:
+                  raise SystemExit('AL raw upload contract missing: ' + token)
+          PY
+
+      - name: Guardrail - Sales write lane remains disabled
+        run: |
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo "::error::Sales BC attachment write lane is not default-off"
+            exit 1
+          }

@@ -1,0 +1,129 @@
+name: Square9 BC Drop Parity Gate
+
+on:
+  pull_request:
+    paths:
+      - 'backend/routers/gpi_integration.py'
+      - 'backend/services/bc_drop_parity_metadata_service.py'
+      - 'backend/services/bc_document_link_recovery_service.py'
+      - 'backend/tests/test_bc_drop_parity_metadata.py'
+      - 'backend/tests/test_bc_document_link_recovery_metadata.py'
+      - 'bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al'
+      - 'bc-extension/src/page/GPIDocumentLinksFactBox.Page.al'
+      - '.github/workflows/square9-bc-drop-parity-gate.yml'
+  workflow_dispatch:
+
+jobs:
+  bc-drop-parity:
+    name: BC Drop exact bytes identity metadata recovery
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx python-dotenv fastapi motor
+
+      - name: Run BC Drop parity tests
+        working-directory: backend
+        env:
+          DEMO_MODE: 'true'
+          BC_BLOCK_PRODUCTION_WRITES: 'true'
+          BC_READ_ENVIRONMENT: 'Production'
+          BC_WRITE_ENVIRONMENT: 'Sandbox_NoZetadocs_UAT'
+          BC_SALES_LINK_WRITE_ENABLED: 'false'
+          MONGO_URL: mongodb://localhost:27017
+          DB_NAME: gpi_hub_ci
+        run: |
+          pytest -q \
+            tests/test_bc_drop_parity_metadata.py \
+            tests/test_bc_document_link_recovery_metadata.py
+
+      - name: Guardrail - AL sends original binary stream
+        run: |
+          grep -q 'FileContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::BC upload no longer writes the original InStream into HttpContent'
+            exit 1
+          }
+          grep -q "Content-Type', 'application/octet-stream'" bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::BC raw upload does not declare application/octet-stream'
+            exit 1
+          }
+          if grep -Eq 'Base64 Convert|ToBase64\(FileInStream\)|multipart/form-data' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al; then
+            echo '::error::Legacy base64/multipart upload path has returned to AL'
+            exit 1
+          fi
+
+      - name: Guardrail - exact BC identity is mandatory before upload
+        run: |
+          grep -q '/upload-raw' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::AL does not call the raw binary upload route'
+            exit 1
+          }
+          grep -q 'bc_system_id=' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::AL upload does not transmit immutable BC SystemId'
+            exit 1
+          }
+          grep -q 'source_table_id=' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::AL upload does not transmit source table identity'
+            exit 1
+          }
+          grep -q 'source_document_type=' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+            echo '::error::AL upload does not transmit lifecycle document type'
+            exit 1
+          }
+          grep -q 'validate_bc_drop_source_contract' backend/routers/gpi_integration.py || {
+            echo '::error::Server does not fail closed on the AP/Warehouse source contract'
+            exit 1
+          }
+
+      - name: Guardrail - metadata gates delivery
+        run: |
+          grep -q 'write_bc_drop_parity_metadata(hub_record, ready=False)' backend/routers/gpi_integration.py || {
+            echo '::error::BC Drop does not stage normalized metadata before BC link creation'
+            exit 1
+          }
+          grep -q 'write_bc_drop_parity_metadata(hub_record, ready=True)' backend/routers/gpi_integration.py || {
+            echo '::error::BC Drop can complete without final ImportReady metadata'
+            exit 1
+          }
+          grep -q 'bc_link_recovered_metadata_failed' backend/services/bc_document_link_recovery_service.py || {
+            echo '::error::Recovery cannot distinguish BC-link success from metadata completion'
+            exit 1
+          }
+          grep -q '_finalize_existing_item_metadata' backend/services/bc_document_link_recovery_service.py || {
+            echo '::error::Recovery does not finalize parity metadata on the existing SharePoint item'
+            exit 1
+          }
+
+      - name: Guardrail - recovery never reuploads
+        run: |
+          if grep -Eq 'upload_to_sharepoint|upload_file|createUploadSession|/upload-raw' backend/services/bc_document_link_recovery_service.py; then
+            echo '::error::BC link recovery contains a SharePoint/file upload path'
+            exit 1
+          fi
+          grep -q 'sharepoint_drive_id' backend/services/bc_document_link_recovery_service.py || {
+            echo '::error::Recovery is not bound to an existing SharePoint drive identity'
+            exit 1
+          }
+          grep -q 'sharepoint_item_id' backend/services/bc_document_link_recovery_service.py || {
+            echo '::error::Recovery is not bound to an existing SharePoint item identity'
+            exit 1
+          }
+
+      - name: Guardrail - Sales remains blocked
+        run: |
+          if grep -q '("salesOrders"' backend/services/bc_drop_parity_metadata_service.py || grep -q '("salesInvoices"' backend/services/bc_drop_parity_metadata_service.py; then
+            echo '::error::Sales/Inside Sales BC Drop source contracts were activated'
+            exit 1
+          fi
+          grep -q 'BC_SALES_LINK_WRITE_ENABLED.*false' backend/services/bc_link_service.py || {
+            echo '::error::Sales BC link write lane is not default-off'
+            exit 1
+          }

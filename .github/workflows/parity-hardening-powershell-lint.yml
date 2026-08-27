@@ -1,0 +1,101 @@
+name: Parity Hardening PowerShell Lint
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1'
+      - 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
+      - '.github/workflows/parity-hardening-powershell-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    name: PowerShell parser gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse parity scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Files = @(
+            'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1',
+            'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
+            'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
+          )
+
+          $Failed = $false
+          foreach ($File in $Files) {
+            if (-not (Test-Path -LiteralPath $File)) {
+              Write-Error "Required parity script missing: $File"
+              $Failed = $true
+              continue
+            }
+
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $File),
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+
+            if ($Errors.Count -gt 0) {
+              $Failed = $true
+              Write-Host "PARSE FAIL: $File" -ForegroundColor Red
+              foreach ($E in $Errors) {
+                Write-Host ("  Line {0}, Col {1}: {2}" -f $E.Extent.StartLineNumber, $E.Extent.StartColumnNumber, $E.Message) -ForegroundColor Red
+              }
+            }
+            else {
+              Write-Host "PARSE PASS: $File" -ForegroundColor Green
+            }
+          }
+
+          if ($Failed) {
+            throw 'Parity PowerShell parser gate failed.'
+          }
+
+      - name: Verify production hard-block markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PublishScript = Get-Content -LiteralPath 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1' -Raw
+
+          foreach ($Marker in @(
+            "Sandbox_08142026_GamerDocs",
+            "Production-like environment detected",
+            "SchemaUpdateMode=synchronize",
+            "DependencyPublishingOption=ignore"
+          )) {
+            if (-not $PublishScript.Contains($Marker)) {
+              throw "Required safety marker missing from publish script: $Marker"
+            }
+          }
+
+          if ($PublishScript -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
+            throw 'Production target assignment detected.'
+          }
+
+          Write-Host 'Sandbox/Production safety markers: PASS' -ForegroundColor Green
+
+      - name: Verify parity classification markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Gate = Get-Content -LiteralPath 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1' -Raw
+          $BurnDown = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1' -Raw
+
+          foreach ($Marker in @('PARITY BLOCKER','PARITY RISK','VALIDATED PARITY')) {
+            if (-not (($Gate + "`n" + $BurnDown).Contains($Marker))) {
+              throw "Parity classification marker missing: $Marker"
+            }
+          }
+
+          Write-Host 'Parity classification markers: PASS' -ForegroundColor Green

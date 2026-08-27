@@ -169,34 +169,52 @@ jobs:
             exit 1
           }
 
-      - name: Guardrail - raw upload validates BC-provided identity before SharePoint artifact
+      - name: Guardrail - raw upload validates BC identity at the artifact delivery boundary
         run: |
           python - <<'PY'
           from pathlib import Path
 
           text = Path('backend/routers/gpi_integration.py').read_text(encoding='utf-8')
-          marker = '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")'
-          start = text.index(marker)
-          tail = text[start:]
-          end_marker = '# --- STEP 3: RECOVER'
-          block = tail[:tail.index(end_marker)] if end_marker in tail else tail
 
-          required = (
+          helper_marker = 'async def _deliver_bc_drop_content('
+          helper_start = text.index(helper_marker)
+          helper_tail = text[helper_start:]
+          helper_end = helper_tail.index('\n\n@router.')
+          helper = helper_tail[:helper_end]
+
+          required_helper = (
               'validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)',
-              'normalize_system_id(bc_system_id)',
+              'bc_system_id = normalize_system_id(bc_system_id)',
+              'build_bc_drop_parity_metadata',
+              'write_bc_drop_parity_metadata',
+          )
+          missing = [token for token in required_helper if token not in helper]
+          if missing:
+              raise SystemExit('BC Drop artifact boundary identity contract incomplete: ' + ', '.join(missing))
+
+          validate = helper.index('validate_bc_drop_source_contract')
+          normalize = helper.index('normalize_system_id')
+          metadata = helper.index('build_bc_drop_parity_metadata')
+          if not (validate < metadata and normalize < metadata):
+              raise SystemExit('BC source contract/SystemId must validate before parity metadata/artifact delivery begins')
+
+          raw_marker = '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")'
+          raw_start = text.index(raw_marker)
+          raw_tail = text[raw_start:]
+          end_marker = '# --- STEP 3: RECOVER'
+          raw = raw_tail[:raw_tail.index(end_marker)] if end_marker in raw_tail else raw_tail
+          for token in (
               'await request.body()',
               '_deliver_bc_drop_content(',
-          )
-          missing = [token for token in required if token not in block]
-          if missing:
-              raise SystemExit('raw BC Drop upload identity contract incomplete: ' + ', '.join(missing))
+              'bc_system_id=bc_system_id',
+              'source_table_id=source_table_id',
+              'source_document_type=source_document_type',
+          ):
+              if token not in raw:
+                  raise SystemExit('raw BC Drop route does not delegate exact identity into guarded delivery boundary: ' + token)
 
-          validate = block.index('validate_bc_drop_source_contract')
-          normalize = block.index('normalize_system_id')
-          read_body = block.index('await request.body()')
-          deliver = block.index('_deliver_bc_drop_content(')
-          if not (validate < read_body and normalize < read_body and read_body < deliver):
-              raise SystemExit('BC source contract/SystemId must validate before raw bytes enter delivery boundary')
+          if raw.index('await request.body()') > raw.index('_deliver_bc_drop_content('):
+              raise SystemExit('raw BC Drop bytes are not passed through the guarded delivery boundary')
 
           al = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
           for token in (

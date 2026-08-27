@@ -105,7 +105,7 @@ jobs:
             "ExpectedSha256",
             "SchemaUpdateMode=synchronize",
             "DependencyPublishingOption=ignore",
-            "expected DEV"
+            "Refusing to change extension scope"
           )) {
             if (-not $RecoveryPublisher.Contains($Marker)) {
               throw "Bridge .21 publisher safety marker missing: $Marker"

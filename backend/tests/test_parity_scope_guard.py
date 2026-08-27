@@ -3,6 +3,7 @@ from services.parity_scope_guard import (
     AUTHENTICATED_ONLY_PREFIXES,
     M2M_OR_USER_PREFIXES,
     OUT_OF_SCOPE_SALES_PREFIXES,
+    graph_webhook_enabled,
     is_admin_only_path,
     is_authenticated_only_path,
     is_m2m_or_user_path,
@@ -198,6 +199,41 @@ def test_sales_route_activation_requires_explicit_true(monkeypatch):
     for value in ("true", "1", "yes", "on"):
         monkeypatch.setenv("ENABLE_OUT_OF_SCOPE_SALES_ROUTES", value)
         assert sales_routes_enabled() is True
+
+
+def test_graph_webhook_is_disabled_by_default_and_requires_explicit_true(monkeypatch):
+    monkeypatch.delenv("GRAPH_WEBHOOK_ENABLED", raising=False)
+    assert graph_webhook_enabled() is False
+
+    for value in ("", "false", "0", "no", "off"):
+        monkeypatch.setenv("GRAPH_WEBHOOK_ENABLED", value)
+        assert graph_webhook_enabled() is False
+
+    for value in ("true", "1", "yes", "on"):
+        monkeypatch.setenv("GRAPH_WEBHOOK_ENABLED", value)
+        assert graph_webhook_enabled() is True
+
+
+def test_prefix_matching_requires_path_segment_boundary():
+    false_positive_samples = (
+        (is_out_of_scope_sales_path, "/api/salesforce"),
+        (is_out_of_scope_sales_path, "/api/sales-dashboarding"),
+        (is_admin_only_path, "/api/administer"),
+        (is_admin_only_path, "/api/migrations"),
+        (is_authenticated_only_path, "/api/documentation"),
+        (is_m2m_or_user_path, "/api/gpi-integration/document-linksmith"),
+    )
+    for matcher, path in false_positive_samples:
+        assert matcher(path) is False, path
+
+    true_boundary_samples = (
+        (is_out_of_scope_sales_path, "/api/sales/"),
+        (is_admin_only_path, "/api/admin/"),
+        (is_authenticated_only_path, "/api/documents/"),
+        (is_m2m_or_user_path, "/api/gpi-integration/document-links/"),
+    )
+    for matcher, path in true_boundary_samples:
+        assert matcher(path) is True, path
 
 
 def test_prefix_lists_have_no_broad_api_catchall():

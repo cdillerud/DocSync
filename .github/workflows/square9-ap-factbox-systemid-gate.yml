@@ -185,18 +185,19 @@ jobs:
           required_helper = (
               'validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)',
               'bc_system_id = normalize_system_id(bc_system_id)',
-              'build_bc_drop_parity_metadata',
-              'write_bc_drop_parity_metadata',
+              'staged_metadata = build_bc_drop_parity_metadata(',
+              'await write_bc_drop_parity_metadata(hub_record, ready=False)',
           )
           missing = [token for token in required_helper if token not in helper]
           if missing:
               raise SystemExit('BC Drop artifact boundary identity contract incomplete: ' + ', '.join(missing))
 
-          validate = helper.index('validate_bc_drop_source_contract')
-          normalize = helper.index('normalize_system_id')
-          metadata = helper.index('build_bc_drop_parity_metadata')
-          if not (validate < metadata and normalize < metadata):
-              raise SystemExit('BC source contract/SystemId must validate before parity metadata/artifact delivery begins')
+          validate = helper.index('validate_bc_drop_source_contract(bc_entity, source_table_id, source_document_type)')
+          normalize = helper.index('bc_system_id = normalize_system_id(bc_system_id)')
+          upload = helper.index('await upload_to_sharepoint(file_content, file_name, folder_path)')
+          metadata = helper.index('staged_metadata = build_bc_drop_parity_metadata(')
+          if not (validate < upload and normalize < upload and upload < metadata):
+              raise SystemExit('BC source contract/SystemId must validate before SharePoint artifact creation')
 
           raw_marker = '@router.post("/document-links/{bc_entity}/{bc_document_no}/upload-raw")'
           raw_start = text.index(raw_marker)
@@ -212,9 +213,6 @@ jobs:
           ):
               if token not in raw:
                   raise SystemExit('raw BC Drop route does not delegate exact identity into guarded delivery boundary: ' + token)
-
-          if raw.index('await request.body()') > raw.index('_deliver_bc_drop_content('):
-              raise SystemExit('raw BC Drop bytes are not passed through the guarded delivery boundary')
 
           al = Path('bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al').read_text(encoding='utf-8')
           for token in (

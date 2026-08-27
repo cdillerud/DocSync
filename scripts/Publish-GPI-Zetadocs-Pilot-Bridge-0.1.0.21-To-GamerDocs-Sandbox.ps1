@@ -111,7 +111,7 @@ Write-Host "SHA256      : $ActualSha256"
 Write-Host 'Production  : HARD BLOCKED' -ForegroundColor Green
 Write-Host 'Data action : NONE'
 
-Section '2. VERIFY CURRENT SANDBOX DEV SCOPE'
+Section '2. VERIFY CURRENT SANDBOX INSTALLATION'
 
 $Token = Get-BcToken
 $Current = Get-AdminAppRecord -Token $Token
@@ -122,16 +122,33 @@ Write-Host "App type          : $($Current.appType)"
 Write-Host "Last result       : $($Current.lastUpdateAttemptResult)"
 
 if ([string]$Current.state -notmatch '(?i)^installed$') { throw "Current app state is '$($Current.state)'." }
-if ([string]$Current.appType -notmatch '(?i)^dev$') { throw "Current app type is '$($Current.appType)', expected DEV." }
 if ([version][string]$Current.version -gt [version]$TargetVersion) { throw "Installed bridge $($Current.version) is newer than target $TargetVersion." }
 
+# Important: Business Central Admin API reports a normally uploaded per-tenant extension as appType=tenant.
+# If the exact target version is already installed successfully, that is the desired end state. Do not reject it
+# merely because it is not a DEV extension, and do not republish an already-installed package.
 if ([string]$Current.version -eq $TargetVersion) {
-    Write-Host 'Target bridge is already installed.' -ForegroundColor Green
+    if ([string]$Current.lastUpdateAttemptResult -and ([string]$Current.lastUpdateAttemptResult -notmatch '(?i)^succeeded$')) {
+        throw "Target $TargetVersion is installed but last update result is '$($Current.lastUpdateAttemptResult)'."
+    }
+
+    Write-Host 'BRIDGE .21 SANDBOX INSTALLATION VERIFIED' -ForegroundColor Green
+    Write-Host "Scope       : $($Current.appType)"
+    Write-Host "SHA256      : $ActualSha256"
+    Write-Host 'Production  : NOT TOUCHED'
+    Write-Host 'Routing     : NOT CHANGED'
+    Write-Host 'Migration data: NOT CHANGED BY VERIFICATION'
     exit 0
 }
 
 if ([string]$Current.version -ne '0.1.0.20') {
     throw "Expected installed bridge 0.1.0.20 before .21, found $($Current.version)."
+}
+
+# This publisher only has a safe direct endpoint for an existing DEV-scoped bridge. A tenant-scoped .20 must use the
+# same tenant-extension upload path that originally installed it; do not silently change extension scope.
+if ([string]$Current.appType -notmatch '(?i)^dev$') {
+    throw "Installed bridge $($Current.version) is appType '$($Current.appType)'. Refusing to change extension scope through the DEV endpoint."
 }
 
 Section '3. PUBLISH .21 TO SAME DEV SCOPE'

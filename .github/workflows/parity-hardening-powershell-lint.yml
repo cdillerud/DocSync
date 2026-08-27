@@ -9,6 +9,7 @@ on:
       - 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
       - 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1'
       - 'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1'
+      - 'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1'
       - '.github/workflows/parity-hardening-powershell-lint.yml'
   workflow_dispatch:
 
@@ -33,7 +34,8 @@ jobs:
             'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1',
             'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1',
             'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1',
-            'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1'
+            'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1',
+            'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1'
           )
 
           $Failed = $false
@@ -76,6 +78,7 @@ jobs:
           $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
           $Recovery = Get-Content -LiteralPath 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1' -Raw
           $RecoveryPublisher = Get-Content -LiteralPath 'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1' -Raw
+          $OneShot = Get-Content -LiteralPath 'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1' -Raw
 
           foreach ($Marker in @(
             "Sandbox_08142026_GamerDocs",
@@ -109,7 +112,19 @@ jobs:
             }
           }
 
-          if (($PublishScript + "`n" + $CutoverGate + "`n" + $Recovery + "`n" + $RecoveryPublisher) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
+          foreach ($Marker in @(
+            "feature/phase-3-record-documents",
+            "HARD BLOCKED by downstream publisher",
+            "Get-FileHash",
+            "ExpectedSha256",
+            "NOT RESET / CLEANED / CHECKED OUT"
+          )) {
+            if (-not $OneShot.Contains($Marker)) {
+              throw "Bridge .21 one-shot runner safety marker missing: $Marker"
+            }
+          }
+
+          if (($PublishScript + "`n" + $CutoverGate + "`n" + $Recovery + "`n" + $RecoveryPublisher + "`n" + $OneShot) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
             throw 'Production target assignment detected.'
           }
 

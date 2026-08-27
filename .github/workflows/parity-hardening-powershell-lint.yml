@@ -6,6 +6,7 @@ on:
       - 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1'
       - 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1'
       - 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
+      - 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
       - '.github/workflows/parity-hardening-powershell-lint.yml'
   workflow_dispatch:
 
@@ -27,7 +28,8 @@ jobs:
           $Files = @(
             'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1',
             'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
-            'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
+            'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1',
+            'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
           )
 
           $Failed = $false
@@ -67,6 +69,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $PublishScript = Get-Content -LiteralPath 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1' -Raw
+          $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
 
           foreach ($Marker in @(
             "Sandbox_08142026_GamerDocs",
@@ -79,7 +82,11 @@ jobs:
             }
           }
 
-          if ($PublishScript -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
+          if (-not $CutoverGate.Contains("Production  : HARD BLOCKED")) {
+            throw 'Consolidated cutover gate is missing the Production hard-block marker.'
+          }
+
+          if (($PublishScript + "`n" + $CutoverGate) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
             throw 'Production target assignment detected.'
           }
 
@@ -91,11 +98,24 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $Gate = Get-Content -LiteralPath 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1' -Raw
           $BurnDown = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1' -Raw
+          $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
+          $Combined = $Gate + "`n" + $BurnDown + "`n" + $CutoverGate
 
           foreach ($Marker in @('PARITY BLOCKER','PARITY RISK','VALIDATED PARITY')) {
-            if (-not (($Gate + "`n" + $BurnDown).Contains($Marker))) {
+            if (-not $Combined.Contains($Marker)) {
               throw "Parity classification marker missing: $Marker"
             }
           }
 
-          Write-Host 'Parity classification markers: PASS' -ForegroundColor Green
+          foreach ($Marker in @(
+            'Exact PO To/CC/BCC evidence gate',
+            'AP/Warehouse send-path recipient authority',
+            'Sent document exposure in Gamer Documents',
+            'Migration stability diagnostic available'
+          )) {
+            if (-not $CutoverGate.Contains($Marker)) {
+              throw "Cutover gate coverage marker missing: $Marker"
+            }
+          }
+
+          Write-Host 'Parity classification/coverage markers: PASS' -ForegroundColor Green

@@ -8,6 +8,7 @@ on:
       - 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1'
       - 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1'
       - 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1'
+      - 'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1'
       - '.github/workflows/parity-hardening-local-gates-lint.yml'
   workflow_dispatch:
 
@@ -28,7 +29,8 @@ jobs:
             'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
             'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1',
             'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1',
-            'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1'
+            'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1',
+            'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1'
           )
           foreach ($file in $files) {
             $tokens = $null
@@ -49,6 +51,7 @@ jobs:
           $provenance = Get-Content 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1' -Raw
           $storage = Get-Content 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1' -Raw
           $runner = Get-Content 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1' -Raw
+          $burn = Get-Content 'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1' -Raw
 
           foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','StaleReferenceDateTime','StaleThreshold := 60 * 60 * 1000','RetryFailures','Commit();')) {
             if (-not $migration.Contains($marker)) { throw "Migration gate marker missing: $marker" }
@@ -73,5 +76,8 @@ jobs:
             'Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
           )) {
             if (-not $runner.Contains($marker)) { throw "Runner marker missing: $marker" }
+          }
+          foreach ($marker in @('Sandbox_08142026_GamerDocs','Production  : HARD BLOCKED','Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1','Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1','Run Hard Parity Gate')) {
+            if (-not $burn.Contains($marker)) { throw "Sandbox burn marker missing: $marker" }
           }
           Write-Host 'Safety/coverage markers PASS' -ForegroundColor Green

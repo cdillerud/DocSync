@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1'
       - 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1'
       - 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1'
       - '.github/workflows/parity-hardening-local-gates-lint.yml'
@@ -23,6 +25,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $files = @(
             'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1',
+            'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
+            'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1',
             'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1',
             'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1'
           )
@@ -36,20 +40,38 @@ jobs:
             }
             Write-Host "PASS $file" -ForegroundColor Green
           }
-      - name: Verify safety markers
+      - name: Verify safety and coverage markers
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $migration = Get-Content 'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1' -Raw
+          $dedupe = Get-Content 'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1' -Raw
+          $provenance = Get-Content 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1' -Raw
           $storage = Get-Content 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1' -Raw
           $runner = Get-Content 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1' -Raw
+
           foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','StaleReferenceDateTime','StaleThreshold := 60 * 60 * 1000','RetryFailures','Commit();')) {
             if (-not $migration.Contains($marker)) { throw "Migration gate marker missing: $marker" }
+          }
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','Source Table ID','Source SystemId','ShouldProcess','Links Existing','Attempts')) {
+            if (-not $dedupe.Contains($marker)) { throw "Dedupe gate marker missing: $marker" }
+          }
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','Source Document Type','Source Party No.','Vendor No.','Location Code','Uploaded Date/Time','SharePoint URL')) {
+            if (-not $provenance.Contains($marker)) { throw "Provenance gate marker missing: $marker" }
           }
           foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','AddSentDocumentsToBuffer','OpenSentDocument(-EntryReference)','Sent document history cannot be deleted')) {
             if (-not $storage.Contains($marker)) { throw "Storage gate marker missing: $marker" }
           }
-          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','Invoke-GPI-Migration-Recoverability-HardGate.ps1','Invoke-GPI-Storage-Traceability-HardGate.ps1','Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1','Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1')) {
+          foreach ($marker in @(
+            'READ ONLY',
+            'Production : NOT TOUCHED',
+            'Invoke-GPI-Migration-Recoverability-HardGate.ps1',
+            'Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
+            'Invoke-GPI-Provenance-Metadata-HardGate.ps1',
+            'Invoke-GPI-Storage-Traceability-HardGate.ps1',
+            'Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
+            'Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
+          )) {
             if (-not $runner.Contains($marker)) { throw "Runner marker missing: $marker" }
           }
-          Write-Host 'Safety markers PASS' -ForegroundColor Green
+          Write-Host 'Safety/coverage markers PASS' -ForegroundColor Green

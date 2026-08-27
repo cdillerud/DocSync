@@ -12,11 +12,11 @@ $BridgeRoot = Join-Path $RepoRoot 'bc-extension\gpi-zetadocs-pilot-bridge'
 $PackagePath = Join-Path $BridgeRoot 'Gamer Packaging_GPI Zetadocs Pilot Bridge_0.1.0.21.app'
 
 $RawBase = 'https://raw.githubusercontent.com/cdillerud/DocSync/agent/parity-cutover-hardening-20260827/scripts'
-$BuildUrl = "$RawBase/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21-REV2.ps1"
+$BuildUrl = "$RawBase/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21-REV3.ps1"
 $PublishUrl = "$RawBase/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1"
 
 $TempRoot = Join-Path $env:TEMP ('gpi-bridge-021-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
-$BuildScript = Join-Path $TempRoot 'Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21-REV2.ps1'
+$BuildScript = Join-Path $TempRoot 'Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21-REV3.ps1'
 $PublishScript = Join-Path $TempRoot 'Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1'
 
 function Section([string]$Name) {
@@ -79,7 +79,7 @@ foreach ($Path in @($BuildScript,$PublishScript)) {
 Write-Host 'Build tool   : parser PASS' -ForegroundColor Green
 Write-Host 'Publish tool : parser PASS' -ForegroundColor Green
 
-Section '3. BUILD BRIDGE .21 FROM CURRENT LOCAL .20 SOURCE'
+Section '3. BUILD BRIDGE .21 FROM CURRENT LOCAL SOURCE'
 
 & $BuildScript
 if ($LASTEXITCODE -ne 0) {

@@ -47,7 +47,7 @@ jobs:
 
       - name: Guardrail - AL sends original binary stream
         run: |
-          grep -q 'UploadContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+          grep -q 'FileContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
             echo '::error::BC upload no longer writes the original InStream into HttpContent'
             exit 1
           }

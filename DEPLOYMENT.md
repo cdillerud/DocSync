@@ -2,9 +2,7 @@
 
 ## Current Cutover Scope
 
-The September 20 Square9 parity cutover is **AP and Warehouse only**. Sales and
-Inside Sales remain paused and must not be enabled, redirected, or included in
-cutover validation until a later explicitly approved phase.
+The September 20 Square9 parity cutover is **AP and Warehouse only**. Sales and Inside Sales remain paused and must not be enabled, redirected, or included in cutover validation until a later explicitly approved phase.
 
 Production Business Central writes remain blocked during parity/UAT work. Use
 `Sandbox_NoZetadocs_UAT` for any write-capable Business Central validation.

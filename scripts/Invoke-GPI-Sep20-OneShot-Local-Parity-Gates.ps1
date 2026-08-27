@@ -17,6 +17,7 @@ $Scripts = @(
     'Invoke-GPI-Provenance-Metadata-HardGate.ps1',
     'Invoke-GPI-Storage-Traceability-HardGate.ps1',
     'Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
+    'Invoke-GPI-UAT-SharePoint-Parity-Schema-HardGate.ps1',
     'Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
 )
 
@@ -77,15 +78,20 @@ Section '7. AP / WAREHOUSE RECIPIENT AUTHORITY'
 & $LocalScripts[4]
 if ($LASTEXITCODE -ne 0) { throw "AP/Warehouse recipient-authority hard gate exited $LASTEXITCODE." }
 
-Section '8. CONSOLIDATED SEP 20 CUTOVER LEDGER'
+Section '8. LIVE UAT SHAREPOINT PARITY SCHEMA'
 & $LocalScripts[5]
+if ($LASTEXITCODE -ne 0) { throw "Live UAT SharePoint parity-schema hard gate exited $LASTEXITCODE." }
+
+Section '9. CONSOLIDATED SEP 20 CUTOVER LEDGER'
+& $LocalScripts[6]
 if ($LASTEXITCODE -ne 0) { throw "Consolidated cutover hard gate exited $LASTEXITCODE." }
 
-Section '9. RESULT'
+Section '10. RESULT'
 Write-Host 'SEP 20 LOCAL AP/WAREHOUSE HARD-GATE STACK: PASS' -ForegroundColor Green
-Write-Host 'Coverage: recoverability, dedupe, record resolution, provenance, metadata, storage, traceability, recipient authority, consolidated ledger'
+Write-Host 'Coverage: recoverability, dedupe, record resolution, provenance, metadata, storage, traceability, recipient authority, live UAT SharePoint schema, consolidated ledger'
 Write-Host 'Production: NOT TOUCHED'
 Write-Host 'No routing changes'
 Write-Host 'No email sends'
 Write-Host 'No migration writes'
+Write-Host 'No SharePoint mutation'
 Write-Host 'No Git reset / clean / checkout'

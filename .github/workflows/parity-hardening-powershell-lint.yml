@@ -1,0 +1,171 @@
+name: Parity Hardening PowerShell Lint
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1'
+      - 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1'
+      - 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
+      - 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1'
+      - 'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1'
+      - 'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1'
+      - '.github/workflows/parity-hardening-powershell-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    name: PowerShell parser gate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse parity scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Files = @(
+            'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1',
+            'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
+            'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1',
+            'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1',
+            'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1',
+            'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1',
+            'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1'
+          )
+
+          $Failed = $false
+          foreach ($File in $Files) {
+            if (-not (Test-Path -LiteralPath $File)) {
+              Write-Error "Required parity script missing: $File"
+              $Failed = $true
+              continue
+            }
+
+            $Tokens = $null
+            $Errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path -LiteralPath $File),
+              [ref]$Tokens,
+              [ref]$Errors
+            ) | Out-Null
+
+            if ($Errors.Count -gt 0) {
+              $Failed = $true
+              Write-Host "PARSE FAIL: $File" -ForegroundColor Red
+              foreach ($E in $Errors) {
+                Write-Host ("  Line {0}, Col {1}: {2}" -f $E.Extent.StartLineNumber, $E.Extent.StartColumnNumber, $E.Message) -ForegroundColor Red
+              }
+            }
+            else {
+              Write-Host "PARSE PASS: $File" -ForegroundColor Green
+            }
+          }
+
+          if ($Failed) {
+            throw 'Parity PowerShell parser gate failed.'
+          }
+
+      - name: Verify production hard-block markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PublishScript = Get-Content -LiteralPath 'scripts/Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1' -Raw
+          $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
+          $Recovery = Get-Content -LiteralPath 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1' -Raw
+          $RecoveryPublisher = Get-Content -LiteralPath 'scripts/Publish-GPI-Zetadocs-Pilot-Bridge-0.1.0.21-To-GamerDocs-Sandbox.ps1' -Raw
+          $OneShot = Get-Content -LiteralPath 'scripts/Invoke-GPI-Zetadocs-Bridge-021-Build-And-Publish.ps1' -Raw
+
+          foreach ($Marker in @(
+            "Sandbox_08142026_GamerDocs",
+            "Production-like environment detected",
+            "SchemaUpdateMode=synchronize",
+            "DependencyPublishingOption=ignore"
+          )) {
+            if (-not $PublishScript.Contains($Marker)) {
+              throw "Required safety marker missing from publish script: $Marker"
+            }
+          }
+
+          if (-not $CutoverGate.Contains("Production  : HARD BLOCKED")) {
+            throw 'Consolidated cutover gate is missing the Production hard-block marker.'
+          }
+
+          if (-not $Recovery.Contains("Production     : NOT TOUCHED")) {
+            throw 'Bridge recovery build is missing Production safety marker.'
+          }
+
+          foreach ($Marker in @(
+            "Sandbox_08142026_GamerDocs",
+            "Production-like environment",
+            "ExpectedSha256",
+            "SchemaUpdateMode=synchronize",
+            "DependencyPublishingOption=ignore",
+            "Refusing to change extension scope"
+          )) {
+            if (-not $RecoveryPublisher.Contains($Marker)) {
+              throw "Bridge .21 publisher safety marker missing: $Marker"
+            }
+          }
+
+          foreach ($Marker in @(
+            "feature/phase-3-record-documents",
+            "HARD BLOCKED by downstream publisher",
+            "Get-FileHash",
+            "ExpectedSha256",
+            "NOT RESET / CLEANED / CHECKED OUT"
+          )) {
+            if (-not $OneShot.Contains($Marker)) {
+              throw "Bridge .21 one-shot runner safety marker missing: $Marker"
+            }
+          }
+
+          if (($PublishScript + "`n" + $CutoverGate + "`n" + $Recovery + "`n" + $RecoveryPublisher + "`n" + $OneShot) -match '(?i)environment\s*=\s*[\"'']production[\"'']') {
+            throw 'Production target assignment detected.'
+          }
+
+          Write-Host 'Sandbox/Production safety markers: PASS' -ForegroundColor Green
+
+      - name: Verify parity classification markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Gate = Get-Content -LiteralPath 'scripts/Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1' -Raw
+          $BurnDown = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-Recipient-Parity-BurnDown.ps1' -Raw
+          $CutoverGate = Get-Content -LiteralPath 'scripts/Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1' -Raw
+          $Recovery = Get-Content -LiteralPath 'scripts/Build-GPI-Zetadocs-First-Batch-Stale-Recovery-Bridge-0.1.0.21.ps1' -Raw
+          $Combined = $Gate + "`n" + $BurnDown + "`n" + $CutoverGate + "`n" + $Recovery
+
+          foreach ($Marker in @('PARITY BLOCKER','PARITY RISK','VALIDATED PARITY')) {
+            if (-not $Combined.Contains($Marker)) {
+              throw "Parity classification marker missing: $Marker"
+            }
+          }
+
+          foreach ($Marker in @(
+            'Exact PO To/CC/BCC evidence gate',
+            'AP/Warehouse send-path recipient authority',
+            'Sent document exposure in Gamer Documents',
+            'Migration stability diagnostic available'
+          )) {
+            if (-not $CutoverGate.Contains($Marker)) {
+              throw "Cutover gate coverage marker missing: $Marker"
+            }
+          }
+
+          foreach ($Marker in @(
+            'StaleReferenceDateTime',
+            "StaleReferenceLabel := 'run start'",
+            'StaleThreshold := 60 * 60 * 1000',
+            'Scheduled Task ID'
+          )) {
+            if (-not $Recovery.Contains($Marker)) {
+              throw "First-batch recovery safety marker missing: $Marker"
+            }
+          }
+
+          Write-Host 'Parity classification/coverage markers: PASS' -ForegroundColor Green

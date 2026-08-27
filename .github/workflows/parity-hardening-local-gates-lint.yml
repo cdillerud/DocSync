@@ -1,0 +1,83 @@
+name: Parity Local Gates Lint
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1'
+      - 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1'
+      - 'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1'
+      - '.github/workflows/parity-hardening-local-gates-lint.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parse:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $files = @(
+            'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1',
+            'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
+            'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1',
+            'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1',
+            'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1',
+            'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+              throw "Parser failure: $file"
+            }
+            Write-Host "PASS $file" -ForegroundColor Green
+          }
+      - name: Verify safety and coverage markers
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $migration = Get-Content 'scripts/Invoke-GPI-Migration-Recoverability-HardGate.ps1' -Raw
+          $dedupe = Get-Content 'scripts/Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1' -Raw
+          $provenance = Get-Content 'scripts/Invoke-GPI-Provenance-Metadata-HardGate.ps1' -Raw
+          $storage = Get-Content 'scripts/Invoke-GPI-Storage-Traceability-HardGate.ps1' -Raw
+          $runner = Get-Content 'scripts/Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1' -Raw
+          $burn = Get-Content 'scripts/Invoke-GPI-Sep20-Sandbox-Parity-Burn.ps1' -Raw
+
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','StaleReferenceDateTime','StaleThreshold := 60 * 60 * 1000','RetryFailures','Commit();')) {
+            if (-not $migration.Contains($marker)) { throw "Migration gate marker missing: $marker" }
+          }
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','Source Table ID','Source SystemId','ShouldProcess','Links Existing','Attempts')) {
+            if (-not $dedupe.Contains($marker)) { throw "Dedupe gate marker missing: $marker" }
+          }
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','Source Document Type','Source Party No.','Vendor No.','Location Code','Uploaded Date/Time','SharePoint URL')) {
+            if (-not $provenance.Contains($marker)) { throw "Provenance gate marker missing: $marker" }
+          }
+          foreach ($marker in @('READ ONLY','Production : NOT TOUCHED','AddSentDocumentsToBuffer','OpenSentDocument(-EntryReference)','Sent document history cannot be deleted')) {
+            if (-not $storage.Contains($marker)) { throw "Storage gate marker missing: $marker" }
+          }
+          foreach ($marker in @(
+            'READ ONLY',
+            'Production : NOT TOUCHED',
+            'Invoke-GPI-Migration-Recoverability-HardGate.ps1',
+            'Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
+            'Invoke-GPI-Provenance-Metadata-HardGate.ps1',
+            'Invoke-GPI-Storage-Traceability-HardGate.ps1',
+            'Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
+            'Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
+          )) {
+            if (-not $runner.Contains($marker)) { throw "Runner marker missing: $marker" }
+          }
+          foreach ($marker in @('Sandbox_08142026_GamerDocs','Production  : HARD BLOCKED','Build-Publish-GPI-PO-Recipient-Hard-Parity-Gate-0.27.0.184.ps1','Invoke-GPI-Sep20-OneShot-Local-Parity-Gates.ps1','Run Hard Parity Gate')) {
+            if (-not $burn.Contains($marker)) { throw "Sandbox burn marker missing: $marker" }
+          }
+          Write-Host 'Safety/coverage markers PASS' -ForegroundColor Green

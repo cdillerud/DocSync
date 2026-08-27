@@ -115,7 +115,7 @@ Write-Host 'Graph token acquired.' -ForegroundColor Green
 
 Write-Section '2. RESOLVE EXACT UAT SHAREPOINT SITE'
 $encodedSitePath = $SitePath.TrimEnd('/')
-$siteUri = "https://graph.microsoft.com/v1.0/sites/$SiteHost`:$encodedSitePath?`$select=id,displayName,webUrl"
+$siteUri = "https://graph.microsoft.com/v1.0/sites/${SiteHost}:$($encodedSitePath)?`$select=id,displayName,webUrl"
 $site = Invoke-GraphGet -Uri $siteUri -Token $token
 
 if ($site.displayName -ne 'GPI-DocumentHub-Test') {

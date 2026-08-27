@@ -201,7 +201,7 @@ jobs:
 
       - name: Guardrail - AL sends original bytes and exact identity
         run: |
-          grep -q 'UploadContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
+          grep -q 'FileContent.WriteFrom(FileInStream)' bc-extension/src/codeunit/GPIDocumentLinkMgt.Codeunit.al || {
             echo "::error::BC AL upload is not sending the original file InStream"
             exit 1
           }

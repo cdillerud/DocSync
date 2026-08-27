@@ -1,0 +1,56 @@
+name: Square9 Parity Scope Guard
+
+on:
+  push:
+    branches:
+      - feature/square9-parity-systemid-gate
+    paths:
+      - 'backend/services/parity_scope_guard.py'
+      - 'backend/tests/test_parity_scope_guard.py'
+      - '.github/workflows/square9-parity-scope-guard.yml'
+  pull_request:
+    paths:
+      - 'backend/services/parity_scope_guard.py'
+      - 'backend/tests/test_parity_scope_guard.py'
+      - '.github/workflows/square9-parity-scope-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity-scope:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install targeted test dependencies
+        run: python -m pip install --disable-pip-version-check pytest fastapi starlette
+
+      - name: Compile parity guard
+        env:
+          PYTHONPATH: backend
+        run: python -m py_compile backend/services/parity_scope_guard.py backend/tests/test_parity_scope_guard.py
+
+      - name: Run parity scope guard tests
+        env:
+          PYTHONPATH: backend
+          ENABLE_OUT_OF_SCOPE_SALES_ROUTES: 'false'
+          GRAPH_WEBHOOK_ENABLED: 'false'
+        run: python -m pytest backend/tests/test_parity_scope_guard.py -q
+
+      - name: Verify hard scope defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'ENABLE_OUT_OF_SCOPE_SALES_ROUTES' backend/services/parity_scope_guard.py
+          grep -F 'GRAPH_WEBHOOK_ENABLED' backend/services/parity_scope_guard.py
+          grep -F 'AP/Warehouse Square9 parity phase' backend/services/parity_scope_guard.py
+          grep -F '/api/gpi-integration/document-links/salesOrders' backend/services/parity_scope_guard.py
+          grep -F '/api/gpi-integration/document-links/salesInvoices' backend/services/parity_scope_guard.py
+          grep -F '/api/square9/readiness/run' backend/services/parity_scope_guard.py
+          echo 'Square9 AP/Warehouse scope markers: PASS'

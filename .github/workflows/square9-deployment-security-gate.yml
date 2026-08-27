@@ -102,7 +102,7 @@ jobs:
 
       - name: Guardrail - startup refuses Sales and Inside Sales activation
         run: |
-          python -m pip install --quiet pytest starlette
+          python -m pip install --quiet pytest fastapi starlette
           cd backend
           pytest -q tests/test_parity_scope_guard.py tests/test_startup_validator_parity_scope.py
           cd ..

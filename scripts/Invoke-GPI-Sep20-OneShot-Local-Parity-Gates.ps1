@@ -13,6 +13,8 @@ $TempRoot = Join-Path $env:TEMP ('gpi-sep20-hardgates-' + (Get-Date -Format 'yyy
 
 $Scripts = @(
     'Invoke-GPI-Migration-Recoverability-HardGate.ps1',
+    'Invoke-GPI-Dedupe-RecordResolution-HardGate.ps1',
+    'Invoke-GPI-Provenance-Metadata-HardGate.ps1',
     'Invoke-GPI-Storage-Traceability-HardGate.ps1',
     'Invoke-GPI-AP-Warehouse-Recipient-Authority-HardGate.ps1',
     'Invoke-GPI-Sep20-AP-Warehouse-Cutover-HardGate.ps1'
@@ -59,20 +61,29 @@ Section '3. MIGRATION / RECOVERABILITY'
 & $LocalScripts[0]
 if ($LASTEXITCODE -ne 0) { throw "Migration/recoverability hard gate exited $LASTEXITCODE." }
 
-Section '4. STORAGE / TRACEABILITY'
+Section '4. DEDUPE / RECORD RESOLUTION'
 & $LocalScripts[1]
+if ($LASTEXITCODE -ne 0) { throw "Dedupe/record-resolution hard gate exited $LASTEXITCODE." }
+
+Section '5. PROVENANCE / METADATA'
+& $LocalScripts[2]
+if ($LASTEXITCODE -ne 0) { throw "Provenance/metadata hard gate exited $LASTEXITCODE." }
+
+Section '6. STORAGE / TRACEABILITY'
+& $LocalScripts[3]
 if ($LASTEXITCODE -ne 0) { throw "Storage/traceability hard gate exited $LASTEXITCODE." }
 
-Section '5. AP / WAREHOUSE RECIPIENT AUTHORITY'
-& $LocalScripts[2]
+Section '7. AP / WAREHOUSE RECIPIENT AUTHORITY'
+& $LocalScripts[4]
 if ($LASTEXITCODE -ne 0) { throw "AP/Warehouse recipient-authority hard gate exited $LASTEXITCODE." }
 
-Section '6. CONSOLIDATED SEP 20 CUTOVER LEDGER'
-& $LocalScripts[3]
+Section '8. CONSOLIDATED SEP 20 CUTOVER LEDGER'
+& $LocalScripts[5]
 if ($LASTEXITCODE -ne 0) { throw "Consolidated cutover hard gate exited $LASTEXITCODE." }
 
-Section '7. RESULT'
+Section '9. RESULT'
 Write-Host 'SEP 20 LOCAL AP/WAREHOUSE HARD-GATE STACK: PASS' -ForegroundColor Green
+Write-Host 'Coverage: recoverability, dedupe, record resolution, provenance, metadata, storage, traceability, recipient authority, consolidated ledger'
 Write-Host 'Production: NOT TOUCHED'
 Write-Host 'No routing changes'
 Write-Host 'No email sends'

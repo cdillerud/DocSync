@@ -111,7 +111,7 @@ else {
 $V110 = Run-Phase -Name 'V110_TUMALO_PYPDF_AP_GUARD' -Script 'Invoke-GPIHub-V110-Tumalo-Pypdf-AP-Guard-Candidate.ps1' -ContinueOnFailure
 $Results.Add($V110)
 
-$AP = Run-Phase -Name 'AP_TOP10_LEGACY_INVENTORY_AI' -Script 'Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1' -ContinueOnFailure
+$AP = Run-Phase -Name 'AP_TOP10_LEGACY_INVENTORY_AI_REV2' -Script 'Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV2.ps1' -ContinueOnFailure
 $Results.Add($AP)
 
 $GUI = Run-Phase -Name 'GUI_TRUTH_AUDIT' -Script 'Invoke-GPIHub-GUI-Truth-Audit.ps1' -ContinueOnFailure

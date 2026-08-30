@@ -13,9 +13,9 @@ $ControlBranch = 'migration/gpi-hub-dedicated-vm'
 $ScriptPath = $PSCommandPath
 $ToolRoot = Split-Path -Parent $ScriptPath
 $StatePath = Join-Path $ToolRoot 'state.json'
+$ScopedPath = 'tools/gpi-hub-migration'
 $RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
 $FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
-$SparsePath = 'tools/gpi-hub-migration'
 
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -65,45 +65,59 @@ function Get-State {
     return (Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 50)
 }
 
-function Update-ControlWorktree {
-    $RepoRootResult = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$ToolRoot,'rev-parse','--show-toplevel'
-    )
-    $RepoRoot = $RepoRootResult.StdOut.Trim()
-    Require (-not [string]::IsNullOrWhiteSpace($RepoRoot)) 'Could not resolve migration worktree root.'
+function Update-ControlFolder {
+    $CurrentState = Get-State
+    $SourceRepo = [string]$CurrentState.local.operational_root
+    Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Operational repo missing: $SourceRepo"
+    Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
+    Require ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) 'tar.exe unavailable.'
 
-    $Status = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'status','--porcelain'
-    )
-    Require ([string]::IsNullOrWhiteSpace($Status.StdOut)) `
-        "Migration control worktree has local changes. Refusing self-update:`n$($Status.StdOut)"
+    $ControlRoot = Split-Path -Parent (Split-Path -Parent $ToolRoot)
+    $ArchivePath = Join-Path $env:TEMP ("gpi-hub-control-update-" + [guid]::NewGuid().ToString('N') + '.tar')
+    $StageRoot = Join-Path $env:TEMP ("gpi-hub-control-stage-" + [guid]::NewGuid().ToString('N'))
 
-    Write-Host 'Updating sparse migration control worktree from GitHub...' -ForegroundColor Cyan
+    Write-Host 'Updating migration controller from GitHub using scoped git archive...' -ForegroundColor Cyan
 
-    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'fetch','--prune','origin',$FetchRefspec
-    )
+    try {
+        $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+            '-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec
+        )
 
-    $Verify = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'rev-parse','--verify',$RemoteTrackingRef
-    )
-    Require (-not [string]::IsNullOrWhiteSpace($Verify.StdOut)) `
-        "Migration remote-tracking ref is unavailable: $RemoteTrackingRef"
+        $verify = Invoke-Native -FilePath 'git.exe' -Arguments @(
+            '-C',$SourceRepo,'rev-parse','--verify',$RemoteTrackingRef
+        )
+        Require (-not [string]::IsNullOrWhiteSpace($verify.StdOut)) `
+            "Migration remote-tracking ref unavailable: $RemoteTrackingRef"
 
-    # Keep the control worktree sparse before every reset. This is required on
-    # Windows because the full DocSync tree contains at least one path that is
-    # legal in Git but cannot be materialized as a normal Windows pathname.
-    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'sparse-checkout','init','--cone'
-    )
-    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'sparse-checkout','set',$SparsePath
-    )
-    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'reset','--hard',$RemoteTrackingRef
-    )
+        New-Item -ItemType Directory -Path $StageRoot -Force | Out-Null
 
-    Write-Host 'GPI_MIGRATION_SPARSE_REPO_UPDATE=PASS' -ForegroundColor Green
+        $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+            '-C',$SourceRepo,
+            'archive','--format=tar',"--output=$ArchivePath",$RemoteTrackingRef,$ScopedPath
+        )
+        Require (Test-Path -LiteralPath $ArchivePath -PathType Leaf) 'Controller update archive was not created.'
+
+        $null = Invoke-Native -FilePath 'tar.exe' -Arguments @('-xf',$ArchivePath,'-C',$StageRoot)
+
+        $StageToolRoot = Join-Path $StageRoot 'tools\gpi-hub-migration'
+        $StageRunner = Join-Path $StageToolRoot 'Invoke-GPIHubMigration.ps1'
+        $StageState = Join-Path $StageToolRoot 'state.json'
+        Require (Test-Path -LiteralPath $StageRunner -PathType Leaf) 'Staged runner missing.'
+        Require (Test-Path -LiteralPath $StageState -PathType Leaf) 'Staged state missing.'
+
+        # Overwrite only the migration-control subtree. Never touch application files.
+        Get-ChildItem -LiteralPath $StageToolRoot -Force | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $ToolRoot -Recurse -Force
+        }
+
+        Write-Host "Control root : $ControlRoot"
+        Write-Host "Control ref  : $($verify.StdOut.Trim())"
+        Write-Host 'GPI_MIGRATION_ARCHIVE_SELF_UPDATE=PASS' -ForegroundColor Green
+    }
+    finally {
+        Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $StageRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
 
     $ChildArgs = @(
         '-NoProfile','-ExecutionPolicy','Bypass',
@@ -123,8 +137,7 @@ function Get-LatestKnownHosts {
     param([Parameter(Mandatory)][string]$OperationalRoot)
 
     $DiagRoot = Join-Path $OperationalRoot '.gpi-diagnostics'
-    Require (Test-Path -LiteralPath $DiagRoot -PathType Container) `
-        "Diagnostics root not found: $DiagRoot"
+    Require (Test-Path -LiteralPath $DiagRoot -PathType Container) "Diagnostics root not found: $DiagRoot"
 
     $candidates = @(
         Get-ChildItem -LiteralPath $DiagRoot -Filter 'target-known_hosts' -File -Recurse -ErrorAction SilentlyContinue |
@@ -132,9 +145,7 @@ function Get-LatestKnownHosts {
         Sort-Object LastWriteTime -Descending
     )
 
-    Require ($candidates.Count -gt 0) `
-        'No V99 target-known_hosts file was found. Run the current V99 phase once so Azure-verified SSH trust exists.'
-
+    Require ($candidates.Count -gt 0) 'No V99 target-known_hosts file was found.'
     return $candidates[0].FullName
 }
 
@@ -153,7 +164,6 @@ function Invoke-TargetStatus {
 set -euo pipefail
 
 echo "UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
 APP=/gpi-hub-data/apps/gpi-hub
 UPLOADS=/gpi-hub-data/volumes/uploads
 MIG=/gpi-hub-data/migration
@@ -317,7 +327,7 @@ function Invoke-ConfiguredPhase {
 }
 
 if (-not $NoSelfUpdate) {
-    Update-ControlWorktree
+    Update-ControlFolder
 }
 
 $State = Get-State

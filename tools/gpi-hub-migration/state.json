@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.6",
+  "schema_version": "3.7",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V108_REV9_STANDALONE_DURABILITY_SAFETY_STRATEGIC_CORPUS",
+  "phase": "V108_REV10_SOURCE_ONLY_STRATEGIC_CORPUS",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V108-REV9-Standalone-Safety-Corpus.ps1",
+  "script": "Invoke-GPIHub-V108-REV10-Source-Corpus-Only.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -38,22 +38,11 @@
     "v98_target_infrastructure": "PASS",
     "v99_first_pass_migration": "PASS",
     "v100_mongo_restore": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
-    "v100_exact_image_pin": "PASS_REV5",
-    "v100_target_app_quiesced": "PASS_MANUAL_20260829",
-    "v100_startup_control_discovery": "PASS_REV6",
-    "v100_rev7_static_overlay": "PASS",
-    "v100_rev7_safety_env": "PASS",
-    "v100_rev7_internal_network": "PASS",
-    "v100_rev7_application_startup": "PASS_INTERNAL_HEALTH_200",
-    "v100_rev8_target_static_validation": "PASS",
-    "v100_rev9_source_rollback": "PASS_3_SERVICES_INTERNAL_API_200",
     "v100_target_runtime": "PASS",
     "v101_target_parity": "PASS_REV3",
     "v102_full_collection_scan": "PASS_23933_OF_23933",
     "v102_warehouse_reference_matrix_discovery": "PASS_REV2_ALL_FOUR_CANDIDATE_GROUPS_PRESENT",
     "v103_warehouse_reference_semantics": "PASS_PARTIAL_STRONG_3_OF_4",
-    "v104_historical_authority_manifest": "PASS_CREATED_FROM_READ_ONLY_DOCSNAV_ZETADOCS_EVIDENCE",
-    "v104_remote_reconciliation": "PASS_3_OPEN_BLOCKERS_1_REFERENCE_MATCH",
     "v104_warehouse_historical_authority": "PASS_REV2_DEFECT_LEDGER_CLOSED",
     "v105_targeted_warehouse_code_path_audit": "PASS_EXACT_MIGRATED_TARGET_TREE_NO_MUTATIONS",
     "v106_runtime_authority_fix_plan": "PASS_HOST_CONTAINER_MATCH",
@@ -62,16 +51,25 @@
       "JBS_INBOUND_R": "CURRENT_ROUTING_REPLAY_WAREHOUSE_NOT_INTERNATIONAL_PASS",
       "JBS_OUTBOUND_SHIPMENT": "CANONICAL_SHIPMENT_NUMBER_5975975_PASS",
       "STRATEGIC_OUTBOUND_BL": "CANONICAL_SHIPMENT_NUMBER_57745_REGRESSION_PASS",
-      "STRATEGIC_INBOUND_BOL": "OPEN_AUTHENTIC_W117105_CORPUS_REQUIRED",
-      "PATCH_DURABILITY": "TARGET_CONTAINER_TEST_ONLY"
+      "STRATEGIC_INBOUND_BOL": "OPEN_AUTHENTIC_W117105_CORPUS_REQUIRED"
     },
     "v108_corpus_authority": "PASS_LEGACY_SHAREPOINT_READ_SHA_48410CADCEAA411D65E51BD266BE5C5942B4431CDEDE9E7A05B871E75A3A2C25",
     "v108_durable_overlay_config": "PASS_BACKEND_RECREATED_WITH_WORKFLOW_OVERLAY",
-    "v108_durable_workflow_overlay": "PASS_REV7_RUNNING_OVERLAY_EXACT_SHA",
-    "v108_static_server_structural_guard": "PASS_REV7_RUNNING_SERVER_EXACT_STATIC_OVERLAY",
-    "v108_rev7_health_harness": "FAILED_EMPTY_STDIN_PROBE_NO_RUNTIME_CONCLUSION",
-    "v108_rev8_generated_matcher": "FAILED_LOCAL_MATCHER_NO_REMOTE_WORK",
-    "v108_rev9": "IN_PROGRESS_STANDALONE_NO_GENERATED_PATCHING",
+    "v108_target_durability_safety": "PASS_REV9",
+    "v108_target_rev9_evidence": {
+      "durable_workflow_overlay": "PASS",
+      "static_server_structural_guard": "PASS",
+      "safety_env": "PASS",
+      "internal_only_network": "PASS",
+      "internal_http": 200,
+      "external_egress_blocked": "PASS",
+      "forbidden_workers_absent": "PASS",
+      "jbs_canonical_shipment": "5975975",
+      "strategic_outbound_canonical_shipment": "57745",
+      "target_corpus_preserved": "PASS"
+    },
+    "v108_rev9_source_probe": "FAILED_TEST_HARNESS_ONLY_MISSING_FITZ_AFTER_SOURCE_AI_AUTHORITY_PASS",
+    "v108_rev10_source_corpus": "IN_PROGRESS_PYPDF_RUNTIME_DEPENDENCY",
     "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
     "ap_top10_named_seed": {
       "vendor": "Tumalo Creek Transportation",
@@ -88,15 +86,15 @@
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "V108_REV9_STANDALONE_SAFETY_AND_W117105_AI_CORPUS",
-      "objective": "Inspect the already recreated target in place with no additional recreate. Prove the exact read-only static server and durable workflow overlays, safety env, internal-only Docker network, direct internal health, blocked egress, forbidden-worker absence, and canonical shipment truth, then run the authentic W117105 packet through the exact audited model-backed classifier seam."
+      "execution_mode": "REV10_SOURCE_ONLY_AUTHENTIC_W117105_AI_CORPUS",
+      "objective": "Use the exact audited source classifier and declared pypdf runtime dependency to test the authentic four-page W117105 packet and its page-4 supporting shipment reference without re-running already-passed target durability/safety."
     },
     {
       "sequence": 2,
       "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
       "tracking_issue": 19,
       "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
-      "objective": "Rank the top 10 payable vendors by legacy DocsNAV/Zetadocs Purchase volume and model-test representative examples with deterministic regression guards. Tumalo Creek Transportation is required and freight-carrier invoices with invoice/payment semantics must remain AP_Invoice."
+      "objective": "Rank the top 10 payable vendors by legacy DocsNAV/Zetadocs Purchase document volume, model-test representative examples, use validated examples in bounded learning context, and add deterministic regression guards. Tumalo Creek Transportation is required."
     },
     {
       "sequence": 3,
@@ -116,20 +114,17 @@
     "sharepoint_target": "test",
     "bc_write_enabled": false,
     "bc_block_production_writes": true,
-    "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id",
-    "background_worker_policy": "target_only_server_overlay returns before first polling worker start",
-    "network_policy": "all target services internal-only no external egress during static parity validation",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "v108_rev9_policy": "STANDALONE. No generated-script text patching and no backend recreate. Require exact pinned image, untouched host workflow baseline, read-only static server overlay and durable workflow overlay, matching host/container SHA, static early-return guard content, safety env, only internal Docker network, direct python-c internal health with HTTP-code regex validation, blocked Graph egress, forbidden worker logs absent, canonical shipment truth preserved, and SHA-gated W117105 corpus before AI-only classifier execution."
+    "v108_rev10_policy": "SOURCE ONLY. No target call, no target recreate, no source restart, no intake, no BC/SharePoint writes, no source Mongo write. Require exact source image and document_intel_helpers SHA, SHA-gated W117105 corpus, source internal health before/after, pypdf import preflight, then full-packet and isolated page-4 model-backed classifier probes."
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
-    "WAREHOUSE_REFERENCE_MATRIX_JBS_STRATEGIC",
+    "WAREHOUSE_STRATEGIC_INBOUND_W117105_MULTIPAGE_REFERENCE_SEMANTICS",
     "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "RESOLVE_V108_MULTIPAGE_WAREHOUSE_REFERENCE_GAP_IF_PROVEN_THEN_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
-  "notes": "REV9 replaces the brittle V108 generated-wrapper chain with one standalone script. Current known state before REV9: durable workflow overlay is mounted and exact; static server overlay is mounted and contains the early-return static guard; previous REV7 stopped only because its docker exec python heredoc health probe did not attach stdin; REV8 stopped locally before remote work because its exact block matcher intentionally failed closed. REV9 makes no recreate or app-tree mutation and validates the current runtime directly before the W117105 AI corpus probe."
+  "next_after_success": "IF_W117105_MULTIPAGE_GAP_PROVEN_PATCH_SUPPORTING_PAGE_REFERENCE_EXTRACTION_ELSE_START_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
+  "notes": "REV9 fully proved target durability and safety: exact durable workflow overlay, static server structural guard, safety env, internal-only network, internal HTTP 200, blocked external egress, no forbidden workers, canonical JBS shipment 5975975 and Strategic outbound 57745, and preserved target corpus. REV9 source AI authority also passed, then the test harness failed only because fitz/PyMuPDF is not installed. The source branch requirements explicitly declare pypdf==6.9.0. REV10 therefore resumes only the source AI corpus test using pypdf PdfReader/PdfWriter and does not touch the target."
 }

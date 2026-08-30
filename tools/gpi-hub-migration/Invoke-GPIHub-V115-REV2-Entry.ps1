@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ToolRoot = Split-Path -Parent $PSCommandPath
 $MainPath = Join-Path $ToolRoot 'Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1'
 $GeneratedPath = Join-Path $ToolRoot '.Invoke-GPIHub-V115-REV2.generated.ps1'
-$ExpectedCommit = '16e2a77504447044babb536a774feabc2d63285c'
+$ExpectedCommit = '30f53b9f087a5a7c4d9033a904b0826c7a19de17'
 
 if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
     throw "V115 main script missing: $MainPath"
@@ -94,8 +94,7 @@ if (-not $script.Contains($probeDbAnchor)) {
 }
 $script = $script.Replace($probeDbAnchor,$probeDbReplacement)
 
-# Repair 6: surface the generalized supervised-support evidence in each golden
-# result row so a failed retest is diagnosable without another harness change.
+# Repair 6: surface generalized supervised support in each golden result row.
 $supportAnchor = @'
                 'candidate_reason':candidate.get('reason'),
                 'prediction_match':proposed==expected,
@@ -109,6 +108,23 @@ if (-not $script.Contains($supportAnchor)) {
     throw 'V115 REV2 repair failed: supervised-support result anchor not found.'
 }
 $script = $script.Replace($supportAnchor,$supportReplacement)
+
+# Repair 7: surface the ensemble decision that reconciles Gemini with repeated
+# same-vendor Accounting evidence. This preserves the original model dissent
+# while proving whether supervised learning actually selected the final route.
+$ensembleAnchor = @'
+                'supervised_route_support':candidate.get('supervised_route_support'),
+                'prediction_match':proposed==expected,
+'@
+$ensembleReplacement = @'
+                'supervised_route_support':candidate.get('supervised_route_support'),
+                'ensemble_reconciliation':candidate.get('ensemble_reconciliation'),
+                'prediction_match':proposed==expected,
+'@
+if (-not $script.Contains($ensembleAnchor)) {
+    throw 'V115 REV2 repair failed: ensemble result anchor not found.'
+}
+$script = $script.Replace($ensembleAnchor,$ensembleReplacement)
 
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
@@ -144,6 +160,9 @@ if (-not $script.Contains("print('V115_READONLY_DB_BOOTSTRAP=PASS',flush=True)")
 if (-not $script.Contains("'supervised_route_support':candidate.get('supervised_route_support')")) {
     throw 'V115 REV2 repair failed: supervised-support result evidence not installed.'
 }
+if (-not $script.Contains("'ensemble_reconciliation':candidate.get('ensemble_reconciliation')")) {
+    throw 'V115 REV2 repair failed: ensemble result evidence not installed.'
+}
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
 
@@ -162,6 +181,7 @@ try {
     Write-Host 'V115_REV2_RESULT_COMMIT_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_READONLY_DB_BOOTSTRAP=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SUPERVISED_SUPPORT_EVIDENCE=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_ENSEMBLE_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 
     & $GeneratedPath

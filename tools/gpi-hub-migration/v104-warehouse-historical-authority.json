@@ -1,0 +1,95 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Authoritative historical document evidence for Square9 Warehouse reference-matrix reconciliation. This manifest records evidence collected read-only from the user's legacy SharePoint DocsNAV/Zetadocs archive. Archive presence and printed/reference evidence are historical authority inputs; they do not by themselves prove replacement parity.",
+  "cases": [
+    {
+      "case_id": "JBS_INBOUND_R",
+      "direction": "inbound",
+      "warehouse": "JBS Logistics",
+      "expected_reference_type": "R_NUMBER",
+      "expected_reference_value": "R72713",
+      "reference_resolution_status": "EXACT_HISTORICAL_FILENAME_AND_HUB_EXTRACTION_MATCH",
+      "business_order": "W118228",
+      "historical_archive_title": "W118228_JBS Logistics_6_4_2026_R72713.pdf",
+      "historical_archive_path": "/sites/DocsNAV/Zetadocs/06-08-2026/Ball Corp - BMBCC Pittston/Purchase/W118228_JBS Logistics_6_4_2026_R72713.pdf",
+      "historical_context_title": "Whse Receipt Notification - Order W118228.pdf",
+      "historical_context_path": "/sites/DocsNAV/Zetadocs/05-29-2026/Ball Corp - BMBCC Pittston/Purchase/Whse Receipt Notification - Order W118228.pdf",
+      "target_candidate_id": "95ced52c-1521-43b6-b69e-4afc4ed600d5",
+      "target_candidate_filename": "W118228_p2.pdf",
+      "target_expected_document_type": "Warehouse_Receipt",
+      "known_target_observation": "Hub extracted receipt_number R72713, but persisted test SharePoint URL was Miscellaneous Documents/Misc Invoices - need approval. Routing remains unvalidated/conflicting for Warehouse parity."
+    },
+    {
+      "case_id": "JBS_OUTBOUND_SHIPMENT",
+      "direction": "outbound",
+      "warehouse": "JBS Logistics",
+      "expected_reference_type": "SHIPMENT_NUMBER",
+      "expected_reference_value": null,
+      "reference_resolution_status": "UNRESOLVED_EXACT_SHIPMENT_NUMBER",
+      "business_order": "111244",
+      "historical_archive_title": "111244_JBS Logistics_2_26_2026_BOL.pdf",
+      "historical_archive_path": "/sites/DocsNAV/Zetadocs/02-27-2026/Green Thumb Industries Inc/Sales/111244_JBS Logistics_2_26_2026_BOL.pdf",
+      "historical_printed_identifiers": {
+        "order_number": "111244",
+        "load_number": "545299334",
+        "ship_id": "PO-019363",
+        "handwritten_top_reference": "595995"
+      },
+      "target_candidate_id": "04a47c5e-9180-4b41-bbd2-fcbfb62d336b",
+      "target_candidate_filename": "111244.pdf",
+      "target_expected_document_type": "Shipping_Document",
+      "known_target_observation": "Hub normalized order_number 111244 and PO-019363, but V103 found no explicit shipment-number semantic field. Historical shipment-number identity still requires authoritative labeling; order number alone must not satisfy this case."
+    },
+    {
+      "case_id": "STRATEGIC_INBOUND_BOL",
+      "direction": "inbound",
+      "warehouse": "Strategic Warehousing",
+      "expected_reference_type": "BOL_NUMBER",
+      "expected_reference_value": null,
+      "reference_resolution_status": "AUTHENTIC_PACKET_FOUND_EXACT_BOL_LABEL_UNRESOLVED",
+      "business_order": "W117105",
+      "historical_archive_title": "W117105_Strategic Warehousing_122625_.pdf",
+      "historical_archive_path": "/sites/DocsNAV/Zetadocs/01-06-2026/Evergreen Resources_ Inc/Purchase/W117105_Strategic Warehousing_122625_.pdf",
+      "historical_companion_title": "PL W117105.pdf",
+      "historical_companion_path": "/sites/DocsNAV/Zetadocs/11-24-2025/Evergreen Resources_ Inc/Purchase/PL W117105.pdf",
+      "historical_printed_identifiers": {
+        "receipt_number": "962222-1",
+        "receiving_reference_number": "815734",
+        "shipment_number": "ER25-1560",
+        "container_or_remark": "YMMU6160934/YMAV246736"
+      },
+      "target_candidate_id": null,
+      "target_candidate_filename": null,
+      "target_expected_document_type": "Warehouse_Receipt",
+      "known_target_observation": "V103's sole strong Strategic inbound candidate was an AP_Invoice with bol_number 16313201 and is not accepted as representative Warehouse inbound proof. V104 must locate W117105/Strategic packet evidence in the restored Hub and keep the exact BOL identity open until labeled historical authority is found."
+    },
+    {
+      "case_id": "STRATEGIC_OUTBOUND_BL",
+      "direction": "outbound",
+      "warehouse": "Strategic Warehousing",
+      "expected_reference_type": "BILL_OF_LADING_NUMBER",
+      "expected_reference_value": "57745",
+      "reference_resolution_status": "EXACT_PRINTED_BILL_OF_LADING_NUMBER",
+      "business_order": "114049/114149",
+      "historical_archive_title": "114049 114149_Strategic_05112026_BOL.pdf",
+      "historical_archive_path": "/sites/DocsNAV/Zetadocs/05-21-2026/E.T. Browne Drug Company_ Inc/Sales/114049 114149_Strategic_05112026_BOL.pdf",
+      "historical_printed_identifiers": {
+        "bill_of_lading_number": "57745",
+        "po_number": "101675",
+        "reference": "W117501B/114049",
+        "additional_reference": "57715-1"
+      },
+      "target_candidate_id": "f35038a9-6d26-49c5-8461-67cef2083171",
+      "target_candidate_filename": "114049_Strategic_05112026_BOL.pdf",
+      "target_expected_document_type": "Shipping_Document",
+      "known_target_observation": "Hub candidate preserved PO 101675 and resolved order context 114149, but V103 did not surface B/L 57745. This is an explicit extraction/normalization test in V104."
+    }
+  ],
+  "guardrails": {
+    "candidate_presence_is_not_parity": true,
+    "current_test_sharepoint_destination_is_not_legacy_authority": true,
+    "production_writes_authorized": false,
+    "traffic_cutover_authorized": false,
+    "background_workers_authorized": false
+  }
+}

@@ -1,9 +1,9 @@
 """GPI Document Hub — bounded AI AP routing decision service.
 
-The model is allowed to interpret messy vendor/document patterns, but it is not
-allowed to invent a SharePoint destination or bypass Business Central evidence.
-The safety governor validates every model proposal against a versioned routing
-contract and fails closed when evidence is weak or contradictory.
+The model may interpret messy vendor/document patterns, but it may not invent a
+SharePoint destination or bypass Business Central evidence. Every proposal is
+validated against a versioned Accounting Temp routing contract and fails closed
+when evidence is weak or contradictory.
 """
 
 from __future__ import annotations
@@ -115,13 +115,24 @@ def _example_for_prompt(example: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _contract_review_route(contract: Dict[str, Any]) -> str:
+    """Return the Temp-relative review path.
+
+    An empty string is intentional and means the AP Temp root. Do not replace
+    it with a fabricated review folder.
+    """
+    if "review_route" in contract:
+        return normalize_route_path(contract.get("review_route"))
+    return ""
+
+
 def _route_contract_prompt(contract: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "version": contract.get("version", "unknown"),
         "base_path": contract.get("base_path", ""),
         "static_routes": contract.get("static_routes", []),
         "dynamic_routes": contract.get("dynamic_routes", []),
-        "review_route": contract.get("review_route", "_NeedsReview"),
+        "review_route": _contract_review_route(contract),
     }
 
 
@@ -143,14 +154,14 @@ def build_route_prompt(
         "Accounting's labeled examples are supervised routing truth. The same vendor may legitimately route "
         "to different queues based on PO/order context, international status, warehouse/dropship context, "
         "document purpose, and supporting pages. NEVER infer a one-vendor/one-folder rule.\n\n"
-        "Important rules:\n"
+        "Rules:\n"
         "1. Classifying a carrier document as AP_Invoice does NOT determine its route.\n"
         "2. Business Central/order context outranks vendor identity when they conflict.\n"
-        "3. You may propose ONLY a route allowed by routing_contract.\n"
+        "3. Propose ONLY a route allowed by routing_contract.\n"
         "4. Do not invent folder names.\n"
-        "5. If evidence conflicts or the correct route depends on missing BC context, return unresolved items.\n"
-        "6. Use the labeled examples as patterns, not as exact string-match rules.\n"
-        "7. Output concise evidence that can be audited by an operator.\n\n"
+        "5. If evidence conflicts or the route depends on missing BC context, list it in unresolved.\n"
+        "6. Use labeled examples as patterns, not exact string-match rules.\n"
+        "7. Output concise auditable evidence.\n\n"
         "Return JSON ONLY with exactly this shape:\n"
         "{\n"
         '  "proposed_route": "Temp-relative path",\n'
@@ -185,18 +196,13 @@ def _strip_json_fence(text: str) -> str:
 
 
 def parse_route_prediction(raw: Any, model: str = DEFAULT_MODEL) -> RoutePrediction:
-    if isinstance(raw, dict):
-        data = raw
-    else:
-        data = json.loads(_strip_json_fence(str(raw)))
-
+    data = raw if isinstance(raw, dict) else json.loads(_strip_json_fence(str(raw)))
     proposed_route = normalize_route_path(data.get("proposed_route"))
     try:
         confidence = float(data.get("confidence", 0.0))
     except (TypeError, ValueError):
         confidence = 0.0
     confidence = max(0.0, min(1.0, confidence))
-
     return RoutePrediction(
         proposed_route=proposed_route,
         confidence=confidence,
@@ -233,25 +239,24 @@ def _normalized_static_routes(contract: Dict[str, Any]) -> set[str]:
     }
 
 
+def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
+    values = context.get("verified_order_numbers") or context.get("order_numbers")
+    if not values:
+        values = [
+            context.get("po_number"),
+            context.get("bc_order_number"),
+            context.get("bc_document_no"),
+        ]
+    if not isinstance(values, list):
+        values = [values]
+    return {str(v).strip().upper() for v in values if v}
+
+
 def _dynamic_route_allowed(route: str, contract: Dict[str, Any], bc_context: Dict[str, Any]) -> bool:
-    """Allow dynamic order folders only when BC evidence proves the dynamic leaf."""
     if not route:
         return False
-    dynamic_rules = contract.get("dynamic_routes") or []
-    verified_refs = {
-        str(v).strip().upper()
-        for v in (
-            bc_context.get("verified_order_numbers")
-            or bc_context.get("order_numbers")
-            or [
-                bc_context.get("po_number"),
-                bc_context.get("bc_order_number"),
-                bc_context.get("bc_document_no"),
-            ]
-        )
-        if v
-    }
-    for rule in dynamic_rules:
+    verified_refs = _verified_bc_refs(bc_context)
+    for rule in contract.get("dynamic_routes") or []:
         prefix = normalize_route_path(rule.get("prefix"))
         if not prefix or not route.startswith(prefix + "/"):
             continue
@@ -329,14 +334,12 @@ def govern_route_prediction(
             f"confidence {prediction.confidence:.1%} below auto-route threshold {threshold:.1%}"
         )
 
-    review_route = normalize_route_path(contract.get("review_route") or "_NeedsReview")
     if blockers or warnings:
-        reason_parts = blockers + warnings
         return GovernedRouteDecision(
             decision=DECISION_NEEDS_REVIEW,
-            route_path=review_route,
+            route_path=_contract_review_route(contract),
             confidence=prediction.confidence,
-            reason="; ".join(reason_parts),
+            reason="; ".join(blockers + warnings),
             blockers=blockers,
             warnings=warnings,
             prediction=prediction.to_dict(),
@@ -368,7 +371,6 @@ async def decide_ap_route(
     model: str = DEFAULT_MODEL,
     llm_send: Optional[Callable[[str, str], Awaitable[Any]]] = None,
 ) -> Dict[str, Any]:
-    """Retrieve supervised examples, ask the model, then fail closed through governor."""
     evidence = _document_evidence(document)
     vendor_name = evidence.get("vendor_name") or ""
     document_type = evidence.get("document_type") or ""

@@ -28,4 +28,5 @@ tools/gpi-hub-migration/Invoke-GPIHub-V107-REV2-Warehouse-Canonical-Shipment-Res
 tools/gpi-hub-migration/Invoke-GPIHub-V108-Durable-Warehouse-Strategic-Corpus.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV2-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV4-Entry.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V108-REV5-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

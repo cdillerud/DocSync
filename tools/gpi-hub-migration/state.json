@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.4",
+  "schema_version": "3.5",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V108_DURABLE_WAREHOUSE_STRATEGIC_CORPUS",
+  "phase": "V108_REV7_DURABILITY_SAFETY_RESUME_STRATEGIC_CORPUS",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V108-REV5-Entry.ps1",
+  "script": "Invoke-GPIHub-V108-REV7-Safety-Resume-Corpus.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -50,37 +50,13 @@
     "v100_target_runtime": "PASS",
     "v101_target_parity": "PASS_REV3",
     "v102_full_collection_scan": "PASS_23933_OF_23933",
-    "v102_candidate_counts": {
-      "JBS_INBOUND_R": 85,
-      "JBS_OUTBOUND_SHIPMENT": 3795,
-      "STRATEGIC_INBOUND_BOL": 1,
-      "STRATEGIC_OUTBOUND_BL": 10
-    },
     "v102_warehouse_reference_matrix_discovery": "PASS_REV2_ALL_FOUR_CANDIDATE_GROUPS_PRESENT",
     "v103_warehouse_reference_semantics": "PASS_PARTIAL_STRONG_3_OF_4",
     "v104_historical_authority_manifest": "PASS_CREATED_FROM_READ_ONLY_DOCSNAV_ZETADOCS_EVIDENCE",
     "v104_remote_reconciliation": "PASS_3_OPEN_BLOCKERS_1_REFERENCE_MATCH",
-    "v104_defect_set": {
-      "JBS_INBOUND_R": "REFERENCE_MATCH_ROUTE_CONFLICT",
-      "JBS_OUTBOUND_SHIPMENT": "SHIPMENT_REFERENCE_NOT_NORMALIZED",
-      "STRATEGIC_INBOUND_BOL": "AUTHENTIC_PACKET_NOT_FOUND_IN_TARGET",
-      "STRATEGIC_OUTBOUND_BL": "BL_REFERENCE_MATCH"
-    },
     "v104_warehouse_historical_authority": "PASS_REV2_DEFECT_LEDGER_CLOSED",
     "v105_targeted_warehouse_code_path_audit": "PASS_EXACT_MIGRATED_TARGET_TREE_NO_MUTATIONS",
-    "v105_findings": {
-      "JBS_INBOUND_R": "CURRENT_HOST_TREE_ALREADY_HAS_WAREHOUSE_RECEIPT_PRE_MISC_ROUTING_RULE_STALE_PERSISTED_ROUTE_SUSPECTED",
-      "JBS_OUTBOUND_SHIPMENT": "REFERENCE_ENGINE_MAPS_BOL_TO_SHIPMENT_SEMANTIC_BUT_PERSISTED_EXPLICIT_SHIPMENT_FIELD_ABSENT",
-      "STRATEGIC_INBOUND_BOL": "NO_W117105_UPLOAD_EVIDENCE_AND_NO_AUTHENTIC_HUB_REPRESENTATION",
-      "STRATEGIC_OUTBOUND_BL": "PRESERVE_57745"
-    },
     "v106_runtime_authority_fix_plan": "PASS_HOST_CONTAINER_MATCH",
-    "v106_dispositions": {
-      "JBS_INBOUND_R": "STALE_PERSISTED_ROUTE_REPLAY_REQUIRED",
-      "JBS_OUTBOUND_SHIPMENT": "CODE_FIX_REQUIRED_CANONICAL_SHIPMENT_FIELD",
-      "STRATEGIC_INBOUND_BOL": "CORPUS_INGESTION_REQUIRED_NO_CODE_DEFECT_PROVEN",
-      "STRATEGIC_OUTBOUND_BL": "BL_57745_BASELINE_PRESERVE"
-    },
     "v107_warehouse_canonical_shipment_target_test": "PASS_REV2",
     "v107_results": {
       "JBS_INBOUND_R": "CURRENT_ROUTING_REPLAY_WAREHOUSE_NOT_INTERNATIONAL_PASS",
@@ -89,8 +65,10 @@
       "STRATEGIC_INBOUND_BOL": "OPEN_AUTHENTIC_W117105_CORPUS_REQUIRED",
       "PATCH_DURABILITY": "TARGET_CONTAINER_TEST_ONLY"
     },
-    "v108_durable_warehouse_strategic_corpus": "IN_PROGRESS",
-    "v108_entry_repair": "REV5_EXPLICIT_PYTHONPATH_APP_IMPORT_FIX",
+    "v108_corpus_authority": "PASS_LEGACY_SHAREPOINT_READ_SHA_48410CADCEAA411D65E51BD266BE5C5942B4431CDEDE9E7A05B871E75A3A2C25",
+    "v108_durable_overlay_config": "PASS_BACKEND_RECREATED",
+    "v108_durable_overlay_safety": "INCOMPLETE_PREVIOUS_RUN_STOPPED_ON_LOG_MARKER_ONLY",
+    "v108_rev7": "IN_PROGRESS_STRUCTURAL_STATIC_SAFETY_RESUME_NO_BLIND_RECREATE",
     "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
     "ap_top10_named_seed": {
       "vendor": "Tumalo Creek Transportation",
@@ -104,35 +82,25 @@
   "near_term_sprints": [
     {
       "sequence": 1,
-      "after": "V107_WAREHOUSE_CANONICAL_SHIPMENT_TARGET_TEST",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V108-Durable-Warehouse-Strategic-Corpus.ps1",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "DURABLE_TARGET_READ_ONLY_OVERLAY_PLUS_AUTHENTIC_W117105_AI_ONLY_CORPUS_PROBE",
-      "objective": "Make the V107-proven canonical shipment_number persistence patch durable without modifying the original target host app tree or pinned image, preserve 5975975 and 57745 across backend recreate, and run the authentic four-page W117105 Strategic Warehousing packet through the audited model-backed classification seam without invoking intake, SharePoint, BC, or source data writes. Explicitly measure whether the current first-page-only multi-page seam loses the supporting-page shipment ER25-1560.",
-      "cutover_relevance": "Warehouse parity remains open until the authentic Strategic inbound packet is model-tested and any proven multi-page reference-loss defect is fixed or otherwise deterministically resolved."
+      "execution_mode": "V108_REV7_RESUME_STRUCTURAL_STATIC_SAFETY_PLUS_W117105_AI_CORPUS",
+      "objective": "Verify the already recreated target in place without another recreate, prove static safety structurally from the actual read-only server overlay, environment, internal network, blocked egress, health and forbidden-worker absence, re-prove 5975975 and 57745, preserve the authentic W117105 corpus, then execute the standalone model-backed W117105 corpus probe."
     },
     {
       "sequence": 2,
-      "after": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
       "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
       "tracking_issue": 19,
       "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
-      "execution_mode": "LEGACY_DOCSNAV_ZETADOCS_PURCHASE_VOLUME_RANKING_PLUS_MODEL_BACKED_REPRESENTATIVE_VENDOR_CORPUS_AND_DETERMINISTIC_REGRESSION_GUARDS",
-      "objective": "Rank the top 10 payable vendors by document count in the legacy DocsNAV/Zetadocs Purchase archive, select representative layout/date variants for each, run them through the same model-backed extraction seam used by the Hub, feed validated corrections/examples into bounded few-shot context, and create deterministic regression guards for dangerous classification/routing semantics. Tumalo Creek Transportation is a required named cohort member and freight-carrier invoices with explicit invoice/payment semantics must remain AP_Invoice.",
-      "cutover_relevance": "No top-10 payable vendor may retain an unresolved dangerous classification, extraction, BC-match, routing, or operator-status defect at cutover."
+      "objective": "Rank the top 10 payable vendors by legacy DocsNAV/Zetadocs Purchase volume and model-test representative examples with deterministic regression guards. Tumalo Creek Transportation is required and freight-carrier invoices with invoice/payment semantics must remain AP_Invoice."
     },
     {
       "sequence": 3,
-      "after": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
       "name": "GUI_TRUTH_FUNCTION_REPORTING_AUDIT",
       "script": "Invoke-GPIHub-GUI-Truth-Audit.ps1",
       "tracking_issue": 17,
-      "classification": "PARITY_HARDENING",
-      "execution_mode": "READ_ONLY",
-      "objective": "Inventory and reconcile the active GPI Hub GUI, every operator action, and all operational reporting against authoritative backend truth; remove or hide inaccurate, contradictory, duplicative, or unnecessary AP/Warehouse surfaces before cutover.",
-      "cutover_relevance": "Misleading operator state is a parity risk and becomes a parity blocker when it can cause an incorrect action or conceal failed delivery."
+      "classification": "PARITY_HARDENING"
     }
   ],
   "safety": {
@@ -145,25 +113,12 @@
     "sharepoint_target": "test",
     "bc_write_enabled": false,
     "bc_block_production_writes": true,
-    "unknown_volume_policy": "fail_closed",
-    "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty",
     "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id",
     "background_worker_policy": "target_only_server_overlay_returns_before_first_polling_worker_start",
     "network_policy": "all_target_services_internal_only_no_external_egress_during_static_parity_validation",
-    "target_health_validation_policy": "container_internal_api_health",
-    "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
-    "v102_discovery_policy": "read_only_scan_of_restored_hub_metadata_upload_filenames_and_copied_source_terms_no_external_calls",
-    "v103_semantic_policy": "read_only_full_collection_semantic_scan_require_expected_reference_field_or_labeled_text_and_reject broad entity keyword false positives",
-    "v104_authority_policy": "read only compare restored hub to committed historical authority manifest collected from user sharepoint docsnav zetadocs archive",
-    "v104_rev2_policy": "reuse already written local v104 reconciliation json no remote call no target or source change",
-    "v105_code_audit_policy": "read only exact target host tree source context and hashes plus targeted w117105 upload and mongo representation search no app or database mutation",
-    "v106_runtime_authority_policy": "read only compare target host tree sha256 to active backend container files before any patch; host and active container matched for all six audited files",
-    "v107_target_test_policy": "patch only active target container writable layer after exact SHA gate; leave original target host app tree and pinned image unchanged; restart same container without recreate; maintain static internal-only network and worker suppression; mutate only shipment_number on two authoritative Shipping_Document target records; no BC or SharePoint writes",
-    "v108_durability_policy": "persist the exact V107-proven workflow_status.py patch as a target-only read-only bind overlay; recreate only target backend with exact pinned image and all static-isolation overlays; original target host app tree remains unchanged",
-    "v108_strategic_corpus_policy": "authentic W117105 legacy PDF SHA-gated; source backend AI-only classify_document_with_ai function after exact image/helper SHA gate; temporary files only; no intake function, no source restart, no SharePoint or BC call; prompt-learning database helpers stubbed to no-op for the probe; target runtime remains internal-only",
-    "v108_entry_policy": "REV5 explicitly sets PYTHONPATH=/app for all temporary source Python helpers because executing /tmp scripts otherwise puts only /tmp on sys.path; includes import preflight before Graph GET; no token printed",
     "target_original_app_tree_modified": false,
-    "target_backend_image_modified": false
+    "target_backend_image_modified": false,
+    "v108_rev7_policy": "NO_BLIND_RECREATE; inspect actual running target first. Require exact image, read-only static server overlay source and matching host/container SHA, static early-return guard content, safety env, only internal Docker network, internal health, blocked Graph egress, forbidden worker logs absent, durable workflow overlay exact SHA, and canonical shipment truth before AI corpus execution."
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
@@ -173,5 +128,5 @@
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
   "next_after_success": "RESOLVE_V108_MULTIPAGE_WAREHOUSE_REFERENCE_GAP_IF_PROVEN_THEN_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
-  "notes": "V107 REV2 passed: current W118228 routing replay returns Warehouse Not International; JBS outbound now has canonical shipment_number 5975975; Strategic outbound preserves canonical shipment_number 57745; original target host tree remains unchanged and target safety is preserved. V108 REV5 repairs only the harness import context: Python temporary scripts are executed with PYTHONPATH=/app, because -w /app alone does not change sys.path[0] for scripts located in /tmp. Previous V108 attempts failed before any target/source migration work or Graph read. V108 still makes the exact shipment patch durable as a read-only target overlay and model-tests the authentic four-page W117105 Strategic packet. User elevated AI learning/regression for the top 10 payable vendors by legacy Purchase document volume to formal parity scope; issue #19 tracks this cohort, with Tumalo Creek Transportation explicitly required."
+  "notes": "V108 reached the real durable target recreate. The previous run passed corpus SHA, target durability precheck, canonical truth before recreate, durable overlay compose config, and recreated/started the backend. It then stopped solely because the expected worker-suppression log line was absent. REV7 does not recreate again. It structurally verifies the actual running static server overlay and early-return guard, exact env/network/egress/health and forbidden-worker absence. Only after those gates pass does it continue to the authentic W117105 AI-only corpus probe."
 }

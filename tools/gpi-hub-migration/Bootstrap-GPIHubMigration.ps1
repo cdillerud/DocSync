@@ -13,7 +13,7 @@ function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Invoke-Native {
+function Invoke-NativeText {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$Arguments,
@@ -21,17 +21,18 @@ function Invoke-Native {
     )
 
     $token = [guid]::NewGuid().ToString('N')
-    $stdoutFile = Join-Path $env:TEMP "gpi-native-$token.out.txt"
     $stderrFile = Join-Path $env:TEMP "gpi-native-$token.err.txt"
+    $oldEap = $ErrorActionPreference
+    $nativeVar = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $oldNative = if ($null -ne $nativeVar) { $nativeVar.Value } else { $null }
 
     try {
-        & $FilePath @Arguments 1> $stdoutFile 2> $stderrFile
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $false }
+
+        $output = & $FilePath @Arguments 2> $stderrFile
         $code = $LASTEXITCODE
-
-        $stdout = if (Test-Path -LiteralPath $stdoutFile) {
-            Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue
-        } else { '' }
-
+        $stdout = (@($output) | ForEach-Object { [string]$_ }) -join "`n"
         $stderr = if (Test-Path -LiteralPath $stderrFile) {
             Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
         } else { '' }
@@ -49,75 +50,99 @@ function Invoke-Native {
         return $result
     }
     finally {
-        Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
+        $ErrorActionPreference = $oldEap
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $oldNative }
+        Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Get-GitFileText {
+    param(
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$Ref,
+        [Parameter(Mandatory)][string]$RepoPath
+    )
+
+    $spec = '{0}:{1}' -f $Ref,$RepoPath
+    $r = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$Repo,'show',$spec)
+    Require ($r.ExitCode -eq 0) "Could not read $RepoPath from $Ref."
+    return [string]$r.StdOut
 }
 
 Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Source repo not found: $SourceRepo"
 Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe is not available.'
-Require ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) 'tar.exe is not available.'
 Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe is not available.'
-Require ($MigrationControlRoot -ne $SourceRepo) 'Migration control root must be separate from the application working tree.'
+Require ($MigrationControlRoot -ne $SourceRepo) 'Migration control root must be separate from application working tree.'
 
 $RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
 $FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
-$ScopedPath = 'tools/gpi-hub-migration'
-$ArchivePath = Join-Path $env:TEMP ("gpi-hub-control-" + [guid]::NewGuid().ToString('N') + '.tar')
+$ToolPrefix = 'tools/gpi-hub-migration/'
+$ManifestRepoPath = "${ToolPrefix}control-files.txt"
 
 Write-Host 'GPI Hub migration bootstrap' -ForegroundColor Cyan
 Write-Host "Source repo        : $SourceRepo"
 Write-Host "Control folder     : $MigrationControlRoot"
 Write-Host "Control branch     : $ControlBranch"
-Write-Host "Materialized path  : $ScopedPath only"
+Write-Host 'Materialization    : per-file git show manifest'
 Write-Host ''
-Write-Host 'The existing DocSync-Zetadocs working tree will NOT be checked out, reset, cleaned, or modified.' -ForegroundColor Yellow
-Write-Host 'No Git worktree/index is used for the migration controller.' -ForegroundColor Yellow
-Write-Host 'Native process execution uses PowerShell-compatible invocation; ProcessStartInfo.ArgumentList is not used.' -ForegroundColor Yellow
+Write-Host 'The existing DocSync-Zetadocs working tree will NOT be checked out, reset, cleaned, archived, or modified.' -ForegroundColor Yellow
+Write-Host 'No Git worktree, index, tree traversal, archive, or checkout is used for the migration controller.' -ForegroundColor Yellow
 
-$probe = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--is-inside-work-tree')
+$probe = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--is-inside-work-tree')
 Require ($probe.StdOut.Trim() -eq 'true') 'Source path is not a Git working tree.'
 Write-Host 'GPI_HUB_NATIVE_COMPATIBILITY=PASS' -ForegroundColor Green
 
 Write-Host 'Fetching migration control branch into explicit remote-tracking ref...' -ForegroundColor Cyan
-$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec)
-$verify = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--verify',$RemoteTrackingRef)
+$null = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec)
+$verify = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--verify',$RemoteTrackingRef)
 Require (-not [string]::IsNullOrWhiteSpace($verify.StdOut)) "Remote-tracking ref unavailable: $RemoteTrackingRef"
 Write-Host 'GPI_HUB_MIGRATION_CONTROL_REF=PASS' -ForegroundColor Green
 
-# Recover automatically from failed worktree attempts from earlier bootstrap versions.
-Write-Host 'Removing stale migration worktree registration, if present...' -ForegroundColor Cyan
-$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','remove','--force',$MigrationControlRoot) -AllowFailure
-$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','prune') -AllowFailure
+# Clean stale registration from earlier abandoned worktree attempts. Failure is harmless.
+$null = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','remove','--force',$MigrationControlRoot) -AllowFailure
+$null = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','prune') -AllowFailure
 Write-Host 'GPI_HUB_MIGRATION_WORKTREE_RECOVERY=PASS' -ForegroundColor Green
 
+$manifestText = Get-GitFileText -Repo $SourceRepo -Ref $RemoteTrackingRef -RepoPath $ManifestRepoPath
+$controlFiles = @(
+    ($manifestText -replace "`r",'') -split "`n" |
+    ForEach-Object { $_.Trim() } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+)
+Require ($controlFiles.Count -gt 0) 'Migration control manifest is empty.'
+Require ($controlFiles -contains $ManifestRepoPath) 'Migration control manifest must include itself.'
+
 if (Test-Path -LiteralPath $MigrationControlRoot) {
-    Write-Host 'Removing previous non-authoritative migration control folder...' -ForegroundColor Cyan
     Remove-Item -LiteralPath $MigrationControlRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $MigrationControlRoot -Force | Out-Null
 
-try {
-    Write-Host 'Archiving ONLY the migration-control subtree from Git...' -ForegroundColor Cyan
-    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$SourceRepo,
-        'archive','--format=tar',"--output=$ArchivePath",$RemoteTrackingRef,$ScopedPath
-    )
-    Require (Test-Path -LiteralPath $ArchivePath -PathType Leaf) 'Scoped migration-control archive was not created.'
+Write-Host "Materializing $($controlFiles.Count) explicit control files with git show..." -ForegroundColor Cyan
+foreach ($repoPath in $controlFiles) {
+    Require ($repoPath.StartsWith($ToolPrefix,[System.StringComparison]::Ordinal)) "Manifest path escapes control subtree: $repoPath"
+    Require ($repoPath -notmatch '(^|/)\.\.(/|$)') "Manifest path contains parent traversal: $repoPath"
 
-    Write-Host 'Extracting migration controller without creating a Git index...' -ForegroundColor Cyan
-    $null = Invoke-Native -FilePath 'tar.exe' -Arguments @('-xf',$ArchivePath,'-C',$MigrationControlRoot)
-}
-finally {
-    Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
+    $relative = $repoPath.Substring($ToolPrefix.Length).Replace('/','\')
+    Require (-not [string]::IsNullOrWhiteSpace($relative)) "Invalid manifest path: $repoPath"
+
+    $destination = Join-Path (Join-Path $MigrationControlRoot 'tools\gpi-hub-migration') $relative
+    $parent = Split-Path -Parent $destination
+    New-Item -ItemType Directory -Path $parent -Force | Out-Null
+
+    $content = Get-GitFileText -Repo $SourceRepo -Ref $RemoteTrackingRef -RepoPath $repoPath
+    Set-Content -LiteralPath $destination -Value $content -Encoding utf8 -NoNewline
+    Write-Host "  $repoPath"
 }
 
 $ToolRoot = Join-Path $MigrationControlRoot 'tools\gpi-hub-migration'
 $Runner = Join-Path $ToolRoot 'Invoke-GPIHubMigration.ps1'
 $State = Join-Path $ToolRoot 'state.json'
+$ManifestLocal = Join-Path $ToolRoot 'control-files.txt'
 
-Require (Test-Path -LiteralPath $Runner -PathType Leaf) "Repo runner not found after extraction: $Runner"
-Require (Test-Path -LiteralPath $State -PathType Leaf) "Migration state not found after extraction: $State"
-Write-Host 'GPI_HUB_MIGRATION_ARCHIVE_MATERIALIZATION=PASS' -ForegroundColor Green
+Require (Test-Path -LiteralPath $Runner -PathType Leaf) "Repo runner missing after materialization: $Runner"
+Require (Test-Path -LiteralPath $State -PathType Leaf) "Migration state missing after materialization: $State"
+Require (Test-Path -LiteralPath $ManifestLocal -PathType Leaf) "Migration manifest missing after materialization: $ManifestLocal"
+Write-Host 'GPI_HUB_MIGRATION_GIT_SHOW_MATERIALIZATION=PASS' -ForegroundColor Green
 
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $Launcher = Join-Path $Desktop 'GPI Hub Migration.cmd'
@@ -134,7 +159,7 @@ Write-Host 'GPI_HUB_MIGRATION_BOOTSTRAP=PASS' -ForegroundColor Green
 Write-Host "Runner          : $Runner"
 Write-Host "Desktop launcher: $Launcher"
 Write-Host ''
-Write-Host 'After this bootstrap, use the Desktop launcher. It self-updates by re-archiving only the migration-control subtree.' -ForegroundColor Green
+Write-Host 'After this bootstrap, use the Desktop launcher. It self-updates using only explicit git show file reads.' -ForegroundColor Green
 Write-Host ''
 
 & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $Runner

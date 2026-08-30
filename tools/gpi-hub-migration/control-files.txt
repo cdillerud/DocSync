@@ -31,4 +31,5 @@ tools/gpi-hub-migration/Invoke-GPIHub-V108-REV4-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV5-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV6-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV7-Safety-Resume-Corpus.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V108-REV8-Health-Resume-Corpus.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

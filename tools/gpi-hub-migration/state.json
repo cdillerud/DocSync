@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V99_FIRST_PASS_IN_PROGRESS",
   "mode": "monitor-v99",
@@ -21,11 +21,13 @@
     "ssh_key": "C:\\Users\\ChadDillerud\\Downloads\\ChadKey - Copy.pem"
   },
   "control_materialization": {
-    "type": "scoped_git_archive",
-    "path": "tools/gpi-hub-migration",
+    "type": "per_file_git_show_manifest",
+    "manifest": "tools/gpi-hub-migration/control-files.txt",
     "uses_worktree": false,
     "uses_checkout": false,
-    "uses_git_index": false
+    "uses_git_index": false,
+    "uses_tree_traversal": false,
+    "uses_git_archive": false
   },
   "safety": {
     "production_touched": false,

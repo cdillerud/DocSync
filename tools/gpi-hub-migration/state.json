@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.2",
+  "schema_version": "3.3",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V106_WAREHOUSE_RUNTIME_AUTHORITY_FIX_PLAN",
+  "phase": "V107_WAREHOUSE_CANONICAL_SHIPMENT_TARGET_TEST",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1",
+  "script": "Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -74,19 +74,26 @@
       "STRATEGIC_INBOUND_BOL": "NO_W117105_UPLOAD_EVIDENCE_AND_NO_AUTHENTIC_HUB_REPRESENTATION",
       "STRATEGIC_OUTBOUND_BL": "PRESERVE_57745"
     },
-    "v106_runtime_authority_fix_plan": "IN_PROGRESS"
+    "v106_runtime_authority_fix_plan": "PASS_HOST_CONTAINER_MATCH",
+    "v106_dispositions": {
+      "JBS_INBOUND_R": "STALE_PERSISTED_ROUTE_REPLAY_REQUIRED",
+      "JBS_OUTBOUND_SHIPMENT": "CODE_FIX_REQUIRED_CANONICAL_SHIPMENT_FIELD",
+      "STRATEGIC_INBOUND_BOL": "CORPUS_INGESTION_REQUIRED_NO_CODE_DEFECT_PROVEN",
+      "STRATEGIC_OUTBOUND_BL": "BL_57745_BASELINE_PRESERVE"
+    },
+    "v107_warehouse_canonical_shipment_target_test": "IN_PROGRESS"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1",
+      "script": "Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1",
       "tracking_issue": 18,
-      "classification": "PARITY_BLOCKER_FIX_DESIGN",
-      "execution_mode": "READ_ONLY_HOST_VS_ACTIVE_CONTAINER_CODE_AUTHORITY_GATE_THEN_V107_NARROW_TARGET_ISOLATED_PATCH_REPLAY_AND_CORPUS_TEST",
-      "objective": "Prove which code copy is actually executing, distinguish W118228 stale persisted routing from an active runtime defect, identify the canonical shipment-field persistence patch point for JBS outbound, classify Strategic inbound as corpus-ingestion coverage unless contrary evidence appears, and preserve Strategic outbound B/L 57745.",
-      "cutover_relevance": "No Warehouse runtime patch is permitted until host-tree and active-container code authority is established. Warehouse parity remains open pending replay/fix/corpus validation of the three authoritative defects."
+      "classification": "PARITY_BLOCKER_TARGET_TEST",
+      "execution_mode": "TARGET_ISOLATED_REVERSIBLE_CONTAINER_PATCH_PLUS_TWO_RECORD_CANONICAL_BACKFILL_AND_READ_ONLY_W118228_ROUTE_REPLAY",
+      "objective": "Prove the current W118228 Warehouse Receipt routing function returns Warehouse Not International without rewriting stored historical routing; add canonical shipment_number persistence to the target warehouse workflow; backfill only authoritative JBS outbound 5975975 and Strategic outbound 57745 target records; preserve worker suppression, internal-only networking, pinned image, original host app tree, and zero BC/SharePoint writes.",
+      "cutover_relevance": "This closes the demonstrated JBS inbound active-code question and tests the canonical shipment contract without broad mutation. Strategic inbound W117105 remains a separate historical corpus-ingestion blocker until an authentic packet is tested."
     },
     {
       "sequence": 2,
@@ -122,7 +129,8 @@
     "v104_authority_policy": "read_only_compare_restored_hub_to_committed_historical_authority_manifest_collected_from_user_sharepoint_docsnav_zetadocs_archive",
     "v104_rev2_policy": "reuse_already_written_local_v104_reconciliation_json_no_remote_call_no_target_or_source_change",
     "v105_code_audit_policy": "read_only_exact_target_host_tree_source_context_and_hashes_plus_targeted_w117105_upload_and_mongo_representation_search_no_app_or_database_mutation",
-    "v106_runtime_authority_policy": "read_only_compare_target_host_tree_sha256_to_active_backend_container_files_before_any_patch; inspect canonical shipment persistence and current warehouse receipt routing; no target database or app mutation",
+    "v106_runtime_authority_policy": "read_only_compare_target_host_tree_sha256_to_active_backend_container_files before any patch; host and active container matched for all six audited files",
+    "v107_target_test_policy": "patch only active target container writable layer after exact SHA gate; leave original target host app tree and pinned image unchanged; restart same container without recreate; maintain static internal-only network and worker suppression; mutate only shipment_number on two authoritative Shipping_Document target records; no BC or SharePoint writes",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -132,6 +140,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V107_AUTHORITY_CONFIRMED_TARGET_ISOLATED_WAREHOUSE_PATCH_REPLAY_AND_CORPUS_TEST",
-  "notes": "V105 passed read-only against the exact migrated target host tree. Its evidence changes the three-defect interpretation: the host-tree folder_routing_service already contains the Warehouse_Receipt pre-Misc guard, so W118228's Misc route may be stale persisted history rather than a missing current rule; the reference engine explicitly maps BOL to shipment_number semantics but the 111244 record lacks an explicit canonical shipment_number field, indicating a persistence/contract gap; W117105 has no upload evidence and no authentic Hub representation, so no Strategic inbound code defect is yet proven and a controlled historical corpus ingestion test is required; Strategic outbound B/L 57745 remains the protected regression baseline. V106 now compares those host-tree files to the code actually executing inside the pinned backend container and captures the final authority-confirmed V107 patch/replay plan. No traffic cutover or Production writes are authorized."
+  "next_after_success": "V108_DURABLE_TARGET_OVERLAY_AND_AUTHENTIC_STRATEGIC_INBOUND_CORPUS_INGESTION_TEST",
+  "notes": "V106 passed with host/container SHA equality for folder routing, reference intelligence, intake, shipping auto-file, document intelligence, and warehouse workflow code. W118228 is now classified as stale persisted routing requiring live function replay, not a demonstrated current routing-code defect. JBS outbound 111244 has BOL 5975975 correctly labeled as shipment_number semantics but no explicit root shipment_number, and Strategic outbound 114049 has B/L 57745 with the same canonical-field gap; V107 adds one target-container-only persistence line and narrowly backfills those two authoritative records after evidence backup. Strategic inbound W117105 is not represented in uploads or Hub and remains a corpus-ingestion blocker; no code defect is claimed. V107 does not touch the source VM, original target host app tree, pinned image, BC, SharePoint, traffic, or Production."
 }

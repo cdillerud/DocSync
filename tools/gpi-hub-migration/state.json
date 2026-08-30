@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.7",
+  "schema_version": "3.8",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V108_REV10_SOURCE_ONLY_STRATEGIC_CORPUS",
+  "phase": "PARITY_AUTOPILOT_WAREHOUSE_AP_GUI",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V108-REV10-Source-Corpus-Only.ps1",
+  "script": "Invoke-GPIHub-Autopilot-Parity-Pipeline.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -47,14 +47,7 @@
     "v105_targeted_warehouse_code_path_audit": "PASS_EXACT_MIGRATED_TARGET_TREE_NO_MUTATIONS",
     "v106_runtime_authority_fix_plan": "PASS_HOST_CONTAINER_MATCH",
     "v107_warehouse_canonical_shipment_target_test": "PASS_REV2",
-    "v107_results": {
-      "JBS_INBOUND_R": "CURRENT_ROUTING_REPLAY_WAREHOUSE_NOT_INTERNATIONAL_PASS",
-      "JBS_OUTBOUND_SHIPMENT": "CANONICAL_SHIPMENT_NUMBER_5975975_PASS",
-      "STRATEGIC_OUTBOUND_BL": "CANONICAL_SHIPMENT_NUMBER_57745_REGRESSION_PASS",
-      "STRATEGIC_INBOUND_BOL": "OPEN_AUTHENTIC_W117105_CORPUS_REQUIRED"
-    },
     "v108_corpus_authority": "PASS_LEGACY_SHAREPOINT_READ_SHA_48410CADCEAA411D65E51BD266BE5C5942B4431CDEDE9E7A05B871E75A3A2C25",
-    "v108_durable_overlay_config": "PASS_BACKEND_RECREATED_WITH_WORKFLOW_OVERLAY",
     "v108_target_durability_safety": "PASS_REV9",
     "v108_target_rev9_evidence": {
       "durable_workflow_overlay": "PASS",
@@ -68,16 +61,32 @@
       "strategic_outbound_canonical_shipment": "57745",
       "target_corpus_preserved": "PASS"
     },
-    "v108_rev9_source_probe": "FAILED_TEST_HARNESS_ONLY_MISSING_FITZ_AFTER_SOURCE_AI_AUTHORITY_PASS",
-    "v108_rev10_source_corpus": "IN_PROGRESS_PYPDF_RUNTIME_DEPENDENCY",
-    "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
-    "ap_top10_named_seed": {
-      "vendor": "Tumalo Creek Transportation",
-      "legacy_examples": [
-        "W118864_TUMALO_0312515_08252026.pdf",
-        "W118897_TUMALO_0312516_08262026.pdf"
-      ],
-      "critical_boundary": "FREIGHT_CARRIER_INVOICE_WITH_PAYMENT_SEMANTICS_MUST_REMAIN_AP_INVOICE"
+    "v108_rev10_source_corpus": "AUTOPILOT_NEXT",
+    "v109_supporting_reference_candidate": "PREBUILT_CONDITIONAL_IF_GAP_PROVEN_OR_UNRESOLVED",
+    "ap_top10_payable_cohort": "AUTOPILOT_NEXT_ISSUE_19",
+    "ap_top10_inventory_scope": {
+      "site": "gamerpackaging1.sharepoint.com/sites/DocsNAV",
+      "libraries": ["Zetadocs", "Zetadocs2021", "Zetadocs2022", "Zetadocs2023"],
+      "folder_scope": "exact Purchase folders",
+      "dedupe": "Graph file hash when available; normalized fallback",
+      "mandatory_seed": "Tumalo Creek Transportation",
+      "tumalo_normalization": "filename override because legacy archive can store Tumalo carrier invoices beneath related customer/vendor Purchase folders"
+    },
+    "gui_truth_audit": "AUTOPILOT_AFTER_AP"
+  },
+  "autopilot": {
+    "enabled": true,
+    "policy": "Do not stop for interim user handoffs. Continue independent read-only parity phases and fail closed only in the final summary.",
+    "sequence": [
+      "V108_REV10_SOURCE_ONLY_STRATEGIC_CORPUS",
+      "V109_SUPPORTING_REFERENCE_CANDIDATE_IF_REQUIRED",
+      "AP_TOP10_LEGACY_PURCHASE_INVENTORY_AND_AI",
+      "GUI_TRUTH_FUNCTION_REPORTING_AUDIT"
+    ],
+    "warehouse_branching": {
+      "PROVEN_SUPPORTING_SHIPMENT_LOST_BY_CURRENT_FIRST_PAGE_SEAM": "RUN_V109",
+      "UNRESOLVED_SUPPORTING_SHIPMENT_NOT_EXTRACTED": "RUN_V109",
+      "NOT_OBSERVED_FULL_PACKET_PRESERVED_SHIPMENT": "SKIP_V109"
     }
   },
   "near_term_sprints": [
@@ -86,22 +95,24 @@
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "REV10_SOURCE_ONLY_AUTHENTIC_W117105_AI_CORPUS",
-      "objective": "Use the exact audited source classifier and declared pypdf runtime dependency to test the authentic four-page W117105 packet and its page-4 supporting shipment reference without re-running already-passed target durability/safety."
+      "execution_mode": "REV10_SOURCE_CORPUS_WITH_CONDITIONAL_V109_CANDIDATE",
+      "objective": "Complete authentic W117105 model test. If the current first-page seam loses or cannot extract the supporting shipment, immediately test a bounded pages-2-5 reference-only second pass without changing page-1 classification authority or the source app tree."
     },
     {
       "sequence": 2,
       "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
       "tracking_issue": 19,
       "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
-      "objective": "Rank the top 10 payable vendors by legacy DocsNAV/Zetadocs Purchase document volume, model-test representative examples, use validated examples in bounded learning context, and add deterministic regression guards. Tumalo Creek Transportation is required."
+      "execution_mode": "AUTONOMOUS_READ_ONLY_LEGACY_GRAPH_INVENTORY_PLUS_REPRESENTATIVE_MODEL_CORPUS",
+      "objective": "Enumerate actual DocsNAV legacy Purchase files across current + 2021/2022/2023 libraries, dedupe exact copies, rank cohort vendors, force Tumalo Creek Transportation into the cohort, select representative oldest/middle/newest samples, and run the existing source classifier read-only to create a vendor-level defect matrix."
     },
     {
       "sequence": 3,
       "name": "GUI_TRUTH_FUNCTION_REPORTING_AUDIT",
       "script": "Invoke-GPIHub-GUI-Truth-Audit.ps1",
       "tracking_issue": 17,
-      "classification": "PARITY_HARDENING"
+      "classification": "PARITY_HARDENING",
+      "execution_mode": "READ_ONLY"
     }
   ],
   "safety": {
@@ -116,7 +127,7 @@
     "bc_block_production_writes": true,
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "v108_rev10_policy": "SOURCE ONLY. No target call, no target recreate, no source restart, no intake, no BC/SharePoint writes, no source Mongo write. Require exact source image and document_intel_helpers SHA, SHA-gated W117105 corpus, source internal health before/after, pypdf import preflight, then full-packet and isolated page-4 model-backed classifier probes."
+    "autopilot_policy": "No Production changes. REV10/V109/AP inventory use source temporary files and read-only Graph/model calls only. GUI audit is read-only. V109 candidate loads a temporary patched module and never replaces /app/services/document_intel_helpers.py."
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
@@ -125,6 +136,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "IF_W117105_MULTIPAGE_GAP_PROVEN_PATCH_SUPPORTING_PAGE_REFERENCE_EXTRACTION_ELSE_START_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
-  "notes": "REV9 fully proved target durability and safety: exact durable workflow overlay, static server structural guard, safety env, internal-only network, internal HTTP 200, blocked external egress, no forbidden workers, canonical JBS shipment 5975975 and Strategic outbound 57745, and preserved target corpus. REV9 source AI authority also passed, then the test harness failed only because fitz/PyMuPDF is not installed. The source branch requirements explicitly declare pypdf==6.9.0. REV10 therefore resumes only the source AI corpus test using pypdf PdfReader/PdfWriter and does not touch the target."
+  "next_after_success": "USE_AUTOPILOT_ARTIFACTS_TO_CLOSE_OR_PATCH_WAREHOUSE_GAP_AND_AP_TOP10_VENDOR_DEFECTS_WITHOUT_INTERIM_USER_HANDOFF",
+  "notes": "Target durability/safety is already closed by REV9. The controller is now promoted to an autonomous parity driver so one launcher run proceeds through REV10, conditional V109, AP Top-10 inventory/AI, and GUI audit without waiting for intermediate pasted output. SharePoint connector evidence confirmed DocsNAV site and separate Zetadocs current/2021/2022/2023 libraries. Tumalo search also proved carrier invoices can be archived beneath related customer/vendor Purchase folders, so the AP inventory keeps raw folder counts and applies a named Tumalo filename normalization rather than relying on folder name alone."
 }

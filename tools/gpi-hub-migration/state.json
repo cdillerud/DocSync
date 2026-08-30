@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.5",
+  "schema_version": "1.6",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV3_CAPTURE",
+  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV4_CONFIGDB_GATE",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV3.ps1",
+  "script": "Invoke-GPIHub-V100-REV4.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -16,7 +16,8 @@
     "public_ip": "52.180.147.52",
     "mount": "/gpi-hub-data",
     "isolated_backend": "127.0.0.1:18005",
-    "isolated_frontend": "127.0.0.1:18080"
+    "isolated_frontend": "127.0.0.1:18080",
+    "mongo_configdb": "/gpi-hub-data/volumes/mongodb-configdb"
   },
   "local": {
     "operational_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-Zetadocs",
@@ -35,7 +36,7 @@
   "milestones": {
     "v98_target_infrastructure": "PASS",
     "v99_first_pass_migration": "PASS",
-    "v100_target_runtime": "IN_PROGRESS_REV3_CAPTURE"
+    "v100_target_runtime": "IN_PROGRESS_REV4_CONFIGDB_GATE"
   },
   "safety": {
     "production_touched": false,
@@ -44,8 +45,10 @@
     "target_hub_start_authorized": true,
     "sharepoint_target": "test",
     "bc_write_enabled": false,
-    "bc_block_production_writes": true
+    "bc_block_production_writes": true,
+    "unknown_volume_policy": "fail_closed",
+    "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty"
   },
   "next_after_success": "V101_TARGET_PARITY_VALIDATION",
-  "notes": "V100 REV3 wraps REV2 with persistent stdout/stderr capture and a stop-on-error console hold. On failure it writes last-v100-run.log and last-v100-error.txt and waits for Enter, so the operator can see the exact fault. No Production writes or traffic cutover are authorized."
+  "notes": "V100 REV4 preserves REV2 JSON/python runtime discovery and REV3 persistent failure capture. It handles only Mongo's exact anonymous /data/configdb volume: source path/name are verified, source contents are probed read-only, and the mount is mapped to dedicated target storage only when empty. Any content or any other unknown volume fails closed. No traffic cutover or Production writes are authorized."
 }

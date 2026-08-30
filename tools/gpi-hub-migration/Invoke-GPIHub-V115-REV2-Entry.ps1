@@ -64,6 +64,36 @@ $script = $script.Replace(
     "'feature_commit':'$ExpectedCommit'"
 )
 
+# Repair 5: V115 executes its golden Python probe as a standalone process inside
+# the already-running backend container. That intentionally bypasses FastAPI /
+# server.startup(), which is where deps.set_db(database.db) is normally wired.
+# The existing PO resolver is read-only on this path but requires get_db().
+# Bootstrap only that existing dependency in the probe; do not start the full
+# application lifecycle and do not alter /app or the feature candidate.
+$probeDbAnchor = @'
+from services.ap_bc_routing_context_service import resolve_ap_routing_context
+from services.folder_routing_service import determine_ap_routing_decision
+
+HOST='gamerpackaging1.sharepoint.com'
+'@
+$probeDbReplacement = @'
+from services.ap_bc_routing_context_service import resolve_ap_routing_context
+from services.folder_routing_service import determine_ap_routing_decision
+from database import db as _v115_source_db
+from deps import get_db as _v115_get_db, set_db as _v115_set_db
+
+_v115_set_db(_v115_source_db)
+if _v115_get_db() is not _v115_source_db:
+    raise RuntimeError('V115 read-only DB dependency bootstrap verification failed')
+print('V115_READONLY_DB_BOOTSTRAP=PASS',flush=True)
+
+HOST='gamerpackaging1.sharepoint.com'
+'@
+if (-not $script.Contains($probeDbAnchor)) {
+    throw 'V115 REV2 repair failed: golden probe DB bootstrap anchor not found.'
+}
+$script = $script.Replace($probeDbAnchor,$probeDbReplacement)
+
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
     throw 'V115 REV2 repair failed: wildcard SCP source remains.'
@@ -86,6 +116,15 @@ if ($script.Contains('$output = $normalized | & ssh.exe')) {
 if (-not $script.Contains("'feature_commit':'$ExpectedCommit'")) {
     throw 'V115 REV2 repair failed: result commit evidence not updated.'
 }
+if (-not $script.Contains('from database import db as _v115_source_db')) {
+    throw 'V115 REV2 repair failed: read-only DB handle import not installed.'
+}
+if (-not $script.Contains('_v115_set_db(_v115_source_db)')) {
+    throw 'V115 REV2 repair failed: read-only DB dependency bootstrap not installed.'
+}
+if (-not $script.Contains("print('V115_READONLY_DB_BOOTSTRAP=PASS',flush=True)")) {
+    throw 'V115 REV2 repair failed: DB bootstrap runtime evidence marker not installed.'
+}
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
 
@@ -102,6 +141,7 @@ try {
     Write-Host 'V115_REV2_SCP_DIRECTORY_STAGE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SSH_BASE64_TRANSPORT=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_RESULT_COMMIT_EVIDENCE=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_READONLY_DB_BOOTSTRAP=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 
     & $GeneratedPath

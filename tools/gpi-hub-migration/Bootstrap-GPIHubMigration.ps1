@@ -54,6 +54,11 @@ $null = Invoke-Git -WorkingDirectory $SourceRepo -Arguments @('fetch','--prune',
 $null = Invoke-Git -WorkingDirectory $SourceRepo -Arguments @('rev-parse','--verify',$RemoteTrackingRef)
 Write-Host 'GPI_HUB_MIGRATION_CONTROL_REF=PASS' -ForegroundColor Green
 
+# Always prune stale registrations first. A failed Windows checkout can leave a
+# worktree registration even when the directory was only partially created.
+& git.exe -C $SourceRepo worktree prune 2>$null
+Write-Host 'GPI_HUB_MIGRATION_WORKTREE_PRUNE=PASS' -ForegroundColor Green
+
 # Recover automatically from an earlier failed full checkout. The dedicated
 # migration directory contains no authoritative application state.
 $WorktreeValid = $false
@@ -65,7 +70,6 @@ if (Test-Path -LiteralPath $MigrationWorktree -PathType Container) {
 if (-not $WorktreeValid -and (Test-Path -LiteralPath $MigrationWorktree -PathType Container)) {
     Write-Host 'Recovering failed/partial migration worktree from prior Windows checkout attempt...' -ForegroundColor Yellow
 
-    # Remove stale registration first, if any. Never touch SourceRepo contents.
     & git.exe -C $SourceRepo worktree remove --force $MigrationWorktree 2>$null
     & git.exe -C $SourceRepo worktree prune 2>$null
 

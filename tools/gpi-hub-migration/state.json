@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.4",
+  "schema_version": "2.5",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_REV9_SOURCE_ROLLBACK_CLOSEOUT",
+  "phase": "V101_TARGET_PARITY_VALIDATION_REV3",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV9-Source-Rollback-Closeout.ps1",
+  "script": "Invoke-GPIHub-V101-Target-Parity-REV3.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -46,8 +46,9 @@
     "v100_rev7_internal_network": "PASS",
     "v100_rev7_application_startup": "PASS_INTERNAL_HEALTH_200",
     "v100_rev8_target_static_validation": "PASS",
-    "v100_rev8_source_running_count": "PASS_3_SERVICES",
-    "v100_target_runtime": "IN_PROGRESS_REV9_SOURCE_ROLLBACK_CLOSEOUT"
+    "v100_rev9_source_rollback": "PASS_3_SERVICES_INTERNAL_API_200",
+    "v100_target_runtime": "PASS",
+    "v101_target_parity": "IN_PROGRESS_REV3"
   },
   "near_term_sprints": [
     {
@@ -92,6 +93,6 @@
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
-  "next_after_success": "V101_TARGET_PARITY_VALIDATION_REV3",
-  "notes": "REV8 proved the entire static target runtime: required services, exact images, safety environment, internal-only network, backend and frontend HTTP health, suppressed background workers, blocked external egress, and preserved Mongo. Its only failure was a source rollback validator that checked /health then / on host port 8005 and received 404 despite all three source containers running. REV9 is a read-only closeout that verifies the target remains safe and checks the source backend's actual /api/health endpoint from inside the source backend container. V101 REV3 is prebuilt with the same target internal-network and source internal-health assumptions. No traffic cutover or Production writes are authorized."
+  "next_after_success": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
+  "notes": "V100 is complete. REV9 proved the target static-isolated runtime remains healthy, background workers remain suppressed, external egress remains blocked, restored Mongo is preserved, and the source rollback checkpoint has all three Compose services running with backend /api/health returning 200 from inside the source container. V101 REV3 is now active. It performs read-only target parity preservation validation for W118093 Warehouse truth, AP Scenario 2 persisted truth, duplicate/idempotency protections, fail-closed semantics, target safety isolation, and source rollback health. The AP live SharePoint authority gap remains explicitly open and is not claimed solved. No traffic cutover or Production writes are authorized."
 }

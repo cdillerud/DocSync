@@ -36,7 +36,7 @@
   },
   "milestones": {
     "v98_target_infrastructure": "PASS",
-    "v99_first_pass_migration": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
+    "v99_first_pass_migration": "PASS",
     "v100_mongo_restore": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
     "v100_target_runtime": "PASS",
     "v101_target_parity": "PASS_REV3",

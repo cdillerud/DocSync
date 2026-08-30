@@ -9,7 +9,6 @@ $ToolRoot = Split-Path -Parent $PSCommandPath
 $MainPath = Join-Path $ToolRoot 'Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1'
 $GeneratedPath = Join-Path $ToolRoot '.Invoke-GPIHub-V115-REV2.generated.ps1'
 $ExpectedCommit = '95202888f533aca9eaf9235655ebe4c3298e07da'
-$PriorEvidenceCommit = 'cd4eece7f10c825bb7382e22a789c0ea0f19dcd5'
 
 if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
     throw "V115 main script missing: $MainPath"
@@ -17,14 +16,13 @@ if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
 
 $script = Get-Content -LiteralPath $MainPath -Raw
 
-# Repair 1: pin the exact currently approved AI routing feature commit.
+# Repair 1: pin the exact currently approved AI-routing feature commit.
 $commitPattern = '\$ExpectedFeatureCommit = ''[0-9a-f]{40}'''
 $commitReplacement = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 $script = $script -replace $commitPattern, $commitReplacement
 
-# Repair 2: avoid Windows wildcard expansion in scp. Copy the candidate directory
-# as one recursive object into a dedicated remote parent, then point HOST_STAGE at
-# the resulting /candidate child. This changes only temp staging mechanics.
+# Repair 2: copy the candidate directory as one recursive SCP object. Do not rely
+# on Windows wildcard expansion.
 $script = $script.Replace(
 @'
 rm -rf /tmp/gpi-ap-routing-v115-host
@@ -41,23 +39,34 @@ $script = $script.Replace('"$CandidateRoot\*",','"$CandidateRoot",')
 $script = $script.Replace('"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-host/"','"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-stage/"')
 $script = $script.Replace("HOST_STAGE='/tmp/gpi-ap-routing-v115-host'","HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")
 
-# Repair 3: normalize every carriage return out of SSH bash payloads. The old
-# normalization handled CRLF pairs only; after generated-script transport a lone
-# CR could survive and become part of a Linux pathname (for example stage\r).
-$oldNormalize = '$normalized = $ScriptText -replace "`r`n","`n"'
-$newNormalize = '$normalized = $ScriptText -replace "`r",""'
-if (-not $script.Contains($oldNormalize)) {
-    throw 'V115 REV2 repair failed: expected SSH CRLF normalization line not found.'
+# Repair 3: remove text-mode SSH script transport completely. PowerShell on
+# Windows can reintroduce CRLF while piping a string to a native process even
+# after the string itself was normalized. Encode the bash script to Base64 and
+# let Linux decode it. The -i switch makes any transport whitespace harmless.
+$script = $script.Replace("        'bash -s'","        'base64 -di | bash'")
+$oldTransport = @'
+        $normalized = $ScriptText -replace "`r`n","`n"
+        $output = $normalized | & ssh.exe @args 2> $stderrFile
+'@
+$newTransport = @'
+        $normalized = $ScriptText -replace "`r",""
+        $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($normalized))
+        $output = $payload | & ssh.exe @args 2> $stderrFile
+'@
+if (-not $script.Contains($oldTransport)) {
+    throw 'V115 REV2 repair failed: expected original SSH text transport block not found.'
 }
-$script = $script.Replace($oldNormalize,$newNormalize)
+$script = $script.Replace($oldTransport,$newTransport)
 
-# Repair 4: keep the emitted evidence JSON tied to the exact feature commit that
-# was materialized and validated in this run.
-$script = $script.Replace("'feature_commit':'$PriorEvidenceCommit'","'feature_commit':'$ExpectedCommit'")
+# Repair 4: keep result evidence pinned to the exact feature code actually run.
+$script = $script.Replace(
+    "'feature_commit':'cd4eece7f10c825bb7382e22a789c0ea0f19dcd5'",
+    "'feature_commit':'$ExpectedCommit'"
+)
 
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
-    throw 'V115 REV2 repair failed: wildcard scp source remains.'
+    throw 'V115 REV2 repair failed: wildcard SCP source remains.'
 }
 if (-not $script.Contains("HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")) {
     throw 'V115 REV2 repair failed: robust remote staging path not installed.'
@@ -65,14 +74,17 @@ if (-not $script.Contains("HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'
 if (-not $script.Contains($expectedPinText)) {
     throw 'V115 REV2 repair failed: exact feature commit pin not installed.'
 }
-if (-not $script.Contains($newNormalize)) {
-    throw 'V115 REV2 repair failed: SSH carriage-return stripping not installed.'
+if (-not $script.Contains("'base64 -di | bash'")) {
+    throw 'V115 REV2 repair failed: Base64 SSH decoder command not installed.'
 }
-if ($script.Contains("'feature_commit':'$PriorEvidenceCommit'")) {
-    throw 'V115 REV2 repair failed: stale feature commit remains in result evidence.'
+if (-not $script.Contains('$payload = [Convert]::ToBase64String')) {
+    throw 'V115 REV2 repair failed: Base64 SSH payload encoder not installed.'
+}
+if ($script.Contains('$output = $normalized | & ssh.exe')) {
+    throw 'V115 REV2 repair failed: legacy text-mode SSH transport remains.'
 }
 if (-not $script.Contains("'feature_commit':'$ExpectedCommit'")) {
-    throw 'V115 REV2 repair failed: current feature commit missing from result evidence.'
+    throw 'V115 REV2 repair failed: result commit evidence not updated.'
 }
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
@@ -88,7 +100,7 @@ try {
 
     Write-Host 'V115_REV2_FEATURE_COMMIT_PIN=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SCP_DIRECTORY_STAGE=PASS' -ForegroundColor Green
-    Write-Host 'V115_REV2_SSH_CR_NORMALIZATION=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_SSH_BASE64_TRANSPORT=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_RESULT_COMMIT_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 

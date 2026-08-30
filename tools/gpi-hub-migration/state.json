@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.4",
+  "schema_version": "1.5",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV2",
+  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV3_CAPTURE",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV2.ps1",
+  "script": "Invoke-GPIHub-V100-REV3.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -35,7 +35,7 @@
   "milestones": {
     "v98_target_infrastructure": "PASS",
     "v99_first_pass_migration": "PASS",
-    "v100_target_runtime": "IN_PROGRESS_REV2"
+    "v100_target_runtime": "IN_PROGRESS_REV3_CAPTURE"
   },
   "safety": {
     "production_touched": false,
@@ -47,5 +47,5 @@
     "bc_block_production_writes": true
   },
   "next_after_success": "V101_TARGET_PARITY_VALIDATION",
-  "notes": "V100 REV2 replaces the brittle Docker Go-template source discovery with docker inspect JSON parsed by python3, then executes the existing V100 reconstruction logic. No Production writes or traffic cutover are authorized."
+  "notes": "V100 REV3 wraps REV2 with persistent stdout/stderr capture and a stop-on-error console hold. On failure it writes last-v100-run.log and last-v100-error.txt and waits for Enter, so the operator can see the exact fault. No Production writes or traffic cutover are authorized."
 }

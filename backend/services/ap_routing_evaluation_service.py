@@ -13,11 +13,16 @@ from collections import Counter, defaultdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from services.ap_routing_decision_service import DECISION_AUTO_ROUTE, decide_ap_route
-from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
+from services.ap_routing_learning_service import (
+    normalize_route_path,
+    normalize_vendor_name,
+    score_example_similarity,
+)
 
 DEFAULT_MIN_EXAMPLES = 20
 DEFAULT_TARGET_COVERAGE = 0.90
 DEFAULT_MIN_AUTO_ROUTE_ACCURACY = 1.00
+DEFAULT_FEW_SHOT_LIMIT = 8
 
 
 def _stable_bucket(example: Dict[str, Any], buckets: int = 5) -> int:
@@ -62,6 +67,85 @@ def _document_from_example(example: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _select_eval_context_examples(
+    train: List[Dict[str, Any]],
+    test: Dict[str, Any],
+    *,
+    limit: int = DEFAULT_FEW_SHOT_LIMIT,
+) -> List[Dict[str, Any]]:
+    """Choose a small, diverse context from the training split only.
+
+    The production learner retrieves a bounded set of similar examples. Held-out
+    evaluation must exercise the same architecture rather than sending hundreds
+    of labels to the LLM. Same-vendor examples are preferred when available;
+    sparse vendors may be supplemented with cross-vendor examples that share
+    document/BC context. Route diversity prevents one dominant queue from
+    teaching a false one-route rule.
+    """
+    limit = max(1, int(limit or DEFAULT_FEW_SHOT_LIMIT))
+    test_fp = test.get("fingerprint")
+    candidates = [e for e in train if not test_fp or e.get("fingerprint") != test_fp]
+
+    vendor_name = str(test.get("vendor_name") or "")
+    vendor_key = normalize_vendor_name(vendor_name)
+    document_type = str(test.get("document_type") or "")
+    bc_context = test.get("bc_context") or {}
+
+    same_vendor = [
+        e for e in candidates
+        if vendor_key and normalize_vendor_name(e.get("vendor_name")) == vendor_key
+    ]
+
+    def rank(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        return sorted(
+            rows,
+            key=lambda row: score_example_similarity(
+                row,
+                vendor_name=vendor_name,
+                document_type=document_type,
+                bc_context=bc_context,
+            ),
+            reverse=True,
+        )
+
+    ranked_same = rank(same_vendor)
+    if len(ranked_same) >= max(4, limit // 2):
+        ranked = ranked_same
+    else:
+        same_fps = {e.get("fingerprint") for e in ranked_same if e.get("fingerprint")}
+        supplemental = [
+            e for e in rank(candidates)
+            if not e.get("fingerprint") or e.get("fingerprint") not in same_fps
+        ]
+        ranked = ranked_same + supplemental
+
+    selected: List[Dict[str, Any]] = []
+    routes_seen = Counter()
+
+    # Pass 1: one strongest example per route.
+    for row in ranked:
+        route = normalize_route_path(row.get("route_path"))
+        if not route or routes_seen[route] > 0:
+            continue
+        selected.append(row)
+        routes_seen[route] += 1
+        if len(selected) >= limit:
+            return selected
+
+    # Pass 2: fill with strongest remaining patterns.
+    selected_fps = {row.get("fingerprint") for row in selected if row.get("fingerprint")}
+    for row in ranked:
+        fp = row.get("fingerprint")
+        if fp and fp in selected_fps:
+            continue
+        selected.append(row)
+        if fp:
+            selected_fps.add(fp)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 async def evaluate_holdout(
     *,
     examples: List[Dict[str, Any]],
@@ -69,6 +153,7 @@ async def evaluate_holdout(
     llm_send: Optional[Callable[[str, str], Awaitable[Any]]] = None,
     model: str = "gemini-2.5-pro",
     vendor_auto_thresholds: Optional[Dict[str, float]] = None,
+    few_shot_limit: int = DEFAULT_FEW_SHOT_LIMIT,
 ) -> Dict[str, Any]:
     train, holdout = split_train_holdout(examples)
     vendor_auto_thresholds = vendor_auto_thresholds or {}
@@ -77,9 +162,11 @@ async def evaluate_holdout(
     for test in holdout:
         vendor = str(test.get("vendor_name") or "")
         vendor_key = normalize_vendor_name(vendor)
-        # Prevent leakage from exact same source item/fingerprint.
-        fp = test.get("fingerprint")
-        context_examples = [e for e in train if not fp or e.get("fingerprint") != fp]
+        context_examples = _select_eval_context_examples(
+            train,
+            test,
+            limit=few_shot_limit,
+        )
         result = await decide_ap_route(
             None,
             document=_document_from_example(test),
@@ -94,12 +181,15 @@ async def evaluate_holdout(
         predicted = normalize_route_path(result.get("route_path"))
         auto = result.get("decision") == DECISION_AUTO_ROUTE
         correct = predicted == expected if auto else False
+        ensemble = result.get("ensemble_reconciliation") or {}
+        support = result.get("supervised_route_support") or {}
         rows.append(
             {
                 "example_id": test.get("fingerprint") or test.get("source_item_id"),
                 "file_name": test.get("file_name"),
                 "vendor_name": vendor,
                 "normalized_vendor": vendor_key,
+                "document_type": test.get("document_type"),
                 "expected_route": expected,
                 "predicted_route": predicted,
                 "decision": result.get("decision"),
@@ -107,6 +197,20 @@ async def evaluate_holdout(
                 "auto_routed": auto,
                 "auto_route_correct": correct,
                 "reason": result.get("reason"),
+                "few_shot_count": len(context_examples),
+                "few_shot_routes": sorted(
+                    {
+                        normalize_route_path(e.get("route_path"))
+                        for e in context_examples
+                        if e.get("route_path")
+                    }
+                ),
+                "supervised_top_route": support.get("top_route"),
+                "supervised_margin": support.get("margin"),
+                "supervised_strong": support.get("strong"),
+                "ensemble_action": ensemble.get("action"),
+                "original_model_route": ensemble.get("original_model_route"),
+                "original_model_confidence": ensemble.get("original_model_confidence"),
             }
         )
 
@@ -125,8 +229,10 @@ def summarize_evaluation(
     wrong_auto = [r for r in auto_rows if not r.get("auto_route_correct")]
 
     by_vendor_rows: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    by_route_rows: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for row in rows:
         by_vendor_rows[row.get("normalized_vendor") or "unknown"].append(row)
+        by_route_rows[row.get("expected_route") or "unknown"].append(row)
 
     by_vendor = []
     for vendor, vendor_rows in sorted(by_vendor_rows.items(), key=lambda x: len(x[1]), reverse=True):
@@ -145,6 +251,23 @@ def summarize_evaluation(
             }
         )
 
+    by_route = []
+    for route, route_rows in sorted(by_route_rows.items(), key=lambda x: len(x[1]), reverse=True):
+        route_auto = [r for r in route_rows if r.get("auto_routed")]
+        route_correct = [r for r in route_auto if r.get("auto_route_correct")]
+        route_wrong = [r for r in route_auto if not r.get("auto_route_correct")]
+        by_route.append(
+            {
+                "route_path": route,
+                "holdout_count": len(route_rows),
+                "auto_routed": len(route_auto),
+                "reviewed": len(route_rows) - len(route_auto),
+                "coverage": round(len(route_auto) / max(len(route_rows), 1), 4),
+                "auto_route_accuracy": round(len(route_correct) / max(len(route_auto), 1), 4) if route_auto else None,
+                "wrong_auto_routes": len(route_wrong),
+            }
+        )
+
     route_counts = Counter(r.get("expected_route") or "" for r in rows)
     return {
         "train_count": train_count,
@@ -157,6 +280,7 @@ def summarize_evaluation(
         "wrong_auto_route_examples": wrong_auto[:25],
         "expected_route_counts": dict(route_counts),
         "by_vendor": by_vendor,
+        "by_route": by_route,
         "rows": rows,
     }
 

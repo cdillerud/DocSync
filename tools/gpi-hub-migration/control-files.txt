@@ -37,5 +37,6 @@ tools/gpi-hub-migration/Invoke-GPIHub-V108-REV10-Source-Corpus-Only.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V109-Supporting-Reference-Candidate-Test.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V110-Tumalo-Pypdf-AP-Guard-Candidate.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-Autopilot-Parity-Pipeline.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

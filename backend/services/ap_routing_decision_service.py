@@ -136,16 +136,235 @@ def _route_contract_prompt(contract: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _filename_reference_shape(value: Any) -> str:
+    """Return a route-neutral structural signature for supervised matching.
+
+    This never assigns a route. It only lets labeled examples teach whether a
+    vendor's filenames tend to begin with a BC/reference token or with a
+    vendor/descriptor token.
+    """
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", name).strip()
+    if not stem:
+        return "empty"
+    if stem[0] in "_-":
+        return "vendor_or_descriptor_leading"
+
+    first = re.split(r"[_\s]+", stem, maxsplit=1)[0].strip("-")
+    if re.fullmatch(r"W[A-Z]{0,2}\d{3,7}[A-Z]?", first, flags=re.IGNORECASE):
+        return "w_prefixed_reference"
+    if re.fullmatch(r"\d{4,7}[A-Z]?", first, flags=re.IGNORECASE):
+        return "numeric_prefixed_reference"
+    if re.fullmatch(r"[A-Z]{1,3}\d{3,7}[A-Z]?", first, flags=re.IGNORECASE):
+        return "alpha_prefixed_reference"
+    return "descriptor_leading"
+
+
+def _context_value(context: Dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = context.get(key)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return ""
+
+
+def _normalized_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def _supervised_route_support(
+    document: Dict[str, Any],
+    bc_context: Dict[str, Any],
+    examples: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Summarize discriminating support from same-vendor Accounting labels.
+
+    The summary is route-neutral evidence for the LLM plus a safety signal for
+    the governor. It does not itself choose or override a route.
+    """
+    evidence = _document_evidence(document)
+    vendor_key = normalize_vendor_name(evidence.get("vendor_name"))
+    document_type = str(evidence.get("document_type") or "").lower()
+    current_shape = _filename_reference_shape(evidence.get("file_name"))
+    current_po = _context_value(
+        bc_context,
+        "po_number",
+        "bc_document_no",
+        "bc_order_number",
+    ).upper()
+    current_location = _context_value(
+        bc_context,
+        "location_code",
+        "locationCode",
+        "bc_location_code",
+    ).upper()
+    current_ship_to_name = _normalized_text(
+        _context_value(bc_context, "ship_to_name", "shipToName")
+    )
+    current_ship_to_city = _normalized_text(
+        _context_value(bc_context, "ship_to_city", "shipToCity")
+    )
+    current_ship_to_state = _normalized_text(
+        _context_value(bc_context, "ship_to_state", "shipToState")
+    )
+
+    same_vendor_examples: List[Dict[str, Any]] = []
+    if vendor_key:
+        for example in examples:
+            example_vendor = normalize_vendor_name(
+                example.get("vendor_name")
+                or example.get("vendor_canonical")
+                or ((example.get("extracted_fields") or {}).get("vendor"))
+            )
+            if example_vendor == vendor_key:
+                same_vendor_examples.append(example)
+
+    route_rows: Dict[str, Dict[str, Any]] = {}
+    for example in same_vendor_examples:
+        route = normalize_route_path(example.get("route_path"))
+        if not route:
+            continue
+
+        score = float(example.get("label_weight") or 0.0)
+        signals: List[str] = []
+        example_type = str(
+            example.get("document_type") or example.get("suggested_job_type") or ""
+        ).lower()
+        if document_type and example_type and document_type == example_type:
+            score += 1.5
+            signals.append("document_type")
+
+        example_shape = _filename_reference_shape(example.get("file_name"))
+        if current_shape not in {"empty", "descriptor_leading"} and example_shape == current_shape:
+            score += 4.0
+            signals.append("filename_reference_shape")
+
+        example_context = example.get("bc_context") or {}
+        example_po = _context_value(
+            example_context,
+            "po_number",
+            "bc_document_no",
+            "bc_order_number",
+        ).upper()
+        if current_po and example_po and current_po == example_po:
+            score += 6.0
+            signals.append("exact_bc_reference")
+
+        example_location = _context_value(
+            example_context,
+            "location_code",
+            "locationCode",
+            "bc_location_code",
+        ).upper()
+        if current_location and example_location and current_location == example_location:
+            score += 5.0
+            signals.append("location_code")
+
+        example_ship_to_name = _normalized_text(
+            _context_value(example_context, "ship_to_name", "shipToName")
+        )
+        if current_ship_to_name and example_ship_to_name and current_ship_to_name == example_ship_to_name:
+            score += 2.0
+            signals.append("ship_to_name")
+
+        example_ship_to_city = _normalized_text(
+            _context_value(example_context, "ship_to_city", "shipToCity")
+        )
+        if current_ship_to_city and example_ship_to_city and current_ship_to_city == example_ship_to_city:
+            score += 1.0
+            signals.append("ship_to_city")
+
+        example_ship_to_state = _normalized_text(
+            _context_value(example_context, "ship_to_state", "shipToState")
+        )
+        if current_ship_to_state and example_ship_to_state and current_ship_to_state == example_ship_to_state:
+            score += 0.5
+            signals.append("ship_to_state")
+
+        row = route_rows.setdefault(
+            route,
+            {
+                "route_path": route,
+                "support_count": 0,
+                "best_score": 0.0,
+                "filename_shape_matches": 0,
+                "exact_bc_reference_matches": 0,
+                "location_matches": 0,
+                "ship_to_matches": 0,
+                "top_example_ids": [],
+            },
+        )
+        row["support_count"] += 1
+        row["best_score"] = max(float(row["best_score"]), round(score, 4))
+        if "filename_reference_shape" in signals:
+            row["filename_shape_matches"] += 1
+        if "exact_bc_reference" in signals:
+            row["exact_bc_reference_matches"] += 1
+        if "location_code" in signals:
+            row["location_matches"] += 1
+        if any(signal.startswith("ship_to_") for signal in signals):
+            row["ship_to_matches"] += 1
+        example_id = (
+            example.get("fingerprint")
+            or example.get("document_id")
+            or example.get("source_item_id")
+        )
+        if example_id and len(row["top_example_ids"]) < 3:
+            row["top_example_ids"].append(str(example_id))
+
+    ranked = sorted(
+        route_rows.values(),
+        key=lambda row: (float(row["best_score"]), int(row["support_count"])),
+        reverse=True,
+    )
+    top = ranked[0] if ranked else None
+    second = ranked[1] if len(ranked) > 1 else None
+    margin = round(
+        float(top["best_score"]) - float(second["best_score"]) if top and second else 0.0,
+        4,
+    )
+    discriminating_matches = 0
+    if top:
+        discriminating_matches = (
+            int(top["filename_shape_matches"])
+            + int(top["exact_bc_reference_matches"])
+            + int(top["location_matches"])
+            + int(top["ship_to_matches"])
+        )
+    variable_vendor = len(route_rows) > 1
+    strong = bool(variable_vendor and top and margin >= 2.0 and discriminating_matches > 0)
+
+    return {
+        "vendor_name": evidence.get("vendor_name") or "",
+        "normalized_vendor": vendor_key,
+        "same_vendor_example_count": len(same_vendor_examples),
+        "variable_vendor": variable_vendor,
+        "current_filename_reference_shape": current_shape,
+        "current_bc_reference": current_po,
+        "current_location_code": current_location,
+        "top_route": top.get("route_path") if top else "",
+        "top_score": top.get("best_score") if top else 0.0,
+        "second_route": second.get("route_path") if second else "",
+        "second_score": second.get("best_score") if second else 0.0,
+        "margin": margin,
+        "strong": strong,
+        "routes": ranked[:8],
+    }
+
+
 def build_route_prompt(
     document: Dict[str, Any],
     bc_context: Dict[str, Any],
     examples: List[Dict[str, Any]],
     contract: Dict[str, Any],
+    supervised_support: Optional[Dict[str, Any]] = None,
 ) -> str:
+    support = supervised_support or _supervised_route_support(document, bc_context, examples)
     payload = {
         "document": _document_evidence(document),
         "bc_context": _compact(bc_context or {}),
         "similar_labeled_examples": [_example_for_prompt(e) for e in examples],
+        "supervised_route_support": _compact(support),
         "routing_contract": _route_contract_prompt(contract),
     }
     return (
@@ -153,15 +372,23 @@ def build_route_prompt(
         "Goal: reduce manual Accounting sorting while preserving the exact AP Temp Folder workflow.\n"
         "Accounting's labeled examples are supervised routing truth. The same vendor may legitimately route "
         "to different queues based on PO/order context, international status, warehouse/dropship context, "
-        "document purpose, and supporting pages. NEVER infer a one-vendor/one-folder rule.\n\n"
+        "document purpose, supporting pages, and recurring document/reference structure. "
+        "NEVER infer a one-vendor/one-folder rule.\n\n"
+        "Important semantics:\n"
+        "- AP Temp folder names are GPI business-workflow labels, not ordinary-English logistics definitions.\n"
+        "- A third-party consignee, carrier vendor, or freight invoice alone does NOT prove a Dropship route.\n"
+        "- supervised_route_support is deterministic evidence summarized from SAME-VENDOR Accounting labels. "
+        "When strong=true, top_route is the leading learned workflow unless explicit current BC facts directly "
+        "contradict its discriminating evidence. If you depart from strong support, list the contradiction in unresolved.\n\n"
         "Rules:\n"
         "1. Classifying a carrier document as AP_Invoice does NOT determine its route.\n"
-        "2. Business Central/order context outranks vendor identity when they conflict.\n"
+        "2. Verified Business Central/order facts outrank vendor identity and generic logistics semantics.\n"
         "3. Propose ONLY a route allowed by routing_contract.\n"
         "4. Do not invent folder names.\n"
         "5. If evidence conflicts or the route depends on missing BC context, list it in unresolved.\n"
         "6. Use labeled examples as patterns, not exact string-match rules.\n"
-        "7. Output concise auditable evidence.\n\n"
+        "7. Treat filename/reference structure as supervised pattern evidence only when the labeled examples support it.\n"
+        "8. Output concise auditable evidence.\n\n"
         "Return JSON ONLY with exactly this shape:\n"
         "{\n"
         '  "proposed_route": "Temp-relative path",\n'
@@ -307,8 +534,10 @@ def govern_route_prediction(
     contract: Dict[str, Any],
     bc_context: Optional[Dict[str, Any]] = None,
     vendor_auto_threshold: Optional[float] = None,
+    supervised_support: Optional[Dict[str, Any]] = None,
 ) -> GovernedRouteDecision:
     context = bc_context or {}
+    support = supervised_support or {}
     threshold = float(vendor_auto_threshold or contract.get("auto_route_threshold") or DEFAULT_AUTO_ROUTE_THRESHOLD)
     review_threshold = float(contract.get("review_threshold") or DEFAULT_REVIEW_THRESHOLD)
     blockers: List[str] = []
@@ -324,6 +553,19 @@ def govern_route_prediction(
 
     if _route_requires_bc_context(prediction.proposed_route, contract) and not _bc_context_is_resolved(context):
         blockers.append("route requires resolved Business Central/order context")
+
+    if support.get("variable_vendor"):
+        top_route = normalize_route_path(support.get("top_route"))
+        if support.get("strong"):
+            if top_route and prediction.proposed_route != top_route:
+                blockers.append(
+                    "model route conflicts with strong same-vendor Accounting support: "
+                    f"predicted {prediction.proposed_route}, supervised {top_route}"
+                )
+        else:
+            blockers.append(
+                "variable-vendor route lacks discriminating same-vendor supervised evidence"
+            )
 
     if prediction.confidence < review_threshold:
         blockers.append(
@@ -385,7 +627,14 @@ async def decide_ap_route(
             limit=int(contract.get("few_shot_limit") or 8),
         )
 
-    prompt = build_route_prompt(document, context, examples, contract)
+    supervised_support = _supervised_route_support(document, context, examples)
+    prompt = build_route_prompt(
+        document,
+        context,
+        examples,
+        contract,
+        supervised_support=supervised_support,
+    )
     sender = llm_send or _default_llm_send
     try:
         raw = await sender(prompt, model)
@@ -408,6 +657,7 @@ async def decide_ap_route(
         contract=contract,
         bc_context=context,
         vendor_auto_threshold=vendor_auto_threshold,
+        supervised_support=supervised_support,
     )
     result = governed.to_dict()
     result["vendor_name"] = vendor_name
@@ -416,4 +666,5 @@ async def decide_ap_route(
     result["few_shot_routes"] = sorted(
         {normalize_route_path(e.get("route_path")) for e in examples if e.get("route_path")}
     )
+    result["supervised_route_support"] = supervised_support
     return result

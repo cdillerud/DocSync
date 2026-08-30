@@ -28,7 +28,7 @@ from services.ap_routing_learning_service import (
     upsert_routing_example,
 )
 from services.document_bundle_reference_service import extract_supporting_references
-from services.document_intel_helpers import classify_document_with_ai
+from services.ap_primary_document_service import classify_primary_document
 from services.sharepoint_service import _get_graph_token
 
 logger = logging.getLogger(__name__)
@@ -198,12 +198,18 @@ def _extract_text_excerpt(file_path: str, max_pages: int = 5, max_chars: int = 1
 
 
 async def hydrate_accounting_label(label: Dict[str, Any]) -> Dict[str, Any]:
-    """Turn one Accounting placement into an evidence-rich supervised example."""
+    """Turn one Accounting placement into an evidence-rich supervised example.
+
+    Hydration intentionally uses the same primary-document guard proven by the
+    V115 Tumalo golden: page-1 purpose is protected by pypdf when semantics are
+    clear, while Gemini still contributes richer extracted fields. Supporting
+    pages remain separate evidence and Business Central resolution stays read-only.
+    """
     file_name = str(label["file_name"])
     suffix = Path(file_name).suffix or ".bin"
     local_path = await _download_graph_file(label["drive_id"], label["item_id"], suffix)
     try:
-        primary = await classify_document_with_ai(local_path, file_name)
+        primary = await classify_primary_document(local_path, file_name)
         primary_type = primary.get("suggested_job_type") or primary.get("document_type") or "Unknown_Document"
         primary_fields = dict(primary.get("extracted_fields") or {})
         bundle = await extract_supporting_references(

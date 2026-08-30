@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.7",
+  "schema_version": "2.8",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V102_REV2_WAREHOUSE_DISCOVERY_CLOSEOUT",
+  "phase": "V103_WAREHOUSE_REFERENCE_SEMANTIC_GATE",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V102-REV2-Warehouse-Discovery-Closeout.ps1",
+  "script": "Invoke-GPIHub-V103-Warehouse-Reference-Semantic-Gate.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -56,19 +56,20 @@
       "STRATEGIC_INBOUND_BOL": 1,
       "STRATEGIC_OUTBOUND_BL": 10
     },
-    "v102_warehouse_reference_matrix": "IN_PROGRESS_REV2_LOCAL_CLOSEOUT"
+    "v102_warehouse_reference_matrix_discovery": "PASS_REV2_ALL_FOUR_CANDIDATE_GROUPS_PRESENT",
+    "v103_warehouse_reference_semantics": "IN_PROGRESS"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V102-REV2-Warehouse-Discovery-Closeout.ps1",
+      "script": "Invoke-GPIHub-V103-Warehouse-Reference-Semantic-Gate.ps1",
       "tracking_issue": 18,
-      "classification": "PARITY_BLOCKER_DISCOVERY",
-      "execution_mode": "READ_ONLY_EVIDENCE_DISCOVERY_THEN_TARGETED_VALIDATION",
-      "objective": "Locate and validate representative historical cases for JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number workflows, including deterministic extraction/resolution and actual routing outcomes.",
-      "cutover_relevance": "The Square9 work instructions prove materially different Warehouse reference-key conventions beyond W118093; broad Warehouse parity cannot be claimed until these patterns are validated or proven obsolete/out of scope."
+      "classification": "PARITY_BLOCKER_VALIDATION",
+      "execution_mode": "READ_ONLY_SEMANTIC_EVIDENCE_GATE_THEN_HISTORICAL_ROUTING_PROOF",
+      "objective": "Prove or reject representative JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number semantics, then prove actual historical routing/delivery for defensible cases.",
+      "cutover_relevance": "Broad keyword candidates are insufficient. The expected reference convention itself must be explicit, and actual historical routing/delivery must still be proven before Warehouse parity can be closed."
     },
     {
       "sequence": 2,
@@ -100,7 +101,7 @@
     "target_health_validation_policy": "container_internal_api_health",
     "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
     "v102_discovery_policy": "read_only_scan_of_restored_hub_metadata_upload_filenames_and_copied_source_terms_no_external_calls",
-    "v102_rev2_policy": "reuse_already_written_local_discovery_json_no_remote_rescan_and_coerce_candidate_sets_to_arrays_before_counting",
+    "v103_semantic_policy": "read_only_full_collection_semantic_scan_require_expected_reference_field_or_labeled_text_and_reject_broad_entity_keyword_false_positives",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -110,6 +111,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V103_TARGETED_WAREHOUSE_REFERENCE_VALIDATION_FROM_SHORTLIST",
-  "notes": "V102 REV1 completed a full 23,933-of-23,933 restored Hub document scan and found candidates in all four Square9 work-instruction groups: JBS inbound R-number=85, JBS outbound shipment=3,795, Strategic inbound BOL=1, Strategic outbound B/L=10. The remote discovery itself emitted V102_WAREHOUSE_REFERENCE_MATRIX_DISCOVERY=PASS. The phase then failed locally because a PowerShell boolean pipeline result was treated as an object with .Count under StrictMode. REV2 does not repeat the remote scan. It reuses the already-written discovery JSON, safely coerces collections to arrays, confirms all-four candidate presence, and emits a scored shortlist for V103 targeted validation. Candidate presence is not parity proof. GUI truth/function/reporting audit remains queued after Warehouse matrix validation. No traffic cutover or Production writes are authorized."
+  "next_after_success": "V104_WAREHOUSE_HISTORICAL_ROUTING_DELIVERY_PROOF_FROM_V103_EVIDENCE",
+  "notes": "V102 REV2 passed discovery closeout using the already-written full-scan JSON. All four broad candidate groups are present, but the shortlist showed why keyword discovery alone is not parity proof: JBS inbound has a plausible Warehouse Receipt W118250 with receipt_number 19944 but no explicit R-number semantics in the shortlist; the only Strategic inbound broad candidate is an AP Invoice; and JBS outbound has a very large broad pool. V103 therefore tightens the evidence gate. It requires expected reference semantics in persisted fields or labeled text, separates STRONG from WEAK evidence, preserves routing/BC context for surviving records, and remains fully read-only on the static isolated target. Even STRONG semantic evidence will still require actual historical SharePoint routing/delivery proof in V104. GUI truth/function/reporting audit remains queued after the Warehouse matrix is closed. No traffic cutover or Production writes are authorized."
 }

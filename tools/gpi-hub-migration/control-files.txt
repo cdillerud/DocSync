@@ -3,3 +3,4 @@ tools/gpi-hub-migration/Invoke-GPIHubMigration.ps1
 tools/gpi-hub-migration/README.md
 tools/gpi-hub-migration/state.json
 tools/gpi-hub-migration/control-files.txt
+tools/gpi-hub-migration/Invoke-GPIHub-V100.ps1

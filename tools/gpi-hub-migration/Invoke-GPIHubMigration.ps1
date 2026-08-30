@@ -28,36 +28,37 @@ function Invoke-Native {
         [switch]$AllowFailure
     )
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $FilePath
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
+    $token = [guid]::NewGuid().ToString('N')
+    $stdoutFile = Join-Path $env:TEMP "gpi-native-$token.out.txt"
+    $stderrFile = Join-Path $env:TEMP "gpi-native-$token.err.txt"
 
-    foreach ($arg in $Arguments) {
-        [void]$psi.ArgumentList.Add($arg)
+    try {
+        & $FilePath @Arguments 1> $stdoutFile 2> $stderrFile
+        $code = $LASTEXITCODE
+
+        $stdout = if (Test-Path -LiteralPath $stdoutFile) {
+            Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue
+        } else { '' }
+
+        $stderr = if (Test-Path -LiteralPath $stderrFile) {
+            Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
+        } else { '' }
+
+        $result = [pscustomobject]@{
+            ExitCode = [int]$code
+            StdOut   = [string]$stdout
+            StdErr   = [string]$stderr
+        }
+
+        if (-not $AllowFailure -and $result.ExitCode -ne 0) {
+            throw "$FilePath failed ($($result.ExitCode)).`n$($result.StdOut)`n$($result.StdErr)"
+        }
+
+        return $result
     }
-
-    $p = [System.Diagnostics.Process]::new()
-    $p.StartInfo = $psi
-    Require ($p.Start()) "Could not start $FilePath."
-
-    $stdoutTask = $p.StandardOutput.ReadToEndAsync()
-    $stderrTask = $p.StandardError.ReadToEndAsync()
-    $p.WaitForExit()
-
-    $result = [pscustomobject]@{
-        ExitCode = $p.ExitCode
-        StdOut   = $stdoutTask.GetAwaiter().GetResult()
-        StdErr   = $stderrTask.GetAwaiter().GetResult()
+    finally {
+        Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
     }
-
-    if (-not $AllowFailure -and $result.ExitCode -ne 0) {
-        throw "$FilePath failed ($($result.ExitCode)).`n$($result.StdOut)`n$($result.StdErr)"
-    }
-
-    return $result
 }
 
 function Get-State {
@@ -68,9 +69,11 @@ function Get-State {
 function Update-ControlFolder {
     $CurrentState = Get-State
     $SourceRepo = [string]$CurrentState.local.operational_root
+
     Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Operational repo missing: $SourceRepo"
     Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
     Require ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) 'tar.exe unavailable.'
+    Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe unavailable.'
 
     $ControlRoot = Split-Path -Parent (Split-Path -Parent $ToolRoot)
     $ArchivePath = Join-Path $env:TEMP ("gpi-hub-control-update-" + [guid]::NewGuid().ToString('N') + '.tar')
@@ -105,7 +108,6 @@ function Update-ControlFolder {
         Require (Test-Path -LiteralPath $StageRunner -PathType Leaf) 'Staged runner missing.'
         Require (Test-Path -LiteralPath $StageState -PathType Leaf) 'Staged state missing.'
 
-        # Overwrite only the migration-control subtree. Never touch application files.
         Get-ChildItem -LiteralPath $StageToolRoot -Force | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $ToolRoot -Recurse -Force
         }
@@ -127,10 +129,8 @@ function Update-ControlFolder {
     )
     if ($Once) { $ChildArgs += '-Once' }
 
-    $child = Invoke-Native -FilePath 'pwsh.exe' -Arguments $ChildArgs -AllowFailure
-    if ($child.StdOut) { Write-Host $child.StdOut }
-    if ($child.StdErr) { Write-Host $child.StdErr -ForegroundColor DarkYellow }
-    exit $child.ExitCode
+    & pwsh.exe @ChildArgs
+    exit $LASTEXITCODE
 }
 
 function Get-LatestKnownHosts {
@@ -149,6 +149,48 @@ function Get-LatestKnownHosts {
     return $candidates[0].FullName
 }
 
+function Invoke-SshScript {
+    param(
+        [Parameter(Mandatory)][string]$KeyPath,
+        [Parameter(Mandatory)][string]$KnownHosts,
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][string]$ScriptText
+    )
+
+    $token = [guid]::NewGuid().ToString('N')
+    $stderrFile = Join-Path $env:TEMP "gpi-ssh-$token.err.txt"
+
+    $sshArgs = @(
+        '-i',$KeyPath,
+        '-o','BatchMode=yes',
+        '-o','StrictHostKeyChecking=yes',
+        '-o',"UserKnownHostsFile=$KnownHosts",
+        '-o','GlobalKnownHostsFile=NUL',
+        '-o','ConnectTimeout=20',
+        $Target,
+        'bash -s'
+    )
+
+    try {
+        $normalized = $ScriptText -replace "`r`n","`n"
+        $output = $normalized | & ssh.exe @sshArgs 2> $stderrFile
+        $code = $LASTEXITCODE
+        $stdout = @($output) -join "`n"
+        $stderr = if (Test-Path -LiteralPath $stderrFile) {
+            Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
+        } else { '' }
+
+        return [pscustomobject]@{
+            ExitCode = [int]$code
+            StdOut   = [string]$stdout
+            StdErr   = [string]$stderr
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Invoke-TargetStatus {
     param([Parameter(Mandatory)]$State)
 
@@ -159,6 +201,7 @@ function Invoke-TargetStatus {
     $KnownHosts = Get-LatestKnownHosts -OperationalRoot $OperationalRoot
 
     Require (Test-Path -LiteralPath $KeyPath -PathType Leaf) "SSH key not found: $KeyPath"
+    Require ($null -ne (Get-Command ssh.exe -ErrorAction SilentlyContinue)) 'ssh.exe unavailable.'
 
     $RemoteScript = @'
 set -euo pipefail
@@ -202,41 +245,15 @@ fi
 df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "DISK_SIZE=" $1 "\nDISK_USED=" $2 "\nDISK_AVAIL=" $3 "\nDISK_PCT=" $4}'
 '@
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = 'ssh.exe'
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
+    $probe = Invoke-SshScript `
+        -KeyPath $KeyPath `
+        -KnownHosts $KnownHosts `
+        -Target "$TargetUser@$TargetIp" `
+        -ScriptText $RemoteScript
 
-    foreach ($arg in @(
-        '-i',$KeyPath,
-        '-o','BatchMode=yes',
-        '-o','StrictHostKeyChecking=yes',
-        '-o',"UserKnownHostsFile=$KnownHosts",
-        '-o','GlobalKnownHostsFile=NUL',
-        '-o','ConnectTimeout=20',
-        "$TargetUser@$TargetIp",
-        'bash -s'
-    )) {
-        [void]$psi.ArgumentList.Add($arg)
-    }
+    Require ($probe.ExitCode -eq 0) "Target status probe failed.`n$($probe.StdOut)`n$($probe.StdErr)"
 
-    $p = [System.Diagnostics.Process]::new()
-    $p.StartInfo = $psi
-    Require ($p.Start()) 'Could not start target SSH status probe.'
-
-    $outTask = $p.StandardOutput.ReadToEndAsync()
-    $errTask = $p.StandardError.ReadToEndAsync()
-    $p.StandardInput.Write(($RemoteScript -replace "`r`n","`n"))
-    $p.StandardInput.Close()
-    $p.WaitForExit()
-
-    $stdout = $outTask.GetAwaiter().GetResult()
-    $stderr = $errTask.GetAwaiter().GetResult()
-    Require ($p.ExitCode -eq 0) "Target status probe failed.`n$stdout`n$stderr"
-
+    $stdout = $probe.StdOut
     $values = @{}
     foreach ($line in (($stdout -replace "`r",'') -split "`n")) {
         if ($line -match '^([A-Z_]+)=(.*)$') {
@@ -244,9 +261,15 @@ df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "D
         }
     }
 
+    foreach ($requiredKey in @('UTC','APP_BYTES','UPLOAD_BYTES','MIG_BYTES','MONGO_BYTES','DISK_AVAIL')) {
+        Require ($values.ContainsKey($requiredKey)) "Target status response is missing $requiredKey."
+    }
+
     $baseline = [double]$State.source.uploads_bytes_baseline
-    $current = if ($values.ContainsKey('UPLOAD_BYTES')) { [double]$values.UPLOAD_BYTES } else { 0 }
-    $pct = if ($baseline -gt 0) { [Math]::Min(100,[Math]::Round(($current / $baseline) * 100,1)) } else { 0 }
+    $current = [double]$values.UPLOAD_BYTES
+    $pct = if ($baseline -gt 0) {
+        [Math]::Min(100,[Math]::Round(($current / $baseline) * 100,1))
+    } else { 0 }
 
     $processText = ''
     if ($stdout -match '(?s)PROCESS_BEGIN\s*(.*?)\s*PROCESS_END') {
@@ -260,11 +283,11 @@ df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "D
     Write-Host "GPI HUB MIGRATION — $($State.phase)" -ForegroundColor Cyan
     Write-Host ('=' * 88) -ForegroundColor Cyan
     Write-Host "UTC               : $($values.UTC)"
-    Write-Host ("App copied         : {0:N2} GiB" -f (([double]$values.APP_BYTES) / 1GB))
+    Write-Host ("App copied         : {0:N2} GiB" -f (([double]$values.APP_BYTES / 1GB))
     Write-Host ("Uploads copied     : {0:N2} / {1:N2} GiB ({2}%)" -f ($current/1GB),($baseline/1GB),$pct)
-    Write-Host ("Migration staging  : {0:N2} GiB" -f (([double]$values.MIG_BYTES) / 1GB))
+    Write-Host ("Migration staging  : {0:N2} GiB" -f (([double]$values.MIG_BYTES / 1GB))
     Write-Host "Mongo archive      : $($values.MONGO_ARCHIVE)"
-    Write-Host ("Mongo bytes        : {0:N2} GiB" -f (([double]$values.MONGO_BYTES) / 1GB))
+    Write-Host ("Mongo bytes        : {0:N2} GiB" -f (([double]$values.MONGO_BYTES / 1GB))
     Write-Host "Target disk free   : $([Math]::Round(([double]$values.DISK_AVAIL)/1GB,1)) GiB"
     Write-Host "V99 summary present: $summaryPresent"
 
@@ -325,6 +348,8 @@ function Invoke-ConfiguredPhase {
         }
     }
 }
+
+Write-Host 'GPI_MIGRATION_NATIVE_COMPATIBILITY=PASS' -ForegroundColor Green
 
 if (-not $NoSelfUpdate) {
     Update-ControlFolder

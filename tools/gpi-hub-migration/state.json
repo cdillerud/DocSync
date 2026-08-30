@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.9",
+  "schema_version": "2.0",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV4_CONFIGDB_GATE",
+  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV5_EXACT_IMAGE_PIN",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV4.ps1",
+  "script": "Invoke-GPIHub-V100-REV5.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -36,7 +36,8 @@
   "milestones": {
     "v98_target_infrastructure": "PASS",
     "v99_first_pass_migration": "PASS",
-    "v100_target_runtime": "IN_PROGRESS_REV4_CONFIGDB_GATE"
+    "v100_mongo_restore": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
+    "v100_target_runtime": "IN_PROGRESS_REV5_EXACT_IMAGE_PIN"
   },
   "near_term_sprints": [
     {
@@ -70,8 +71,9 @@
     "bc_write_enabled": false,
     "bc_block_production_writes": true,
     "unknown_volume_policy": "fail_closed",
-    "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty"
+    "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty",
+    "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id"
   },
   "next_after_success": "V101_TARGET_PARITY_VALIDATION",
-  "notes": "V100 REV4 remains the active phase. V101 target parity preservation validation is prebuilt and remains next. Newly discovered Square9 Warehouse reference-key evidence is prioritized immediately after V101 as issue #18, followed by the read-only GUI truth/function/reporting audit in issue #17. No traffic cutover or Production writes are authorized."
+  "notes": "V100 REV4 successfully restored 10,734,247 Mongo documents with zero restore failures, then failed only because Compose derived the nonexistent image name gpi-hub-v100-backend:latest. REV5 pins every target service to its exact source image reference, retains image-ID verification, reuses the completed Mongo restore when the marker/hash match, and streams output live. V101 remains next. No traffic cutover or Production writes are authorized."
 }

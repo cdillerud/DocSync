@@ -26,4 +26,5 @@ tools/gpi-hub-migration/Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.p
 tools/gpi-hub-migration/Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V107-REV2-Warehouse-Canonical-Shipment-Resume.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-Durable-Warehouse-Strategic-Corpus.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V108-REV2-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

@@ -20,36 +20,37 @@ function Invoke-Native {
         [switch]$AllowFailure
     )
 
-    $psi = [System.Diagnostics.ProcessStartInfo]::new()
-    $psi.FileName = $FilePath
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
+    $token = [guid]::NewGuid().ToString('N')
+    $stdoutFile = Join-Path $env:TEMP "gpi-native-$token.out.txt"
+    $stderrFile = Join-Path $env:TEMP "gpi-native-$token.err.txt"
 
-    foreach ($arg in $Arguments) {
-        [void]$psi.ArgumentList.Add($arg)
+    try {
+        & $FilePath @Arguments 1> $stdoutFile 2> $stderrFile
+        $code = $LASTEXITCODE
+
+        $stdout = if (Test-Path -LiteralPath $stdoutFile) {
+            Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue
+        } else { '' }
+
+        $stderr = if (Test-Path -LiteralPath $stderrFile) {
+            Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
+        } else { '' }
+
+        $result = [pscustomobject]@{
+            ExitCode = [int]$code
+            StdOut   = [string]$stdout
+            StdErr   = [string]$stderr
+        }
+
+        if (-not $AllowFailure -and $result.ExitCode -ne 0) {
+            throw "$FilePath failed ($($result.ExitCode)).`n$($result.StdOut)`n$($result.StdErr)"
+        }
+
+        return $result
     }
-
-    $p = [System.Diagnostics.Process]::new()
-    $p.StartInfo = $psi
-    Require ($p.Start()) "Could not start $FilePath."
-
-    $outTask = $p.StandardOutput.ReadToEndAsync()
-    $errTask = $p.StandardError.ReadToEndAsync()
-    $p.WaitForExit()
-
-    $result = [pscustomobject]@{
-        ExitCode = $p.ExitCode
-        StdOut   = $outTask.GetAwaiter().GetResult()
-        StdErr   = $errTask.GetAwaiter().GetResult()
+    finally {
+        Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
     }
-
-    if (-not $AllowFailure -and $result.ExitCode -ne 0) {
-        throw "$FilePath failed ($($result.ExitCode)).`n$($result.StdOut)`n$($result.StdErr)"
-    }
-
-    return $result
 }
 
 Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Source repo not found: $SourceRepo"
@@ -71,9 +72,11 @@ Write-Host "Materialized path  : $ScopedPath only"
 Write-Host ''
 Write-Host 'The existing DocSync-Zetadocs working tree will NOT be checked out, reset, cleaned, or modified.' -ForegroundColor Yellow
 Write-Host 'No Git worktree/index is used for the migration controller.' -ForegroundColor Yellow
+Write-Host 'Native process execution uses PowerShell-compatible invocation; ProcessStartInfo.ArgumentList is not used.' -ForegroundColor Yellow
 
 $probe = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--is-inside-work-tree')
 Require ($probe.StdOut.Trim() -eq 'true') 'Source path is not a Git working tree.'
+Write-Host 'GPI_HUB_NATIVE_COMPATIBILITY=PASS' -ForegroundColor Green
 
 Write-Host 'Fetching migration control branch into explicit remote-tracking ref...' -ForegroundColor Cyan
 $null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec)

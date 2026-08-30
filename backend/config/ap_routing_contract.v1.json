@@ -1,0 +1,80 @@
+{
+  "version": "2026-08-30-prod-temp-v1",
+  "authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder read-only snapshot",
+  "base_path": "General/Accounting/Accounts Payable/Temp Folder",
+  "review_route": "",
+  "auto_route_threshold": 0.92,
+  "review_threshold": 0.70,
+  "few_shot_limit": 8,
+  "static_routes": [
+    "DO NOT PAY",
+    "Dropship International",
+    "Dropship Not International",
+    "Dropship Not International/Ball",
+    "Dropship Not International/Canpack",
+    "Dropship Not International/Drop Ship All Others",
+    "Dropship Not International/Freight",
+    "Dropship Not International/Freight/Credit Memo's",
+    "Dropship Not International/Freight/Freight Issues",
+    "Dropship Not International/Freight/Ready to process Purch Inv",
+    "Dropship Not International/Freight/Sales Order not posted",
+    "Meg to Process",
+    "Miscellaneous",
+    "Miscellaneous/Misc Invoices - approved",
+    "Miscellaneous/Misc Invoices - need approval",
+    "Rhonda - Issues",
+    "S&H Invoices Approved",
+    "S&H Invoices Approved/Amanda to process",
+    "S&H Invoices Approved/Brandy to process",
+    "S&H Invoices waiting for approval",
+    "S&H Invoices waiting for approval/Andy to approve",
+    "S&H Invoices waiting for approval/Ellie to approve",
+    "S&H Invoices waiting for approval/Jess to approve",
+    "S&H Invoices waiting for approval/Monthly Rec & Templates",
+    "Tooling Invoices",
+    "Vendor Credit Memos",
+    "Vendor Credit Memos/Anchor Dunnage",
+    "Vendor Credit Memos/Ball Detention Credits",
+    "Vendor Credit Memos/Ball Pallets",
+    "Vendor Credit Memos/OI Dunnage",
+    "Vendor Credit Memos/Processed Credit Memo - Aaron",
+    "Vendor Credit Memos/Sent to Quality",
+    "Vendor Credit Memos/Unclaimed credits posted",
+    "Warehouse International",
+    "Warehouse Not International",
+    "Warehouse Not International/Assembly GT B&B",
+    "Warehouse Not International/Assembly GT SMC",
+    "Warehouse Not International/Assembly Kent",
+    "Warehouse Not International/Ball Orders",
+    "Warehouse Not International/Temp - Cost Variance for POs",
+    "Warehouse Not International/UPS Orders",
+    "Warehouse Not International/WTR Transfers"
+  ],
+  "dynamic_routes": [
+    {
+      "prefix": "Dropship International",
+      "leaf_pattern": "[A-Z0-9_-]{4,20}",
+      "requires_verified_bc_reference": true,
+      "description": "Order-number subfolders observed under the international dropship queue"
+    },
+    {
+      "prefix": "Warehouse International",
+      "leaf_pattern": "[A-Z0-9_-]{4,20}",
+      "requires_verified_bc_reference": true,
+      "description": "International warehouse order folders; permit only with verified BC reference"
+    }
+  ],
+  "bc_context_required_prefixes": [
+    "Dropship International",
+    "Dropship Not International",
+    "Warehouse International",
+    "Warehouse Not International"
+  ],
+  "notes": [
+    "DocsNAV/Zetadocs archive paths are not routing authority.",
+    "Carrier identity alone is not a route. Tumalo has current labeled examples in both Warehouse Not International and Dropship Not International/Freight.",
+    "Top-level Freight Issues is intentionally absent because Production uses Dropship Not International/Freight/Freight Issues.",
+    "Ball Dunnage is intentionally absent because current Production Vendor Credit Memos uses Ball Detention Credits and Ball Pallets.",
+    "Static processor queues reflect the read-only Production snapshot and must be refreshed when Accounting changes its Temp structure."
+  ]
+}

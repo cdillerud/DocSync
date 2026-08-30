@@ -40,6 +40,16 @@ $script = $script.Replace('"$CandidateRoot\*",','"$CandidateRoot",')
 $script = $script.Replace('"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-host/"','"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-stage/"')
 $script = $script.Replace("HOST_STAGE='/tmp/gpi-ap-routing-v115-host'","HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")
 
+# Repair 3: normalize every carriage return out of SSH bash payloads. The old
+# normalization handled CRLF pairs only; after generated-script transport a lone
+# CR could survive and become part of a Linux pathname (for example stage\r).
+$oldNormalize = '$normalized = $ScriptText -replace "`r`n","`n"'
+$newNormalize = '$normalized = $ScriptText -replace "`r",""'
+if (-not $script.Contains($oldNormalize)) {
+    throw 'V115 REV2 repair failed: expected SSH CRLF normalization line not found.'
+}
+$script = $script.Replace($oldNormalize,$newNormalize)
+
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
     throw 'V115 REV2 repair failed: wildcard scp source remains.'
@@ -49,6 +59,9 @@ if (-not $script.Contains("HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'
 }
 if (-not $script.Contains($expectedPinText)) {
     throw 'V115 REV2 repair failed: exact feature commit pin not installed.'
+}
+if (-not $script.Contains($newNormalize)) {
+    throw 'V115 REV2 repair failed: SSH carriage-return stripping not installed.'
 }
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
@@ -64,6 +77,7 @@ try {
 
     Write-Host 'V115_REV2_FEATURE_COMMIT_PIN=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SCP_DIRECTORY_STAGE=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_SSH_CR_NORMALIZATION=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 
     & $GeneratedPath

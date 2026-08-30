@@ -18,4 +18,6 @@ tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity-REV3.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V102-REV2-Warehouse-Discovery-Closeout.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V103-Warehouse-Reference-Semantic-Gate.ps1
+tools/gpi-hub-migration/v104-warehouse-historical-authority.json
+tools/gpi-hub-migration/Invoke-GPIHub-V104-Warehouse-Historical-Authority-Reconciliation.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

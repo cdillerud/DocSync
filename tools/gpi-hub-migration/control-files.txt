@@ -5,3 +5,4 @@ tools/gpi-hub-migration/state.json
 tools/gpi-hub-migration/control-files.txt
 tools/gpi-hub-migration/Invoke-GPIHub-V100.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV2.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V100-REV3.ps1

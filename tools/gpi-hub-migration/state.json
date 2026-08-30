@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.3",
+  "schema_version": "3.4",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V107_WAREHOUSE_CANONICAL_SHIPMENT_TARGET_TEST",
+  "phase": "V108_DURABLE_WAREHOUSE_STRATEGIC_CORPUS",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1",
+  "script": "Invoke-GPIHub-V108-Durable-Warehouse-Strategic-Corpus.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -81,23 +81,50 @@
       "STRATEGIC_INBOUND_BOL": "CORPUS_INGESTION_REQUIRED_NO_CODE_DEFECT_PROVEN",
       "STRATEGIC_OUTBOUND_BL": "BL_57745_BASELINE_PRESERVE"
     },
-    "v107_warehouse_canonical_shipment_target_test": "IN_PROGRESS"
+    "v107_warehouse_canonical_shipment_target_test": "PASS_REV2",
+    "v107_results": {
+      "JBS_INBOUND_R": "CURRENT_ROUTING_REPLAY_WAREHOUSE_NOT_INTERNATIONAL_PASS",
+      "JBS_OUTBOUND_SHIPMENT": "CANONICAL_SHIPMENT_NUMBER_5975975_PASS",
+      "STRATEGIC_OUTBOUND_BL": "CANONICAL_SHIPMENT_NUMBER_57745_REGRESSION_PASS",
+      "STRATEGIC_INBOUND_BOL": "OPEN_AUTHENTIC_W117105_CORPUS_REQUIRED",
+      "PATCH_DURABILITY": "TARGET_CONTAINER_TEST_ONLY"
+    },
+    "v108_durable_warehouse_strategic_corpus": "IN_PROGRESS",
+    "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
+    "ap_top10_named_seed": {
+      "vendor": "Tumalo Creek Transportation",
+      "legacy_examples": [
+        "W118864_TUMALO_0312515_08252026.pdf",
+        "W118897_TUMALO_0312516_08262026.pdf"
+      ],
+      "critical_boundary": "FREIGHT_CARRIER_INVOICE_WITH_PAYMENT_SEMANTICS_MUST_REMAIN_AP_INVOICE"
+    }
   },
   "near_term_sprints": [
     {
       "sequence": 1,
-      "after": "V101_TARGET_PARITY_VALIDATION",
+      "after": "V107_WAREHOUSE_CANONICAL_SHIPMENT_TARGET_TEST",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1",
+      "script": "Invoke-GPIHub-V108-Durable-Warehouse-Strategic-Corpus.ps1",
       "tracking_issue": 18,
-      "classification": "PARITY_BLOCKER_TARGET_TEST",
-      "execution_mode": "TARGET_ISOLATED_REVERSIBLE_CONTAINER_PATCH_PLUS_TWO_RECORD_CANONICAL_BACKFILL_AND_READ_ONLY_W118228_ROUTE_REPLAY",
-      "objective": "Prove the current W118228 Warehouse Receipt routing function returns Warehouse Not International without rewriting stored historical routing; add canonical shipment_number persistence to the target warehouse workflow; backfill only authoritative JBS outbound 5975975 and Strategic outbound 57745 target records; preserve worker suppression, internal-only networking, pinned image, original host app tree, and zero BC/SharePoint writes.",
-      "cutover_relevance": "This closes the demonstrated JBS inbound active-code question and tests the canonical shipment contract without broad mutation. Strategic inbound W117105 remains a separate historical corpus-ingestion blocker until an authentic packet is tested."
+      "classification": "PARITY_BLOCKER_VALIDATION",
+      "execution_mode": "DURABLE_TARGET_READ_ONLY_OVERLAY_PLUS_AUTHENTIC_W117105_AI_ONLY_CORPUS_PROBE",
+      "objective": "Make the V107-proven canonical shipment_number persistence patch durable without modifying the original target host app tree or pinned image, preserve 5975975 and 57745 across backend recreate, and run the authentic four-page W117105 Strategic Warehousing packet through the audited model-backed classification seam without invoking intake, SharePoint, BC, or source data writes. Explicitly measure whether the current first-page-only multi-page seam loses the supporting-page shipment ER25-1560.",
+      "cutover_relevance": "Warehouse parity remains open until the authentic Strategic inbound packet is model-tested and any proven multi-page reference-loss defect is fixed or otherwise deterministically resolved."
     },
     {
       "sequence": 2,
       "after": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
+      "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
+      "tracking_issue": 19,
+      "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
+      "execution_mode": "LEGACY_DOCSNAV_ZETADOCS_PURCHASE_VOLUME_RANKING_PLUS_MODEL_BACKED_REPRESENTATIVE_VENDOR_CORPUS_AND_DETERMINISTIC_REGRESSION_GUARDS",
+      "objective": "Rank the top 10 payable vendors by document count in the legacy DocsNAV/Zetadocs Purchase archive, select representative layout/date variants for each, run them through the same model-backed extraction seam used by the Hub, feed validated corrections/examples into bounded few-shot context, and create deterministic regression guards for dangerous classification/routing semantics. Tumalo Creek Transportation is a required named cohort member and freight-carrier invoices with explicit invoice/payment semantics must remain AP_Invoice.",
+      "cutover_relevance": "No top-10 payable vendor may retain an unresolved dangerous classification, extraction, BC-match, routing, or operator-status defect at cutover."
+    },
+    {
+      "sequence": 3,
+      "after": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
       "name": "GUI_TRUTH_FUNCTION_REPORTING_AUDIT",
       "script": "Invoke-GPIHub-GUI-Truth-Audit.ps1",
       "tracking_issue": 17,
@@ -131,15 +158,18 @@
     "v105_code_audit_policy": "read_only_exact_target_host_tree_source_context_and_hashes_plus_targeted_w117105_upload_and_mongo_representation_search_no_app_or_database_mutation",
     "v106_runtime_authority_policy": "read_only_compare_target_host_tree_sha256_to_active_backend_container_files before any patch; host and active container matched for all six audited files",
     "v107_target_test_policy": "patch only active target container writable layer after exact SHA gate; leave original target host app tree and pinned image unchanged; restart same container without recreate; maintain static internal-only network and worker suppression; mutate only shipment_number on two authoritative Shipping_Document target records; no BC or SharePoint writes",
+    "v108_durability_policy": "persist the exact V107-proven workflow_status.py patch as a target-only read-only bind overlay; recreate only target backend with exact pinned image and all static-isolation overlays; original target host app tree remains unchanged",
+    "v108_strategic_corpus_policy": "authentic W117105 legacy PDF SHA-gated; source backend AI-only classify_document_with_ai function after exact image/helper SHA gate; temporary files only; no intake function, no source restart, no SharePoint or BC call; prompt-learning database helpers stubbed to no-op for the probe; target runtime remains internal-only",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
     "WAREHOUSE_REFERENCE_MATRIX_JBS_STRATEGIC",
+    "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V108_DURABLE_TARGET_OVERLAY_AND_AUTHENTIC_STRATEGIC_INBOUND_CORPUS_INGESTION_TEST",
-  "notes": "V106 passed with host/container SHA equality for folder routing, reference intelligence, intake, shipping auto-file, document intelligence, and warehouse workflow code. W118228 is now classified as stale persisted routing requiring live function replay, not a demonstrated current routing-code defect. JBS outbound 111244 has BOL 5975975 correctly labeled as shipment_number semantics but no explicit root shipment_number, and Strategic outbound 114049 has B/L 57745 with the same canonical-field gap; V107 adds one target-container-only persistence line and narrowly backfills those two authoritative records after evidence backup. Strategic inbound W117105 is not represented in uploads or Hub and remains a corpus-ingestion blocker; no code defect is claimed. V107 does not touch the source VM, original target host app tree, pinned image, BC, SharePoint, traffic, or Production."
+  "next_after_success": "RESOLVE_V108_MULTIPAGE_WAREHOUSE_REFERENCE_GAP_IF_PROVEN_THEN_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
+  "notes": "V107 REV2 passed: current W118228 routing replay returns Warehouse Not International; JBS outbound now has canonical shipment_number 5975975; Strategic outbound preserves canonical shipment_number 57745; original target host tree remains unchanged and target safety is preserved. The one-line code patch is still non-durable until V108. V108 makes that exact patch durable as a read-only target overlay and model-tests the authentic four-page W117105 Strategic packet. The packet carries primary W117105/receipt context on page 1 and supporting shipment ER25-1560 on page 4, while the current document_intel_helpers multi-page behavior intentionally sends only page 1 to Gemini; V108 explicitly measures whether this loses a parity-critical supporting reference. User also elevated AI learning/regression for the top 10 payable vendors by legacy Purchase document volume to formal parity scope. Issue #19 tracks this cohort. Tumalo Creek Transportation is a required named member; recent legacy Purchase examples 0312515 and 0312516 prove that freight-carrier documents with explicit invoice/payment semantics must be AP_Invoice, not Freight_Document. GUI truth audit moves to sequence 3 after this AP cohort."
 }

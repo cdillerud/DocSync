@@ -1,9 +1,9 @@
 {
   "schema_version": "4.1",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V115_AP_AI_ROUTING_LEARNING_GOLDEN_REV2",
+  "phase": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V115-REV2-Entry.ps1",
+  "script": "Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -103,12 +103,28 @@
       "warehouse_holdout": "model proposed Dropship Not International/Freight at 0.85 but governor correctly returned needs_review; supervised support favored Warehouse Not International 6.44 vs 2.44 with margin 4.0",
       "dropship_holdout": "correct auto-route Dropship Not International/Freight at 0.98; supervised support favored Dropship 6.44 vs 2.44 with margin 4.0",
       "wrong_auto_routes": 0,
-      "finding": "safety blocker closed: strong same-vendor Accounting evidence now prevents the wrong route, but the learner still had veto-only authority and could not select the supported warehouse route; next feature commit adds bounded supervised ensemble selection"
+      "finding": "safety blocker closed: strong same-vendor Accounting evidence prevented the wrong route, but the learner still had veto-only authority and could not select the supported warehouse route"
     },
+    "v115_rev2_third_live_golden_result": {
+      "status": "PASS_STRONG_2_OF_2_EXACT_AUTO_ROUTE",
+      "feature_commit": "30f53b9f087a5a7c4d9033a904b0826c7a19de17",
+      "training_examples": 8,
+      "warehouse_training": 4,
+      "dropship_training": 4,
+      "warehouse_holdout": "correct Warehouse Not International auto-route at 0.96; supervised ensemble overrode dissenting generic-logistics LLM interpretation using repeated same-vendor Accounting evidence",
+      "dropship_holdout": "correct Dropship Not International/Freight auto-route at approximately 0.95",
+      "auto_route_exact_count": 2,
+      "wrong_auto_routes": 0,
+      "manual_validation_reduction_evidence": "STRONG_2_OF_2_EXACT_AUTO_ROUTE",
+      "source_runtime_unchanged": true,
+      "production_mutation": false,
+      "finding": "the learning mechanism can distinguish two legitimate workflows for the same carrier/vendor and automatically select both exact Accounting routes without vendor-specific routing code"
+    },
+    "v115_ap_ai_routing_learning_golden": "PASS_REV2_2_OF_2_EXACT_AUTO_ROUTE_ZERO_WRONG",
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "30f53b9f087a5a7c4d9033a904b0826c7a19de17",
-      "status": "V115_REV2_SUPERVISED_ENSEMBLE_RETEST_NEXT",
+      "commit": "be1b3ad44e1aa7f97fd0ff6102d0638acc04a7a8",
+      "status": "V116_BROAD_HELDOUT_EVALUATION_NEXT",
       "runtime_authority": false
     },
     "gui_truth_audit": "PASS_SCANNER_COMPLETED_SECOND_PASS_STILL_REQUIRED_FOR_LOW_DISCOVERY_AND_UNMATCHED_CALLS"
@@ -118,18 +134,18 @@
     "routing_label_authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder placement plus explicit reviewer corrections",
     "legacy_nav_role": "historical layout/vendor coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "30f53b9f087a5a7c4d9033a904b0826c7a19de17",
+    "feature_commit": "be1b3ad44e1aa7f97fd0ff6102d0638acc04a7a8",
     "pipeline": [
       "primary document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting reference extraction",
       "read-only Business Central reference/context resolution",
-      "supervised route prediction using diverse labeled Accounting examples",
+      "supervised route prediction using small diverse similar Accounting-labeled examples",
       "same-vendor discriminating supervised support from document/reference structure and verified BC facts",
       "strong repeated contract-valid supervised support may select the learned route over a dissenting LLM proposal; weaker or contradictory variable-vendor evidence fails closed",
       "versioned live Accounting Temp route contract governor",
       "review only on insufficient/contradictory evidence",
       "explicit correction becomes higher-weight supervised example",
-      "held-out accuracy plus auto-route coverage gates runtime authority",
+      "stable held-out accuracy plus auto-route coverage gates runtime authority",
       "post-upload AP shadow telemetry without routing authority"
     ],
     "promotion_targets": {
@@ -144,17 +160,19 @@
       "sequence": 1,
       "name": "V115_AP_AI_ROUTING_LEARNING_GOLDEN_REV2",
       "tracking_issue": 20,
-      "classification": "PARITY_BLOCKER_AI_LABOR_REDUCTION_VALIDATION",
+      "classification": "VALIDATED_PARITY_AI_LEARNING_MECHANISM",
       "execution_mode": "READ_ONLY_PRODUCTION_ACCOUNTING_LABELS_PLUS_BC_READS_TEMP_STAGED_FEATURE_CODE",
-      "objective": "Train from contrasting live Tumalo Accounting placements, hold out one warehouse and one dropship/freight case, and prove the AI can automatically select both learned workflows without collapsing Tumalo into one vendor rule. Current retest adds bounded supervised ensemble selection after the second live golden proved the safety governor but still returned warehouse for manual review."
+      "status": "PASS_2_OF_2_EXACT_AUTO_ROUTE_ZERO_WRONG",
+      "objective": "Prove the same vendor can learn multiple legitimate Accounting workflows from document plus BC/context evidence and automatically choose both exact routes."
     },
     {
       "sequence": 2,
-      "name": "AP_ROUTING_CORPUS_HELDOUT_EVALUATION",
+      "name": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION",
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
       "execution_mode": "BALANCED_LIVE_ACCOUNTING_LABEL_CORPUS_READ_ONLY",
-      "objective": "Measure auto-route accuracy and manual-review coverage across high-volume AP patterns; promote only cohorts with zero wrong auto-routes and sufficient coverage."
+      "status": "READY_TO_RUN",
+      "objective": "Build a balanced live Accounting Temp corpus with the V115-proven primary-document pipeline, use a stable 80/20 holdout and bounded eight-example context, and measure zero-wrong auto-route accuracy plus automation coverage before any runtime authority is considered."
     },
     {
       "sequence": 3,
@@ -186,10 +204,11 @@
     "target_backend_image_modified": false,
     "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart.",
     "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion.",
-    "v115_variable_vendor_guard": "No vendor-specific or route-name override. A learned route can be selected only from repeated same-vendor Accounting labels with a strong score margin, discriminating evidence, at least two supporting labels, and a contract-valid target; otherwise the route fails closed to review."
+    "v115_variable_vendor_guard": "No vendor-specific or route-name override. A learned route can be selected only from repeated same-vendor Accounting labels with a strong score margin, discriminating evidence, at least two supporting labels, and a contract-valid target; otherwise the route fails closed to review.",
+    "v116_policy": "Balanced labels are read directly from GamerAccounting AP Temp, corpus persistence is false, feature files remain temp-staged, held-out prompts are bounded to eight train-only examples, Business Central is read-only, /app is unchanged, and no runtime restart or Production write is permitted."
   },
   "open_parity_blockers": [
-    "AP_AI_ROUTING_LEARNING_GOLDEN_ISSUE_20",
+    "AP_ROUTING_CORPUS_HELDOUT_EVALUATION_ISSUE_20",
     "AP_ACCOUNTING_TEMP_ROUTE_CONTRACT_DRIFT_ISSUE_20",
     "AP_LIVE_SHAREPOINT_END_TO_END_ROUTE_PROOF",
     "WAREHOUSE_STRATEGIC_INBOUND_GENERALIZED_SUPPORTING_REFERENCE_INTEGRATION",
@@ -198,6 +217,6 @@
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS",
     "GUI_TRUTH_SECOND_PASS"
   ],
-  "next_after_success": "Expand supervised Accounting Temp corpus and held-out route evaluation across high-volume vendors/patterns; then integrate only measured candidates into UAT runtime with fail-closed governor. Production remains untouched until explicit cutover authorization.",
-  "notes": "The AP program is AI-first by design. Accounting's already-sorted Temp files are supervised labels; explicit corrections are higher-weight labels; NAV/Zetadocs supplies historical layout coverage only. V115 REV2 first live golden exposed one unsafe warehouse-to-dropship auto-route; the second live golden closed that safety defect but still required manual review for warehouse despite strong learned Warehouse support. Feature commit 30f53b9 adds bounded supervised ensemble selection so repeated Accounting evidence can select the learned workflow while preserving the dissenting LLM proposal for audit."
+  "next_after_success": "Use V116 measured evidence to identify eligible high-confidence cohorts for shadow-first UAT integration while deterministic routing remains authoritative. Production remains untouched until explicit cutover authorization.",
+  "notes": "V115 is now validated parity evidence for the AI learning mechanism: two contrasting live Tumalo holdouts auto-routed exactly with zero wrong routes and no source mutation. V116 broadens the proof using a balanced live Accounting corpus. Before V116, the reusable corpus hydrator was aligned to the V115 pypdf primary-document guard, and the evaluator was corrected to use bounded route-diverse train-only few-shot context rather than the entire training corpus."
 }

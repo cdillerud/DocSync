@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.5",
+  "schema_version": "3.6",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V108_REV7_DURABILITY_SAFETY_RESUME_STRATEGIC_CORPUS",
+  "phase": "V108_REV9_STANDALONE_DURABILITY_SAFETY_STRATEGIC_CORPUS",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V108-REV7-Safety-Resume-Corpus.ps1",
+  "script": "Invoke-GPIHub-V108-REV9-Standalone-Safety-Corpus.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -66,9 +66,12 @@
       "PATCH_DURABILITY": "TARGET_CONTAINER_TEST_ONLY"
     },
     "v108_corpus_authority": "PASS_LEGACY_SHAREPOINT_READ_SHA_48410CADCEAA411D65E51BD266BE5C5942B4431CDEDE9E7A05B871E75A3A2C25",
-    "v108_durable_overlay_config": "PASS_BACKEND_RECREATED",
-    "v108_durable_overlay_safety": "INCOMPLETE_PREVIOUS_RUN_STOPPED_ON_LOG_MARKER_ONLY",
-    "v108_rev7": "IN_PROGRESS_STRUCTURAL_STATIC_SAFETY_RESUME_NO_BLIND_RECREATE",
+    "v108_durable_overlay_config": "PASS_BACKEND_RECREATED_WITH_WORKFLOW_OVERLAY",
+    "v108_durable_workflow_overlay": "PASS_REV7_RUNNING_OVERLAY_EXACT_SHA",
+    "v108_static_server_structural_guard": "PASS_REV7_RUNNING_SERVER_EXACT_STATIC_OVERLAY",
+    "v108_rev7_health_harness": "FAILED_EMPTY_STDIN_PROBE_NO_RUNTIME_CONCLUSION",
+    "v108_rev8_generated_matcher": "FAILED_LOCAL_MATCHER_NO_REMOTE_WORK",
+    "v108_rev9": "IN_PROGRESS_STANDALONE_NO_GENERATED_PATCHING",
     "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
     "ap_top10_named_seed": {
       "vendor": "Tumalo Creek Transportation",
@@ -85,8 +88,8 @@
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "V108_REV7_RESUME_STRUCTURAL_STATIC_SAFETY_PLUS_W117105_AI_CORPUS",
-      "objective": "Verify the already recreated target in place without another recreate, prove static safety structurally from the actual read-only server overlay, environment, internal network, blocked egress, health and forbidden-worker absence, re-prove 5975975 and 57745, preserve the authentic W117105 corpus, then execute the standalone model-backed W117105 corpus probe."
+      "execution_mode": "V108_REV9_STANDALONE_SAFETY_AND_W117105_AI_CORPUS",
+      "objective": "Inspect the already recreated target in place with no additional recreate. Prove the exact read-only static server and durable workflow overlays, safety env, internal-only Docker network, direct internal health, blocked egress, forbidden-worker absence, and canonical shipment truth, then run the authentic W117105 packet through the exact audited model-backed classifier seam."
     },
     {
       "sequence": 2,
@@ -114,11 +117,11 @@
     "bc_write_enabled": false,
     "bc_block_production_writes": true,
     "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id",
-    "background_worker_policy": "target_only_server_overlay_returns_before_first_polling_worker_start",
-    "network_policy": "all_target_services_internal_only_no_external_egress_during_static_parity_validation",
+    "background_worker_policy": "target_only_server_overlay returns before first polling worker start",
+    "network_policy": "all target services internal-only no external egress during static parity validation",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "v108_rev7_policy": "NO_BLIND_RECREATE; inspect actual running target first. Require exact image, read-only static server overlay source and matching host/container SHA, static early-return guard content, safety env, only internal Docker network, internal health, blocked Graph egress, forbidden worker logs absent, durable workflow overlay exact SHA, and canonical shipment truth before AI corpus execution."
+    "v108_rev9_policy": "STANDALONE. No generated-script text patching and no backend recreate. Require exact pinned image, untouched host workflow baseline, read-only static server overlay and durable workflow overlay, matching host/container SHA, static early-return guard content, safety env, only internal Docker network, direct python-c internal health with HTTP-code regex validation, blocked Graph egress, forbidden worker logs absent, canonical shipment truth preserved, and SHA-gated W117105 corpus before AI-only classifier execution."
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
@@ -128,5 +131,5 @@
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
   "next_after_success": "RESOLVE_V108_MULTIPAGE_WAREHOUSE_REFERENCE_GAP_IF_PROVEN_THEN_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
-  "notes": "V108 reached the real durable target recreate. The previous run passed corpus SHA, target durability precheck, canonical truth before recreate, durable overlay compose config, and recreated/started the backend. It then stopped solely because the expected worker-suppression log line was absent. REV7 does not recreate again. It structurally verifies the actual running static server overlay and early-return guard, exact env/network/egress/health and forbidden-worker absence. Only after those gates pass does it continue to the authentic W117105 AI-only corpus probe."
+  "notes": "REV9 replaces the brittle V108 generated-wrapper chain with one standalone script. Current known state before REV9: durable workflow overlay is mounted and exact; static server overlay is mounted and contains the early-return static guard; previous REV7 stopped only because its docker exec python heredoc health probe did not attach stdin; REV8 stopped locally before remote work because its exact block matcher intentionally failed closed. REV9 makes no recreate or app-tree mutation and validates the current runtime directly before the W117105 AI corpus probe."
 }

@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.9",
+  "schema_version": "3.0",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V104_WAREHOUSE_HISTORICAL_AUTHORITY_RECONCILIATION",
+  "phase": "V104_REV2_HISTORICAL_AUTHORITY_CLOSEOUT",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V104-Warehouse-Historical-Authority-Reconciliation.ps1",
+  "script": "Invoke-GPIHub-V104-REV2-Historical-Authority-Closeout.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -59,19 +59,26 @@
     "v102_warehouse_reference_matrix_discovery": "PASS_REV2_ALL_FOUR_CANDIDATE_GROUPS_PRESENT",
     "v103_warehouse_reference_semantics": "PASS_PARTIAL_STRONG_3_OF_4",
     "v104_historical_authority_manifest": "PASS_CREATED_FROM_READ_ONLY_DOCSNAV_ZETADOCS_EVIDENCE",
-    "v104_warehouse_historical_authority": "IN_PROGRESS"
+    "v104_remote_reconciliation": "PASS_3_OPEN_BLOCKERS_1_REFERENCE_MATCH",
+    "v104_defect_set": {
+      "JBS_INBOUND_R": "REFERENCE_MATCH_ROUTE_CONFLICT",
+      "JBS_OUTBOUND_SHIPMENT": "SHIPMENT_REFERENCE_NOT_NORMALIZED",
+      "STRATEGIC_INBOUND_BOL": "AUTHENTIC_PACKET_NOT_FOUND_IN_TARGET",
+      "STRATEGIC_OUTBOUND_BL": "BL_REFERENCE_MATCH"
+    },
+    "v104_warehouse_historical_authority": "IN_PROGRESS_REV2_LOCAL_CLOSEOUT"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V104-Warehouse-Historical-Authority-Reconciliation.ps1",
+      "script": "Invoke-GPIHub-V104-REV2-Historical-Authority-Closeout.ps1",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "READ_ONLY_HISTORICAL_AUTHORITY_RECONCILIATION_THEN_TARGETED_CODE_FIX_RETEST",
-      "objective": "Reconcile the restored Hub against authoritative historical JBS and Strategic warehouse packets, reject false-positive AP evidence, identify exact missing normalized references/routing conflicts, then fix and retest only the demonstrated gaps.",
-      "cutover_relevance": "The Warehouse matrix remains open until JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number behavior is demonstrated with authoritative historical evidence and correct replacement routing/fail-closed behavior."
+      "execution_mode": "LOCAL_CLOSEOUT_THEN_TARGETED_CODE_PATH_AUDIT_AND_FIX",
+      "objective": "Close the historical-authority reconciliation ledger, then fix and retest only the demonstrated JBS inbound routing, JBS outbound shipment normalization, and Strategic inbound representation gaps while preserving the validated Strategic outbound B/L behavior.",
+      "cutover_relevance": "Warehouse parity remains blocked by three demonstrated defects; Strategic outbound B/L 57745 is validated and must not regress."
     },
     {
       "sequence": 2,
@@ -104,7 +111,8 @@
     "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
     "v102_discovery_policy": "read_only_scan_of_restored_hub_metadata_upload_filenames_and_copied_source_terms_no_external_calls",
     "v103_semantic_policy": "read_only_full_collection_semantic_scan_require_expected_reference_field_or_labeled_text_and_reject_broad_entity_keyword_false_positives",
-    "v104_authority_policy": "read_only_compare_restored_hub_to_committed_historical_authority_manifest_collected_from_user_sharepoint_docsnAV_zetadocs_archive",
+    "v104_authority_policy": "read_only_compare_restored_hub_to_committed_historical_authority_manifest_collected_from_user_sharepoint_docsnav_zetadocs_archive",
+    "v104_rev2_policy": "reuse_already_written_local_v104_reconciliation_json_no_remote_call_no_target_or_source_change",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -114,6 +122,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V105_WAREHOUSE_GAP_FIX_AND_RETEST_FROM_V104",
-  "notes": "V103 passed as an evidence gate but only three of four broad semantic groups had strong candidates, and several strong candidates were wrong workflow types. Read-only historical archive research then established authoritative packets: JBS inbound W118228 has an exact legacy file named W118228_JBS Logistics_6_4_2026_R72713.pdf; JBS outbound has legacy packet 111244_JBS Logistics_2_26_2026_BOL.pdf, whose BOL separates order 111244 from other load/reference identifiers and therefore does not permit order number to masquerade as shipment number; Strategic inbound now has a real Purchase-side W117105_Strategic Warehousing_122625_.pdf packet plus PL W117105.pdf with Shipment ER25-1560, replacing the invalid AP-invoice representative; Strategic outbound has exact legacy BOL 114049 114149_Strategic_05112026_BOL.pdf with printed Bill of Lading #57745. V104 reconciles the static restored Hub against these cases and identifies the specific extraction/normalization/routing gaps for V105. No traffic cutover or Production writes are authorized."
+  "next_after_success": "V105_TARGETED_WAREHOUSE_GAP_CODE_PATH_AUDIT_AND_FIX_DESIGN",
+  "notes": "V104 remote reconciliation completed successfully before the local formatter failed under StrictMode on the intentionally absent STRATEGIC_INBOUND_BOL target property. The completed JSON establishes the authoritative defect ledger: JBS inbound W118228 extracts R72713 correctly but routes to Miscellaneous Documents/Misc Invoices - need approval; JBS outbound 111244 is a Shipping_Document and extracts BOL 5975975 with semantic_type shipment_number, but no explicit shipment field is normalized; authentic Strategic inbound W117105/Strategic evidence is not represented in the restored Hub; Strategic outbound 114049 correctly extracts and normalizes historical B/L 57745. REV2 is local-only and closes this ledger without rerunning the target reconciliation. No traffic cutover or Production writes are authorized."
 }

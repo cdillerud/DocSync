@@ -8,5 +8,6 @@ tools/gpi-hub-migration/Invoke-GPIHub-V100-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV3.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV4.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV5.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V100-REV6-Safe-Quiesce.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

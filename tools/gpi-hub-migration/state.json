@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.1",
+  "schema_version": "2.2",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_REV6_SAFE_QUIESCE_AND_STARTUP_CONTROL_DISCOVERY",
+  "phase": "V100_REV7_STATIC_ISOLATED_TARGET_RUNTIME",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV6-Safe-Quiesce.ps1",
+  "script": "Invoke-GPIHub-V100-REV7-Static-Isolated.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -17,7 +17,8 @@
     "mount": "/gpi-hub-data",
     "isolated_backend": "127.0.0.1:18005",
     "isolated_frontend": "127.0.0.1:18080",
-    "mongo_configdb": "/gpi-hub-data/volumes/mongodb-configdb"
+    "mongo_configdb": "/gpi-hub-data/volumes/mongodb-configdb",
+    "static_network": "gpi-hub-v100-static-net"
   },
   "local": {
     "operational_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-Zetadocs",
@@ -39,7 +40,8 @@
     "v100_mongo_restore": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
     "v100_exact_image_pin": "PASS_REV5",
     "v100_target_app_quiesced": "PASS_MANUAL_20260829",
-    "v100_target_runtime": "IN_PROGRESS_REV6_SAFE_QUIESCE"
+    "v100_startup_control_discovery": "PASS_REV6",
+    "v100_target_runtime": "IN_PROGRESS_REV7_STATIC_ISOLATED"
   },
   "near_term_sprints": [
     {
@@ -70,8 +72,8 @@
     "source_stop_authorized": false,
     "target_hub_start_authorized": true,
     "target_background_workers_authorized": false,
-    "target_backend_quiesced": true,
-    "target_frontend_quiesced": true,
+    "target_backend_quiesced_before_rev7": true,
+    "target_frontend_quiesced_before_rev7": true,
     "target_mongo_preserved": true,
     "sharepoint_target": "test",
     "bc_write_enabled": false,
@@ -79,8 +81,11 @@
     "unknown_volume_policy": "fail_closed",
     "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty",
     "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id",
-    "background_worker_policy": "discover_exact_runtime_controls_before_target_backend_restart"
+    "background_worker_policy": "target_only_server_overlay_returns_before_first_polling_worker_start",
+    "network_policy": "all_target_services_internal_only_no_external_egress_during_static_parity_validation",
+    "target_original_app_tree_modified": false,
+    "target_backend_image_modified": false
   },
-  "next_after_success": "V100_REV7_ISOLATED_RESTART_WITH_BACKGROUND_WORKERS_DISABLED",
-  "notes": "REV5 proved exact image IDs, preserved the completed Mongo restore, started all three target services, and confirmed BC/SharePoint safety flags. It also exposed that the isolated target backend started AP mailbox polling and background schedulers. The target backend/frontend were manually quiesced successfully; Mongo remains running. REV6 is now the authoritative read-only discovery phase to identify the exact runtime controls needed to suppress mailbox polling and schedulers before any target backend restart. Source, traffic, and Production remain untouched."
+  "next_after_success": "V101_TARGET_PARITY_VALIDATION",
+  "notes": "REV6 proved EMAIL_POLLING_ENABLED and SALES_EMAIL_POLLING_ENABLED exist but also proved the dynamic mailbox polling worker is created unconditionally before those legacy polling gates. The startup path also launches numerous schedulers with no global isolation flag. REV7 therefore creates a reversible migration-only server.py overlay extracted from the exact backend image, inserts a GPI_MIGRATION_STATIC_RUNTIME early return immediately before the first polling-worker startup, mounts that overlay read-only, forces intake/auto-post/pilot controls false, and attaches backend/frontend/Mongo only to an internal Docker network. The original copied app tree and exact backend image remain unchanged. V101 is next after REV7 passes. No traffic cutover or Production writes are authorized."
 }

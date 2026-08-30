@@ -1,5 +1,5 @@
 {
-  "schema_version": "3.8",
+  "schema_version": "3.9",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "PARITY_AUTOPILOT_WAREHOUSE_AP_GUI",
   "mode": "run-script",
@@ -63,6 +63,15 @@
     },
     "v108_rev10_source_corpus": "AUTOPILOT_NEXT",
     "v109_supporting_reference_candidate": "PREBUILT_CONDITIONAL_IF_GAP_PROVEN_OR_UNRESOLVED",
+    "v110_tumalo_pypdf_guard": "PREBUILT_AP_DETERMINISTIC_GUARD_CANDIDATE",
+    "v110_local_evidence": {
+      "w118864_page1_chars_pypdf": 1012,
+      "w118864_invoice_indicators": 3,
+      "w118897_page1_chars_pypdf": 1012,
+      "w118897_invoice_indicators": 3,
+      "credit_indicators": 0,
+      "finding": "current AP PDF heuristic imports fitz but runtime requirements provide pypdf; intended Tumalo invoice/payment guard is recoverable with installed pypdf"
+    },
     "ap_top10_payable_cohort": "AUTOPILOT_NEXT_ISSUE_19",
     "ap_top10_inventory_scope": {
       "site": "gamerpackaging1.sharepoint.com/sites/DocsNAV",
@@ -80,6 +89,7 @@
     "sequence": [
       "V108_REV10_SOURCE_ONLY_STRATEGIC_CORPUS",
       "V109_SUPPORTING_REFERENCE_CANDIDATE_IF_REQUIRED",
+      "V110_TUMALO_PYPDF_AP_GUARD_CANDIDATE",
       "AP_TOP10_LEGACY_PURCHASE_INVENTORY_AND_AI",
       "GUI_TRUTH_FUNCTION_REPORTING_AUDIT"
     ],
@@ -95,19 +105,25 @@
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_VALIDATION",
-      "execution_mode": "REV10_SOURCE_CORPUS_WITH_CONDITIONAL_V109_CANDIDATE",
-      "objective": "Complete authentic W117105 model test. If the current first-page seam loses or cannot extract the supporting shipment, immediately test a bounded pages-2-5 reference-only second pass without changing page-1 classification authority or the source app tree."
+      "execution_mode": "REV10_SOURCE_CORPUS_WITH_CONDITIONAL_V109_CANDIDATE"
     },
     {
       "sequence": 2,
-      "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
+      "name": "AP_DETERMINISTIC_INVOICE_GUARD_REPAIR",
       "tracking_issue": 19,
-      "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
-      "execution_mode": "AUTONOMOUS_READ_ONLY_LEGACY_GRAPH_INVENTORY_PLUS_REPRESENTATIVE_MODEL_CORPUS",
-      "objective": "Enumerate actual DocsNAV legacy Purchase files across current + 2021/2022/2023 libraries, dedupe exact copies, rank cohort vendors, force Tumalo Creek Transportation into the cohort, select representative oldest/middle/newest samples, and run the existing source classifier read-only to create a vendor-level defect matrix."
+      "classification": "PARITY_BLOCKER_AP_GUARD",
+      "execution_mode": "V110_TEMPORARY_PYPDF_CANDIDATE",
+      "objective": "Prove the current fitz-based AP PDF guard is inert in the exact source runtime and that the already-installed pypdf dependency restores the intended invoice/payment semantic guard for authoritative Tumalo invoices without replacing source code."
     },
     {
       "sequence": 3,
+      "name": "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
+      "tracking_issue": 19,
+      "classification": "PARITY_BLOCKER_AP_CORPUS_HARDENING",
+      "execution_mode": "AUTONOMOUS_READ_ONLY_LEGACY_GRAPH_INVENTORY_PLUS_REPRESENTATIVE_MODEL_CORPUS"
+    },
+    {
+      "sequence": 4,
       "name": "GUI_TRUTH_FUNCTION_REPORTING_AUDIT",
       "script": "Invoke-GPIHub-GUI-Truth-Audit.ps1",
       "tracking_issue": 17,
@@ -127,15 +143,16 @@
     "bc_block_production_writes": true,
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "autopilot_policy": "No Production changes. REV10/V109/AP inventory use source temporary files and read-only Graph/model calls only. GUI audit is read-only. V109 candidate loads a temporary patched module and never replaces /app/services/document_intel_helpers.py."
+    "autopilot_policy": "No Production changes. REV10/V109/V110/AP inventory use temporary source-container files and read-only Graph/model calls only. GUI audit is read-only. V109 and V110 do not replace source app modules."
   },
   "open_parity_blockers": [
     "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
     "WAREHOUSE_STRATEGIC_INBOUND_W117105_MULTIPAGE_REFERENCE_SEMANTICS",
+    "AP_PDF_DETERMINISTIC_INVOICE_GUARD_DEPENDENCY",
     "AP_TOP10_PAYABLE_VENDOR_AI_CORPUS",
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "USE_AUTOPILOT_ARTIFACTS_TO_CLOSE_OR_PATCH_WAREHOUSE_GAP_AND_AP_TOP10_VENDOR_DEFECTS_WITHOUT_INTERIM_USER_HANDOFF",
-  "notes": "Target durability/safety is already closed by REV9. The controller is now promoted to an autonomous parity driver so one launcher run proceeds through REV10, conditional V109, AP Top-10 inventory/AI, and GUI audit without waiting for intermediate pasted output. SharePoint connector evidence confirmed DocsNAV site and separate Zetadocs current/2021/2022/2023 libraries. Tumalo search also proved carrier invoices can be archived beneath related customer/vendor Purchase folders, so the AP inventory keeps raw folder counts and applies a named Tumalo filename normalization rather than relying on folder name alone."
+  "next_after_success": "USE_AUTOPILOT_ARTIFACTS_TO_PROMOTE ONLY VALIDATED NARROW FIXES, THEN CONTINUE AP SHAREPOINT AUTHORITY AND BROADER END_TO_END BURN_IN",
+  "notes": "Controller now runs REV10, conditional V109, V110, AP Top-10 inventory/AI, and GUI audit in one launcher session without interim chat handoffs. REV9 already closed target durability/safety. Local authoritative Tumalo PDFs proved pypdf can extract the intended invoice/payment indicators while the runtime helper still imports unavailable fitz for deterministic PDF heuristics. V110 confirms that defect on the exact source runtime before any source-code repair is considered."
 }

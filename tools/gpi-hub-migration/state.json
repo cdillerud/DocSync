@@ -3,7 +3,7 @@
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V108_DURABLE_WAREHOUSE_STRATEGIC_CORPUS",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V108-REV4-Entry.ps1",
+  "script": "Invoke-GPIHub-V108-REV5-Entry.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -90,7 +90,7 @@
       "PATCH_DURABILITY": "TARGET_CONTAINER_TEST_ONLY"
     },
     "v108_durable_warehouse_strategic_corpus": "IN_PROGRESS",
-    "v108_entry_repair": "REV4_APP_WORKDIR_IMPORT_FIX",
+    "v108_entry_repair": "REV5_EXPLICIT_PYTHONPATH_APP_IMPORT_FIX",
     "ap_top10_payable_cohort": "QUEUED_ISSUE_19",
     "ap_top10_named_seed": {
       "vendor": "Tumalo Creek Transportation",
@@ -161,7 +161,7 @@
     "v107_target_test_policy": "patch only active target container writable layer after exact SHA gate; leave original target host app tree and pinned image unchanged; restart same container without recreate; maintain static internal-only network and worker suppression; mutate only shipment_number on two authoritative Shipping_Document target records; no BC or SharePoint writes",
     "v108_durability_policy": "persist the exact V107-proven workflow_status.py patch as a target-only read-only bind overlay; recreate only target backend with exact pinned image and all static-isolation overlays; original target host app tree remains unchanged",
     "v108_strategic_corpus_policy": "authentic W117105 legacy PDF SHA-gated; source backend AI-only classify_document_with_ai function after exact image/helper SHA gate; temporary files only; no intake function, no source restart, no SharePoint or BC call; prompt-learning database helpers stubbed to no-op for the probe; target runtime remains internal-only",
-    "v108_entry_policy": "REV4 executes temporary Python from /app so source backend services package is importable; self-retrieval is read-only Graph GET of exact legacy drive item and no token is printed",
+    "v108_entry_policy": "REV5 explicitly sets PYTHONPATH=/app for all temporary source Python helpers because executing /tmp scripts otherwise puts only /tmp on sys.path; includes import preflight before Graph GET; no token printed",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -173,5 +173,5 @@
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
   "next_after_success": "RESOLVE_V108_MULTIPAGE_WAREHOUSE_REFERENCE_GAP_IF_PROVEN_THEN_AP_TOP10_PAYABLE_VENDOR_AI_CORPUS_ISSUE_19",
-  "notes": "V107 REV2 passed: current W118228 routing replay returns Warehouse Not International; JBS outbound now has canonical shipment_number 5975975; Strategic outbound preserves canonical shipment_number 57745; original target host tree remains unchanged and target safety is preserved. V108 REV4 repairs only the harness import context: temporary source Python helpers run with /app as working directory so services.* imports resolve. Previous V108 attempts failed before any target/source migration work. V108 still makes the exact shipment patch durable as a read-only target overlay and model-tests the authentic four-page W117105 Strategic packet. User elevated AI learning/regression for the top 10 payable vendors by legacy Purchase document volume to formal parity scope; issue #19 tracks this cohort, with Tumalo Creek Transportation explicitly required."
+  "notes": "V107 REV2 passed: current W118228 routing replay returns Warehouse Not International; JBS outbound now has canonical shipment_number 5975975; Strategic outbound preserves canonical shipment_number 57745; original target host tree remains unchanged and target safety is preserved. V108 REV5 repairs only the harness import context: Python temporary scripts are executed with PYTHONPATH=/app, because -w /app alone does not change sys.path[0] for scripts located in /tmp. Previous V108 attempts failed before any target/source migration work or Graph read. V108 still makes the exact shipment patch durable as a read-only target overlay and model-tests the authentic four-page W117105 Strategic packet. User elevated AI learning/regression for the top 10 payable vendors by legacy Purchase document volume to formal parity scope; issue #19 tracks this cohort, with Tumalo Creek Transportation explicitly required."
 }

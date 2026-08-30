@@ -12,16 +12,12 @@ $KeyPath = [string]$State.local.ssh_key
 $SourceIp = [string]$State.source.public_ip
 $CorpusPath = Join-Path $env:USERPROFILE 'Downloads\W117105_Strategic Warehousing_122625_.pdf'
 $CorpusSha = '48410cadceaa411d65e51bd266be5c5942b4431cdede9e7a05b871e75a3a2c25'
-$ExpectedBackendImage = 'sha256:646051f6b0434b20ad429dec18c5f7b2a7d017c0fdec94f4bd77eaa7375fabb3'
-$ExpectedHelperSha = '2d2298b9c7e6315745d814e5437687caf463a44dec24d73d710b6d9e4e772117'
 $Stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
 $DiagDir = Join-Path $OperationalRoot ".gpi-diagnostics\migration-v108-rev10-source-corpus\$Stamp"
 New-Item -ItemType Directory -Path $DiagDir -Force | Out-Null
 Start-Transcript -LiteralPath (Join-Path $DiagDir 'Invoke-GPIHub-V108-REV10-Source-Corpus-Only.txt') -Force | Out-Null
 
-function Require([bool]$Condition,[string]$Message) {
-    if (-not $Condition) { throw $Message }
-}
+function Require([bool]$Condition,[string]$Message) { if (-not $Condition) { throw $Message } }
 
 function Invoke-NativeText {
     param([Parameter(Mandatory)][string]$FilePath,[Parameter(Mandatory)][string[]]$Arguments,[switch]$AllowFailure)
@@ -81,12 +77,7 @@ function Invoke-SshScript {
     }
 }
 
-function Section([string]$Title){
-    Write-Host ''
-    Write-Host ('='*120) -ForegroundColor Cyan
-    Write-Host $Title -ForegroundColor Cyan
-    Write-Host ('='*120) -ForegroundColor Cyan
-}
+function Section([string]$Title){Write-Host '';Write-Host('='*120)-ForegroundColor Cyan;Write-Host $Title -ForegroundColor Cyan;Write-Host('='*120)-ForegroundColor Cyan}
 
 try {
     Section 'V108 REV10 - SOURCE-ONLY STRATEGIC INBOUND AI CORPUS RESUME'
@@ -105,7 +96,6 @@ try {
     Require (Test-Path -LiteralPath $KeyPath -PathType Leaf) "SSH key missing: $KeyPath"
     foreach($cmd in 'ssh.exe','scp.exe','ssh-keygen.exe'){Require ($null-ne(Get-Command $cmd -ErrorAction SilentlyContinue)) "$cmd unavailable."}
     $Known=Get-KnownHostsForIp $SourceIp
-
     $scp=Invoke-NativeText -FilePath 'scp.exe' -Arguments @('-i',$KeyPath,'-o','BatchMode=yes','-o','StrictHostKeyChecking=yes','-o',"UserKnownHostsFile=$Known",'-o','GlobalKnownHostsFile=NUL','-o','ConnectTimeout=20',$CorpusPath,"azureuser@${SourceIp}:/tmp/v108-w117105.pdf")
     Require ($scp.ExitCode-eq0) 'Failed to stage W117105 corpus to source.'
     Write-Host 'V108_REV10_SOURCE_CORPUS_STAGED=PASS' -ForegroundColor Green
@@ -122,19 +112,12 @@ backend=$(docker ps --filter 'label=com.docker.compose.service=backend' --format
 [ "$(sha256sum /tmp/v108-w117105.pdf | awk '{print $1}')" = "$EXPECTED_CORPUS" ] || { echo 'Source corpus SHA mismatch.' >&2; exit 74; }
 
 health_before=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health", timeout=4); print(r.status)')
-case "$health_before" in
-  2??|3??) ;;
-  *) echo "Source backend unhealthy before AI probe: $health_before" >&2; exit 75;;
-esac
+case "$health_before" in 2??|3??) ;; *) echo "Source backend unhealthy before AI probe: $health_before" >&2; exit 75;; esac
 echo "V108_REV10_SOURCE_HEALTH_BEFORE=$health_before"
 
-docker exec -e PYTHONPATH=/app -w /app "$backend" python - <<'PY' >/tmp/v108-pypdf-preflight.txt 2>&1 || true
-PY
-# Use -c instead of stdin-dependent docker exec for the actual import preflight.
 docker exec -e PYTHONPATH=/app -w /app "$backend" python -c 'import pypdf; from pypdf import PdfReader, PdfWriter; print("V108_REV10_PYPDF_VERSION=" + getattr(pypdf,"__version__","unknown")); print("V108_REV10_PYPDF_PREFLIGHT=PASS")'
 echo V108_REV10_SOURCE_AI_AUTHORITY=PASS
 
-# Keep the classifier probe isolated from source feedback/vendor DB reads. This is a model/extraction seam test only.
 docker cp /tmp/v108-w117105.pdf "$backend:/tmp/v108-w117105.pdf" >/dev/null
 rm -f /tmp/v108-w117105.pdf
 cat > /tmp/v108-rev10-probe.py <<'PY'
@@ -153,7 +136,6 @@ vendor=types.ModuleType('services.vendor_inference_service')
 def no_vendor(*args, **kwargs): return (None,None)
 vendor.infer_vendor=no_vendor
 sys.modules['services.vendor_inference_service']=vendor
-
 from services.document_intel_helpers import classify_document_with_ai
 
 def has(obj, token):
@@ -171,18 +153,12 @@ async def main():
     packet='/tmp/v108-w117105.pdf'
     reader=PdfReader(packet)
     print(f'V108_REV10_PACKET_PAGES={len(reader.pages)}')
-    if len(reader.pages) != 4:
-        raise SystemExit(f'Expected 4-page packet, got {len(reader.pages)}')
-
+    if len(reader.pages) != 4: raise SystemExit(f'Expected 4-page packet, got {len(reader.pages)}')
     full=await classify(packet,'W117105_Strategic Warehousing_122625_.pdf','FULL_PACKET')
-
     p4='/tmp/v108-w117105-page4.pdf'
-    writer=PdfWriter()
-    writer.add_page(reader.pages[3])
-    with open(p4,'wb') as f:
-        writer.write(f)
+    writer=PdfWriter(); writer.add_page(reader.pages[3])
+    with open(p4,'wb') as f: writer.write(f)
     page4=await classify(p4,'W117105_Strategic_supporting_shipping_page.pdf','SUPPORTING_PAGE4')
-
     checks={
       'full_W117105':has(full,'W117105'),
       'full_962222-1':has(full,'962222-1'),
@@ -192,14 +168,12 @@ async def main():
     }
     print('V108_REV10_AI_CHECKS='+json.dumps(checks,sort_keys=True))
     for k,v in checks.items(): print(f'V108_REV10_CHECK_{k}=' + ('PASS' if v else 'MISS'))
-
     if checks['page4_ER25-1560'] and not checks['full_ER25-1560']:
         gap='PROVEN_SUPPORTING_SHIPMENT_LOST_BY_CURRENT_FIRST_PAGE_SEAM'
     elif checks['full_ER25-1560']:
         gap='NOT_OBSERVED_FULL_PACKET_PRESERVED_SHIPMENT'
     else:
         gap='UNRESOLVED_SUPPORTING_SHIPMENT_NOT_EXTRACTED'
-
     print('V108_MULTIPAGE_REFERENCE_GAP='+gap)
     print('V108_STRATEGIC_PRIMARY_IDENTITY=' + ('PASS' if checks['full_W117105'] else 'MISS'))
     print('V108_REV10_AI_CORPUS_EXECUTION=PASS')
@@ -217,12 +191,8 @@ printf '%s\n' "$probe_out"
 docker exec "$backend" rm -f /tmp/v108-rev10-probe.py /tmp/v108-w117105.pdf /tmp/v108-w117105-page4.pdf >/dev/null 2>&1 || true
 [ "$probe_code" -eq 0 ] || { echo "AI corpus probe failed with exit code $probe_code" >&2; exit 76; }
 printf '%s\n' "$probe_out" | grep -Fq 'V108_REV10_AI_CORPUS_EXECUTION=PASS' || { echo 'AI execution marker missing.' >&2; exit 77; }
-
 health_after=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health", timeout=4); print(r.status)')
-case "$health_after" in
-  2??|3??) ;;
-  *) echo "Source backend unhealthy after AI probe: $health_after" >&2; exit 78;;
-esac
+case "$health_after" in 2??|3??) ;; *) echo "Source backend unhealthy after AI probe: $health_after" >&2; exit 78;; esac
 echo "V108_REV10_SOURCE_HEALTH_AFTER=$health_after"
 echo V108_REV10_SOURCE_AI_CORPUS_PROBE=PASS
 '@
@@ -232,11 +202,9 @@ echo V108_REV10_SOURCE_AI_CORPUS_PROBE=PASS
     if($r.StdOut){Write-Host $r.StdOut}
     if($r.StdErr){Write-Host $r.StdErr -ForegroundColor DarkYellow}
     Require ($r.ExitCode-eq0) "V108 REV10 source AI corpus probe failed with exit code $($r.ExitCode)."
-
     foreach($m in 'V108_REV10_PYPDF_PREFLIGHT=PASS','V108_REV10_SOURCE_AI_AUTHORITY=PASS','V108_REV10_AI_CORPUS_EXECUTION=PASS','V108_REV10_SOURCE_AI_CORPUS_PROBE=PASS'){
         Require ($r.StdOut-match[regex]::Escape($m)) "Missing source marker: $m"
     }
-
     $gap=@($r.StdOut-split"`n"|Where-Object{$_-like'V108_MULTIPAGE_REFERENCE_GAP=*'}|Select-Object -Last 1)
     Require ($gap.Count-eq1) 'Missing multi-page reference disposition.'
     $primary=@($r.StdOut-split"`n"|Where-Object{$_-like'V108_STRATEGIC_PRIMARY_IDENTITY=*'}|Select-Object -Last 1)

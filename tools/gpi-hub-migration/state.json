@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.3",
+  "schema_version": "2.4",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_REV8_STATIC_ISOLATED_RESUME_VERIFY",
+  "phase": "V100_REV9_SOURCE_ROLLBACK_CLOSEOUT",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100-REV8-Static-Resume-Verify.ps1",
+  "script": "Invoke-GPIHub-V100-REV9-Source-Rollback-Closeout.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -45,7 +45,9 @@
     "v100_rev7_safety_env": "PASS",
     "v100_rev7_internal_network": "PASS",
     "v100_rev7_application_startup": "PASS_INTERNAL_HEALTH_200",
-    "v100_target_runtime": "IN_PROGRESS_REV8_STATIC_RESUME_VERIFY"
+    "v100_rev8_target_static_validation": "PASS",
+    "v100_rev8_source_running_count": "PASS_3_SERVICES",
+    "v100_target_runtime": "IN_PROGRESS_REV9_SOURCE_ROLLBACK_CLOSEOUT"
   },
   "near_term_sprints": [
     {
@@ -85,10 +87,11 @@
     "target_image_policy": "pin_each_service_to_exact_source_image_reference_and_verify_image_id",
     "background_worker_policy": "target_only_server_overlay_returns_before_first_polling_worker_start",
     "network_policy": "all_target_services_internal_only_no_external_egress_during_static_parity_validation",
-    "health_validation_policy": "validate_inside_internal_container_network_not_host_loopback_nat",
+    "target_health_validation_policy": "container_internal_api_health",
+    "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
-  "next_after_success": "V101_TARGET_PARITY_VALIDATION_REV2_INTERNAL_NETWORK",
-  "notes": "REV7 successfully created the target-only server.py overlay, set all safety flags, attached all services only to the internal Docker network, and the backend completed startup with repeated /api/health 200 responses from inside the container. REV7 failed only because its host-side 127.0.0.1:18005 probe is incompatible with the stronger internal-network isolation model. REV8 does not rebuild or restart the stack; it verifies the already-running static runtime from inside the isolated network, confirms workers remain suppressed and external egress remains blocked, verifies Mongo and source rollback health, and completes V100. V101 REV2 is prebuilt to use the same internal-network safety precheck."
+  "next_after_success": "V101_TARGET_PARITY_VALIDATION_REV3",
+  "notes": "REV8 proved the entire static target runtime: required services, exact images, safety environment, internal-only network, backend and frontend HTTP health, suppressed background workers, blocked external egress, and preserved Mongo. Its only failure was a source rollback validator that checked /health then / on host port 8005 and received 404 despite all three source containers running. REV9 is a read-only closeout that verifies the target remains safe and checks the source backend's actual /api/health endpoint from inside the source backend container. V101 REV3 is prebuilt with the same target internal-network and source internal-health assumptions. No traffic cutover or Production writes are authorized."
 }

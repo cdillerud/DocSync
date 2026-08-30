@@ -17,7 +17,9 @@ if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
 $script = Get-Content -LiteralPath $MainPath -Raw
 
 # Repair 1: pin the exact currently approved AI routing feature commit.
-$script = $script -replace "\$ExpectedFeatureCommit = '[0-9a-f]{40}'", ('$ExpectedFeatureCommit = ''' + $ExpectedCommit + '''')
+$commitPattern = '\$ExpectedFeatureCommit = ''[0-9a-f]{40}'''
+$commitReplacement = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
+$script = $script -replace $commitPattern, $commitReplacement
 
 # Repair 2: avoid Windows wildcard expansion in scp. Copy the candidate directory
 # as one recursive object into a dedicated remote parent, then point HOST_STAGE at
@@ -34,24 +36,24 @@ mkdir -p /tmp/gpi-ap-routing-v115-stage
 chmod 700 /tmp/gpi-ap-routing-v115-stage
 '@
 )
-$script = $script.Replace('"$CandidateRoot\\*",','"$CandidateRoot",')
+$script = $script.Replace('"$CandidateRoot\*",','"$CandidateRoot",')
 $script = $script.Replace('"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-host/"','"azureuser@$SourceIp`:/tmp/gpi-ap-routing-v115-stage/"')
 $script = $script.Replace("HOST_STAGE='/tmp/gpi-ap-routing-v115-host'","HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")
 
-if ($script -match [regex]::Escape('"$CandidateRoot\\*",')) {
+$expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
+if ($script.Contains('"$CandidateRoot\*",')) {
     throw 'V115 REV2 repair failed: wildcard scp source remains.'
 }
-if ($script -notmatch [regex]::Escape("HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")) {
+if (-not $script.Contains("HOST_STAGE='/tmp/gpi-ap-routing-v115-stage/candidate'")) {
     throw 'V115 REV2 repair failed: robust remote staging path not installed.'
 }
-if ($script -notmatch [regex]::Escape("$ExpectedFeatureCommit = '$ExpectedCommit'")) {
+if (-not $script.Contains($expectedPinText)) {
     throw 'V115 REV2 repair failed: exact feature commit pin not installed.'
 }
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
 
 try {
-    # Parse-check the generated phase before execution.
     $tokens = $null
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($GeneratedPath,[ref]$tokens,[ref]$errors)

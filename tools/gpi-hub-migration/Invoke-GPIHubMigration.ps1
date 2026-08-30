@@ -15,6 +15,7 @@ $ToolRoot = Split-Path -Parent $ScriptPath
 $StatePath = Join-Path $ToolRoot 'state.json'
 $RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
 $FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
+$SparsePath = 'tools/gpi-hub-migration'
 
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -77,7 +78,7 @@ function Update-ControlWorktree {
     Require ([string]::IsNullOrWhiteSpace($Status.StdOut)) `
         "Migration control worktree has local changes. Refusing self-update:`n$($Status.StdOut)"
 
-    Write-Host 'Updating migration control branch from GitHub...' -ForegroundColor Cyan
+    Write-Host 'Updating sparse migration control worktree from GitHub...' -ForegroundColor Cyan
 
     $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
         '-C',$RepoRoot,'fetch','--prune','origin',$FetchRefspec
@@ -89,11 +90,20 @@ function Update-ControlWorktree {
     Require (-not [string]::IsNullOrWhiteSpace($Verify.StdOut)) `
         "Migration remote-tracking ref is unavailable: $RemoteTrackingRef"
 
+    # Keep the control worktree sparse before every reset. This is required on
+    # Windows because the full DocSync tree contains at least one path that is
+    # legal in Git but cannot be materialized as a normal Windows pathname.
+    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        '-C',$RepoRoot,'sparse-checkout','init','--cone'
+    )
+    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        '-C',$RepoRoot,'sparse-checkout','set',$SparsePath
+    )
     $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
         '-C',$RepoRoot,'reset','--hard',$RemoteTrackingRef
     )
 
-    Write-Host 'GPI_MIGRATION_REPO_UPDATE=PASS' -ForegroundColor Green
+    Write-Host 'GPI_MIGRATION_SPARSE_REPO_UPDATE=PASS' -ForegroundColor Green
 
     $ChildArgs = @(
         '-NoProfile','-ExecutionPolicy','Bypass',

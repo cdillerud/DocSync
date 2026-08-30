@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V99_FIRST_PASS_IN_PROGRESS",
   "mode": "monitor-v99",
@@ -17,8 +17,15 @@
   },
   "local": {
     "operational_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-Zetadocs",
-    "migration_worktree": "C:\\Users\\ChadDillerud\\Documents\\DocSync-GPIHub-Migration",
+    "migration_control_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-GPIHub-Migration",
     "ssh_key": "C:\\Users\\ChadDillerud\\Downloads\\ChadKey - Copy.pem"
+  },
+  "control_materialization": {
+    "type": "scoped_git_archive",
+    "path": "tools/gpi-hub-migration",
+    "uses_worktree": false,
+    "uses_checkout": false,
+    "uses_git_index": false
   },
   "safety": {
     "production_touched": false,

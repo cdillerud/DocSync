@@ -1,9 +1,9 @@
 {
-  "schema_version": "4.0",
+  "schema_version": "4.1",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V115_AP_AI_ROUTING_LEARNING_GOLDEN",
+  "phase": "V115_AP_AI_ROUTING_LEARNING_GOLDEN_REV2",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1",
+  "script": "Invoke-GPIHub-V115-REV2-Entry.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -87,8 +87,8 @@
     },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "cd4eece7f10c825bb7382e22a789c0ea0f19dcd5",
-      "status": "TEMP_STAGE_VALIDATION_NEXT",
+      "commit": "95202888f533aca9eaf9235655ebe4c3298e07da",
+      "status": "V115_REV2_TEMP_STAGE_VALIDATION_NEXT",
       "runtime_authority": false
     },
     "gui_truth_audit": "PASS_SCANNER_COMPLETED_SECOND_PASS_STILL_REQUIRED_FOR_LOW_DISCOVERY_AND_UNMATCHED_CALLS"
@@ -98,7 +98,7 @@
     "routing_label_authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder placement plus explicit reviewer corrections",
     "legacy_nav_role": "historical layout/vendor coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "cd4eece7f10c825bb7382e22a789c0ea0f19dcd5",
+    "feature_commit": "95202888f533aca9eaf9235655ebe4c3298e07da",
     "pipeline": [
       "primary document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting reference extraction",
@@ -107,7 +107,8 @@
       "versioned live Accounting Temp route contract governor",
       "review only on insufficient/contradictory evidence",
       "explicit correction becomes higher-weight supervised example",
-      "held-out accuracy plus auto-route coverage gates runtime authority"
+      "held-out accuracy plus auto-route coverage gates runtime authority",
+      "post-upload AP shadow telemetry without routing authority"
     ],
     "promotion_targets": {
       "wrong_auto_routes_allowed": 0,
@@ -119,11 +120,11 @@
   "near_term_sprints": [
     {
       "sequence": 1,
-      "name": "V115_AP_AI_ROUTING_LEARNING_GOLDEN",
+      "name": "V115_AP_AI_ROUTING_LEARNING_GOLDEN_REV2",
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_AI_LABOR_REDUCTION_VALIDATION",
       "execution_mode": "READ_ONLY_PRODUCTION_ACCOUNTING_LABELS_PLUS_BC_READS_TEMP_STAGED_FEATURE_CODE",
-      "objective": "Train from contrasting live Tumalo Accounting placements, hold out one warehouse and one dropship/freight case, and prove the AI can predict both routes without collapsing Tumalo into one vendor rule."
+      "objective": "Train from contrasting live Tumalo Accounting placements, hold out one warehouse and one dropship/freight case, and prove the AI can predict both routes without collapsing Tumalo into one vendor rule. REV2 pins the exact feature commit and removes Windows wildcard scp staging."
     },
     {
       "sequence": 2,
@@ -161,7 +162,8 @@
     "bc_block_production_writes": true,
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart."
+    "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart.",
+    "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion."
   },
   "open_parity_blockers": [
     "AP_AI_ROUTING_LEARNING_GOLDEN_ISSUE_20",
@@ -174,5 +176,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "Expand supervised Accounting Temp corpus and held-out route evaluation across high-volume vendors/patterns; then integrate only measured candidates into UAT runtime with fail-closed governor. Production remains untouched until explicit cutover authorization.",
-  "notes": "The AP program is now AI-first by design. Accounting's already-sorted Temp files are supervised labels; explicit corrections are higher-weight labels; NAV/Zetadocs supplies historical layout coverage only. V115 is the first live read-only proof that one variable vendor (Tumalo) can learn two different correct queues from document and BC context rather than a brittle vendor rule."
+  "notes": "The AP program is AI-first by design. Accounting's already-sorted Temp files are supervised labels; explicit corrections are higher-weight labels; NAV/Zetadocs supplies historical layout coverage only. V115 REV2 repairs the exact feature commit pin and removes wildcard-dependent staging before live read-only golden validation."
 }

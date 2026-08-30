@@ -9,6 +9,7 @@ $ToolRoot = Split-Path -Parent $PSCommandPath
 $MainPath = Join-Path $ToolRoot 'Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1'
 $GeneratedPath = Join-Path $ToolRoot '.Invoke-GPIHub-V115-REV2.generated.ps1'
 $ExpectedCommit = '95202888f533aca9eaf9235655ebe4c3298e07da'
+$PriorEvidenceCommit = 'cd4eece7f10c825bb7382e22a789c0ea0f19dcd5'
 
 if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
     throw "V115 main script missing: $MainPath"
@@ -50,6 +51,10 @@ if (-not $script.Contains($oldNormalize)) {
 }
 $script = $script.Replace($oldNormalize,$newNormalize)
 
+# Repair 4: keep the emitted evidence JSON tied to the exact feature commit that
+# was materialized and validated in this run.
+$script = $script.Replace("'feature_commit':'$PriorEvidenceCommit'","'feature_commit':'$ExpectedCommit'")
+
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
     throw 'V115 REV2 repair failed: wildcard scp source remains.'
@@ -62,6 +67,12 @@ if (-not $script.Contains($expectedPinText)) {
 }
 if (-not $script.Contains($newNormalize)) {
     throw 'V115 REV2 repair failed: SSH carriage-return stripping not installed.'
+}
+if ($script.Contains("'feature_commit':'$PriorEvidenceCommit'")) {
+    throw 'V115 REV2 repair failed: stale feature commit remains in result evidence.'
+}
+if (-not $script.Contains("'feature_commit':'$ExpectedCommit'")) {
+    throw 'V115 REV2 repair failed: current feature commit missing from result evidence.'
 }
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
@@ -78,6 +89,7 @@ try {
     Write-Host 'V115_REV2_FEATURE_COMMIT_PIN=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SCP_DIRECTORY_STAGE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_SSH_CR_NORMALIZATION=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_RESULT_COMMIT_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 
     & $GeneratedPath

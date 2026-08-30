@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.6",
+  "schema_version": "2.7",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V102_WAREHOUSE_SQUARE9_REFERENCE_MATRIX_DISCOVERY",
+  "phase": "V102_REV2_WAREHOUSE_DISCOVERY_CLOSEOUT",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1",
+  "script": "Invoke-GPIHub-V102-REV2-Warehouse-Discovery-Closeout.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -49,14 +49,21 @@
     "v100_rev9_source_rollback": "PASS_3_SERVICES_INTERNAL_API_200",
     "v100_target_runtime": "PASS",
     "v101_target_parity": "PASS_REV3",
-    "v102_warehouse_reference_matrix": "IN_PROGRESS_DISCOVERY"
+    "v102_full_collection_scan": "PASS_23933_OF_23933",
+    "v102_candidate_counts": {
+      "JBS_INBOUND_R": 85,
+      "JBS_OUTBOUND_SHIPMENT": 3795,
+      "STRATEGIC_INBOUND_BOL": 1,
+      "STRATEGIC_OUTBOUND_BL": 10
+    },
+    "v102_warehouse_reference_matrix": "IN_PROGRESS_REV2_LOCAL_CLOSEOUT"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1",
+      "script": "Invoke-GPIHub-V102-REV2-Warehouse-Discovery-Closeout.ps1",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_DISCOVERY",
       "execution_mode": "READ_ONLY_EVIDENCE_DISCOVERY_THEN_TARGETED_VALIDATION",
@@ -93,6 +100,7 @@
     "target_health_validation_policy": "container_internal_api_health",
     "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
     "v102_discovery_policy": "read_only_scan_of_restored_hub_metadata_upload_filenames_and_copied_source_terms_no_external_calls",
+    "v102_rev2_policy": "reuse_already_written_local_discovery_json_no_remote_rescan_and_coerce_candidate_sets_to_arrays_before_counting",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -102,6 +110,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V102_TARGETED_WAREHOUSE_REFERENCE_VALIDATION_FROM_DISCOVERED_CANDIDATES",
-  "notes": "V101 REV3 passed target parity preservation validation: isolated target safety, W118093 persisted Warehouse truth, AP Scenario 2 persisted truth, duplicate/idempotency protections, fail-closed source semantics, and source rollback health all passed. AP live SharePoint authority remains explicitly open. V102 is now the active read-only discovery phase for the Square9 work-instruction reference matrix: JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number. Candidate discovery is not itself parity validation; discovered cases must still be proven against authoritative historical routing/delivery evidence. GUI truth/function/reporting audit remains queued immediately after the Warehouse matrix work. No traffic cutover or Production writes are authorized."
+  "next_after_success": "V103_TARGETED_WAREHOUSE_REFERENCE_VALIDATION_FROM_SHORTLIST",
+  "notes": "V102 REV1 completed a full 23,933-of-23,933 restored Hub document scan and found candidates in all four Square9 work-instruction groups: JBS inbound R-number=85, JBS outbound shipment=3,795, Strategic inbound BOL=1, Strategic outbound B/L=10. The remote discovery itself emitted V102_WAREHOUSE_REFERENCE_MATRIX_DISCOVERY=PASS. The phase then failed locally because a PowerShell boolean pipeline result was treated as an object with .Count under StrictMode. REV2 does not repeat the remote scan. It reuses the already-written discovery JSON, safely coerces collections to arrays, confirms all-four candidate presence, and emits a scored shortlist for V103 targeted validation. Candidate presence is not parity proof. GUI truth/function/reporting audit remains queued after Warehouse matrix validation. No traffic cutover or Production writes are authorized."
 }

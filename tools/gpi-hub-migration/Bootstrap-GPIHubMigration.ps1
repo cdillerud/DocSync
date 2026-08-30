@@ -55,9 +55,22 @@ else {
 $Runner = Join-Path $MigrationWorktree 'tools\gpi-hub-migration\Invoke-GPIHubMigration.ps1'
 Require (Test-Path -LiteralPath $Runner -PathType Leaf) "Repo runner not found: $Runner"
 
+$Desktop = [Environment]::GetFolderPath('Desktop')
+$Launcher = Join-Path $Desktop 'GPI Hub Migration.cmd'
+$LauncherContent = @"
+@echo off
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "$Runner"
+echo.
+pause
+"@
+Set-Content -LiteralPath $Launcher -Value $LauncherContent -Encoding ascii
+
 Write-Host ''
 Write-Host 'GPI_HUB_MIGRATION_BOOTSTRAP=PASS' -ForegroundColor Green
-Write-Host "Runner: $Runner"
+Write-Host "Runner          : $Runner"
+Write-Host "Desktop launcher: $Launcher"
+Write-Host ''
+Write-Host 'After this bootstrap, use the desktop launcher. It self-updates from the repo control branch before each run.' -ForegroundColor Green
 Write-Host ''
 
 & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $Runner

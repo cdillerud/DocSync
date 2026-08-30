@@ -23,4 +23,5 @@ tools/gpi-hub-migration/Invoke-GPIHub-V104-Warehouse-Historical-Authority-Reconc
 tools/gpi-hub-migration/Invoke-GPIHub-V104-REV2-Historical-Authority-Closeout.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V105-Warehouse-Gap-CodePath-Audit.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V107-Warehouse-Canonical-Shipment-Target-Test.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

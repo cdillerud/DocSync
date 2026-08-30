@@ -11,6 +11,8 @@ tools/gpi-hub-migration/Invoke-GPIHub-V100-REV5.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV6-Safe-Quiesce.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV7-Static-Isolated.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V100-REV8-Static-Resume-Verify.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V100-REV9-Source-Rollback-Closeout.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity-REV2.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity-REV3.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

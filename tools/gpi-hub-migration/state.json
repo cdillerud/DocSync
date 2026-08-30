@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "control_branch": "migration/gpi-hub-dedicated-vm",
+  "phase": "V99_FIRST_PASS_IN_PROGRESS",
+  "mode": "monitor-v99",
+  "source": {
+    "vm": "QualityProjectManagement",
+    "public_ip": "4.204.41.190",
+    "app_path": "/data/apps/gpi-hub",
+    "uploads_bytes_baseline": 36214917046,
+    "uploads_files_baseline": 90716
+  },
+  "target": {
+    "vm": "GPI-Hub-VM",
+    "public_ip": "52.180.147.52",
+    "mount": "/gpi-hub-data"
+  },
+  "local": {
+    "operational_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-Zetadocs",
+    "migration_worktree": "C:\\Users\\ChadDillerud\\Documents\\DocSync-GPIHub-Migration",
+    "ssh_key": "C:\\Users\\ChadDillerud\\Downloads\\ChadKey - Copy.pem"
+  },
+  "safety": {
+    "production_touched": false,
+    "traffic_cutover": false,
+    "source_stop_authorized": false,
+    "target_hub_start_authorized": false
+  },
+  "next_after_success": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START",
+  "notes": "V99 REV3 is currently executing outside the repo runner. The repo runner monitors it. Do not start a second V99 copy while an existing V99 process is active."
+}

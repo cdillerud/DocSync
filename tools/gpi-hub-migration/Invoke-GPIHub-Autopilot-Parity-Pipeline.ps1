@@ -98,6 +98,9 @@ else {
     Write-Host "AUTOPILOT_V109=SKIPPED_GAP_DISPOSITION_$Gap"
 }
 
+$V110 = Run-Phase -Name 'V110_TUMALO_PYPDF_AP_GUARD' -Script 'Invoke-GPIHub-V110-Tumalo-Pypdf-AP-Guard-Candidate.ps1' -ContinueOnFailure
+$Results.Add($V110)
+
 $AP = Run-Phase -Name 'AP_TOP10_LEGACY_INVENTORY_AI' -Script 'Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1' -ContinueOnFailure
 $Results.Add($AP)
 

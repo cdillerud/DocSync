@@ -1,9 +1,9 @@
 {
-  "schema_version": "1.3",
+  "schema_version": "1.4",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START",
+  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV2",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V100.ps1",
+  "script": "Invoke-GPIHub-V100-REV2.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -35,7 +35,7 @@
   "milestones": {
     "v98_target_infrastructure": "PASS",
     "v99_first_pass_migration": "PASS",
-    "v100_target_runtime": "IN_PROGRESS"
+    "v100_target_runtime": "IN_PROGRESS_REV2"
   },
   "safety": {
     "production_touched": false,
@@ -47,5 +47,5 @@
     "bc_block_production_writes": true
   },
   "next_after_success": "V101_TARGET_PARITY_VALIDATION",
-  "notes": "V99 passed. V100 reconstructs the target runtime from authoritative source Compose metadata, restores the staged Mongo archive, starts the target only on loopback test ports, validates safety environment and source continuity, and performs no traffic cutover or Production write enablement."
+  "notes": "V100 REV2 replaces the brittle Docker Go-template source discovery with docker inspect JSON parsed by python3, then executes the existing V100 reconstruction logic. No Production writes or traffic cutover are authorized."
 }

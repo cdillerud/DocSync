@@ -15,4 +15,5 @@ tools/gpi-hub-migration/Invoke-GPIHub-V100-REV9-Source-Rollback-Closeout.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V101-Target-Parity-REV3.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

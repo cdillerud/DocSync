@@ -22,4 +22,5 @@ tools/gpi-hub-migration/v104-warehouse-historical-authority.json
 tools/gpi-hub-migration/Invoke-GPIHub-V104-Warehouse-Historical-Authority-Reconciliation.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V104-REV2-Historical-Authority-Closeout.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V105-Warehouse-Gap-CodePath-Audit.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-GUI-Truth-Audit.ps1

@@ -36,6 +36,10 @@ tools/gpi-hub-migration/Invoke-GPIHub-V108-REV9-Standalone-Safety-Corpus.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V108-REV10-Source-Corpus-Only.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V109-Supporting-Reference-Candidate-Test.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V110-Tumalo-Pypdf-AP-Guard-Candidate.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V111-Combined-DocumentIntel-Candidate.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V113-AP-Payable-Prevalence-Ranking.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V114-Accounting-Temp-Golden-Route-Audit.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV3-Delta.ps1

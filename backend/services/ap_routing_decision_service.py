@@ -14,7 +14,7 @@ import os
 import re
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from services.ap_routing_learning_service import (
     normalize_route_path,
@@ -179,8 +179,9 @@ def _supervised_route_support(
 ) -> Dict[str, Any]:
     """Summarize discriminating support from same-vendor Accounting labels.
 
-    The summary is route-neutral evidence for the LLM plus a safety signal for
-    the governor. It does not itself choose or override a route.
+    This is learned routing evidence, not a vendor rule. It feeds both the LLM
+    and the bounded ensemble so repeated Accounting patterns can select a route
+    when the model's generic logistics semantics disagree with local workflow.
     """
     evidence = _document_evidence(document)
     vendor_key = normalize_vendor_name(evidence.get("vendor_name"))
@@ -528,6 +529,154 @@ def _bc_context_is_resolved(context: Dict[str, Any]) -> bool:
     )
 
 
+def _top_support_row(support: Dict[str, Any]) -> Dict[str, Any]:
+    top_route = normalize_route_path(support.get("top_route"))
+    for row in support.get("routes") or []:
+        if normalize_route_path(row.get("route_path")) == top_route:
+            return row
+    return {}
+
+
+def _supervised_support_can_select(
+    support: Dict[str, Any],
+    *,
+    contract: Dict[str, Any],
+    bc_context: Dict[str, Any],
+) -> Tuple[bool, List[str]]:
+    """Require repeated discriminating evidence before supervised selection.
+
+    A single same-vendor example is never sufficient. Filename structure may
+    qualify only when repeated across at least two Accounting labels; exact BC,
+    location, or ship-to matches qualify directly. The learned route must still
+    pass the live routing contract.
+    """
+    if not support.get("variable_vendor") or not support.get("strong"):
+        return False, []
+
+    top_route = normalize_route_path(support.get("top_route"))
+    if not top_route or not route_is_allowed(top_route, contract, bc_context):
+        return False, []
+
+    top = _top_support_row(support)
+    if int(top.get("support_count") or 0) < 2:
+        return False, []
+    if float(support.get("margin") or 0.0) < 3.0:
+        return False, []
+
+    signals: List[str] = []
+    if int(top.get("exact_bc_reference_matches") or 0) > 0:
+        signals.append("exact_bc_reference")
+    if int(top.get("location_matches") or 0) > 0:
+        signals.append("location_code")
+    if int(top.get("ship_to_matches") or 0) > 0:
+        signals.append("ship_to")
+    if int(top.get("filename_shape_matches") or 0) >= 2:
+        signals.append("repeated_filename_reference_shape")
+
+    return bool(signals), signals
+
+
+def _reconcile_prediction_with_supervised_support(
+    prediction: RoutePrediction,
+    *,
+    supervised_support: Dict[str, Any],
+    contract: Dict[str, Any],
+    bc_context: Dict[str, Any],
+) -> Tuple[RoutePrediction, Dict[str, Any]]:
+    """Ensemble the LLM with measured same-vendor Accounting evidence.
+
+    Generic LLM semantics are useful for messy documents, but they are not
+    permitted to overrule a strong repeated GPI workflow pattern merely because
+    words like carrier/consignee sound like dropship. When the supervised gate
+    is strong enough, the learned Accounting route becomes the ensemble choice.
+    The original model proposal remains fully auditable in the result metadata.
+    """
+    can_select, signals = _supervised_support_can_select(
+        supervised_support,
+        contract=contract,
+        bc_context=bc_context,
+    )
+    original = prediction.to_dict()
+    audit: Dict[str, Any] = {
+        "action": "none",
+        "selected_route": prediction.proposed_route,
+        "original_model_route": prediction.proposed_route,
+        "original_model_confidence": prediction.confidence,
+        "support_route": normalize_route_path(supervised_support.get("top_route")),
+        "support_margin": float(supervised_support.get("margin") or 0.0),
+        "support_signals": signals,
+        "original_prediction": original,
+    }
+
+    if not can_select:
+        audit["reason"] = "supervised support did not meet ensemble selection gate"
+        return prediction, audit
+    if not prediction.proposed_route:
+        audit["reason"] = "model produced no route; fail closed rather than replacing a model failure"
+        return prediction, audit
+    if any(str(item).startswith("model_error:") for item in prediction.unresolved):
+        audit["reason"] = "model call failed; fail closed rather than replacing a model failure"
+        return prediction, audit
+
+    support_route = normalize_route_path(supervised_support.get("top_route"))
+    top = _top_support_row(supervised_support)
+    margin = float(supervised_support.get("margin") or 0.0)
+    repeat_bonus = min(0.03, max(0, int(top.get("support_count") or 0) - 2) * 0.01)
+    margin_bonus = min(0.03, max(0.0, margin - 3.0) * 0.01)
+    authority_bonus = 0.0
+    if "exact_bc_reference" in signals or "location_code" in signals:
+        authority_bonus = 0.02
+    elif "ship_to" in signals:
+        authority_bonus = 0.01
+    learned_confidence = min(0.99, DEFAULT_AUTO_ROUTE_THRESHOLD + repeat_bonus + margin_bonus + authority_bonus)
+
+    evidence = list(prediction.evidence)
+    evidence.insert(
+        0,
+        "same-vendor Accounting support selected "
+        f"{support_route} (score={supervised_support.get('top_score')}, "
+        f"margin={margin:.2f}, signals={','.join(signals)})",
+    )
+    if prediction.proposed_route != support_route:
+        evidence.append(
+            "LLM dissent preserved for audit: "
+            f"{prediction.proposed_route} at {prediction.confidence:.1%}"
+        )
+
+    bc_refs = list(prediction.bc_refs_used)
+    current_ref = str(supervised_support.get("current_bc_reference") or "").strip()
+    if current_ref and current_ref not in bc_refs:
+        bc_refs.append(current_ref)
+
+    matched_ids = list(top.get("top_example_ids") or [])
+    for item in prediction.matched_example_ids:
+        if item not in matched_ids:
+            matched_ids.append(item)
+
+    reconciled = RoutePrediction(
+        proposed_route=support_route,
+        confidence=max(float(prediction.confidence), learned_confidence),
+        evidence=[str(item)[:500] for item in evidence[:12]],
+        reasoning_summary=(
+            "Strong repeated same-vendor Accounting evidence selected the learned GPI workflow "
+            f"{support_route}; the original LLM proposal is retained in ensemble audit evidence."
+        ),
+        bc_refs_used=[str(item)[:200] for item in bc_refs[:12]],
+        unresolved=[],
+        matched_example_ids=[str(item)[:200] for item in matched_ids[:12]],
+        model=f"{prediction.model}+supervised_ensemble",
+    )
+    audit.update(
+        {
+            "action": "supervised_route_selected",
+            "selected_route": support_route,
+            "selected_confidence": reconciled.confidence,
+            "reason": "strong repeated same-vendor Accounting evidence passed ensemble selection gate",
+        }
+    )
+    return reconciled, audit
+
+
 def govern_route_prediction(
     prediction: RoutePrediction,
     *,
@@ -652,6 +801,13 @@ async def decide_ap_route(
             model=model,
         )
 
+    prediction, ensemble_reconciliation = _reconcile_prediction_with_supervised_support(
+        prediction,
+        supervised_support=supervised_support,
+        contract=contract,
+        bc_context=context,
+    )
+
     governed = govern_route_prediction(
         prediction,
         contract=contract,
@@ -667,4 +823,5 @@ async def decide_ap_route(
         {normalize_route_path(e.get("route_path")) for e in examples if e.get("route_path")}
     )
     result["supervised_route_support"] = supervised_support
+    result["ensemble_reconciliation"] = ensemble_reconciliation
     return result

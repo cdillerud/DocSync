@@ -13,6 +13,8 @@ $ControlBranch = 'migration/gpi-hub-dedicated-vm'
 $ScriptPath = $PSCommandPath
 $ToolRoot = Split-Path -Parent $ScriptPath
 $StatePath = Join-Path $ToolRoot 'state.json'
+$RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
+$FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
 
 function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
@@ -75,14 +77,20 @@ function Update-ControlWorktree {
     Require ([string]::IsNullOrWhiteSpace($Status.StdOut)) `
         "Migration control worktree has local changes. Refusing self-update:`n$($Status.StdOut)"
 
-    Write-Host "Updating migration control branch from GitHub..." -ForegroundColor Cyan
+    Write-Host 'Updating migration control branch from GitHub...' -ForegroundColor Cyan
 
     $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'fetch','--prune','origin',$ControlBranch
+        '-C',$RepoRoot,'fetch','--prune','origin',$FetchRefspec
     )
 
+    $Verify = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        '-C',$RepoRoot,'rev-parse','--verify',$RemoteTrackingRef
+    )
+    Require (-not [string]::IsNullOrWhiteSpace($Verify.StdOut)) `
+        "Migration remote-tracking ref is unavailable: $RemoteTrackingRef"
+
     $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-        '-C',$RepoRoot,'reset','--hard',"origin/$ControlBranch"
+        '-C',$RepoRoot,'reset','--hard',$RemoteTrackingRef
     )
 
     Write-Host 'GPI_MIGRATION_REPO_UPDATE=PASS' -ForegroundColor Green

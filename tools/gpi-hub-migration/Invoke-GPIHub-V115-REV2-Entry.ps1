@@ -94,6 +94,22 @@ if (-not $script.Contains($probeDbAnchor)) {
 }
 $script = $script.Replace($probeDbAnchor,$probeDbReplacement)
 
+# Repair 6: surface the generalized supervised-support evidence in each golden
+# result row so a failed retest is diagnosable without another harness change.
+$supportAnchor = @'
+                'candidate_reason':candidate.get('reason'),
+                'prediction_match':proposed==expected,
+'@
+$supportReplacement = @'
+                'candidate_reason':candidate.get('reason'),
+                'supervised_route_support':candidate.get('supervised_route_support'),
+                'prediction_match':proposed==expected,
+'@
+if (-not $script.Contains($supportAnchor)) {
+    throw 'V115 REV2 repair failed: supervised-support result anchor not found.'
+}
+$script = $script.Replace($supportAnchor,$supportReplacement)
+
 $expectedPinText = '$ExpectedFeatureCommit = ''' + $ExpectedCommit + ''''
 if ($script.Contains('"$CandidateRoot\*",')) {
     throw 'V115 REV2 repair failed: wildcard SCP source remains.'
@@ -125,6 +141,9 @@ if (-not $script.Contains('_v115_set_db(_v115_source_db)')) {
 if (-not $script.Contains("print('V115_READONLY_DB_BOOTSTRAP=PASS',flush=True)")) {
     throw 'V115 REV2 repair failed: DB bootstrap runtime evidence marker not installed.'
 }
+if (-not $script.Contains("'supervised_route_support':candidate.get('supervised_route_support')")) {
+    throw 'V115 REV2 repair failed: supervised-support result evidence not installed.'
+}
 
 Set-Content -LiteralPath $GeneratedPath -Value $script -Encoding utf8 -NoNewline
 
@@ -142,6 +161,7 @@ try {
     Write-Host 'V115_REV2_SSH_BASE64_TRANSPORT=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_RESULT_COMMIT_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_READONLY_DB_BOOTSTRAP=PASS' -ForegroundColor Green
+    Write-Host 'V115_REV2_SUPERVISED_SUPPORT_EVIDENCE=PASS' -ForegroundColor Green
     Write-Host 'V115_REV2_GENERATED_PARSE=PASS' -ForegroundColor Green
 
     & $GeneratedPath

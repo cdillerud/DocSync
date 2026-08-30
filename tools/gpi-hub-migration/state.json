@@ -36,7 +36,7 @@
   },
   "milestones": {
     "v98_target_infrastructure": "PASS",
-    "v99_first_pass_migration": "PASS",
+    "v99_first_pass_migration": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
     "v100_mongo_restore": "PASS_REV4_10734247_DOCUMENTS_ZERO_FAILURES",
     "v100_target_runtime": "PASS",
     "v101_target_parity": "PASS_REV3",
@@ -85,10 +85,20 @@
       "dropship_holdout": "110784A_TUMALO_0312676_08262026.pdf -> Dropship Not International/Freight",
       "finding": "same AP payable carrier pattern legitimately routes differently; vendor identity alone is not authoritative"
     },
+    "v115_rev2_first_live_golden_result": {
+      "status": "FAIL_UNSAFE_WRONG_AUTO_ROUTE",
+      "training_examples": 8,
+      "warehouse_training": 4,
+      "dropship_training": 4,
+      "warehouse_holdout": "predicted Dropship Not International/Freight at 0.95; expected Warehouse Not International",
+      "dropship_holdout": "correct Dropship Not International/Freight at 0.98",
+      "wrong_auto_routes": 1,
+      "finding": "variable-vendor model confidence was not bounded by discriminating same-vendor supervised evidence; BC location context was absent and several training documents resolved to noisy/shared PO references"
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "95202888f533aca9eaf9235655ebe4c3298e07da",
-      "status": "V115_REV2_TEMP_STAGE_VALIDATION_NEXT",
+      "commit": "16e2a77504447044babb536a774feabc2d63285c",
+      "status": "V115_REV2_SUPERVISED_VARIABLE_ROUTE_GUARD_RETEST_NEXT",
       "runtime_authority": false
     },
     "gui_truth_audit": "PASS_SCANNER_COMPLETED_SECOND_PASS_STILL_REQUIRED_FOR_LOW_DISCOVERY_AND_UNMATCHED_CALLS"
@@ -98,12 +108,14 @@
     "routing_label_authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder placement plus explicit reviewer corrections",
     "legacy_nav_role": "historical layout/vendor coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "95202888f533aca9eaf9235655ebe4c3298e07da",
+    "feature_commit": "16e2a77504447044babb536a774feabc2d63285c",
     "pipeline": [
       "primary document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting reference extraction",
       "read-only Business Central reference/context resolution",
       "supervised route prediction using diverse labeled Accounting examples",
+      "same-vendor discriminating supervised support from document/reference structure and verified BC facts",
+      "variable-vendor predictions fail closed when they contradict strong supervised support or lack discriminating support",
       "versioned live Accounting Temp route contract governor",
       "review only on insufficient/contradictory evidence",
       "explicit correction becomes higher-weight supervised example",
@@ -124,7 +136,7 @@
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_AI_LABOR_REDUCTION_VALIDATION",
       "execution_mode": "READ_ONLY_PRODUCTION_ACCOUNTING_LABELS_PLUS_BC_READS_TEMP_STAGED_FEATURE_CODE",
-      "objective": "Train from contrasting live Tumalo Accounting placements, hold out one warehouse and one dropship/freight case, and prove the AI can predict both routes without collapsing Tumalo into one vendor rule. REV2 pins the exact feature commit and removes Windows wildcard scp staging."
+      "objective": "Train from contrasting live Tumalo Accounting placements, hold out one warehouse and one dropship/freight case, and prove the AI can predict both routes without collapsing Tumalo into one vendor rule. Current retest adds generalized same-vendor supervised discrimination and a fail-closed variable-route governor after the first live golden exposed one unsafe wrong auto-route."
     },
     {
       "sequence": 2,
@@ -163,7 +175,8 @@
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
     "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart.",
-    "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion."
+    "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion.",
+    "v115_variable_vendor_guard": "No route-name or vendor-specific override. Same-vendor Accounting labels provide discriminating support; conflicting or non-discriminated variable-vendor predictions fail closed to review."
   },
   "open_parity_blockers": [
     "AP_AI_ROUTING_LEARNING_GOLDEN_ISSUE_20",
@@ -176,5 +189,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "Expand supervised Accounting Temp corpus and held-out route evaluation across high-volume vendors/patterns; then integrate only measured candidates into UAT runtime with fail-closed governor. Production remains untouched until explicit cutover authorization.",
-  "notes": "The AP program is AI-first by design. Accounting's already-sorted Temp files are supervised labels; explicit corrections are higher-weight labels; NAV/Zetadocs supplies historical layout coverage only. V115 REV2 repairs the exact feature commit pin and removes wildcard-dependent staging before live read-only golden validation."
+  "notes": "The AP program is AI-first by design. Accounting's already-sorted Temp files are supervised labels; explicit corrections are higher-weight labels; NAV/Zetadocs supplies historical layout coverage only. V115 REV2 first live golden proved the harness and exposed one unsafe warehouse-to-dropship auto-route. Feature commit 16e2a775 adds generalized same-vendor supervised discrimination plus a fail-closed variable-route guard for retest."
 }

@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [string]$SourceRepo = 'C:\Users\ChadDillerud\Documents\DocSync-Zetadocs',
-    [string]$MigrationWorktree = 'C:\Users\ChadDillerud\Documents\DocSync-GPIHub-Migration',
+    [string]$MigrationControlRoot = 'C:\Users\ChadDillerud\Documents\DocSync-GPIHub-Migration',
     [string]$ControlBranch = 'migration/gpi-hub-dedicated-vm'
 )
 
@@ -13,100 +13,108 @@ function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Invoke-Git {
+function Invoke-Native {
     param(
-        [Parameter(Mandatory)][string]$WorkingDirectory,
+        [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$Arguments,
         [switch]$AllowFailure
     )
 
-    & git.exe -C $WorkingDirectory @Arguments
-    $code = $LASTEXITCODE
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $FilePath
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
 
-    if (-not $AllowFailure -and $code -ne 0) {
-        throw "git failed ($code): git -C $WorkingDirectory $($Arguments -join ' ')"
+    foreach ($arg in $Arguments) {
+        [void]$psi.ArgumentList.Add($arg)
     }
 
-    return $code
+    $p = [System.Diagnostics.Process]::new()
+    $p.StartInfo = $psi
+    Require ($p.Start()) "Could not start $FilePath."
+
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    $p.WaitForExit()
+
+    $result = [pscustomobject]@{
+        ExitCode = $p.ExitCode
+        StdOut   = $outTask.GetAwaiter().GetResult()
+        StdErr   = $errTask.GetAwaiter().GetResult()
+    }
+
+    if (-not $AllowFailure -and $result.ExitCode -ne 0) {
+        throw "$FilePath failed ($($result.ExitCode)).`n$($result.StdOut)`n$($result.StdErr)"
+    }
+
+    return $result
 }
 
 Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Source repo not found: $SourceRepo"
 Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe is not available.'
+Require ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) 'tar.exe is not available.'
 Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe is not available.'
+Require ($MigrationControlRoot -ne $SourceRepo) 'Migration control root must be separate from the application working tree.'
 
 $RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
 $FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
-$SparsePath = 'tools/gpi-hub-migration'
+$ScopedPath = 'tools/gpi-hub-migration'
+$ArchivePath = Join-Path $env:TEMP ("gpi-hub-control-" + [guid]::NewGuid().ToString('N') + '.tar')
 
 Write-Host 'GPI Hub migration bootstrap' -ForegroundColor Cyan
-Write-Host "Source worktree    : $SourceRepo"
-Write-Host "Control worktree   : $MigrationWorktree"
+Write-Host "Source repo        : $SourceRepo"
+Write-Host "Control folder     : $MigrationControlRoot"
 Write-Host "Control branch     : $ControlBranch"
-Write-Host "Sparse checkout    : $SparsePath only"
+Write-Host "Materialized path  : $ScopedPath only"
 Write-Host ''
 Write-Host 'The existing DocSync-Zetadocs working tree will NOT be checked out, reset, cleaned, or modified.' -ForegroundColor Yellow
-Write-Host 'The control worktree intentionally does NOT materialize the full DocSync tree on Windows.' -ForegroundColor Yellow
+Write-Host 'No Git worktree/index is used for the migration controller.' -ForegroundColor Yellow
 
-$null = Invoke-Git -WorkingDirectory $SourceRepo -Arguments @('rev-parse','--is-inside-work-tree')
+$probe = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--is-inside-work-tree')
+Require ($probe.StdOut.Trim() -eq 'true') 'Source path is not a Git working tree.'
 
-Write-Host 'Fetching migration control branch into an explicit remote-tracking ref...' -ForegroundColor Cyan
-$null = Invoke-Git -WorkingDirectory $SourceRepo -Arguments @('fetch','--prune','origin',$FetchRefspec)
-$null = Invoke-Git -WorkingDirectory $SourceRepo -Arguments @('rev-parse','--verify',$RemoteTrackingRef)
+Write-Host 'Fetching migration control branch into explicit remote-tracking ref...' -ForegroundColor Cyan
+$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec)
+$verify = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'rev-parse','--verify',$RemoteTrackingRef)
+Require (-not [string]::IsNullOrWhiteSpace($verify.StdOut)) "Remote-tracking ref unavailable: $RemoteTrackingRef"
 Write-Host 'GPI_HUB_MIGRATION_CONTROL_REF=PASS' -ForegroundColor Green
 
-# Always prune stale registrations first. A failed Windows checkout can leave a
-# worktree registration even when the directory was only partially created.
-& git.exe -C $SourceRepo worktree prune 2>$null
-Write-Host 'GPI_HUB_MIGRATION_WORKTREE_PRUNE=PASS' -ForegroundColor Green
+# Recover automatically from failed worktree attempts from earlier bootstrap versions.
+Write-Host 'Removing stale migration worktree registration, if present...' -ForegroundColor Cyan
+$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','remove','--force',$MigrationControlRoot) -AllowFailure
+$null = Invoke-Native -FilePath 'git.exe' -Arguments @('-C',$SourceRepo,'worktree','prune') -AllowFailure
+Write-Host 'GPI_HUB_MIGRATION_WORKTREE_RECOVERY=PASS' -ForegroundColor Green
 
-# Recover automatically from an earlier failed full checkout. The dedicated
-# migration directory contains no authoritative application state.
-$WorktreeValid = $false
-if (Test-Path -LiteralPath $MigrationWorktree -PathType Container) {
-    & git.exe -C $MigrationWorktree rev-parse --is-inside-work-tree *> $null
-    $WorktreeValid = ($LASTEXITCODE -eq 0)
+if (Test-Path -LiteralPath $MigrationControlRoot) {
+    Write-Host 'Removing previous non-authoritative migration control folder...' -ForegroundColor Cyan
+    Remove-Item -LiteralPath $MigrationControlRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $MigrationControlRoot -Force | Out-Null
+
+try {
+    Write-Host 'Archiving ONLY the migration-control subtree from Git...' -ForegroundColor Cyan
+    $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        '-C',$SourceRepo,
+        'archive','--format=tar',"--output=$ArchivePath",$RemoteTrackingRef,$ScopedPath
+    )
+    Require (Test-Path -LiteralPath $ArchivePath -PathType Leaf) 'Scoped migration-control archive was not created.'
+
+    Write-Host 'Extracting migration controller without creating a Git index...' -ForegroundColor Cyan
+    $null = Invoke-Native -FilePath 'tar.exe' -Arguments @('-xf',$ArchivePath,'-C',$MigrationControlRoot)
+}
+finally {
+    Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
 }
 
-if (-not $WorktreeValid -and (Test-Path -LiteralPath $MigrationWorktree -PathType Container)) {
-    Write-Host 'Recovering failed/partial migration worktree from prior Windows checkout attempt...' -ForegroundColor Yellow
+$ToolRoot = Join-Path $MigrationControlRoot 'tools\gpi-hub-migration'
+$Runner = Join-Path $ToolRoot 'Invoke-GPIHubMigration.ps1'
+$State = Join-Path $ToolRoot 'state.json'
 
-    & git.exe -C $SourceRepo worktree remove --force $MigrationWorktree 2>$null
-    & git.exe -C $SourceRepo worktree prune 2>$null
-
-    if (Test-Path -LiteralPath $MigrationWorktree -PathType Container) {
-        Remove-Item -LiteralPath $MigrationWorktree -Recurse -Force
-    }
-
-    Write-Host 'GPI_HUB_MIGRATION_PARTIAL_WORKTREE_RECOVERY=PASS' -ForegroundColor Green
-}
-
-if (-not (Test-Path -LiteralPath $MigrationWorktree -PathType Container)) {
-    Write-Host 'Creating sparse dedicated migration worktree with NO initial checkout...' -ForegroundColor Cyan
-
-    & git.exe -C $SourceRepo worktree add --no-checkout -B gpi-hub-migration $MigrationWorktree $RemoteTrackingRef
-    Require ($LASTEXITCODE -eq 0) 'Could not create no-checkout migration worktree.'
-
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('sparse-checkout','init','--cone')
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('sparse-checkout','set',$SparsePath)
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('reset','--hard',$RemoteTrackingRef)
-}
-else {
-    Write-Host 'Dedicated migration worktree already exists; validating sparse control state...' -ForegroundColor Cyan
-
-    $Status = (& git.exe -C $MigrationWorktree status --porcelain | Out-String).Trim()
-    Require ([string]::IsNullOrWhiteSpace($Status)) `
-        "Migration control worktree has local changes and will not be reset:`n$Status"
-
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('fetch','--prune','origin',$FetchRefspec)
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('sparse-checkout','init','--cone')
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('sparse-checkout','set',$SparsePath)
-    $null = Invoke-Git -WorkingDirectory $MigrationWorktree -Arguments @('reset','--hard',$RemoteTrackingRef)
-}
-
-$Runner = Join-Path $MigrationWorktree 'tools\gpi-hub-migration\Invoke-GPIHubMigration.ps1'
-Require (Test-Path -LiteralPath $Runner -PathType Leaf) "Repo runner not found: $Runner"
-
-Write-Host 'GPI_HUB_MIGRATION_SPARSE_WORKTREE=PASS' -ForegroundColor Green
+Require (Test-Path -LiteralPath $Runner -PathType Leaf) "Repo runner not found after extraction: $Runner"
+Require (Test-Path -LiteralPath $State -PathType Leaf) "Migration state not found after extraction: $State"
+Write-Host 'GPI_HUB_MIGRATION_ARCHIVE_MATERIALIZATION=PASS' -ForegroundColor Green
 
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $Launcher = Join-Path $Desktop 'GPI Hub Migration.cmd'
@@ -123,7 +131,7 @@ Write-Host 'GPI_HUB_MIGRATION_BOOTSTRAP=PASS' -ForegroundColor Green
 Write-Host "Runner          : $Runner"
 Write-Host "Desktop launcher: $Launcher"
 Write-Host ''
-Write-Host 'After this bootstrap, use the desktop launcher. It self-updates from the repo control branch before each run.' -ForegroundColor Green
+Write-Host 'After this bootstrap, use the Desktop launcher. It self-updates by re-archiving only the migration-control subtree.' -ForegroundColor Green
 Write-Host ''
 
 & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $Runner

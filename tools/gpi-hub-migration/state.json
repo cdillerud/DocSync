@@ -1,9 +1,9 @@
 {
-  "schema_version": "3.1",
+  "schema_version": "3.2",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V105_TARGETED_WAREHOUSE_GAP_CODE_PATH_AUDIT",
+  "phase": "V106_WAREHOUSE_RUNTIME_AUTHORITY_FIX_PLAN",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V105-Warehouse-Gap-CodePath-Audit.ps1",
+  "script": "Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -67,19 +67,26 @@
       "STRATEGIC_OUTBOUND_BL": "BL_REFERENCE_MATCH"
     },
     "v104_warehouse_historical_authority": "PASS_REV2_DEFECT_LEDGER_CLOSED",
-    "v105_targeted_warehouse_code_path_audit": "IN_PROGRESS"
+    "v105_targeted_warehouse_code_path_audit": "PASS_EXACT_MIGRATED_TARGET_TREE_NO_MUTATIONS",
+    "v105_findings": {
+      "JBS_INBOUND_R": "CURRENT_HOST_TREE_ALREADY_HAS_WAREHOUSE_RECEIPT_PRE_MISC_ROUTING_RULE_STALE_PERSISTED_ROUTE_SUSPECTED",
+      "JBS_OUTBOUND_SHIPMENT": "REFERENCE_ENGINE_MAPS_BOL_TO_SHIPMENT_SEMANTIC_BUT_PERSISTED_EXPLICIT_SHIPMENT_FIELD_ABSENT",
+      "STRATEGIC_INBOUND_BOL": "NO_W117105_UPLOAD_EVIDENCE_AND_NO_AUTHENTIC_HUB_REPRESENTATION",
+      "STRATEGIC_OUTBOUND_BL": "PRESERVE_57745"
+    },
+    "v106_runtime_authority_fix_plan": "IN_PROGRESS"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-      "script": "Invoke-GPIHub-V105-Warehouse-Gap-CodePath-Audit.ps1",
+      "script": "Invoke-GPIHub-V106-Warehouse-Runtime-Authority-FixPlan.ps1",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_FIX_DESIGN",
-      "execution_mode": "READ_ONLY_EXACT_RUNTIME_CODE_PATH_AUDIT_THEN_NARROW_TARGET_ONLY_FIX_AND_RETEST",
-      "objective": "Trace and fix only the demonstrated JBS inbound routing conflict, JBS outbound shipment-reference normalization gap, and Strategic inbound representation gap while preserving validated Strategic outbound B/L 57745 behavior.",
-      "cutover_relevance": "Warehouse parity remains blocked by three authoritative defects. V105 audits the exact migrated runtime tree and restored evidence before any narrow V106 patch is designed."
+      "execution_mode": "READ_ONLY_HOST_VS_ACTIVE_CONTAINER_CODE_AUTHORITY_GATE_THEN_V107_NARROW_TARGET_ISOLATED_PATCH_REPLAY_AND_CORPUS_TEST",
+      "objective": "Prove which code copy is actually executing, distinguish W118228 stale persisted routing from an active runtime defect, identify the canonical shipment-field persistence patch point for JBS outbound, classify Strategic inbound as corpus-ingestion coverage unless contrary evidence appears, and preserve Strategic outbound B/L 57745.",
+      "cutover_relevance": "No Warehouse runtime patch is permitted until host-tree and active-container code authority is established. Warehouse parity remains open pending replay/fix/corpus validation of the three authoritative defects."
     },
     {
       "sequence": 2,
@@ -114,7 +121,8 @@
     "v103_semantic_policy": "read_only_full_collection_semantic_scan_require_expected_reference_field_or_labeled_text_and_reject_broad_entity_keyword_false_positives",
     "v104_authority_policy": "read_only_compare_restored_hub_to_committed_historical_authority_manifest_collected_from_user_sharepoint_docsnav_zetadocs_archive",
     "v104_rev2_policy": "reuse_already_written_local_v104_reconciliation_json_no_remote_call_no_target_or_source_change",
-    "v105_code_audit_policy": "read_only_exact_target_runtime_source_context_and_hashes_plus_targeted_w117105_upload_and_mongo_representation_search_no_app_or_database_mutation",
+    "v105_code_audit_policy": "read_only_exact_target_host_tree_source_context_and_hashes_plus_targeted_w117105_upload_and_mongo_representation_search_no_app_or_database_mutation",
+    "v106_runtime_authority_policy": "read_only_compare_target_host_tree_sha256_to_active_backend_container_files_before_any_patch; inspect canonical shipment persistence and current warehouse receipt routing; no target database or app mutation",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
@@ -124,6 +132,6 @@
     "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
     "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
   ],
-  "next_after_success": "V106_NARROW_WAREHOUSE_GAP_FIX_AND_REGRESSION_RETEST_FROM_V105",
-  "notes": "V104 REV2 closed the historical-authority ledger with three Warehouse defects and one validated behavior. JBS inbound W118228_p2 extracts R72713 but routes to Miscellaneous Documents/Misc Invoices - need approval. JBS outbound 111244.pdf is a Shipping_Document and extracts BOL 5975975 with reference-candidate semantic_type shipment_number, but no explicit shipment_number field is normalized. Authentic Strategic inbound W117105/Strategic historical evidence is not represented in restored hub_documents. Strategic outbound 114049_Strategic_05112026_BOL.pdf correctly extracts and normalizes B/L 57745 and is a protected regression case. V105 is read-only and audits the exact migrated target runtime source plus W117105 upload/Mongo representation evidence so V106 can be a narrow, reversible, evidence-driven fix. No traffic cutover or Production writes are authorized."
+  "next_after_success": "V107_AUTHORITY_CONFIRMED_TARGET_ISOLATED_WAREHOUSE_PATCH_REPLAY_AND_CORPUS_TEST",
+  "notes": "V105 passed read-only against the exact migrated target host tree. Its evidence changes the three-defect interpretation: the host-tree folder_routing_service already contains the Warehouse_Receipt pre-Misc guard, so W118228's Misc route may be stale persisted history rather than a missing current rule; the reference engine explicitly maps BOL to shipment_number semantics but the 111244 record lacks an explicit canonical shipment_number field, indicating a persistence/contract gap; W117105 has no upload evidence and no authentic Hub representation, so no Strategic inbound code defect is yet proven and a controlled historical corpus ingestion test is required; Strategic outbound B/L 57745 remains the protected regression baseline. V106 now compares those host-tree files to the code actually executing inside the pinned backend container and captures the final authority-confirmed V107 patch/replay plan. No traffic cutover or Production writes are authorized."
 }

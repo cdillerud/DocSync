@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.6",
+  "schema_version": "1.7",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START_REV4_CONFIGDB_GATE",
   "mode": "run-script",
@@ -38,6 +38,17 @@
     "v99_first_pass_migration": "PASS",
     "v100_target_runtime": "IN_PROGRESS_REV4_CONFIGDB_GATE"
   },
+  "near_term_sprints": [
+    {
+      "sequence": 1,
+      "after": "V101_TARGET_PARITY_VALIDATION",
+      "name": "GUI_TRUTH_FUNCTION_REPORTING_AUDIT",
+      "tracking_issue": 17,
+      "classification": "PARITY_HARDENING",
+      "objective": "Inventory and reconcile the active GPI Hub GUI, every operator action, and all operational reporting against authoritative backend truth; remove or hide inaccurate, contradictory, duplicative, or unnecessary AP/Warehouse surfaces before cutover.",
+      "cutover_relevance": "Misleading operator state is a parity risk and becomes a parity blocker when it can cause an incorrect action or conceal failed delivery."
+    }
+  ],
   "safety": {
     "production_touched": false,
     "traffic_cutover": false,
@@ -50,5 +61,5 @@
     "mongo_configdb_policy": "allow_only_if_exact_anonymous_mount_and_source_directory_empty"
   },
   "next_after_success": "V101_TARGET_PARITY_VALIDATION",
-  "notes": "V100 REV4 preserves REV2 JSON/python runtime discovery and REV3 persistent failure capture. It handles only Mongo's exact anonymous /data/configdb volume: source path/name are verified, source contents are probed read-only, and the mount is mapped to dedicated target storage only when empty. Any content or any other unknown volume fails closed. No traffic cutover or Production writes are authorized."
+  "notes": "V100 REV4 preserves REV2 JSON/python runtime discovery and REV3 persistent failure capture. It handles only Mongo's exact anonymous /data/configdb volume: source path/name are verified, source contents are probed read-only, and the mount is mapped to dedicated target storage only when empty. Any content or any other unknown volume fails closed. No traffic cutover or Production writes are authorized. Near-term sprint queue now includes the GUI truth/function/reporting audit tracked by GitHub issue #17 immediately after V101 target parity validation."
 }

@@ -1,9 +1,9 @@
 {
-  "schema_version": "2.5",
+  "schema_version": "2.6",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V101_TARGET_PARITY_VALIDATION_REV3",
+  "phase": "V102_WAREHOUSE_SQUARE9_REFERENCE_MATRIX_DISCOVERY",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V101-Target-Parity-REV3.ps1",
+  "script": "Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -48,16 +48,18 @@
     "v100_rev8_target_static_validation": "PASS",
     "v100_rev9_source_rollback": "PASS_3_SERVICES_INTERNAL_API_200",
     "v100_target_runtime": "PASS",
-    "v101_target_parity": "IN_PROGRESS_REV3"
+    "v101_target_parity": "PASS_REV3",
+    "v102_warehouse_reference_matrix": "IN_PROGRESS_DISCOVERY"
   },
   "near_term_sprints": [
     {
       "sequence": 1,
       "after": "V101_TARGET_PARITY_VALIDATION",
       "name": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
+      "script": "Invoke-GPIHub-V102-Warehouse-Reference-Matrix-Discovery.ps1",
       "tracking_issue": 18,
       "classification": "PARITY_BLOCKER_DISCOVERY",
-      "execution_mode": "EVIDENCE_DRIVEN",
+      "execution_mode": "READ_ONLY_EVIDENCE_DISCOVERY_THEN_TARGETED_VALIDATION",
       "objective": "Locate and validate representative historical cases for JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number workflows, including deterministic extraction/resolution and actual routing outcomes.",
       "cutover_relevance": "The Square9 work instructions prove materially different Warehouse reference-key conventions beyond W118093; broad Warehouse parity cannot be claimed until these patterns are validated or proven obsolete/out of scope."
     },
@@ -90,9 +92,16 @@
     "network_policy": "all_target_services_internal_only_no_external_egress_during_static_parity_validation",
     "target_health_validation_policy": "container_internal_api_health",
     "source_rollback_health_validation_policy": "compose_service_labels_plus_backend_container_internal_api_health",
+    "v102_discovery_policy": "read_only_scan_of_restored_hub_metadata_upload_filenames_and_copied_source_terms_no_external_calls",
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false
   },
-  "next_after_success": "WAREHOUSE_SQUARE9_REFERENCE_MATRIX_VALIDATION",
-  "notes": "V100 is complete. REV9 proved the target static-isolated runtime remains healthy, background workers remain suppressed, external egress remains blocked, restored Mongo is preserved, and the source rollback checkpoint has all three Compose services running with backend /api/health returning 200 from inside the source container. V101 REV3 is now active. It performs read-only target parity preservation validation for W118093 Warehouse truth, AP Scenario 2 persisted truth, duplicate/idempotency protections, fail-closed semantics, target safety isolation, and source rollback health. The AP live SharePoint authority gap remains explicitly open and is not claimed solved. No traffic cutover or Production writes are authorized."
+  "open_parity_blockers": [
+    "AP_LIVE_SHAREPOINT_AUTHORITY_PROOF",
+    "WAREHOUSE_REFERENCE_MATRIX_JBS_STRATEGIC",
+    "GOLDEN_SQUARE9_SEMANTIC_CORPUS",
+    "BROADER_AP_WAREHOUSE_END_TO_END_DEMOS"
+  ],
+  "next_after_success": "V102_TARGETED_WAREHOUSE_REFERENCE_VALIDATION_FROM_DISCOVERED_CANDIDATES",
+  "notes": "V101 REV3 passed target parity preservation validation: isolated target safety, W118093 persisted Warehouse truth, AP Scenario 2 persisted truth, duplicate/idempotency protections, fail-closed source semantics, and source rollback health all passed. AP live SharePoint authority remains explicitly open. V102 is now the active read-only discovery phase for the Square9 work-instruction reference matrix: JBS inbound R-number, JBS outbound shipment-number, Strategic inbound BOL-number, and Strategic outbound B/L-number. Candidate discovery is not itself parity validation; discovered cases must still be proven against authoritative historical routing/delivery evidence. GUI truth/function/reporting audit remains queued immediately after the Warehouse matrix work. No traffic cutover or Production writes are authorized."
 }

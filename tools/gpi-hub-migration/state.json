@@ -1,8 +1,9 @@
 {
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V99_FIRST_PASS_IN_PROGRESS",
-  "mode": "monitor-v99",
+  "phase": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START",
+  "mode": "run-script",
+  "script": "Invoke-GPIHub-V100.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -13,7 +14,9 @@
   "target": {
     "vm": "GPI-Hub-VM",
     "public_ip": "52.180.147.52",
-    "mount": "/gpi-hub-data"
+    "mount": "/gpi-hub-data",
+    "isolated_backend": "127.0.0.1:18005",
+    "isolated_frontend": "127.0.0.1:18080"
   },
   "local": {
     "operational_root": "C:\\Users\\ChadDillerud\\Documents\\DocSync-Zetadocs",
@@ -29,12 +32,20 @@
     "uses_tree_traversal": false,
     "uses_git_archive": false
   },
+  "milestones": {
+    "v98_target_infrastructure": "PASS",
+    "v99_first_pass_migration": "PASS",
+    "v100_target_runtime": "IN_PROGRESS"
+  },
   "safety": {
     "production_touched": false,
     "traffic_cutover": false,
     "source_stop_authorized": false,
-    "target_hub_start_authorized": false
+    "target_hub_start_authorized": true,
+    "sharepoint_target": "test",
+    "bc_write_enabled": false,
+    "bc_block_production_writes": true
   },
-  "next_after_success": "V100_TARGET_RUNTIME_RECONSTRUCTION_AND_ISOLATED_START",
-  "notes": "V99 REV3 is currently executing outside the repo runner. The repo runner monitors it. Do not start a second V99 copy while an existing V99 process is active."
+  "next_after_success": "V101_TARGET_PARITY_VALIDATION",
+  "notes": "V99 passed. V100 reconstructs the target runtime from authoritative source Compose metadata, restores the staged Mongo archive, starts the target only on loopback test ports, validates safety environment and source continuity, and performs no traffic cutover or Production write enablement."
 }

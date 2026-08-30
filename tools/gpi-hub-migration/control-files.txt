@@ -40,6 +40,7 @@ tools/gpi-hub-migration/Invoke-GPIHub-V111-Combined-DocumentIntel-Candidate.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V113-AP-Payable-Prevalence-Ranking.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V114-Accounting-Temp-Golden-Route-Audit.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V115-REV2-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV3-Delta.ps1

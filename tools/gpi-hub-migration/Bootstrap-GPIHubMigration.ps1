@@ -17,6 +17,9 @@ Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Source repo no
 Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe is not available.'
 Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe is not available.'
 
+$RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
+$FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
+
 Write-Host 'GPI Hub migration bootstrap' -ForegroundColor Cyan
 Write-Host "Source worktree    : $SourceRepo"
 Write-Host "Control worktree   : $MigrationWorktree"
@@ -27,13 +30,17 @@ Write-Host 'The existing DocSync-Zetadocs working tree will NOT be checked out, 
 & git.exe -C $SourceRepo rev-parse --is-inside-work-tree | Out-Null
 Require ($LASTEXITCODE -eq 0) 'Source path is not a Git working tree.'
 
-Write-Host 'Fetching migration control branch...' -ForegroundColor Cyan
-& git.exe -C $SourceRepo fetch --prune origin $ControlBranch
+Write-Host 'Fetching migration control branch into an explicit remote-tracking ref...' -ForegroundColor Cyan
+& git.exe -C $SourceRepo fetch --prune origin $FetchRefspec
 Require ($LASTEXITCODE -eq 0) 'Could not fetch migration control branch.'
+
+& git.exe -C $SourceRepo rev-parse --verify $RemoteTrackingRef | Out-Null
+Require ($LASTEXITCODE -eq 0) "Remote-tracking ref was not created: $RemoteTrackingRef"
+Write-Host 'GPI_HUB_MIGRATION_CONTROL_REF=PASS' -ForegroundColor Green
 
 if (-not (Test-Path -LiteralPath $MigrationWorktree -PathType Container)) {
     Write-Host 'Creating dedicated migration worktree...' -ForegroundColor Cyan
-    & git.exe -C $SourceRepo worktree add -B gpi-hub-migration $MigrationWorktree "origin/$ControlBranch"
+    & git.exe -C $SourceRepo worktree add -B gpi-hub-migration $MigrationWorktree $RemoteTrackingRef
     Require ($LASTEXITCODE -eq 0) 'Could not create migration worktree.'
 }
 else {
@@ -45,10 +52,10 @@ else {
     Require ([string]::IsNullOrWhiteSpace($Status)) `
         "Migration worktree has local changes and will not be reset:`n$Status"
 
-    & git.exe -C $MigrationWorktree fetch --prune origin $ControlBranch
+    & git.exe -C $MigrationWorktree fetch --prune origin $FetchRefspec
     Require ($LASTEXITCODE -eq 0) 'Could not refresh migration worktree.'
 
-    & git.exe -C $MigrationWorktree reset --hard "origin/$ControlBranch"
+    & git.exe -C $MigrationWorktree reset --hard $RemoteTrackingRef
     Require ($LASTEXITCODE -eq 0) 'Could not update migration worktree.'
 }
 

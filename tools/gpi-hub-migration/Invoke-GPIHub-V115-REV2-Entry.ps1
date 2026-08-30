@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $ToolRoot = Split-Path -Parent $PSCommandPath
 $MainPath = Join-Path $ToolRoot 'Invoke-GPIHub-V115-AP-AI-Routing-Learning-Golden.ps1'
 $GeneratedPath = Join-Path $ToolRoot '.Invoke-GPIHub-V115-REV2.generated.ps1'
-$ExpectedCommit = '95202888f533aca9eaf9235655ebe4c3298e07da'
+$ExpectedCommit = '16e2a77504447044babb536a774feabc2d63285c'
 
 if (-not (Test-Path -LiteralPath $MainPath -PathType Leaf)) {
     throw "V115 main script missing: $MainPath"

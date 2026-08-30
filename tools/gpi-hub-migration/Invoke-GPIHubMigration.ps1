@@ -13,7 +13,8 @@ $ControlBranch = 'migration/gpi-hub-dedicated-vm'
 $ScriptPath = $PSCommandPath
 $ToolRoot = Split-Path -Parent $ScriptPath
 $StatePath = Join-Path $ToolRoot 'state.json'
-$ScopedPath = 'tools/gpi-hub-migration'
+$ToolPrefix = 'tools/gpi-hub-migration/'
+$ManifestRepoPath = "${ToolPrefix}control-files.txt"
 $RemoteTrackingRef = "refs/remotes/origin/$ControlBranch"
 $FetchRefspec = "+refs/heads/$ControlBranch`:$RemoteTrackingRef"
 
@@ -21,7 +22,7 @@ function Require([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Invoke-Native {
+function Invoke-NativeText {
     param(
         [Parameter(Mandatory)][string]$FilePath,
         [Parameter(Mandatory)][string[]]$Arguments,
@@ -29,17 +30,18 @@ function Invoke-Native {
     )
 
     $token = [guid]::NewGuid().ToString('N')
-    $stdoutFile = Join-Path $env:TEMP "gpi-native-$token.out.txt"
     $stderrFile = Join-Path $env:TEMP "gpi-native-$token.err.txt"
+    $oldEap = $ErrorActionPreference
+    $nativeVar = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $oldNative = if ($null -ne $nativeVar) { $nativeVar.Value } else { $null }
 
     try {
-        & $FilePath @Arguments 1> $stdoutFile 2> $stderrFile
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $false }
+
+        $output = & $FilePath @Arguments 2> $stderrFile
         $code = $LASTEXITCODE
-
-        $stdout = if (Test-Path -LiteralPath $stdoutFile) {
-            Get-Content -LiteralPath $stdoutFile -Raw -ErrorAction SilentlyContinue
-        } else { '' }
-
+        $stdout = (@($output) | ForEach-Object { [string]$_ }) -join "`n"
         $stderr = if (Test-Path -LiteralPath $stderrFile) {
             Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
         } else { '' }
@@ -57,8 +59,23 @@ function Invoke-Native {
         return $result
     }
     finally {
-        Remove-Item -LiteralPath $stdoutFile,$stderrFile -Force -ErrorAction SilentlyContinue
+        $ErrorActionPreference = $oldEap
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $oldNative }
+        Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
     }
+}
+
+function Get-GitFileText {
+    param(
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][string]$Ref,
+        [Parameter(Mandatory)][string]$RepoPath
+    )
+
+    $spec = '{0}:{1}' -f $Ref,$RepoPath
+    $r = Invoke-NativeText -FilePath 'git.exe' -Arguments @('-C',$Repo,'show',$spec)
+    Require ($r.ExitCode -eq 0) "Could not read $RepoPath from $Ref."
+    return [string]$r.StdOut
 }
 
 function Get-State {
@@ -72,52 +89,59 @@ function Update-ControlFolder {
 
     Require (Test-Path -LiteralPath $SourceRepo -PathType Container) "Operational repo missing: $SourceRepo"
     Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
-    Require ($null -ne (Get-Command tar.exe -ErrorAction SilentlyContinue)) 'tar.exe unavailable.'
     Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe unavailable.'
 
-    $ControlRoot = Split-Path -Parent (Split-Path -Parent $ToolRoot)
-    $ArchivePath = Join-Path $env:TEMP ("gpi-hub-control-update-" + [guid]::NewGuid().ToString('N') + '.tar')
     $StageRoot = Join-Path $env:TEMP ("gpi-hub-control-stage-" + [guid]::NewGuid().ToString('N'))
+    $StageToolRoot = Join-Path $StageRoot 'tools\gpi-hub-migration'
 
-    Write-Host 'Updating migration controller from GitHub using scoped git archive...' -ForegroundColor Cyan
+    Write-Host 'Updating migration controller using explicit git show file reads...' -ForegroundColor Cyan
 
     try {
-        $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        $null = Invoke-NativeText -FilePath 'git.exe' -Arguments @(
             '-C',$SourceRepo,'fetch','--prune','origin',$FetchRefspec
         )
 
-        $verify = Invoke-Native -FilePath 'git.exe' -Arguments @(
+        $verify = Invoke-NativeText -FilePath 'git.exe' -Arguments @(
             '-C',$SourceRepo,'rev-parse','--verify',$RemoteTrackingRef
         )
         Require (-not [string]::IsNullOrWhiteSpace($verify.StdOut)) `
             "Migration remote-tracking ref unavailable: $RemoteTrackingRef"
 
-        New-Item -ItemType Directory -Path $StageRoot -Force | Out-Null
-
-        $null = Invoke-Native -FilePath 'git.exe' -Arguments @(
-            '-C',$SourceRepo,
-            'archive','--format=tar',"--output=$ArchivePath",$RemoteTrackingRef,$ScopedPath
+        $manifestText = Get-GitFileText -Repo $SourceRepo -Ref $RemoteTrackingRef -RepoPath $ManifestRepoPath
+        $controlFiles = @(
+            ($manifestText -replace "`r",'') -split "`n" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         )
-        Require (Test-Path -LiteralPath $ArchivePath -PathType Leaf) 'Controller update archive was not created.'
+        Require ($controlFiles.Count -gt 0) 'Migration control manifest is empty.'
+        Require ($controlFiles -contains $ManifestRepoPath) 'Migration control manifest must include itself.'
 
-        $null = Invoke-Native -FilePath 'tar.exe' -Arguments @('-xf',$ArchivePath,'-C',$StageRoot)
+        New-Item -ItemType Directory -Path $StageToolRoot -Force | Out-Null
 
-        $StageToolRoot = Join-Path $StageRoot 'tools\gpi-hub-migration'
-        $StageRunner = Join-Path $StageToolRoot 'Invoke-GPIHubMigration.ps1'
-        $StageState = Join-Path $StageToolRoot 'state.json'
-        Require (Test-Path -LiteralPath $StageRunner -PathType Leaf) 'Staged runner missing.'
-        Require (Test-Path -LiteralPath $StageState -PathType Leaf) 'Staged state missing.'
+        foreach ($repoPath in $controlFiles) {
+            Require ($repoPath.StartsWith($ToolPrefix,[System.StringComparison]::Ordinal)) "Manifest path escapes control subtree: $repoPath"
+            Require ($repoPath -notmatch '(^|/)\.\.(/|$)') "Manifest path contains parent traversal: $repoPath"
+
+            $relative = $repoPath.Substring($ToolPrefix.Length).Replace('/','\')
+            $destination = Join-Path $StageToolRoot $relative
+            New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+
+            $content = Get-GitFileText -Repo $SourceRepo -Ref $RemoteTrackingRef -RepoPath $repoPath
+            Set-Content -LiteralPath $destination -Value $content -Encoding utf8 -NoNewline
+        }
+
+        Require (Test-Path -LiteralPath (Join-Path $StageToolRoot 'Invoke-GPIHubMigration.ps1') -PathType Leaf) 'Staged runner missing.'
+        Require (Test-Path -LiteralPath (Join-Path $StageToolRoot 'state.json') -PathType Leaf) 'Staged state missing.'
 
         Get-ChildItem -LiteralPath $StageToolRoot -Force | ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $ToolRoot -Recurse -Force
         }
 
-        Write-Host "Control root : $ControlRoot"
-        Write-Host "Control ref  : $($verify.StdOut.Trim())"
-        Write-Host 'GPI_MIGRATION_ARCHIVE_SELF_UPDATE=PASS' -ForegroundColor Green
+        Write-Host "Control ref : $($verify.StdOut.Trim())"
+        Write-Host "Files       : $($controlFiles.Count)"
+        Write-Host 'GPI_MIGRATION_GIT_SHOW_SELF_UPDATE=PASS' -ForegroundColor Green
     }
     finally {
-        Remove-Item -LiteralPath $ArchivePath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $StageRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 
@@ -159,6 +183,9 @@ function Invoke-SshScript {
 
     $token = [guid]::NewGuid().ToString('N')
     $stderrFile = Join-Path $env:TEMP "gpi-ssh-$token.err.txt"
+    $oldEap = $ErrorActionPreference
+    $nativeVar = Get-Variable PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $oldNative = if ($null -ne $nativeVar) { $nativeVar.Value } else { $null }
 
     $sshArgs = @(
         '-i',$KeyPath,
@@ -172,10 +199,13 @@ function Invoke-SshScript {
     )
 
     try {
+        $ErrorActionPreference = 'Continue'
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $false }
+
         $normalized = $ScriptText -replace "`r`n","`n"
         $output = $normalized | & ssh.exe @sshArgs 2> $stderrFile
         $code = $LASTEXITCODE
-        $stdout = @($output) -join "`n"
+        $stdout = (@($output) | ForEach-Object { [string]$_ }) -join "`n"
         $stderr = if (Test-Path -LiteralPath $stderrFile) {
             Get-Content -LiteralPath $stderrFile -Raw -ErrorAction SilentlyContinue
         } else { '' }
@@ -187,6 +217,8 @@ function Invoke-SshScript {
         }
     }
     finally {
+        $ErrorActionPreference = $oldEap
+        if ($null -ne $nativeVar) { $PSNativeCommandUseErrorActionPreference = $oldNative }
         Remove-Item -LiteralPath $stderrFile -Force -ErrorAction SilentlyContinue
     }
 }
@@ -197,7 +229,6 @@ function Invoke-TargetStatus {
     $OperationalRoot = [string]$State.local.operational_root
     $KeyPath = [string]$State.local.ssh_key
     $TargetIp = [string]$State.target.public_ip
-    $TargetUser = 'azureuser'
     $KnownHosts = Get-LatestKnownHosts -OperationalRoot $OperationalRoot
 
     Require (Test-Path -LiteralPath $KeyPath -PathType Leaf) "SSH key not found: $KeyPath"
@@ -235,9 +266,6 @@ fi
 summary=$(ls -1t "$MIG"/v99-firstpass-*.json 2>/dev/null | head -n 1 || true)
 if [ -n "$summary" ]; then
   echo "SUMMARY=$summary"
-  echo 'SUMMARY_BEGIN'
-  cat "$summary"
-  echo 'SUMMARY_END'
 else
   echo 'SUMMARY='
 fi
@@ -248,7 +276,7 @@ df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "D
     $probe = Invoke-SshScript `
         -KeyPath $KeyPath `
         -KnownHosts $KnownHosts `
-        -Target "$TargetUser@$TargetIp" `
+        -Target "azureuser@$TargetIp" `
         -ScriptText $RemoteScript
 
     Require ($probe.ExitCode -eq 0) "Target status probe failed.`n$($probe.StdOut)`n$($probe.StdErr)"
@@ -267,9 +295,7 @@ df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "D
 
     $baseline = [double]$State.source.uploads_bytes_baseline
     $current = [double]$values.UPLOAD_BYTES
-    $pct = if ($baseline -gt 0) {
-        [Math]::Min(100,[Math]::Round(($current / $baseline) * 100,1))
-    } else { 0 }
+    $pct = if ($baseline -gt 0) { [Math]::Min(100,[Math]::Round(($current / $baseline) * 100,1)) } else { 0 }
 
     $processText = ''
     if ($stdout -match '(?s)PROCESS_BEGIN\s*(.*?)\s*PROCESS_END') {
@@ -295,8 +321,7 @@ df -B1 --output=size,used,avail,pcent /gpi-hub-data | tail -n 1 | awk '{print "D
     Write-Host 'Active transfer processes:'
     if ([string]::IsNullOrWhiteSpace($processText)) {
         Write-Host '  none detected'
-    }
-    else {
+    } else {
         $processText -split "`n" | ForEach-Object { Write-Host "  $_" }
     }
 
@@ -324,32 +349,27 @@ function Invoke-ConfiguredPhase {
             } while ($true)
             return
         }
-
         'run-script' {
             $Relative = [string]$State.script
             Require (-not [string]::IsNullOrWhiteSpace($Relative)) 'state.json run-script mode has no script path.'
             $PhaseScript = Join-Path $ToolRoot $Relative
             Require (Test-Path -LiteralPath $PhaseScript -PathType Leaf) "Phase script missing: $PhaseScript"
-
             Write-Host "Running repo-controlled phase: $($State.phase)" -ForegroundColor Cyan
             & pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $PhaseScript
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            return
+            exit $LASTEXITCODE
         }
-
         'hold' {
             Write-Host "Migration control is on HOLD: $($State.phase)" -ForegroundColor Yellow
             Write-Host ([string]$State.notes)
             return
         }
-
         default {
             throw "Unknown migration mode in state.json: $($State.mode)"
         }
     }
 }
 
-Write-Host 'GPI_MIGRATION_NATIVE_COMPATIBILITY=PASS' -ForegroundColor Green
+Write-Host 'GPI_MIGRATION_GIT_SHOW_TRANSPORT=PASS' -ForegroundColor Green
 
 if (-not $NoSelfUpdate) {
     Update-ControlFolder

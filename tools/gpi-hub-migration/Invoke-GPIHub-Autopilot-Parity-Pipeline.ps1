@@ -39,6 +39,15 @@ function Run-Phase {
     $Err = $null
 
     try {
+        $Tokens = $null
+        $ParseErrors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($Path,[ref]$Tokens,[ref]$ParseErrors)
+        if (@($ParseErrors).Count -gt 0) {
+            $ParseMessage = (@($ParseErrors) | ForEach-Object { $_.Message }) -join '; '
+            throw "Phase parser failed before execution: $ParseMessage"
+        }
+        Write-Host "AUTOPILOT_PHASE_PARSE=PASS|$Name" -ForegroundColor Green
+
         & $Path *>&1 | Tee-Object -FilePath $Log | ForEach-Object { Write-Host $_ }
     }
     catch {
@@ -74,6 +83,7 @@ Write-Host 'BC writes           : NONE'
 Write-Host 'SharePoint writes   : NONE'
 Write-Host 'Target recreate     : NONE IN THIS DRIVER'
 Write-Host 'Failure behavior    : INDEPENDENT READ-ONLY PHASES CONTINUE; FINAL SUMMARY FAILS CLOSED'
+Write-Host 'Parser policy       : EVERY CHILD PHASE PARSED BEFORE EXECUTION'
 
 $Results = New-Object System.Collections.Generic.List[object]
 

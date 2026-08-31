@@ -22,8 +22,10 @@ from urllib.parse import quote, unquote
 import httpx
 
 from services.ap_bc_routing_context_service import resolve_ap_routing_context
+from services.ap_routing_decision_service import route_is_allowed
 from services.ap_routing_learning_service import (
     LABEL_SOURCE_ACCOUNTING_TEMP,
+    normalize_route_path,
     prepare_routing_example,
     upsert_routing_example,
 )
@@ -71,6 +73,82 @@ def _supported_file(name: str) -> bool:
     return Path(str(name or "")).suffix.lower() in SUPPORTED_EXTENSIONS
 
 
+def _static_contract_routes(contract: Optional[Dict[str, Any]]) -> List[str]:
+    if not contract:
+        return []
+    routes = {
+        normalize_route_path(route)
+        for route in (contract.get("static_routes") or [])
+        if normalize_route_path(route)
+    }
+    return sorted(routes, key=lambda value: (value.count("/"), len(value)), reverse=True)
+
+
+def _nearest_static_contract_route(
+    raw_route: str,
+    contract: Optional[Dict[str, Any]],
+) -> str:
+    """Collapse a live placement to the nearest routable Accounting queue.
+
+    The AP Temp tree contains many nested work/archive folders beneath queues:
+    years under DO NOT PAY, customer return folders under Canpack, issue folders,
+    completed folders, and project folders. Those are useful provenance but are
+    not necessarily intake destinations. The versioned routing contract defines
+    the queue boundary. Verified dynamic routes are recovered after BC hydration.
+    """
+    normalized = normalize_route_path(raw_route)
+    if not normalized:
+        return ""
+    if not contract:
+        return normalized
+
+    for route in _static_contract_routes(contract):
+        if normalized == route or normalized.startswith(route + "/"):
+            return route
+    return ""
+
+
+def _canonicalize_discovered_labels(
+    labels: List[Dict[str, Any]],
+    contract: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Preserve raw placement while mapping examples to legitimate route queues."""
+    if not contract:
+        copied = [dict(label) for label in labels]
+        return {
+            "labels": copied,
+            "canonical_route_counts": dict(Counter(normalize_route_path(x.get("route_path")) for x in copied)),
+            "collapsed_path_count": 0,
+            "unmapped_route_counts": {},
+        }
+
+    canonical: List[Dict[str, Any]] = []
+    collapsed = 0
+    unmapped = Counter()
+    for label in labels:
+        raw_route = normalize_route_path(label.get("route_path"))
+        queue_route = _nearest_static_contract_route(raw_route, contract)
+        if not queue_route:
+            unmapped[raw_route or "<root>"] += 1
+            continue
+        item = dict(label)
+        item["source_route_path"] = raw_route
+        item["route_path"] = queue_route
+        item["route_label_resolution"] = (
+            "exact_static_queue" if raw_route == queue_route else "nearest_static_queue"
+        )
+        if raw_route != queue_route:
+            collapsed += 1
+        canonical.append(item)
+
+    return {
+        "labels": canonical,
+        "canonical_route_counts": dict(Counter(x["route_path"] for x in canonical)),
+        "collapsed_path_count": collapsed,
+        "unmapped_route_counts": dict(unmapped),
+    }
+
+
 async def _graph_get(client: httpx.AsyncClient, token: str, url: str) -> Dict[str, Any]:
     response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
     response.raise_for_status()
@@ -106,7 +184,7 @@ async def discover_accounting_temp_labels(
     max_files: int = 50000,
     include_review_root: bool = False,
 ) -> Dict[str, Any]:
-    """Enumerate Temp files and their human-assigned parent queue read-only."""
+    """Enumerate Temp files and their human-assigned parent placement read-only."""
     token = await _get_graph_token()
     timeout = httpx.Timeout(GRAPH_TIMEOUT, connect=20.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
@@ -197,13 +275,18 @@ def _extract_text_excerpt(file_path: str, max_pages: int = 5, max_chars: int = 1
         return ""
 
 
-async def hydrate_accounting_label(label: Dict[str, Any]) -> Dict[str, Any]:
+async def hydrate_accounting_label(
+    label: Dict[str, Any],
+    *,
+    routing_contract: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Turn one Accounting placement into an evidence-rich supervised example.
 
     Hydration intentionally uses the same primary-document guard proven by the
-    V115 Tumalo golden: page-1 purpose is protected by pypdf when semantics are
-    clear, while Gemini still contributes richer extracted fields. Supporting
-    pages remain separate evidence and Business Central resolution stays read-only.
+    V115 Tumalo golden. A raw nested Accounting placement is retained for audit,
+    but its supervised route label is the contract-valid queue boundary. A
+    one-level dynamic route is retained only when the hydrated BC context makes
+    that exact route contract-valid.
     """
     file_name = str(label["file_name"])
     suffix = Path(file_name).suffix or ".bin"
@@ -235,14 +318,29 @@ async def hydrate_accounting_label(label: Dict[str, Any]) -> Dict[str, Any]:
             or ((bc_context.get("live_bc_context") or {}).get("bc_vendor_name"))
             or ""
         )
+
+        queue_route = normalize_route_path(label.get("route_path"))
+        source_route = normalize_route_path(label.get("source_route_path") or queue_route)
+        label_resolution = str(label.get("route_label_resolution") or "raw_accounting_placement")
+        if (
+            routing_contract
+            and source_route
+            and source_route != queue_route
+            and route_is_allowed(source_route, routing_contract, bc_context)
+        ):
+            queue_route = source_route
+            label_resolution = "verified_dynamic_route"
+
         return prepare_routing_example(
             {
                 "label_source": LABEL_SOURCE_ACCOUNTING_TEMP,
                 "source_item_id": label["item_id"],
                 "source_drive_id": label["drive_id"],
                 "source_web_url": label.get("web_url"),
+                "source_route_path": source_route,
+                "route_label_resolution": label_resolution,
                 "file_name": file_name,
-                "route_path": label["route_path"],
+                "route_path": queue_route,
                 "vendor_name": vendor_name,
                 "document_type": primary_type,
                 "classification_confidence": primary.get("confidence"),
@@ -277,7 +375,7 @@ def _balanced_sample(
         by_route[label["route_path"]].append(label)
 
     selected: List[Dict[str, Any]] = []
-    # Round-robin across routes to prevent giant queues from dominating.
+    # Round-robin across routable queues to prevent giant queues from dominating.
     ordered_routes = sorted(by_route, key=lambda r: len(by_route[r]), reverse=True)
     indices = {route: 0 for route in ordered_routes}
     while len(selected) < max_total:
@@ -304,18 +402,30 @@ async def build_supervised_routing_corpus(
     max_total: int = 500,
     concurrency: int = 2,
     persist: bool = False,
+    routing_contract: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Build a balanced evidence-rich corpus; persistence is explicit opt-in."""
+    """Build a balanced evidence-rich corpus; persistence is explicit opt-in.
+
+    When a routing contract is supplied, raw live folder placements are first
+    resolved to their nearest routable queue so nested work/archive structure is
+    not accidentally learned as an intake destination. The raw placement is
+    preserved on every example for audit and verified dynamic routes may be
+    restored after BC context hydration.
+    """
     discovered = await discover_accounting_temp_labels(max_files=discovery_max_files)
+    label_resolution = _canonicalize_discovered_labels(discovered["files"], routing_contract)
     selected = _balanced_sample(
-        discovered["files"], max_per_route=max_per_route, max_total=max_total
+        label_resolution["labels"], max_per_route=max_per_route, max_total=max_total
     )
     semaphore = asyncio.Semaphore(max(1, concurrency))
 
     async def hydrate(label):
         async with semaphore:
             try:
-                example = await hydrate_accounting_label(label)
+                example = await hydrate_accounting_label(
+                    label,
+                    routing_contract=routing_contract,
+                )
                 if persist:
                     if db is None:
                         raise ValueError("db is required when persist=True")
@@ -327,6 +437,7 @@ async def build_supervised_routing_corpus(
                     "ok": False,
                     "file_name": label.get("file_name"),
                     "route_path": label.get("route_path"),
+                    "source_route_path": label.get("source_route_path") or label.get("route_path"),
                     "error": f"{type(exc).__name__}:{exc}"[:500],
                 }
 
@@ -337,8 +448,14 @@ async def build_supervised_routing_corpus(
         "authority": discovered["authority"],
         "discovered_file_count": discovered["file_count"],
         "discovered_route_counts": discovered["route_counts"],
+        "canonical_discovered_route_counts": label_resolution["canonical_route_counts"],
+        "collapsed_route_path_count": label_resolution["collapsed_path_count"],
+        "unmapped_route_counts": label_resolution["unmapped_route_counts"],
         "selected_count": len(selected),
+        "selected_route_counts": dict(Counter(x["route_path"] for x in selected)),
         "hydrated_count": len(examples),
+        "hydrated_route_counts": dict(Counter(x.get("route_path") or "" for x in examples)),
+        "route_label_resolution_counts": dict(Counter(x.get("route_label_resolution") or "unknown" for x in examples)),
         "failure_count": len(failures),
         "persisted": persist,
         "examples": examples,

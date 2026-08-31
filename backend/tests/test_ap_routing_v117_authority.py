@@ -94,12 +94,13 @@ def test_stable_vendor_stop_pay_consensus_overrides_generic_cost_variance_model(
             llm_send=_sender("Warehouse Not International/Temp - Cost Variance for POs"),
         )
     )
+    assert result["pre_authority_guard_decision"] == "needs_review"
+    assert result["pre_authority_guard_route"] == ""
     assert result["decision"] == "auto_route"
     assert result["route_path"] == "DO NOT PAY"
-    assert result["authority_guard"]["action"] in {
-        "override_stop_pay_stable_consensus",
-        "override_stable_vendor_semantic_consensus",
-    }
+    assert result["authority_guard"]["raw_model_route"] == "Warehouse Not International/Temp - Cost Variance for POs"
+    assert result["authority_guard"]["stable_vendor_route"] == "DO NOT PAY"
+    assert result["authority_guard"]["action"] == "promote_stable_vendor_semantic_consensus"
 
 
 def test_variable_vendor_standard_order_cannot_auto_route_to_warehouse_by_majority():

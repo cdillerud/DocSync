@@ -1,5 +1,5 @@
 {
-  "version": "2026-08-30-prod-temp-v1",
+  "version": "2026-08-31-prod-temp-v2",
   "authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder read-only snapshot",
   "base_path": "General/Accounting/Accounts Payable/Temp Folder",
   "review_route": "",
@@ -50,6 +50,12 @@
     "Warehouse Not International/UPS Orders",
     "Warehouse Not International/WTR Transfers"
   ],
+  "learning_excluded_routes": [
+    "Vendor Credit Memos/Processed Credit Memo - Aaron"
+  ],
+  "manual_only_routes": [
+    "Vendor Credit Memos/Processed Credit Memo - Aaron"
+  ],
   "dynamic_routes": [
     {
       "prefix": "Dropship International",
@@ -72,7 +78,9 @@
   ],
   "notes": [
     "DocsNAV/Zetadocs archive paths are not routing authority.",
-    "Carrier identity alone is not a route. Tumalo has current labeled examples in both Warehouse Not International and Dropship Not International/Freight.",
+    "Carrier identity alone is not a route. Tumalo has current labeled examples in multiple Accounting workflows.",
+    "Raw nested Accounting placement is retained as provenance, but supervised learning uses only contract-defined intake queues.",
+    "Vendor Credit Memos/Processed Credit Memo - Aaron is a downstream processed state exposed by V116 and is excluded from supervised intake labels and automatic routing authority.",
     "Top-level Freight Issues is intentionally absent because Production uses Dropship Not International/Freight/Freight Issues.",
     "Ball Dunnage is intentionally absent because current Production Vendor Credit Memos uses Ball Detention Credits and Ball Pallets.",
     "Static processor queues reflect the read-only Production snapshot and must be refreshed when Accounting changes its Temp structure."

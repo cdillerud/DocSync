@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import httpx
 
@@ -26,6 +26,8 @@ from services.ap_routing_corpus_service import (
     hydrate_accounting_label,
 )
 from services.ap_routing_learning_service import normalize_vendor_name
+
+ProgressCallback = Callable[[int, int, Dict[str, Any]], None]
 
 
 def _compact(value: Any) -> str:
@@ -159,6 +161,21 @@ def _round_robin_vendor_routes(
     return selected
 
 
+def _emit_progress(
+    callback: Optional[ProgressCallback],
+    completed: int,
+    total: int,
+    row: Dict[str, Any],
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(completed, total, row)
+    except Exception:
+        # Progress telemetry must never change routing evaluation semantics.
+        return
+
+
 async def expand_high_value_vendor_corpus(
     base_examples: List[Dict[str, Any]],
     *,
@@ -169,12 +186,17 @@ async def expand_high_value_vendor_corpus(
     max_additional: int = 180,
     concurrency: int = 2,
     retry_count: int = 3,
+    progress_callback: Optional[ProgressCallback] = None,
 ) -> Dict[str, Any]:
     """Add more live labels for high-value/variable vendors, read-only.
 
     Selection uses vendor identity in filenames only to decide which documents to
     hydrate. It never uses an expected route to predict another route. The live
     Accounting parent queue remains the supervised label after hydration.
+
+    `progress_callback`, when supplied, receives each completion as
+    `(completed, total, result_row)`. It is telemetry only; callback failures are
+    deliberately ignored so observability cannot affect evaluation behavior.
     """
     targets = _target_vendors(base_examples, max_vendors=max_vendors)
     if not targets:
@@ -267,7 +289,19 @@ async def expand_high_value_vendor_corpus(
                 "error": f"{type(last_error).__name__}:{last_error}"[:500] if last_error else "unknown",
             }
 
-    results = await asyncio.gather(*(hydrate(vendor_key, label) for vendor_key, label in selected_pairs))
+    tasks = [
+        asyncio.create_task(hydrate(vendor_key, label))
+        for vendor_key, label in selected_pairs
+    ]
+    results: List[Dict[str, Any]] = []
+    total = len(tasks)
+    completed = 0
+    for task in asyncio.as_completed(tasks):
+        row = await task
+        results.append(row)
+        completed += 1
+        _emit_progress(progress_callback, completed, total, row)
+
     examples = [row["example"] for row in results if row.get("ok")]
     failures = [row for row in results if not row.get("ok")]
 

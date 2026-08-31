@@ -1,6 +1,6 @@
 import asyncio
 
-from services.ap_routing_authority_guard_service import decide_ap_route_with_authority_guard
+from services.ap_routing_runtime_authority_service import decide_ap_route_with_authority_guard
 
 
 CONTRACT = {
@@ -213,6 +213,54 @@ def test_foreign_reference_collision_is_blocked_when_model_cites_foreign_referen
     assert any("different vendor" in blocker for blocker in result["authority_guard"]["blockers"])
 
 
+def test_sparse_warehouse_reference_blocks_generic_tooling_auto_without_vendor_history():
+    result = asyncio.run(
+        decide_ap_route_with_authority_guard(
+            None,
+            document=_doc(
+                "Evergreen Resources",
+                "W118614 Evergreen_PS-INV260828_06172026 - delayed to mid-September.pdf",
+                "international warehouse shipment delayed tooling charge",
+            ),
+            bc_context={"status": "not_found", "verified_order_numbers": []},
+            contract=CONTRACT,
+            examples=[],
+            support_examples=[],
+            llm_send=_sender("Tooling Invoices", confidence=0.99),
+        )
+    )
+    assert result["pre_runtime_authority_decision"] == "auto_route"
+    assert result["pre_runtime_authority_route"] == "Tooling Invoices"
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["authority_guard"]["action"] == "force_review"
+    assert result["runtime_authority_overlay"]["warehouse_reference_tokens"] == ["W118614"]
+    assert result["runtime_authority_overlay"]["same_vendor_tooling_label_count"] == 0
+    assert any("Tooling Invoices" in blocker for blocker in result["authority_guard"]["blockers"])
+
+
+def test_repeated_same_vendor_tooling_history_can_authorize_warehouse_linked_tooling():
+    vendor = "Known Tooling Supplier"
+    examples = [
+        _example(vendor, "Tooling Invoices", "W118500_KnownTooling_1001.pdf", "tooling charge", po="W118500"),
+        _example(vendor, "Tooling Invoices", "W118501_KnownTooling_1002.pdf", "tooling charge", po="W118501"),
+    ]
+    context = {"status": "resolved", "po_number": "W118502", "verified_order_numbers": ["W118502"]}
+    result = asyncio.run(
+        decide_ap_route_with_authority_guard(
+            None,
+            document=_doc(vendor, "W118502_KnownTooling_1003.pdf", "tooling charge"),
+            bc_context=context,
+            contract=CONTRACT,
+            examples=examples,
+            support_examples=examples,
+            llm_send=_sender("Tooling Invoices", confidence=0.99, bc_refs=["W118502"]),
+        )
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "Tooling Invoices"
+
+
 def test_sparse_warehouse_reference_with_independent_warehouse_semantics_blocks_generic_tooling_auto():
     examples = [
         _example(
@@ -255,4 +303,4 @@ def test_sparse_warehouse_reference_with_independent_warehouse_semantics_blocks_
     )
     assert result["decision"] == "needs_review"
     assert result["route_path"] == ""
-    assert any("full-corpus evidence" in blocker for blocker in result["authority_guard"]["blockers"])
+    assert result["authority_guard"]["action"] == "force_review"

@@ -1,5 +1,5 @@
 {
-  "schema_version": "4.2",
+  "schema_version": "4.3",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V117_AP_ROUTING_EVIDENCE_AUTHORITY_HELDOUT",
   "mode": "run-script",
@@ -96,10 +96,40 @@
       "production_mutation": false,
       "gate": "FAIL_WRONG_AUTO_ROUTE_EXIT_91"
     },
+    "v117_rev1_measured_result": {
+      "status": "FAIL_ONE_WRONG_AUTO_ROUTE_AND_LOW_COVERAGE",
+      "feature_commit": "b143802bc9fe8659fccaa49a01fd806ee8f5e900",
+      "focused_regressions": "PASS_6_OF_6",
+      "discovered_live_files": 2934,
+      "base_selected": 163,
+      "base_hydrated": 148,
+      "base_hydration_failures": 15,
+      "targeted_expansion_selected": 149,
+      "targeted_expansion_hydrated": 33,
+      "targeted_expansion_failures": 116,
+      "merged_labels": 181,
+      "holdout": 25,
+      "auto_routed": 11,
+      "reviewed": 14,
+      "coverage": 0.44,
+      "auto_route_accuracy": 0.9091,
+      "wrong_auto_routes": 1,
+      "remaining_unsafe_case": "Evergreen W118614 Evergreen_PS-INV260828_06172026 - delayed to mid-September.pdf: expected Warehouse International; model auto-selected Tooling Invoices; authority guard allowed existing decision with no same-vendor/full-support evidence",
+      "closed_unsafe_classes": [
+        "Tumalo 110784B unsafe Warehouse auto-selection now fails closed to review",
+        "Graphic Packaging cost-is-wrong now routes correctly to DO NOT PAY"
+      ],
+      "infrastructure_finding": "targeted expansion was severely degraded by repeated 30-second ServerSelectionTimeoutError failures resolving mongodb:27017; 116 of 149 targeted expansion hydrations failed",
+      "gate": "FAIL_WRONG_AUTO_ROUTE_EXIT_91",
+      "source_health_after": 200,
+      "temp_cleanup": true,
+      "source_runtime_unchanged": true,
+      "production_mutation": false
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "b143802bc9fe8659fccaa49a01fd806ee8f5e900",
-      "status": "V117_FAST_REGRESSIONS_ASSERT_EXACT_SAFE_AUTHORITY_PATHS_THEN_TARGETED_VENDOR_EXPANSION_AND_STABLE_HELDOUT",
+      "commit": "834eaed10b7285177544864a995eb9da647d2313",
+      "status": "V117_REV2_EVERGREEN_FAIL_CLOSED_MONGO_RESILIENT_CONTEXT_AND_VISIBLE_EXPANSION_PROGRESS",
       "runtime_authority": false
     },
     "accounting_temp_routing_authority": "PROVEN_READ_ONLY_PRODUCTION",
@@ -112,7 +142,7 @@
     "routing_label_authority": "GamerAccounting AP Temp placement at a contract-defined intake queue plus explicit reviewer corrections",
     "legacy_nav_role": "historical vendor/layout coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "b143802bc9fe8659fccaa49a01fd806ee8f5e900",
+    "feature_commit": "834eaed10b7285177544864a995eb9da647d2313",
     "pipeline": [
       "primary-document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting-reference extraction",
@@ -124,7 +154,10 @@
       "variable-vendor semantic/context discrimination; vendor frequency and generic filename shape cannot grant authority",
       "order/reference-family safety veto for warehouse-versus-dropship contradictions",
       "cross-vendor exact-reference veto only when the model actually relies on the foreign evidence",
+      "final sparse-risk runtime overlay: warehouse-prefixed documents cannot auto-route to Tooling Invoices without repeated same-vendor Accounting Tooling evidence",
       "targeted read-only corpus expansion for high-value/variable vendors after route-balanced base sampling",
+      "evaluation-only resilient BC context: use normal cache-first resolution while healthy, then latch to live-BC-only reads after Mongo DNS failure",
+      "visible targeted-expansion progress telemetry without changing evaluation semantics",
       "versioned live Accounting Temp route contract",
       "explicit correction becomes higher-weight supervised evidence",
       "shadow-first integration only after measured held-out promotion gates"
@@ -143,8 +176,8 @@
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
       "execution_mode": "FAST_SYNTHETIC_REGRESSION_GATE_THEN_READ_ONLY_LIVE_ACCOUNTING_CORPUS",
-      "status": "NEXT",
-      "objective": "Close all three V116 REV3 unsafe-auto classes, expand high-value/variable vendor labels toward 30 each, then rerun the stable heldout gate without reducing the zero-wrong or 90-percent coverage targets."
+      "status": "IN_PROGRESS_REV2",
+      "objective": "Re-run after closing the remaining Evergreen unsafe-auto class and preventing Mongo DNS loss from discarding targeted labels. Gate remains zero wrong auto-routes, 100% auto-route accuracy, and at least 90% coverage."
     },
     {
       "sequence": 2,
@@ -183,5 +216,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "If V117 reaches zero wrong automatic routes, 100% automatic accuracy, and at least 90% heldout coverage, integrate the learned AP router shadow-first in UAT while the deterministic route remains authoritative and accumulate real intake telemetry. Production remains untouched until explicit authorization.",
-  "notes": "Detailed V115/V116 history remains preserved in Git history through control commit 538f5180071ce40dcd833b28734f9b4cbfe89d2c. V117 does not lower the gate. It adds stable-workflow consensus, variable-workflow semantic discrimination, reference-family safety, narrower cross-vendor-reference dependence checks, and targeted vendor corpus expansion. The Tumalo fixture explicitly recreates the V116 pre-authority Warehouse selection before asserting forced review. The Graphic fixture explicitly asserts the unsafe raw cost-variance proposal, pre-authority review state, stable DO NOT PAY evidence, and evidence-backed promotion to DO NOT PAY."
+  "notes": "Detailed V115/V116 history remains preserved in Git history. V117 REV1 measured 25 holdouts, 11 auto-routes, 14 reviews, 44% coverage, 90.91% auto accuracy, and one wrong auto-route; runtime authority remained blocked. REV1 also exposed a severe evaluation infrastructure defect: 116 of 149 targeted expansion hydrations failed after Mongo DNS loss, causing long opaque runtime and starving the expanded corpus. REV2 keeps every promotion threshold unchanged, adds a narrow fail-closed warehouse-reference-versus-Tooling safety overlay, adds evaluation-only live-BC fallback after Mongo failure, and emits expansion progress every ten completions."
 }

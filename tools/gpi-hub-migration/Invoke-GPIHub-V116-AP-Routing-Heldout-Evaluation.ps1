@@ -13,7 +13,7 @@ $KeyPath = [string]$State.local.ssh_key
 $SourceIp = [string]$State.source.public_ip
 $FeatureBranch = 'feature/ap-ai-routing-learning'
 $FeatureRef = 'refs/remotes/origin/feature/ap-ai-routing-learning'
-$ExpectedFeatureCommit = 'be1b3ad44e1aa7f97fd0ff6102d0638acc04a7a8'
+$ExpectedFeatureCommit = 'ee75f8dbea0a72f1184b5e241f100bf8df83b17f'
 $ExpectedBackendImage = 'sha256:646051f6b0434b20ad429dec18c5f7b2a7d017c0fdec94f4bd77eaa7375fabb3'
 $ExpectedHelperSha = '2d2298b9c7e6315745d814e5437687caf463a44dec24d73d710b6d9e4e772117'
 $Stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMddTHHmmssZ')
@@ -136,6 +136,7 @@ try {
     Section 'V116 - AP ROUTING BROAD HELD-OUT EVALUATION'
     Write-Host 'Classification       : PARITY BLOCKER / MEASURED AUTOMATION'
     Write-Host 'Routing label truth  : LIVE GamerAccounting AP Temp placement (READ ONLY)'
+    Write-Host 'Label boundary       : NEAREST CONTRACT-VALID INTAKE QUEUE; RAW NESTED PLACEMENT RETAINED FOR AUDIT'
     Write-Host 'Evaluation design    : BALANCED LIVE CORPUS + STABLE 80/20 HOLDOUT'
     Write-Host 'Few-shot design      : MAX 8 / SIMILAR + ROUTE-DIVERSE / TRAIN SPLIT ONLY'
     Write-Host 'Promotion targets    : ZERO WRONG AUTO-ROUTES / 100% AUTO ACCURACY / >=90% COVERAGE'
@@ -279,22 +280,11 @@ from services.ap_routing_evaluation_service import (
 from services.ap_routing_learning_service import normalize_vendor_name
 
 EXPECTED_AUTHORITY='gamerpackaging1.sharepoint.com/sites/GamerAccounting/General/Accounting/Accounts Payable/Temp Folder'
-FEATURE_COMMIT='be1b3ad44e1aa7f97fd0ff6102d0638acc04a7a8'
+FEATURE_COMMIT='ee75f8dbea0a72f1184b5e241f100bf8df83b17f'
 
 
 def load_contract():
     return json.loads(Path(CANDIDATE+'/config/ap_routing_contract.v1.json').read_text(encoding='utf-8'))
-
-
-def contract_route_known(route, contract):
-    route=str(route or '').strip('/')
-    if route in set(contract.get('static_routes') or []):
-        return True
-    for rule in contract.get('dynamic_routes') or []:
-        prefix=str(rule.get('prefix') or '').strip('/')
-        if prefix and route.startswith(prefix+'/'):
-            return True
-    return False
 
 
 async def main():
@@ -307,6 +297,7 @@ async def main():
         max_total=80,
         concurrency=2,
         persist=False,
+        routing_contract=contract,
     )
     authority=str(corpus.get('authority') or '')
     if authority != EXPECTED_AUTHORITY:
@@ -316,20 +307,24 @@ async def main():
 
     print('V116_ACCOUNTING_AUTHORITY='+authority,flush=True)
     print('V116_DISCOVERED_FILE_COUNT='+str(corpus.get('discovered_file_count')),flush=True)
-    print('V116_DISCOVERED_ROUTE_COUNTS='+json.dumps(corpus.get('discovered_route_counts') or {},sort_keys=True),flush=True)
+    print('V116_RAW_PLACEMENT_COUNTS='+json.dumps(corpus.get('discovered_route_counts') or {},sort_keys=True),flush=True)
+    print('V116_CANONICAL_QUEUE_COUNTS='+json.dumps(corpus.get('canonical_discovered_route_counts') or {},sort_keys=True),flush=True)
+    print('V116_COLLAPSED_NESTED_PLACEMENTS='+str(corpus.get('collapsed_route_path_count') or 0),flush=True)
+    print('V116_UNMAPPED_QUEUE_COUNTS='+json.dumps(corpus.get('unmapped_route_counts') or {},sort_keys=True),flush=True)
     print('V116_SELECTED_COUNT='+str(corpus.get('selected_count')),flush=True)
+    print('V116_SELECTED_ROUTE_COUNTS='+json.dumps(corpus.get('selected_route_counts') or {},sort_keys=True),flush=True)
     print('V116_HYDRATED_COUNT='+str(corpus.get('hydrated_count')),flush=True)
+    print('V116_HYDRATED_ROUTE_COUNTS='+json.dumps(corpus.get('hydrated_route_counts') or {},sort_keys=True),flush=True)
+    print('V116_ROUTE_LABEL_RESOLUTION_COUNTS='+json.dumps(corpus.get('route_label_resolution_counts') or {},sort_keys=True),flush=True)
     print('V116_HYDRATION_FAILURE_COUNT='+str(corpus.get('failure_count')),flush=True)
     for failure in (corpus.get('failures') or [])[:20]:
         print('V116_HYDRATION_FAILURE='+json.dumps(failure,sort_keys=True,default=str),flush=True)
 
-    discovered_routes=list((corpus.get('discovered_route_counts') or {}).keys())
-    drift=sorted(route for route in discovered_routes if not contract_route_known(route,contract))
-    print('V116_CONTRACT_DRIFT_ROUTES='+json.dumps(drift),flush=True)
-    if drift:
-        print('V116_CONTRACT_DRIFT=FAIL',flush=True)
+    unmapped=corpus.get('unmapped_route_counts') or {}
+    if unmapped:
+        print('V116_CONTRACT_QUEUE_MAPPING=FAIL_UNMAPPED_ANCESTRY',flush=True)
         raise SystemExit(94)
-    print('V116_CONTRACT_DRIFT=PASS',flush=True)
+    print('V116_CONTRACT_QUEUE_MAPPING=PASS',flush=True)
 
     examples=list(corpus.get('examples') or [])
     if len(examples)<20:
@@ -388,11 +383,18 @@ async def main():
         })
 
     summary={
-        'schema_version':'1.0',
+        'schema_version':'1.1',
         'feature_commit':FEATURE_COMMIT,
         'authority':authority,
+        'raw_placement_count':sum((corpus.get('discovered_route_counts') or {}).values()),
+        'canonical_queue_counts':corpus.get('canonical_discovered_route_counts'),
+        'collapsed_nested_placements':corpus.get('collapsed_route_path_count'),
+        'unmapped_queue_counts':unmapped,
         'selected_count':corpus.get('selected_count'),
+        'selected_route_counts':corpus.get('selected_route_counts'),
         'hydrated_count':len(examples),
+        'hydrated_route_counts':corpus.get('hydrated_route_counts'),
+        'route_label_resolution_counts':corpus.get('route_label_resolution_counts'),
         'hydration_failure_count':corpus.get('failure_count'),
         'train_count':evaluation.get('train_count'),
         'holdout_count':evaluation.get('holdout_count'),

@@ -22,7 +22,7 @@ import hashlib
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 
 COLLECTION = "ap_routing_examples"
@@ -47,6 +47,46 @@ _CORP_SUFFIX = re.compile(
     r"\b(incorporated|inc|llc|ltd|limited|corp|corporation|company|co)\b",
     re.IGNORECASE,
 )
+
+# Route-neutral retrieval stopwords. These remove boilerplate that otherwise
+# makes unrelated invoices appear similar while preserving meaningful words such
+# as freight, customs, dunnage, tooling, warehouse, pallet, storage, receipt,
+# reconciliation, detention, etc. No route name is encoded here.
+_TEXT_STOPWORDS = {
+    "invoice",
+    "invoices",
+    "credit",
+    "memo",
+    "purchase",
+    "order",
+    "number",
+    "date",
+    "amount",
+    "total",
+    "page",
+    "vendor",
+    "customer",
+    "gamer",
+    "packaging",
+    "document",
+    "documents",
+    "payment",
+    "terms",
+    "description",
+    "quantity",
+    "price",
+    "unit",
+    "each",
+    "please",
+    "thank",
+    "account",
+    "address",
+    "phone",
+    "email",
+    "sales",
+    "subtotal",
+    "balance",
+}
 
 
 def _now() -> str:
@@ -150,14 +190,69 @@ def _bc_context_signature(context: Optional[Dict[str, Any]]) -> Dict[str, str]:
     }
 
 
+def _flatten_text(value: Any, *, max_items: int = 40) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        chunks: List[str] = []
+        for key, item in list(value.items())[:max_items]:
+            chunks.append(str(key))
+            chunks.append(_flatten_text(item, max_items=max_items))
+        return " ".join(chunks)
+    if isinstance(value, (list, tuple, set)):
+        return " ".join(_flatten_text(item, max_items=max_items) for item in list(value)[:max_items])
+    return str(value)
+
+
+def _evidence_tokens(
+    *,
+    file_name: Any = "",
+    raw_text: Any = "",
+    extracted_fields: Optional[Dict[str, Any]] = None,
+    max_tokens: int = 400,
+) -> Set[str]:
+    text = " ".join(
+        [
+            str(file_name or ""),
+            str(raw_text or "")[:12000],
+            _flatten_text(extracted_fields or {}),
+        ]
+    ).lower()
+    tokens: List[str] = []
+    for token in re.findall(r"[a-z][a-z0-9'-]{3,}", text):
+        normalized = token.strip("'-")
+        if len(normalized) < 4 or normalized in _TEXT_STOPWORDS:
+            continue
+        if normalized.isdigit():
+            continue
+        tokens.append(normalized)
+        if len(tokens) >= max_tokens:
+            break
+    return set(tokens)
+
+
+def _filename_tokens(value: Any) -> Set[str]:
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+    return _evidence_tokens(file_name=name, max_tokens=80)
+
+
 def score_example_similarity(
     example: Dict[str, Any],
     *,
     vendor_name: str = "",
     document_type: str = "",
     bc_context: Optional[Dict[str, Any]] = None,
+    file_name: str = "",
+    raw_text: str = "",
+    extracted_fields: Optional[Dict[str, Any]] = None,
 ) -> float:
-    """Deterministic retrieval score; the LLM never chooses its own examples."""
+    """Deterministic route-neutral retrieval score; the LLM never picks context.
+
+    Beyond vendor/document/BC similarity, compare lexical document evidence so a
+    sparse or new vendor receives examples that resemble the current document's
+    purpose instead of an arbitrary set of generic AP invoices. The scoring does
+    not inspect route names and cannot assign a route by itself.
+    """
     score = float(example.get("label_weight") or 0.0)
     wanted_vendor = normalize_vendor_name(vendor_name)
     example_vendor = normalize_vendor_name(
@@ -185,6 +280,26 @@ def score_example_similarity(
     if wanted_ctx["bc_entity_type"] and wanted_ctx["bc_entity_type"] == example_ctx["bc_entity_type"]:
         score += 0.5
 
+    current_filename_tokens = _filename_tokens(file_name)
+    example_filename_tokens = _filename_tokens(example.get("file_name"))
+    filename_overlap = current_filename_tokens.intersection(example_filename_tokens)
+    if filename_overlap:
+        score += min(4.0, 1.25 * len(filename_overlap))
+
+    current_tokens = _evidence_tokens(
+        file_name=file_name,
+        raw_text=raw_text,
+        extracted_fields=extracted_fields,
+    )
+    example_tokens = _evidence_tokens(
+        file_name=example.get("file_name"),
+        raw_text=example.get("raw_text_excerpt") or example.get("raw_text") or "",
+        extracted_fields=example.get("extracted_fields") or {},
+    )
+    body_overlap = current_tokens.intersection(example_tokens) - filename_overlap
+    if body_overlap:
+        score += min(3.0, 0.25 * len(body_overlap))
+
     if example.get("reviewer_corrected"):
         score += 1.0
     return round(score, 4)
@@ -196,6 +311,9 @@ async def select_few_shot_examples(
     vendor_name: str = "",
     document_type: str = "",
     bc_context: Optional[Dict[str, Any]] = None,
+    file_name: str = "",
+    raw_text: str = "",
+    extracted_fields: Optional[Dict[str, Any]] = None,
     limit: int = 8,
     candidate_limit: int = 250,
 ) -> List[Dict[str, Any]]:
@@ -203,6 +321,8 @@ async def select_few_shot_examples(
 
     We intentionally prefer diversity across route labels so variable vendors
     such as Tumalo do not teach the model a false one-vendor/one-folder rule.
+    Route-neutral lexical evidence now ranks the candidate pool before diversity
+    is applied, making sparse-vendor context materially more relevant.
     """
     vendor_key = normalize_vendor_name(vendor_name)
     query: Dict[str, Any] = {"active": True, "label_source": {"$in": list(ROUTING_LABEL_SOURCES)}}
@@ -226,7 +346,13 @@ async def select_few_shot_examples(
     ranked = sorted(
         rows,
         key=lambda r: score_example_similarity(
-            r, vendor_name=vendor_name, document_type=document_type, bc_context=bc_context
+            r,
+            vendor_name=vendor_name,
+            document_type=document_type,
+            bc_context=bc_context,
+            file_name=file_name,
+            raw_text=raw_text,
+            extracted_fields=extracted_fields,
         ),
         reverse=True,
     )
@@ -234,7 +360,7 @@ async def select_few_shot_examples(
     selected: List[Dict[str, Any]] = []
     routes_seen = Counter()
 
-    # Pass 1: maximize route diversity.
+    # Pass 1: maximize route diversity after relevance ranking.
     for row in ranked:
         route = normalize_route_path(row.get("route_path"))
         if not route or routes_seen[route] > 0:

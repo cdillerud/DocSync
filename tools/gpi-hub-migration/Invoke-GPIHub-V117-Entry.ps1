@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '3e3ebadbeb52b06d4eaf20bc8bf35a65810bcbed'
+$ExpectedFeatureCommit = 'b2ae7a9ee09ca8064bef5585d5432a23f4f97e4b'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -51,20 +51,25 @@ $Raw = Replace-Required -Text $Raw `
     -New "FEATURE_COMMIT='$ExpectedFeatureCommit'" `
     -Marker 'probe feature commit evidence'
 
-$Raw = Replace-Required -Text $Raw `
-    -Old " '$CONTAINER_STAGE/services/ap_routing_decision_service.py' \\" `
-    -New " '$CONTAINER_STAGE/services/ap_routing_decision_service.py' \\`n '$CONTAINER_STAGE/services/ap_routing_authority_guard_service.py' \\`n '$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py' \\" `
-    -Marker 'V117 pycompile additions'
-
-$Raw = Replace-Required -Text $Raw `
-    -Old 'echo V116_CANDIDATE_PYCOMPILE=PASS' `
-    -New @'
+$FastGate = @'
 echo V116_CANDIDATE_PYCOMPILE=PASS
+
+docker exec "$backend" python -c 'import pytest; print("V117_PYTEST_VERSION=" + str(pytest.__version__))'
+echo V117_PYTEST_PREFLIGHT=PASS
+
+docker exec "$backend" sh -c "PYTHONPATH='$CONTAINER_STAGE:/app' python -m py_compile \
+ '$CONTAINER_STAGE/services/ap_routing_authority_guard_service.py' \
+ '$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py' \
+ '$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py'"
+echo V117_ADDITIVE_PYCOMPILE=PASS
 
 docker exec "$backend" sh -c "PYTHONPATH='$CONTAINER_STAGE:/app' python -m pytest -q '$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py'"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
-'@ `
-    -Marker 'focused V117 regression gate'
+'@
+$Raw = Replace-Required -Text $Raw `
+    -Old 'echo V116_CANDIDATE_PYCOMPILE=PASS' `
+    -New $FastGate `
+    -Marker 'focused V117 compile and regression gate'
 
 $Raw = Replace-Required -Text $Raw `
     -Old 'from services.ap_routing_corpus_service import build_supervised_routing_corpus' `
@@ -136,6 +141,8 @@ Require ($Raw.Contains($ExpectedFeatureCommit)) 'V117 generated script lacks exp
 Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')) 'V117 generated script lacks authority guard service.'
 Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
 Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
+Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
+Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_START=1')) 'V117 generated script lacks vendor expansion phase.'
 Require ($Raw.Contains('max_total=180')) 'V117 generated script lacks balanced base sample.'
 
@@ -157,6 +164,7 @@ Write-Host 'V117_VARIABLE_VENDOR_SEMANTIC_DISCRIMINATION=PASS' -ForegroundColor 
 Write-Host 'V117_ORDER_FAMILY_SAFETY=PASS' -ForegroundColor Green
 Write-Host 'V117_CROSS_VENDOR_REFERENCE_RELIANCE_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green
+Write-Host 'V117_FAST_REGRESSION_GATE=PASS' -ForegroundColor Green
 Write-Host 'V117_GENERATED_PARSE=PASS' -ForegroundColor Green
 Write-Host "V117_FEATURE_COMMIT=$ExpectedFeatureCommit"
 Write-Host "V117_GENERATED=$GeneratedPath"

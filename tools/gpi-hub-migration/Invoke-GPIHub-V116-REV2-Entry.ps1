@@ -13,6 +13,7 @@ $OperationalRoot = [string]$State.local.operational_root
 $ExpectedFeatureCommit = '6ea5910149e67010907763740eea00ea0c85a222'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v116-rev2-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V116-REV2-Generated.ps1'
+$GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -31,6 +32,7 @@ function Replace-Required {
 }
 
 Require (Test-Path -LiteralPath $BasePath -PathType Leaf) "Base V116 controller missing: $BasePath"
+Require (Test-Path -LiteralPath $StatePath -PathType Leaf) "V116 REV2 state missing: $StatePath"
 New-Item -ItemType Directory -Path $GeneratedRoot -Force | Out-Null
 $Raw = Get-Content -LiteralPath $BasePath -Raw
 
@@ -76,10 +78,19 @@ Require ($Raw.Contains('max_total=180')) 'V116 REV2 generated script lacks expan
 Require ($Raw.Contains('V116_EXCLUDED_LEARNING_FILE_COUNT')) 'V116 REV2 generated script lacks downstream-label diagnostics.'
 
 Set-Content -LiteralPath $GeneratedPath -Value $Raw -Encoding utf8 -NoNewline
+# The base V116 controller resolves state.json relative to its own script location.
+# Because REV2 is intentionally generated under diagnostics, colocate the exact
+# repo-controlled state beside it rather than changing the base controller's path semantics.
+Copy-Item -LiteralPath $StatePath -Destination $GeneratedStatePath -Force
+Require (Test-Path -LiteralPath $GeneratedStatePath -PathType Leaf) 'V116 REV2 generated state copy missing.'
+$GeneratedState = Get-Content -LiteralPath $GeneratedStatePath -Raw | ConvertFrom-Json -Depth 80
+Require ([string]$GeneratedState.phase -eq 'V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2') 'V116 REV2 generated state phase mismatch.'
+Require ([string]$GeneratedState.local.operational_root -eq $OperationalRoot) 'V116 REV2 generated state operational-root mismatch.'
 
 Write-Host 'V116_REV2_AUTHORITY_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V116_REV2_DOWNSTREAM_LABEL_EXCLUSION=PASS' -ForegroundColor Green
 Write-Host 'V116_REV2_EXPANDED_CORPUS=PASS' -ForegroundColor Green
+Write-Host 'V116_REV2_GENERATED_STATE=PASS' -ForegroundColor Green
 Write-Host "V116_REV2_FEATURE_COMMIT=$ExpectedFeatureCommit"
 Write-Host "V116_REV2_GENERATED=$GeneratedPath"
 

@@ -204,3 +204,48 @@ def test_foreign_reference_collision_is_blocked_when_model_cites_foreign_referen
     )
     assert result["decision"] == "needs_review"
     assert any("different vendor" in blocker for blocker in result["authority_guard"]["blockers"])
+
+
+def test_sparse_warehouse_reference_with_independent_warehouse_semantics_blocks_generic_tooling_auto():
+    examples = [
+        _example(
+            "Cargo Modules",
+            "Warehouse International",
+            "W118609_Cargo_invoice.pdf",
+            "international warehouse shipment delayed tooling charge",
+            po="W118609",
+        ),
+        _example(
+            "Hwa Hsia Glass",
+            "Warehouse International",
+            "W118610_HWA_invoice.pdf",
+            "international warehouse shipment delayed tooling charge",
+            po="W118610",
+        ),
+        _example(
+            "Strategic Supplier",
+            "Warehouse International",
+            "W118611_supplier_invoice.pdf",
+            "international warehouse shipment delayed tooling charge",
+            po="W118611",
+        ),
+    ]
+    context = {"status": "resolved", "po_number": "W118614", "verified_order_numbers": ["W118614"]}
+    result = asyncio.run(
+        decide_ap_route_with_authority_guard(
+            None,
+            document=_doc(
+                "Evergreen Resources",
+                "W118614 Evergreen_PS-INV260828_06172026 - delayed to mid-September.pdf",
+                "international warehouse shipment delayed tooling charge",
+            ),
+            bc_context=context,
+            contract=CONTRACT,
+            examples=examples,
+            support_examples=examples,
+            llm_send=_sender("Tooling Invoices", confidence=0.99),
+        )
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert any("full-corpus evidence" in blocker for blocker in result["authority_guard"]["blockers"])

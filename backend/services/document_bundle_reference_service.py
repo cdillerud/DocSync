@@ -62,6 +62,10 @@ _LABEL_PATTERNS = {
 }
 
 
+def _empty_refs() -> Dict[str, List[Dict[str, Any]]]:
+    return {field: [] for field in _REFERENCE_FIELDS}
+
+
 def _dedupe(values: List[str]) -> List[str]:
     seen = set()
     out = []
@@ -78,7 +82,7 @@ def _dedupe(values: List[str]) -> List[str]:
 
 
 def _regex_supporting_refs(page_texts: List[Dict[str, Any]]) -> Dict[str, Any]:
-    result: Dict[str, List[Dict[str, Any]]] = {field: [] for field in _REFERENCE_FIELDS}
+    result: Dict[str, List[Dict[str, Any]]] = _empty_refs()
     for page in page_texts:
         page_no = int(page["page"])
         text = str(page.get("text") or "")
@@ -151,7 +155,7 @@ def _strip_json_fence(text: str) -> str:
 
 
 def _normalize_model_refs(data: Dict[str, Any]) -> Dict[str, Any]:
-    output: Dict[str, List[Dict[str, Any]]] = {field: [] for field in _REFERENCE_FIELDS}
+    output: Dict[str, List[Dict[str, Any]]] = _empty_refs()
     for field in _REFERENCE_FIELDS:
         values = data.get(field) or []
         if not isinstance(values, list):
@@ -176,7 +180,7 @@ def _normalize_model_refs(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _merge_refs(*sources: Dict[str, Any]) -> Dict[str, Any]:
-    merged: Dict[str, List[Dict[str, Any]]] = {field: [] for field in _REFERENCE_FIELDS}
+    merged: Dict[str, List[Dict[str, Any]]] = _empty_refs()
     for source in sources:
         for field in _REFERENCE_FIELDS:
             for item in source.get(field) or []:
@@ -203,14 +207,33 @@ async def extract_supporting_references(
     model: str = DEFAULT_MODEL,
     llm_enabled: bool = True,
 ) -> Dict[str, Any]:
-    """Extract supporting references without changing primary classification."""
+    """Extract supporting references without changing primary classification.
+
+    Supporting-page extraction is a PDF-only concept in this service. Image
+    files are already single primary documents for this pipeline, so they return
+    an empty supporting-reference bundle instead of being sent through pypdf.
+    """
+    if Path(file_path).suffix.lower() != ".pdf":
+        return {
+            "primary_document_type": primary_document_type,
+            "primary_document_type_locked": True,
+            "page_count": 1,
+            "supporting_pages_scanned": [],
+            "references": _empty_refs(),
+            "regex_reference_count": 0,
+            "ai_reference_count": 0,
+            "model_error": None,
+            "primary_fields_preserved": dict(primary_fields or {}),
+            "supporting_scan_skipped_reason": "non_pdf_primary",
+        }
+
     page_count = 0
     page_texts: List[Dict[str, Any]] = []
     temp_pdf: Optional[str] = None
     try:
         page_count, page_texts, temp_pdf = _extract_page_text_and_pdf(file_path)
         regex_refs = _regex_supporting_refs(page_texts)
-        model_refs: Dict[str, Any] = {field: [] for field in _REFERENCE_FIELDS}
+        model_refs: Dict[str, Any] = _empty_refs()
         model_error = None
 
         if temp_pdf and llm_enabled and EMERGENT_LLM_KEY:

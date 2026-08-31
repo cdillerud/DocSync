@@ -1,9 +1,9 @@
 {
   "schema_version": "4.1",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2",
+  "phase": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV3",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V116-REV2-Entry.ps1",
+  "script": "Invoke-GPIHub-V116-REV3-Entry.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -112,7 +112,7 @@
       "warehouse_training": 4,
       "dropship_training": 4,
       "warehouse_holdout": "correct Warehouse Not International auto-route at 0.96; supervised ensemble overrode dissenting generic-logistics LLM interpretation using repeated same-vendor Accounting evidence",
-      "dropship_holdout": "correct Dropship Not International/Freight auto-route at approximately 0.95",
+      "dropship_holdout": "correct auto-route Dropship Not International/Freight at approximately 0.95",
       "auto_route_exact_count": 2,
       "wrong_auto_routes": 0,
       "manual_validation_reduction_evidence": "STRONG_2_OF_2_EXACT_AUTO_ROUTE",
@@ -158,10 +158,34 @@
       "production_mutation": false,
       "finding": "V116 reached real held-out routing for the first time. The result is a true parity blocker: downstream states must be excluded from intake learning, sparse-vendor exact-reference transfer must fail closed, and filename-shape-only ensemble authority must not generalize across vendors spanning three or more workflows."
     },
+    "v116_third_broad_result": {
+      "status": "FAIL_SAFE_ZERO_WRONG_BUT_20PCT_COVERAGE",
+      "feature_commit": "6ea5910149e67010907763740eea00ea0c85a222",
+      "discovered_live_files": 2913,
+      "canonical_queue_mapping": "PASS_ZERO_UNMAPPED",
+      "excluded_downstream_learning_files": 704,
+      "selected": 180,
+      "hydrated": 177,
+      "hydration_failures": 3,
+      "holdout": 30,
+      "auto_routed": 6,
+      "reviewed": 24,
+      "coverage": 0.2,
+      "auto_route_accuracy": 1.0,
+      "wrong_auto_routes": 0,
+      "exit_code": 92,
+      "source_runtime_unchanged": true,
+      "production_mutation": false,
+      "finding": "REV2 closed the immediate unsafe-auto-route defect: all 6 automatic decisions were correct. The authority guard was too conservative, however, because it treated sparse vendor history as a blanket veto and required current BC/location evidence even when the raw model and wider supervised corpus independently agreed. Coverage fell to 20%, so labor reduction remains a parity blocker."
+    },
+    "v116_rev2_launcher_finding": {
+      "status": "CONTROL_WRAPPER_DEFECT_AFTER_EVALUATION",
+      "finding": "REV2 rewrote GPI Hub Migration.cmd while cmd.exe was still executing that same batch file. After PowerShell returned, cmd.exe resumed from a shifted file position and attempted to execute a fragment ending in ion.ps1. REV3 does not mutate the live desktop batch file."
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "6ea5910149e67010907763740eea00ea0c85a222",
-      "status": "V116_REV2_AUTHORITY_GUARD_EXPANDED_CORPUS_RETEST_NEXT",
+      "commit": "003db3994535694fc2f04dd06154a45cf6e6506f",
+      "status": "V116_REV3_EVIDENCE_CONSENSUS_AND_ROUTE_NEUTRAL_RETRIEVAL_RETEST_NEXT",
       "runtime_authority": false
     },
     "gui_truth_audit": "PASS_SCANNER_COMPLETED_SECOND_PASS_STILL_REQUIRED_FOR_LOW_DISCOVERY_AND_UNMATCHED_CALLS"
@@ -171,17 +195,17 @@
     "routing_label_authority": "GamerAccounting AP Temp placement at a contract-defined intake queue plus explicit reviewer corrections; downstream/processed states remain audit provenance but are excluded from supervised intake authority",
     "legacy_nav_role": "historical layout/vendor coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "6ea5910149e67010907763740eea00ea0c85a222",
+    "feature_commit": "003db3994535694fc2f04dd06154a45cf6e6506f",
     "pipeline": [
       "primary document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting reference extraction for PDFs; non-PDF primary images skip PDF supporting-page parsing",
       "read-only Business Central reference/context resolution",
       "live Accounting placement retained as provenance while supervised labels resolve to contract-valid intake queues; contract-declared downstream processed states are excluded from learning authority",
-      "supervised route prediction using small diverse similar Accounting-labeled examples",
-      "bounded prompt remains eight examples while runtime-authority guard evaluates the full train-only supervised corpus",
-      "same-vendor discriminating supervised support from document/reference structure and verified BC facts",
-      "vendors spanning three or more workflows require authoritative BC/location/ship-to evidence; filename-shape-only support cannot grant auto-route authority",
-      "sparse same-vendor cohorts fail closed instead of transferring one cross-workflow PO example into automatic authority",
+      "bounded eight-example prompt selected using vendor/document/BC similarity plus route-neutral filename/body/extracted-field evidence before route diversity",
+      "full train-only supervised corpus remains outside the LLM prompt and is used by the authority guard",
+      "sparse/new vendors are not blanket-vetoed; exact current references borrowed only from a different vendor are blocked",
+      "multi-route filename-shape evidence may earn authority only when current business context supports it or the raw model and wider supervised corpus independently agree on the same repeated route",
+      "repeated full-corpus same-vendor consensus may promote a bounded review only when there is no unresolved model evidence, no unresolved BC-required route, no contract failure, and no conflicting route evidence",
       "versioned live Accounting Temp route contract governor plus manual/downstream-only route guard",
       "review only on insufficient/contradictory evidence",
       "explicit correction becomes higher-weight supervised example",
@@ -207,12 +231,12 @@
     },
     {
       "sequence": 2,
-      "name": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2",
+      "name": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV3",
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
-      "execution_mode": "BALANCED_LIVE_ACCOUNTING_LABEL_CORPUS_READ_ONLY_FULL_TRAIN_AUTHORITY_GUARD",
-      "status": "RETEST_AFTER_THREE_REAL_WRONG_AUTO_ROUTES",
-      "objective": "Expand the balanced live corpus, exclude proven downstream processed states from supervised intake labels, keep the LLM prompt bounded, and grant automatic authority only after a full-train safety guard closes the sparse-vendor, cross-workflow PO, and multi-route filename-shape failure modes exposed by the second V116 run."
+      "execution_mode": "BALANCED_LIVE_ACCOUNTING_LABEL_CORPUS_READ_ONLY_FULL_TRAIN_CONSENSUS_GUARD",
+      "status": "RETEST_AFTER_SAFE_20PCT_COVERAGE",
+      "objective": "Preserve REV2 zero-wrong safety while recovering automation coverage through route-neutral relevant-example retrieval and evidence consensus. The raw LLM, bounded examples, full train-only supervised evidence, BC context, and route contract must agree strongly enough for automatic authority; otherwise the document remains in review."
     },
     {
       "sequence": 3,
@@ -245,7 +269,7 @@
     "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart.",
     "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion.",
     "v115_variable_vendor_guard": "No vendor-specific or route-name override. A learned route can be selected only from repeated same-vendor Accounting labels with a strong score margin, discriminating evidence, at least two supporting labels, and a contract-valid target; otherwise the route fails closed to review.",
-    "v116_policy": "Balanced labels are read directly from GamerAccounting AP Temp; raw placement remains audit provenance; downstream processed states can be contract-excluded from supervised intake authority; corpus persistence is false; Gemini prompts remain bounded to eight train-only examples; a separate full-train authority guard can only veto automatic routing; Business Central is read-only; /app is unchanged; no runtime restart or Production write is permitted."
+    "v116_policy": "Balanced labels are read directly from GamerAccounting AP Temp; raw placement remains audit provenance; downstream processed states can be contract-excluded from supervised intake authority; corpus persistence is false; Gemini prompts remain bounded to eight train-only examples; the full train-only authority guard may veto unsafe automatic routing or promote a review only through repeated evidence consensus under the route contract; Business Central is read-only; /app is unchanged; no runtime restart or Production write is permitted."
   },
   "open_parity_blockers": [
     "AP_ROUTING_CORPUS_HELDOUT_EVALUATION_ISSUE_20",
@@ -258,5 +282,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "Use V116 measured evidence to identify eligible high-confidence cohorts for shadow-first UAT integration while deterministic routing remains authoritative. Production remains untouched until explicit cutover authorization.",
-  "notes": "V115 remains validated parity evidence for the learning mechanism. The second V116 run was the first trustworthy broad held-out routing test and failed materially: 3 wrong auto-routes out of 9 automatic decisions. Feature commit 6ea5910 adds a full-train authority guard around the unchanged V115-proven core, excludes the proven downstream Processed Credit Memo - Aaron state from supervised intake labels, and retains the bounded eight-example prompt. V116 REV2 expands the balanced sample from 80 to 180 documents and remains read-only/temp-staged."
+  "notes": "V115 remains validated parity evidence for the learning mechanism. V116 REV2 materially improved safety: 177 hydrated examples, 30 holdouts, 6 automatic decisions, 100% automatic accuracy, zero wrong auto-routes, but only 20% coverage. REV3 preserves the zero-wrong bar while replacing the blanket sparse-vendor veto with cross-vendor exact-reference protection and repeated full-corpus consensus; it also ranks bounded examples using route-neutral document evidence. The desktop GPI Hub Migration.cmd remains a static thin wrapper to the self-updating runner and is not modified while executing."
 }

@@ -87,10 +87,34 @@ $GeneratedState = Get-Content -LiteralPath $GeneratedStatePath -Raw | ConvertFro
 Require ([string]$GeneratedState.phase -eq 'V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2') 'V116 REV2 generated state phase mismatch.'
 Require ([string]$GeneratedState.local.operational_root -eq $OperationalRoot) 'V116 REV2 generated state operational-root mismatch.'
 
+# Refresh the desktop launcher itself so its timestamp and contents prove which
+# repo-controlled runner is being invoked. The launcher stays a thin pointer;
+# all migration logic remains in the self-updating PowerShell runner.
+$RunnerPath = Join-Path $ToolRoot 'Invoke-GPIHubMigration.ps1'
+Require (Test-Path -LiteralPath $RunnerPath -PathType Leaf) "Migration runner missing: $RunnerPath"
+$Desktop = [Environment]::GetFolderPath('Desktop')
+Require (-not [string]::IsNullOrWhiteSpace($Desktop)) 'Desktop path could not be resolved.'
+$LauncherPath = Join-Path $Desktop 'GPI Hub Migration.cmd'
+$LauncherContent = @"
+@echo off
+setlocal
+pwsh.exe -NoProfile -ExecutionPolicy Bypass -File "$RunnerPath"
+set "GPI_EXIT=%ERRORLEVEL%"
+echo.
+pause
+exit /b %GPI_EXIT%
+"@
+Set-Content -LiteralPath $LauncherPath -Value $LauncherContent -Encoding ascii
+Require (Test-Path -LiteralPath $LauncherPath -PathType Leaf) "Desktop launcher refresh failed: $LauncherPath"
+$LauncherVerify = Get-Content -LiteralPath $LauncherPath -Raw
+Require ($LauncherVerify.Contains($RunnerPath)) 'Desktop launcher does not point to the current migration runner.'
+
 Write-Host 'V116_REV2_AUTHORITY_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V116_REV2_DOWNSTREAM_LABEL_EXCLUSION=PASS' -ForegroundColor Green
 Write-Host 'V116_REV2_EXPANDED_CORPUS=PASS' -ForegroundColor Green
 Write-Host 'V116_REV2_GENERATED_STATE=PASS' -ForegroundColor Green
+Write-Host 'GPI_HUB_DESKTOP_LAUNCHER_REFRESH=PASS' -ForegroundColor Green
+Write-Host "GPI_HUB_DESKTOP_LAUNCHER=$LauncherPath"
 Write-Host "V116_REV2_FEATURE_COMMIT=$ExpectedFeatureCommit"
 Write-Host "V116_REV2_GENERATED=$GeneratedPath"
 

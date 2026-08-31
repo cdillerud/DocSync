@@ -84,6 +84,28 @@ def _static_contract_routes(contract: Optional[Dict[str, Any]]) -> List[str]:
     return sorted(routes, key=lambda value: (value.count("/"), len(value)), reverse=True)
 
 
+def _learning_excluded_routes(contract: Optional[Dict[str, Any]]) -> List[str]:
+    if not contract:
+        return []
+    routes = {
+        normalize_route_path(route)
+        for route in (contract.get("learning_excluded_routes") or [])
+        if normalize_route_path(route)
+    }
+    return sorted(routes, key=lambda value: (value.count("/"), len(value)), reverse=True)
+
+
+def _learning_exclusion_for_route(
+    raw_route: str,
+    contract: Optional[Dict[str, Any]],
+) -> str:
+    normalized = normalize_route_path(raw_route)
+    for excluded in _learning_excluded_routes(contract):
+        if normalized == excluded or normalized.startswith(excluded + "/"):
+            return excluded
+    return ""
+
+
 def _nearest_static_contract_route(
     raw_route: str,
     contract: Optional[Dict[str, Any]],
@@ -112,7 +134,12 @@ def _canonicalize_discovered_labels(
     labels: List[Dict[str, Any]],
     contract: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """Preserve raw placement while mapping examples to legitimate route queues."""
+    """Preserve raw placement while mapping examples to legitimate intake queues.
+
+    Contract-declared downstream/processed states remain visible in raw audit
+    counts but are deliberately excluded from supervised intake learning. This
+    prevents a terminal archive state from becoming a false destination label.
+    """
     if not contract:
         copied = [dict(label) for label in labels]
         return {
@@ -120,13 +147,21 @@ def _canonicalize_discovered_labels(
             "canonical_route_counts": dict(Counter(normalize_route_path(x.get("route_path")) for x in copied)),
             "collapsed_path_count": 0,
             "unmapped_route_counts": {},
+            "excluded_learning_route_counts": {},
+            "excluded_learning_file_count": 0,
         }
 
     canonical: List[Dict[str, Any]] = []
     collapsed = 0
     unmapped = Counter()
+    excluded_learning = Counter()
     for label in labels:
         raw_route = normalize_route_path(label.get("route_path"))
+        excluded_route = _learning_exclusion_for_route(raw_route, contract)
+        if excluded_route:
+            excluded_learning[excluded_route] += 1
+            continue
+
         queue_route = _nearest_static_contract_route(raw_route, contract)
         if not queue_route:
             unmapped[raw_route or "<root>"] += 1
@@ -146,6 +181,8 @@ def _canonicalize_discovered_labels(
         "canonical_route_counts": dict(Counter(x["route_path"] for x in canonical)),
         "collapsed_path_count": collapsed,
         "unmapped_route_counts": dict(unmapped),
+        "excluded_learning_route_counts": dict(excluded_learning),
+        "excluded_learning_file_count": sum(excluded_learning.values()),
     }
 
 
@@ -326,6 +363,7 @@ async def hydrate_accounting_label(
             routing_contract
             and source_route
             and source_route != queue_route
+            and not _learning_exclusion_for_route(source_route, routing_contract)
             and route_is_allowed(source_route, routing_contract, bc_context)
         ):
             queue_route = source_route
@@ -408,8 +446,9 @@ async def build_supervised_routing_corpus(
 
     When a routing contract is supplied, raw live folder placements are first
     resolved to their nearest routable queue so nested work/archive structure is
-    not accidentally learned as an intake destination. The raw placement is
-    preserved on every example for audit and verified dynamic routes may be
+    not accidentally learned as an intake destination. Contract-declared
+    downstream processed states are excluded from supervised learning while
+    remaining visible in raw audit counts. Verified dynamic routes may be
     restored after BC context hydration.
     """
     discovered = await discover_accounting_temp_labels(max_files=discovery_max_files)
@@ -451,6 +490,8 @@ async def build_supervised_routing_corpus(
         "canonical_discovered_route_counts": label_resolution["canonical_route_counts"],
         "collapsed_route_path_count": label_resolution["collapsed_path_count"],
         "unmapped_route_counts": label_resolution["unmapped_route_counts"],
+        "excluded_learning_route_counts": label_resolution["excluded_learning_route_counts"],
+        "excluded_learning_file_count": label_resolution["excluded_learning_file_count"],
         "selected_count": len(selected),
         "selected_route_counts": dict(Counter(x["route_path"] for x in selected)),
         "hydrated_count": len(examples),

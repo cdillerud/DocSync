@@ -98,8 +98,8 @@
     },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "af82036e93968b5286055cbdbe7e1f98373d45fa",
-      "status": "V117_FAST_REGRESSION_FIXTURE_TIGHTENED_THEN_TARGETED_VENDOR_EXPANSION_AND_STABLE_HELDOUT",
+      "commit": "b143802bc9fe8659fccaa49a01fd806ee8f5e900",
+      "status": "V117_FAST_REGRESSIONS_ASSERT_EXACT_SAFE_AUTHORITY_PATHS_THEN_TARGETED_VENDOR_EXPANSION_AND_STABLE_HELDOUT",
       "runtime_authority": false
     },
     "accounting_temp_routing_authority": "PROVEN_READ_ONLY_PRODUCTION",
@@ -112,7 +112,7 @@
     "routing_label_authority": "GamerAccounting AP Temp placement at a contract-defined intake queue plus explicit reviewer corrections",
     "legacy_nav_role": "historical vendor/layout coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "af82036e93968b5286055cbdbe7e1f98373d45fa",
+    "feature_commit": "b143802bc9fe8659fccaa49a01fd806ee8f5e900",
     "pipeline": [
       "primary-document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting-reference extraction",
@@ -183,5 +183,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "If V117 reaches zero wrong automatic routes, 100% automatic accuracy, and at least 90% heldout coverage, integrate the learned AP router shadow-first in UAT while the deterministic route remains authoritative and accumulate real intake telemetry. Production remains untouched until explicit authorization.",
-  "notes": "Detailed V115/V116 history remains preserved in Git history through control commit 538f5180071ce40dcd833b28734f9b4cbfe89d2c. V117 does not lower the gate. It adds stable-workflow consensus, variable-workflow semantic discrimination, reference-family safety, narrower cross-vendor-reference dependence checks, and targeted vendor corpus expansion. The Tumalo focused fixture now explicitly recreates the V116 pre-authority supervised Warehouse selection before asserting that V117 forces review for the standard-order reference family."
+  "notes": "Detailed V115/V116 history remains preserved in Git history through control commit 538f5180071ce40dcd833b28734f9b4cbfe89d2c. V117 does not lower the gate. It adds stable-workflow consensus, variable-workflow semantic discrimination, reference-family safety, narrower cross-vendor-reference dependence checks, and targeted vendor corpus expansion. The Tumalo fixture explicitly recreates the V116 pre-authority Warehouse selection before asserting forced review. The Graphic fixture explicitly asserts the unsafe raw cost-variance proposal, pre-authority review state, stable DO NOT PAY evidence, and evidence-backed promotion to DO NOT PAY."
 }

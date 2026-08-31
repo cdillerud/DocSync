@@ -78,7 +78,9 @@ def _select_eval_context_examples(
 
     The LLM sees at most `limit` examples. The authority guard separately sees
     the full train split so prompt-size constraints cannot accidentally become
-    evidence-size constraints.
+    evidence-size constraints. Retrieval ranks route-neutral filename/body
+    evidence before route diversity, which makes sparse-vendor context useful
+    without encoding route names as rules.
     """
     limit = max(1, int(limit or DEFAULT_FEW_SHOT_LIMIT))
     test_fp = test.get("fingerprint")
@@ -88,6 +90,9 @@ def _select_eval_context_examples(
     vendor_key = normalize_vendor_name(vendor_name)
     document_type = str(test.get("document_type") or "")
     bc_context = test.get("bc_context") or {}
+    file_name = str(test.get("file_name") or "")
+    raw_text = str(test.get("raw_text_excerpt") or "")
+    extracted_fields = test.get("extracted_fields") or {}
 
     same_vendor = [
         e
@@ -103,6 +108,9 @@ def _select_eval_context_examples(
                 vendor_name=vendor_name,
                 document_type=document_type,
                 bc_context=bc_context,
+                file_name=file_name,
+                raw_text=raw_text,
+                extracted_fields=extracted_fields,
             ),
             reverse=True,
         )
@@ -122,8 +130,8 @@ def _select_eval_context_examples(
     selected: List[Dict[str, Any]] = []
     routes_seen = Counter()
 
-    # Pass 1: one strongest example per route, preventing a single large queue
-    # from consuming the entire prompt.
+    # Pass 1: one strongest relevant example per route, preventing a single
+    # large queue from consuming the entire prompt.
     for row in ranked:
         route = normalize_route_path(row.get("route_path"))
         if not route or routes_seen[route] > 0:

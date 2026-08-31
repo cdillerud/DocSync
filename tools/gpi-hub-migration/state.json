@@ -1,9 +1,9 @@
 {
   "schema_version": "4.1",
   "control_branch": "migration/gpi-hub-dedicated-vm",
-  "phase": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION",
+  "phase": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1",
+  "script": "Invoke-GPIHub-V116-REV2-Entry.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -134,29 +134,55 @@
       "production_mutation": false,
       "finding": "V116 treated every nested AP Temp work/archive folder as an intake route, causing false contract drift. Two PNG hydration failures also exposed PDF-only supporting-page parsing being applied to images. The router itself was not evaluated in this run."
     },
+    "v116_second_broad_result": {
+      "status": "FAIL_REAL_ROUTING_THREE_WRONG_AUTO_ROUTES",
+      "feature_commit": "ee75f8dbea0a72f1184b5e241f100bf8df83b17f",
+      "discovered_live_files": 2913,
+      "canonical_queue_mapping": "PASS_ZERO_UNMAPPED",
+      "collapsed_nested_placements": 1940,
+      "selected": 80,
+      "hydrated": 79,
+      "hydration_failures": 1,
+      "holdout": 11,
+      "auto_routed": 9,
+      "reviewed": 2,
+      "coverage": 0.8182,
+      "auto_route_accuracy": 0.6667,
+      "wrong_auto_routes": 3,
+      "unsafe_cases": [
+        "Anchor _ANCHOR_22494681_122924 - Do Not Pay - Tied to Inv 22494668.pdf: current placement Vendor Credit Memos/Processed Credit Memo - Aaron but model correctly read Do Not Pay semantics; exposed downstream processed folder being used as false intake label",
+        "Ball W118374_Horseshoe_8272026_.pdf: expected Dropship Not International/Ball but model auto-routed Warehouse Not International/Ball Orders based on an exact-PO example from another workflow",
+        "Tumalo 110784B_TUMALO_0312777_08282026.pdf: expected Dropship Not International/Freight but bounded supervised ensemble auto-selected Meg to Process from repeated filename-shape evidence across an increasingly multi-route vendor"
+      ],
+      "source_runtime_unchanged": true,
+      "production_mutation": false,
+      "finding": "V116 reached real held-out routing for the first time. The result is a true parity blocker: downstream states must be excluded from intake learning, sparse-vendor exact-reference transfer must fail closed, and filename-shape-only ensemble authority must not generalize across vendors spanning three or more workflows."
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "ee75f8dbea0a72f1184b5e241f100bf8df83b17f",
-      "status": "V116_QUEUE_BOUNDARY_AND_IMAGE_FIX_RETEST_NEXT",
+      "commit": "6ea5910149e67010907763740eea00ea0c85a222",
+      "status": "V116_REV2_AUTHORITY_GUARD_EXPANDED_CORPUS_RETEST_NEXT",
       "runtime_authority": false
     },
     "gui_truth_audit": "PASS_SCANNER_COMPLETED_SECOND_PASS_STILL_REQUIRED_FOR_LOW_DISCOVERY_AND_UNMATCHED_CALLS"
   },
   "ai_routing_program": {
     "objective": "Reduce Accounting manual validation and sorting. Manual review is exception behavior, not the normal AP workflow.",
-    "routing_label_authority": "GamerAccounting/General/Accounting/Accounts Payable/Temp Folder placement plus explicit reviewer corrections",
+    "routing_label_authority": "GamerAccounting AP Temp placement at a contract-defined intake queue plus explicit reviewer corrections; downstream/processed states remain audit provenance but are excluded from supervised intake authority",
     "legacy_nav_role": "historical layout/vendor coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "ee75f8dbea0a72f1184b5e241f100bf8df83b17f",
+    "feature_commit": "6ea5910149e67010907763740eea00ea0c85a222",
     "pipeline": [
       "primary document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting reference extraction for PDFs; non-PDF primary images skip PDF supporting-page parsing",
       "read-only Business Central reference/context resolution",
-      "live Accounting placement retained as provenance while supervised route labels resolve to the nearest contract-valid intake queue; verified dynamic order routes may be retained after BC resolution",
+      "live Accounting placement retained as provenance while supervised labels resolve to contract-valid intake queues; contract-declared downstream processed states are excluded from learning authority",
       "supervised route prediction using small diverse similar Accounting-labeled examples",
+      "bounded prompt remains eight examples while runtime-authority guard evaluates the full train-only supervised corpus",
       "same-vendor discriminating supervised support from document/reference structure and verified BC facts",
-      "strong repeated contract-valid supervised support may select the learned route over a dissenting LLM proposal; weaker or contradictory variable-vendor evidence fails closed",
-      "versioned live Accounting Temp route contract governor",
+      "vendors spanning three or more workflows require authoritative BC/location/ship-to evidence; filename-shape-only support cannot grant auto-route authority",
+      "sparse same-vendor cohorts fail closed instead of transferring one cross-workflow PO example into automatic authority",
+      "versioned live Accounting Temp route contract governor plus manual/downstream-only route guard",
       "review only on insufficient/contradictory evidence",
       "explicit correction becomes higher-weight supervised example",
       "stable held-out accuracy plus auto-route coverage gates runtime authority",
@@ -181,12 +207,12 @@
     },
     {
       "sequence": 2,
-      "name": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION",
+      "name": "V116_AP_ROUTING_CORPUS_HELDOUT_EVALUATION_REV2",
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
-      "execution_mode": "BALANCED_LIVE_ACCOUNTING_LABEL_CORPUS_READ_ONLY",
-      "status": "RETEST_AFTER_QUEUE_BOUNDARY_AND_IMAGE_FIX",
-      "objective": "Build a balanced live Accounting Temp corpus at contract-valid intake-queue granularity, retain raw nested placements for audit, use a stable 80/20 holdout and bounded eight-example context, and measure zero-wrong auto-route accuracy plus automation coverage before any runtime authority is considered."
+      "execution_mode": "BALANCED_LIVE_ACCOUNTING_LABEL_CORPUS_READ_ONLY_FULL_TRAIN_AUTHORITY_GUARD",
+      "status": "RETEST_AFTER_THREE_REAL_WRONG_AUTO_ROUTES",
+      "objective": "Expand the balanced live corpus, exclude proven downstream processed states from supervised intake labels, keep the LLM prompt bounded, and grant automatic authority only after a full-train safety guard closes the sparse-vendor, cross-workflow PO, and multi-route filename-shape failure modes exposed by the second V116 run."
     },
     {
       "sequence": 3,
@@ -219,7 +245,7 @@
     "v115_policy": "Feature files are materialized with git show, copied only to /tmp on source host/container, compiled/imported from temp, Production Accounting and BC are read only, Mongo persistence disabled, /app unchanged, no restart.",
     "v115_rev2_transport": "Candidate directory copied as one recursive scp object to a dedicated /tmp parent; no Windows wildcard expansion.",
     "v115_variable_vendor_guard": "No vendor-specific or route-name override. A learned route can be selected only from repeated same-vendor Accounting labels with a strong score margin, discriminating evidence, at least two supporting labels, and a contract-valid target; otherwise the route fails closed to review.",
-    "v116_policy": "Balanced labels are read directly from GamerAccounting AP Temp, raw nested placements are retained for audit but learned labels resolve to contract-valid intake queues, corpus persistence is false, feature files remain temp-staged, held-out prompts are bounded to eight train-only examples, Business Central is read-only, /app is unchanged, and no runtime restart or Production write is permitted."
+    "v116_policy": "Balanced labels are read directly from GamerAccounting AP Temp; raw placement remains audit provenance; downstream processed states can be contract-excluded from supervised intake authority; corpus persistence is false; Gemini prompts remain bounded to eight train-only examples; a separate full-train authority guard can only veto automatic routing; Business Central is read-only; /app is unchanged; no runtime restart or Production write is permitted."
   },
   "open_parity_blockers": [
     "AP_ROUTING_CORPUS_HELDOUT_EVALUATION_ISSUE_20",
@@ -232,5 +258,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "Use V116 measured evidence to identify eligible high-confidence cohorts for shadow-first UAT integration while deterministic routing remains authoritative. Production remains untouched until explicit cutover authorization.",
-  "notes": "V115 is validated parity evidence for the AI learning mechanism. V116 first broad run discovered 2,913 live labeled files but stopped before held-out routing because the harness confused nested Accounting work/archive folders with intake destinations. The feature now preserves raw placement while resolving supervised labels to the nearest contract-valid intake queue, retains verified dynamic order routes only with BC evidence, and skips PDF supporting-page parsing for image primaries. V116 is ready for a clean retest."
+  "notes": "V115 remains validated parity evidence for the learning mechanism. The second V116 run was the first trustworthy broad held-out routing test and failed materially: 3 wrong auto-routes out of 9 automatic decisions. Feature commit 6ea5910 adds a full-train authority guard around the unchanged V115-proven core, excludes the proven downstream Processed Credit Memo - Aaron state from supervised intake labels, and retains the bounded eight-example prompt. V116 REV2 expands the balanced sample from 80 to 180 documents and remains read-only/temp-staged."
 }

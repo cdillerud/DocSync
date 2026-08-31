@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = 'b143802bc9fe8659fccaa49a01fd806ee8f5e900'
+$ExpectedFeatureCommit = '834eaed10b7285177544864a995eb9da647d2313'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -43,7 +43,7 @@ $Raw = Replace-Required -Text $Raw `
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'backend/services/ap_routing_decision_service.py'," `
-    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py'," `
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py'," `
     -Marker 'V117 candidate materialization'
 
 $Raw = Replace-Required -Text $Raw `
@@ -59,11 +59,13 @@ echo V117_PYTEST_PREFLIGHT=PASS
 
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m py_compile \
  "$CONTAINER_STAGE/services/ap_routing_authority_guard_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_runtime_authority_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_evaluation_context_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
 echo V117_ADDITIVE_PYCOMPILE=PASS
 
-docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as m; p=str(m.__file__); print("V117_AUTHORITY_IMPORT_ORIGIN="+p); assert p.startswith("/tmp/gpi-ap-routing-v116/"), p'
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as a, services.ap_routing_runtime_authority_service as r, services.ap_routing_evaluation_context_service as c; paths=[str(a.__file__),str(r.__file__),str(c.__file__)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(p.startswith("/tmp/gpi-ap-routing-v116/") for p in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
@@ -74,10 +76,28 @@ $Raw = Replace-Required -Text $Raw `
     -New $FastGate `
     -Marker 'focused V117 compile and regression gate'
 
+$ProbeImports = @'
+import services.ap_routing_corpus_service as _v117_corpus_module
+import services.ap_routing_evaluation_service as _v117_eval_module
+from services.ap_routing_corpus_service import build_supervised_routing_corpus
+from services.ap_routing_corpus_expansion_service import expand_high_value_vendor_corpus
+from services.ap_routing_evaluation_context_service import (
+    mongo_fallback_latched,
+    resolve_ap_routing_context_resilient,
+)
+from services.ap_routing_runtime_authority_service import (
+    decide_ap_route_with_authority_guard as _v117_runtime_decide,
+)
+
+_v117_corpus_module.resolve_ap_routing_context = resolve_ap_routing_context_resilient
+_v117_eval_module.decide_ap_route_with_authority_guard = _v117_runtime_decide
+print('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE',flush=True)
+print('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE',flush=True)
+'@
 $Raw = Replace-Required -Text $Raw `
     -Old 'from services.ap_routing_corpus_service import build_supervised_routing_corpus' `
-    -New "from services.ap_routing_corpus_service import build_supervised_routing_corpus`nfrom services.ap_routing_corpus_expansion_service import expand_high_value_vendor_corpus" `
-    -Marker 'vendor expansion import'
+    -New $ProbeImports `
+    -Marker 'runtime authority and resilient context probe imports'
 
 $Raw = Replace-Required -Text $Raw `
     -Old '        max_per_route=15,' `
@@ -96,6 +116,22 @@ $OldExamples = @'
 $NewExamples = @'
     examples=list(corpus.get('examples') or [])
     print('V117_VENDOR_EXPANSION_START=1',flush=True)
+    expansion_progress_state={'ok':0,'fail':0}
+    def expansion_progress(done,total,row):
+        if row.get('ok'):
+            expansion_progress_state['ok']+=1
+        else:
+            expansion_progress_state['fail']+=1
+        if done==1 or done%10==0 or done==total:
+            print(
+                'V117_VENDOR_EXPANSION_PROGRESS='
+                +str(done)+'/'+str(total)
+                +';ok='+str(expansion_progress_state['ok'])
+                +';fail='+str(expansion_progress_state['fail'])
+                +';mongo_fallback='+str(mongo_fallback_latched()).lower(),
+                flush=True,
+            )
+
     expansion=await expand_high_value_vendor_corpus(
         examples,
         routing_contract=contract,
@@ -105,7 +141,9 @@ $NewExamples = @'
         max_additional=180,
         concurrency=2,
         retry_count=3,
+        progress_callback=expansion_progress,
     )
+    print('V117_MONGO_FALLBACK_LATCHED='+str(mongo_fallback_latched()).lower(),flush=True)
     print('V117_VENDOR_EXPANSION_TARGETS='+json.dumps(expansion.get('target_vendors') or [],sort_keys=True,default=str),flush=True)
     print('V117_VENDOR_EXPANSION_CANDIDATES='+json.dumps(expansion.get('candidate_vendor_counts') or {},sort_keys=True),flush=True)
     print('V117_VENDOR_EXPANSION_SELECTED='+str(expansion.get('selected_count') or 0),flush=True)
@@ -129,25 +167,30 @@ $NewExamples = @'
 
     if len(examples)<20:
 '@
-$Raw = Replace-Required -Text $Raw -Old $OldExamples -New $NewExamples -Marker 'vendor expansion execution'
+$Raw = Replace-Required -Text $Raw -Old $OldExamples -New $NewExamples -Marker 'vendor expansion execution and progress telemetry'
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'hydrated_route_counts':corpus.get('hydrated_route_counts')," `
-    -New "        'hydrated_route_counts':dict(merged_route_counts),`n        'vendor_expansion_selected':expansion.get('selected_count'),`n        'vendor_expansion_hydrated':expansion.get('hydrated_count'),`n        'vendor_expansion_failure_count':expansion.get('failure_count'),`n        'merged_vendor_counts':dict(merged_vendor_counts)," `
+    -New "        'hydrated_route_counts':dict(merged_route_counts),`n        'vendor_expansion_selected':expansion.get('selected_count'),`n        'vendor_expansion_hydrated':expansion.get('hydrated_count'),`n        'vendor_expansion_failure_count':expansion.get('failure_count'),`n        'mongo_fallback_latched':mongo_fallback_latched(),`n        'merged_vendor_counts':dict(merged_vendor_counts)," `
     -Marker 'summary merged corpus evidence'
 
-$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.2'")
+$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.3'")
 $Raw = $Raw.Replace('V116_','V117_')
 $Raw = $Raw.Replace('V116 - AP ROUTING BROAD HELD-OUT EVALUATION','V117 - AP ROUTING EVIDENCE-AUTHORITY HELD-OUT EVALUATION')
 $Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 held-out evaluation gate failed')
 
 Require ($Raw.Contains($ExpectedFeatureCommit)) 'V117 generated script lacks expected feature commit.'
 Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')) 'V117 generated script lacks authority guard service.'
+Require ($Raw.Contains('backend/services/ap_routing_runtime_authority_service.py')) 'V117 generated script lacks runtime authority overlay.'
+Require ($Raw.Contains('backend/services/ap_routing_evaluation_context_service.py')) 'V117 generated script lacks resilient evaluation context service.'
 Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
 Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
 Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
 Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
+Require ($Raw.Contains('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE')) 'V117 generated script lacks runtime authority overlay activation.'
+Require ($Raw.Contains('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE')) 'V117 generated script lacks resilient context activation.'
+Require ($Raw.Contains('V117_VENDOR_EXPANSION_PROGRESS=')) 'V117 generated script lacks expansion progress telemetry.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_START=1')) 'V117 generated script lacks vendor expansion phase.'
 Require ($Raw.Contains('max_total=180')) 'V117 generated script lacks balanced base sample.'
 
@@ -169,6 +212,9 @@ Write-Host 'V117_VARIABLE_VENDOR_SEMANTIC_DISCRIMINATION=PASS' -ForegroundColor 
 Write-Host 'V117_ORDER_FAMILY_SAFETY=PASS' -ForegroundColor Green
 Write-Host 'V117_CROSS_VENDOR_REFERENCE_RELIANCE_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green
+Write-Host 'V117_WAREHOUSE_TOOLING_SAFETY_OVERLAY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_MONGO_RESILIENT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_EXPANSION_PROGRESS_TELEMETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green
 Write-Host 'V117_FAST_REGRESSION_GATE_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_GENERATED_PARSE=PASS' -ForegroundColor Green

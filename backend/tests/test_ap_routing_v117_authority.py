@@ -105,11 +105,11 @@ def test_stable_vendor_stop_pay_consensus_overrides_generic_cost_variance_model(
 def test_variable_vendor_standard_order_cannot_auto_route_to_warehouse_by_majority():
     vendor = "Tumalo Creek Transportation"
     examples = [
-        _example(vendor, "Warehouse Not International", "_TUMALO_0311991.pdf", "warehouse freight invoice"),
-        _example(vendor, "Warehouse Not International", "_TUMALO_0311992.pdf", "warehouse freight invoice"),
-        _example(vendor, "Warehouse Not International", "_TUMALO_0311993.pdf", "warehouse freight invoice"),
-        _example(vendor, "Dropship Not International/Freight", "110781A_TUMALO_0312700.pdf", "dropship freight invoice", po="110781A"),
-        _example(vendor, "Dropship Not International/Freight", "110782A_TUMALO_0312701.pdf", "dropship freight invoice", po="110782A"),
+        _example(vendor, "Warehouse Not International", "110770_TUMALO_0311991.pdf", "freight invoice"),
+        _example(vendor, "Warehouse Not International", "110771_TUMALO_0311992.pdf", "freight invoice"),
+        _example(vendor, "Warehouse Not International", "110772_TUMALO_0311993.pdf", "freight invoice"),
+        _example(vendor, "Dropship Not International/Freight", "_TUMALO_0312700.pdf", "freight invoice", po="110781A"),
+        _example(vendor, "Dropship Not International/Freight", "_TUMALO_0312701.pdf", "freight invoice", po="110782A"),
     ]
     context = {"status": "resolved", "po_number": "110784B", "verified_order_numbers": ["110784B"]}
     result = asyncio.run(
@@ -123,8 +123,14 @@ def test_variable_vendor_standard_order_cannot_auto_route_to_warehouse_by_majori
             llm_send=_sender("Warehouse Not International", bc_refs=["110784B"]),
         )
     )
+    assert result["ensemble_reconciliation"]["action"] == "supervised_route_selected"
+    assert result["ensemble_reconciliation"]["selected_route"] == "Warehouse Not International"
+    assert result["pre_authority_guard_decision"] == "auto_route"
+    assert result["pre_authority_guard_route"] == "Warehouse Not International"
     assert result["decision"] == "needs_review"
     assert result["route_path"] == ""
+    assert result["authority_guard"]["action"] == "force_review"
+    assert result["authority_guard"]["current_reference_family"] == "standard_order"
     assert any("reference family" in blocker for blocker in result["authority_guard"]["blockers"])
 
 

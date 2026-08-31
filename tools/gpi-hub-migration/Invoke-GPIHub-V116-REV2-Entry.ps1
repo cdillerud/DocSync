@@ -1,0 +1,87 @@
+#requires -Version 7.0
+[CmdletBinding()]
+param()
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+$ToolRoot = Split-Path -Parent $PSCommandPath
+$BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1'
+$StatePath = Join-Path $ToolRoot 'state.json'
+$State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
+$OperationalRoot = [string]$State.local.operational_root
+$ExpectedFeatureCommit = '6ea5910149e67010907763740eea00ea0c85a222'
+$GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v116-rev2-generated'
+$GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V116-REV2-Generated.ps1'
+
+function Require {
+    param([bool]$Condition,[string]$Message)
+    if (-not $Condition) { throw $Message }
+}
+
+function Replace-Required {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string]$Old,
+        [Parameter(Mandatory)][string]$New,
+        [Parameter(Mandatory)][string]$Marker
+    )
+    Require ($Text.Contains($Old)) "V116 REV2 repair anchor missing: $Marker"
+    return $Text.Replace($Old,$New)
+}
+
+Require (Test-Path -LiteralPath $BasePath -PathType Leaf) "Base V116 controller missing: $BasePath"
+New-Item -ItemType Directory -Path $GeneratedRoot -Force | Out-Null
+$Raw = Get-Content -LiteralPath $BasePath -Raw
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "`$ExpectedFeatureCommit = 'ee75f8dbea0a72f1184b5e241f100bf8df83b17f'" `
+    -New "`$ExpectedFeatureCommit = '$ExpectedFeatureCommit'" `
+    -Marker 'feature commit pin'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "        'backend/services/ap_routing_decision_service.py'," `
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py'," `
+    -Marker 'authority guard candidate materialization'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "FEATURE_COMMIT='ee75f8dbea0a72f1184b5e241f100bf8df83b17f'" `
+    -New "FEATURE_COMMIT='$ExpectedFeatureCommit'" `
+    -Marker 'probe feature commit evidence'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old '        max_per_route=15,' `
+    -New '        max_per_route=8,' `
+    -Marker 'expanded per-route sample'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old '        max_total=80,' `
+    -New '        max_total=180,' `
+    -Marker 'expanded total sample'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "    print('V116_UNMAPPED_QUEUE_COUNTS='+json.dumps(corpus.get('unmapped_route_counts') or {},sort_keys=True),flush=True)" `
+    -New "    print('V116_UNMAPPED_QUEUE_COUNTS='+json.dumps(corpus.get('unmapped_route_counts') or {},sort_keys=True),flush=True)`n    print('V116_EXCLUDED_LEARNING_FILE_COUNT='+str(corpus.get('excluded_learning_file_count') or 0),flush=True)`n    print('V116_EXCLUDED_LEARNING_ROUTE_COUNTS='+json.dumps(corpus.get('excluded_learning_route_counts') or {},sort_keys=True),flush=True)" `
+    -Marker 'excluded downstream label evidence'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "        'collapsed_nested_placements':corpus.get('collapsed_route_path_count')," `
+    -New "        'collapsed_nested_placements':corpus.get('collapsed_route_path_count'),`n        'excluded_learning_file_count':corpus.get('excluded_learning_file_count'),`n        'excluded_learning_route_counts':corpus.get('excluded_learning_route_counts')," `
+    -Marker 'summary exclusion evidence'
+
+# The generated script must contain the exact guarded feature pin and new service.
+Require ($Raw.Contains($ExpectedFeatureCommit)) 'V116 REV2 generated script lacks expected feature commit.'
+Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')) 'V116 REV2 generated script lacks authority guard service.'
+Require ($Raw.Contains('max_total=180')) 'V116 REV2 generated script lacks expanded sample size.'
+Require ($Raw.Contains('V116_EXCLUDED_LEARNING_FILE_COUNT')) 'V116 REV2 generated script lacks downstream-label diagnostics.'
+
+Set-Content -LiteralPath $GeneratedPath -Value $Raw -Encoding utf8 -NoNewline
+
+Write-Host 'V116_REV2_AUTHORITY_GUARD=PASS' -ForegroundColor Green
+Write-Host 'V116_REV2_DOWNSTREAM_LABEL_EXCLUSION=PASS' -ForegroundColor Green
+Write-Host 'V116_REV2_EXPANDED_CORPUS=PASS' -ForegroundColor Green
+Write-Host "V116_REV2_FEATURE_COMMIT=$ExpectedFeatureCommit"
+Write-Host "V116_REV2_GENERATED=$GeneratedPath"
+
+& $GeneratedPath
+exit $LASTEXITCODE

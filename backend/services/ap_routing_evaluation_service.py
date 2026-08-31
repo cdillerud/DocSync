@@ -12,7 +12,8 @@ import hashlib
 from collections import Counter, defaultdict
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
-from services.ap_routing_decision_service import DECISION_AUTO_ROUTE, decide_ap_route
+from services.ap_routing_authority_guard_service import decide_ap_route_with_authority_guard
+from services.ap_routing_decision_service import DECISION_AUTO_ROUTE
 from services.ap_routing_learning_service import (
     normalize_route_path,
     normalize_vendor_name,
@@ -73,14 +74,11 @@ def _select_eval_context_examples(
     *,
     limit: int = DEFAULT_FEW_SHOT_LIMIT,
 ) -> List[Dict[str, Any]]:
-    """Choose a small, diverse context from the training split only.
+    """Choose a small, diverse prompt context from the training split only.
 
-    The production learner retrieves a bounded set of similar examples. Held-out
-    evaluation must exercise the same architecture rather than sending hundreds
-    of labels to the LLM. Same-vendor examples are preferred when available;
-    sparse vendors may be supplemented with cross-vendor examples that share
-    document/BC context. Route diversity prevents one dominant queue from
-    teaching a false one-route rule.
+    The LLM sees at most `limit` examples. The authority guard separately sees
+    the full train split so prompt-size constraints cannot accidentally become
+    evidence-size constraints.
     """
     limit = max(1, int(limit or DEFAULT_FEW_SHOT_LIMIT))
     test_fp = test.get("fingerprint")
@@ -92,7 +90,8 @@ def _select_eval_context_examples(
     bc_context = test.get("bc_context") or {}
 
     same_vendor = [
-        e for e in candidates
+        e
+        for e in candidates
         if vendor_key and normalize_vendor_name(e.get("vendor_name")) == vendor_key
     ]
 
@@ -114,7 +113,8 @@ def _select_eval_context_examples(
     else:
         same_fps = {e.get("fingerprint") for e in ranked_same if e.get("fingerprint")}
         supplemental = [
-            e for e in rank(candidates)
+            e
+            for e in rank(candidates)
             if not e.get("fingerprint") or e.get("fingerprint") not in same_fps
         ]
         ranked = ranked_same + supplemental
@@ -122,7 +122,8 @@ def _select_eval_context_examples(
     selected: List[Dict[str, Any]] = []
     routes_seen = Counter()
 
-    # Pass 1: one strongest example per route.
+    # Pass 1: one strongest example per route, preventing a single large queue
+    # from consuming the entire prompt.
     for row in ranked:
         route = normalize_route_path(row.get("route_path"))
         if not route or routes_seen[route] > 0:
@@ -132,7 +133,7 @@ def _select_eval_context_examples(
         if len(selected) >= limit:
             return selected
 
-    # Pass 2: fill with strongest remaining patterns.
+    # Pass 2: fill remaining slots with the strongest repeated patterns.
     selected_fps = {row.get("fingerprint") for row in selected if row.get("fingerprint")}
     for row in ranked:
         fp = row.get("fingerprint")
@@ -167,12 +168,13 @@ async def evaluate_holdout(
             test,
             limit=few_shot_limit,
         )
-        result = await decide_ap_route(
+        result = await decide_ap_route_with_authority_guard(
             None,
             document=_document_from_example(test),
             bc_context=test.get("bc_context") or {},
             contract=contract,
             examples=context_examples,
+            support_examples=train,
             vendor_auto_threshold=vendor_auto_thresholds.get(vendor_key),
             model=model,
             llm_send=llm_send,
@@ -183,6 +185,8 @@ async def evaluate_holdout(
         correct = predicted == expected if auto else False
         ensemble = result.get("ensemble_reconciliation") or {}
         support = result.get("supervised_route_support") or {}
+        full_support = result.get("full_supervised_route_support") or {}
+        authority_guard = result.get("authority_guard") or {}
         rows.append(
             {
                 "example_id": test.get("fingerprint") or test.get("source_item_id"),
@@ -208,9 +212,16 @@ async def evaluate_holdout(
                 "supervised_top_route": support.get("top_route"),
                 "supervised_margin": support.get("margin"),
                 "supervised_strong": support.get("strong"),
+                "full_supervised_top_route": full_support.get("top_route"),
+                "full_supervised_margin": full_support.get("margin"),
+                "full_supervised_route_count": len(full_support.get("routes") or []),
                 "ensemble_action": ensemble.get("action"),
                 "original_model_route": ensemble.get("original_model_route"),
                 "original_model_confidence": ensemble.get("original_model_confidence"),
+                "authority_guard_action": authority_guard.get("action"),
+                "authority_guard_blockers": authority_guard.get("blockers") or [],
+                "same_vendor_label_count": authority_guard.get("same_vendor_label_count"),
+                "same_vendor_route_count": authority_guard.get("same_vendor_route_count"),
             }
         )
 

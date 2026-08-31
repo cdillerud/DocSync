@@ -57,13 +57,16 @@ echo V116_CANDIDATE_PYCOMPILE=PASS
 docker exec "$backend" python -c 'import pytest; print("V117_PYTEST_VERSION=" + str(pytest.__version__))'
 echo V117_PYTEST_PREFLIGHT=PASS
 
-docker exec "$backend" sh -c "PYTHONPATH='$CONTAINER_STAGE:/app' python -m py_compile \
- '$CONTAINER_STAGE/services/ap_routing_authority_guard_service.py' \
- '$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py' \
- '$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py'"
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m py_compile \
+ "$CONTAINER_STAGE/services/ap_routing_authority_guard_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
 echo V117_ADDITIVE_PYCOMPILE=PASS
 
-docker exec "$backend" sh -c "PYTHONPATH='$CONTAINER_STAGE:/app' python -m pytest -q '$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py'"
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as m; p=str(m.__file__); print("V117_AUTHORITY_IMPORT_ORIGIN="+p); assert p.startswith("/tmp/gpi-ap-routing-v116/"), p'
+echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
+
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
 '@
 $Raw = Replace-Required -Text $Raw `
@@ -136,12 +139,14 @@ $Raw = Replace-Required -Text $Raw `
 $Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.2'")
 $Raw = $Raw.Replace('V116_','V117_')
 $Raw = $Raw.Replace('V116 - AP ROUTING BROAD HELD-OUT EVALUATION','V117 - AP ROUTING EVIDENCE-AUTHORITY HELD-OUT EVALUATION')
+$Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 held-out evaluation gate failed')
 
 Require ($Raw.Contains($ExpectedFeatureCommit)) 'V117 generated script lacks expected feature commit.'
 Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')) 'V117 generated script lacks authority guard service.'
 Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
 Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
+Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
 Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_START=1')) 'V117 generated script lacks vendor expansion phase.'
 Require ($Raw.Contains('max_total=180')) 'V117 generated script lacks balanced base sample.'
@@ -164,6 +169,7 @@ Write-Host 'V117_VARIABLE_VENDOR_SEMANTIC_DISCRIMINATION=PASS' -ForegroundColor 
 Write-Host 'V117_ORDER_FAMILY_SAFETY=PASS' -ForegroundColor Green
 Write-Host 'V117_CROSS_VENDOR_REFERENCE_RELIANCE_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green
+Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green
 Write-Host 'V117_FAST_REGRESSION_GATE=PASS' -ForegroundColor Green
 Write-Host 'V117_GENERATED_PARSE=PASS' -ForegroundColor Green
 Write-Host "V117_FEATURE_COMMIT=$ExpectedFeatureCommit"

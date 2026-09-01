@@ -108,7 +108,7 @@ foreach ($Needle in @(
     Require-Text -Text $VendorApi -Needle $Needle -Label 'commercialVendorLocations API'
 }
 $Permission = Get-Content -LiteralPath $PermissionPath -Raw
-Require-Text -Text $Permission -Needle 'page "GPI Comm VLoc API" = X;' -Label 'GPI PACK CATALOG permission set'
+Require-Text -Text $Permission -Needle 'page "GPI Comm VLoc API" = X,' -Label 'GPI PACK CATALOG permission set'
 Write-Host 'commercialVendorLocations       : PASS / READ ONLY / COUNTRY + GEO CONTEXT'
 
 Write-Section '5. EXISTING QUOTE + SOURCING-COMPARISON AUTHORITY'

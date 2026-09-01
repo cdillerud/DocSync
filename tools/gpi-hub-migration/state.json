@@ -1,9 +1,9 @@
 {
-  "schema_version": "4.3",
+  "schema_version": "4.4",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V117_AP_ROUTING_EVIDENCE_AUTHORITY_HELDOUT",
   "mode": "run-script",
-  "script": "Invoke-GPIHub-V117-Entry.ps1",
+  "script": "Invoke-GPIHub-V117-REV2-Detached-Entry.ps1",
   "source": {
     "vm": "QualityProjectManagement",
     "public_ip": "4.204.41.190",
@@ -126,10 +126,27 @@
       "source_runtime_unchanged": true,
       "production_mutation": false
     },
+    "v117_rev2_transport_attempt": {
+      "status": "FAIL_INFRASTRUCTURE_SSH_CONNECTION_RESET_NO_ROUTING_MEASUREMENT",
+      "feature_commit": "834eaed10b7285177544864a995eb9da647d2313",
+      "focused_regressions": "PASS_8_OF_8",
+      "runtime_authority_overlay": "ACTIVE",
+      "resilient_context_fallback": "ACTIVE",
+      "mongo_fallback_latched": true,
+      "targeted_expansion_total": 164,
+      "targeted_expansion_completed_before_disconnect": 130,
+      "targeted_expansion_successes_before_disconnect": 130,
+      "targeted_expansion_failures_before_disconnect": 0,
+      "termination": "SSH_CONNECTION_RESET_EXIT_255",
+      "heldout_evaluation_completed": false,
+      "routing_gate_measured": false,
+      "production_mutation": false,
+      "finding": "Mongo-resilient context recovered targeted hydration, but a single long-lived SSH attachment destroyed the run before expansion and heldout evaluation completed."
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
       "commit": "834eaed10b7285177544864a995eb9da647d2313",
-      "status": "V117_REV2_EVERGREEN_FAIL_CLOSED_MONGO_RESILIENT_CONTEXT_AND_VISIBLE_EXPANSION_PROGRESS",
+      "status": "V117_REV2_EVERGREEN_FAIL_CLOSED_MONGO_RESILIENT_CONTEXT_DETACHED_SSH_AND_REUSABLE_EVIDENCE_SNAPSHOT",
       "runtime_authority": false
     },
     "accounting_temp_routing_authority": "PROVEN_READ_ONLY_PRODUCTION",
@@ -157,7 +174,8 @@
       "final sparse-risk runtime overlay: warehouse-prefixed documents cannot auto-route to Tooling Invoices without repeated same-vendor Accounting Tooling evidence",
       "targeted read-only corpus expansion for high-value/variable vendors after route-balanced base sampling",
       "evaluation-only resilient BC context: use normal cache-first resolution while healthy, then latch to live-BC-only reads after Mongo DNS failure",
-      "visible targeted-expansion progress telemetry without changing evaluation semantics",
+      "detached source-host evaluation with short SSH polling so transport resets cannot terminate the evaluator",
+      "reusable temp evidence snapshot written before heldout evaluation so later routing iterations can avoid full rehydration",
       "versioned live Accounting Temp route contract",
       "explicit correction becomes higher-weight supervised evidence",
       "shadow-first integration only after measured held-out promotion gates"
@@ -175,9 +193,9 @@
       "name": "V117_AP_ROUTING_EVIDENCE_AUTHORITY_HELDOUT",
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
-      "execution_mode": "FAST_SYNTHETIC_REGRESSION_GATE_THEN_READ_ONLY_LIVE_ACCOUNTING_CORPUS",
-      "status": "IN_PROGRESS_REV2",
-      "objective": "Re-run after closing the remaining Evergreen unsafe-auto class and preventing Mongo DNS loss from discarding targeted labels. Gate remains zero wrong auto-routes, 100% auto-route accuracy, and at least 90% coverage."
+      "execution_mode": "DETACHED_REMOTE_EVALUATOR_WITH_SHORT_POLLING_AND_REUSABLE_EVIDENCE_SNAPSHOT",
+      "status": "IN_PROGRESS_REV2_TRANSPORT_HARDENED",
+      "objective": "Obtain the first valid REV2 heldout measurement after the prior attempt was terminated by SSH transport reset. Gate remains zero wrong auto-routes, 100% auto-route accuracy, and at least 90% coverage."
     },
     {
       "sequence": 2,
@@ -203,7 +221,7 @@
     "bc_block_production_writes": true,
     "target_original_app_tree_modified": false,
     "target_backend_image_modified": false,
-    "v117_policy": "Feature code is materialized with git show and copied only to /tmp on source host/container. Focused tests run before live corpus reads. GamerAccounting and Business Central are read-only. Corpus persistence is false. /app is unchanged. No restart, SharePoint move/upload, Mongo mutation, BC write, or Production routing authority is permitted."
+    "v117_policy": "Feature code is materialized with git show and copied only to /tmp on source host/container. Focused tests run before live corpus reads. GamerAccounting and Business Central are read-only. No Mongo writes occur. Evidence snapshots are temp-only under /tmp and are not runtime authority. /app is unchanged. No restart, SharePoint move/upload, Mongo mutation, BC write, or Production routing authority is permitted."
   },
   "open_parity_blockers": [
     "AP_ROUTING_HELDOUT_ACCURACY_AND_COVERAGE_ISSUE_20",
@@ -216,5 +234,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "If V117 reaches zero wrong automatic routes, 100% automatic accuracy, and at least 90% heldout coverage, integrate the learned AP router shadow-first in UAT while the deterministic route remains authoritative and accumulate real intake telemetry. Production remains untouched until explicit authorization.",
-  "notes": "Detailed V115/V116 history remains preserved in Git history. V117 REV1 measured 25 holdouts, 11 auto-routes, 14 reviews, 44% coverage, 90.91% auto accuracy, and one wrong auto-route; runtime authority remained blocked. REV1 also exposed a severe evaluation infrastructure defect: 116 of 149 targeted expansion hydrations failed after Mongo DNS loss, causing long opaque runtime and starving the expanded corpus. REV2 keeps every promotion threshold unchanged, adds a narrow fail-closed warehouse-reference-versus-Tooling safety overlay, adds evaluation-only live-BC fallback after Mongo failure, and emits expansion progress every ten completions."
+  "notes": "V117 REV1 measured 25 holdouts, 11 auto-routes, 14 reviews, 44% coverage, 90.91% auto accuracy, and one wrong auto-route; runtime authority remained blocked. The first REV2 live attempt did not produce a routing measurement: focused 8/8 regressions passed, Mongo fallback latched successfully, and targeted expansion reached 130/164 with 130 successes and zero failures before the single attached SSH session reset and killed the run with exit 255. The current controller detaches the remote evaluator, polls via short reconnectable SSH sessions, preserves the remote log, writes a reusable temp evidence snapshot before heldout evaluation, increases read-only hydration concurrency from 2 to 4, and keeps the failure window open. Promotion thresholds remain unchanged."
 }

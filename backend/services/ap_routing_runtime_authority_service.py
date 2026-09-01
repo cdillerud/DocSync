@@ -17,6 +17,12 @@ V117 runtime-authority boundaries
   for that exact child.
 * Rhonda - Issues is an exception workflow, not a generic semantic bucket; a
   vendor with no learned Rhonda - Issues history fails closed to review.
+* Semantically specific exception children such as Ball Detention Credits need
+  current-document semantic evidence; vendor history alone cannot specialize a
+  generic credit memo into that workflow.
+* An exact current warehouse/order reference found in same-vendor Accounting
+  source-placement evidence under a different canonical workflow vetoes a
+  vendor-majority override.
 
 These are authority vetoes only. They never infer the replacement route and do
 not write SharePoint, Mongo, or Business Central.
@@ -120,6 +126,24 @@ def _is_sparse_exception_workflow(route: str) -> bool:
     return normalized == "Rhonda - Issues" or normalized.startswith("Rhonda - Issues/")
 
 
+def _document_semantic_text(document: Dict[str, Any]) -> str:
+    fields = document.get("extracted_fields") or document.get("ai_extraction") or {}
+    return " ".join(
+        [
+            str(document.get("file_name") or ""),
+            str(document.get("raw_text") or document.get("document_text") or "")[:16000],
+            " ".join(f"{key} {value}" for key, value in list(fields.items())[:80]),
+        ]
+    ).lower()
+
+
+def _specific_child_semantics_supported(route: str, document: Dict[str, Any]) -> bool:
+    normalized = normalize_route_path(route)
+    if normalized == "Vendor Credit Memos/Ball Detention Credits":
+        return bool(re.search(r"\bdetention\b", _document_semantic_text(document)))
+    return True
+
+
 def _warehouse_reference_tokens(document: Dict[str, Any], context: Dict[str, Any]) -> Set[str]:
     values: List[Any] = []
     fields = document.get("extracted_fields") or document.get("ai_extraction") or {}
@@ -157,6 +181,39 @@ def _warehouse_reference_tokens(document: Dict[str, Any], context: Dict[str, Any
         ):
             warehouse.add(token)
     return warehouse
+
+
+def _same_vendor_exact_reference_routes(
+    document: Dict[str, Any],
+    context: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+) -> Dict[str, Set[str]]:
+    refs = _warehouse_reference_tokens(document, context)
+    if not refs:
+        return {}
+
+    matches: Dict[str, Set[str]] = {ref: set() for ref in refs}
+    for example in _same_vendor_examples(document, support_examples):
+        route = normalize_route_path(example.get("route_path"))
+        if not route:
+            continue
+        example_context = example.get("bc_context") or {}
+        haystack = " ".join(
+            [
+                str(example.get("source_route_path") or ""),
+                str(example.get("raw_route_path") or ""),
+                str(example.get("placement_path") or ""),
+                str(example.get("file_name") or ""),
+                " ".join(str(value) for value in (example_context.get("verified_order_numbers") or [])),
+                str(example_context.get("po_number") or ""),
+                str(example_context.get("bc_order_number") or ""),
+            ]
+        ).upper()
+        for ref in refs:
+            if re.search(rf"(?<![A-Z0-9]){re.escape(ref)}(?![A-Z0-9])", haystack):
+                matches[ref].add(route)
+
+    return {ref: routes for ref, routes in matches.items() if routes}
 
 
 def _force_review_runtime(
@@ -230,6 +287,47 @@ async def decide_ap_route_with_runtime_authority(
     same_vendor_exact_route = _same_vendor_route_support(document, support, route)
     dynamic_prefix = _dynamic_route_prefix(route, contract)
     static_parent = _static_parent_route(route, contract)
+
+    # A semantically specific child workflow needs current-document evidence for
+    # the semantic distinction encoded in that child. Repeated vendor history
+    # cannot turn an ordinary credit memo into a detention-credit workflow.
+    if not _specific_child_semantics_supported(route, document):
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "specific child workflow lacks current-document semantic evidence "
+                "for the specialization"
+            ),
+            evidence={
+                "specific_child_route": route,
+                "same_vendor_label_count": same_vendor_count,
+                "same_vendor_exact_route_label_count": same_vendor_exact_route,
+            },
+        )
+
+    # Exact current references embedded in Accounting's same-vendor source
+    # placements are stronger than vendor-majority consensus. If that exact
+    # reference has learned a different canonical workflow, veto the proposal.
+    exact_reference_routes = _same_vendor_exact_reference_routes(document, context, support)
+    conflicting_reference_routes = {
+        ref: sorted(routes)
+        for ref, routes in exact_reference_routes.items()
+        if route not in routes
+    }
+    if conflicting_reference_routes:
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "exact current reference has same-vendor Accounting source-placement "
+                "evidence for a different canonical workflow"
+            ),
+            evidence={
+                "same_vendor_exact_reference_routes": conflicting_reference_routes,
+                "same_vendor_label_count": same_vendor_count,
+            },
+        )
 
     # Dynamic route validation proves only that the leaf is contract-valid and,
     # where required, tied to a verified BC reference. It does not prove that

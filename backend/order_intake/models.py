@@ -1,9 +1,9 @@
 """Normalized models for inbound customer orders.
 
 Source facts and Business Central transaction values are deliberately separate.
-For example, a customer blanket schedule may say 89,775 physical units per truck,
-while Business Central may order the item as 89.775 M or as 22 PALLET. The parser
-must preserve the source evidence and never infer the BC transaction quantity.
+For example, a customer blanket schedule may express a truckload as a physical
+piece count while Business Central transacts the same load in a different sales
+quantity/UOM. The parser must preserve source evidence and never infer BC values.
 """
 
 from dataclasses import dataclass, field, asdict

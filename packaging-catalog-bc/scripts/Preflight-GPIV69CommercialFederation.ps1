@@ -1,11 +1,20 @@
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$AppPath = (Split-Path -Parent $PSScriptRoot)
+    [string]$AppPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+$ScriptFile = $MyInvocation.MyCommand.Path
+if ([string]::IsNullOrWhiteSpace($ScriptFile)) {
+    throw 'Could not resolve the V69 federation preflight script path.'
+}
+$ScriptDirectory = Split-Path -Parent ([System.IO.Path]::GetFullPath($ScriptFile))
+if ([string]::IsNullOrWhiteSpace($AppPath)) {
+    $AppPath = Split-Path -Parent $ScriptDirectory
+}
 
 function Write-Section {
     param([Parameter(Mandatory)][string]$Title)
@@ -40,6 +49,7 @@ Write-Host ''
 Write-Host ('=' * 118) -ForegroundColor Cyan
 Write-Host 'GPI PACKAGING CATALOG V69 COMMERCIAL CONTEXT FEDERATION / LOCAL PREFLIGHT' -ForegroundColor Cyan
 Write-Host ('=' * 118) -ForegroundColor Cyan
+Write-Host "Resolved app path               : $AppPath"
 Write-Host 'Business Central calls          : NONE'
 Write-Host 'Business Central writes         : NONE'
 Write-Host 'Publish/install                 : NONE'

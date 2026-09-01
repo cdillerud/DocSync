@@ -47,6 +47,43 @@ $BaseRaw = $BaseRaw.Replace(
     "        '-o','ConnectTimeout=20',`n        '-o','ServerAliveInterval=30',`n        '-o','ServerAliveCountMax=6',`n        '-o','TCPKeepAlive=yes',"
 )
 
+$BackendSelectorOld = @'
+backend=$(docker ps --filter 'label=com.docker.compose.service=backend' --format '{{.Names}}' | head -n 1)
+[ -n "$backend" ] || { echo 'Source backend missing.' >&2; exit 71; }
+[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image drift.' >&2; exit 72; }
+[ "$(docker exec "$backend" sha256sum /app/services/document_intel_helpers.py | awk '{print $1}')" = "$EXPECTED_HELPER" ] || { echo 'Source document helper drift.' >&2; exit 73; }
+'@
+$BackendSelectorNew = @'
+backend=''
+backend_candidates=0
+image_matches=0
+certified_matches=0
+while IFS= read -r candidate; do
+    [ -n "$candidate" ] || continue
+    backend_candidates=$((backend_candidates+1))
+    candidate_image=$(docker inspect "$candidate" -f '{{.Image}}' 2>/dev/null || true)
+    candidate_project=$(docker inspect "$candidate" -f '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
+    candidate_helper=''
+    if docker exec "$candidate" test -f /app/services/document_intel_helpers.py >/dev/null 2>&1; then
+        candidate_helper=$(docker exec "$candidate" sha256sum /app/services/document_intel_helpers.py 2>/dev/null | awk '{print $1}' || true)
+    fi
+    echo "V116_BACKEND_CANDIDATE=name=$candidate;project=$candidate_project;image=$candidate_image;helper=$candidate_helper"
+    if [ "$candidate_image" = "$EXPECTED_IMAGE" ]; then
+        image_matches=$((image_matches+1))
+        if [ "$candidate_helper" = "$EXPECTED_HELPER" ]; then
+            backend="$candidate"
+            certified_matches=$((certified_matches+1))
+        fi
+    fi
+done < <(docker ps --filter 'label=com.docker.compose.service=backend' --format '{{.Names}}')
+[ "$backend_candidates" -gt 0 ] || { echo 'Source backend missing.' >&2; exit 71; }
+[ "$image_matches" -gt 0 ] || { echo 'Source certified backend image not found among backend containers.' >&2; exit 72; }
+[ "$certified_matches" -gt 0 ] || { echo 'Source document helper drift on certified backend image.' >&2; exit 73; }
+[ "$certified_matches" -eq 1 ] || { echo "Source certified backend selection ambiguous: matches=$certified_matches" >&2; exit 78; }
+echo "V116_SOURCE_BACKEND_SELECTED=$backend"
+'@
+$BaseRaw = Replace-Required -Text $BaseRaw -Old $BackendSelectorOld -New $BackendSelectorNew -Marker 'certified backend container selector'
+
 $BaseRaw = Replace-Required -Text $BaseRaw `
     -Old "        concurrency=2,`n        persist=False," `
     -New "        concurrency=4,`n        persist=False," `
@@ -250,6 +287,7 @@ Write-Host 'V117_REV2_SHORT_POLL_STREAMING_CONFIGURED=PASS' -ForegroundColor Gre
 Write-Host 'V117_REV2_BASE_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_EXPANSION_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_REV2_CERTIFIED_BACKEND_SELECTOR_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host "V117_REV2_PATCH_ROOT=$PatchRoot"
 
 try {

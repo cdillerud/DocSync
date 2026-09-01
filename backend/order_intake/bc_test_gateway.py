@@ -1,8 +1,8 @@
 """Guarded Business Central gateway for GPI Order Intake write tests.
 
-This gateway is intentionally restricted to the approved PRE-GAMERDOCS cutover
-sandbox and Gamer Packaging company. It can create/read/delete tagged test Sales
-Orders, but it exposes no release, shipment, invoice, or posting operations.
+Restricted to PRE_GAMERDOCS_CUTOVER_20260831 + Gamer Packaging. This gateway can
+read order/customer/item data and create/delete tagged Open test Sales Orders.
+It intentionally exposes no release, shipment, invoice, or posting operations.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from services.business_central_service import (
     get_bc_token,
 )
 
-
 APPROVED_ENVIRONMENT = "PRE_GAMERDOCS_CUTOVER_20260831"
 APPROVED_COMPANY_NAME = "Gamer Packaging"
 TEST_EXTERNAL_DOC_PREFIX = "AITEST-"
@@ -33,13 +32,6 @@ class OrderIntakeBCGuardError(RuntimeError):
 
 
 class OrderIntakeBCTestGateway:
-    """Read/write test gateway with hard safety fences.
-
-    Read and write operations both refuse to run against any environment other
-    than PRE_GAMERDOCS_CUTOVER_20260831. Writes additionally require the explicit
-    GPI_ORDER_INTAKE_BC_WRITE_TESTS_ENABLED=true feature flag.
-    """
-
     def __init__(self):
         self.environment = (
             os.environ.get("BC_ENVIRONMENT")
@@ -67,8 +59,7 @@ class OrderIntakeBCTestGateway:
 
     def assert_write_enabled(self) -> None:
         self.assert_target_environment()
-        enabled = os.environ.get(WRITE_FLAG_NAME, "false").strip().lower() == "true"
-        if not enabled:
+        if os.environ.get(WRITE_FLAG_NAME, "false").strip().lower() != "true":
             raise OrderIntakeBCGuardError(
                 f"BC write testing is disabled. Set {WRITE_FLAG_NAME}=true explicitly."
             )
@@ -76,16 +67,11 @@ class OrderIntakeBCTestGateway:
     async def _headers(self) -> Dict[str, str]:
         self.assert_target_environment()
         token = await get_bc_token()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     async def resolve_company(self) -> Dict[str, Any]:
-        """Resolve and verify the Gamer Packaging company in the approved sandbox."""
         if self._company:
             return self._company
-
         headers = await self._headers()
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{self.environment}/api/v2.0/companies"
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
@@ -94,15 +80,11 @@ class OrderIntakeBCTestGateway:
             raise OrderIntakeBCGuardError(
                 f"Unable to read BC companies: HTTP {resp.status_code}: {resp.text[:300]}"
             )
-
         companies = resp.json().get("value", [])
-        selected = None
         if self.configured_company_id:
             selected = next((c for c in companies if c.get("id") == self.configured_company_id), None)
             if not selected:
-                raise OrderIntakeBCGuardError(
-                    "Configured BC_COMPANY_ID was not found in the approved environment."
-                )
+                raise OrderIntakeBCGuardError("Configured BC_COMPANY_ID was not found in the approved environment.")
         else:
             exact = [
                 c for c in companies
@@ -114,13 +96,11 @@ class OrderIntakeBCTestGateway:
                     f"Expected exactly one '{APPROVED_COMPANY_NAME}' company; found {len(exact)}."
                 )
             selected = exact[0]
-
         company_name = (selected.get("name") or selected.get("displayName") or "").strip()
         if company_name.lower() != APPROVED_COMPANY_NAME.lower():
             raise OrderIntakeBCGuardError(
-                f"Resolved company '{company_name}' is not approved for Order Intake write tests."
+                f"Resolved company '{company_name}' is not approved for Order Intake tests."
             )
-
         self._company = selected
         self._company_id = selected["id"]
         return selected
@@ -139,9 +119,57 @@ class OrderIntakeBCTestGateway:
             "company": company.get("name") or company.get("displayName"),
             "companyId": company.get("id"),
             "writeTestsEnabled": os.environ.get(WRITE_FLAG_NAME, "false").strip().lower() == "true",
-            "allowedWriteOperations": ["create tagged Open Sales Order", "create tagged Sales Order lines", "delete tagged Open test Sales Order"],
+            "allowedWriteOperations": [
+                "create tagged Open Sales Order",
+                "create tagged Sales Order lines",
+                "delete tagged Open test Sales Order",
+            ],
             "blockedOperations": ["release", "ship", "invoice", "post"],
         }
+
+    async def find_customers(self, search_text: str, top: int = 25) -> List[Dict[str, Any]]:
+        """Read-only customer discovery for initial customer-profile setup."""
+        headers = await self._headers()
+        base = await self._base_url()
+        needle = self._odata_literal(search_text)
+        params = {
+            "$select": "id,number,displayName,email,phoneNumber,blocked",
+            "$filter": f"contains(displayName, '{needle}')",
+            "$top": str(top),
+        }
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(f"{base}/customers", headers=headers, params=params)
+        if resp.status_code != 200:
+            raise OrderIntakeBCGuardError(
+                f"Customer lookup failed: HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+        return resp.json().get("value", [])
+
+    async def resolve_item(self, item_number: str) -> Dict[str, Any]:
+        """Resolve one exact BC Item No. to its GUID before creating a line."""
+        headers = await self._headers()
+        base = await self._base_url()
+        number = self._odata_literal(item_number)
+        params = {
+            "$select": "id,number,displayName,type,blocked,baseUnitOfMeasureCode",
+            "$filter": f"number eq '{number}'",
+            "$top": "2",
+        }
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.get(f"{base}/items", headers=headers, params=params)
+        if resp.status_code != 200:
+            raise OrderIntakeBCGuardError(
+                f"Item lookup failed: HTTP {resp.status_code}: {resp.text[:300]}"
+            )
+        matches = resp.json().get("value", [])
+        if len(matches) != 1:
+            raise OrderIntakeBCGuardError(
+                f"Expected exactly one BC item for number '{item_number}'; found {len(matches)}."
+            )
+        item = matches[0]
+        if item.get("blocked") is True:
+            raise OrderIntakeBCGuardError(f"BC item '{item_number}' is blocked.")
+        return item
 
     async def find_sales_orders(
         self,
@@ -150,7 +178,6 @@ class OrderIntakeBCTestGateway:
         external_document_number: str,
         top: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Read-only duplicate lookup by customer + external document number."""
         headers = await self._headers()
         base = await self._base_url()
         customer = self._odata_literal(customer_number)
@@ -180,8 +207,7 @@ class OrderIntakeBCTestGateway:
             order = resp.json()
             if include_lines:
                 line_resp = await client.get(
-                    f"{base}/salesOrders({order_id})/salesOrderLines",
-                    headers=headers,
+                    f"{base}/salesOrders({order_id})/salesOrderLines", headers=headers
                 )
                 if line_resp.status_code != 200:
                     raise OrderIntakeBCGuardError(
@@ -198,17 +224,29 @@ class OrderIntakeBCTestGateway:
             )
 
     async def create_test_sales_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Create an Open tagged test Sales Order and optional item lines.
+        """Create a tagged Open test order and read it back.
 
-        Pricing is intentionally omitted so Business Central calculates it.
+        Unit price is never supplied by this method. BC calculates price using its
+        normal sales rules. Each item number is resolved to the BC item GUID first.
         """
         self.assert_write_enabled()
         external = str(order_data.get("externalDocumentNumber") or "")
         self._validate_test_external_document(external)
-
         customer_number = str(order_data.get("customerNumber") or "").strip()
         if not customer_number:
             raise OrderIntakeBCGuardError("customerNumber is required for write testing.")
+
+        lines = order_data.get("lines") or []
+        resolved_lines: List[Dict[str, Any]] = []
+        for index, line in enumerate(lines, start=1):
+            item_number = str(line.get("itemNumber") or "").strip()
+            if not item_number:
+                raise OrderIntakeBCGuardError(f"Test line {index} is missing itemNumber.")
+            quantity = float(line.get("quantity") or 0)
+            if quantity <= 0:
+                raise OrderIntakeBCGuardError(f"Test line {index} quantity must be > 0.")
+            item = await self.resolve_item(item_number)
+            resolved_lines.append({"source": line, "item": item, "quantity": quantity})
 
         headers = await self._headers()
         base = await self._base_url()
@@ -229,26 +267,20 @@ class OrderIntakeBCTestGateway:
                 )
             created_order = resp.json()
             order_id = created_order["id"]
-
             try:
-                for index, line in enumerate(order_data.get("lines") or [], start=1):
-                    item_number = str(line.get("itemNumber") or "").strip()
-                    if not item_number:
-                        raise OrderIntakeBCGuardError(f"Test line {index} is missing itemNumber.")
-                    quantity = float(line.get("quantity") or 0)
-                    if quantity <= 0:
-                        raise OrderIntakeBCGuardError(f"Test line {index} quantity must be > 0.")
-
+                for index, resolved in enumerate(resolved_lines, start=1):
+                    source = resolved["source"]
+                    item = resolved["item"]
                     line_payload: Dict[str, Any] = {
                         "lineType": "Item",
-                        "itemNumber": item_number,
-                        "quantity": quantity,
+                        "itemId": item["id"],
+                        "lineObjectNumber": item["number"],
+                        "quantity": resolved["quantity"],
                     }
-                    if line.get("unitOfMeasureCode"):
-                        line_payload["unitOfMeasureCode"] = line["unitOfMeasureCode"]
-                    if line.get("description"):
-                        line_payload["description"] = str(line["description"])[:100]
-
+                    if source.get("unitOfMeasureCode"):
+                        line_payload["unitOfMeasureCode"] = source["unitOfMeasureCode"]
+                    if source.get("description"):
+                        line_payload["description"] = str(source["description"])[:100]
                     line_resp = await client.post(
                         f"{base}/salesOrders({order_id})/salesOrderLines",
                         headers=headers,
@@ -260,8 +292,6 @@ class OrderIntakeBCTestGateway:
                             f"HTTP {line_resp.status_code}: {line_resp.text[:500]}"
                         )
             except Exception:
-                # Best effort cleanup is permitted only because this order was created
-                # by this method with the mandatory AITEST- tag.
                 try:
                     await self.delete_test_sales_order(order_id)
                 finally:
@@ -270,18 +300,15 @@ class OrderIntakeBCTestGateway:
         return await self.get_sales_order(created_order["id"], include_lines=True)
 
     async def delete_test_sales_order(self, order_id: str) -> Dict[str, Any]:
-        """Delete only a tagged, still-open test Sales Order."""
         self.assert_write_enabled()
         order = await self.get_sales_order(order_id, include_lines=False)
         external = str(order.get("externalDocumentNumber") or "")
         self._validate_test_external_document(external)
-
         status = str(order.get("status") or "").strip().lower()
         if status not in {"open", "draft"}:
             raise OrderIntakeBCGuardError(
                 f"Refusing to delete test Sales Order in status '{order.get('status')}'."
             )
-
         headers = await self._headers()
         headers["If-Match"] = "*"
         base = await self._base_url()

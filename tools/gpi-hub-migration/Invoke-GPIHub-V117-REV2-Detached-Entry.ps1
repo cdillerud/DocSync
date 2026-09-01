@@ -84,6 +84,41 @@ echo "V116_SOURCE_BACKEND_SELECTED=$backend"
 '@
 $BaseRaw = Replace-Required -Text $BaseRaw -Old $BackendSelectorOld -New $BackendSelectorNew -Marker 'certified backend container selector'
 
+$HealthProbeOld = @'
+health=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=4); print(r.status)')
+case "$health" in 2??|3??) ;; *) echo "Source backend unhealthy: $health" >&2; exit 77;; esac
+echo "V116_SOURCE_HEALTH_BEFORE=$health"
+echo V116_SOURCE_SAFETY=PASS
+'@
+$HealthProbeNew = @'
+health=''
+health_attempt=0
+while [ "$health_attempt" -lt 6 ]; do
+    health_attempt=$((health_attempt+1))
+    health=$(docker exec "$backend" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=8).status)' 2>/dev/null || true)
+    if [ -n "$health" ]; then
+        echo "V116_SOURCE_HEALTH_ATTEMPT=$health_attempt;result=$health"
+    else
+        echo "V116_SOURCE_HEALTH_ATTEMPT=$health_attempt;result=TIMEOUT_OR_ERROR"
+    fi
+    case "$health" in
+        2??|3??) break ;;
+    esac
+    sleep 5
+done
+case "$health" in
+    2??|3??) ;;
+    *)
+        docker inspect "$backend" -f 'V116_SOURCE_CONTAINER_STATE=status={{.State.Status}};running={{.State.Running}};restart_count={{.RestartCount}};oom_killed={{.State.OOMKilled}};started={{.State.StartedAt}}' 2>/dev/null || true
+        echo "Source backend unhealthy after bounded retries: $health" >&2
+        exit 77
+        ;;
+esac
+echo "V116_SOURCE_HEALTH_BEFORE=$health"
+echo V116_SOURCE_SAFETY=PASS
+'@
+$BaseRaw = Replace-Required -Text $BaseRaw -Old $HealthProbeOld -New $HealthProbeNew -Marker 'bounded source health retries'
+
 $BaseRaw = Replace-Required -Text $BaseRaw `
     -Old "        concurrency=2,`n        persist=False," `
     -New "        concurrency=4,`n        persist=False," `
@@ -288,6 +323,7 @@ Write-Host 'V117_REV2_BASE_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_EXPANSION_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_CERTIFIED_BACKEND_SELECTOR_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_REV2_BOUNDED_SOURCE_HEALTH_RETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host "V117_REV2_PATCH_ROOT=$PatchRoot"
 
 try {

@@ -42,7 +42,7 @@ $VendorApiPath = Join-Path $AppPath 'src\Pages\GPICommercialVendorLocationAPI.Pa
 $QuoteApiPath = Join-Path $AppPath 'src\Pages\GPIQuoteSummaryAPI.Page.al'
 $CompareApiPath = Join-Path $AppPath 'src\Pages\GPICompareLineAPI.Page.al'
 $ProductTablePath = Join-Path $AppPath 'src\Tables\GPIPackagingProduct.Table.al'
-$PermissionPath = Join-Path $AppPath 'src\PermissionSets\GPIV69Federation.PermissionSetExt.al'
+$PermissionPath = Join-Path $AppPath 'src\PermissionSets\GPIPackagingCatalog.PermissionSet.al'
 $BuildPath = Join-Path $AppPath 'scripts\Build-GPIPackagingCatalog.ps1'
 
 Write-Host ''
@@ -95,7 +95,7 @@ Write-Host 'commercialProducts              : PASS / READ ONLY / EXPANDED CONTEX
 Write-Section '4. READ-ONLY COMMERCIAL VENDOR LOCATION API'
 $VendorApi = Get-Content -LiteralPath $VendorApiPath -Raw
 foreach ($Needle in @(
-    'page 71127 "GPI Comm Vendor Loc API"',
+    'page 71131 "GPI Comm VLoc API"',
     "APIGroup = 'commercialAgents';",
     "EntitySetName = 'commercialVendorLocations';",
     'InsertAllowed = false;',
@@ -108,7 +108,7 @@ foreach ($Needle in @(
     Require-Text -Text $VendorApi -Needle $Needle -Label 'commercialVendorLocations API'
 }
 $Permission = Get-Content -LiteralPath $PermissionPath -Raw
-Require-Text -Text $Permission -Needle 'page "GPI Comm Vendor Loc API" = X;' -Label 'V69 permission set extension'
+Require-Text -Text $Permission -Needle 'page "GPI Comm VLoc API" = X;' -Label 'GPI PACK CATALOG permission set'
 Write-Host 'commercialVendorLocations       : PASS / READ ONLY / COUNTRY + GEO CONTEXT'
 
 Write-Section '5. EXISTING QUOTE + SOURCING-COMPARISON AUTHORITY'

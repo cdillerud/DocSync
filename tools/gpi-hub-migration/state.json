@@ -1,5 +1,5 @@
 {
-  "schema_version": "4.4",
+  "schema_version": "4.5",
   "control_branch": "migration/gpi-hub-dedicated-vm",
   "phase": "V117_AP_ROUTING_EVIDENCE_AUTHORITY_HELDOUT",
   "mode": "run-script",
@@ -143,10 +143,44 @@
       "production_mutation": false,
       "finding": "Mongo-resilient context recovered targeted hydration, but a single long-lived SSH attachment destroyed the run before expansion and heldout evaluation completed."
     },
+    "v117_rev2_measured_result": {
+      "status": "FAIL_UNSAFE_FOUR_WRONG_AUTO_ROUTES_AND_LOW_COVERAGE",
+      "feature_commit": "834eaed10b7285177544864a995eb9da647d2313",
+      "focused_regressions": "PASS_8_OF_8",
+      "discovered_live_files": 2876,
+      "collapsed_nested_placements": 1923,
+      "unmapped_queue_count": 0,
+      "base_selected": 162,
+      "base_hydrated": 161,
+      "base_hydration_failures": 1,
+      "targeted_expansion_selected": 137,
+      "targeted_expansion_hydrated": 137,
+      "targeted_expansion_failures": 0,
+      "mongo_fallback_latched": true,
+      "merged_labels": 298,
+      "holdout": 56,
+      "auto_routed": 19,
+      "reviewed": 37,
+      "coverage": 0.3393,
+      "auto_route_accuracy": 0.7895,
+      "wrong_auto_routes": 4,
+      "unsafe_cases": [
+        "Preform 115174_PreformSolutions_97028_82926.pdf: expected Dropship Not International; model auto-selected more-specific Dropship Not International/Drop Ship All Others with zero same-vendor supervised labels",
+        "Craler 114480_CRALER_259746085_20260827.pdf: expected Dropship Not International/Freight/Sales Order not posted; model auto-selected contract-valid dynamic Dropship International/114480 solely from verified order context with zero same-vendor supervised labels",
+        "Pacific Southwest Container 108784_PSC_1225483_71026 HOLD-PSC Checking About This Order.pdf: expected Dropship Not International/Drop Ship All Others; model auto-selected Rhonda - Issues from generic hold/checking semantics with zero same-vendor supervised labels",
+        "SGC Solutions 113787 113788 SGC 260807 SGC-07-AUG-2026-1 & -2.pdf: expected Dropship International; model auto-selected dynamic Dropship International/113788 although same-vendor Accounting evidence supported only the parent queue"
+      ],
+      "finding": "Contract validity and verified BC references were still being treated as sufficient runtime authority for unsupported route specialization. V117 REV3 therefore adds fail-closed authority boundaries without selecting replacement routes.",
+      "gate": "FAIL_WRONG_AUTO_ROUTE_EXIT_91",
+      "source_health_after": 200,
+      "temp_cleanup": true,
+      "source_runtime_unchanged": true,
+      "production_mutation": false
+    },
     "ap_ai_routing_feature_branch": {
       "branch": "feature/ap-ai-routing-learning",
-      "commit": "834eaed10b7285177544864a995eb9da647d2313",
-      "status": "V117_REV2_EVERGREEN_FAIL_CLOSED_MONGO_RESILIENT_CONTEXT_DETACHED_SSH_AND_REUSABLE_EVIDENCE_SNAPSHOT",
+      "commit": "5aaa52cac87e6c4087b5007bb98594ca868b6d7a",
+      "status": "V117_REV3_UNSUPPORTED_SPECIALIZATION_AUTHORITY_BOUNDARY_CANDIDATE_14_FOCUSED_TESTS_CONFIGURED",
       "runtime_authority": false
     },
     "accounting_temp_routing_authority": "PROVEN_READ_ONLY_PRODUCTION",
@@ -159,7 +193,7 @@
     "routing_label_authority": "GamerAccounting AP Temp placement at a contract-defined intake queue plus explicit reviewer corrections",
     "legacy_nav_role": "historical vendor/layout coverage only; never route-label authority",
     "feature_branch": "feature/ap-ai-routing-learning",
-    "feature_commit": "834eaed10b7285177544864a995eb9da647d2313",
+    "feature_commit": "5aaa52cac87e6c4087b5007bb98594ca868b6d7a",
     "pipeline": [
       "primary-document classification with pypdf dangerous-semantic guard",
       "bounded pages-2-to-5 supporting-reference extraction",
@@ -171,6 +205,9 @@
       "variable-vendor semantic/context discrimination; vendor frequency and generic filename shape cannot grant authority",
       "order/reference-family safety veto for warehouse-versus-dropship contradictions",
       "cross-vendor exact-reference veto only when the model actually relies on the foreign evidence",
+      "final runtime specialization boundary: contract-valid dynamic order leaves require exact same-vendor Accounting route evidence before auto-route",
+      "final runtime specialization boundary: a static child under an also-valid parent requires same-vendor Accounting evidence for that child before auto-route",
+      "final runtime exception boundary: Rhonda - Issues requires same-vendor Accounting evidence rather than generic hold/problem semantics",
       "final sparse-risk runtime overlay: warehouse-prefixed documents cannot auto-route to Tooling Invoices without repeated same-vendor Accounting Tooling evidence",
       "targeted read-only corpus expansion for high-value/variable vendors after route-balanced base sampling",
       "evaluation-only resilient BC context: use normal cache-first resolution while healthy, then latch to live-BC-only reads after Mongo DNS failure",
@@ -194,8 +231,8 @@
       "tracking_issue": 20,
       "classification": "PARITY_BLOCKER_MEASURED_AUTOMATION",
       "execution_mode": "DETACHED_REMOTE_EVALUATOR_WITH_SHORT_POLLING_AND_REUSABLE_EVIDENCE_SNAPSHOT",
-      "status": "IN_PROGRESS_REV2_TRANSPORT_HARDENED",
-      "objective": "Obtain the first valid REV2 heldout measurement after the prior attempt was terminated by SSH transport reset. Gate remains zero wrong auto-routes, 100% auto-route accuracy, and at least 90% coverage."
+      "status": "IN_PROGRESS_REV3_UNSUPPORTED_SPECIALIZATION_AUTHORITY_BOUNDARY",
+      "objective": "Re-run the same locked heldout gate with explicit fail-closed boundaries for the four REV2 unsafe authority classes. Gate remains zero wrong auto-routes, 100% auto-route accuracy, and at least 90% coverage."
     },
     {
       "sequence": 2,
@@ -234,5 +271,5 @@
     "GUI_TRUTH_SECOND_PASS"
   ],
   "next_after_success": "If V117 reaches zero wrong automatic routes, 100% automatic accuracy, and at least 90% heldout coverage, integrate the learned AP router shadow-first in UAT while the deterministic route remains authoritative and accumulate real intake telemetry. Production remains untouched until explicit authorization.",
-  "notes": "V117 REV1 measured 25 holdouts, 11 auto-routes, 14 reviews, 44% coverage, 90.91% auto accuracy, and one wrong auto-route; runtime authority remained blocked. The first REV2 live attempt did not produce a routing measurement: focused 8/8 regressions passed, Mongo fallback latched successfully, and targeted expansion reached 130/164 with 130 successes and zero failures before the single attached SSH session reset and killed the run with exit 255. The current controller detaches the remote evaluator, polls via short reconnectable SSH sessions, preserves the remote log, writes a reusable temp evidence snapshot before heldout evaluation, increases read-only hydration concurrency from 2 to 4, and keeps the failure window open. Promotion thresholds remain unchanged."
+  "notes": "V117 REV2 is now a valid measured failure, not a transport-only attempt: 56 holdouts, 19 auto-routes, 37 reviews, 33.93% coverage, 78.95% auto-route accuracy, and four wrong auto-routes. All 137 targeted expansion documents hydrated successfully and the merged evidence set reached 298 labels. The four unsafe cases exposed one authority defect: an allowed contract route or verified BC order was still enough to authorize unsupported specialization. REV3 feature 5aaa52cac87e6c4087b5007bb98594ca868b6d7a adds fail-closed dynamic-child, static-child, and Rhonda-Issues authority boundaries while preserving the existing Evergreen Tooling veto. Six focused regression/positive-control cases were added beside the existing eight; the controller now requires both files before any live corpus read. Promotion thresholds remain unchanged."
 }

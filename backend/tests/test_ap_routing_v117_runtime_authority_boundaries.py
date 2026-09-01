@@ -1,5 +1,6 @@
 import asyncio
 
+import services.ap_routing_runtime_authority_service as runtime_authority
 from services.ap_routing_runtime_authority_service import decide_ap_route_with_authority_guard
 
 
@@ -17,7 +18,10 @@ BASE_CONTRACT = {
         "Dropship Not International/Drop Ship All Others",
         "Dropship Not International/Freight",
         "Dropship Not International/Freight/Sales Order not posted",
+        "Meg to Process",
         "Rhonda - Issues",
+        "Vendor Credit Memos",
+        "Vendor Credit Memos/Ball Detention Credits",
         "Warehouse International",
         "Warehouse Not International",
         "Tooling Invoices",
@@ -49,12 +53,21 @@ def _contract(*, dynamic=False):
     return contract
 
 
-def _example(vendor, route, file_name, raw_text, *, po="", document_type="AP_Invoice"):
+def _example(
+    vendor,
+    route,
+    file_name,
+    raw_text,
+    *,
+    po="",
+    document_type="AP_Invoice",
+    source_route_path="",
+):
     context = {"status": "resolved" if po else "not_found"}
     if po:
         context["po_number"] = po
         context["verified_order_numbers"] = [po]
-    return {
+    row = {
         "fingerprint": f"{vendor}|{route}|{file_name}",
         "vendor_name": vendor,
         "route_path": route,
@@ -65,6 +78,9 @@ def _example(vendor, route, file_name, raw_text, *, po="", document_type="AP_Inv
         "extracted_fields": {"vendor": vendor},
         "bc_context": context,
     }
+    if source_route_path:
+        row["source_route_path"] = source_route_path
+    return row
 
 
 def _document(vendor, file_name, raw_text, *, document_type="AP_Invoice"):
@@ -106,6 +122,38 @@ def _run(*, document, context, contract, examples, route, bc_refs=None):
             llm_send=_sender(route, bc_refs=bc_refs),
         )
     )
+
+
+def _run_overlay(*, document, context, contract, examples, route, confidence=0.99):
+    async def fake_base(*args, **kwargs):
+        return {
+            "decision": "auto_route",
+            "route_path": route,
+            "confidence": confidence,
+            "blockers": [],
+            "warnings": [],
+            "authority_guard": {
+                "action": "allow_existing_decision",
+                "blockers": [],
+            },
+        }
+
+    original = runtime_authority._base_decide_ap_route_with_authority_guard
+    runtime_authority._base_decide_ap_route_with_authority_guard = fake_base
+    try:
+        return asyncio.run(
+            runtime_authority.decide_ap_route_with_runtime_authority(
+                None,
+                document=document,
+                bc_context=context,
+                contract=contract,
+                examples=examples,
+                support_examples=examples,
+                llm_send=_sender(route),
+            )
+        )
+    finally:
+        runtime_authority._base_decide_ap_route_with_authority_guard = original
 
 
 def test_sparse_preform_child_route_fails_closed_when_parent_is_also_valid():
@@ -266,3 +314,120 @@ def test_sparse_psc_hold_language_cannot_create_rhonda_issues_authority():
         "Rhonda - Issues" in blocker
         for blocker in result["runtime_authority_overlay"]["blockers"]
     )
+
+
+def test_generic_credit_memo_cannot_specialize_to_ball_detention_without_detention_semantics():
+    vendor = "BALL METAL BEVERAGE CONTAINER CORP"
+    examples = [
+        _example(
+            vendor,
+            "Vendor Credit Memos/Ball Detention Credits",
+            "Ball prior detention credit.pdf",
+            "detention charge credit memo",
+            document_type="Credit_Memo",
+        )
+    ]
+    result = _run_overlay(
+        document=_document(
+            vendor,
+            "_BallMetalBeverageContainer_6393080 CREDIT_08292026 - Possible Duplicate.pdf",
+            "ordinary vendor credit memo possible duplicate",
+            document_type="Credit_Memo",
+        ),
+        context={"status": "not_found"},
+        contract=_contract(),
+        examples=examples,
+        route="Vendor Credit Memos/Ball Detention Credits",
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["runtime_authority_overlay"]["specific_child_route"] == "Vendor Credit Memos/Ball Detention Credits"
+    assert "semantic evidence" in result["reason"]
+
+
+def test_detention_semantics_can_preserve_ball_detention_route():
+    vendor = "BALL METAL BEVERAGE CONTAINER CORP"
+    examples = [
+        _example(
+            vendor,
+            "Vendor Credit Memos/Ball Detention Credits",
+            "Ball prior detention credit.pdf",
+            "detention charge credit memo",
+            document_type="Credit_Memo",
+        )
+    ]
+    result = _run_overlay(
+        document=_document(
+            vendor,
+            "BallMetalBeverageContainer_5701110_04_10_2025.pdf",
+            "credit memo for detention charges and detention fees",
+            document_type="Credit_Memo",
+        ),
+        context={"status": "not_found"},
+        contract=_contract(),
+        examples=examples,
+        route="Vendor Credit Memos/Ball Detention Credits",
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "Vendor Credit Memos/Ball Detention Credits"
+
+
+def test_exact_same_vendor_source_placement_reference_vetoes_vendor_majority_override():
+    vendor = "Cargo Modules LLC"
+    examples = [
+        _example(
+            vendor,
+            "Rhonda - Issues",
+            "W111694 Cargo prior.pdf",
+            "cargo invoice exception",
+            source_route_path="Rhonda - Issues/OIBJC Insurance Claim Documents/Ocean Freight",
+        ),
+        _example(
+            vendor,
+            "Meg to Process",
+            "Cargo quality replacement prior.pdf",
+            "cargo quality replacement invoice",
+            source_route_path="Meg to Process/Xolution/XO Quality Claim and Replacement Entries/W115989",
+        ),
+    ]
+    result = _run_overlay(
+        document=_document(
+            vendor,
+            "W115989 Cargo 250519 125134305-AR.pdf",
+            "cargo invoice quality claim replacement",
+        ),
+        context={"status": "not_found"},
+        contract=_contract(),
+        examples=examples,
+        route="Rhonda - Issues",
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["runtime_authority_overlay"]["same_vendor_exact_reference_routes"]["W115989"] == ["Meg to Process"]
+    assert "exact current reference" in result["reason"]
+
+
+def test_exact_same_vendor_source_placement_reference_allows_matching_route():
+    vendor = "Cargo Modules LLC"
+    examples = [
+        _example(
+            vendor,
+            "Meg to Process",
+            "Cargo quality replacement prior.pdf",
+            "cargo quality replacement invoice",
+            source_route_path="Meg to Process/Xolution/XO Quality Claim and Replacement Entries/W115989",
+        )
+    ]
+    result = _run_overlay(
+        document=_document(
+            vendor,
+            "W115989 Cargo 250519 125134305-AR.pdf",
+            "cargo invoice quality claim replacement",
+        ),
+        context={"status": "not_found"},
+        contract=_contract(),
+        examples=examples,
+        route="Meg to Process",
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "Meg to Process"

@@ -95,7 +95,7 @@ def test_giovanni_parser_preserves_packout_without_guessing_bc_uom(tmp_path):
 
 
 def test_giovanni_14oz_pizza_profile_maps_packout_to_m_uom(tmp_path):
-    """Real BC evidence: 89,775/TL is transacted as 89.775 M."""
+    """Live BC evidence: a normal 89,775-unit load is transacted as 89.775 M."""
     path = tmp_path / "gio_pizza.xlsx"
     wb = Workbook()
     ws = wb.active
@@ -114,7 +114,7 @@ def test_giovanni_14oz_pizza_profile_maps_packout_to_m_uom(tmp_path):
                 customer_item_reference="C-8479-10000229",
                 bc_quantity_per_load=89.775,
                 bc_uom="M",
-                source="posted Giovanni BC invoice evidence",
+                source="live PRE_GAMERDOCS Giovanni sales history",
             )
         }
     )
@@ -126,8 +126,8 @@ def test_giovanni_14oz_pizza_profile_maps_packout_to_m_uom(tmp_path):
     assert release.quantity_resolution_method == "authoritative_customer_item_profile"
 
 
-def test_giovanni_16oz_vinegar_profile_can_use_pallet_uom(tmp_path):
-    """Real BC evidence: full TL for this item is 22 PALLET, not 78.166 M."""
+def test_giovanni_16oz_vinegar_profile_maps_live_bc_m_uom(tmp_path):
+    """Live PRE_GAMERDOCS evidence: a normal 78,166-unit load is 78.166 M."""
     path = tmp_path / "gio_vinegar.xlsx"
     wb = Workbook()
     ws = wb.active
@@ -144,17 +144,18 @@ def test_giovanni_16oz_vinegar_profile_can_use_pallet_uom(tmp_path):
                 product_context="16oz Vinegar",
                 physical_units_per_load=78166,
                 customer_item_reference="C-8808-12026443",
-                bc_quantity_per_load=22,
-                bc_uom="PALLET",
-                source="posted Giovanni BC pick-ticket evidence",
+                bc_quantity_per_load=78.166,
+                bc_uom="M",
+                source="live PRE_GAMERDOCS Giovanni sales history",
             )
         }
     )
     release = parser.parse(path, period="2026-04").releases[0]
 
     assert release.physical_quantity == 78166
-    assert release.quantity == 22
-    assert release.uom == "PALLET"
+    assert release.quantity == 78.166
+    assert release.uom == "M"
+    assert release.quantity_resolution_method == "authoritative_customer_item_profile"
 
 
 def test_giovanni_nonstandard_load_does_not_inherit_normal_quantity(tmp_path):
@@ -176,9 +177,9 @@ def test_giovanni_nonstandard_load_does_not_inherit_normal_quantity(tmp_path):
                 product_context="16oz Vinegar",
                 physical_units_per_load=78166,
                 customer_item_reference="C-8808-12026443",
-                bc_quantity_per_load=22,
-                bc_uom="PALLET",
-                source="BC customer/product profile",
+                bc_quantity_per_load=78.166,
+                bc_uom="M",
+                source="live PRE_GAMERDOCS Giovanni sales history",
             )
         }
     )

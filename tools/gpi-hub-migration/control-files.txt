@@ -45,6 +45,7 @@ tools/gpi-hub-migration/Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V116-REV2-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V116-REV3-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-V117-Entry.ps1
+tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV2.ps1
 tools/gpi-hub-migration/Invoke-GPIHub-AP-Top10-Legacy-Inventory-AI-REV3-Delta.ps1

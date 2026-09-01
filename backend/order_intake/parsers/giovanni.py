@@ -23,10 +23,19 @@ from ..utils import clean_text, excel_serial_to_datetime, numeric_reference, sha
 
 @dataclass(frozen=True)
 class GiovanniQuantityProfile:
+    """Authoritative per-product release mapping used after parsing.
+
+    `physical_units_per_load` describes the customer/packout reality.
+    `bc_quantity_per_load` + `bc_uom` describe how the same normal release must be
+    entered on a BC Sales Order. They are intentionally separate because Giovanni
+    items do not share one transaction UOM.
+    """
+
     product_context: str
-    full_tl_quantity: Optional[float]
+    physical_units_per_load: Optional[float]
     customer_item_reference: Optional[str] = None
-    uom: Optional[str] = None
+    bc_quantity_per_load: Optional[float] = None
+    bc_uom: Optional[str] = None
     source: Optional[str] = None
 
 
@@ -92,9 +101,18 @@ class GiovanniOorParser:
             parts.append(notes)
         return " | ".join(parts) or None
 
-    def _resolve_test_quantity(
+    def _resolve_quantity_profile(
         self, product: str, note: Optional[str]
-    ) -> Tuple[Optional[float], Optional[str], Optional[str], Optional[str], List[str]]:
+    ) -> Tuple[
+        Optional[float], Optional[str], Optional[float], Optional[str],
+        Optional[str], Optional[str], List[str]
+    ]:
+        """Resolve source packout and BC transaction values for a normal release.
+
+        Returns physical quantity/UOM, BC quantity/UOM, item reference, evidence,
+        and review reasons. A mixed/nonstandard release never inherits the normal
+        per-load BC quantity.
+        """
         profile = self.quantity_profiles.get(product)
         review: List[str] = []
         text = (note or "").lower()
@@ -104,26 +122,40 @@ class GiovanniOorParser:
             review.append("Nonstandard/mixed/cancel/reroute note requires quantity/order review")
             return (
                 None,
-                profile.customer_item_reference if profile else None,
-                profile.uom if profile else None,
-                profile.source if profile else None,
-                review,
-            )
-
-        if not profile or profile.full_tl_quantity is None:
-            review.append("No authoritative Giovanni full-TL quantity profile supplied")
-            return (
+                None,
+                None,
                 None,
                 profile.customer_item_reference if profile else None,
-                profile.uom if profile else None,
                 profile.source if profile else None,
                 review,
             )
 
+        if not profile:
+            review.append("No authoritative Giovanni customer/item quantity profile supplied")
+            return None, None, None, None, None, None, review
+
+        physical_quantity = (
+            float(profile.physical_units_per_load)
+            if profile.physical_units_per_load is not None else None
+        )
+        physical_uom = "EA/PER_LOAD" if physical_quantity is not None else None
+
+        if profile.bc_quantity_per_load is None or not profile.bc_uom:
+            review.append("BC sales quantity/UOM not resolved for Giovanni product")
+            bc_quantity = None
+            bc_uom = None
+            resolution_method = None
+        else:
+            bc_quantity = float(profile.bc_quantity_per_load)
+            bc_uom = profile.bc_uom
+            resolution_method = "authoritative_customer_item_profile"
+
         return (
-            float(profile.full_tl_quantity),
+            physical_quantity,
+            physical_uom,
+            bc_quantity,
+            bc_uom,
             profile.customer_item_reference,
-            profile.uom,
             profile.source,
             review,
         )
@@ -181,7 +213,16 @@ class GiovanniOorParser:
                     ws.cell(row_idx, start_col + 4).value,
                     ws.cell(row_idx, start_col + 5).value,
                 )
-                quantity, item_ref, uom, qty_source, review = self._resolve_test_quantity(product, note)
+                (
+                    physical_quantity,
+                    physical_uom,
+                    bc_quantity,
+                    bc_uom,
+                    item_ref,
+                    qty_source,
+                    review,
+                ) = self._resolve_quantity_profile(product, note)
+
                 if "montreal" in (note or "").lower():
                     review.append("Ship-to/location needs BC resolution")
 
@@ -192,13 +233,19 @@ class GiovanniOorParser:
                         product_context=product,
                         customer_item_reference=item_ref,
                         description=f"{calendar.month_name[target_month]} {product}",
-                        quantity=quantity,
-                        uom=uom,
+                        quantity=bc_quantity,
+                        uom=bc_uom,
+                        physical_quantity=physical_quantity,
+                        physical_uom=physical_uom,
                         requested_delivery_date=delivery.date(),
                         existing_gamer_order=gamer_po,
                         notes=note,
                         source_coordinates=[coord],
                         quantity_source=qty_source,
+                        quantity_resolution_method=(
+                            "authoritative_customer_item_profile"
+                            if bc_quantity is not None and bc_uom else None
+                        ),
                         extraction_confidence=1.0,
                         parser_review_reasons=list(dict.fromkeys(review)),
                     )

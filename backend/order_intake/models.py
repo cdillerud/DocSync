@@ -75,7 +75,16 @@ class NormalizedRelease:
 
     requested_shipment_date: Optional[datetime] = None
     requested_delivery_date: Optional[date] = None
+
+    # Customer ship-to and BC inventory/location are separate concepts. Giovanni
+    # live BC evidence shows pricing can vary by BC Location Code even when the
+    # customer, item, UOM and quantity are identical. Never overload ship-to as
+    # location or infer one from the other.
     ship_to_candidate: Optional[str] = None
+    location_candidate: Optional[str] = None
+    resolved_location_code: Optional[str] = None
+    resolved_location_id: Optional[str] = None
+
     existing_gamer_order: Optional[str] = None
     notes: Optional[str] = None
     source_coordinates: List[str] = field(default_factory=list)
@@ -92,6 +101,7 @@ class OrderValidation:
     item_status: Optional[str] = None
     quantity_status: Optional[str] = None
     ship_to_status: Optional[str] = None
+    location_status: Optional[str] = None
     date_status: Optional[str] = None
     price_status: Optional[str] = None
     exceptions: List[str] = field(default_factory=list)

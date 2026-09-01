@@ -1,8 +1,9 @@
 """Normalized models for inbound customer orders.
 
-These models deliberately contain extracted/source facts. Business Central remains
-authoritative for customer/item resolution, quantity/UOM rules, ship-to, pricing,
-dimensions, and duplicate decisions.
+Source facts and Business Central transaction values are deliberately separate.
+For example, a customer blanket schedule may say 89,775 physical units per truck,
+while Business Central may order the item as 89.775 M or as 22 PALLET. The parser
+must preserve the source evidence and never infer the BC transaction quantity.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -60,8 +61,18 @@ class NormalizedRelease:
     product_context: Optional[str] = None
     customer_item_reference: Optional[str] = None
     description: Optional[str] = None
+
+    # BC-ready transaction values. These may be populated directly from a normal
+    # PO (CanPack) or only after an authoritative customer/item profile resolves
+    # the customer's physical release into the BC sales UOM (Giovanni).
     quantity: Optional[float] = None
     uom: Optional[str] = None
+
+    # Customer/source physical quantity evidence. Never send these fields directly
+    # to BC without resolving the item's BC sales UOM/profile first.
+    physical_quantity: Optional[float] = None
+    physical_uom: Optional[str] = None
+
     requested_shipment_date: Optional[datetime] = None
     requested_delivery_date: Optional[date] = None
     ship_to_candidate: Optional[str] = None
@@ -69,6 +80,7 @@ class NormalizedRelease:
     notes: Optional[str] = None
     source_coordinates: List[str] = field(default_factory=list)
     quantity_source: Optional[str] = None
+    quantity_resolution_method: Optional[str] = None
     extraction_confidence: Optional[float] = None
     parser_review_reasons: List[str] = field(default_factory=list)
 

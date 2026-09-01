@@ -42,14 +42,12 @@ def test_canpack_parser_normalizes_known_row(tmp_path):
     assert release.requested_delivery_date.isoformat() == "2026-09-29"
 
 
-def test_giovanni_parser_returns_blank_gamer_po_release_only(tmp_path):
+def test_giovanni_parser_preserves_packout_without_guessing_bc_uom(tmp_path):
     path = tmp_path / "gio.xlsx"
     wb = Workbook()
     ws = wb.active
     ws.title = "Orders"
 
-    # Monthly section anchor. Fields are fixed offsets:
-    # Load, Gamer PO, Gio PO, Delivery Date, BOL, Notes.
     ws.cell(1, 8).value = "April 24oz Salsa"
     ws.cell(2, 8).value = 1
     ws.cell(2, 9).value = None
@@ -73,9 +71,10 @@ def test_giovanni_parser_returns_blank_gamer_po_release_only(tmp_path):
         quantity_profiles={
             "24oz Salsa": GiovanniQuantityProfile(
                 product_context="24oz Salsa",
-                full_tl_quantity=58240,
+                physical_units_per_load=58240,
                 customer_item_reference="C-8682-10001486 / 12013925",
-                source="BC customer/product profile",
+                # BC transaction quantity/UOM intentionally unresolved.
+                source="Giovanni workbook packout evidence",
             )
         }
     )
@@ -86,12 +85,79 @@ def test_giovanni_parser_returns_blank_gamer_po_release_only(tmp_path):
     assert release.customer_release_reference == "61309"
     assert release.load_number == 1
     assert release.product_context == "24oz Salsa"
-    assert release.quantity == 58240
+    assert release.physical_quantity == 58240
+    assert release.physical_uom == "EA/PER_LOAD"
+    assert release.quantity is None
+    assert release.uom is None
+    assert "BC sales quantity/UOM not resolved" in " | ".join(release.parser_review_reasons)
     assert "Montreal" in release.notes
     assert "Ship-to/location needs BC resolution" in release.parser_review_reasons
 
 
-def test_giovanni_nonstandard_load_does_not_guess_quantity(tmp_path):
+def test_giovanni_14oz_pizza_profile_maps_packout_to_m_uom(tmp_path):
+    """Real BC evidence: 89,775/TL is transacted as 89.775 M."""
+    path = tmp_path / "gio_pizza.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Orders"
+    ws.cell(1, 22).value = "April 14oz Pizza"
+    ws.cell(2, 22).value = 1
+    ws.cell(2, 24).value = 61738
+    ws.cell(2, 25).value = datetime(2026, 4, 23)
+    wb.save(path)
+
+    parser = GiovanniOorParser(
+        quantity_profiles={
+            "14oz Pizza": GiovanniQuantityProfile(
+                product_context="14oz Pizza",
+                physical_units_per_load=89775,
+                customer_item_reference="C-8479-10000229",
+                bc_quantity_per_load=89.775,
+                bc_uom="M",
+                source="posted Giovanni BC invoice evidence",
+            )
+        }
+    )
+    release = parser.parse(path, period="2026-04").releases[0]
+
+    assert release.physical_quantity == 89775
+    assert release.quantity == 89.775
+    assert release.uom == "M"
+    assert release.quantity_resolution_method == "authoritative_customer_item_profile"
+
+
+def test_giovanni_16oz_vinegar_profile_can_use_pallet_uom(tmp_path):
+    """Real BC evidence: full TL for this item is 22 PALLET, not 78.166 M."""
+    path = tmp_path / "gio_vinegar.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Orders"
+    ws.cell(1, 15).value = "April 16oz Vinegar"
+    ws.cell(2, 15).value = 6
+    ws.cell(2, 17).value = 61369
+    ws.cell(2, 18).value = datetime(2026, 4, 14)
+    wb.save(path)
+
+    parser = GiovanniOorParser(
+        quantity_profiles={
+            "16oz Vinegar": GiovanniQuantityProfile(
+                product_context="16oz Vinegar",
+                physical_units_per_load=78166,
+                customer_item_reference="C-8808-12026443",
+                bc_quantity_per_load=22,
+                bc_uom="PALLET",
+                source="posted Giovanni BC pick-ticket evidence",
+            )
+        }
+    )
+    release = parser.parse(path, period="2026-04").releases[0]
+
+    assert release.physical_quantity == 78166
+    assert release.quantity == 22
+    assert release.uom == "PALLET"
+
+
+def test_giovanni_nonstandard_load_does_not_inherit_normal_quantity(tmp_path):
     path = tmp_path / "gio_mixed.xlsx"
     wb = Workbook()
     ws = wb.active
@@ -108,16 +174,19 @@ def test_giovanni_nonstandard_load_does_not_guess_quantity(tmp_path):
         quantity_profiles={
             "16oz Vinegar": GiovanniQuantityProfile(
                 product_context="16oz Vinegar",
-                full_tl_quantity=78166,
+                physical_units_per_load=78166,
+                customer_item_reference="C-8808-12026443",
+                bc_quantity_per_load=22,
+                bc_uom="PALLET",
                 source="BC customer/product profile",
             )
         }
     )
-    result = parser.parse(path, period="2026-04")
+    release = parser.parse(path, period="2026-04").releases[0]
 
-    assert len(result.releases) == 1
-    release = result.releases[0]
     assert release.quantity is None
+    assert release.uom is None
+    assert release.physical_quantity is None
     assert release.parser_review_reasons
 
 
@@ -142,7 +211,7 @@ def test_giovanni_period_filter_ignores_historical_same_month(tmp_path):
         quantity_profiles={
             "24oz Pasta": GiovanniQuantityProfile(
                 product_context="24oz Pasta",
-                full_tl_quantity=56420,
+                physical_units_per_load=56420,
             )
         }
     )

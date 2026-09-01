@@ -44,6 +44,7 @@ $CompareApiPath = Join-Path $AppPath 'src\Pages\GPICompareLineAPI.Page.al'
 $ProductTablePath = Join-Path $AppPath 'src\Tables\GPIPackagingProduct.Table.al'
 $PermissionPath = Join-Path $AppPath 'src\PermissionSets\GPIPackagingCatalog.PermissionSet.al'
 $BuildPath = Join-Path $AppPath 'scripts\Build-GPIPackagingCatalog.ps1'
+$QuoteLayoutPath = Join-Path $AppPath 'Layouts\GPIPackQuote.rdlc'
 
 Write-Host ''
 Write-Host ('=' * 118) -ForegroundColor Cyan
@@ -57,7 +58,7 @@ Write-Host 'Production touched              : NO'
 Write-Host 'Secrets output                  : NO'
 
 Write-Section '1. REQUIRED SOURCE FILES'
-foreach ($Path in @($AppJsonPath, $ProductApiPath, $VendorApiPath, $QuoteApiPath, $CompareApiPath, $ProductTablePath, $PermissionPath, $BuildPath)) {
+foreach ($Path in @($AppJsonPath, $ProductApiPath, $VendorApiPath, $QuoteApiPath, $CompareApiPath, $ProductTablePath, $PermissionPath, $BuildPath, $QuoteLayoutPath)) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Required source file is missing: $Path"
     }
@@ -70,6 +71,9 @@ Write-Host "App version                     : $($AppJson.version)"
 if ([string]$AppJson.version -ne '0.48.0.0') {
     throw 'V69 federation preflight requires GPI Packaging Catalog version 0.48.0.0.'
 }
+$BuildScript = Get-Content -LiteralPath $BuildPath -Raw
+Require-Text -Text $BuildScript -Needle '/GenerateReportLayout-' -Label 'GPI Packaging Catalog build harness'
+Write-Host 'Report layout generation        : DISABLED / CHECKED-IN RDLC PRESERVED'
 
 Write-Section '3. READ-ONLY COMMERCIAL PRODUCT API'
 $ProductApi = Get-Content -LiteralPath $ProductApiPath -Raw
@@ -153,10 +157,16 @@ Write-Host 'MOQ gap                         : CONFIRMED / SOURCE TEXT MUST BE PR
 Write-Host 'Incoterm gap                    : CONFIRMED / SOURCE TEXT MUST BE PRESERVED' -ForegroundColor Yellow
 
 Write-Section '7. COMPILE GPI PACKAGING CATALOG / NO PUBLISH'
+$QuoteLayoutHashBefore = (Get-FileHash -LiteralPath $QuoteLayoutPath -Algorithm SHA256).Hash
 & $BuildPath -AppPath $AppPath
 if ($LASTEXITCODE -ne 0) {
     throw "GPI Packaging Catalog build failed with exit code $LASTEXITCODE"
 }
+$QuoteLayoutHashAfter = (Get-FileHash -LiteralPath $QuoteLayoutPath -Algorithm SHA256).Hash
+if ($QuoteLayoutHashAfter -ne $QuoteLayoutHashBefore) {
+    throw 'AL compilation changed the checked-in GPIPackQuote.rdlc. Report-layout preservation contract FAILED.'
+}
+Write-Host 'GPIPackQuote.rdlc preservation  : PASS / BYTE-EXACT SHA256'
 
 Write-Section '8. FINAL BC FEDERATION PREFLIGHT RESULT'
 Write-Host 'GPI Packaging Catalog           : PASS / 0.48.0.0' -ForegroundColor Green
@@ -164,6 +174,7 @@ Write-Host 'Commercial product context      : PASS / READ ONLY' -ForegroundColor
 Write-Host 'Vendor/FOB country context      : PASS / READ ONLY' -ForegroundColor Green
 Write-Host 'Quote summary context           : PASS / READ ONLY' -ForegroundColor Green
 Write-Host 'Saved sourcing comparison       : PRESENT' -ForegroundColor Green
+Write-Host 'Report layout preservation      : PASS / CHECKED-IN RDLC UNCHANGED' -ForegroundColor Green
 Write-Host 'MOQ                             : MIGRATION GAP / NOT INVENTED' -ForegroundColor Yellow
 Write-Host 'Incoterm                        : MIGRATION GAP / NOT INVENTED' -ForegroundColor Yellow
 Write-Host 'Business Central calls          : NONE'

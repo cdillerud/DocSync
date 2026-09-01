@@ -1,3 +1,5 @@
+#requires -Version 7.0
+
 [CmdletBinding()]
 param(
     [ValidateSet('Preflight','FindCustomer','ResolveItem','LookupDuplicate','WriteRoundTrip')]
@@ -16,51 +18,117 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$ApprovedEnvironment = 'PRE_GAMERDOCS_CUTOVER_20260831'
-$ApprovedCompanyName = 'Gamer Packaging'
-$TestPrefix = 'AITEST-'
+# =====================================================================================================================
+# CERTIFIED ORDER-INTAKE TEST TARGET ONLY
+# =====================================================================================================================
+$TenantId          = 'c7b2de14-71d9-4c49-a0b9-2bec103a6fdc'
+$Environment       = 'PRE_GAMERDOCS_CUTOVER_20260831'
+$CompanyName       = 'Gamer Packaging'
+$ExpectedCompanyId = '7d84c6d5-81e2-eb11-86df-00224822baa7'
+$ForbiddenEnv      = 'Sandbox_NoZetadocs_UAT'
+$TestPrefix        = 'AITEST-'
+$WriteFlagName     = 'GPI_ORDER_INTAKE_BC_WRITE_TESTS_ENABLED'
 
-function Get-RequiredEnv {
-    param([Parameter(Mandatory)][string[]]$Names)
-    foreach ($name in $Names) {
-        $value = [Environment]::GetEnvironmentVariable($name)
-        if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+function Convert-TokenToString {
+    param([Parameter(Mandatory)]$TokenValue)
+    if ($TokenValue -is [string]) { return $TokenValue }
+    if ($TokenValue -is [Security.SecureString]) {
+        return [System.Net.NetworkCredential]::new('', $TokenValue).Password
     }
-    throw "Required environment variable missing. Tried: $($Names -join ', ')"
+    if ($TokenValue.PSObject.Properties.Name -contains 'SecurePassword') {
+        return [System.Net.NetworkCredential]::new('', $TokenValue.SecurePassword).Password
+    }
+    return [string]$TokenValue
 }
 
-function Get-BCToken {
-    param(
-        [Parameter(Mandatory)][string]$TenantId,
-        [Parameter(Mandatory)][string]$ClientId,
-        [Parameter(Mandatory)][string]$ClientSecret
-    )
-    $tokenUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
-    $body = @{
-        grant_type    = 'client_credentials'
-        client_id     = $ClientId
-        client_secret = $ClientSecret
-        scope         = 'https://api.businesscentral.dynamics.com/.default'
+function Get-BcToken {
+    if (-not (Get-Module -ListAvailable -Name Az.Accounts)) {
+        throw 'Az.Accounts is required. Install-Module Az.Accounts -Scope CurrentUser'
     }
-    $token = Invoke-RestMethod -Method Post -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded'
-    if (-not $token.access_token) { throw 'Business Central token response did not contain access_token.' }
-    return $token.access_token
+    Import-Module Az.Accounts -ErrorAction Stop
+
+    try {
+        $tokenResult = Get-AzAccessToken `
+            -TenantId $TenantId `
+            -ResourceUrl 'https://api.businesscentral.dynamics.com' `
+            -ErrorAction Stop
+        $token = Convert-TokenToString $tokenResult.Token
+        if (-not [string]::IsNullOrWhiteSpace($token)) { return $token }
+    }
+    catch {
+        # Fall through to isolated interactive BC-scoped auth.
+    }
+
+    Write-Host 'Starting Business Central scoped Microsoft sign-in...' -ForegroundColor Yellow
+    Disconnect-AzAccount -Scope Process -ErrorAction SilentlyContinue | Out-Null
+    Connect-AzAccount `
+        -Tenant $TenantId `
+        -AuthScope 'https://api.businesscentral.dynamics.com' `
+        -Scope Process `
+        -ErrorAction Stop | Out-Null
+
+    $tokenResult = Get-AzAccessToken `
+        -TenantId $TenantId `
+        -ResourceUrl 'https://api.businesscentral.dynamics.com' `
+        -ErrorAction Stop
+    $token = Convert-TokenToString $tokenResult.Token
+    if ([string]::IsNullOrWhiteSpace($token)) {
+        throw 'Could not acquire Business Central access token.'
+    }
+    return $token
 }
 
-function Invoke-BCJson {
+function Assert-CertifiedConfiguration {
+    if ($TenantId -ne 'c7b2de14-71d9-4c49-a0b9-2bec103a6fdc') {
+        throw 'Tenant hard pin changed. Execution blocked.'
+    }
+    if ($Environment -ne 'PRE_GAMERDOCS_CUTOVER_20260831') {
+        throw "Unauthorized Business Central environment '$Environment'. Execution blocked."
+    }
+    if ($Environment -eq $ForbiddenEnv -or $Environment -match '(?i)prod|production') {
+        throw "Forbidden Business Central environment '$Environment'. Execution blocked."
+    }
+    if ($CompanyName -ne 'Gamer Packaging') {
+        throw 'Company-name hard pin changed. Execution blocked.'
+    }
+    if ($ExpectedCompanyId -ne '7d84c6d5-81e2-eb11-86df-00224822baa7') {
+        throw 'Company-ID hard pin changed. Execution blocked.'
+    }
+}
+
+function Assert-BcUri {
+    param([Parameter(Mandatory)][string]$Uri)
+    $parsed = [Uri]$Uri
+    if ($parsed.Scheme -ne 'https' -or $parsed.Host -ne 'api.businesscentral.dynamics.com') {
+        throw "Unexpected Business Central URI blocked: $Uri"
+    }
+    if ($Uri.IndexOf($ForbiddenEnv, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Forbidden legacy sandbox URI blocked: $Uri"
+    }
+    if ($Uri.IndexOf('/Production/', [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        throw "Production-like URI blocked: $Uri"
+    }
+}
+
+function Invoke-BcJson {
     param(
         [Parameter(Mandatory)][ValidateSet('GET','POST','DELETE')][string]$Method,
         [Parameter(Mandatory)][string]$Uri,
         [Parameter(Mandatory)][hashtable]$Headers,
         [object]$Body
     )
+    Assert-BcUri -Uri $Uri
+
     if ($Method -eq 'GET') {
-        return Invoke-RestMethod -Method Get -Uri $Uri -Headers $Headers
+        return Invoke-RestMethod -Method Get -Uri $Uri -Headers $Headers -TimeoutSec 90
     }
     if ($Method -eq 'POST') {
-        return Invoke-RestMethod -Method Post -Uri $Uri -Headers $Headers -Body ($Body | ConvertTo-Json -Depth 20) -ContentType 'application/json'
+        return Invoke-RestMethod `
+            -Method Post -Uri $Uri -Headers $Headers `
+            -Body ($Body | ConvertTo-Json -Depth 20) `
+            -ContentType 'application/json' -TimeoutSec 90
     }
-    Invoke-RestMethod -Method Delete -Uri $Uri -Headers $Headers
+    Invoke-RestMethod -Method Delete -Uri $Uri -Headers $Headers -TimeoutSec 90
 }
 
 function Escape-ODataLiteral {
@@ -68,57 +136,64 @@ function Escape-ODataLiteral {
     return $Value.Replace("'", "''")
 }
 
-$tenantId = Get-RequiredEnv -Names @('BC_TENANT_ID','TENANT_ID','BC_SANDBOX_TENANT_ID')
-$clientId = Get-RequiredEnv -Names @('BC_CLIENT_ID','BC_SANDBOX_CLIENT_ID')
-$clientSecret = Get-RequiredEnv -Names @('BC_CLIENT_SECRET','BC_SANDBOX_CLIENT_SECRET')
-$environment = Get-RequiredEnv -Names @('BC_ENVIRONMENT','BC_SANDBOX_ENVIRONMENT')
-
-if ($environment -ne $ApprovedEnvironment) {
-    throw "REFUSING TO RUN: restricted to $ApprovedEnvironment. Configured environment: $environment"
-}
-
-$token = Get-BCToken -TenantId $tenantId -ClientId $clientId -ClientSecret $clientSecret
+Assert-CertifiedConfiguration
+$token = Get-BcToken
 $headers = @{ Authorization = "Bearer $token"; Accept = 'application/json' }
-$apiRoot = "https://api.businesscentral.dynamics.com/v2.0/$tenantId/$environment/api/v2.0"
-$companies = Invoke-BCJson -Method GET -Uri "$apiRoot/companies" -Headers $headers
 
-$configuredCompanyId = [Environment]::GetEnvironmentVariable('BC_COMPANY_ID')
-if (-not [string]::IsNullOrWhiteSpace($configuredCompanyId)) {
-    $companyMatches = @($companies.value | Where-Object { $_.id -eq $configuredCompanyId })
-} else {
-    $companyMatches = @($companies.value | Where-Object {
-        $_.name -eq $ApprovedCompanyName -or $_.displayName -eq $ApprovedCompanyName
-    })
+# Server-side verification that the exact named environment still exists and is a sandbox.
+$environmentResponse = Invoke-BcJson `
+    -Method GET `
+    -Uri 'https://api.businesscentral.dynamics.com/environments/v1.2' `
+    -Headers $headers
+$environmentMatches = @($environmentResponse.value | Where-Object { [string]$_.name -eq $Environment })
+if ($environmentMatches.Count -ne 1) {
+    throw "Expected exactly one $Environment environment; found $($environmentMatches.Count)."
 }
+$environmentType = [string]$environmentMatches[0].type
+if ($environmentType -ine 'sandbox') {
+    throw "SAFETY STOP: $Environment is type '$environmentType', not sandbox."
+}
+
+$environmentEncoded = [Uri]::EscapeDataString($Environment)
+$apiRoot = "https://api.businesscentral.dynamics.com/v2.0/$TenantId/$environmentEncoded/api/v2.0"
+$companies = Invoke-BcJson -Method GET -Uri "$apiRoot/companies" -Headers $headers
+$companyMatches = @($companies.value | Where-Object {
+    [string]$_.id -eq $ExpectedCompanyId -and
+    (([string]$_.name -eq $CompanyName) -or ([string]$_.displayName -eq $CompanyName))
+})
 if ($companyMatches.Count -ne 1) {
-    throw "Expected exactly one approved company '$ApprovedCompanyName'; found $($companyMatches.Count)."
+    throw "Expected exact Gamer Packaging company ID $ExpectedCompanyId; found $($companyMatches.Count)."
 }
 $company = $companyMatches[0]
-$resolvedCompanyName = if ($company.name) { $company.name } else { $company.displayName }
-if ($resolvedCompanyName -ne $ApprovedCompanyName) {
-    throw "REFUSING TO RUN: resolved company '$resolvedCompanyName' is not '$ApprovedCompanyName'."
-}
-$companyRoot = "$apiRoot/companies($($company.id))"
+$companyRoot = "$apiRoot/companies($ExpectedCompanyId)"
 
-Write-Host ('=' * 120)
-Write-Host 'GPI ORDER INTAKE BC TEST HARNESS'
-Write-Host ('=' * 120)
-Write-Host "Environment : $environment"
-Write-Host "Company     : $resolvedCompanyName"
-Write-Host "Company ID  : $($company.id)"
-Write-Host "Mode        : $Mode"
-Write-Host 'Release/Post: BLOCKED BY DESIGN'
-Write-Host ('=' * 120)
+Write-Host ('=' * 120) -ForegroundColor Cyan
+Write-Host 'GPI ORDER INTAKE BC TEST HARNESS' -ForegroundColor Cyan
+Write-Host ('=' * 120) -ForegroundColor Cyan
+Write-Host "Environment      : $Environment"
+Write-Host "Environment type : $environmentType"
+Write-Host "Company          : $CompanyName"
+Write-Host "Company ID       : $ExpectedCompanyId"
+Write-Host "Mode             : $Mode"
+Write-Host "Write flag       : $([Environment]::GetEnvironmentVariable($WriteFlagName))"
+Write-Host 'Production       : HARD BLOCKED' -ForegroundColor Green
+Write-Host 'Release/Ship/Post: NOT IMPLEMENTED / BLOCKED' -ForegroundColor Green
+Write-Host ('=' * 120) -ForegroundColor Cyan
 
 if ($Mode -eq 'Preflight') {
     [ordered]@{
-        environment = $environment
-        company = $resolvedCompanyName
-        companyId = $company.id
+        environment = $Environment
+        environmentType = $environmentType
+        company = $CompanyName
+        companyId = $ExpectedCompanyId
         readAccess = 'PASS'
-        writeTestFlag = [Environment]::GetEnvironmentVariable('GPI_ORDER_INTAKE_BC_WRITE_TESTS_ENABLED')
-        allowedWrites = @('Create tagged Open Sales Order','Create tagged Item lines','Delete tagged Open test Sales Order')
-        blocked = @('Release','Ship','Invoice','Post')
+        writeTestFlag = [Environment]::GetEnvironmentVariable($WriteFlagName)
+        allowedWrites = @(
+            'Create tagged Open Sales Order',
+            'Create tagged Item line',
+            'Delete tagged Open/Draft test Sales Order'
+        )
+        blocked = @('Release','Ship','Invoice','Post','Production')
     } | ConvertTo-Json -Depth 10
     exit 0
 }
@@ -128,7 +203,7 @@ if ($Mode -eq 'FindCustomer') {
     $literal = Escape-ODataLiteral $SearchText
     $filter = [Uri]::EscapeDataString("contains(displayName, '$literal')")
     $select = [Uri]::EscapeDataString('id,number,displayName,email,phoneNumber,blocked')
-    $result = Invoke-BCJson -Method GET -Uri "$companyRoot/customers?`$select=$select&`$filter=$filter&`$top=25" -Headers $headers
+    $result = Invoke-BcJson -Method GET -Uri "$companyRoot/customers?`$select=$select&`$filter=$filter&`$top=25" -Headers $headers
     $result.value | ConvertTo-Json -Depth 20
     exit 0
 }
@@ -138,7 +213,7 @@ if ($Mode -eq 'ResolveItem') {
     $literal = Escape-ODataLiteral $ItemNumber
     $filter = [Uri]::EscapeDataString("number eq '$literal'")
     $select = [Uri]::EscapeDataString('id,number,displayName,type,blocked,baseUnitOfMeasureCode')
-    $result = Invoke-BCJson -Method GET -Uri "$companyRoot/items?`$select=$select&`$filter=$filter&`$top=2" -Headers $headers
+    $result = Invoke-BcJson -Method GET -Uri "$companyRoot/items?`$select=$select&`$filter=$filter&`$top=2" -Headers $headers
     $matches = @($result.value)
     if ($matches.Count -ne 1) { throw "Expected exactly one item '$ItemNumber'; found $($matches.Count)." }
     $matches[0] | ConvertTo-Json -Depth 20
@@ -155,15 +230,15 @@ if ($Mode -eq 'LookupDuplicate') {
     $escapedExternal = Escape-ODataLiteral $ExternalDocumentNumber
     $filter = [Uri]::EscapeDataString("customerNumber eq '$escapedCustomer' and externalDocumentNumber eq '$escapedExternal'")
     $select = [Uri]::EscapeDataString('id,number,customerNumber,customerName,externalDocumentNumber,status,orderDate,requestedDeliveryDate')
-    $result = Invoke-BCJson -Method GET -Uri "$companyRoot/salesOrders?`$select=$select&`$filter=$filter&`$top=20" -Headers $headers
+    $result = Invoke-BcJson -Method GET -Uri "$companyRoot/salesOrders?`$select=$select&`$filter=$filter&`$top=20" -Headers $headers
     $result.value | ConvertTo-Json -Depth 20
     exit 0
 }
 
 if ($Mode -eq 'WriteRoundTrip') {
-    $writeFlag = [Environment]::GetEnvironmentVariable('GPI_ORDER_INTAKE_BC_WRITE_TESTS_ENABLED')
-    if ($writeFlag -ne 'true') {
-        throw 'REFUSING WRITE: set GPI_ORDER_INTAKE_BC_WRITE_TESTS_ENABLED=true explicitly.'
+    $writeFlag = [Environment]::GetEnvironmentVariable($WriteFlagName)
+    if ($writeFlag -ine 'true') {
+        throw "REFUSING WRITE: set `$env:$WriteFlagName = 'true' explicitly."
     }
     if ([string]::IsNullOrWhiteSpace($ItemNumber)) { throw '-ItemNumber is required for WriteRoundTrip.' }
     if ($Quantity -le 0) { throw '-Quantity must be greater than zero for WriteRoundTrip.' }
@@ -175,11 +250,20 @@ if ($Mode -eq 'WriteRoundTrip') {
         throw "REFUSING WRITE: external document number must start with '$TestPrefix'."
     }
 
+    # Read-only duplicate protection even for tagged test orders.
+    $escapedCustomer = Escape-ODataLiteral $CustomerNumber
+    $escapedExternal = Escape-ODataLiteral $ExternalDocumentNumber
+    $dupFilter = [Uri]::EscapeDataString("customerNumber eq '$escapedCustomer' and externalDocumentNumber eq '$escapedExternal'")
+    $dups = Invoke-BcJson -Method GET -Uri "$companyRoot/salesOrders?`$filter=$dupFilter&`$top=2" -Headers $headers
+    if (@($dups.value).Count -ne 0) {
+        throw "REFUSING WRITE: tagged external document '$ExternalDocumentNumber' already exists for $CustomerNumber."
+    }
+
     # Resolve exact BC Item No. -> GUID before creating the line.
     $itemLiteral = Escape-ODataLiteral $ItemNumber
     $itemFilter = [Uri]::EscapeDataString("number eq '$itemLiteral'")
     $itemSelect = [Uri]::EscapeDataString('id,number,displayName,type,blocked,baseUnitOfMeasureCode')
-    $itemResult = Invoke-BCJson -Method GET -Uri "$companyRoot/items?`$select=$itemSelect&`$filter=$itemFilter&`$top=2" -Headers $headers
+    $itemResult = Invoke-BcJson -Method GET -Uri "$companyRoot/items?`$select=$itemSelect&`$filter=$itemFilter&`$top=2" -Headers $headers
     $items = @($itemResult.value)
     if ($items.Count -ne 1) { throw "Expected exactly one BC item '$ItemNumber'; found $($items.Count)." }
     $item = $items[0]
@@ -196,8 +280,8 @@ if ($Mode -eq 'WriteRoundTrip') {
 
     $createdOrder = $null
     try {
-        Write-Host "Creating tagged Open Sales Order: $ExternalDocumentNumber"
-        $createdOrder = Invoke-BCJson -Method POST -Uri "$companyRoot/salesOrders" -Headers $headers -Body $orderBody
+        Write-Host "Creating tagged Open Sales Order: $ExternalDocumentNumber" -ForegroundColor Yellow
+        $createdOrder = Invoke-BcJson -Method POST -Uri "$companyRoot/salesOrders" -Headers $headers -Body $orderBody
 
         $lineBody = [ordered]@{
             lineType = 'Item'
@@ -209,17 +293,17 @@ if ($Mode -eq 'WriteRoundTrip') {
             $lineBody.unitOfMeasureCode = $UnitOfMeasureCode
         }
 
-        Write-Host "Adding test line: item=$($item.number) itemId=$($item.id) qty=$Quantity"
-        $null = Invoke-BCJson -Method POST -Uri "$companyRoot/salesOrders($($createdOrder.id))/salesOrderLines" -Headers $headers -Body $lineBody
+        Write-Host "Adding test line: item=$($item.number) itemId=$($item.id) qty=$Quantity uom=$UnitOfMeasureCode" -ForegroundColor Yellow
+        $null = Invoke-BcJson -Method POST -Uri "$companyRoot/salesOrders($($createdOrder.id))/salesOrderLines" -Headers $headers -Body $lineBody
 
-        Write-Host 'Reading created order back from BC...'
-        $readBack = Invoke-BCJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $headers
-        $lines = Invoke-BCJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))/salesOrderLines" -Headers $headers
+        Write-Host 'Reading created order back from BC...' -ForegroundColor Yellow
+        $readBack = Invoke-BcJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $headers
+        $lines = Invoke-BcJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))/salesOrderLines" -Headers $headers
 
         [ordered]@{
             success = $true
-            environment = $environment
-            company = $resolvedCompanyName
+            environment = $Environment
+            company = $CompanyName
             salesOrderId = $readBack.id
             salesOrderNumber = $readBack.number
             status = $readBack.status
@@ -232,7 +316,7 @@ if ($Mode -eq 'WriteRoundTrip') {
         } | ConvertTo-Json -Depth 30
 
         if ($Cleanup) {
-            $current = Invoke-BCJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $headers
+            $current = Invoke-BcJson -Method GET -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $headers
             if (-not ([string]$current.externalDocumentNumber).StartsWith($TestPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
                 throw 'REFUSING CLEANUP: order is not tagged as an AITEST order.'
             }
@@ -240,15 +324,15 @@ if ($Mode -eq 'WriteRoundTrip') {
                 throw "REFUSING CLEANUP: status is '$($current.status)', not Open/Draft."
             }
             $deleteHeaders = @{ Authorization = "Bearer $token"; Accept = 'application/json'; 'If-Match' = '*' }
-            Write-Host "Deleting tagged test Sales Order $($current.number)..."
-            Invoke-BCJson -Method DELETE -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $deleteHeaders
-            Write-Host 'Cleanup: PASS'
+            Write-Host "Deleting tagged test Sales Order $($current.number)..." -ForegroundColor Yellow
+            Invoke-BcJson -Method DELETE -Uri "$companyRoot/salesOrders($($createdOrder.id))" -Headers $deleteHeaders
+            Write-Host 'Cleanup: PASS' -ForegroundColor Green
         }
     }
     catch {
         Write-Error $_
         if ($createdOrder -and $createdOrder.id) {
-            Write-Warning "A test order may remain in BC. ID=$($createdOrder.id), Number=$($createdOrder.number), ExternalDocumentNumber=$ExternalDocumentNumber"
+            Write-Warning "A tagged test order may remain in BC. ID=$($createdOrder.id), Number=$($createdOrder.number), ExternalDocumentNumber=$ExternalDocumentNumber"
         }
         exit 1
     }

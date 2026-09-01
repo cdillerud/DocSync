@@ -226,8 +226,10 @@ class OrderIntakeBCTestGateway:
     async def create_test_sales_order(self, order_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a tagged Open test order and read it back.
 
-        Unit price is never supplied by this method. BC calculates price using its
-        normal sales rules. Each item number is resolved to the BC item GUID first.
+        Unit price is intentionally not supplied. Live PRE_GAMERDOCS testing proved
+        that the standard v2.0 line-create API can leave unitPrice at zero, so this
+        method is transport plumbing only and must not be treated as pricing proof.
+        Each item number is resolved to the exact BC item GUID first.
         """
         self.assert_write_enabled()
         external = str(order_data.get("externalDocumentNumber") or "")

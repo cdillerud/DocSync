@@ -80,7 +80,9 @@ done < <(docker ps --filter 'label=com.docker.compose.service=backend' --format 
 [ "$image_matches" -gt 0 ] || { echo 'Source certified backend image not found among backend containers.' >&2; exit 72; }
 [ "$certified_matches" -gt 0 ] || { echo 'Source document helper drift on certified backend image.' >&2; exit 73; }
 [ "$certified_matches" -eq 1 ] || { echo "Source certified backend selection ambiguous: matches=$certified_matches" >&2; exit 78; }
+backend_id_before=$(docker inspect "$backend" -f '{{.Id}}')
 echo "V116_SOURCE_BACKEND_SELECTED=$backend"
+echo "V116_SOURCE_BACKEND_ID_BEFORE=$backend_id_before"
 '@
 $BaseRaw = Replace-Required -Text $BaseRaw -Old $BackendSelectorOld -New $BackendSelectorNew -Marker 'certified backend container selector'
 
@@ -118,6 +120,66 @@ echo "V116_SOURCE_HEALTH_BEFORE=$health"
 echo V116_SOURCE_SAFETY=PASS
 '@
 $BaseRaw = Replace-Required -Text $BaseRaw -Old $HealthProbeOld -New $HealthProbeNew -Marker 'bounded source health retries'
+
+$PostProbeOld = @'
+echo "V116_HELDOUT_PROBE_EXIT=$probe_exit"
+
+after=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=4); print(r.status)')
+echo "V116_SOURCE_HEALTH_AFTER=$after"
+[ "$after" = "$health" ] || { echo 'Source health changed during V116.' >&2; exit 78; }
+[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image changed during V116.' >&2; exit 79; }
+
+docker exec "$backend" rm -rf "$CONTAINER_STAGE" "$PROBE"
+rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE"
+echo V116_TEMP_CLEANUP=PASS
+echo V116_SOURCE_RUNTIME_UNCHANGED=PASS
+exit "$probe_exit"
+'@
+$PostProbeNew = @'
+echo "V116_HELDOUT_PROBE_EXIT=$probe_exit"
+
+backend_id_after=$(docker inspect "$backend" -f '{{.Id}}' 2>/dev/null || true)
+echo "V116_SOURCE_BACKEND_ID_AFTER=$backend_id_after"
+if [ -z "$backend_id_after" ] || [ "$backend_id_after" != "$backend_id_before" ]; then
+    echo "V116_SOURCE_BACKEND_REPLACED_DURING_EVALUATION=FAIL;before=$backend_id_before;after=$backend_id_after" >&2
+    rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE" || true
+    exit 80
+fi
+
+after=''
+after_attempt=0
+while [ "$after_attempt" -lt 6 ]; do
+    after_attempt=$((after_attempt+1))
+    after=$(docker exec "$backend" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=8).status)' 2>/dev/null || true)
+    if [ -n "$after" ]; then
+        echo "V116_SOURCE_HEALTH_AFTER_ATTEMPT=$after_attempt;result=$after"
+    else
+        echo "V116_SOURCE_HEALTH_AFTER_ATTEMPT=$after_attempt;result=TIMEOUT_OR_ERROR"
+    fi
+    case "$after" in
+        2??|3??) break ;;
+    esac
+    sleep 5
+done
+case "$after" in
+    2??|3??) ;;
+    *)
+        docker inspect "$backend" -f 'V116_SOURCE_CONTAINER_STATE_AFTER=status={{.State.Status}};running={{.State.Running}};restart_count={{.RestartCount}};oom_killed={{.State.OOMKilled}};started={{.State.StartedAt}}' 2>/dev/null || true
+        echo 'Source backend unhealthy after V116 bounded retries.' >&2
+        exit 77
+        ;;
+esac
+echo "V116_SOURCE_HEALTH_AFTER=$after"
+[ "$after" = "$health" ] || { echo 'Source health changed during V116.' >&2; exit 78; }
+[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image changed during V116.' >&2; exit 79; }
+
+docker exec "$backend" rm -rf "$CONTAINER_STAGE" "$PROBE"
+rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE"
+echo V116_TEMP_CLEANUP=PASS
+echo V116_SOURCE_RUNTIME_UNCHANGED=PASS
+exit "$probe_exit"
+'@
+$BaseRaw = Replace-Required -Text $BaseRaw -Old $PostProbeOld -New $PostProbeNew -Marker 'backend replacement detection and bounded post health'
 
 $BaseRaw = Replace-Required -Text $BaseRaw `
     -Old "        concurrency=2,`n        persist=False," `
@@ -324,6 +386,7 @@ Write-Host 'V117_REV2_EXPANSION_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor 
 Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_CERTIFIED_BACKEND_SELECTOR_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_BOUNDED_SOURCE_HEALTH_RETRY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_REV2_BACKEND_REPLACEMENT_DETECTION_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host "V117_REV2_PATCH_ROOT=$PatchRoot"
 
 try {

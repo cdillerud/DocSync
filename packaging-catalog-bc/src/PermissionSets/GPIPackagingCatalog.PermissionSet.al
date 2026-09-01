@@ -103,6 +103,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Comm Evid API" = X,
         page "GPI Comm Queue API" = X,
         page "GPI Comm Product API" = X,
+        page "GPI Comm VLoc API" = X,
         page "GPI Agent Ex API" = X,
         page "GPI Agent Evid API" = X,
         page "GPI Agent Queue API" = X,

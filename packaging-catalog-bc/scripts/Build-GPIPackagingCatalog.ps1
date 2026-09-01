@@ -120,13 +120,15 @@ Write-Host "Compiler : $CompilerPath"
 Write-Host "Symbols  : $PackageCachePath"
 Write-Host "Output   : $OutputPath"
 Write-Host "Packages : $($SymbolFiles.Count)"
+Write-Host 'Report layout generation : DISABLED / PRESERVE CHECKED-IN LAYOUTS'
 Write-Host ''
 
 $ProjectArg = "/project:$AppPath"
 $PackageArg = "/packagecachepath:$PackageCachePath"
 $OutputArg = "/out:$OutputPath"
+$GenerateReportLayoutArg = '/GenerateReportLayout-'
 
-& $CompilerPath $ProjectArg $PackageArg $OutputArg
+& $CompilerPath $ProjectArg $PackageArg $OutputArg $GenerateReportLayoutArg
 $CompilerExitCode = $LASTEXITCODE
 
 if ($CompilerExitCode -ne 0) {

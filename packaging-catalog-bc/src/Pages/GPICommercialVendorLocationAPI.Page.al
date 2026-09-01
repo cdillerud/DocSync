@@ -1,4 +1,4 @@
-page 71127 "GPI Comm Vendor Loc API"
+page 71131 "GPI Comm VLoc API"
 {
     PageType = API;
     APIPublisher = 'gpi';

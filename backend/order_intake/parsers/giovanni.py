@@ -64,27 +64,19 @@ class GiovanniOorParser:
                 return product
         return None
 
-    def _find_sections(self, ws, month: int) -> List[Tuple[int, int, str, int]]:
-        """Return (section_row, start_col, product, header_row) tuples."""
-        sections: List[Tuple[int, int, str, int]] = []
+    def _find_sections(self, ws, month: int) -> List[Tuple[int, int, str]]:
+        """Find monthly product block anchors.
+
+        Giovanni does not repeat field headers under every month. Each monthly
+        product title anchors a fixed six-column block:
+        Load, Gamer PO, Gio PO, Delivery Date, BOL, Notes.
+        """
+        sections: List[Tuple[int, int, str]] = []
         for row in ws.iter_rows():
             for cell in row:
                 product = self._section_product(cell.value, month)
-                if not product:
-                    continue
-                for header_row in range(cell.row, min(cell.row + 8, ws.max_row) + 1):
-                    values = [
-                        self._norm(ws.cell(header_row, cell.column + offset).value).lower()
-                        for offset in range(5)
-                    ]
-                    if (
-                        values[0] in {"load count", "load"}
-                        and values[1] == "gamer po"
-                        and values[2] == "gio po"
-                        and "delivery" in values[3]
-                    ):
-                        sections.append((cell.row, cell.column, product, header_row))
-                        break
+                if product:
+                    sections.append((cell.row, cell.column, product))
         return sections
 
     @staticmethod
@@ -151,8 +143,8 @@ class GiovanniOorParser:
         path = Path(path)
         target_year, target_month = self._period_parts(period)
 
-        # Normal mode is intentional here. The historical Orders sheet requires
-        # random access; repeated ws.cell() in openpyxl read-only mode is very slow.
+        # Normal mode is intentional. This historical sheet requires random access;
+        # repeated ws.cell() in openpyxl read-only mode is prohibitively slow.
         wb = load_workbook(path, data_only=True, read_only=False)
         if self.sheet_name not in wb.sheetnames:
             raise ValueError(f"Giovanni workbook does not contain sheet '{self.sheet_name}'")
@@ -163,10 +155,10 @@ class GiovanniOorParser:
         seen = set()
         month_names = tuple(name.lower() for name in calendar.month_name[1:])
 
-        for _, start_col, product, header_row in sections:
-            for row_idx in range(header_row + 1, min(header_row + 100, ws.max_row) + 1):
+        for section_row, start_col, product in sections:
+            for row_idx in range(section_row + 1, min(section_row + 100, ws.max_row) + 1):
                 first = self._norm(ws.cell(row_idx, start_col).value)
-                if row_idx > header_row + 1 and any(first.lower().startswith(f"{m} ") for m in month_names):
+                if row_idx > section_row + 1 and any(first.lower().startswith(f"{m} ") for m in month_names):
                     break
 
                 load_ref = numeric_reference(ws.cell(row_idx, start_col).value)
@@ -174,7 +166,7 @@ class GiovanniOorParser:
                 gio_ref = numeric_reference(ws.cell(row_idx, start_col + 2).value)
                 delivery = excel_serial_to_datetime(ws.cell(row_idx, start_col + 3).value)
                 if not load_ref or not gio_ref or not delivery:
-                    continue  # SS/non-release rows are intentionally skipped
+                    continue  # skips SS and other non-release rows
                 if delivery.year != target_year or delivery.month != target_month:
                     continue
                 if gamer_po and not include_existing:

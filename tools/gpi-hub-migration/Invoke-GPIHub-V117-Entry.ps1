@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '834eaed10b7285177544864a995eb9da647d2313'
+$ExpectedFeatureCommit = '5aaa52cac87e6c4087b5007bb98594ca868b6d7a'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -43,7 +43,7 @@ $Raw = Replace-Required -Text $Raw `
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'backend/services/ap_routing_decision_service.py'," `
-    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py'," `
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py'," `
     -Marker 'V117 candidate materialization'
 
 $Raw = Replace-Required -Text $Raw `
@@ -62,13 +62,16 @@ docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backen
  "$CONTAINER_STAGE/services/ap_routing_runtime_authority_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_evaluation_context_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py"
 echo V117_ADDITIVE_PYCOMPILE=PASS
 
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as a, services.ap_routing_runtime_authority_service as r, services.ap_routing_evaluation_context_service as c; paths=[str(a.__file__),str(r.__file__),str(c.__file__)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(p.startswith("/tmp/gpi-ap-routing-v116/") for p in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
-docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py"
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
 '@
 $Raw = Replace-Required -Text $Raw `
@@ -185,6 +188,7 @@ Require ($Raw.Contains('backend/services/ap_routing_runtime_authority_service.py
 Require ($Raw.Contains('backend/services/ap_routing_evaluation_context_service.py')) 'V117 generated script lacks resilient evaluation context service.'
 Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
 Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
+Require ($Raw.Contains('test_ap_routing_v117_runtime_authority_boundaries.py')) 'V117 generated script lacks specialization authority boundary tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
 Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
 Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
@@ -213,6 +217,7 @@ Write-Host 'V117_ORDER_FAMILY_SAFETY=PASS' -ForegroundColor Green
 Write-Host 'V117_CROSS_VENDOR_REFERENCE_RELIANCE_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green
 Write-Host 'V117_WAREHOUSE_TOOLING_SAFETY_OVERLAY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_UNSUPPORTED_SPECIALIZATION_AUTHORITY_BOUNDARY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_MONGO_RESILIENT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_EXPANSION_PROGRESS_TELEMETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green

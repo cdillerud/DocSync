@@ -87,14 +87,14 @@ cat > '$remoteRunner' <<'GPI_RUNNER'
 #!/usr/bin/env bash
 set +e
 bash '$remoteScript' > '$remoteLog' 2>&1
-rc=$?
-printf '%s\n' "$rc" > '$remoteExit'
+rc=`$?
+printf '%s\n' "`$rc" > '$remoteExit'
 exit 0
 GPI_RUNNER
 chmod 700 '$remoteRunner'
 nohup bash '$remoteRunner' >/dev/null 2>&1 < /dev/null &
-printf '%s\n' "$!" > '$remotePid'
-echo "V117_DETACHED_REMOTE_PID=$!"
+printf '%s\n' "`$!" > '$remotePid'
+echo "V117_DETACHED_REMOTE_PID=`$!"
 echo "V117_DETACHED_REMOTE_LOG=$remoteLog"
 echo "V117_DETACHED_REMOTE_EXIT_FILE=$remoteExit"
 "@
@@ -116,7 +116,7 @@ if [ -f '$remoteLog' ]; then
     cat '$remoteLog'
 fi
 if [ -f '$remoteExit' ]; then
-    printf '__GPI_REMOTE_EXIT__=%s\n' "$(cat '$remoteExit')"
+    printf '__GPI_REMOTE_EXIT__=%s\n' "`$(cat '$remoteExit')"
 fi
 "@
         $poll = Invoke-SshScript -KnownHosts $KnownHosts -ScriptText $pollScript
@@ -229,7 +229,7 @@ $EntryRaw = Replace-Required -Text $EntryRaw -Old $SnapshotOld -New $SnapshotNew
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "& `$GeneratedPath`nexit `$LASTEXITCODE" `
-    -New "& `$GeneratedPath`nif (`$LASTEXITCODE -ne 0) { throw \"V117 generated controller returned exit code `$LASTEXITCODE.\" }" `
+    -New "& `$GeneratedPath`nif (`$LASTEXITCODE -ne 0) { throw `"V117 generated controller returned exit code `$LASTEXITCODE.`" }" `
     -Marker 'propagate failure without closing host'
 
 Set-Content -LiteralPath $PatchedBasePath -Value $BaseRaw -Encoding utf8 -NoNewline
@@ -239,11 +239,11 @@ Copy-Item -LiteralPath $StatePath -Destination $PatchedStatePath -Force
 $tokens = $null
 $errors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile($PatchedBasePath,[ref]$tokens,[ref]$errors)
-Require (@($errors).Count -eq 0) ('V117 REV2 patched base parse failed: ' + ((@($errors) | ForEach-Object Message) -join '; '))
+Require (@($errors).Count -eq 0) ('V117 REV2 patched base parse failed: ' + ((@($errors) | ForEach-Object { $_.Message }) -join '; '))
 $tokens = $null
 $errors = $null
 [void][System.Management.Automation.Language.Parser]::ParseFile($PatchedEntryPath,[ref]$tokens,[ref]$errors)
-Require (@($errors).Count -eq 0) ('V117 REV2 patched entry parse failed: ' + ((@($errors) | ForEach-Object Message) -join '; '))
+Require (@($errors).Count -eq 0) ('V117 REV2 patched entry parse failed: ' + ((@($errors) | ForEach-Object { $_.Message }) -join '; '))
 
 Write-Host 'V117_REV2_DETACHED_SSH_EXECUTION_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_REV2_SHORT_POLL_STREAMING_CONFIGURED=PASS' -ForegroundColor Green

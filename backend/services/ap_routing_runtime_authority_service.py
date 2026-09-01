@@ -1,16 +1,25 @@
 """Final fail-closed runtime-authority overlay for AP routing.
 
-V117 exposed a live unsafe case where an Evergreen invoice whose filename began
-with warehouse order W118614 was auto-routed to Tooling Invoices because the
-base authority guard treats warehouse-vs-special as non-conflicting and the
-held-out train split had no corroborating Evergreen examples.
+The bounded router may propose any destination allowed by the versioned routing
+contract, but contract validity is not the same thing as learned runtime
+authority. This overlay protects sparse/high-risk cases that should remain in
+review until Accounting evidence demonstrates the more-specific workflow.
 
-This overlay does not turn warehouse numbering into a route rule. It only vetoes
-a sparse Tooling Invoices auto-route when the current document carries an
-explicit warehouse-family reference and there is not repeated same-vendor
-Accounting evidence that this vendor legitimately uses Tooling Invoices.
+V117 runtime-authority boundaries
+---------------------------------
+* Warehouse-prefixed documents cannot auto-route to Tooling Invoices without
+  repeated same-vendor Accounting Tooling evidence.
+* A dynamic order-specific route may be contract-valid from a verified BC
+  reference, but it cannot auto-route without same-vendor Accounting evidence
+  for that exact dynamic destination.
+* When both a parent queue and a more-specific static child are valid contract
+  routes, the child cannot be selected without same-vendor Accounting evidence
+  for that exact child.
+* Rhonda - Issues is an exception workflow, not a generic semantic bucket; a
+  vendor with no learned Rhonda - Issues history fails closed to review.
 
-No SharePoint, Mongo, or Business Central writes occur here.
+These are authority vetoes only. They never infer the replacement route and do
+not write SharePoint, Mongo, or Business Central.
 """
 
 from __future__ import annotations
@@ -45,6 +54,70 @@ def _example_vendor(example: Dict[str, Any]) -> str:
         or fields.get("vendor_name")
         or ""
     ).strip()
+
+
+def _same_vendor_examples(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    vendor_key = normalize_vendor_name(_document_vendor(document))
+    if not vendor_key:
+        return []
+    return [
+        example
+        for example in support_examples
+        if normalize_vendor_name(_example_vendor(example)) == vendor_key
+    ]
+
+
+def _same_vendor_route_support(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+    route: str,
+) -> int:
+    target = normalize_route_path(route)
+    return sum(
+        1
+        for example in _same_vendor_examples(document, support_examples)
+        if normalize_route_path(example.get("route_path")) == target
+    )
+
+
+def _normalized_static_routes(contract: Dict[str, Any]) -> Set[str]:
+    return {
+        normalize_route_path(route)
+        for route in (contract.get("static_routes") or [])
+        if normalize_route_path(route)
+    }
+
+
+def _dynamic_route_prefix(route: str, contract: Dict[str, Any]) -> str:
+    normalized = normalize_route_path(route)
+    if not normalized or normalized in _normalized_static_routes(contract):
+        return ""
+    for rule in contract.get("dynamic_routes") or []:
+        prefix = normalize_route_path((rule or {}).get("prefix"))
+        if prefix and normalized.startswith(prefix + "/"):
+            return prefix
+    return ""
+
+
+def _static_parent_route(route: str, contract: Dict[str, Any]) -> str:
+    normalized = normalize_route_path(route)
+    static_routes = _normalized_static_routes(contract)
+    if normalized not in static_routes or "/" not in normalized:
+        return ""
+    parts = normalized.split("/")
+    for end in range(len(parts) - 1, 0, -1):
+        parent = "/".join(parts[:end])
+        if parent in static_routes:
+            return parent
+    return ""
+
+
+def _is_sparse_exception_workflow(route: str) -> bool:
+    normalized = normalize_route_path(route)
+    return normalized == "Rhonda - Issues" or normalized.startswith("Rhonda - Issues/")
 
 
 def _warehouse_reference_tokens(document: Dict[str, Any], context: Dict[str, Any]) -> Set[str]:
@@ -86,19 +159,40 @@ def _warehouse_reference_tokens(document: Dict[str, Any], context: Dict[str, Any
     return warehouse
 
 
-def _same_vendor_tooling_support(
-    document: Dict[str, Any],
-    support_examples: List[Dict[str, Any]],
-) -> int:
-    vendor_key = normalize_vendor_name(_document_vendor(document))
-    if not vendor_key:
-        return 0
-    return sum(
-        1
-        for example in support_examples
-        if normalize_vendor_name(_example_vendor(example)) == vendor_key
-        and normalize_route_path(example.get("route_path")) == "Tooling Invoices"
+def _force_review_runtime(
+    result: Dict[str, Any],
+    *,
+    contract: Dict[str, Any],
+    blocker: str,
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    output = dict(result)
+    output["pre_runtime_authority_decision"] = output.get("decision")
+    output["pre_runtime_authority_route"] = output.get("route_path")
+    output["decision"] = DECISION_NEEDS_REVIEW
+    output["route_path"] = (
+        normalize_route_path(contract.get("review_route"))
+        if "review_route" in contract
+        else ""
     )
+    output["blockers"] = list(output.get("blockers") or []) + [blocker]
+    output["reason"] = blocker
+
+    guard = dict(output.get("authority_guard") or {})
+    guard["action"] = "force_review"
+    guard["blockers"] = list(guard.get("blockers") or []) + [blocker]
+    if evidence:
+        guard.update(evidence)
+    output["authority_guard"] = guard
+
+    overlay = {
+        "action": "force_review",
+        "blockers": [blocker],
+    }
+    if evidence:
+        overlay.update(evidence)
+    output["runtime_authority_overlay"] = overlay
+    return output
 
 
 async def decide_ap_route_with_runtime_authority(
@@ -132,37 +226,83 @@ async def decide_ap_route_with_runtime_authority(
         return result
 
     route = normalize_route_path(result.get("route_path"))
+    same_vendor_count = len(_same_vendor_examples(document, support))
+    same_vendor_exact_route = _same_vendor_route_support(document, support, route)
+    dynamic_prefix = _dynamic_route_prefix(route, contract)
+    static_parent = _static_parent_route(route, contract)
+
+    # Dynamic route validation proves only that the leaf is contract-valid and,
+    # where required, tied to a verified BC reference. It does not prove that
+    # Accounting uses that order-specific child workflow for this vendor.
+    if dynamic_prefix and same_vendor_exact_route < 1:
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "contract-valid dynamic route lacks same-vendor Accounting "
+                "authority for the exact order-specific destination"
+            ),
+            evidence={
+                "dynamic_route_prefix": dynamic_prefix,
+                "same_vendor_label_count": same_vendor_count,
+                "same_vendor_exact_route_label_count": same_vendor_exact_route,
+            },
+        )
+
+    # When Accounting exposes both a parent queue and a more-specific static
+    # child, generic model semantics are insufficient to choose the child. One
+    # same-vendor child label is the minimum evidence boundary; this is a veto,
+    # not a rule that selects the child.
+    if static_parent and same_vendor_exact_route < 1:
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "specific static child route lacks same-vendor Accounting "
+                "authority while a contract-valid parent queue also exists"
+            ),
+            evidence={
+                "static_parent_route": static_parent,
+                "same_vendor_label_count": same_vendor_count,
+                "same_vendor_exact_route_label_count": same_vendor_exact_route,
+            },
+        )
+
+    # Rhonda - Issues represents an explicit exception workflow. Words such as
+    # hold/checking/problem are not enough to create authority for a new vendor.
+    if _is_sparse_exception_workflow(route) and same_vendor_exact_route < 1:
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "exception workflow Rhonda - Issues requires same-vendor "
+                "Accounting evidence before automatic routing"
+            ),
+            evidence={
+                "same_vendor_label_count": same_vendor_count,
+                "same_vendor_exact_route_label_count": same_vendor_exact_route,
+            },
+        )
+
     warehouse_refs = _warehouse_reference_tokens(document, context)
-    same_vendor_tooling = _same_vendor_tooling_support(document, support)
+    same_vendor_tooling = _same_vendor_route_support(document, support, "Tooling Invoices")
 
     # A warehouse-prefixed order/reference plus a generic "tooling charge"
     # interpretation is not enough to grant Tooling runtime authority. Require
     # repeated same-vendor Accounting evidence; otherwise fail closed to review.
     if route == "Tooling Invoices" and warehouse_refs and same_vendor_tooling < 2:
-        blocker = (
-            "warehouse-prefixed current reference requires repeated same-vendor "
-            "Accounting evidence before Tooling Invoices may auto-route"
+        return _force_review_runtime(
+            result,
+            contract=contract,
+            blocker=(
+                "warehouse-prefixed current reference requires repeated same-vendor "
+                "Accounting evidence before Tooling Invoices may auto-route"
+            ),
+            evidence={
+                "warehouse_reference_tokens": sorted(warehouse_refs),
+                "same_vendor_tooling_label_count": same_vendor_tooling,
+            },
         )
-        output = dict(result)
-        output["pre_runtime_authority_decision"] = output.get("decision")
-        output["pre_runtime_authority_route"] = output.get("route_path")
-        output["decision"] = DECISION_NEEDS_REVIEW
-        output["route_path"] = normalize_route_path(contract.get("review_route")) if "review_route" in contract else ""
-        output["blockers"] = list(output.get("blockers") or []) + [blocker]
-        output["reason"] = blocker
-        guard = dict(output.get("authority_guard") or {})
-        guard["action"] = "force_review"
-        guard["blockers"] = list(guard.get("blockers") or []) + [blocker]
-        guard["warehouse_reference_tokens"] = sorted(warehouse_refs)
-        guard["same_vendor_tooling_label_count"] = same_vendor_tooling
-        output["authority_guard"] = guard
-        output["runtime_authority_overlay"] = {
-            "action": "force_review",
-            "blockers": [blocker],
-            "warehouse_reference_tokens": sorted(warehouse_refs),
-            "same_vendor_tooling_label_count": same_vendor_tooling,
-        }
-        return output
 
     return result
 

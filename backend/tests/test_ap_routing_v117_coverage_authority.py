@@ -16,6 +16,7 @@ BASE_CONTRACT = {
         "Dropship Not International/Canpack",
         "Dropship Not International/Drop Ship All Others",
         "Dropship Not International/Freight",
+        "Dropship Not International/Freight/Freight Issues",
         "Meg to Process",
         "Rhonda - Issues",
         "Vendor Credit Memos",
@@ -112,7 +113,7 @@ def test_explicit_do_not_pay_recovers_review(monkeypatch):
         base_result=_review_result(),
         document=_document(
             "R+L Carriers, Inc.",
-            "109577_RLCarriers_NO.1949252536_DO NOT_PAY.pdf",
+            "109577_RLCarriers_NO.1949252536_DO_NOT_PAY.pdf",
             "DO NOT PAY - invoice was reissued",
         ),
     )
@@ -237,4 +238,76 @@ def test_existing_auto_route_passes_through_unchanged(monkeypatch):
     )
     assert result["decision"] == "auto_route"
     assert result["route_path"] == "Dropship International"
+    assert result.get("coverage_authority") is None
+
+
+def test_freight_accessorial_evidence_demotes_dnp_vendor_history_auto(monkeypatch):
+    vendor = "Celtic International, LLC"
+    examples = [
+        _example(
+            vendor,
+            "DO NOT PAY",
+            "112971 Celtic DO NOT PAY.pdf",
+        ),
+        _example(
+            vendor,
+            "Dropship Not International/Freight/Freight Issues",
+            "115940 Celtic storage adjustment.pdf",
+        ),
+    ]
+    result = _run(
+        monkeypatch,
+        base_result=_auto_result("DO NOT PAY"),
+        document=_document(
+            vendor,
+            "115996_Celtic_L548735A_08202026 yard storage added.pdf",
+            "invoice includes yard storage added as an accessorial charge",
+        ),
+        examples=examples,
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["coverage_authority"]["action"] == "force_review_freight_accessorial_dnp_conflict"
+    assert result["coverage_authority"]["freight_accessorial_intent"] is True
+    assert "Dropship Not International/Freight/Freight Issues" in result["coverage_authority"]["same_vendor_freight_routes"]
+
+
+def test_explicit_dnp_remains_authoritative_with_freight_accessorial_words(monkeypatch):
+    vendor = "Celtic International, LLC"
+    examples = [
+        _example(
+            vendor,
+            "Dropship Not International/Freight/Freight Issues",
+            "115940 Celtic storage adjustment.pdf",
+        )
+    ]
+    result = _run(
+        monkeypatch,
+        base_result=_auto_result("DO NOT PAY"),
+        document=_document(
+            vendor,
+            "115996_Celtic_DO NOT PAY_yard storage.pdf",
+            "DO NOT PAY this yard storage charge because it is disputed",
+        ),
+        examples=examples,
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "DO NOT PAY"
+    assert result.get("coverage_authority") is None
+
+
+def test_accessorial_words_without_same_vendor_freight_history_do_not_create_veto(monkeypatch):
+    vendor = "Unrelated Vendor"
+    result = _run(
+        monkeypatch,
+        base_result=_auto_result("DO NOT PAY"),
+        document=_document(
+            vendor,
+            "invoice storage fee.pdf",
+            "storage fee adjustment",
+        ),
+        examples=[_example(vendor, "DO NOT PAY", "prior do not pay.pdf")],
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "DO NOT PAY"
     assert result.get("coverage_authority") is None

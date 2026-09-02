@@ -1,0 +1,197 @@
+"""Final fail-closed safety boundary for V117 coverage recovery.
+
+This layer sits on top of the additive coverage-recovery service. It exists only
+to neutralize recovery classes that proved unsafe in measured held-out data while
+preserving the useful deterministic reference-family and semantic-child gains.
+
+Measured V117 findings encoded here:
+* ordinary numeric BC references can be incidental/stale and may not grant an
+  automatic route through the extended exact-reference recovery path;
+* a generic credit memo may not be auto-routed to DO NOT PAY from vendor-majority
+  evidence when that vendor also has learned Vendor Credit Memo workflows, unless
+  the current document itself contains an explicit stop-pay instruction.
+
+This service only demotes automatic decisions to review. It never selects a new
+route and performs no SharePoint, Mongo, or Business Central writes.
+"""
+
+from __future__ import annotations
+
+import re
+from typing import Any, Dict, List, Optional
+
+from services.ap_routing_coverage_recovery_service import (
+    decide_ap_route_with_authority_guard as _base_recovery_decide,
+)
+from services.ap_routing_decision_service import DECISION_AUTO_ROUTE, DECISION_NEEDS_REVIEW
+from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
+
+
+def _document_vendor(document: Dict[str, Any]) -> str:
+    fields = document.get("extracted_fields") or document.get("ai_extraction") or {}
+    return str(
+        document.get("vendor_canonical")
+        or document.get("vendor_raw")
+        or fields.get("vendor")
+        or fields.get("vendor_name")
+        or ""
+    ).strip()
+
+
+def _example_vendor(example: Dict[str, Any]) -> str:
+    fields = example.get("extracted_fields") or {}
+    return str(
+        example.get("vendor_name")
+        or example.get("vendor_canonical")
+        or fields.get("vendor")
+        or fields.get("vendor_name")
+        or ""
+    ).strip()
+
+
+def _same_vendor_examples(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    key = normalize_vendor_name(_document_vendor(document))
+    if not key:
+        return []
+    return [
+        example
+        for example in support_examples
+        if normalize_vendor_name(_example_vendor(example)) == key
+    ]
+
+
+def _document_text(document: Dict[str, Any]) -> str:
+    fields = document.get("extracted_fields") or document.get("ai_extraction") or {}
+    return " ".join(
+        [
+            str(document.get("file_name") or ""),
+            str(document.get("raw_text") or document.get("document_text") or "")[:16000],
+            " ".join(f"{key} {value}" for key, value in list(fields.items())[:80]),
+        ]
+    ).lower()
+
+
+def _explicit_stop_pay(document: Dict[str, Any]) -> bool:
+    text = _document_text(document)
+    patterns = (
+        r"\bdo\s+not\s+pay\b",
+        r"\bdon['’]?t\s+pay\b",
+        r"\bdont\s+pay\b",
+        r"\bdo\s+not\s+process\b",
+        r"\bhold\s+payment\b",
+        r"\binvoice\s+not\s+paid\b",
+    )
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _is_credit_memo(document: Dict[str, Any]) -> bool:
+    value = str(document.get("document_type") or document.get("suggested_job_type") or "")
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return normalized in {"credit_memo", "vendor_credit_memo"}
+
+
+def _same_vendor_credit_workflow_routes(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+) -> List[str]:
+    routes = {
+        normalize_route_path(example.get("route_path"))
+        for example in _same_vendor_examples(document, support_examples)
+    }
+    return sorted(route for route in routes if route.startswith("Vendor Credit Memos"))
+
+
+def _force_review(
+    result: Dict[str, Any],
+    *,
+    contract: Dict[str, Any],
+    blocker: str,
+    action: str,
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    output = dict(result)
+    output["pre_recovery_safety_decision"] = output.get("decision")
+    output["pre_recovery_safety_route"] = output.get("route_path")
+    output["decision"] = DECISION_NEEDS_REVIEW
+    output["route_path"] = normalize_route_path(contract.get("review_route")) if "review_route" in contract else ""
+    output["blockers"] = list(output.get("blockers") or []) + [blocker]
+    output["reason"] = blocker
+    safety = {
+        "action": action,
+        "blockers": [blocker],
+    }
+    if evidence:
+        safety.update(evidence)
+    output["coverage_recovery_safety"] = safety
+    return output
+
+
+async def decide_ap_route_with_recovery_safety(
+    db,
+    *,
+    document: Dict[str, Any],
+    bc_context: Optional[Dict[str, Any]],
+    contract: Dict[str, Any],
+    examples: Optional[List[Dict[str, Any]]] = None,
+    support_examples: Optional[List[Dict[str, Any]]] = None,
+    vendor_auto_threshold: Optional[float] = None,
+    model: str = "gemini-2.5-pro",
+    llm_send=None,
+) -> Dict[str, Any]:
+    support = list(support_examples if support_examples is not None else (examples or []))
+    result = await _base_recovery_decide(
+        db,
+        document=document,
+        bc_context=bc_context or {},
+        contract=contract,
+        examples=examples,
+        support_examples=support_examples,
+        vendor_auto_threshold=vendor_auto_threshold,
+        model=model,
+        llm_send=llm_send,
+    )
+
+    if result.get("decision") != DECISION_AUTO_ROUTE:
+        return result
+
+    recovery = result.get("coverage_recovery") or {}
+    if recovery.get("action") == "promote_extended_exact_reference_consensus":
+        exact = recovery.get("exact_reference_consensus") or {}
+        return _force_review(
+            result,
+            contract=contract,
+            blocker=(
+                "ordinary numeric exact-reference recovery is not sufficient automatic "
+                "routing authority after measured held-out stale/incidental-reference failures"
+            ),
+            action="force_review_extended_numeric_reference_recovery",
+            evidence={"exact_reference_consensus": exact},
+        )
+
+    route = normalize_route_path(result.get("route_path"))
+    if route == "DO NOT PAY" and _is_credit_memo(document) and not _explicit_stop_pay(document):
+        credit_routes = _same_vendor_credit_workflow_routes(document, support)
+        if credit_routes:
+            return _force_review(
+                result,
+                contract=contract,
+                blocker=(
+                    "generic credit memo cannot inherit automatic DO NOT PAY authority when "
+                    "same-vendor Accounting history contains Vendor Credit Memo workflows"
+                ),
+                action="force_review_generic_credit_memo_dnp_conflict",
+                evidence={
+                    "same_vendor_credit_workflow_routes": credit_routes,
+                    "explicit_stop_pay": False,
+                },
+            )
+
+    result["coverage_recovery_safety"] = {"action": "allow_existing_decision", "blockers": []}
+    return result
+
+
+# Final drop-in name used by the held-out evaluator.
+decide_ap_route_with_authority_guard = decide_ap_route_with_recovery_safety

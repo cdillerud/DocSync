@@ -8,12 +8,14 @@ generic semantic inference:
 * repeated same-vendor Accounting labels for the exact current operational
   reference, all agreeing on one canonical route.
 
-It also owns the final post-overlay safety boundary for already-automatic
-results. A stable/vendor-majority DO NOT PAY decision is demoted to review when
-the current invoice contains clear freight-accessorial evidence, lacks an
-explicit stop-pay instruction, and the same vendor has learned Accounting
-history in a freight workflow. This is a veto only; it never chooses the freight
-replacement route.
+It also owns final post-overlay safety boundaries for already-automatic results.
+A stable/vendor-majority DO NOT PAY decision is demoted to review when the
+current invoice contains clear freight-accessorial evidence, lacks an explicit
+stop-pay instruction, and the same vendor has learned Accounting history in a
+freight workflow. Likewise, an S&H approval-family destination cannot become
+automatic from generic storage/handling semantics when Accounting has never
+routed that vendor to that exact S&H destination. These are vetoes only; they
+never choose a replacement route.
 
 A runtime-authority veto is final and can never be overridden here. Nothing in
 this module writes SharePoint, Mongo, or Business Central.
@@ -70,6 +72,19 @@ def _same_vendor_examples(
         for example in support_examples
         if normalize_vendor_name(_example_vendor(example)) == vendor_key
     ]
+
+
+def _same_vendor_exact_route_count(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+    route: str,
+) -> int:
+    target = normalize_route_path(route)
+    return sum(
+        1
+        for example in _same_vendor_examples(document, support_examples)
+        if normalize_route_path(example.get("route_path")) == target
+    )
 
 
 def _document_semantic_text(document: Dict[str, Any]) -> str:
@@ -131,6 +146,14 @@ def _same_vendor_freight_routes(
         for route in routes
         if route.startswith("Dropship Not International/Freight")
         or route.startswith("Dropship International/Freight")
+    )
+
+
+def _is_sh_approval_route(route: str) -> bool:
+    normalized = normalize_route_path(route)
+    return (
+        normalized == "S&H Invoices waiting for approval"
+        or normalized.startswith("S&H Invoices waiting for approval/")
     )
 
 
@@ -346,9 +369,8 @@ async def decide_ap_route_with_coverage_authority(
         llm_send=llm_send,
     )
 
-    # Final automatic-state safety boundary. Freight/accessorial current-document
-    # evidence cannot be erased by a stable/vendor-majority exception workflow.
-    # This rule only demotes to review and never selects the replacement route.
+    # Final automatic-state safety boundaries. These rules only demote to review
+    # and never select a replacement route.
     if result.get("decision") == DECISION_AUTO_ROUTE:
         route = normalize_route_path(result.get("route_path"))
         freight_routes = _same_vendor_freight_routes(document, support)
@@ -371,6 +393,23 @@ async def decide_ap_route_with_coverage_authority(
                     "same_vendor_freight_routes": freight_routes,
                 },
             )
+
+        if _is_sh_approval_route(route):
+            exact_count = _same_vendor_exact_route_count(document, support, route)
+            if exact_count < 1:
+                return _force_review_coverage(
+                    result,
+                    contract=contract,
+                    blocker=(
+                        "S&H approval workflow requires same-vendor Accounting authority "
+                        "for the exact destination before automatic routing"
+                    ),
+                    action="force_review_sh_approval_without_same_vendor_authority",
+                    evidence={
+                        "same_vendor_exact_route_label_count": exact_count,
+                        "same_vendor_label_count": len(_same_vendor_examples(document, support)),
+                    },
+                )
         return result
 
     if result.get("decision") != DECISION_NEEDS_REVIEW:

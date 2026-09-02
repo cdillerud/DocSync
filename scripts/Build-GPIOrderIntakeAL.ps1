@@ -92,18 +92,75 @@ if ([string]::IsNullOrWhiteSpace($AlcPath) -or -not (Test-Path $AlcPath)) {
     throw 'Could not locate alc.exe. Pass -AlcPath explicitly or install/enable the Microsoft AL Language VS Code extension.'
 }
 
-if ([string]::IsNullOrWhiteSpace($PackageCachePath)) {
+function Get-SymbolMajorVersion {
+    param(
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$PackageStem
+    )
+
+    $match = Get-ChildItem $Directory -Filter "Microsoft_${PackageStem}_*.app" -File -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            if ($_.Name -match '^Microsoft_.+?_(\d+)\.(\d+)(?:\.|_)') {
+                [pscustomobject]@{
+                    File = $_.FullName
+                    Major = [int]$Matches[1]
+                    Minor = [int]$Matches[2]
+                }
+            }
+        } |
+        Sort-Object @{ Expression = 'Major'; Descending = $true }, @{ Expression = 'Minor'; Descending = $true } |
+        Select-Object -First 1
+
+    return $match
+}
+
+function Test-CompatiblePackageCache {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path $Path -PathType Container)) {
+        return $false
+    }
+
+    $application = Get-SymbolMajorVersion -Directory $Path -PackageStem 'Application'
+    $baseApp = Get-SymbolMajorVersion -Directory $Path -PackageStem 'Base Application'
+    $systemApp = Get-SymbolMajorVersion -Directory $Path -PackageStem 'System Application'
+    $system = Get-SymbolMajorVersion -Directory $Path -PackageStem 'System'
+
+    if (-not $application -or -not $baseApp -or -not $systemApp -or -not $system) {
+        return $false
+    }
+
+    # app.json declares 24.0 as the minimum application/platform dependency.
+    # Microsoft dependency versions are minimums, so a complete 25.x+ symbol set
+    # is valid for this offline compile gate as well.
+    return (
+        $application.Major -ge 24 -and
+        $baseApp.Major -ge 24 -and
+        $systemApp.Major -ge 24 -and
+        $system.Major -ge 24
+    )
+}
+
+if (-not [string]::IsNullOrWhiteSpace($PackageCachePath)) {
+    if (-not (Test-CompatiblePackageCache -Path $PackageCachePath)) {
+        throw "Package cache is missing a complete Microsoft 24.x-or-newer symbol set: $PackageCachePath"
+    }
+    $PackageCachePath = (Resolve-Path $PackageCachePath).Path
+}
+else {
+    $documents = [Environment]::GetFolderPath('MyDocuments')
     $knownCandidates = @(
         (Join-Path $ProjectPath '.alpackages'),
         (Join-Path $RepoRoot 'bc-extension\.alpackages'),
         (Join-Path $RepoRoot 'packaging-catalog-bc\.alpackages'),
-        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'DocSync-V69-CommercialFederation\packaging-catalog-bc\.alpackages'),
-        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'DocSync-PackagingCatalog\packaging-catalog-bc\.alpackages'),
-        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'DocSync-Zetadocs\bc-extension\zetadocs-replacement\.alpackages')
+        (Join-Path $documents 'AL\MappingProj\.alpackages'),
+        (Join-Path $documents 'DocSync-V69-CommercialFederation\packaging-catalog-bc\.alpackages'),
+        (Join-Path $documents 'DocSync-PackagingCatalog\packaging-catalog-bc\.alpackages'),
+        (Join-Path $documents 'DocSync-Zetadocs\bc-extension\zetadocs-replacement\.alpackages')
     )
 
     foreach ($candidate in $knownCandidates) {
-        if ((Test-Path $candidate) -and @(Get-ChildItem $candidate -Filter '*.app' -File -ErrorAction SilentlyContinue).Count -gt 0) {
+        if (Test-CompatiblePackageCache -Path $candidate) {
             $PackageCachePath = (Resolve-Path $candidate).Path
             break
         }
@@ -112,8 +169,8 @@ if ([string]::IsNullOrWhiteSpace($PackageCachePath)) {
 
 if ([string]::IsNullOrWhiteSpace($PackageCachePath) -or -not (Test-Path $PackageCachePath)) {
     throw @'
-Could not locate an AL .alpackages symbol cache.
-Pass -PackageCachePath explicitly, pointing to a symbol cache from a current Business Central extension worktree.
+Could not locate a compatible AL .alpackages symbol cache.
+Pass -PackageCachePath explicitly, pointing to a complete Microsoft 24.x-or-newer symbol cache.
 This build script does not download symbols and does not connect to Business Central.
 '@
 }

@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = 'cc7752b8dfae2826a7923e884fcd3b291264579e'
+$ExpectedFeatureCommit = '068c1491d1f65a2bd12cc93cf9072d50894f67fe'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -43,7 +43,7 @@ $Raw = Replace-Required -Text $Raw `
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'backend/services/ap_routing_decision_service.py'," `
-    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py'," `
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_safety_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery_safety.py'," `
     -Marker 'V117 candidate materialization'
 
 $Raw = Replace-Required -Text $Raw `
@@ -62,22 +62,25 @@ docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backen
  "$CONTAINER_STAGE/services/ap_routing_runtime_authority_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_coverage_authority_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_coverage_recovery_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_coverage_recovery_safety_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_evaluation_context_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py"
 echo V117_ADDITIVE_PYCOMPILE=PASS
 
-docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as a, services.ap_routing_runtime_authority_service as r, services.ap_routing_coverage_authority_service as v, services.ap_routing_coverage_recovery_service as y, services.ap_routing_evaluation_context_service as c; paths=[str(a.__file__),str(r.__file__),str(v.__file__),str(y.__file__),str(c.__file__)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(p.startswith("/tmp/gpi-ap-routing-v116/") for p in paths), paths'
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as a, services.ap_routing_runtime_authority_service as r, services.ap_routing_coverage_authority_service as v, services.ap_routing_coverage_recovery_service as y, services.ap_routing_coverage_recovery_safety_service as z, services.ap_routing_evaluation_context_service as c; paths=[str(a.__file__),str(r.__file__),str(v.__file__),str(y.__file__),str(z.__file__),str(c.__file__)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(p.startswith("/tmp/gpi-ap-routing-v116/") for p in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
 '@
 $Raw = Replace-Required -Text $Raw `
@@ -94,7 +97,7 @@ from services.ap_routing_evaluation_context_service import (
     mongo_fallback_latched,
     resolve_ap_routing_context_resilient,
 )
-from services.ap_routing_coverage_recovery_service import (
+from services.ap_routing_coverage_recovery_safety_service import (
     decide_ap_route_with_authority_guard as _v117_runtime_decide,
 )
 
@@ -103,6 +106,7 @@ _v117_eval_module.decide_ap_route_with_authority_guard = _v117_runtime_decide
 print('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE',flush=True)
 print('V117_DETERMINISTIC_COVERAGE_AUTHORITY=ACTIVE',flush=True)
 print('V117_DETERMINISTIC_COVERAGE_RECOVERY=ACTIVE',flush=True)
+print('V117_COVERAGE_RECOVERY_SAFETY=ACTIVE',flush=True)
 print('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE',flush=True)
 '@
 $Raw = Replace-Required -Text $Raw `
@@ -195,18 +199,21 @@ Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')
 Require ($Raw.Contains('backend/services/ap_routing_runtime_authority_service.py')) 'V117 generated script lacks runtime authority overlay.'
 Require ($Raw.Contains('backend/services/ap_routing_coverage_authority_service.py')) 'V117 generated script lacks deterministic coverage authority service.'
 Require ($Raw.Contains('backend/services/ap_routing_coverage_recovery_service.py')) 'V117 generated script lacks deterministic coverage recovery service.'
+Require ($Raw.Contains('backend/services/ap_routing_coverage_recovery_safety_service.py')) 'V117 generated script lacks recovery safety service.'
 Require ($Raw.Contains('backend/services/ap_routing_evaluation_context_service.py')) 'V117 generated script lacks resilient evaluation context service.'
 Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
 Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
 Require ($Raw.Contains('test_ap_routing_v117_runtime_authority_boundaries.py')) 'V117 generated script lacks specialization authority boundary tests.'
 Require ($Raw.Contains('test_ap_routing_v117_coverage_authority.py')) 'V117 generated script lacks deterministic coverage authority tests.'
 Require ($Raw.Contains('test_ap_routing_v117_coverage_recovery.py')) 'V117 generated script lacks deterministic coverage recovery tests.'
+Require ($Raw.Contains('test_ap_routing_v117_coverage_recovery_safety.py')) 'V117 generated script lacks recovery safety tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
 Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
 Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
 Require ($Raw.Contains('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE')) 'V117 generated script lacks runtime authority overlay activation.'
 Require ($Raw.Contains('V117_DETERMINISTIC_COVERAGE_AUTHORITY=ACTIVE')) 'V117 generated script lacks deterministic coverage authority activation.'
 Require ($Raw.Contains('V117_DETERMINISTIC_COVERAGE_RECOVERY=ACTIVE')) 'V117 generated script lacks deterministic coverage recovery activation.'
+Require ($Raw.Contains('V117_COVERAGE_RECOVERY_SAFETY=ACTIVE')) 'V117 generated script lacks recovery safety activation.'
 Require ($Raw.Contains('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE')) 'V117 generated script lacks resilient context activation.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_PROGRESS=')) 'V117 generated script lacks expansion progress telemetry.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_START=1')) 'V117 generated script lacks vendor expansion phase.'
@@ -237,6 +244,7 @@ Write-Host 'V117_DETERMINISTIC_COVERAGE_AUTHORITY_CONFIGURED=PASS' -ForegroundCo
 Write-Host 'V117_FREIGHT_ACCESSORIAL_DNP_VETO_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_SH_APPROVAL_AUTHORITY_BOUNDARY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_DETERMINISTIC_COVERAGE_RECOVERY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_COVERAGE_RECOVERY_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_MONGO_RESILIENT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_EXPANSION_PROGRESS_TELEMETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green

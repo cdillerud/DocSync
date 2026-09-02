@@ -8,6 +8,13 @@ generic semantic inference:
 * repeated same-vendor Accounting labels for the exact current operational
   reference, all agreeing on one canonical route.
 
+It also owns the final post-overlay safety boundary for already-automatic
+results. A stable/vendor-majority DO NOT PAY decision is demoted to review when
+the current invoice contains clear freight-accessorial evidence, lacks an
+explicit stop-pay instruction, and the same vendor has learned Accounting
+history in a freight workflow. This is a veto only; it never chooses the freight
+replacement route.
+
 A runtime-authority veto is final and can never be overridden here. Nothing in
 this module writes SharePoint, Mongo, or Business Central.
 """
@@ -87,6 +94,44 @@ def _explicit_do_not_pay(document: Dict[str, Any]) -> bool:
         r"\bhold\s+payment\b",
     )
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _freight_accessorial_intent(document: Dict[str, Any]) -> bool:
+    """Recognize current-document freight/accessorial charge semantics.
+
+    These terms are intentionally used only as a *veto* against an unrelated
+    exception-workflow auto-route. They never grant a freight destination.
+    """
+    text = _document_semantic_text(document)
+    patterns = (
+        r"\byard\s+storage\b",
+        r"\bstorage\s+(?:charge|charges|fee|fees|added|invoice|cost|costs)\b",
+        r"\baccessorial(?:s|\s+charge|\s+charges)?\b",
+        r"\breweigh(?:\s+charge|\s+charges|\s+fee|\s+fees)?\b",
+        r"\blayover(?:\s+charge|\s+charges|\s+fee|\s+fees)?\b",
+        r"\blumper(?:\s+charge|\s+charges|\s+fee|\s+fees)?\b",
+        r"\bredelivery(?:\s+charge|\s+charges|\s+fee|\s+fees)?\b",
+        r"\bdemurrage\b",
+        r"\bdetention(?:\s+charge|\s+charges|\s+fee|\s+fees)?\b",
+        r"\bfreight\s+(?:charge|charges|fee|fees|surcharge|surcharges|adjustment|variance)\b",
+    )
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _same_vendor_freight_routes(
+    document: Dict[str, Any],
+    support_examples: List[Dict[str, Any]],
+) -> List[str]:
+    routes = {
+        normalize_route_path(example.get("route_path"))
+        for example in _same_vendor_examples(document, support_examples)
+    }
+    return sorted(
+        route
+        for route in routes
+        if route.startswith("Dropship Not International/Freight")
+        or route.startswith("Dropship International/Freight")
+    )
 
 
 def _leading_operational_reference(file_name: Any) -> str:
@@ -218,6 +263,31 @@ def _has_final_safety_veto(result: Dict[str, Any]) -> bool:
     return guard.get("action") == "force_review"
 
 
+def _force_review_coverage(
+    result: Dict[str, Any],
+    *,
+    contract: Dict[str, Any],
+    blocker: str,
+    action: str,
+    evidence: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    output = dict(result)
+    output["pre_coverage_authority_decision"] = output.get("decision")
+    output["pre_coverage_authority_route"] = output.get("route_path")
+    output["decision"] = DECISION_NEEDS_REVIEW
+    output["route_path"] = normalize_route_path(contract.get("review_route")) if "review_route" in contract else ""
+    output["blockers"] = list(output.get("blockers") or []) + [blocker]
+    output["reason"] = blocker
+    coverage = {
+        "action": action,
+        "blockers": [blocker],
+    }
+    if evidence:
+        coverage.update(evidence)
+    output["coverage_authority"] = coverage
+    return output
+
+
 def _grant_runtime_coverage(
     result: Dict[str, Any],
     *,
@@ -276,8 +346,33 @@ async def decide_ap_route_with_coverage_authority(
         llm_send=llm_send,
     )
 
+    # Final automatic-state safety boundary. Freight/accessorial current-document
+    # evidence cannot be erased by a stable/vendor-majority exception workflow.
+    # This rule only demotes to review and never selects the replacement route.
     if result.get("decision") == DECISION_AUTO_ROUTE:
+        route = normalize_route_path(result.get("route_path"))
+        freight_routes = _same_vendor_freight_routes(document, support)
+        if (
+            route == "DO NOT PAY"
+            and not _explicit_do_not_pay(document)
+            and _freight_accessorial_intent(document)
+            and freight_routes
+        ):
+            return _force_review_coverage(
+                result,
+                contract=contract,
+                blocker=(
+                    "current-document freight/accessorial evidence conflicts with "
+                    "automatic DO NOT PAY exception-workflow authority"
+                ),
+                action="force_review_freight_accessorial_dnp_conflict",
+                evidence={
+                    "freight_accessorial_intent": True,
+                    "same_vendor_freight_routes": freight_routes,
+                },
+            )
         return result
+
     if result.get("decision") != DECISION_NEEDS_REVIEW:
         return result
     if _has_final_safety_veto(result):

@@ -19,6 +19,8 @@ BASE_CONTRACT = {
         "Dropship Not International/Freight/Freight Issues",
         "Meg to Process",
         "Rhonda - Issues",
+        "S&H Invoices waiting for approval",
+        "S&H Invoices waiting for approval/Jess to approve",
         "Vendor Credit Memos",
         "Warehouse International",
         "Warehouse Not International",
@@ -310,4 +312,45 @@ def test_accessorial_words_without_same_vendor_freight_history_do_not_create_vet
     )
     assert result["decision"] == "auto_route"
     assert result["route_path"] == "DO NOT PAY"
+    assert result.get("coverage_authority") is None
+
+
+def test_sh_approval_route_without_same_vendor_authority_fails_closed(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_auto_result("S&H Invoices waiting for approval"),
+        document=_document(
+            "SORT & STACK",
+            "Sort & Stack 230920 2298 SO 78922.pdf",
+            "storage and handling invoice tied to sales order 78922",
+        ),
+        examples=[],
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["coverage_authority"]["action"] == "force_review_sh_approval_without_same_vendor_authority"
+    assert result["coverage_authority"]["same_vendor_exact_route_label_count"] == 0
+
+
+def test_same_vendor_exact_sh_route_authority_preserves_auto(monkeypatch):
+    vendor = "O-I Packaging Solutions LLC"
+    route = "S&H Invoices waiting for approval/Jess to approve"
+    result = _run(
+        monkeypatch,
+        base_result=_auto_result(route),
+        document=_document(
+            vendor,
+            "W119028_ROTONDO_082726_BOL.pdf",
+            "warehouse shipment bill of lading",
+        ),
+        examples=[
+            _example(
+                vendor,
+                route,
+                "W119020 prior OI BOL.pdf",
+            )
+        ],
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == route
     assert result.get("coverage_authority") is None

@@ -1,0 +1,74 @@
+"""Composable AI-primary learned-autonomy AP routing pipeline for V117."""
+
+from __future__ import annotations
+
+from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence
+
+from services.ap_routing_ai_primary_service import propose_ap_route_ai_primary
+from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
+from services.ap_routing_learned_safety_service import apply_learned_autonomy_safety
+from services.ap_routing_relevant_learning_service import build_relevant_learning_examples
+
+
+async def decide_ap_route_learned(
+    *,
+    document: Dict[str, Any],
+    bc_context: Optional[Dict[str, Any]],
+    contract: Dict[str, Any],
+    train_examples: Sequence[Dict[str, Any]],
+    performance_outcomes: Iterable[Dict[str, Any]] = (),
+    hard_blockers: Iterable[str] = (),
+    relevant_limit: int = 20,
+    model: Optional[str] = None,
+    llm_send: Optional[Callable[[str, str], Awaitable[Any]]] = None,
+) -> Dict[str, Any]:
+    """Run AI proposal -> learned authority -> fail-closed safety.
+
+    No stage after the model is allowed to select a different route.
+    """
+    relevant: List[Dict[str, Any]] = build_relevant_learning_examples(
+        document,
+        train_examples,
+        limit=relevant_limit,
+    )
+    kwargs: Dict[str, Any] = {
+        "document": document,
+        "bc_context": bc_context or {},
+        "contract": contract,
+        "examples": relevant,
+        "llm_send": llm_send,
+    }
+    if model:
+        kwargs["model"] = model
+    ai = await propose_ap_route_ai_primary(**kwargs)
+
+    autonomy = evaluate_learned_autonomy(
+        document={**document, "bc_context": bc_context or document.get("bc_context") or {}},
+        ai_decision=ai,
+        train_examples=train_examples,
+        performance_outcomes=performance_outcomes,
+        relevant_limit=relevant_limit,
+    )
+    autonomy["prediction"] = ai.get("prediction") or {}
+    autonomy["ai_confidence"] = ai.get("confidence")
+    autonomy["ai_reason"] = ai.get("reason")
+    autonomy["route_selected_by"] = "ai_model"
+    autonomy["supervised_route_substitution"] = False
+    autonomy["prompt_example_count"] = len(relevant)
+    autonomy["prompt_example_ids"] = [
+        str(item.get("fingerprint") or item.get("source_item_id") or item.get("document_id") or item.get("file_name") or "")
+        for item in relevant
+    ]
+
+    final = apply_learned_autonomy_safety(
+        document=document,
+        autonomy_decision=autonomy,
+        contract=contract,
+        bc_context=bc_context or {},
+        hard_blockers=hard_blockers,
+    )
+    final["ai_primary_router"] = True
+    final["learned_autonomy_active"] = True
+    final["self_training_blocked"] = True
+    final["deterministic_route_substitution"] = False
+    return final

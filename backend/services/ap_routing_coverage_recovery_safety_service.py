@@ -1,8 +1,10 @@
-"""Final fail-closed safety boundary for V117 coverage recovery.
+"""Final safety and high-precision recovery boundary for V117 coverage work.
 
-This layer sits on top of the additive coverage-recovery service. It exists only
-to neutralize recovery/override classes that proved unsafe in measured held-out
-data while preserving useful deterministic reference-family gains.
+This layer sits on top of the additive coverage-recovery service. It neutralizes
+recovery/override classes that proved unsafe in measured held-out data while
+preserving useful deterministic reference-family gains. It may also recover an
+explicit current-document stop-pay command to DO NOT PAY when no hard authority
+conflict is present.
 
 Measured V117 findings encoded here:
 * ordinary numeric BC references can be incidental/stale and may not grant an
@@ -15,13 +17,15 @@ Measured V117 findings encoded here:
   measured Ball detention false-positive proved that semantic-child recovery
   needs another independent discriminator before it can be automatic;
 * an explicit current-document stop-pay instruction may never be overridden by a
-  learned payable vendor workflow; and
+  learned payable vendor workflow;
 * stable-vendor semantic overrides are not sufficient automatic authority for
   non-AP operational documents, where extracted vendor identity may describe a
-  referenced supplier/customer rather than the workflow owner.
+  referenced supplier/customer rather than the workflow owner; and
+* a strong imperative stop-pay command may recover a review only when the review
+  is caused by soft ambiguity. Cross-vendor/reference-family/dynamic-route hard
+  conflicts remain fail-closed.
 
-This service only demotes automatic decisions to review. It never selects a new
-route and performs no SharePoint, Mongo, or Business Central writes.
+This service performs no SharePoint, Mongo, or Business Central writes.
 """
 
 from __future__ import annotations
@@ -96,6 +100,19 @@ def _explicit_stop_pay(document: Dict[str, Any]) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def _explicit_stop_pay_command(document: Dict[str, Any]) -> bool:
+    """Return True only for imperative/current instructions safe enough to recover."""
+    text = _document_text(document)
+    patterns = (
+        r"\bdo\s+not\s+pay\b",
+        r"\bdon['’]?t\s+pay\b",
+        r"\bdont\s+pay\b",
+        r"\bdo\s+not\s+process\b",
+        r"\bhold\s+payment\b",
+    )
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def _normalized_document_type(document: Dict[str, Any]) -> str:
     value = str(document.get("document_type") or document.get("suggested_job_type") or "")
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
@@ -114,6 +131,27 @@ def _same_vendor_credit_workflow_routes(
         for example in _same_vendor_examples(document, support_examples)
     }
     return sorted(route for route in routes if route.startswith("Vendor Credit Memos"))
+
+
+def _review_has_hard_authority_conflict(result: Dict[str, Any]) -> bool:
+    guard = result.get("authority_guard") or {}
+    evidence = [
+        str(result.get("reason") or ""),
+        *[str(value) for value in (result.get("blockers") or [])],
+        *[str(value) for value in (guard.get("blockers") or [])],
+    ]
+    combined = " | ".join(evidence).lower()
+    hard_fragments = (
+        "exact current reference seen only under a different vendor",
+        "cross-vendor",
+        "candidate route family",
+        "reference family conflicts",
+        "contract-valid dynamic route lacks",
+        "specific static child route lacks",
+        "route requires resolved business central/order context",
+        "warehouse tooling",
+    )
+    return any(fragment in combined for fragment in hard_fragments)
 
 
 def _force_review(
@@ -138,6 +176,27 @@ def _force_review(
     if evidence:
         safety.update(evidence)
     output["coverage_recovery_safety"] = safety
+    return output
+
+
+def _promote_explicit_stop_pay_review(result: Dict[str, Any]) -> Dict[str, Any]:
+    output = dict(result)
+    output["pre_recovery_safety_decision"] = output.get("decision")
+    output["pre_recovery_safety_route"] = output.get("route_path")
+    output["decision"] = DECISION_AUTO_ROUTE
+    output["route_path"] = "DO NOT PAY"
+    try:
+        current_confidence = float(output.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        current_confidence = 0.0
+    output["confidence"] = max(current_confidence, 0.99)
+    output["blockers"] = []
+    output["reason"] = "explicit current-document stop-pay command grants deterministic final recovery"
+    output["coverage_recovery_safety"] = {
+        "action": "promote_explicit_stop_pay_review_recovery",
+        "blockers": [],
+        "explicit_stop_pay": True,
+    }
     return output
 
 
@@ -166,7 +225,10 @@ async def decide_ap_route_with_recovery_safety(
         llm_send=llm_send,
     )
 
+    strong_stop_pay = _explicit_stop_pay_command(document)
     if result.get("decision") != DECISION_AUTO_ROUTE:
+        if strong_stop_pay and not _review_has_hard_authority_conflict(result):
+            return _promote_explicit_stop_pay_review(result)
         return result
 
     route = normalize_route_path(result.get("route_path"))
@@ -174,9 +236,21 @@ async def decide_ap_route_with_recovery_safety(
     guard_action = str(guard.get("action") or "")
     document_type = _normalized_document_type(document)
 
+    # A strong explicit stop-pay command already routed to DO NOT PAY outranks
+    # downstream recovery demotions such as ordinary numeric exact-reference
+    # safety. This preserves direct current-document authority without weakening
+    # any hard blocker because the base decision is already automatic here.
+    if strong_stop_pay and route == "DO NOT PAY":
+        result["coverage_recovery_safety"] = {
+            "action": "allow_explicit_stop_pay_dnp_precedence",
+            "blockers": [],
+            "explicit_stop_pay": True,
+        }
+        return result
+
     # Current-document stop-pay language is a final safety boundary. A learned
     # payable workflow may never override it. We fail closed rather than changing
-    # the destination here because this wrapper only demotes decisions.
+    # the destination when a conflicting automatic payable route survives below.
     if _explicit_stop_pay(document) and route != "DO NOT PAY":
         return _force_review(
             result,

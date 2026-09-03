@@ -57,30 +57,34 @@ Newly visible real REVIEW contexts:
 
 Stable pricing still does not override source semantics: Pasta from the quantity-less blanket format and explicit mixed/exception Salsa remain REVIEW even when their pricing context itself is stable.
 
-## Live positive breadth state
+## Completed live positive breadth proof
 
-The first positive breadth run progressed through the Pizza/00 and Salsa16/00 cases before reaching Vinegar/082. Salsa16/00 explicitly proved `85.932 M -> 217.67` with Draft creation and cleanup PASS. Progression to Vinegar means the prior Pizza/00 case satisfied the matrix's exact item/quantity/UOM/location/price/cleanup assertions as well.
+Four different normal Giovanni contexts have now independently created a tagged Draft, preserved the requested PO quantity, read back the full-history context price, and deleted the exact tagged Draft with cleanup PASS:
 
-Vinegar/082 was then independently diagnosed after the stale `188.01` expectation failed:
+1. 14oz Pizza `C-8479-10000229` / `61.425 M` / Location `00` / `196.43`.
+2. 16oz Salsa `C-503004-12033478` / `85.932 M` / Location `00` / `217.67`.
+3. 16oz Vinegar `C-8808-12026443` / `49.742 M` / Location `082` / `212.60`.
+4. 24oz Salsa `C-503003-12033922` / `33.852 M` / Location `082` / `289.49`.
 
-- incoming quantity: `49.742 M`
-- Location: `082`
-- resolver/read-back price: `212.60`
-- Draft only
-- cleanup PASS
+The Vinegar case was re-proven independently after retiring the stale capped-profiler expectation. The final Salsa24/082 resume test created Draft Sales Order `118857`, read back `33.852 M @ 289.49`, and deleted it with cleanup PASS.
 
-The corrected full-history GET evidence independently corroborates `212.60 / 212.60` as the latest-two Vinegar/082 price context.
+This breadth proof establishes that the order-intake authority is not replaying one fixture quantity. Different requested quantities survive exactly while Unit Price is resolved independently from `customer + item + UOM + location` evidence.
 
-The only original four-case breadth item not yet executed is:
+## Fail-closed coverage already proven
 
-- 24oz Salsa `C-503003-12033922` / `33.852 M` / Location `082` / expected full-history price `289.49`.
+The installed `0.1.0.8` has already rejected with zero residual AITEST orders:
 
-Use `scripts/Resume-GPIOrderIntakePositiveBreadth-FullHistory-0.1.0.8-PRE.ps1` to run only that remaining tagged Draft with mandatory cleanup; do not rerun the stale original breadth matrix.
+- Pizza / Location `082`: latest-two price conflict.
+- Pasta current blanket source: quantity-source ambiguity.
+- mixed/exception Salsa: explicit exception semantics.
+- invalid BC UOM (`BOX`): structural rejection.
 
 ## Next gates
 
-1. Complete the one remaining Salsa24/082 positive breadth case.
-2. Add full-history fail-closed pricing-evidence coverage for Vinegar Location `001` (latest-two conflict) and Location `002` (one observation), with zero residual AITEST orders.
+1. Run `scripts/Test-GPIOrderIntakeResolver-FullHistoryPricingRejections-0.1.0.8-PRE.ps1` against the newly visible Vinegar contexts:
+   - Location `001`: latest-two price conflict.
+   - Location `002`: exactly one posted invoice observation.
+2. Require both cases to reject before Draft creation with `residualTaggedOrders = 0`.
 3. Keep Pizza/082, Pasta source ambiguity, mixed/exception Salsa, and invalid UOM fail-closed.
 4. Do not use capped pricing-profile evidence for authority decisions.
 5. Keep Production and all release/ship/invoice/post behavior blocked throughout Phase 0.

@@ -26,7 +26,7 @@ $app = Get-Content $AppJsonPath -Raw | ConvertFrom-Json
 $ExpectedAppId = 'fcb4d73a-731e-47a4-85fa-8a49033cd3da'
 $ExpectedName = 'GPI Order Intake'
 $ExpectedPublisher = 'Gamer Packaging Inc'
-$ExpectedVersion = '0.1.0.2'
+$ExpectedVersion = '0.1.0.3'
 
 if ([string]$app.id -ne $ExpectedAppId) { throw "Unexpected app id: $($app.id)" }
 if ([string]$app.name -ne $ExpectedName) { throw "Unexpected app name: $($app.name)" }
@@ -37,8 +37,8 @@ if ($app.idRanges.Count -ne 1 -or [int]$app.idRanges[0].from -ne 71200 -or [int]
 }
 
 $sourceFiles = @(Get-ChildItem (Join-Path $ProjectPath 'src') -Filter '*.al' -File -Recurse)
-if ($sourceFiles.Count -lt 8) {
-    throw "Expected at least 8 AL source files; found $($sourceFiles.Count)."
+if ($sourceFiles.Count -lt 9) {
+    throw "Expected at least 9 AL source files; found $($sourceFiles.Count)."
 }
 
 $sourceText = ($sourceFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
@@ -53,7 +53,8 @@ $requiredMarkers = @(
     'GPI Order Intake Authority',
     'Price List Line',
     'Sales Price',
-    'Item Unit of Measure'
+    'Item Unit of Measure',
+    'Event Subscription'
 )
 foreach ($marker in $requiredMarkers) {
     if ($sourceText.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
@@ -178,7 +179,7 @@ This build script does not download symbols and does not connect to Business Cen
 $outputDir = Join-Path $ProjectPath '.output'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
-$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.2.app'
+$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.3.app'
 if (Test-Path $outFile) {
     Remove-Item $outFile -Force
 }

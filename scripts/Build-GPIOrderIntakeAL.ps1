@@ -26,19 +26,19 @@ $app = Get-Content $AppJsonPath -Raw | ConvertFrom-Json
 $ExpectedAppId = 'fcb4d73a-731e-47a4-85fa-8a49033cd3da'
 $ExpectedName = 'GPI Order Intake'
 $ExpectedPublisher = 'Gamer Packaging Inc'
-$ExpectedVersion = '0.1.0.1'
+$ExpectedVersion = '0.1.0.2'
 
 if ([string]$app.id -ne $ExpectedAppId) { throw "Unexpected app id: $($app.id)" }
 if ([string]$app.name -ne $ExpectedName) { throw "Unexpected app name: $($app.name)" }
 if ([string]$app.publisher -ne $ExpectedPublisher) { throw "Unexpected publisher: $($app.publisher)" }
-if ([string]$app.version -ne $ExpectedVersion) { throw "Unexpected version: $($app.version)" }
+if ([string]$app.version -ne $ExpectedVersion) { throw "Unexpected app version: $($app.version)" }
 if ($app.idRanges.Count -ne 1 -or [int]$app.idRanges[0].from -ne 71200 -or [int]$app.idRanges[0].to -ne 71299) {
     throw 'Unexpected Order Intake object range. Expected exactly 71200..71299.'
 }
 
 $sourceFiles = @(Get-ChildItem (Join-Path $ProjectPath 'src') -Filter '*.al' -File -Recurse)
-if ($sourceFiles.Count -lt 6) {
-    throw "Expected at least 6 AL source files; found $($sourceFiles.Count)."
+if ($sourceFiles.Count -lt 8) {
+    throw "Expected at least 8 AL source files; found $($sourceFiles.Count)."
 }
 
 $sourceText = ($sourceFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
@@ -51,7 +51,9 @@ $requiredMarkers = @(
     'UpdateUnitPrice',
     'Unit Price',
     'GPI Order Intake Authority',
-    'Price List Line'
+    'Price List Line',
+    'Sales Price',
+    'Item Unit of Measure'
 )
 foreach ($marker in $requiredMarkers) {
     if ($sourceText.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
@@ -176,7 +178,7 @@ This build script does not download symbols and does not connect to Business Cen
 $outputDir = Join-Path $ProjectPath '.output'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
-$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.1.app'
+$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.2.app'
 if (Test-Path $outFile) {
     Remove-Item $outFile -Force
 }

@@ -57,6 +57,21 @@ def _auto(route, *, recovery=None, guard_action="allow_existing_decision"):
     return result
 
 
+def _review(*, reason="needs review", guard_action="force_review", guard_blockers=None, confidence=0.95):
+    return {
+        "decision": "needs_review",
+        "route_path": "",
+        "confidence": confidence,
+        "blockers": [],
+        "warnings": [],
+        "reason": reason,
+        "authority_guard": {
+            "action": guard_action,
+            "blockers": list(guard_blockers or []),
+        },
+    }
+
+
 def _run(monkeypatch, *, base_result, document, examples=None):
     async def fake_base(*args, **kwargs):
         return dict(base_result)
@@ -279,3 +294,62 @@ def test_stable_vendor_consensus_normal_ap_invoice_without_stop_pay_is_preserved
     assert result["decision"] == "auto_route"
     assert result["route_path"] == route
     assert result["coverage_recovery_safety"]["action"] == "allow_existing_decision"
+
+
+def test_explicit_stop_pay_review_with_soft_multiroute_blocker_is_promoted(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_review(
+            reason="ordinary numeric exact-reference recovery is not sufficient automatic routing authority",
+            guard_blockers=["multi-route vendor lacks discriminating current-document or authoritative BC context evidence"],
+            confidence=1.0,
+        ),
+        document=_document(
+            "Celtic International, LLC",
+            "42448 Celtic 201117 L341583A DO NOT PAY.pdf",
+            raw_text="DO NOT PAY",
+        ),
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "DO NOT PAY"
+    assert result["coverage_recovery_safety"]["action"] == "promote_explicit_stop_pay_review_recovery"
+
+
+def test_explicit_stop_pay_dnp_outranks_numeric_recovery_demotion(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_auto(
+            "DO NOT PAY",
+            recovery={
+                "action": "promote_extended_exact_reference_consensus",
+                "granted_route": "DO NOT PAY",
+                "exact_reference_consensus": {"reference": "341583", "route": "DO NOT PAY", "label_count": 2},
+            },
+        ),
+        document=_document(
+            "Celtic International, LLC",
+            "42448 Celtic 201117 L341583A DO NOT PAY.pdf",
+            raw_text="DO NOT PAY",
+        ),
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == "DO NOT PAY"
+    assert result["coverage_recovery_safety"]["action"] == "allow_explicit_stop_pay_dnp_precedence"
+
+
+def test_explicit_stop_pay_does_not_override_cross_vendor_reference_conflict(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_review(
+            reason="candidate route relies on an exact current reference seen only under a different vendor",
+            guard_blockers=["candidate route relies on an exact current reference seen only under a different vendor"],
+            confidence=1.0,
+        ),
+        document=_document(
+            "Example Vendor",
+            "Example DO NOT PAY.pdf",
+            raw_text="DO NOT PAY",
+        ),
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""

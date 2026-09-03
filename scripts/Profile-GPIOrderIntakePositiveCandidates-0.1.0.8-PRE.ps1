@@ -28,14 +28,9 @@ try {
     $base = (& git show "HEAD:$BasePath") -join "`n"
     if ([string]::IsNullOrWhiteSpace($base)) { throw 'Committed base profiler content was empty.' }
 
-    $old = @'
-$review = @($ordered | Where-Object {[string]$_.decision -ne 'PASS_LATEST_TWO_AGREE'})
-$agree = @($ordered | Where-Object {[string]$_.decision -eq 'PASS_LATEST_TWO_AGREE'})
-'@.TrimEnd("`r","`n")
-
-    $new = @'
-$review = @($ordered | Where-Object {[string]$_.decision -ne 'PASS_LATEST_TWO_AGREE'})
-$agree = @($ordered | Where-Object {[string]$_.decision -eq 'PASS_LATEST_TWO_AGREE'})
+    # Anchor on one unique single line rather than a newline-sensitive multi-line block.
+    $anchor = '$agree = @($ordered | Where-Object {[string]$_.decision -eq ''PASS_LATEST_TWO_AGREE''})'
+    $candidateBlock = @'
 
 Write-Host ''
 Write-Host 'POSITIVE_BREADTH_CANDIDATES' -ForegroundColor Green
@@ -55,10 +50,14 @@ foreach ($row in @($agree | Where-Object {[string]$_.role -eq 'NORMAL'} | Sort-O
 }
 '@.TrimEnd("`r","`n")
 
-    $count = ([regex]::Matches($base, [regex]::Escape($old))).Count
-    if ($count -ne 1) { throw "Expected one candidate-output patch target; found $count." }
-    $patched = $base.Replace($old, $new)
+    $anchorCount = ([regex]::Matches($base, [regex]::Escape($anchor))).Count
+    Write-Host "Candidate anchor count : $anchorCount / 1"
+    if ($anchorCount -ne 1) { throw "Expected one candidate anchor; found $anchorCount." }
+    $patched = $base.Replace($anchor, $anchor + $candidateBlock)
 
+    if ($patched.IndexOf('POSITIVE_BREADTH_CANDIDATES', [StringComparison]::Ordinal) -lt 0) {
+        throw 'Positive-candidate output marker missing after patch.'
+    }
     if ($patched -match '(?i)Invoke-RestMethod\s+-Method\s+(Post|Patch|Delete)|Invoke-WebRequest\s+-Method\s+(Post|Patch|Delete)|extensionUpload|Microsoft\.NAV\.upload|createValidatedDraft') {
         throw 'Positive-candidate profiler unexpectedly contains mutation/action operations.'
     }

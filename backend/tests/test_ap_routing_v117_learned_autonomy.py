@@ -316,3 +316,147 @@ def test_end_to_end_learned_pipeline_preserves_ai_route_and_blocks_self_training
     assert result["ai_primary_router"] is True
     assert result["self_training_blocked"] is True
     assert result["deterministic_route_substitution"] is False
+
+
+def test_warehouse_reference_family_demotes_dropship_without_replacement():
+    current = doc(file_name="W118614_Evergreen_invoice.pdf")
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_A), train_examples=five(ROUTE_A))
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context={},
+        support_examples=five(ROUTE_A),
+    )
+    assert final["decision"] == "needs_review"
+    assert final["route_path"] == ""
+    assert final["ai_proposed_route"] == ROUTE_A
+    assert any("reference family warehouse" in item for item in final["safety_blockers"])
+
+
+def test_standard_order_reference_demotes_warehouse_without_replacement():
+    current = doc(file_name="110784B_TUMALO_invoice.pdf")
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_B), train_examples=five(ROUTE_B))
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context={},
+        support_examples=five(ROUTE_B),
+    )
+    assert final["decision"] == "needs_review"
+    assert final["ai_proposed_route"] == ROUTE_B
+    assert any("reference family standard_order" in item for item in final["safety_blockers"])
+
+
+def test_resolved_bc_vendor_conflict_demotes_logistics_route():
+    current = doc(vendor="Ball Metal Beverage Container")
+    context = {
+        "status": "resolved",
+        "bc_vendor_name": "Completely Different Logistics",
+        "verified_order_numbers": ["123456"],
+    }
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_A), train_examples=five(ROUTE_A))
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context=context,
+        support_examples=five(ROUTE_A),
+    )
+    assert final["decision"] == "needs_review"
+    assert any("Business Central vendor conflicts" in item for item in final["safety_blockers"])
+
+
+def test_resolved_bc_vendor_conflict_does_not_poison_special_route():
+    current = doc(vendor="Ball Metal Beverage Container")
+    context = {
+        "status": "resolved",
+        "bc_vendor_name": "Completely Different Logistics",
+        "verified_order_numbers": ["123456"],
+    }
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(DNP), train_examples=five(DNP))
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context=context,
+        support_examples=five(DNP),
+    )
+    assert final["decision"] == "auto_route"
+    assert final["route_path"] == DNP
+
+
+def test_manual_only_route_is_demoted_without_substitution():
+    current = doc()
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_A), train_examples=five(ROUTE_A))
+    c = contract()
+    c["manual_only_routes"] = [ROUTE_A]
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=c,
+        bc_context={},
+        support_examples=five(ROUTE_A),
+    )
+    assert final["decision"] == "needs_review"
+    assert final["ai_proposed_route"] == ROUTE_A
+    assert "AI proposed a manual-only route" in final["safety_blockers"]
+
+
+def test_foreign_exact_reference_dependency_demotes_only_when_ai_relied_on_it():
+    current = doc()
+    context = {"verified_order_numbers": ["123456"]}
+    local = five(ROUTE_A)
+    foreign = ex(
+        ROUTE_A,
+        vendor="Foreign Vendor",
+        fingerprint="foreign-ref",
+        bc_context={"verified_order_numbers": ["123456"]},
+    )
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_A), train_examples=local)
+    autonomy["prediction"] = {
+        "proposed_route": ROUTE_A,
+        "confidence": 0.97,
+        "unresolved": [],
+        "bc_refs_used": ["123456"],
+        "matched_example_ids": ["foreign-ref"],
+    }
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context=context,
+        support_examples=local + [foreign],
+    )
+    assert final["decision"] == "needs_review"
+    assert any("foreign-vendor exact-reference" in item for item in final["safety_blockers"])
+
+
+def test_foreign_exact_reference_collision_without_ai_reliance_does_not_poison_route():
+    current = doc()
+    context = {"verified_order_numbers": ["123456"]}
+    local = five(ROUTE_A)
+    foreign = ex(
+        ROUTE_A,
+        vendor="Foreign Vendor",
+        fingerprint="foreign-ref",
+        bc_context={"verified_order_numbers": ["123456"]},
+    )
+    autonomy = evaluate_learned_autonomy(document=current, ai_decision=ai(ROUTE_A), train_examples=local)
+    autonomy["prediction"] = {
+        "proposed_route": ROUTE_A,
+        "confidence": 0.97,
+        "unresolved": [],
+        "bc_refs_used": [],
+        "matched_example_ids": [],
+    }
+    final = apply_learned_autonomy_safety(
+        document=current,
+        autonomy_decision=autonomy,
+        contract=contract(),
+        bc_context=context,
+        support_examples=local + [foreign],
+    )
+    assert final["decision"] == "auto_route"
+    assert final["route_path"] == ROUTE_A

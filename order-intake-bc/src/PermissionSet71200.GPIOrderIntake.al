@@ -10,8 +10,10 @@ permissionset 71200 "GPI ORDER INTAKE"
     Permissions =
         tabledata Customer = R,
         tabledata Item = R,
+        tabledata "Item Unit of Measure" = R,
         tabledata Location = R,
         tabledata "Price List Line" = R,
+        tabledata "Sales Price" = R,
         tabledata "Sales Price Access" = R,
         tabledata "Sales Header" = RIM,
         tabledata "Sales Line" = RIM,
@@ -20,5 +22,7 @@ permissionset 71200 "GPI ORDER INTAKE"
         page "GPI Order Intake Cust API" = X,
         page "GPI Order Intake Order API" = X,
         page "GPI Order Intake Line API" = X,
-        page "GPI Order Intake Price API" = X;
+        page "GPI Order Intake Price API" = X,
+        page "GPI Order Intake SalesPrice" = X,
+        page "GPI Order Intake Item UOM" = X;
 }

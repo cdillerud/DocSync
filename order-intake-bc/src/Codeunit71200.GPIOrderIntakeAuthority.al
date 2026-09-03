@@ -1,8 +1,8 @@
 /// <summary>
 /// Phase-0 Business Central authority for GPI Order Intake.
 /// Creates only tagged Draft/Open Sales Orders in the certified PRE sandbox.
-/// Uses standard Sales Header / Sales Line validation so BC remains authoritative
-/// for customer, item, UOM, location, dates, discounts and pricing.
+/// Uses standard Sales Header / Sales Line validation for order context and a deterministic
+/// BC posted-history resolver for Giovanni Unit Price. No release, ship, invoice or post behavior exists.
 /// </summary>
 codeunit 71200 "GPI Order Intake Authority"
 {
@@ -32,6 +32,11 @@ codeunit 71200 "GPI Order Intake Authority"
         ExistingSalesHeader: Record "Sales Header";
         SalesInvoiceHeader: Record "Sales Invoice Header";
         EnvironmentInformation: Codeunit "Environment Information";
+        Resolver: Codeunit "GPI Order Intake Resolver";
+        ResolvedUnitPrice: Decimal;
+        MatchingPriceEvidenceCount: Integer;
+        LatestEvidenceDocumentNo: Code[20];
+        BoyerRollingStateCorroborates: Boolean;
     begin
         AssertPhase0Target(EnvironmentInformation, ExternalDocumentNo);
         AssertRequiredInputs(
@@ -71,6 +76,25 @@ codeunit 71200 "GPI Order Intake Authority"
                 CustomerNo,
                 ExternalDocumentNo);
 
+        // Resolve pricing before any Sales Header/Line insert. REVIEW/error outcomes therefore leave no draft behind.
+        Resolver.ResolveGiovanniUnitPrice(
+            CustomerNo,
+            ItemNo,
+            Quantity,
+            UnitOfMeasureCode,
+            LocationCode,
+            ResolvedUnitPrice,
+            MatchingPriceEvidenceCount,
+            LatestEvidenceDocumentNo,
+            BoyerRollingStateCorroborates);
+
+        if (ResolvedUnitPrice <= 0) or (MatchingPriceEvidenceCount < 2) then
+            Error(
+                'Order Intake resolver safety stop. Resolved Unit Price %1 with evidence count %2 for latest evidence document %3.',
+                ResolvedUnitPrice,
+                MatchingPriceEvidenceCount,
+                LatestEvidenceDocumentNo);
+
         CreatedSalesHeader.Init();
         CreatedSalesHeader."Document Type" := CreatedSalesHeader."Document Type"::Order;
         CreatedSalesHeader.Insert(true);
@@ -94,27 +118,16 @@ codeunit 71200 "GPI Order Intake Authority"
         CreatedSalesLine.Validate("Unit of Measure Code", UnitOfMeasureCode);
         CreatedSalesLine.Validate(Quantity, Quantity);
 
-        // Explicitly execute the standard Sales Line price-calculation path after
-        // all known pricing context has been validated onto the line.
-        CreatedSalesLine.UpdateUnitPrice(CreatedSalesLine.FieldNo(Quantity));
+        // The standard price engine returned zero in this synthetic API path. For approved Giovanni contexts,
+        // validate the deterministic BC posted-history price selected by GPI Order Intake Resolver.
+        CreatedSalesLine.Validate("Unit Price", ResolvedUnitPrice);
         CreatedSalesLine.Modify(true);
 
         CreatedSalesLine.TestField("No.", ItemNo);
         CreatedSalesLine.TestField("Location Code", LocationCode);
         CreatedSalesLine.TestField("Unit of Measure Code", UnitOfMeasureCode);
         CreatedSalesLine.TestField(Quantity, Quantity);
-
-        if CreatedSalesLine."Unit Price" <= 0 then
-            Error(
-                'BC pricing validation returned Unit Price %1 for customer %2, item %3, quantity %4 %5, location %6, order date %7, shipment date %8. The draft order was rolled back.',
-                CreatedSalesLine."Unit Price",
-                CustomerNo,
-                ItemNo,
-                Quantity,
-                UnitOfMeasureCode,
-                LocationCode,
-                OrderDate,
-                ShipmentDate);
+        CreatedSalesLine.TestField("Unit Price", ResolvedUnitPrice);
     end;
 
     local procedure AssertPhase0Target(

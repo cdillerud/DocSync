@@ -66,6 +66,7 @@ async def decide_ap_route_learned(
         contract=contract,
         bc_context=bc_context or {},
         hard_blockers=hard_blockers,
+        support_examples=train_examples,
     )
     final["ai_primary_router"] = True
     final["learned_autonomy_active"] = True

@@ -16,6 +16,7 @@ permissionset 71200 "GPI ORDER INTAKE"
         tabledata "Sales Price" = R,
         tabledata "Sales Price Access" = R,
         tabledata "Event Subscription" = R,
+        tabledata "Customer Item Sales" = R,
         tabledata "Sales Header" = RIM,
         tabledata "Sales Line" = RIM,
         tabledata "Sales Invoice Header" = R,
@@ -26,5 +27,6 @@ permissionset 71200 "GPI ORDER INTAKE"
         page "GPI Order Intake Price API" = X,
         page "GPI Order Intake SalesPrice" = X,
         page "GPI Order Intake Item UOM" = X,
-        page "GPI Order Intake Event Subs" = X;
+        page "GPI Order Intake Event Subs" = X,
+        page "GPI Order Intake CustItemSales" = X;
 }

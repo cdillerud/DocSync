@@ -48,8 +48,6 @@ try {
     $base = (& git show "HEAD:$BasePath") -join "`n"
     if ([string]::IsNullOrWhiteSpace($base)) { throw 'Committed base harness content was empty.' }
 
-    # Exact counts deliberately pin this wrapper to the reviewed base harness. If that harness changes,
-    # this wrapper stops instead of silently applying a partial or over-broad text transformation.
     $patches = @(
         [pscustomobject]@{ Name='version'; Old='0.1.0.0'; New=$TargetVersion; ExpectedCount=4 },
         [pscustomobject]@{ Name='package SHA'; Old='D92A5D2F724F258A690ED0F4E54219A6FE4C9ABCFE3A7FCB731C21E33E266E44'; New=$ExpectedPackageHash; ExpectedCount=1 },
@@ -59,19 +57,16 @@ try {
     $patched = $base
     foreach ($patch in $patches) {
         $count = ([regex]::Matches($patched, [regex]::Escape([string]$patch.Old))).Count
+        Write-Host ("Patch target {0,-13}: {1} / {2}" -f $patch.Name, $count, $patch.ExpectedCount)
         if ($count -ne [int]$patch.ExpectedCount) {
             throw "Expected exactly $($patch.ExpectedCount) $($patch.Name) patch target(s); found $count."
         }
-        Write-Host ("Patch target {0,-14}: {1} / {2}" -f $patch.Name, $count, $patch.ExpectedCount)
         $patched = $patched.Replace([string]$patch.Old, [string]$patch.New)
     }
 
-    $oldFinal = @'
-Write-Host 'Cleanup: PASS' -ForegroundColor Green
-Write-Host 'GPI ORDER INTAKE AL AUTHORITY ROUND-TRIP: PASS' -ForegroundColor Green
-'@.TrimEnd("`r","`n")
-    $newFinal = @'
-Write-Host 'Cleanup: PASS' -ForegroundColor Green
+    # Patch only the unique final PASS marker. This is intentionally newline-format agnostic.
+    $oldFinalPass = "Write-Host 'GPI ORDER INTAKE AL AUTHORITY ROUND-TRIP: PASS' -ForegroundColor Green"
+    $newFinalPass = @'
 if ($pricingResult -ne 'MATCHED_HISTORICAL_LOCATION_PRICE') {
     throw "Resolver round trip cleaned up safely but returned Unit Price $observedPrice instead of required 277.99."
 }
@@ -79,14 +74,16 @@ Write-Host 'Resolver exact-price assertion: PASS (277.99)' -ForegroundColor Gree
 Write-Host 'GPI ORDER INTAKE 0.1.0.7 RESOLVER ROUND-TRIP: PASS' -ForegroundColor Green
 '@.TrimEnd("`r","`n")
 
-    $finalCount = ([regex]::Matches($patched, [regex]::Escape($oldFinal))).Count
+    $finalCount = ([regex]::Matches($patched, [regex]::Escape($oldFinalPass))).Count
+    Write-Host "Patch target final PASS    : $finalCount / 1"
     if ($finalCount -ne 1) { throw "Expected exactly one final PASS patch target; found $finalCount." }
-    $patched = $patched.Replace($oldFinal, $newFinal)
+    $patched = $patched.Replace($oldFinalPass, $newFinalPass)
 
     if ($patched -match '0\.1\.0\.0') { throw 'Old app version marker remains after patching.' }
     if ($patched -match 'D92A5D2F724F258A690ED0F4E54219A6FE4C9ABCFE3A7FCB731C21E33E266E44') { throw 'Old package SHA remains after patching.' }
     if ($patched -match 'GPI_ORDER_INTAKE_AL_PRE_TEST_ENABLED') { throw 'Old enable flag remains after patching.' }
     if ($patched.IndexOf('MATCHED_HISTORICAL_LOCATION_PRICE', [StringComparison]::Ordinal) -lt 0) { throw 'Exact historical-price assertion marker missing.' }
+    if ($patched.IndexOf('Resolver exact-price assertion: PASS (277.99)', [StringComparison]::Ordinal) -lt 0) { throw 'Resolver exact-price final assertion missing.' }
 
     $tempScript = Join-Path $PSScriptRoot ('.GPIOrderIntake-ResolverPublishTest-' + [guid]::NewGuid().ToString('N') + '.tmp.ps1')
     try {

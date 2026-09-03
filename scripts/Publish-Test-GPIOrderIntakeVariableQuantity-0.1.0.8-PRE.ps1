@@ -80,12 +80,7 @@ try {
 
     # StrictMode safety: the historical base harness directly dereferenced .Count on the return of Get-TestOrders.
     # A zero-result function invocation can be $null in PowerShell. Force array semantics so zero matches is safely Count=0.
-    $patched = Replace-ExactCount \
-        $patched \
-        'if ((Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' \
-        'if (@(Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' \
-        1 \
-        'zero-result precheck'
+    $patched = Replace-ExactCount $patched 'if ((Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' 'if (@(Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' 1 'zero-result precheck'
 
     # Strengthen the final success condition: after mandatory cleanup, both the different input quantity and the
     # context-resolved price must have survived the round trip exactly.

@@ -98,12 +98,43 @@ A controlled test then deliberately used a quantity different from the original 
 
 This proves that incoming quantity can vary independently from the historical pricing key. The resolver is therefore validating and pricing a new order, not replaying a sample PO.
 
+## PRE 0.1.0.8 pricing-context profile
+
+A GET-only profiler evaluated the known Giovanni pricing contexts using the production candidate key `customer + item + UOM + location`, with quantity excluded from the price key.
+
+- pricing contexts total: `12`;
+- latest-two agreement contexts: `11`;
+- review contexts: `1`;
+- the only live pricing-evidence conflict is 14oz Pizza `C-8479-10000229`, UOM `M`, Location `082`;
+- that context has 28 posted invoice rows but the two newest Unit Prices disagree, so it is a real fail-closed pricing case;
+- no one-observation pricing context exists among the current 12 known Giovanni contexts.
+
+Stable pricing does not override source semantics. 24oz Pasta remains source REVIEW because the current blanket workbook does not state quantity, and mixed Salsa remains exception REVIEW even where latest-two prices agree.
+
+## PRE 0.1.0.8 fail-closed live proof
+
+A no-publish fail-closed gate exercised four independent REVIEW paths against the already-installed `0.1.0.8`. Every action returned a controlled resolver rejection with `residualTaggedOrders = 0`; no Draft Sales Order survived any case.
+
+1. `REAL_PRICE_CONFLICT_PIZZA_082`
+   - item `C-8479-10000229` / `89.775 M` / Location `082`;
+   - rejected because the two most recent pricing-context posted invoices disagree on Unit Price.
+2. `PASTA_QUANTITY_SOURCE_AMBIGUITY`
+   - item `C-9874-10001833` / `62.062 M` / Location `00`;
+   - rejected because the current Giovanni blanket source does not state quantity and historical repetition cannot establish source intent.
+3. `MIXED_SALSA_SOURCE_EXCEPTION`
+   - item `C-8682-12013925` / `5.642 M` / Location `082`;
+   - rejected because explicit mixed/exception source semantics are never eligible for normal automatic resolution.
+4. `INVALID_BC_UOM`
+   - item `C-503003-12033922` / `56.357 BOX` / Location `00`;
+   - rejected because `BOX` is not configured for the item in Business Central.
+
+The gate ended `GPI ORDER INTAKE 0.1.0.8 FAIL-CLOSED RESOLVER GATE: PASS` with zero residual tagged orders. This confirms that `different quantity = bad` is not a rule; REVIEW is driven by unsafe pricing evidence, source ambiguity/exception semantics, or invalid BC structure.
+
 ## Next gates
 
-1. Use GET-only history under the 0.1.0.8 pricing key (`customer + item + UOM + location`) to identify real contexts with only one price observation or conflicting two-latest prices.
-2. Prove fail-closed behavior for those real pricing-evidence contexts with zero residual AITEST orders.
-3. Prove fail-closed behavior for true source/context problems: Pasta quantity-source ambiguity, mixed/exception Salsa, unsupported item, missing/invalid UOM, and missing location.
-4. Continue positive variable-quantity proofs only for additional normal Giovanni contexts whose two-latest pricing evidence agrees.
-5. Resolve the 24oz Pasta quantity-source distinction for the current blanket format.
-6. Discover CanPack sell-to identity and customer-item/UOM mappings before any CanPack write test.
-7. Keep Production and all release/ship/invoice/post behaviors blocked throughout Phase 0.
+1. Produce a concise GET-only matrix of the 11 latest-two-agreement Giovanni pricing contexts with exact current Unit Price and observed quantity range/evidence.
+2. Run a small positive breadth matrix across multiple normal Giovanni items/locations, preserving incoming quantities and requiring exact context price read-back plus mandatory cleanup for each case.
+3. Keep Pizza Location `082`, Pasta quantity-less blanket rows, and mixed/exception Salsa fail-closed until their respective evidence/source issues are resolved.
+4. Resolve the 24oz Pasta quantity-source distinction for the current blanket format.
+5. Discover CanPack sell-to identity and customer-item/UOM mappings before any CanPack write test.
+6. Keep Production and all release/ship/invoice/post behaviors blocked throughout Phase 0.

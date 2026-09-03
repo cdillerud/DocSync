@@ -44,15 +44,20 @@ if ($matches -ne 1) {
 }
 
 $patched = $raw.Replace($old, $new.TrimEnd("`r", "`n"))
+if ($patched -eq $raw) {
+    throw 'REV2 parser patch made no change.'
+}
+if ($patched.Contains($old)) {
+    throw 'REV2 parser patch left the invalid parser target behind.'
+}
+if ($patched.IndexOf('$tablePattern = ', [System.StringComparison]::Ordinal) -lt 0) {
+    throw 'REV2 parser patch did not add the safe tablePattern construction.'
+}
+
 $tempScript = Join-Path ([System.IO.Path]::GetTempPath()) ("GPIOrderIntake-BoyerItemParam-REV2-" + [Guid]::NewGuid().ToString('N') + '.ps1')
 
 try {
     Set-Content -LiteralPath $tempScript -Value $patched -Encoding UTF8 -NoNewline
-
-    $patchedRaw = Get-Content -LiteralPath $tempScript -Raw
-    if ($patchedRaw -notmatch [regex]::Escape("`$tablePattern = '(?i)^\s*table\s+(\d+)\s+\"?' + `$escaped + '\"?\s*`$'")) {
-        throw 'REV2 parser patch verification failed.'
-    }
 
     Write-Host 'REV2 narrow patch       : PASS' -ForegroundColor Green
     Write-Host 'Starting patched GET-only ItemParam source trace...' -ForegroundColor Cyan

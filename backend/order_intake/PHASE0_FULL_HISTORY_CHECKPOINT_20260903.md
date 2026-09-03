@@ -48,7 +48,7 @@ Normal positive contexts:
 - 24oz Salsa `C-503003-12033922` / `M` / Location `00`: latest two `277.99 / 277.99`, 32 rows.
 - 24oz Salsa `C-503003-12033922` / `M` / Location `082`: latest two `289.49 / 289.49`, 7 rows.
 
-Newly visible real REVIEW contexts:
+Real REVIEW pricing contexts:
 
 - 14oz Pizza `C-8479-10000229` / `M` / Location `082`: latest two disagree.
 - 16oz Vinegar `C-8808-12026443` / `M` / Location `001`: 2 rows; latest two disagree.
@@ -59,7 +59,7 @@ Stable pricing still does not override source semantics: Pasta from the quantity
 
 ## Completed live positive breadth proof
 
-Four different normal Giovanni contexts have now independently created a tagged Draft, preserved the requested PO quantity, read back the full-history context price, and deleted the exact tagged Draft with cleanup PASS:
+Four different normal Giovanni contexts independently created a tagged Draft, preserved the requested PO quantity, read back the full-history context price, and deleted the exact tagged Draft with cleanup PASS:
 
 1. 14oz Pizza `C-8479-10000229` / `61.425 M` / Location `00` / `196.43`.
 2. 16oz Salsa `C-503004-12033478` / `85.932 M` / Location `00` / `217.67`.
@@ -70,21 +70,42 @@ The Vinegar case was re-proven independently after retiring the stale capped-pro
 
 This breadth proof establishes that the order-intake authority is not replaying one fixture quantity. Different requested quantities survive exactly while Unit Price is resolved independently from `customer + item + UOM + location` evidence.
 
-## Fail-closed coverage already proven
+## Completed fail-closed coverage
 
-The installed `0.1.0.8` has already rejected with zero residual AITEST orders:
+The installed `0.1.0.8` has rejected the following with zero residual AITEST orders and no surviving Draft:
 
 - Pizza / Location `082`: latest-two price conflict.
 - Pasta current blanket source: quantity-source ambiguity.
 - mixed/exception Salsa: explicit exception semantics.
 - invalid BC UOM (`BOX`): structural rejection.
+- Vinegar / Location `001`: full-history latest-two conflict. Live rejection proved document `294879 = 193.90` versus `285035 = 191.77`, HTTP 400, `residualTaggedOrders = 0`.
+- Vinegar / Location `002`: exactly one posted invoice observation. Live rejection proved latest document `298460 @ 201.09`, HTTP 400, `residualTaggedOrders = 0`.
+
+The full-history pricing-evidence rejection gate ended:
+
+`GPI ORDER INTAKE 0.1.0.8 FULL-HISTORY PRICING-EVIDENCE REJECTION GATE: PASS`
+
+This completes live coverage for both missing pricing-evidence branches: conflicting recent evidence and insufficient evidence.
+
+## Giovanni Phase-0 authority conclusion
+
+For the currently supported Giovanni normal-item allow-list, `0.1.0.8` now has live PRE proof for:
+
+- variable incoming quantity preservation;
+- BC item/UOM structural validation;
+- location-sensitive pricing context;
+- repeated latest-two price agreement -> tagged Draft creation;
+- latest-two conflict -> REVIEW / rollback;
+- one observation -> REVIEW / rollback;
+- source ambiguity/exception semantics -> REVIEW / rollback;
+- mandatory exact AITEST cleanup;
+- zero Production, release, ship, invoice, or post exposure.
 
 ## Next gates
 
-1. Run `scripts/Test-GPIOrderIntakeResolver-FullHistoryPricingRejections-0.1.0.8-PRE.ps1` against the newly visible Vinegar contexts:
-   - Location `001`: latest-two price conflict.
-   - Location `002`: exactly one posted invoice observation.
-2. Require both cases to reject before Draft creation with `residualTaggedOrders = 0`.
-3. Keep Pizza/082, Pasta source ambiguity, mixed/exception Salsa, and invalid UOM fail-closed.
-4. Do not use capped pricing-profile evidence for authority decisions.
-5. Keep Production and all release/ship/invoice/post behavior blocked throughout Phase 0.
+1. Move back up the pipeline and prove another customer format without assuming it resembles Giovanni.
+2. CanPack remains GET-only until sell-to customer identity, customer-item mapping, BC item/UOM, location/ship-to semantics, and pricing context are independently proven.
+3. Treat CanPack source quantity/UOM as PO-owned facts (`Call-off quantity`, source UOM); do not normalize them to Giovanni-style `M` quantities.
+4. Resolve the 24oz Pasta quantity-source distinction for the current Giovanni blanket format separately; do not generalize that fixture-specific ambiguity to other POs.
+5. Do not use capped pricing-profile evidence for authority decisions.
+6. Keep Production and all release/ship/invoice/post behavior blocked throughout Phase 0.

@@ -1,4 +1,4 @@
-"""Phase 0 tests for deterministic customer order intake parsers."""
+"""Phase 0 tests for deterministic customer/supplier order-intake parsers."""
 
 from datetime import datetime
 
@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from order_intake.parsers import CanPackXlsxParser, GiovanniOorParser, GiovanniQuantityProfile
 
 
-def test_canpack_parser_normalizes_known_row(tmp_path):
+def test_canpack_parser_preserves_supplier_schedule_without_promoting_sales_values(tmp_path):
     path = tmp_path / "canpack.xlsx"
     wb = Workbook()
     ws = wb.active
@@ -33,13 +33,30 @@ def test_canpack_parser_normalizes_known_row(tmp_path):
     result = CanPackXlsxParser().parse(path)
 
     assert result.source.source_format == "CANPACK_XLSX"
+    assert result.source.source_party_role == "SUPPLIER_MANUFACTURER"
+    assert result.document.document_type.value == "SUPPLIER_SALES_ORDER_SCHEDULE"
+    assert result.customer.candidate_customer_name is None
+    assert result.validation is not None
+    assert result.validation.proposed_action.value == "REVIEW"
+    assert result.validation.customer_status == "UNRESOLVED_END_CUSTOMER"
+
     assert len(result.releases) == 1
     release = result.releases[0]
     assert release.customer_release_reference == "W113159"
     assert release.customer_item_reference == "3286_NH01"
-    assert release.quantity == 194500
-    assert release.uom == "TS"
+
+    # CanPack's supplier-side call-off quantity/UOM/plant are source evidence only.
+    # They are not BC Sales Order quantity/UOM/ship-to/location values.
+    assert release.physical_quantity == 194500
+    assert release.physical_uom == "TS"
+    assert release.source_facility_reference == "US50"
+    assert release.quantity is None
+    assert release.uom is None
+    assert release.ship_to_candidate is None
+    assert release.location_candidate is None
     assert release.requested_delivery_date.isoformat() == "2026-09-29"
+    assert "supplier/manufacturer-side schedule" in " | ".join(release.parser_review_reasons)
+    assert "must not be sent to BC Sales Order" in " | ".join(release.parser_review_reasons)
 
 
 def test_giovanni_parser_preserves_packout_without_guessing_bc_uom(tmp_path):

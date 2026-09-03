@@ -1,5 +1,5 @@
 /// <summary>
-/// Minimal permission set for the Phase-0 GPI Order Intake authority and read-only pricing diagnostics.
+/// Minimal permission set for the Phase-0 GPI Order Intake authority and read-only pricing/event diagnostics.
 /// Does not grant release, shipment, invoicing or posting permissions.
 /// </summary>
 permissionset 71200 "GPI ORDER INTAKE"
@@ -15,6 +15,7 @@ permissionset 71200 "GPI ORDER INTAKE"
         tabledata "Price List Line" = R,
         tabledata "Sales Price" = R,
         tabledata "Sales Price Access" = R,
+        tabledata "Event Subscription" = R,
         tabledata "Sales Header" = RIM,
         tabledata "Sales Line" = RIM,
         tabledata "Sales Invoice Header" = R,
@@ -24,5 +25,6 @@ permissionset 71200 "GPI ORDER INTAKE"
         page "GPI Order Intake Line API" = X,
         page "GPI Order Intake Price API" = X,
         page "GPI Order Intake SalesPrice" = X,
-        page "GPI Order Intake Item UOM" = X;
+        page "GPI Order Intake Item UOM" = X,
+        page "GPI Order Intake Event Subs" = X;
 }

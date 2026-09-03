@@ -90,7 +90,7 @@ function Escape-ODataLiteral {
 }
 
 function Get-UniqueById {
-    param([Parameter(Mandatory)][object[]]$Rows)
+    param([AllowEmptyCollection()][object[]]$Rows = @())
     $seen = @{}
     $result = foreach ($row in $Rows) {
         $key = [string]$row.id

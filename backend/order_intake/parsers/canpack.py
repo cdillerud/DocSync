@@ -1,4 +1,4 @@
-"""Deterministic parser for CanPack sales-order XLSX files."""
+"""Deterministic parser for CanPack supplier/manufacturer sales-order schedule XLSX files."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from ..models import (
     OrderCustomer,
     OrderDocument,
     OrderSource,
+    OrderValidation,
+    ProposedAction,
 )
 from ..utils import clean_text, excel_serial_to_datetime, sha256_file
 
@@ -70,9 +72,20 @@ class CanPackXlsxParser:
 
             qty_raw = ws.cell(row_idx, columns["quantity"]).value
             try:
-                quantity = float(qty_raw) if qty_raw not in (None, "") else None
+                source_quantity = float(qty_raw) if qty_raw not in (None, "") else None
             except (TypeError, ValueError):
-                quantity = None
+                source_quantity = None
+
+            source_uom = (
+                clean_text(ws.cell(row_idx, columns.get("uom", 0)).value)
+                if "uom" in columns
+                else None
+            )
+            source_plant = (
+                clean_text(ws.cell(row_idx, columns.get("plant", 0)).value)
+                if "plant" in columns
+                else None
+            )
 
             pickup = excel_serial_to_datetime(
                 ws.cell(row_idx, columns["pickup"]).value if "pickup" in columns else None
@@ -81,29 +94,40 @@ class CanPackXlsxParser:
                 ws.cell(row_idx, columns["receive"]).value if "receive" in columns else None
             )
 
-            review_reasons: List[str] = []
-            if quantity is None:
-                review_reasons.append("Quantity missing or non-numeric")
+            review_reasons: List[str] = [
+                "CanPack workbook is supplier/manufacturer-side schedule evidence; end-customer Sales Order context must be resolved",
+                "Supplier quantity/UOM must not be sent to BC Sales Order until customer/item sales UOM mapping is proven",
+            ]
+            if source_quantity is None:
+                review_reasons.append("Source quantity missing or non-numeric")
             if not clean_text(ws.cell(row_idx, columns["customer_item"]).value):
-                review_reasons.append("Customer material number missing")
+                review_reasons.append("Supplier customer material number missing")
 
             releases.append(
                 NormalizedRelease(
+                    # Retained for compatibility with the normalized release model. For this
+                    # source format the value is a supplier-side PO/order reference and must not
+                    # be assumed to be an end-customer PO until relationship resolution occurs.
                     customer_release_reference=po,
                     product_context=clean_text(ws.cell(row_idx, columns.get("description", 0)).value)
                     if "description" in columns else None,
                     customer_item_reference=clean_text(ws.cell(row_idx, columns["customer_item"]).value),
                     description=clean_text(ws.cell(row_idx, columns.get("description", 0)).value)
                     if "description" in columns else None,
-                    quantity=quantity,
-                    uom=clean_text(ws.cell(row_idx, columns.get("uom", 0)).value)
-                    if "uom" in columns else None,
+                    # Do not promote CanPack's supplier-side call-off quantity/UOM into BC-ready
+                    # Sales Order values. Preserve them as physical/source evidence only.
+                    quantity=None,
+                    uom=None,
+                    physical_quantity=source_quantity,
+                    physical_uom=source_uom,
+                    source_facility_reference=source_plant,
                     requested_shipment_date=pickup,
                     requested_delivery_date=receive_dt.date() if receive_dt else None,
-                    ship_to_candidate=clean_text(ws.cell(row_idx, columns.get("plant", 0)).value)
-                    if "plant" in columns else None,
+                    ship_to_candidate=None,
+                    location_candidate=None,
                     source_coordinates=[f"{ws.title}!A{row_idx}:{ws.cell(row_idx, ws.max_column).coordinate}"],
                     quantity_source=f"{ws.title}!{ws.cell(row_idx, columns['quantity']).coordinate}",
+                    quantity_resolution_method="supplier_source_requires_linked_customer_item_resolution",
                     extraction_confidence=1.0,
                     parser_review_reasons=review_reasons,
                 )
@@ -115,13 +139,30 @@ class CanPackXlsxParser:
                 attachment_sha256=sha256_file(path),
                 source_format=self.SOURCE_FORMAT,
                 source_sheet=ws.title,
+                source_party_role="SUPPLIER_MANUFACTURER",
             ),
             customer=OrderCustomer(
-                candidate_customer_name="CanPack",
-                resolution_method="known_format",
-                resolution_confidence=1.0,
-                evidence=[f"Known CanPack workbook format; sheet={ws.title}"],
+                candidate_customer_name=None,
+                resolution_method="supplier_schedule_requires_end_customer_resolution",
+                resolution_confidence=0.0,
+                evidence=[
+                    "Known CanPack workbook format is supplier/manufacturer-side schedule evidence",
+                    "CanPack must not be assumed to be the BC sell-to customer",
+                ],
             ),
-            document=OrderDocument(document_type=DocumentType.STANDARD_PO),
+            document=OrderDocument(document_type=DocumentType.SUPPLIER_SALES_ORDER_SCHEDULE),
             releases=releases,
+            validation=OrderValidation(
+                customer_status="UNRESOLVED_END_CUSTOMER",
+                item_status="UNRESOLVED_CUSTOMER_ITEM_MAPPING",
+                quantity_status="SOURCE_ONLY_REQUIRES_BC_SALES_RESOLUTION",
+                ship_to_status="UNRESOLVED",
+                location_status="UNRESOLVED",
+                price_status="NOT_EVALUATED",
+                exceptions=[
+                    "Supplier schedule is not itself authorization to create a BC Sales Order",
+                    "Resolve linked end customer, BC item, sales UOM, ship-to/location, and duplicate state first",
+                ],
+                proposed_action=ProposedAction.REVIEW,
+            ),
         )

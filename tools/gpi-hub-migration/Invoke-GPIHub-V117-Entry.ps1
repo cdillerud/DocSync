@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '8d762dbd120f5f7a69b9e72217eafe50be574637'
+$ExpectedFeatureCommit = '3d581ff6def9eb0d42733f35ca46ea1d2232de99'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -94,7 +94,7 @@ echo V117_LEARNED_STACK_PYCOMPILE=PASS
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_ai_primary_service as a, services.ap_routing_learned_autonomy_service as l, services.ap_routing_learned_safety_service as s, services.ap_routing_learned_pipeline_service as p, services.ap_routing_learned_v117_adapter as v, services.ap_routing_relevant_learning_service as r, services.ap_routing_autonomy_performance_service as m; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(path.startswith("/tmp/gpi-ap-routing-v116/") for path in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
-echo V117_FOCUSED_REGRESSION_TARGET=76
+echo V117_FOCUSED_REGRESSION_TARGET=83
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \

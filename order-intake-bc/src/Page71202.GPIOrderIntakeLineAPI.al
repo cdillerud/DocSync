@@ -1,5 +1,5 @@
 /// <summary>
-/// Read-only API subpage exposing BC-authoritative Sales Line results and pricing context.
+/// Read-only API subpage exposing BC-authoritative Sales Line results, pricing context and audit timestamps.
 /// </summary>
 page 71202 "GPI Order Intake Line API"
 {
@@ -37,6 +37,11 @@ page 71202 "GPI Order Intake Line API"
                 field(sequence; Rec."Line No.")
                 {
                     Caption = 'Sequence';
+                    Editable = false;
+                }
+                field(sellToCustomerNumber; Rec."Sell-to Customer No.")
+                {
+                    Caption = 'Sell-To Customer Number';
                     Editable = false;
                 }
                 field(itemNumber; Rec."No.")
@@ -107,6 +112,26 @@ page 71202 "GPI Order Intake Line API"
                 field(locationCode; Rec."Location Code")
                 {
                     Caption = 'Location Code';
+                    Editable = false;
+                }
+                field(systemCreatedAt; Rec.SystemCreatedAt)
+                {
+                    Caption = 'System Created At';
+                    Editable = false;
+                }
+                field(systemCreatedBy; Rec.SystemCreatedBy)
+                {
+                    Caption = 'System Created By';
+                    Editable = false;
+                }
+                field(systemModifiedAt; Rec.SystemModifiedAt)
+                {
+                    Caption = 'System Modified At';
+                    Editable = false;
+                }
+                field(systemModifiedBy; Rec.SystemModifiedBy)
+                {
+                    Caption = 'System Modified By';
                     Editable = false;
                 }
             }

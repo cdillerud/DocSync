@@ -8,9 +8,10 @@ Set-StrictMode -Version Latest
 
 # =====================================================================================================================
 # CERTIFIED PRE-ONLY WRAPPER OVER THE PROVEN AL PUBLISH/TEST HARNESS.
-# Publishes only the exact compiled GPI Order Intake 0.1.0.8 package SHA, then executes one tagged Giovanni round trip
-# using a quantity deliberately different from the original 56.42 M proof case. Price must still resolve from
-# customer + item + UOM + location context, and mandatory cleanup must leave zero residual AITEST orders.
+# Publishes only the exact compiled GPI Order Intake 0.1.0.8 package SHA if that exact version is not already installed,
+# then executes one tagged Giovanni round trip using a quantity deliberately different from the original 56.42 M proof
+# case. Price must still resolve from customer + item + UOM + location context, and mandatory cleanup must leave zero
+# residual AITEST orders.
 # =====================================================================================================================
 $ExpectedBaseBlob = '5583c0ad8f6a1ae8cf6f49466ab818b849bf0d16'
 $BasePath = 'scripts/Publish-Test-GPIOrderIntakeAL-PRE.ps1'
@@ -47,7 +48,7 @@ try {
     }
 
     Write-Host ('=' * 120) -ForegroundColor Cyan
-    Write-Host 'GPI ORDER INTAKE 0.1.0.8 - VARIABLE-QUANTITY RESOLVER PUBLISH + ROUND TRIP / PRE ONLY' -ForegroundColor Cyan
+    Write-Host 'GPI ORDER INTAKE 0.1.0.8 - VARIABLE-QUANTITY RESOLVER PUBLISH/RESUME + ROUND TRIP / PRE ONLY' -ForegroundColor Cyan
     Write-Host ('=' * 120) -ForegroundColor Cyan
     Write-Host "Expected base blob   : $ExpectedBaseBlob"
     Write-Host "HEAD base blob       : $headBlob"
@@ -61,6 +62,7 @@ try {
     Write-Host 'Baseline proof qty   : 56.42 M (NOT used in this round trip)'
     Write-Host "Required read-back   : preserve $VariableQuantity M and Unit Price $ExpectedUnitPrice"
     Write-Host 'Price key            : customer + item + UOM + location; quantity excluded'
+    Write-Host 'Installed behavior   : if exact 0.1.0.8 is already installed, duplicate upload is skipped'
     Write-Host 'Cleanup              : MANDATORY exact AITEST Open/Draft only'
     Write-Host 'Release/Ship/Post    : NOT IMPLEMENTED / BLOCKED'
     Write-Host 'Production           : HARD BLOCKED'
@@ -75,6 +77,15 @@ try {
     $patched = Replace-ExactCount $patched 'GPI_ORDER_INTAKE_AL_PRE_TEST_ENABLED' $EnableFlag 1 'enable flag'
     $patched = Replace-ExactCount $patched '[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 0 -and' '[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 8 -and' 2 'installed revision'
     $patched = Replace-ExactCount $patched '$Quantity            = [decimal]56.42' '$Quantity            = [decimal]56.357' 1 'variable quantity'
+
+    # StrictMode safety: the historical base harness directly dereferenced .Count on the return of Get-TestOrders.
+    # A zero-result function invocation can be $null in PowerShell. Force array semantics so zero matches is safely Count=0.
+    $patched = Replace-ExactCount \
+        $patched \
+        'if ((Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' \
+        'if (@(Get-TestOrders -ExternalDocumentNumber $external).Count -ne 0) { throw ''Unexpected duplicate test tag before AL action.'' }' \
+        1 \
+        'zero-result precheck'
 
     # Strengthen the final success condition: after mandatory cleanup, both the different input quantity and the
     # context-resolved price must have survived the round trip exactly.
@@ -99,6 +110,9 @@ Write-Host 'GPI ORDER INTAKE 0.1.0.8 VARIABLE-QUANTITY RESOLVER ROUND-TRIP: PASS
     if ($patched -match 'GPI_ORDER_INTAKE_AL_PRE_TEST_ENABLED') { throw 'Old enable flag remains after patching.' }
     if ($patched -match '\$Quantity\s*=\s*\[decimal\]56\.42') { throw 'Original fixed proof quantity remains as the action quantity.' }
     if ($patched.IndexOf('MATCHED_HISTORICAL_LOCATION_PRICE', [StringComparison]::Ordinal) -lt 0) { throw 'Price assertion marker missing.' }
+    if ($patched.IndexOf('@(Get-TestOrders -ExternalDocumentNumber $external).Count', [StringComparison]::Ordinal) -lt 0) {
+        throw 'StrictMode-safe zero-result precheck marker missing.'
+    }
 
     $tempScript = Join-Path $PSScriptRoot ('.GPIOrderIntake-VariableQtyPublishTest-' + [guid]::NewGuid().ToString('N') + '.tmp.ps1')
     try {

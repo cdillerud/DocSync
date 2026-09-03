@@ -1,12 +1,14 @@
 /// <summary>
 /// Phase-0 deterministic resolver for Giovanni order-intake contexts.
-/// Quantity/UOM guardrails are explicit. Unit Price is resolved only from repeated
-/// posted Sales Invoice Line evidence for the exact customer + item + quantity + UOM + location.
+/// The incoming PO owns quantity. Business Central validates the requested item/UOM/location,
+/// while Unit Price is resolved only from repeated posted Sales Invoice Line evidence for the
+/// pricing context customer + item + UOM + location. Quantity is evidence, not a required price key.
 /// Boyer Customer Item Sales is corroborating rolling-cache evidence only and never price authority.
 /// </summary>
 codeunit 71201 "GPI Order Intake Resolver"
 {
     Permissions =
+        tabledata "Item Unit of Measure" = R,
         tabledata "Sales Invoice Line" = R,
         tabledata "Customer Item Sales" = R;
 
@@ -37,10 +39,9 @@ codeunit 71201 "GPI Order Intake Resolver"
             UnitOfMeasureCode,
             LocationCode);
 
-        FindTwoLatestExactContextInvoices(
+        FindTwoLatestPricingContextInvoices(
             CustomerNo,
             ItemNo,
-            Quantity,
             UnitOfMeasureCode,
             LocationCode,
             SalesInvoiceLine,
@@ -53,19 +54,17 @@ codeunit 71201 "GPI Order Intake Resolver"
 
         if LatestCreatedAt = 0DT then
             Error(
-                'Order Intake pricing REVIEW required. No posted invoice evidence exists for customer %1, item %2, quantity %3 %4, location %5.',
+                'Order Intake pricing REVIEW required. No posted invoice evidence exists for customer %1, item %2, UOM %3, location %4.',
                 CustomerNo,
                 ItemNo,
-                Quantity,
                 UnitOfMeasureCode,
                 LocationCode);
 
         if SecondLatestCreatedAt = 0DT then
             Error(
-                'Order Intake pricing REVIEW required. Only one posted invoice observation exists for customer %1, item %2, quantity %3 %4, location %5. Latest document is %6 at Unit Price %7.',
+                'Order Intake pricing REVIEW required. Only one posted invoice observation exists for customer %1, item %2, UOM %3, location %4. Latest document is %5 at Unit Price %6.',
                 CustomerNo,
                 ItemNo,
-                Quantity,
                 UnitOfMeasureCode,
                 LocationCode,
                 LatestDocumentNo,
@@ -73,7 +72,7 @@ codeunit 71201 "GPI Order Intake Resolver"
 
         if (LatestUnitPrice <= 0) or (SecondLatestUnitPrice <= 0) then
             Error(
-                'Order Intake pricing REVIEW required. Latest exact-context posted invoice prices must both be greater than zero. Documents %1/%2 returned %3/%4.',
+                'Order Intake pricing REVIEW required. Latest pricing-context posted invoice prices must both be greater than zero. Documents %1/%2 returned %3/%4.',
                 LatestDocumentNo,
                 SecondLatestDocumentNo,
                 LatestUnitPrice,
@@ -81,7 +80,7 @@ codeunit 71201 "GPI Order Intake Resolver"
 
         if LatestUnitPrice <> SecondLatestUnitPrice then
             Error(
-                'Order Intake pricing REVIEW required. The two most recent exact-context posted invoices disagree on Unit Price. %1 = %2; %3 = %4.',
+                'Order Intake pricing REVIEW required. The two most recent pricing-context posted invoices disagree on Unit Price. %1 = %2; %3 = %4.',
                 LatestDocumentNo,
                 LatestUnitPrice,
                 SecondLatestDocumentNo,
@@ -91,11 +90,10 @@ codeunit 71201 "GPI Order Intake Resolver"
         LatestEvidenceDocumentNo := LatestDocumentNo;
 
         SalesInvoiceLine.Reset();
-        ApplyExactContextFilters(
+        ApplyPricingContextFilters(
             SalesInvoiceLine,
             CustomerNo,
             ItemNo,
-            Quantity,
             UnitOfMeasureCode,
             LocationCode);
         SalesInvoiceLine.SetRange("Unit Price", ResolvedUnitPrice);
@@ -104,16 +102,14 @@ codeunit 71201 "GPI Order Intake Resolver"
         BoyerRollingStateCorroborates := false;
         if CustomerItemSales.Get(CustomerNo, ItemNo) then
             BoyerRollingStateCorroborates :=
-                (CustomerItemSales."Last Sold Quantity" = Quantity) and
                 (CustomerItemSales."Last Sold Unit of Measure Code" = UnitOfMeasureCode) and
                 (CustomerItemSales."Last Unit Price" = ResolvedUnitPrice) and
                 (CustomerItemSales."Location Code" = LocationCode);
     end;
 
-    local procedure FindTwoLatestExactContextInvoices(
+    local procedure FindTwoLatestPricingContextInvoices(
         CustomerNo: Code[20];
         ItemNo: Code[20];
-        Quantity: Decimal;
         UnitOfMeasureCode: Code[10];
         LocationCode: Code[10];
         var SalesInvoiceLine: Record "Sales Invoice Line";
@@ -134,11 +130,10 @@ codeunit 71201 "GPI Order Intake Resolver"
         Clear(SecondLatestDocumentNo);
 
         SalesInvoiceLine.Reset();
-        ApplyExactContextFilters(
+        ApplyPricingContextFilters(
             SalesInvoiceLine,
             CustomerNo,
             ItemNo,
-            Quantity,
             UnitOfMeasureCode,
             LocationCode);
 
@@ -162,18 +157,16 @@ codeunit 71201 "GPI Order Intake Resolver"
             until SalesInvoiceLine.Next() = 0;
     end;
 
-    local procedure ApplyExactContextFilters(
+    local procedure ApplyPricingContextFilters(
         var SalesInvoiceLine: Record "Sales Invoice Line";
         CustomerNo: Code[20];
         ItemNo: Code[20];
-        Quantity: Decimal;
         UnitOfMeasureCode: Code[10];
         LocationCode: Code[10])
     begin
         SalesInvoiceLine.SetRange("Sell-to Customer No.", CustomerNo);
         SalesInvoiceLine.SetRange(Type, SalesInvoiceLine.Type::Item);
         SalesInvoiceLine.SetRange("No.", ItemNo);
-        SalesInvoiceLine.SetRange(Quantity, Quantity);
         SalesInvoiceLine.SetRange("Unit of Measure Code", UnitOfMeasureCode);
         SalesInvoiceLine.SetRange("Location Code", LocationCode);
     end;
@@ -184,31 +177,36 @@ codeunit 71201 "GPI Order Intake Resolver"
         Quantity: Decimal;
         UnitOfMeasureCode: Code[10];
         LocationCode: Code[10])
+    var
+        ItemUnitOfMeasure: Record "Item Unit of Measure";
     begin
         if CustomerNo <> 'GIOVANN' then
             Error('Order Intake Phase-0 resolver currently supports only customer GIOVANN. Customer %1 requires REVIEW.', CustomerNo);
 
-        if UnitOfMeasureCode <> 'M' then
-            Error(
-                'Order Intake quantity/UOM REVIEW required for Giovanni item %1. Expected UOM M; received %2.',
-                ItemNo,
-                UnitOfMeasureCode);
+        if Quantity <= 0 then
+            Error('Order Intake quantity REVIEW required for Giovanni item %1. Quantity must be greater than zero.', ItemNo);
+
+        if UnitOfMeasureCode = '' then
+            Error('Order Intake UOM REVIEW required for Giovanni item %1. UOM is required.', ItemNo);
 
         if LocationCode = '' then
             Error('Order Intake location is required before pricing can be resolved.');
 
         case ItemNo of
-            'C-8808-12026443':
-                AssertExactQuantity(ItemNo, Quantity, 78.166);
-            'C-8479-10000229':
-                AssertExactQuantity(ItemNo, Quantity, 89.775);
-            'C-503004-12033478':
-                AssertExactQuantity(ItemNo, Quantity, 78.12);
+            'C-8808-12026443',
+            'C-8479-10000229',
+            'C-503004-12033478',
             'C-503003-12033922':
-                AssertExactQuantity(ItemNo, Quantity, 56.42);
+                begin
+                    if not ItemUnitOfMeasure.Get(ItemNo, UnitOfMeasureCode) then
+                        Error(
+                            'Order Intake UOM REVIEW required for Giovanni item %1. UOM %2 is not configured for the item in Business Central.',
+                            ItemNo,
+                            UnitOfMeasureCode);
+                end;
             'C-9874-10001833':
                 Error(
-                    'Order Intake quantity REVIEW required for Giovanni 24oz Pasta item %1. Both 62.062 M and 56.42 M repeat in authoritative history; business distinction is unresolved.',
+                    'Order Intake quantity-source REVIEW required for Giovanni 24oz Pasta item %1. The current blanket workbook does not state quantity and both 62.062 M and 56.42 M repeat in authoritative history; an explicit quantity source or resolved business distinction is required.',
                     ItemNo);
             'C-8682-12013925':
                 Error(
@@ -219,15 +217,5 @@ codeunit 71201 "GPI Order Intake Resolver"
                     'Order Intake Giovanni item %1 is not in the Phase-0 deterministic resolver allow-list. REVIEW required.',
                     ItemNo);
         end;
-    end;
-
-    local procedure AssertExactQuantity(ItemNo: Code[20]; ActualQuantity: Decimal; ExpectedQuantity: Decimal)
-    begin
-        if ActualQuantity <> ExpectedQuantity then
-            Error(
-                'Order Intake quantity REVIEW required for Giovanni item %1. Expected normal quantity %2 M; received %3 M.',
-                ItemNo,
-                ExpectedQuantity,
-                ActualQuantity);
     end;
 }

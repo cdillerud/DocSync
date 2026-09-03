@@ -43,14 +43,14 @@ def _example(vendor, route, file_name):
     }
 
 
-def _auto(route, *, recovery=None):
+def _auto(route, *, recovery=None, guard_action="allow_existing_decision"):
     result = {
         "decision": "auto_route",
         "route_path": route,
         "confidence": 0.98,
         "blockers": [],
         "warnings": [],
-        "authority_guard": {"action": "allow_existing_decision", "blockers": []},
+        "authority_guard": {"action": guard_action, "blockers": []},
     }
     if recovery:
         result["coverage_recovery"] = recovery
@@ -225,3 +225,57 @@ def test_credit_memo_dnp_without_competing_credit_workflow_history_is_preserved(
     )
     assert result["decision"] == "auto_route"
     assert result["route_path"] == "DO NOT PAY"
+
+
+def test_explicit_stop_pay_cannot_be_overridden_by_stable_vendor_consensus(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_auto(
+            "Dropship Not International/Drop Ship All Others",
+            guard_action="override_stable_vendor_semantic_consensus",
+        ),
+        document=_document(
+            "O-I Packaging Solutions LLC",
+            "36539 O-I Pkg Solutions 200611 9310086178 Do not pay, replaced by 9310086251.pdf",
+            raw_text="DO NOT PAY. Replaced by invoice 9310086251.",
+        ),
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["coverage_recovery_safety"]["action"] == "force_review_explicit_stop_pay_route_conflict"
+
+
+def test_stable_vendor_consensus_non_ap_operational_document_is_demoted(monkeypatch):
+    result = _run(
+        monkeypatch,
+        base_result=_auto(
+            "Dropship Not International/Drop Ship All Others",
+            guard_action="override_stable_vendor_semantic_consensus",
+        ),
+        document=_document(
+            "O-I Packaging Solutions LLC",
+            "W119028_ROTONDO_082726_BOL.pdf",
+            document_type="Shipping_Document",
+            raw_text="bill of lading warehouse shipment",
+        ),
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["coverage_recovery_safety"]["action"] == "force_review_stable_vendor_override_non_ap_document"
+
+
+def test_stable_vendor_consensus_normal_ap_invoice_without_stop_pay_is_preserved(monkeypatch):
+    route = "Dropship Not International/Drop Ship All Others"
+    result = _run(
+        monkeypatch,
+        base_result=_auto(route, guard_action="override_stable_vendor_semantic_consensus"),
+        document=_document(
+            "O-I Packaging Solutions LLC",
+            "118275_OIPkgSol_51579677_09022026.pdf",
+            document_type="AP_Invoice",
+            raw_text="ordinary payable invoice",
+        ),
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == route
+    assert result["coverage_recovery_safety"]["action"] == "allow_existing_decision"

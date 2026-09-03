@@ -2,14 +2,18 @@
 
 This layer sits on top of the additive coverage-recovery service. It exists only
 to neutralize recovery classes that proved unsafe in measured held-out data while
-preserving the useful deterministic reference-family and semantic-child gains.
+preserving the useful deterministic reference-family gains.
 
 Measured V117 findings encoded here:
 * ordinary numeric BC references can be incidental/stale and may not grant an
   automatic route through the extended exact-reference recovery path;
 * a generic credit memo may not be auto-routed to DO NOT PAY from vendor-majority
   evidence when that vendor also has learned Vendor Credit Memo workflows, unless
-  the current document itself contains an explicit stop-pay instruction.
+  the current document itself contains an explicit stop-pay instruction;
+* current-document semantic words plus repeated same-vendor child-route history
+  are not sufficient by themselves to grant a specific child workflow. The
+  measured Ball detention false-positive proved that semantic-child recovery
+  needs another independent discriminator before it can be automatic.
 
 This service only demotes automatic decisions to review. It never selects a new
 route and performs no SharePoint, Mongo, or Business Central writes.
@@ -158,7 +162,9 @@ async def decide_ap_route_with_recovery_safety(
         return result
 
     recovery = result.get("coverage_recovery") or {}
-    if recovery.get("action") == "promote_extended_exact_reference_consensus":
+    recovery_action = str(recovery.get("action") or "")
+
+    if recovery_action == "promote_extended_exact_reference_consensus":
         exact = recovery.get("exact_reference_consensus") or {}
         return _force_review(
             result,
@@ -169,6 +175,19 @@ async def decide_ap_route_with_recovery_safety(
             ),
             action="force_review_extended_numeric_reference_recovery",
             evidence={"exact_reference_consensus": exact},
+        )
+
+    if recovery_action == "promote_semantic_child_accounting_consensus":
+        semantic = recovery.get("semantic_child_consensus") or {}
+        return _force_review(
+            result,
+            contract=contract,
+            blocker=(
+                "semantic-child recovery requires an additional independent current-document "
+                "or authoritative context discriminator before automatic routing"
+            ),
+            action="force_review_semantic_child_recovery_insufficient_authority",
+            evidence={"semantic_child_consensus": semantic},
         )
 
     route = normalize_route_path(result.get("route_path"))

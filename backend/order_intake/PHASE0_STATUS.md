@@ -16,7 +16,7 @@ Order Intake is not a replay engine for fixture quantities. Every incoming PO ca
 - Parsers preserve those source values; they do not normalize a new PO by copying a previous PO's quantity.
 - Business Central validates that the requested item/UOM/location/quantity are structurally valid.
 - Historical quantities are evidence and anomaly signals, not universal requirements.
-- Pricing must be resolved independently from authoritative BC context. A new legitimate quantity must not fail merely because no invoice exists with that exact quantity.
+- Pricing is resolved independently from authoritative BC context. A new legitimate quantity must not fail merely because no invoice exists with that exact quantity.
 - Mixed, cancelled, rerouted, ambiguous, unsupported, or otherwise explicitly exceptional source lines remain REVIEW.
 
 The Giovanni blanket workbook is a special source format because its normal release rows do not contain an explicit quantity column. For that format only, a customer/item profile may derive a normal per-load BC quantity. This fixture-specific derivation must never become a generic rule for other POs.
@@ -40,7 +40,7 @@ For Giovanni `C-503003-12033922`, nine open `56.42 M @ 277.99 / Location 00` lin
 
 `GPI Order Intake 0.1.0.7` produced the first successful live pricing authority proof. It required exact customer + item + quantity + UOM + location history and therefore intentionally overfit the first controlled fixture.
 
-`GPI Order Intake 0.1.0.8` corrects that overfit before broader testing:
+`GPI Order Intake 0.1.0.8` corrects that overfit:
 
 - incoming quantity is accepted as variable when positive;
 - requested UOM must exist for the item in BC;
@@ -59,7 +59,7 @@ A resume-only, no-publish authority test executed exactly one tagged case:
 - customer `GIOVANN`;
 - item `C-503003-12033922`;
 - quantity/UOM `56.42 M`;
-- Location `00` (`53ec399a-c4e1-eb11-abff-7c05070e4047`);
+- Location `00`;
 - client did **not** send Unit Price;
 - created Draft Sales Order `118850`;
 - read-back Unit Price `277.99`;
@@ -69,14 +69,41 @@ A resume-only, no-publish authority test executed exactly one tagged case:
 - no release, ship, invoice, or post operation was exposed or called;
 - Production remained hard blocked.
 
-This proves the BC authority mechanism. It does **not** establish that 56.42 M is the only valid future quantity.
+This proved the BC authority mechanism but did not establish that `56.42 M` is the only valid future quantity.
+
+## PRE 0.1.0.8 variable-quantity live authority proof
+
+`GPI Order Intake 0.1.0.8` compiled from 12 AL files with only the expected `Sales Price` deprecation warning.
+
+- package: `Gamer Packaging Inc_GPI Order Intake_0.1.0.8.app`;
+- SHA256: `6C8E9AA69685622073294B21B54F92032887DDE66D49018075D88E624D22389A`;
+- deployment reached `Completed` in PRE;
+- exact installed-version verification passed.
+
+A controlled test then deliberately used a quantity different from the original proof fixture:
+
+- customer `GIOVANN`;
+- item `C-503003-12033922`;
+- incoming quantity/UOM `56.357 M`;
+- Location `00` (`53ec399a-c4e1-eb11-abff-7c05070e4047`);
+- client did **not** send Unit Price;
+- created Draft Sales Order `118852`;
+- read-back quantity remained exactly `56.357 M`;
+- read-back Unit Price was `277.99`;
+- pricing result `MATCHED_HISTORICAL_LOCATION_PRICE`;
+- exact tagged Draft was deleted;
+- cleanup PASS;
+- no release, ship, invoice, or post operation was exposed or called;
+- Production remained hard blocked.
+
+This proves that incoming quantity can vary independently from the historical pricing key. The resolver is therefore validating and pricing a new order, not replaying a sample PO.
 
 ## Next gates
 
-1. Compile `0.1.0.8` with no publish/install and verify the variable-quantity source gates.
-2. Use GET-only history to choose a deliberately different but structurally valid quantity for a controlled variable-PO proof.
-3. Publish/test `0.1.0.8` only after that evidence is reviewed; require correct price read-back and mandatory AITEST cleanup.
-4. Rebuild the negative suite around true invalid/ambiguous cases, not around a quantity merely differing from the fixture.
+1. Use GET-only history under the 0.1.0.8 pricing key (`customer + item + UOM + location`) to identify real contexts with only one price observation or conflicting two-latest prices.
+2. Prove fail-closed behavior for those real pricing-evidence contexts with zero residual AITEST orders.
+3. Prove fail-closed behavior for true source/context problems: Pasta quantity-source ambiguity, mixed/exception Salsa, unsupported item, missing/invalid UOM, and missing location.
+4. Continue positive variable-quantity proofs only for additional normal Giovanni contexts whose two-latest pricing evidence agrees.
 5. Resolve the 24oz Pasta quantity-source distinction for the current blanket format.
 6. Discover CanPack sell-to identity and customer-item/UOM mappings before any CanPack write test.
 7. Keep Production and all release/ship/invoice/post behaviors blocked throughout Phase 0.

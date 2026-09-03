@@ -8,8 +8,9 @@ Set-StrictMode -Version Latest
 
 # =====================================================================================================================
 # RESUME-ONLY wrapper over the proven installed-app authority tester.
-# NO extension upload/install is permitted in this script.
-# It waits for the already-completed 0.1.0.7 deployment to become visible, then executes exactly one AITEST round trip.
+# The prior publish run already reported deployment Completed.
+# This wrapper contains no extension upload/install operation: it waits for installed 0.1.0.7 visibility,
+# then uses the existing exact AITEST create/read/mandatory-cleanup harness.
 # =====================================================================================================================
 $ExpectedBaseBlob = '3e7b89f63dd058ab9c402980554b5bc62def144d'
 $BasePath = 'scripts/Test-GPIOrderIntakeALAuthority-PRE.ps1'
@@ -61,14 +62,25 @@ try {
     $patched = $base
 
     $patches = @(
-        [pscustomobject]@{ Name='expected app version'; Old="$ExpectedAppVersion = '0.1.0.0'"; New="$ExpectedAppVersion = '0.1.0.7'"; Count=1 },
-        [pscustomobject]@{ Name='enable flag'; Old="GPI_ORDER_INTAKE_AL_AUTHORITY_TEST_ENABLED"; New=$EnableFlag; Count=1 },
-        [pscustomobject]@{ Name='installed revision'; Old='[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 0 -and'; New='[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 7 -and'; Count=1 }
+        [pscustomobject]@{
+            Name = 'expected app version'
+            Old = '$ExpectedAppVersion = ''0.1.0.0'''
+            New = '$ExpectedAppVersion = ''0.1.0.7'''
+            Count = 1
+        },
+        [pscustomobject]@{
+            Name = 'enable flag'
+            Old = 'GPI_ORDER_INTAKE_AL_AUTHORITY_TEST_ENABLED'
+            New = $EnableFlag
+            Count = 1
+        },
+        [pscustomobject]@{
+            Name = 'installed revision'
+            Old = '[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 0 -and'
+            New = '[int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 7 -and'
+            Count = 1
+        }
     )
-
-    # PowerShell variable marker above must remain literal in the generated source.
-    $patches[0].Old = '$ExpectedAppVersion = ''0.1.0.0'''
-    $patches[0].New = '$ExpectedAppVersion = ''0.1.0.7'''
 
     foreach ($patch in $patches) {
         $count = ([regex]::Matches($patched, [regex]::Escape([string]$patch.Old))).Count
@@ -79,34 +91,24 @@ try {
         $patched = $patched.Replace([string]$patch.Old, [string]$patch.New)
     }
 
-    $oldInstallBlock = @'
-# Verify exact app is already installed. This script does not upload or install anything.
-$extensions = Invoke-BcGet -Uri "$automationRoot/extensions?`$top=200" -Headers $script:Headers
-$installed = @($extensions.value | Where-Object {
-    [string]$_.id -eq $ExpectedAppId -and
-    [string]$_.displayName -eq $ExpectedAppName -and
-    [string]$_.publisher -eq $ExpectedPublisher -and
-    [int]$_.versionMajor -eq 0 -and [int]$_.versionMinor -eq 1 -and
-    [int]$_.versionBuild -eq 0 -and [int]$_.versionRevision -eq 7 -and
-    $_.isInstalled -eq $true
-})
-if ($installed.Count -ne 1) {
-    throw "Expected exactly one installed $ExpectedAppName $ExpectedAppVersion in PRE; found $($installed.Count). No publish attempted."
-}
-'@.TrimEnd("`r","`n")
+    # Insert a visibility poll immediately before the base tester's existing exact installed-app check.
+    # The existing check remains intact and runs after this poll.
+    $installMarker = '# Verify exact app is already installed. This script does not upload or install anything.'
+    $markerCount = ([regex]::Matches($patched, [regex]::Escape($installMarker))).Count
+    Write-Host "Patch target visibility marker : $markerCount / 1"
+    if ($markerCount -ne 1) { throw "Expected exactly one installed-app marker; found $markerCount." }
 
-    $newInstallBlock = @'
-# Resume-only visibility gate. Deployment already reported Completed in the prior run.
-# Poll Automation API until the exact installed 0.1.0.7 record is visible. Never upload/install here.
-$installed = @()
-$gpiVisibility = @()
+    $visibilityBlock = @'
+# Resume-only visibility poll. Prior deployment already reported Completed.
+$visibleGpi = @()
+$installedVisible = @()
 for ($visibilityAttempt = 1; $visibilityAttempt -le 60; $visibilityAttempt++) {
-    $extensions = Invoke-BcGet -Uri "$automationRoot/extensions?`$top=500" -Headers $script:Headers
-    $gpiVisibility = @($extensions.value | Where-Object {
+    $visibilityExtensions = Invoke-BcGet -Uri "$automationRoot/extensions?`$top=500" -Headers $script:Headers
+    $visibleGpi = @($visibilityExtensions.value | Where-Object {
         [string]$_.id -eq $ExpectedAppId -or
         ([string]$_.displayName -eq $ExpectedAppName -and [string]$_.publisher -eq $ExpectedPublisher)
     })
-    $installed = @($gpiVisibility | Where-Object {
+    $installedVisible = @($visibleGpi | Where-Object {
         [string]$_.id -eq $ExpectedAppId -and
         [string]$_.displayName -eq $ExpectedAppName -and
         [string]$_.publisher -eq $ExpectedPublisher -and
@@ -115,27 +117,28 @@ for ($visibilityAttempt = 1; $visibilityAttempt -le 60; $visibilityAttempt++) {
         $_.isInstalled -eq $true
     })
 
-    if ($installed.Count -eq 1) { break }
-    if ($installed.Count -gt 1) { throw 'More than one exact installed GPI Order Intake 0.1.0.7 record is visible.' }
+    if ($installedVisible.Count -eq 1) { break }
+    if ($installedVisible.Count -gt 1) { throw 'More than one exact installed GPI Order Intake 0.1.0.7 record is visible.' }
 
     if ($visibilityAttempt -eq 1 -or ($visibilityAttempt % 10) -eq 0) {
-        $visibleSummary = @($gpiVisibility | ForEach-Object {
-            [pscustomobject][ordered]@{
-                id = [string]$_.id
-                displayName = [string]$_.displayName
-                publisher = [string]$_.publisher
-                version = "$($_.versionMajor).$($_.versionMinor).$($_.versionBuild).$($_.versionRevision)"
-                isInstalled = [bool]$_.isInstalled
-            }
-        })
         Write-Host "Waiting for installed 0.1.0.7 visibility (attempt $visibilityAttempt/60)..." -ForegroundColor Yellow
-        if ($visibleSummary.Count -gt 0) { $visibleSummary | Format-Table -AutoSize | Out-Host }
+        if ($visibleGpi.Count -gt 0) {
+            @($visibleGpi | ForEach-Object {
+                [pscustomobject][ordered]@{
+                    id = [string]$_.id
+                    displayName = [string]$_.displayName
+                    publisher = [string]$_.publisher
+                    version = "$($_.versionMajor).$($_.versionMinor).$($_.versionBuild).$($_.versionRevision)"
+                    isInstalled = [bool]$_.isInstalled
+                }
+            }) | Format-Table -AutoSize | Out-Host
+        }
     }
     Start-Sleep -Seconds 2
 }
 
-if ($installed.Count -ne 1) {
-    $visibleSummary = @($gpiVisibility | ForEach-Object {
+if ($installedVisible.Count -ne 1) {
+    $visibleSummary = @($visibleGpi | ForEach-Object {
         [pscustomobject][ordered]@{
             id = [string]$_.id
             displayName = [string]$_.displayName
@@ -144,46 +147,49 @@ if ($installed.Count -ne 1) {
             isInstalled = [bool]$_.isInstalled
         }
     })
+
     [ordered]@{
         success = $false
         result = 'DEPLOYMENT_COMPLETED_BUT_0_1_0_7_NOT_VISIBLE_AS_INSTALLED'
         expectedVersion = $ExpectedAppVersion
         visibleGpiRecords = $visibleSummary
-        publishThisRun = 'NONE'
-        businessDataWrites = 'NONE'
-        salesOrderAction = 'NOT CALLED'
-        production = 'HARD BLOCKED'
+        safety = [ordered]@{
+            publishThisRun = 'NONE'
+            businessDataWrites = 'NONE'
+            salesOrderAction = 'NOT CALLED'
+            production = 'HARD BLOCKED'
+        }
     } | ConvertTo-Json -Depth 10
+
     throw "Expected installed $ExpectedAppName $ExpectedAppVersion never became visible. No republish attempted and no Sales Order action was called."
 }
 Write-Host 'PRE installed 0.1.0.7 visibility: PASS' -ForegroundColor Green
-'@.TrimEnd("`r","`n")
 
-    $installCount = ([regex]::Matches($patched, [regex]::Escape($oldInstallBlock))).Count
-    Write-Host "Patch target install visibility : $installCount / 1"
-    if ($installCount -ne 1) { throw "Expected exactly one install visibility block; found $installCount." }
-    $patched = $patched.Replace($oldInstallBlock, $newInstallBlock)
+'@
 
-    $oldFinal = "if (`$testResult -and `$testResult.success -eq `$true) {`n    Write-Host 'GPI ORDER INTAKE AL AUTHORITY ROUND-TRIP: PASS' -ForegroundColor Green`n}"
-    $newFinal = @'
-if ($testResult -and $testResult.success -eq $true) {
-    if ($testResult.pricingResult -ne 'MATCHED_HISTORICAL_LOCATION_PRICE') {
-        throw "Resolver test cleaned up safely but Unit Price did not match required historical exact-context price 277.99. Observed: $($testResult.observedUnitPrice)"
+    $patched = $patched.Replace($installMarker, $visibilityBlock + $installMarker)
+
+    # Strengthen the existing successful final line so the round trip only passes when the observed price matched 277.99.
+    $finalMarker = "Write-Host 'GPI ORDER INTAKE AL AUTHORITY ROUND-TRIP: PASS' -ForegroundColor Green"
+    $finalCount = ([regex]::Matches($patched, [regex]::Escape($finalMarker))).Count
+    Write-Host "Patch target final PASS        : $finalCount / 1"
+    if ($finalCount -ne 1) { throw "Expected exactly one final PASS marker; found $finalCount." }
+
+    $finalReplacement = @'
+if ($testResult.pricingResult -ne 'MATCHED_HISTORICAL_LOCATION_PRICE') {
+        throw "Resolver test cleaned up safely but Unit Price did not match required exact-context price 277.99. Observed: $($testResult.observedUnitPrice)"
     }
     Write-Host 'Resolver exact-price assertion: PASS (277.99)' -ForegroundColor Green
     Write-Host 'GPI ORDER INTAKE 0.1.0.7 RESOLVER RESUME ROUND-TRIP: PASS' -ForegroundColor Green
-}
 '@.TrimEnd("`r","`n")
-
-    $finalCount = ([regex]::Matches($patched, [regex]::Escape($oldFinal))).Count
-    Write-Host "Patch target exact-price final : $finalCount / 1"
-    if ($finalCount -ne 1) { throw "Expected exactly one final PASS block; found $finalCount." }
-    $patched = $patched.Replace($oldFinal, $newFinal)
+    $patched = $patched.Replace($finalMarker, $finalReplacement)
 
     if ($patched -match "ExpectedAppVersion\s*=\s*'0\.1\.0\.0'") { throw 'Old expected app version remains.' }
     if ($patched -match 'versionRevision\s+-eq\s+0') { throw 'Old installed revision check remains.' }
     if ($patched -match 'GPI_ORDER_INTAKE_AL_AUTHORITY_TEST_ENABLED') { throw 'Old enable flag remains.' }
-    if ($patched -match '(?i)extensionUpload|extensionContent|Microsoft\.NAV\.upload') { throw 'Resume tester unexpectedly contains extension upload/install operations.' }
+    if ($patched -match '(?i)extensionUpload|extensionContent|Microsoft\.NAV\.upload') {
+        throw 'Resume tester unexpectedly contains extension upload/install operations.'
+    }
 
     $tempScript = Join-Path $PSScriptRoot ('.GPIOrderIntake-ResolverResume-' + [guid]::NewGuid().ToString('N') + '.tmp.ps1')
     try {

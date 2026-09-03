@@ -10,6 +10,31 @@ import {
 const API = process.env.REACT_APP_BACKEND_URL;
 const RUN_POLL_INTERVAL_MS = 3000;
 
+// Latest clean, measured V117 held-out result. Update this only after a
+// complete V117 run proves the immutable routing gate on a real holdout.
+const AP_ROUTING_MEASURED_BASELINE = {
+  featureCommit: '6c455f1a027361115eba3ea9ecde989009bda76e',
+  measuredOn: 'Sep 3, 2026',
+  holdoutCount: 62,
+  autoRouted: 26,
+  reviewed: 36,
+  coveragePct: 41.94,
+  targetCoveragePct: 90,
+  accuracyPct: 100,
+  targetAccuracyPct: 100,
+  wrongAutoRoutes: 0,
+  maxWrongAutoRoutes: 0,
+  gate: 'FAIL_COVERAGE',
+};
+
+// Newer code exists, but it must not influence cutover status until a full
+// held-out run measures it. This keeps the page honest while work continues.
+const AP_ROUTING_PENDING_CANDIDATE = {
+  featureCommit: '609ad242af95877a9f663e4cf0bcfb17198674f8',
+  focusedTestsExpected: 52,
+  status: 'PENDING RERUN',
+};
+
 function formatTimestamp(iso) {
   if (!iso) return '';
   try {
@@ -40,17 +65,26 @@ function StatBlock({ label, value, sublabel }) {
   );
 }
 
+function GateRow({ label, detail, passed, blockedLabel = 'BLOCKED' }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2 border-b last:border-b-0">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-muted-foreground">{detail}</p>
+      </div>
+      <Badge className={passed ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'}>
+        {passed ? 'PASS' : blockedLabel}
+      </Badge>
+    </div>
+  );
+}
+
 export default function Square9ReadinessPage() {
   const [latest, setLatest] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [runState, setRunState] = useState({ status: 'idle' });
-  // Never read directly - just forces a re-render once a second while a
-  // run is in progress so the "running for Xs" display (computed fresh
-  // from Date.now() on every render) actually advances visually, since
-  // React has no reason to re-render on its own just because time passes.
   const [, setRunElapsedTick] = useState(0);
   const pollTimeoutRef = useRef(null);
 
@@ -62,16 +96,18 @@ export default function Square9ReadinessPage() {
         fetch(`${API}/api/square9/readiness/latest`),
         fetch(`${API}/api/square9/readiness/history`),
       ]);
+
       if (!latestRes.ok) {
         if (latestRes.status === 404) {
-          setError('No readiness snapshots recorded yet.');
+          setError('No historical readiness snapshots recorded yet.');
         } else {
-          setError(`Failed to load latest snapshot (HTTP ${latestRes.status}).`);
+          setError(`Failed to load latest historical snapshot (HTTP ${latestRes.status}).`);
         }
         setLatest(null);
       } else {
         setLatest(await latestRes.json());
       }
+
       if (historyRes.ok) {
         const h = await historyRes.json();
         setHistory((h.history || []).map(row => ({
@@ -79,7 +115,7 @@ export default function Square9ReadinessPage() {
           label: formatTimestamp(row.recorded_utc),
         })));
       }
-    } catch (e) {
+    } catch {
       setError('Could not reach the server.');
     } finally {
       setLoading(false);
@@ -96,27 +132,14 @@ export default function Square9ReadinessPage() {
       if (data.status === 'running') {
         pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
       } else if (data.status === 'completed') {
-        // Pull the fresh snapshot + trend into the main dashboard view.
         fetchAll();
       }
-      // 'failed' and 'idle' just stop polling - the error/idle state
-      // renders from runState directly, nothing else to refresh.
     } catch {
-      // Transient fetch failure while polling - try again on the next
-      // tick rather than giving up and leaving the button stuck.
       pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
     }
   }, [fetchAll]);
 
   const resumeIfAlreadyRunning = useCallback(async () => {
-    // Mount-time check only: if a run is genuinely still in progress
-    // (e.g. the page was navigated away from and back to), resume
-    // polling it. Deliberately does NOT surface 'completed' or
-    // 'failed' from this check - that would show a stale failure
-    // banner from some past run every time the page loads, even
-    // though the person viewing it hasn't triggered anything this
-    // session. Failures/completions only render after a run this
-    // session's triggerRun() actually started.
     try {
       const res = await fetch(`${API}/api/square9/readiness/run-status`);
       if (!res.ok) return;
@@ -126,17 +149,12 @@ export default function Square9ReadinessPage() {
         pollTimeoutRef.current = setTimeout(pollRunStatus, RUN_POLL_INTERVAL_MS);
       }
     } catch {
-      // Nothing to resume if we can't even check - stay idle, the
-      // person can just click the button.
+      // Stay idle if status cannot be checked.
     }
   }, [pollRunStatus]);
 
   useEffect(() => {
     fetchAll();
-    // Resume polling on mount only if a run is genuinely still in
-    // progress - see resumeIfAlreadyRunning's own comment for why this
-    // must not surface a stale completed/failed status from some past
-    // run nobody triggered this session.
     resumeIfAlreadyRunning();
     return () => {
       if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current);
@@ -144,9 +162,6 @@ export default function Square9ReadinessPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ticks the "running for Xs" display once a second while a run is in
-  // progress, independent of the 3s poll interval, so the elapsed time
-  // doesn't visibly stall between polls.
   useEffect(() => {
     if (runState.status !== 'running') return undefined;
     const tick = setInterval(() => setRunElapsedTick(t => t + 1), 1000);
@@ -157,8 +172,6 @@ export default function Square9ReadinessPage() {
     try {
       const res = await fetch(`${API}/api/square9/readiness/run`, { method: 'POST' });
       if (res.status === 409) {
-        // Someone else already started one (or a stray double-click) -
-        // just start tracking it rather than erroring.
         const body = await res.json().catch(() => ({}));
         setRunState({ status: 'running', started_at: body?.detail?.started_at });
       } else if (res.ok) {
@@ -208,7 +221,7 @@ export default function Square9ReadinessPage() {
             </>
           ) : (
             <>
-              <Play className="w-3.5 h-3.5" /> Run Readiness Check
+              <Play className="w-3.5 h-3.5" /> Run Historical Check
             </>
           )}
         </button>
@@ -220,18 +233,28 @@ export default function Square9ReadinessPage() {
   }
 
   const matchRate = latest?.match_rate_pct ?? 0;
-  const target = latest?.min_match_rate_pct ?? 85;
-  const isGo = latest?.decision === 'GO';
+  const historicalTarget = latest?.min_match_rate_pct ?? 85;
   const bucketCounts = latest?.bucket_counts || {};
   const bucketC = latest?.bucket_C_intake_cohort_detail || [];
 
+  const historicalMatchPass = matchRate >= historicalTarget;
+  const routingSafetyPass =
+    AP_ROUTING_MEASURED_BASELINE.accuracyPct >= AP_ROUTING_MEASURED_BASELINE.targetAccuracyPct
+    && AP_ROUTING_MEASURED_BASELINE.wrongAutoRoutes <= AP_ROUTING_MEASURED_BASELINE.maxWrongAutoRoutes;
+  const routingCoveragePass =
+    AP_ROUTING_MEASURED_BASELINE.coveragePct >= AP_ROUTING_MEASURED_BASELINE.targetCoveragePct;
+  const overallReady = historicalMatchPass && routingSafetyPass && routingCoveragePass;
+
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Square9 Cutover Readiness</h1>
-          <p className="text-sm text-muted-foreground">
-            Last checked {formatTimestamp(latest?.recorded_utc)}
+          <p className="text-sm text-muted-foreground mt-1">
+            Overall cutover requires historical document parity plus the V117 AP routing promotion gates.
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Historical check last run {formatTimestamp(latest?.recorded_utc)}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -251,7 +274,7 @@ export default function Square9ReadinessPage() {
               </>
             ) : (
               <>
-                <Play className="w-3.5 h-3.5" /> Run Readiness Check
+                <Play className="w-3.5 h-3.5" /> Run Historical Check
               </>
             )}
           </button>
@@ -269,8 +292,7 @@ export default function Square9ReadinessPage() {
           <CardContent className="p-4 flex items-center gap-2 text-sm">
             <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
             <span>
-              Pulling the current Square9/Hub comparison — this typically takes 45–90 seconds.
-              The dashboard below will refresh automatically when it's done.
+              Pulling the current Square9/Hub historical comparison. This does not rerun the V117 AP routing gate.
             </span>
           </CardContent>
         </Card>
@@ -281,48 +303,137 @@ export default function Square9ReadinessPage() {
           <CardContent className="p-4 flex items-start gap-2 text-sm">
             <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
             <div>
-              <p className="font-medium">Readiness check failed to complete.</p>
+              <p className="font-medium">Historical readiness check failed to complete.</p>
               <p className="text-muted-foreground mt-1 whitespace-pre-wrap">{runState.error || 'Unknown error.'}</p>
             </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Headline */}
-      <Card className={`border-l-4 ${isGo ? 'border-l-emerald-500 bg-emerald-500/5' : 'border-l-red-500 bg-red-500/5'}`}>
+      <Card className={`border-l-4 ${overallReady ? 'border-l-emerald-500 bg-emerald-500/5' : 'border-l-red-500 bg-red-500/5'}`}>
         <CardContent className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              {isGo
-                ? <CheckCircle2 className="w-8 h-8 text-emerald-600" />
-                : <XCircle className="w-8 h-8 text-red-600" />}
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              {overallReady
+                ? <CheckCircle2 className="w-9 h-9 text-emerald-600 mt-1" />
+                : <XCircle className="w-9 h-9 text-red-600 mt-1" />}
               <div>
-                <p className="text-5xl font-bold tracking-tight">{matchRate.toFixed(1)}%</p>
-                <p className="text-sm text-muted-foreground">
-                  Match rate — need {target.toFixed(0)}% to cut over
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Overall cutover status</p>
+                <p className="text-4xl font-bold tracking-tight mt-1">{overallReady ? 'READY' : 'NOT READY'}</p>
+                <p className="text-sm text-muted-foreground mt-2 max-w-3xl">
+                  Historical document parity {historicalMatchPass ? 'has passed' : 'has not passed'}.
+                  {' '}AP routing safety {routingSafetyPass ? 'has passed' : 'has not passed'}.
+                  {' '}Automatic routing coverage is {AP_ROUTING_MEASURED_BASELINE.coveragePct.toFixed(1)}%
+                  {' '}and must reach {AP_ROUTING_MEASURED_BASELINE.targetCoveragePct}%.
                 </p>
               </div>
             </div>
-            <Badge className={isGo ? 'bg-emerald-600 text-white text-sm px-3 py-1' : 'bg-red-600 text-white text-sm px-3 py-1'}>
-              {latest?.decision || 'UNKNOWN'}
+            <Badge className={overallReady ? 'bg-emerald-600 text-white text-sm px-3 py-1' : 'bg-red-600 text-white text-sm px-3 py-1'}>
+              {overallReady ? 'GO' : 'HOLD'}
             </Badge>
           </div>
-          <Progress value={Math.min(matchRate, 100)} className="h-3" />
-          {latest?.projected_match_rate_pct != null && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Projected after applying all known-safe fixes: {latest.projected_match_rate_pct.toFixed(1)}%
-              {latest.projected_match_rate_pct < target && ' — still short of target, real intake work required too'}
-            </p>
-          )}
+
+          <div className="mt-5 border rounded-lg px-4">
+            <GateRow
+              label="Historical document parity"
+              detail={`${matchRate.toFixed(1)}% match rate; threshold ${historicalTarget.toFixed(0)}%`}
+              passed={historicalMatchPass}
+            />
+            <GateRow
+              label="AP routing safety"
+              detail={`${AP_ROUTING_MEASURED_BASELINE.accuracyPct.toFixed(0)}% auto-route accuracy; ${AP_ROUTING_MEASURED_BASELINE.wrongAutoRoutes} wrong automatic routes`}
+              passed={routingSafetyPass}
+            />
+            <GateRow
+              label="AP routing coverage"
+              detail={`${AP_ROUTING_MEASURED_BASELINE.coveragePct.toFixed(2)}% measured coverage; target ${AP_ROUTING_MEASURED_BASELINE.targetCoveragePct}%`}
+              passed={routingCoveragePass}
+            />
+          </div>
         </CardContent>
       </Card>
 
-      {/* Trend chart */}
+      <div className="grid md:grid-cols-2 gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between gap-3">
+              <span>Historical Document Parity</span>
+              <Badge className={historicalMatchPass ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'}>
+                {historicalMatchPass ? 'PASS' : 'BLOCKED'}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-end gap-2">
+              <p className="text-4xl font-bold tracking-tight">{matchRate.toFixed(1)}%</p>
+              <p className="text-sm text-muted-foreground mb-1">target {historicalTarget.toFixed(0)}%</p>
+            </div>
+            <Progress value={Math.min(matchRate, 100)} className="h-3 mt-4" />
+            {latest?.projected_match_rate_pct != null && (
+              <p className="text-xs text-muted-foreground mt-3">
+                Projected historical match after known-safe fixes: {latest.projected_match_rate_pct.toFixed(1)}%
+              </p>
+            )}
+            <p className="text-xs text-muted-foreground mt-2">
+              Live from the Square9/Hub historical comparison API. This is not the AP routing promotion gate.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center justify-between gap-3">
+              <span>AP Routing Promotion</span>
+              <Badge className={routingCoveragePass && routingSafetyPass ? 'bg-emerald-600 text-white' : 'bg-amber-600 text-white'}>
+                {routingCoveragePass && routingSafetyPass ? 'PASS' : 'BLOCKED'}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <div className="flex items-end gap-2">
+                <p className="text-4xl font-bold tracking-tight">{AP_ROUTING_MEASURED_BASELINE.coveragePct.toFixed(1)}%</p>
+                <p className="text-sm text-muted-foreground mb-1">coverage; target {AP_ROUTING_MEASURED_BASELINE.targetCoveragePct}%</p>
+              </div>
+              <Progress value={AP_ROUTING_MEASURED_BASELINE.coveragePct} className="h-3 mt-4" />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="border rounded-md p-3">
+                <p className="text-xs text-muted-foreground uppercase">Accuracy</p>
+                <p className="text-xl font-bold">{AP_ROUTING_MEASURED_BASELINE.accuracyPct.toFixed(0)}%</p>
+              </div>
+              <div className="border rounded-md p-3">
+                <p className="text-xs text-muted-foreground uppercase">Wrong autos</p>
+                <p className="text-xl font-bold">{AP_ROUTING_MEASURED_BASELINE.wrongAutoRoutes}</p>
+              </div>
+              <div className="border rounded-md p-3">
+                <p className="text-xs text-muted-foreground uppercase">Auto-routed</p>
+                <p className="text-xl font-bold">{AP_ROUTING_MEASURED_BASELINE.autoRouted}/{AP_ROUTING_MEASURED_BASELINE.holdoutCount}</p>
+              </div>
+              <div className="border rounded-md p-3">
+                <p className="text-xs text-muted-foreground uppercase">Review</p>
+                <p className="text-xl font-bold">{AP_ROUTING_MEASURED_BASELINE.reviewed}</p>
+              </div>
+            </div>
+
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>
+                Measured V117 baseline: {AP_ROUTING_MEASURED_BASELINE.measuredOn} · feature {AP_ROUTING_MEASURED_BASELINE.featureCommit.slice(0, 10)} · {AP_ROUTING_MEASURED_BASELINE.gate}
+              </p>
+              <p>
+                New candidate {AP_ROUTING_PENDING_CANDIDATE.featureCommit.slice(0, 10)} is {AP_ROUTING_PENDING_CANDIDATE.status.toLowerCase()} and is not counted in readiness.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {history.length > 1 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
-              <TrendingUp className="w-4 h-4" /> Progress over time
+              <TrendingUp className="w-4 h-4" /> Historical document match progress
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -333,11 +444,15 @@ export default function Square9ReadinessPage() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                   <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} unit="%" />
                   <Tooltip
-                    formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Match rate']}
+                    formatter={(value) => [`${Number(value).toFixed(1)}%`, 'Historical match']}
                     labelFormatter={(label) => label}
                   />
-                  <ReferenceLine y={target} stroke="#dc2626" strokeDasharray="4 4"
-                    label={{ value: `${target}% target`, position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }} />
+                  <ReferenceLine
+                    y={historicalTarget}
+                    stroke="#dc2626"
+                    strokeDasharray="4 4"
+                    label={{ value: `${historicalTarget}% historical target`, position: 'insideTopRight', fontSize: 11, fill: '#dc2626' }}
+                  />
                   <Line type="monotone" dataKey="match_rate_pct" stroke="#2563eb" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
@@ -346,39 +461,35 @@ export default function Square9ReadinessPage() {
         </Card>
       )}
 
-      {/* Breakdown */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card><CardContent className="p-4"><StatBlock label="Square9 docs" value={latest?.square_count ?? '—'} /></CardContent></Card>
         <Card><CardContent className="p-4"><StatBlock label="Matched" value={latest?.matched_count ?? '—'} /></CardContent></Card>
         <Card><CardContent className="p-4"><StatBlock label="Strong evidence" value={bucketCounts.strong_evidence_match ?? '—'} /></CardContent></Card>
-        <Card><CardContent className="p-4"><StatBlock label="No match" value={bucketCounts.no_match ?? '—'} /></CardContent></Card>
+        <Card><CardContent className="p-4"><StatBlock label="No match" value={latest?.no_match_count ?? bucketCounts.no_match ?? '—'} /></CardContent></Card>
       </div>
 
-      {/* Real remaining gaps */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            Real intake gaps — {bucketC.reduce((sum, c) => sum + (c.affected_doc_count || 0), 0)} documents across {bucketC.length} vendors
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {bucketC.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No real intake gaps recorded — nice.</p>
-          ) : (
-            <div className="space-y-2">
-              {bucketC.map((c, i) => (
-                <div key={i} className="flex items-center justify-between border-b last:border-b-0 py-2 text-sm">
-                  <div>
-                    <span className="font-medium">{c.likely_vendor === '<unknown>' ? 'Unidentified sender' : c.likely_vendor}</span>
-                    <span className="text-muted-foreground ml-2">{c.recommended_intake_change?.replaceAll('_', ' ')}</span>
-                  </div>
-                  <Badge variant="outline">{c.affected_doc_count} doc{c.affected_doc_count === 1 ? '' : 's'}</Badge>
+      {bucketC.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Real intake gaps</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm text-muted-foreground mb-4">
+              Historical Square9 items without a verified Hub match. These are document-parity gaps, separate from AP routing coverage.
+            </p>
+            <div className="space-y-2 max-h-80 overflow-auto">
+              {bucketC.slice(0, 50).map((row, index) => (
+                <div key={`${row?.name || row?.file_name || 'gap'}-${index}`} className="border rounded-md p-3 text-sm">
+                  <p className="font-medium break-all">{row?.name || row?.file_name || row?.document_name || 'Unmatched document'}</p>
+                  {(row?.reason || row?.detail) && (
+                    <p className="text-xs text-muted-foreground mt-1">{row.reason || row.detail}</p>
+                  )}
                 </div>
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

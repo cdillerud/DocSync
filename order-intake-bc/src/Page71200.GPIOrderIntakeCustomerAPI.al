@@ -2,6 +2,7 @@
 /// Customer-bound custom API for the Phase-0 GPI Order Intake authority.
 /// Endpoint: /api/gpi/orderIntake/v1.0/companies({companyId})/orderIntakeCustomers
 /// Bound action: Microsoft.NAV.createValidatedDraft
+/// Version 0.1.0.1 adds read-only customer pricing-context fields.
 /// </summary>
 page 71200 "GPI Order Intake Cust API"
 {
@@ -39,6 +40,31 @@ page 71200 "GPI Order Intake Cust API"
                 field(displayName; Rec.Name)
                 {
                     Caption = 'Display Name';
+                    Editable = false;
+                }
+                field(billToCustomerNumber; Rec."Bill-to Customer No.")
+                {
+                    Caption = 'Bill-to Customer Number';
+                    Editable = false;
+                }
+                field(customerPriceGroup; Rec."Customer Price Group")
+                {
+                    Caption = 'Customer Price Group';
+                    Editable = false;
+                }
+                field(customerDiscountGroup; Rec."Customer Disc. Group")
+                {
+                    Caption = 'Customer Discount Group';
+                    Editable = false;
+                }
+                field(currencyCode; Rec."Currency Code")
+                {
+                    Caption = 'Currency Code';
+                    Editable = false;
+                }
+                field(priceCalculationMethod; Rec."Price Calculation Method")
+                {
+                    Caption = 'Price Calculation Method';
                     Editable = false;
                 }
             }

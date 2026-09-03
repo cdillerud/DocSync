@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '609ad242af95877a9f663e4cf0bcfb17198674f8'
+$ExpectedFeatureCommit = '8d762dbd120f5f7a69b9e72217eafe50be574637'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -43,8 +43,8 @@ $Raw = Replace-Required -Text $Raw `
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'backend/services/ap_routing_decision_service.py'," `
-    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_safety_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery_safety.py'," `
-    -Marker 'V117 candidate materialization'
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_safety_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/services/ap_routing_relevant_learning_service.py',`r`n        'backend/services/ap_routing_feedback_service.py',`r`n        'backend/services/ap_routing_autonomy_performance_service.py',`r`n        'backend/services/ap_routing_ai_primary_service.py',`r`n        'backend/services/ap_routing_learned_autonomy_service.py',`r`n        'backend/services/ap_routing_learned_safety_service.py',`r`n        'backend/services/ap_routing_learned_pipeline_service.py',`r`n        'backend/services/ap_routing_learned_v117_adapter.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery_safety.py',`r`n        'backend/tests/test_ap_routing_v117_learned_autonomy.py'," `
+    -Marker 'V117 learned candidate materialization'
 
 $Raw = Replace-Required -Text $Raw `
     -Old "FEATURE_COMMIT='ee75f8dbea0a72f1184b5e241f100bf8df83b17f'" `
@@ -65,28 +65,39 @@ docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backen
  "$CONTAINER_STAGE/services/ap_routing_coverage_recovery_safety_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_evaluation_context_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_relevant_learning_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_feedback_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_autonomy_performance_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_ai_primary_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_autonomy_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_safety_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_pipeline_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_v117_adapter.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py"
-echo V117_ADDITIVE_PYCOMPILE=PASS
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py"
+echo V117_LEARNED_STACK_PYCOMPILE=PASS
 
-docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_authority_guard_service as a, services.ap_routing_runtime_authority_service as r, services.ap_routing_coverage_authority_service as v, services.ap_routing_coverage_recovery_service as y, services.ap_routing_coverage_recovery_safety_service as z, services.ap_routing_evaluation_context_service as c; paths=[str(a.__file__),str(r.__file__),str(v.__file__),str(y.__file__),str(z.__file__),str(c.__file__)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(p.startswith("/tmp/gpi-ap-routing-v116/") for p in paths), paths'
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_ai_primary_service as a, services.ap_routing_learned_autonomy_service as l, services.ap_routing_learned_safety_service as s, services.ap_routing_learned_pipeline_service as p, services.ap_routing_learned_v117_adapter as v, services.ap_routing_relevant_learning_service as r, services.ap_routing_autonomy_performance_service as m; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(path.startswith("/tmp/gpi-ap-routing-v116/") for path in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
+echo V117_FOCUSED_REGRESSION_TARGET=76
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
 '@
 $Raw = Replace-Required -Text $Raw `
     -Old 'echo V116_CANDIDATE_PYCOMPILE=PASS' `
     -New $FastGate `
-    -Marker 'focused V117 compile and regression gate'
+    -Marker 'focused V117 learned compile and regression gate'
 
 $ProbeImports = @'
 import services.ap_routing_corpus_service as _v117_corpus_module
@@ -97,22 +108,25 @@ from services.ap_routing_evaluation_context_service import (
     mongo_fallback_latched,
     resolve_ap_routing_context_resilient,
 )
-from services.ap_routing_coverage_recovery_safety_service import (
-    decide_ap_route_with_authority_guard as _v117_runtime_decide,
+from services.ap_routing_learned_v117_adapter import (
+    decide_ap_route_with_learned_autonomy as _v117_runtime_decide,
 )
 
 _v117_corpus_module.resolve_ap_routing_context = resolve_ap_routing_context_resilient
 _v117_eval_module.decide_ap_route_with_authority_guard = _v117_runtime_decide
-print('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE',flush=True)
-print('V117_DETERMINISTIC_COVERAGE_AUTHORITY=ACTIVE',flush=True)
-print('V117_DETERMINISTIC_COVERAGE_RECOVERY=ACTIVE',flush=True)
-print('V117_COVERAGE_RECOVERY_SAFETY=ACTIVE',flush=True)
+print('V117_AI_PRIMARY_ROUTER=ACTIVE',flush=True)
+print('V117_LEARNED_AUTONOMY=ACTIVE',flush=True)
+print('V117_RELEVANT_EXAMPLE_RETRIEVAL=ACTIVE',flush=True)
+print('V117_HUMAN_CONFIRMED_LEARNING=ACTIVE',flush=True)
+print('V117_SELF_TRAINING_BLOCKED=ACTIVE',flush=True)
+print('V117_DETERMINISTIC_SAFETY_ENVELOPE=ACTIVE',flush=True)
+print('V117_DETERMINISTIC_ROUTE_SUBSTITUTION=DISABLED',flush=True)
 print('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE',flush=True)
 '@
 $Raw = Replace-Required -Text $Raw `
     -Old 'from services.ap_routing_corpus_service import build_supervised_routing_corpus' `
     -New $ProbeImports `
-    -Marker 'runtime authority and resilient context probe imports'
+    -Marker 'AI-primary learned runtime probe imports'
 
 $Raw = Replace-Required -Text $Raw `
     -Old '        max_per_route=15,' `
@@ -186,34 +200,30 @@ $Raw = Replace-Required -Text $Raw -Old $OldExamples -New $NewExamples -Marker '
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'hydrated_route_counts':corpus.get('hydrated_route_counts')," `
-    -New "        'hydrated_route_counts':dict(merged_route_counts),`n        'vendor_expansion_selected':expansion.get('selected_count'),`n        'vendor_expansion_hydrated':expansion.get('hydrated_count'),`n        'vendor_expansion_failure_count':expansion.get('failure_count'),`n        'mongo_fallback_latched':mongo_fallback_latched(),`n        'merged_vendor_counts':dict(merged_vendor_counts)," `
+    -New "        'hydrated_route_counts':dict(merged_route_counts),`n        'vendor_expansion_selected':expansion.get('selected_count'),`n        'vendor_expansion_hydrated':expansion.get('hydrated_count'),`n        'vendor_expansion_failure_count':expansion.get('failure_count'),`n        'mongo_fallback_latched':mongo_fallback_latched(),`n        'merged_vendor_counts':dict(merged_vendor_counts),`n        'routing_architecture':'AI_PRIMARY_LEARNED_AUTONOMY'," `
     -Marker 'summary merged corpus evidence'
 
-$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.3'")
+$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.4'")
 $Raw = $Raw.Replace('V116_','V117_')
-$Raw = $Raw.Replace('V116 - AP ROUTING BROAD HELD-OUT EVALUATION','V117 - AP ROUTING EVIDENCE-AUTHORITY HELD-OUT EVALUATION')
-$Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 held-out evaluation gate failed')
+$Raw = $Raw.Replace('V116 - AP ROUTING BROAD HELD-OUT EVALUATION','V117 - AI PRIMARY LEARNED AUTONOMY HELD-OUT EVALUATION')
+$Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 learned-autonomy held-out evaluation gate failed')
 
 Require ($Raw.Contains($ExpectedFeatureCommit)) 'V117 generated script lacks expected feature commit.'
-Require ($Raw.Contains('backend/services/ap_routing_authority_guard_service.py')) 'V117 generated script lacks authority guard service.'
-Require ($Raw.Contains('backend/services/ap_routing_runtime_authority_service.py')) 'V117 generated script lacks runtime authority overlay.'
-Require ($Raw.Contains('backend/services/ap_routing_coverage_authority_service.py')) 'V117 generated script lacks deterministic coverage authority service.'
-Require ($Raw.Contains('backend/services/ap_routing_coverage_recovery_service.py')) 'V117 generated script lacks deterministic coverage recovery service.'
-Require ($Raw.Contains('backend/services/ap_routing_coverage_recovery_safety_service.py')) 'V117 generated script lacks recovery safety service.'
-Require ($Raw.Contains('backend/services/ap_routing_evaluation_context_service.py')) 'V117 generated script lacks resilient evaluation context service.'
-Require ($Raw.Contains('backend/services/ap_routing_corpus_expansion_service.py')) 'V117 generated script lacks corpus expansion service.'
-Require ($Raw.Contains('test_ap_routing_v117_authority.py')) 'V117 generated script lacks focused authority tests.'
-Require ($Raw.Contains('test_ap_routing_v117_runtime_authority_boundaries.py')) 'V117 generated script lacks specialization authority boundary tests.'
-Require ($Raw.Contains('test_ap_routing_v117_coverage_authority.py')) 'V117 generated script lacks deterministic coverage authority tests.'
-Require ($Raw.Contains('test_ap_routing_v117_coverage_recovery.py')) 'V117 generated script lacks deterministic coverage recovery tests.'
-Require ($Raw.Contains('test_ap_routing_v117_coverage_recovery_safety.py')) 'V117 generated script lacks recovery safety tests.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_v117_adapter.py')) 'V117 generated script lacks learned V117 adapter.'
+Require ($Raw.Contains('backend/services/ap_routing_ai_primary_service.py')) 'V117 generated script lacks AI-primary service.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_autonomy_service.py')) 'V117 generated script lacks learned autonomy service.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_safety_service.py')) 'V117 generated script lacks learned safety service.'
+Require ($Raw.Contains('backend/services/ap_routing_relevant_learning_service.py')) 'V117 generated script lacks relevant learning retrieval.'
+Require ($Raw.Contains('backend/services/ap_routing_autonomy_performance_service.py')) 'V117 generated script lacks performance calibration.'
+Require ($Raw.Contains('test_ap_routing_v117_learned_autonomy.py')) 'V117 generated script lacks learned autonomy tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
 Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
-Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused authority gate.'
-Require ($Raw.Contains('V117_RUNTIME_AUTHORITY_OVERLAY=ACTIVE')) 'V117 generated script lacks runtime authority overlay activation.'
-Require ($Raw.Contains('V117_DETERMINISTIC_COVERAGE_AUTHORITY=ACTIVE')) 'V117 generated script lacks deterministic coverage authority activation.'
-Require ($Raw.Contains('V117_DETERMINISTIC_COVERAGE_RECOVERY=ACTIVE')) 'V117 generated script lacks deterministic coverage recovery activation.'
-Require ($Raw.Contains('V117_COVERAGE_RECOVERY_SAFETY=ACTIVE')) 'V117 generated script lacks recovery safety activation.'
+Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused regression gate.'
+Require ($Raw.Contains('V117_AI_PRIMARY_ROUTER=ACTIVE')) 'V117 generated script lacks AI-primary activation.'
+Require ($Raw.Contains('V117_LEARNED_AUTONOMY=ACTIVE')) 'V117 generated script lacks learned autonomy activation.'
+Require ($Raw.Contains('V117_RELEVANT_EXAMPLE_RETRIEVAL=ACTIVE')) 'V117 generated script lacks relevant retrieval activation.'
+Require ($Raw.Contains('V117_SELF_TRAINING_BLOCKED=ACTIVE')) 'V117 generated script lacks self-training block.'
+Require ($Raw.Contains('V117_DETERMINISTIC_ROUTE_SUBSTITUTION=DISABLED')) 'V117 generated script lacks deterministic route-substitution disable proof.'
 Require ($Raw.Contains('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE')) 'V117 generated script lacks resilient context activation.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_PROGRESS=')) 'V117 generated script lacks expansion progress telemetry.'
 Require ($Raw.Contains('V117_VENDOR_EXPANSION_START=1')) 'V117 generated script lacks vendor expansion phase.'
@@ -232,22 +242,16 @@ if (@($errors).Count -gt 0) {
 }
 
 Write-Host 'GPI_HUB_DESKTOP_LAUNCHER_STATIC_WRAPPER=PASS' -ForegroundColor Green
-Write-Host 'V117_STABLE_VENDOR_CONSENSUS=PASS' -ForegroundColor Green
-Write-Host 'V117_VARIABLE_VENDOR_SEMANTIC_DISCRIMINATION=PASS' -ForegroundColor Green
-Write-Host 'V117_ORDER_FAMILY_SAFETY=PASS' -ForegroundColor Green
-Write-Host 'V117_CROSS_VENDOR_REFERENCE_RELIANCE_GUARD=PASS' -ForegroundColor Green
+Write-Host 'V117_AI_PRIMARY_ROUTER_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_LEARNED_AUTONOMY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_HUMAN_CONFIRMED_LEARNING_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_SELF_TRAINING_BLOCKED_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_DETERMINISTIC_SAFETY_ENVELOPE_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_DETERMINISTIC_ROUTE_SUBSTITUTION_DISABLED_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_RELEVANT_EXAMPLE_RETRIEVAL_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_AUTONOMY_PERFORMANCE_CALIBRATION_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_FROZEN_ZERO_WRONG_FALLBACK=6c455f1a027361115eba3ea9ecde989009bda76e' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green
-Write-Host 'V117_WAREHOUSE_TOOLING_SAFETY_OVERLAY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_UNSUPPORTED_SPECIALIZATION_AUTHORITY_BOUNDARY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_SEMANTIC_CHILD_AND_EXACT_REFERENCE_AUTHORITY_BOUNDARY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_DETERMINISTIC_COVERAGE_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_FREIGHT_ACCESSORIAL_DNP_VETO_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_SH_APPROVAL_AUTHORITY_BOUNDARY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_DETERMINISTIC_COVERAGE_RECOVERY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_COVERAGE_RECOVERY_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_SEMANTIC_CHILD_RECOVERY_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_STABLE_VENDOR_FINAL_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_EXPLICIT_STOP_PAY_RECOVERY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_MONGO_RESILIENT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_EXPANSION_PROGRESS_TELEMETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green

@@ -37,6 +37,16 @@ New-Item -ItemType Directory -Path $GeneratedRoot -Force | Out-Null
 $Raw = Get-Content -LiteralPath $BasePath -Raw
 
 $Raw = Replace-Required -Text $Raw `
+    -Old "`$FeatureBranch = 'feature/ap-ai-routing-learning'" `
+    -New "`$FeatureBranch = 'feature/ap-ai-learned-autonomy'" `
+    -Marker 'learned feature branch name'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "`$FeatureRef = 'refs/remotes/origin/feature/ap-ai-routing-learning'" `
+    -New "`$FeatureRef = 'refs/remotes/origin/feature/ap-ai-learned-autonomy'" `
+    -Marker 'learned feature remote ref'
+
+$Raw = Replace-Required -Text $Raw `
     -Old "`$ExpectedFeatureCommit = 'ee75f8dbea0a72f1184b5e241f100bf8df83b17f'" `
     -New "`$ExpectedFeatureCommit = '$ExpectedFeatureCommit'" `
     -Marker 'feature commit pin'

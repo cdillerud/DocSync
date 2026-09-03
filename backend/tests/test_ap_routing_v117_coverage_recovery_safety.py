@@ -120,6 +120,52 @@ def test_reference_family_recovery_is_not_disturbed(monkeypatch):
     assert result["coverage_recovery_safety"]["action"] == "allow_existing_decision"
 
 
+def test_semantic_child_recovery_is_demoted_until_second_discriminator_exists(monkeypatch):
+    vendor = "BALL METAL BEVERAGE CONTAINER CORP"
+    route = "Vendor Credit Memos/Ball Detention Credits"
+    result = _run(
+        monkeypatch,
+        base_result=_auto(
+            route,
+            recovery={
+                "action": "promote_semantic_child_accounting_consensus",
+                "granted_route": route,
+                "semantic_child_consensus": {
+                    "route": route,
+                    "label_count": 3,
+                    "semantic_pattern": r"\bdetention\b",
+                },
+            },
+        ),
+        document=_document(
+            vendor,
+            "_BallMetalBeverageContainer_6363143_08082026.pdf",
+            document_type="Credit_Memo",
+            raw_text="detention credit memo",
+        ),
+    )
+    assert result["decision"] == "needs_review"
+    assert result["route_path"] == ""
+    assert result["coverage_recovery_safety"]["action"] == "force_review_semantic_child_recovery_insufficient_authority"
+
+
+def test_existing_auto_detention_child_not_created_by_recovery_is_preserved(monkeypatch):
+    route = "Vendor Credit Memos/Ball Detention Credits"
+    result = _run(
+        monkeypatch,
+        base_result=_auto(route),
+        document=_document(
+            "BALL METAL BEVERAGE CONTAINER CORP",
+            "Ball detention already-authoritative.pdf",
+            document_type="Credit_Memo",
+            raw_text="detention credit memo",
+        ),
+    )
+    assert result["decision"] == "auto_route"
+    assert result["route_path"] == route
+    assert result["coverage_recovery_safety"]["action"] == "allow_existing_decision"
+
+
 def test_generic_credit_memo_dnp_with_credit_workflow_history_is_demoted(monkeypatch):
     vendor = "BALL METAL BEVERAGE CONTAINER CORP"
     examples = [

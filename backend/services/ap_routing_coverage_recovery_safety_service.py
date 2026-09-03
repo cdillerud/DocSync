@@ -1,8 +1,8 @@
 """Final fail-closed safety boundary for V117 coverage recovery.
 
 This layer sits on top of the additive coverage-recovery service. It exists only
-to neutralize recovery classes that proved unsafe in measured held-out data while
-preserving the useful deterministic reference-family gains.
+to neutralize recovery/override classes that proved unsafe in measured held-out
+data while preserving useful deterministic reference-family gains.
 
 Measured V117 findings encoded here:
 * ordinary numeric BC references can be incidental/stale and may not grant an
@@ -13,7 +13,12 @@ Measured V117 findings encoded here:
 * current-document semantic words plus repeated same-vendor child-route history
   are not sufficient by themselves to grant a specific child workflow. The
   measured Ball detention false-positive proved that semantic-child recovery
-  needs another independent discriminator before it can be automatic.
+  needs another independent discriminator before it can be automatic;
+* an explicit current-document stop-pay instruction may never be overridden by a
+  learned payable vendor workflow; and
+* stable-vendor semantic overrides are not sufficient automatic authority for
+  non-AP operational documents, where extracted vendor identity may describe a
+  referenced supplier/customer rather than the workflow owner.
 
 This service only demotes automatic decisions to review. It never selects a new
 route and performs no SharePoint, Mongo, or Business Central writes.
@@ -91,10 +96,13 @@ def _explicit_stop_pay(document: Dict[str, Any]) -> bool:
     return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns)
 
 
-def _is_credit_memo(document: Dict[str, Any]) -> bool:
+def _normalized_document_type(document: Dict[str, Any]) -> str:
     value = str(document.get("document_type") or document.get("suggested_job_type") or "")
-    normalized = re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
-    return normalized in {"credit_memo", "vendor_credit_memo"}
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+
+
+def _is_credit_memo(document: Dict[str, Any]) -> bool:
+    return _normalized_document_type(document) in {"credit_memo", "vendor_credit_memo"}
 
 
 def _same_vendor_credit_workflow_routes(
@@ -161,6 +169,49 @@ async def decide_ap_route_with_recovery_safety(
     if result.get("decision") != DECISION_AUTO_ROUTE:
         return result
 
+    route = normalize_route_path(result.get("route_path"))
+    guard = result.get("authority_guard") or {}
+    guard_action = str(guard.get("action") or "")
+    document_type = _normalized_document_type(document)
+
+    # Current-document stop-pay language is a final safety boundary. A learned
+    # payable workflow may never override it. We fail closed rather than changing
+    # the destination here because this wrapper only demotes decisions.
+    if _explicit_stop_pay(document) and route != "DO NOT PAY":
+        return _force_review(
+            result,
+            contract=contract,
+            blocker=(
+                "explicit current-document stop-pay instruction conflicts with the automatic "
+                f"payable route {route}"
+            ),
+            action="force_review_explicit_stop_pay_route_conflict",
+            evidence={
+                "proposed_route": route,
+                "authority_guard_action": guard_action,
+                "explicit_stop_pay": True,
+            },
+        )
+
+    # Stable vendor semantic consensus is useful for normal AP invoices but is
+    # not sufficient automatic authority for operational/non-AP documents. In
+    # those documents a referenced vendor can be extracted even when the actual
+    # Accounting workflow belongs to a warehouse or handling process.
+    if guard_action == "override_stable_vendor_semantic_consensus" and document_type != "ap_invoice":
+        return _force_review(
+            result,
+            contract=contract,
+            blocker=(
+                "stable-vendor semantic consensus cannot grant automatic authority for "
+                f"non-AP operational document type {document_type or 'unknown'}"
+            ),
+            action="force_review_stable_vendor_override_non_ap_document",
+            evidence={
+                "document_type": document_type,
+                "authority_guard_action": guard_action,
+            },
+        )
+
     recovery = result.get("coverage_recovery") or {}
     recovery_action = str(recovery.get("action") or "")
 
@@ -190,7 +241,6 @@ async def decide_ap_route_with_recovery_safety(
             evidence={"semantic_child_consensus": semantic},
         )
 
-    route = normalize_route_path(result.get("route_path"))
     if route == "DO NOT PAY" and _is_credit_memo(document) and not _explicit_stop_pay(document):
         credit_routes = _same_vendor_credit_workflow_routes(document, support)
         if credit_routes:

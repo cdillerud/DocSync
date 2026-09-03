@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '6c455f1a027361115eba3ea9ecde989009bda76e'
+$ExpectedFeatureCommit = '609ad242af95877a9f663e4cf0bcfb17198674f8'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -178,7 +178,7 @@ $NewExamples = @'
     merged_vendor_counts=Counter(normalize_vendor_name(e.get('vendor_name')) or 'unknown' for e in examples)
     print('V117_MERGED_LABEL_COUNT='+str(len(examples)),flush=True)
     print('V117_MERGED_ROUTE_COUNTS='+json.dumps(dict(merged_route_counts),sort_keys=True),flush=True)
-    print('V117_MERGED_VENDOR_COUNTS='+json.dumps(dict(merged_vendor_counts),sort_keys=True),flush=True)
+    print('V117_MERGED_VENDOR_COUNTS='+json.dumps(dict(merged_vendor_counts),sort_keys=True,flush=True))
 
     if len(examples)<20:
 '@
@@ -247,6 +247,7 @@ Write-Host 'V117_DETERMINISTIC_COVERAGE_RECOVERY_CONFIGURED=PASS' -ForegroundCol
 Write-Host 'V117_COVERAGE_RECOVERY_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_SEMANTIC_CHILD_RECOVERY_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_STABLE_VENDOR_FINAL_SAFETY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_EXPLICIT_STOP_PAY_RECOVERY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_MONGO_RESILIENT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_EXPANSION_PROGRESS_TELEMETRY_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_CANDIDATE_PACKAGE_ORIGIN_GATE=PASS' -ForegroundColor Green

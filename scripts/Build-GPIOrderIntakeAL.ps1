@@ -26,19 +26,35 @@ $app = Get-Content $AppJsonPath -Raw | ConvertFrom-Json
 $ExpectedAppId = 'fcb4d73a-731e-47a4-85fa-8a49033cd3da'
 $ExpectedName = 'GPI Order Intake'
 $ExpectedPublisher = 'Gamer Packaging Inc'
-$ExpectedVersion = '0.1.0.3'
+$ExpectedVersion = '0.1.0.4'
+$ExpectedBoyerAppId = '65994cd5-4d6f-497e-abc0-767b8c392608'
+$ExpectedBoyerName = 'Boyer And Associates Custom Package'
+$ExpectedBoyerPublisher = 'Boyer And Associates'
+$ExpectedBoyerVersion = '25.0.0.13'
 
 if ([string]$app.id -ne $ExpectedAppId) { throw "Unexpected app id: $($app.id)" }
 if ([string]$app.name -ne $ExpectedName) { throw "Unexpected app name: $($app.name)" }
 if ([string]$app.publisher -ne $ExpectedPublisher) { throw "Unexpected publisher: $($app.publisher)" }
 if ([string]$app.version -ne $ExpectedVersion) { throw "Unexpected app version: $($app.version)" }
-if ($app.idRanges.Count -ne 1 -or [int]$app.idRanges[0].from -ne 71200 -or [int]$app.idRanges[0].to -ne 71299) {
+if (@($app.idRanges).Length -ne 1 -or [int]$app.idRanges[0].from -ne 71200 -or [int]$app.idRanges[0].to -ne 71299) {
     throw 'Unexpected Order Intake object range. Expected exactly 71200..71299.'
 }
 
+$dependencies = @($app.dependencies)
+if ($dependencies.Length -ne 1) {
+    throw "Expected exactly one app dependency (Boyer Custom Package); found $($dependencies.Length)."
+}
+$boyerDependency = $dependencies[0]
+if ([string]$boyerDependency.id -ne $ExpectedBoyerAppId -or
+    [string]$boyerDependency.name -ne $ExpectedBoyerName -or
+    [string]$boyerDependency.publisher -ne $ExpectedBoyerPublisher -or
+    [string]$boyerDependency.version -ne $ExpectedBoyerVersion) {
+    throw 'Boyer dependency hard pin changed.'
+}
+
 $sourceFiles = @(Get-ChildItem (Join-Path $ProjectPath 'src') -Filter '*.al' -File -Recurse)
-if ($sourceFiles.Count -lt 9) {
-    throw "Expected at least 9 AL source files; found $($sourceFiles.Count)."
+if ($sourceFiles.Length -lt 10) {
+    throw "Expected at least 10 AL source files; found $($sourceFiles.Length)."
 }
 
 $sourceText = ($sourceFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
@@ -54,7 +70,9 @@ $requiredMarkers = @(
     'Price List Line',
     'Sales Price',
     'Item Unit of Measure',
-    'Event Subscription'
+    'Event Subscription',
+    'Customer Item Sales',
+    'GPI Order Intake CustItemSales'
 )
 foreach ($marker in $requiredMarkers) {
     if ($sourceText.IndexOf($marker, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
@@ -176,10 +194,17 @@ This build script does not download symbols and does not connect to Business Cen
 '@
 }
 
+$boyerPackages = @(Get-ChildItem $PackageCachePath -Filter '*.app' -File -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match '(?i)Boyer' -and $_.Name -match '25\.0\.0\.13'
+})
+if ($boyerPackages.Length -lt 1) {
+    throw "Package cache does not contain the pinned Boyer Custom Package 25.0.0.13 symbol package: $PackageCachePath"
+}
+
 $outputDir = Join-Path $ProjectPath '.output'
 New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
 
-$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.3.app'
+$outFile = Join-Path $outputDir 'Gamer Packaging Inc_GPI Order Intake_0.1.0.4.app'
 if (Test-Path $outFile) {
     Remove-Item $outFile -Force
 }
@@ -190,6 +215,7 @@ Write-Host ('=' * 120) -ForegroundColor Cyan
 Write-Host "Project           : $ProjectPath"
 Write-Host "App               : $ExpectedName $ExpectedVersion"
 Write-Host "App ID            : $ExpectedAppId"
+Write-Host "Boyer dependency  : $ExpectedBoyerName $ExpectedBoyerVersion"
 Write-Host 'Object range      : 71200..71299'
 Write-Host "AL compiler       : $AlcPath"
 Write-Host "Package cache     : $PackageCachePath"

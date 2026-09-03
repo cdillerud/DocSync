@@ -1,0 +1,212 @@
+"""Relevant TRAIN-only human learning retrieval for AP routing.
+
+This module selects examples for the AI. It does not select a route.
+Only human-resolved Gamer Accounting evidence is eligible. Unreviewed AI
+predictions and held-out examples are explicitly excluded.
+"""
+
+from __future__ import annotations
+
+from collections import Counter
+from typing import Any, Dict, Iterable, List, Sequence
+
+from services.ap_routing_learning_service import (
+    LABEL_SOURCE_ACCOUNTING_TEMP,
+    LABEL_SOURCE_REVIEWER_CORRECTION,
+    normalize_route_path,
+    normalize_vendor_name,
+    score_example_similarity,
+)
+
+LABEL_SOURCE_REVIEWER_CONFIRMATION = "reviewer_confirmation"
+HUMAN_AUTHORITY_SOURCES = {
+    LABEL_SOURCE_ACCOUNTING_TEMP,
+    LABEL_SOURCE_REVIEWER_CORRECTION,
+    LABEL_SOURCE_REVIEWER_CONFIRMATION,
+}
+
+
+def _document_vendor(document: Dict[str, Any]) -> str:
+    fields = document.get("extracted_fields") or {}
+    return str(
+        document.get("vendor_name")
+        or document.get("vendor_canonical")
+        or fields.get("vendor")
+        or ""
+    )
+
+
+def _document_type(document: Dict[str, Any]) -> str:
+    return str(
+        document.get("document_type")
+        or document.get("suggested_job_type")
+        or (document.get("extracted_fields") or {}).get("document_type")
+        or ""
+    )
+
+
+def is_train_human_example(example: Dict[str, Any]) -> bool:
+    """Return True only for human-authoritative TRAIN evidence."""
+    source = str(example.get("label_source") or example.get("source") or "").lower()
+    if source not in HUMAN_AUTHORITY_SOURCES:
+        return False
+    if example.get("active") is False:
+        return False
+    if bool(example.get("is_holdout")):
+        return False
+    split = str(example.get("split") or example.get("evaluation_split") or "").lower()
+    if split in {"holdout", "test", "validation"}:
+        return False
+    if bool(example.get("ai_generated")) and not bool(example.get("human_resolved")):
+        return False
+    return bool(normalize_route_path(example.get("route_path") or example.get("final_human_route")))
+
+
+def _authority_bonus(example: Dict[str, Any]) -> float:
+    source = str(example.get("label_source") or example.get("source") or "").lower()
+    if source == LABEL_SOURCE_REVIEWER_CORRECTION:
+        return 6.0
+    if source == LABEL_SOURCE_REVIEWER_CONFIRMATION:
+        return 3.0
+    return 1.0
+
+
+def _same_vendor(document: Dict[str, Any], example: Dict[str, Any]) -> bool:
+    wanted = normalize_vendor_name(_document_vendor(document))
+    found = normalize_vendor_name(
+        example.get("vendor_name") or example.get("normalized_vendor") or ""
+    )
+    return bool(wanted and found and wanted == found)
+
+
+def _same_document_type(document: Dict[str, Any], example: Dict[str, Any]) -> bool:
+    wanted = _document_type(document).strip().lower()
+    found = str(example.get("document_type") or example.get("suggested_job_type") or "").strip().lower()
+    return bool(wanted and found and wanted == found)
+
+
+def _rank_score(document: Dict[str, Any], example: Dict[str, Any]) -> float:
+    score = score_example_similarity(
+        example,
+        vendor_name=_document_vendor(document),
+        document_type=_document_type(document),
+        bc_context=document.get("bc_context") or {},
+        file_name=str(document.get("file_name") or ""),
+        raw_text=str(document.get("raw_text") or document.get("raw_text_excerpt") or ""),
+        extracted_fields=document.get("extracted_fields") or {},
+    )
+    score += _authority_bonus(example)
+    if _same_vendor(document, example):
+        score += 4.0
+    if _same_document_type(document, example):
+        score += 2.0
+    return round(score, 4)
+
+
+def build_relevant_learning_examples(
+    current_document: Dict[str, Any],
+    examples: Sequence[Dict[str, Any]],
+    *,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """Return correction-first relevant examples plus deliberate contrasts.
+
+    The caller must pass TRAIN candidates. This function independently rejects
+    holdout/test rows and non-human/self-generated authority anyway.
+
+    Selection strategy:
+    * rank human labels by current-document similarity and correction authority;
+    * reserve capacity for same-vendor contradictory routes so the LLM sees
+      decision boundaries instead of learning a false one-vendor/one-route rule;
+    * preserve some route diversity after the relevant core is selected.
+    """
+    if limit <= 0:
+        return []
+
+    eligible = [dict(e) for e in examples if is_train_human_example(e)]
+    if not eligible:
+        return []
+
+    for row in eligible:
+        row["_learned_relevance_score"] = _rank_score(current_document, row)
+        row["_learned_same_vendor"] = _same_vendor(current_document, row)
+        row["_learned_same_document_type"] = _same_document_type(current_document, row)
+
+    ranked = sorted(
+        eligible,
+        key=lambda row: (
+            row["_learned_relevance_score"],
+            str(row.get("label_source") or "") == LABEL_SOURCE_REVIEWER_CORRECTION,
+        ),
+        reverse=True,
+    )
+
+    selected: List[Dict[str, Any]] = []
+    seen = set()
+
+    def add(row: Dict[str, Any]) -> None:
+        key = str(
+            row.get("fingerprint")
+            or row.get("source_item_id")
+            or row.get("document_id")
+            or f"{row.get('file_name')}|{row.get('route_path')}|{len(seen)}"
+        )
+        if key in seen or len(selected) >= limit:
+            return
+        seen.add(key)
+        selected.append(row)
+
+    # Relevant core: approximately 60% of the prompt context.
+    core_limit = max(1, min(limit, int(round(limit * 0.60))))
+    for row in ranked:
+        add(row)
+        if len(selected) >= core_limit:
+            break
+
+    # Deliberate same-vendor route contrasts. These are especially important
+    # for variable vendors and reviewer corrections.
+    same_vendor_rows = [row for row in ranked if row.get("_learned_same_vendor")]
+    route_counts = Counter(normalize_route_path(row.get("route_path")) for row in same_vendor_rows)
+    contrast_routes = [route for route, _ in route_counts.most_common() if route]
+    already_routes = {normalize_route_path(row.get("route_path")) for row in selected}
+    for route in contrast_routes:
+        if len(selected) >= limit:
+            break
+        if route in already_routes and len(contrast_routes) > 1:
+            continue
+        candidate = next(
+            (row for row in same_vendor_rows if normalize_route_path(row.get("route_path")) == route),
+            None,
+        )
+        if candidate:
+            add(candidate)
+            already_routes.add(route)
+
+    # Correction-first boundary examples, even if cross-vendor, then general
+    # relevant/diverse fill. A correction can reveal a semantic boundary that
+    # matters more than another generic same-route invoice.
+    for row in ranked:
+        if str(row.get("label_source") or "") == LABEL_SOURCE_REVIEWER_CORRECTION:
+            add(row)
+            if len(selected) >= limit:
+                break
+
+    routes_seen = Counter(normalize_route_path(row.get("route_path")) for row in selected)
+    for row in ranked:
+        if len(selected) >= limit:
+            break
+        route = normalize_route_path(row.get("route_path"))
+        if route and routes_seen[route] == 0:
+            before = len(selected)
+            add(row)
+            if len(selected) > before:
+                routes_seen[route] += 1
+
+    for row in ranked:
+        add(row)
+        if len(selected) >= limit:
+            break
+
+    # Internal ranking metadata is useful to evaluator/audit and harmless to
+    # the LLM, but do not mutate the caller's examples.
+    return selected

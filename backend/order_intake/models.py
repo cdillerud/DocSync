@@ -1,9 +1,11 @@
-"""Normalized models for inbound customer orders.
+"""Normalized models for order-intake source documents.
 
 Source facts and Business Central transaction values are deliberately separate.
-For example, a customer blanket schedule may express a truckload as a physical
-piece count while Business Central transacts the same load in a different sales
-quantity/UOM. The parser must preserve source evidence and never infer BC values.
+A customer PO may state BC-ready values directly, while a supplier/manufacturer
+schedule may describe a linked customer order using the supplier's own quantity,
+UOM, plant, or reference scheme. Parsers must preserve source evidence and never
+promote supplier-side values into BC Sales Order fields without authoritative
+customer/item resolution.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -15,6 +17,7 @@ from typing import Any, Dict, List, Optional
 class DocumentType(str, Enum):
     STANDARD_PO = "STANDARD_PO"
     BLANKET_RELEASE_BATCH = "BLANKET_RELEASE_BATCH"
+    SUPPLIER_SALES_ORDER_SCHEDULE = "SUPPLIER_SALES_ORDER_SCHEDULE"
 
 
 class ProposedAction(str, Enum):
@@ -30,6 +33,7 @@ class OrderSource:
     attachment_sha256: str
     source_format: str
     source_sheet: Optional[str] = None
+    source_party_role: Optional[str] = None
     message_id: Optional[str] = None
     internet_message_id: Optional[str] = None
     sender: Optional[str] = None
@@ -62,24 +66,24 @@ class NormalizedRelease:
     customer_item_reference: Optional[str] = None
     description: Optional[str] = None
 
-    # BC-ready transaction values. These may be populated directly from a normal
-    # PO (CanPack) or only after an authoritative customer/item profile resolves
-    # the customer's physical release into the BC sales UOM (Giovanni).
+    # BC-ready transaction values. Populate these only when the source is actually
+    # the customer order context or after an authoritative BC/customer/item mapping
+    # resolves source quantity/UOM into the BC sales transaction values.
     quantity: Optional[float] = None
     uom: Optional[str] = None
 
-    # Customer/source physical quantity evidence. Never send these fields directly
-    # to BC without resolving the item's BC sales UOM/profile first.
+    # Source physical quantity evidence. Supplier/manufacturer schedules belong here
+    # until their relationship to the end-customer Sales Order is explicitly proven.
     physical_quantity: Optional[float] = None
     physical_uom: Optional[str] = None
+    source_facility_reference: Optional[str] = None
 
     requested_shipment_date: Optional[datetime] = None
     requested_delivery_date: Optional[date] = None
 
-    # Customer ship-to and BC inventory/location are separate concepts. Giovanni
-    # live BC evidence shows pricing can vary by BC Location Code even when the
-    # customer, item, UOM and quantity are identical. Never overload ship-to as
-    # location or infer one from the other.
+    # Customer ship-to and BC inventory/location are separate concepts. Source
+    # supplier/manufacturer plants are separate again and belong in
+    # source_facility_reference, never ship_to_candidate or location_candidate.
     ship_to_candidate: Optional[str] = None
     location_candidate: Optional[str] = None
     resolved_location_code: Optional[str] = None

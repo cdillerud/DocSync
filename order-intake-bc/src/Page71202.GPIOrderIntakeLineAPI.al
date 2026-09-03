@@ -1,5 +1,5 @@
 /// <summary>
-/// Read-only API subpage exposing the BC-authoritative line result for GPI Order Intake.
+/// Read-only API subpage exposing BC-authoritative Sales Line results and pricing context.
 /// </summary>
 page 71202 "GPI Order Intake Line API"
 {
@@ -29,6 +29,11 @@ page 71202 "GPI Order Intake Line API"
                     Caption = 'ID';
                     Editable = false;
                 }
+                field(documentNumber; Rec."Document No.")
+                {
+                    Caption = 'Document Number';
+                    Editable = false;
+                }
                 field(sequence; Rec."Line No.")
                 {
                     Caption = 'Sequence';
@@ -42,6 +47,11 @@ page 71202 "GPI Order Intake Line API"
                 field(description; Rec.Description)
                 {
                     Caption = 'Description';
+                    Editable = false;
+                }
+                field(variantCode; Rec."Variant Code")
+                {
+                    Caption = 'Variant Code';
                     Editable = false;
                 }
                 field(quantity; Rec.Quantity)
@@ -67,6 +77,26 @@ page 71202 "GPI Order Intake Line API"
                 field(lineAmount; Rec."Line Amount")
                 {
                     Caption = 'Line Amount';
+                    Editable = false;
+                }
+                field(customerPriceGroup; Rec."Customer Price Group")
+                {
+                    Caption = 'Customer Price Group';
+                    Editable = false;
+                }
+                field(customerDiscountGroup; Rec."Customer Disc. Group")
+                {
+                    Caption = 'Customer Discount Group';
+                    Editable = false;
+                }
+                field(priceCalculationMethod; Rec."Price Calculation Method")
+                {
+                    Caption = 'Price Calculation Method';
+                    Editable = false;
+                }
+                field(currencyCode; Rec."Currency Code")
+                {
+                    Caption = 'Currency Code';
                     Editable = false;
                 }
                 field(shipmentDate; Rec."Shipment Date")

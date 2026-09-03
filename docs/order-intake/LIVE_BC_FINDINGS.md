@@ -72,10 +72,22 @@ Conclusion: the zero-price behavior is not a standard REST-only artifact. Even n
 
 ## Pricing diagnostics next
 
-Version `0.1.0.1` is staged as a diagnostics-only revision. It does not change the write authority. It adds read-only API visibility for:
+Version `0.1.0.1` is a diagnostics-only revision. It does not change the write authority. It adds read-only API visibility for:
 
 - Giovanni customer pricing context: Bill-to Customer No., Customer Price Group, Customer Discount Group, Currency Code, Price Calculation Method;
 - open Sales Line pricing context: document number, customer price/discount groups, currency, price calculation method, item/UOM/quantity/location/price;
 - Price List Line records: source type/no., asset/item, UOM, minimum quantity, dates, currency, amount type, unit price, status.
 
-The next gate is offline compilation of `0.1.0.1`. No PRE deployment should occur until that compile passes and the generated package SHA is reviewed.
+Offline compile of `0.1.0.1`: PASS
+
+- AL compiler: `17.0.34.45391`
+- source files compiled: `6`
+- package: `Gamer Packaging Inc_GPI Order Intake_0.1.0.1.app`
+- SHA256: `8CC6ED106EFC4FD66BF642DE69DB4D7956157EB8FD5CB322EDD15268369A41AB`
+- Business Central contacted: NO
+- publish/install: NONE
+- BC writes: NONE
+- Production: NOT TOUCHED
+- Release/Ship/Post source hard gate: PASS
+
+Next gate: publish only `0.1.0.1` to certified PRE and perform GET-only pricing diagnostics. No Sales Order authority action should be invoked in that pass.

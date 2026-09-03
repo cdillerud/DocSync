@@ -48,18 +48,21 @@ try {
     $base = (& git show "HEAD:$BasePath") -join "`n"
     if ([string]::IsNullOrWhiteSpace($base)) { throw 'Committed base harness content was empty.' }
 
+    # Exact counts deliberately pin this wrapper to the reviewed base harness. If that harness changes,
+    # this wrapper stops instead of silently applying a partial or over-broad text transformation.
     $patches = @(
-        [pscustomobject]@{ Name='version'; Old='0.1.0.0'; New=$TargetVersion; Minimum=5 },
-        [pscustomobject]@{ Name='package SHA'; Old='D92A5D2F724F258A690ED0F4E54219A6FE4C9ABCFE3A7FCB731C21E33E266E44'; New=$ExpectedPackageHash; Minimum=1 },
-        [pscustomobject]@{ Name='enable flag'; Old='GPI_ORDER_INTAKE_AL_PRE_TEST_ENABLED'; New=$EnableFlag; Minimum=1 }
+        [pscustomobject]@{ Name='version'; Old='0.1.0.0'; New=$TargetVersion; ExpectedCount=4 },
+        [pscustomobject]@{ Name='package SHA'; Old='D92A5D2F724F258A690ED0F4E54219A6FE4C9ABCFE3A7FCB731C21E33E266E44'; New=$ExpectedPackageHash; ExpectedCount=1 },
+        [pscustomobject]@{ Name='enable flag'; Old='GPI_ORDER_INTAKE_AL_PRE_TEST_ENABLED'; New=$EnableFlag; ExpectedCount=1 }
     )
 
     $patched = $base
     foreach ($patch in $patches) {
         $count = ([regex]::Matches($patched, [regex]::Escape([string]$patch.Old))).Count
-        if ($count -lt [int]$patch.Minimum) {
-            throw "Expected at least $($patch.Minimum) $($patch.Name) patch target(s); found $count."
+        if ($count -ne [int]$patch.ExpectedCount) {
+            throw "Expected exactly $($patch.ExpectedCount) $($patch.Name) patch target(s); found $count."
         }
+        Write-Host ("Patch target {0,-14}: {1} / {2}" -f $patch.Name, $count, $patch.ExpectedCount)
         $patched = $patched.Replace([string]$patch.Old, [string]$patch.New)
     }
 

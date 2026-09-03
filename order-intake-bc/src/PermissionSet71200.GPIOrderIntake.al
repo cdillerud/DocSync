@@ -22,6 +22,7 @@ permissionset 71200 "GPI ORDER INTAKE"
         tabledata "Sales Invoice Header" = R,
         tabledata "Sales Invoice Line" = R,
         codeunit "GPI Order Intake Authority" = X,
+        codeunit "GPI Order Intake Resolver" = X,
         page "GPI Order Intake Cust API" = X,
         page "GPI Order Intake Order API" = X,
         page "GPI Order Intake Line API" = X,

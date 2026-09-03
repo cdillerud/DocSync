@@ -178,7 +178,7 @@ $NewExamples = @'
     merged_vendor_counts=Counter(normalize_vendor_name(e.get('vendor_name')) or 'unknown' for e in examples)
     print('V117_MERGED_LABEL_COUNT='+str(len(examples)),flush=True)
     print('V117_MERGED_ROUTE_COUNTS='+json.dumps(dict(merged_route_counts),sort_keys=True),flush=True)
-    print('V117_MERGED_VENDOR_COUNTS='+json.dumps(dict(merged_vendor_counts),sort_keys=True,flush=True))
+    print('V117_MERGED_VENDOR_COUNTS='+json.dumps(dict(merged_vendor_counts),sort_keys=True),flush=True)
 
     if len(examples)<20:
 '@

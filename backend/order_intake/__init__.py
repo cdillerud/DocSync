@@ -1,8 +1,9 @@
 """GPI customer order intake package.
 
-Phase 0 is intentionally read-only with respect to Business Central.
+Phase 0 keeps parsing/mapping evidence separate from Business Central mutation.
 """
 
+from .customer_pdf_mapping import apply_profiled_customer_pdf_mapping
 from .models import (
     DocumentType,
     NormalizedInboundOrder,
@@ -23,4 +24,5 @@ __all__ = [
     "OrderSource",
     "OrderValidation",
     "ProposedAction",
+    "apply_profiled_customer_pdf_mapping",
 ]

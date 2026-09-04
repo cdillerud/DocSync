@@ -25,6 +25,18 @@ from services.ap_routing_learning_service import normalize_route_path, normalize
 logger = logging.getLogger(__name__)
 
 
+def _prompt_learning_example(example: Dict[str, Any]) -> Dict[str, Any]:
+    """Expose the bounded semantics that made a human example relevant."""
+    row = dict(example)
+    extracted = dict(example.get("extracted_fields") or {})
+    excerpt = str(example.get("raw_text_excerpt") or example.get("raw_text") or "")[:1600]
+    row["key_evidence"] = {
+        "extracted_fields": extracted,
+        "semantic_excerpt": excerpt,
+    }
+    return row
+
+
 async def propose_ap_route_ai_primary(
     *,
     document: Dict[str, Any],
@@ -41,11 +53,12 @@ async def propose_ap_route_ai_primary(
     """
     evidence = _document_evidence(document)
     context = bc_context or {}
-    support = _supervised_route_support(document, context, examples)
+    prompt_examples = [_prompt_learning_example(item) for item in examples[:8]]
+    support = _supervised_route_support(document, context, prompt_examples)
     prompt = build_route_prompt(
         document,
         context,
-        examples,
+        prompt_examples,
         contract,
         supervised_support=support,
     )
@@ -79,13 +92,18 @@ async def propose_ap_route_ai_primary(
         "vendor_name": evidence.get("vendor_name") or "",
         "normalized_vendor": normalize_vendor_name(evidence.get("vendor_name") or ""),
         "document_type": evidence.get("document_type") or "",
-        "few_shot_count": len(examples),
+        "few_shot_count": len(prompt_examples),
         "few_shot_routes": sorted(
             {
                 normalize_route_path(item.get("route_path"))
-                for item in examples
+                for item in prompt_examples
                 if normalize_route_path(item.get("route_path"))
             }
+        ),
+        "prompt_semantic_excerpt_count": sum(
+            1
+            for item in prompt_examples
+            if str((item.get("key_evidence") or {}).get("semantic_excerpt") or "").strip()
         ),
         "supervised_route_support_for_prompt_only": support,
         "route_selected_by": "ai_model",

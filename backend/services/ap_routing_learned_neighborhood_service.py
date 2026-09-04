@@ -18,6 +18,15 @@ from services.ap_routing_relevant_learning_service import (
 )
 
 
+EXCEPTIONAL_WORKFLOW_FEATURES = frozenset(
+    {
+        "explicit_stop_pay",
+        "replacement_or_offset",
+        "reversal_or_void",
+    }
+)
+
+
 def _vendor(document: Dict[str, Any]) -> str:
     fields = document.get("extracted_fields") or {}
     return normalize_vendor_name(
@@ -82,6 +91,7 @@ def summarize_authority_neighborhood(
     ]
 
     current_semantics = semantic_features(document)
+    exceptional_semantics = current_semantics.intersection(EXCEPTIONAL_WORKFLOW_FEATURES)
     current_ref = reference_family(document)
     structural_refs = {"wtr_reference", "wa_reference", "w_reference", "numeric_reference", "alpha_reference"}
     semantic_anchor = bool(current_semantics or current_ref in structural_refs)
@@ -121,8 +131,32 @@ def summarize_authority_neighborhood(
         weight = relative * _label_multiplier(row)
         weighted.append((row, weight))
 
-    support = [(row, weight) for row, weight in weighted if normalize_route_path(row.get("route_path")) == proposed]
-    contradictions = [(row, weight) for row, weight in weighted if normalize_route_path(row.get("route_path")) != proposed]
+    def support_matches_current_exception(row: Dict[str, Any]) -> bool:
+        if not exceptional_semantics:
+            return True
+        return exceptional_semantics.issubset(semantic_features(row))
+
+    proposed_rows = [
+        (row, weight)
+        for row, weight in weighted
+        if normalize_route_path(row.get("route_path")) == proposed
+    ]
+    support = [
+        (row, weight)
+        for row, weight in proposed_rows
+        if support_matches_current_exception(row)
+    ]
+    exception_mismatch_support = [
+        (row, weight)
+        for row, weight in proposed_rows
+        if not support_matches_current_exception(row)
+    ]
+    contradictions = [
+        (row, weight)
+        for row, weight in weighted
+        if normalize_route_path(row.get("route_path")) != proposed
+    ]
+
     support_weight = sum(weight for _, weight in support)
     contradiction_weight = sum(weight for _, weight in contradictions)
     total_weight = support_weight + contradiction_weight
@@ -136,12 +170,18 @@ def summarize_authority_neighborhood(
         if str(row.get("label_source") or "").lower() == "reviewer_correction"
     )
 
+    exception_support_ready = bool(
+        not exceptional_semantics
+        or len(support) >= minimum_support
+    )
+
     authority_ready = bool(
         proposed
         and len(support) >= minimum_support
         and share >= minimum_share
         and margin >= minimum_margin
         and correction_contradictions == 0
+        and exception_support_ready
         and (scope == "same_vendor" or semantic_anchor)
     )
 
@@ -167,6 +207,10 @@ def summarize_authority_neighborhood(
         "semantic_anchor": semantic_anchor,
         "current_reference_family": current_ref,
         "current_semantic_features": sorted(current_semantics),
+        "exceptional_workflow_features": sorted(exceptional_semantics),
+        "exception_support_count": len(support) if exceptional_semantics else 0,
+        "exception_mismatch_support_count": len(exception_mismatch_support),
+        "exception_support_ready": exception_support_ready,
         "authority_ready": authority_ready,
         "neighbor_routes": [normalize_route_path(row.get("route_path")) for row in neighborhood],
         "neighbor_ids": [

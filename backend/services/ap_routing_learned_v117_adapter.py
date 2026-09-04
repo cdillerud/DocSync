@@ -2,25 +2,15 @@
 
 The evaluator still calls a function named like the legacy authority guard. This
 adapter preserves that call contract while routing through the learned pipeline.
-It does not use the legacy deterministic route selector. Selected pure legacy
-helpers are reused only to identify universal safety conflicts; they can only
-cause review and can never select a replacement route.
+All deterministic safety is already applied inside the learned pipeline and may
+only demote the AI's exact route to review. No route substitution is allowed.
 """
 
 from __future__ import annotations
 
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from services.ap_routing_authority_guard_service import (
-    _bc_vendor_mismatch,
-    _cross_vendor_exact_reference_dependency,
-    _current_reference_family,
-    _family_conflict,
-    _manual_only_routes,
-)
 from services.ap_routing_learned_pipeline_service import decide_ap_route_learned
-from services.ap_routing_learned_safety_service import apply_learned_autonomy_safety
-from services.ap_routing_learning_service import normalize_route_path
 
 
 async def decide_ap_route_with_learned_autonomy(
@@ -48,45 +38,16 @@ async def decide_ap_route_with_learned_autonomy(
             row for row in train
             if row.get("human_resolved") and row.get("ai_proposed_route") and row.get("final_human_route")
         ],
+        relevant_limit=8,
         model=model,
         llm_send=llm_send,
     )
 
-    # Universal V117 safety evidence remains useful, but only as a veto. None
-    # of these helpers may replace the AI route.
-    proposed = normalize_route_path(result.get("ai_proposed_route"))
-    hard_blockers: List[str] = []
-    if proposed in _manual_only_routes(contract):
-        hard_blockers.append("AI proposed route is manual-only")
-    ref_family = _current_reference_family(document, context)
-    if proposed and ref_family and _family_conflict(ref_family, proposed):
-        hard_blockers.append(f"reference-family conflict: {ref_family} vs {proposed}")
-    if proposed and _bc_vendor_mismatch(document, context):
-        hard_blockers.append("authoritative BC vendor context conflicts with current document vendor")
-    if proposed and _cross_vendor_exact_reference_dependency(
-        document,
-        context,
-        train,
-        proposed,
-        {
-            "prediction": result.get("prediction") or {},
-            "ensemble_reconciliation": {
-                "original_prediction": result.get("prediction") or {},
-                "original_model_route": proposed,
-                "original_model_confidence": result.get("ai_confidence"),
-            },
-        },
-    ):
-        hard_blockers.append("cross-vendor exact-reference evidence was relied upon by the AI")
-
-    if hard_blockers:
-        result = apply_learned_autonomy_safety(
-            document=document,
-            autonomy_decision=result,
-            contract=contract,
-            bc_context=context,
-            hard_blockers=hard_blockers,
-        )
+    neighborhood = result.get("neighborhood") or {}
+    neighbor_routes = [str(route) for route in (neighborhood.get("neighbor_routes") or []) if route]
+    scope = str(neighborhood.get("scope") or "")
+    same_vendor_count = int(neighborhood.get("neighborhood_count") or 0) if scope == "same_vendor" else 0
+    same_vendor_route_count = len(set(neighbor_routes)) if scope == "same_vendor" else 0
 
     result["confidence"] = float(result.get("ai_confidence") or 0.0)
     result["blockers"] = list(result.get("safety_blockers") or result.get("reasons") or [])
@@ -96,13 +57,24 @@ async def decide_ap_route_with_learned_autonomy(
     result["authority_guard"] = {
         "action": "learned_" + str(result.get("autonomy_tier") or "review"),
         "blockers": list(result.get("safety_blockers") or result.get("reasons") or []),
-        "same_vendor_label_count": int(result.get("support_count") or 0) + int(result.get("contradiction_count") or 0),
-        "same_vendor_route_count": 1 + (1 if int(result.get("contradiction_count") or 0) else 0),
+        "same_vendor_label_count": same_vendor_count,
+        "same_vendor_route_count": same_vendor_route_count,
         "autonomy_score": result.get("autonomy_score"),
+        "support_count": result.get("support_count"),
+        "contradiction_count": result.get("contradiction_count"),
         "support_share": result.get("support_share"),
+        "support_margin": result.get("support_margin"),
+        "neighborhood_scope": scope,
+        "neighborhood_count": neighborhood.get("neighborhood_count"),
+        "neighbor_routes": neighbor_routes,
+        "neighbor_ids": neighborhood.get("neighbor_ids") or [],
+        "neighbor_scores": neighborhood.get("neighbor_scores") or [],
+        "semantic_anchor": neighborhood.get("semantic_anchor"),
+        "current_reference_family": neighborhood.get("current_reference_family"),
+        "current_semantic_features": neighborhood.get("current_semantic_features") or [],
         "performance": result.get("performance") or {},
         "earned_by": result.get("earned_by"),
-        "hard_safety_blockers": hard_blockers,
+        "hard_safety_blockers": list(result.get("safety_blockers") or []),
     }
     result["ensemble_reconciliation"] = {
         "action": "ai_primary_no_route_substitution",

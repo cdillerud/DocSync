@@ -5,9 +5,9 @@ PDF byte/text extraction is intentionally outside this module.
 - Digital PDFs may supply extracted text to a format-specific parser.
 - Image/scanned PDFs may supply structured evidence from a document-vision/OCR layer.
 
-Both paths end in the same normalized order contract. The parser preserves source
-quantity/UOM/price evidence but does not make Business Central pricing or item-resolution
-decisions.
+Both paths end in the same normalized order contract. Customer PO quantity/UOM and
+price remain source evidence until an authoritative customer/item mapping proves how
+they translate to the Business Central Sales Order transaction.
 """
 
 from __future__ import annotations
@@ -62,7 +62,12 @@ class CustomerPoEvidence:
 
 
 class CustomerPoEvidenceNormalizer:
-    """Convert extracted customer-PO evidence into the normalized order contract."""
+    """Convert extracted customer-PO evidence into the normalized order contract.
+
+    Important: customer PO quantity/UOM are preserved as source evidence. They are
+    not promoted into BC-ready transaction quantity/UOM until a customer/item mapping
+    explicitly proves direct equivalence or a deterministic packout conversion.
+    """
 
     def normalize(
         self,
@@ -109,8 +114,11 @@ class CustomerPoEvidenceNormalizer:
                     source_line_number=line.line_number,
                     customer_item_reference=line.customer_item_reference,
                     description=line.description,
-                    quantity=float(line.quantity),
-                    uom=line.uom,
+                    # Source quantity/UOM are deliberately not BC-ready yet.
+                    quantity=None,
+                    uom=None,
+                    physical_quantity=float(line.quantity),
+                    physical_uom=line.uom,
                     source_quantity_text=line.source_quantity_text,
                     source_uom_text=line.source_uom_text,
                     source_unit_price=line.source_unit_price,
@@ -120,8 +128,11 @@ class CustomerPoEvidenceNormalizer:
                     ship_to_candidate=evidence.ship_to,
                     source_coordinates=list(line.source_coordinates),
                     quantity_source="customer_purchase_order",
-                    quantity_resolution_method="source_customer_po",
+                    quantity_resolution_method=None,
                     extraction_confidence=1.0,
+                    parser_review_reasons=[
+                        "BC transaction quantity/UOM unresolved until authoritative customer/item mapping proves direct equivalence or conversion."
+                    ],
                 )
             )
 
@@ -151,7 +162,7 @@ class CustomerPoEvidenceNormalizer:
             validation=OrderValidation(
                 customer_status="CANDIDATE_FROM_CUSTOMER_PO",
                 item_status="UNRESOLVED_CUSTOMER_ITEM",
-                quantity_status="SOURCE_STATED",
+                quantity_status="SOURCE_STATED_BC_TRANSACTION_UNRESOLVED",
                 ship_to_status="SOURCE_STATED" if evidence.ship_to else "UNRESOLVED",
                 date_status="SOURCE_STATED",
                 price_status="SOURCE_STATED_EVIDENCE_NOT_AUTHORITY",
@@ -194,8 +205,9 @@ class HerdezCoupaPdfTextParser:
     """Parse the profiled Herdez Coupa PDF text layout.
 
     Herdez uses a decimal comma in the displayed quantity while the line total uses
-    US-style thousands separators. Example: `195,888 THOUSAND @ 225.75` means
-    195.888 thousand, not 195,888 thousand.
+    US-style thousands separators. Example: `195,888 THOUSAND @ 225.75` normalizes
+    the source quantity to `195.888 M`; that source normalization is still not proof
+    of the BC transaction quantity until the customer/item mapping is validated.
     """
 
     _po_re = re.compile(r"(?mi)^PO Number\s+(?P<po>\S+)\s*$")
@@ -247,15 +259,15 @@ class HerdezCoupaPdfTextParser:
                 raise ValueError(f"Herdez PO line {line_match.group('line')} has no quantity/detail row.")
 
             source_uom = detail.group("uom").upper()
-            quantity = self._parse_herdez_quantity(detail.group("qty"), source_uom)
-            normalized_uom = self._normalize_customer_uom(source_uom)
+            normalized_source_quantity = self._parse_herdez_quantity(detail.group("qty"), source_uom)
+            normalized_source_uom = self._normalize_customer_uom(source_uom)
             lines.append(
                 CustomerPoLineEvidence(
                     line_number=line_match.group("line"),
                     customer_item_reference=line_match.group("item"),
                     description=line_match.group("description").strip(),
-                    quantity=float(quantity),
-                    uom=normalized_uom,
+                    quantity=float(normalized_source_quantity),
+                    uom=normalized_source_uom,
                     requested_delivery_date=datetime.strptime(detail.group("date"), "%m/%d/%Y").date(),
                     source_quantity_text=detail.group("qty"),
                     source_uom_text=source_uom,
@@ -283,8 +295,10 @@ class HerdezCoupaPdfTextParser:
             attachment_sha256=attachment_sha256,
         )
         for release in result.releases:
-            if release.source_uom_text == "THOUSAND" and release.uom == "M":
-                release.quantity_resolution_method = "semantic_customer_uom_alias:THOUSAND->M"
+            if release.source_uom_text == "THOUSAND" and release.physical_uom == "M":
+                release.parser_review_reasons.append(
+                    "Herdez source quantity semantically normalized from THOUSAND to M; BC transaction equivalence still requires customer/item validation."
+                )
         return result
 
     @staticmethod

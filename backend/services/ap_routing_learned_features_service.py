@@ -8,7 +8,9 @@ business document: reference shape, document purpose, and semantic markers.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, Set
+from typing import Any, Dict, Set
+
+SEMANTIC_FEATURE_SCHEMA = "v117-semantic-v1"
 
 
 def _flatten(value: Any, *, limit: int = 80) -> str:
@@ -89,9 +91,41 @@ _SEMANTIC_PATTERNS = {
 }
 
 
+def known_semantic_feature_names() -> Set[str]:
+    return set(_SEMANTIC_PATTERNS)
+
+
+def _stored_semantic_features(document: Dict[str, Any]) -> Set[str]:
+    fields = document.get("extracted_fields") or {}
+    schema = str(
+        document.get("learned_feature_schema")
+        or fields.get("_learned_feature_schema")
+        or ""
+    )
+    if schema != SEMANTIC_FEATURE_SCHEMA:
+        return set()
+    values = document.get("learned_semantic_features")
+    if values is None:
+        values = fields.get("_learned_semantic_features")
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    known = known_semantic_feature_names()
+    return {str(value) for value in values if str(value) in known}
+
+
 def semantic_features(document: Dict[str, Any]) -> Set[str]:
     text = document_text(document)
-    return {name for name, pattern in _SEMANTIC_PATTERNS.items() if pattern.search(text)}
+    derived = {name for name, pattern in _SEMANTIC_PATTERNS.items() if pattern.search(text)}
+    return derived.union(_stored_semantic_features(document))
+
+
+def semantic_feature_snapshot(document: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a route-neutral, versioned semantic snapshot for durable evidence."""
+    return {
+        "schema": SEMANTIC_FEATURE_SCHEMA,
+        "features": sorted(semantic_features(document)),
+        "reference_family": reference_family(document),
+    }
 
 
 def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict[str, Any]:

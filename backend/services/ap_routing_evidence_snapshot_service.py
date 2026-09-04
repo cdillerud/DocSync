@@ -17,6 +17,10 @@ from pathlib import Path
 from typing import Any, Dict
 
 from services.ap_routing_decision_service import route_is_allowed
+from services.ap_routing_learned_features_service import (
+    SEMANTIC_FEATURE_SCHEMA,
+    known_semantic_feature_names,
+)
 from services.ap_routing_learning_service import (
     LABEL_SOURCE_ACCOUNTING_TEMP,
     LABEL_SOURCE_REVIEWER_CORRECTION,
@@ -32,12 +36,7 @@ HUMAN_SNAPSHOT_SOURCES = {
 
 
 def snapshot_examples_sha256(examples: list[Dict[str, Any]]) -> str:
-    """Stable digest for newly written snapshots.
-
-    Old V117 snapshots did not carry a digest, so validation treats a missing
-    digest as legacy metadata rather than as authority. New snapshots always
-    emit and verify it.
-    """
+    """Stable digest for versioned evidence snapshots."""
     canonical = json.dumps(
         examples,
         ensure_ascii=False,
@@ -55,6 +54,7 @@ def load_valid_evidence_snapshot(
     contract: Dict[str, Any],
     max_age_hours: float = 24.0,
     minimum_examples: int = 20,
+    required_semantic_feature_schema: str = SEMANTIC_FEATURE_SCHEMA,
 ) -> Dict[str, Any]:
     """Return validated snapshot metadata; otherwise return a fail-closed result."""
     snapshot_path = Path(path)
@@ -67,6 +67,7 @@ def load_valid_evidence_snapshot(
         "source_feature_commit": "",
         "age_seconds": None,
         "integrity": "unverified",
+        "semantic_feature_schema": "",
     }
     if not snapshot_path.is_file():
         result["reason"] = "snapshot_missing"
@@ -93,6 +94,15 @@ def load_valid_evidence_snapshot(
         result["reason"] = "authority_mismatch"
         return result
 
+    semantic_schema = str(payload.get("semantic_feature_schema") or "")
+    result["semantic_feature_schema"] = semantic_schema
+    if semantic_schema != required_semantic_feature_schema:
+        result["reason"] = (
+            "semantic_feature_schema_mismatch:"
+            f"{semantic_schema or 'missing'}!={required_semantic_feature_schema}"
+        )
+        return result
+
     raw_examples = payload.get("examples")
     if not isinstance(raw_examples, list):
         result["reason"] = "examples_not_list"
@@ -115,17 +125,18 @@ def load_valid_evidence_snapshot(
         return result
 
     declared_digest = str(payload.get("examples_sha256") or "").strip().lower()
-    if declared_digest:
-        actual_digest = snapshot_examples_sha256(examples)
-        if declared_digest != actual_digest:
-            result["reason"] = "snapshot_digest_mismatch"
-            return result
-        result["integrity"] = "sha256_verified"
-    else:
-        result["integrity"] = "legacy_no_digest"
+    if not declared_digest:
+        result["reason"] = "snapshot_digest_missing"
+        return result
+    actual_digest = snapshot_examples_sha256(examples)
+    if declared_digest != actual_digest:
+        result["reason"] = "snapshot_digest_mismatch"
+        return result
+    result["integrity"] = "sha256_verified"
 
     fingerprints = set()
     distinct_routes = set()
+    known_features = known_semantic_feature_names()
     for row in examples:
         source = str(row.get("label_source") or row.get("source") or "").strip().lower()
         if source not in HUMAN_SNAPSHOT_SOURCES:
@@ -153,6 +164,29 @@ def load_valid_evidence_snapshot(
             result["reason"] = f"route_not_allowed:{route}"
             return result
         distinct_routes.add(route)
+
+        row_schema = str(row.get("learned_feature_schema") or "")
+        if row_schema != required_semantic_feature_schema:
+            result["reason"] = "example_semantic_schema_missing_or_mismatch"
+            return result
+        features = row.get("learned_semantic_features")
+        if not isinstance(features, list):
+            result["reason"] = "example_semantic_features_missing"
+            return result
+        if any(not isinstance(feature, str) or feature not in known_features for feature in features):
+            result["reason"] = "example_semantic_features_invalid"
+            return result
+        fields = row.get("extracted_fields") or {}
+        if not isinstance(fields, dict):
+            result["reason"] = "example_extracted_fields_invalid"
+            return result
+        if str(fields.get("_learned_feature_schema") or "") != required_semantic_feature_schema:
+            result["reason"] = "example_semantic_schema_mirror_missing"
+            return result
+        mirrored = fields.get("_learned_semantic_features")
+        if not isinstance(mirrored, list) or sorted(mirrored) != sorted(features):
+            result["reason"] = "example_semantic_feature_mirror_mismatch"
+            return result
 
         fingerprint = str(
             row.get("fingerprint")

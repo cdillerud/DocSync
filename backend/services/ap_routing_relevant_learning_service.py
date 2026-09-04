@@ -8,8 +8,9 @@ predictions and held-out examples are explicitly excluded.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, List, Sequence
 
+from services.ap_routing_learned_features_service import feature_similarity
 from services.ap_routing_learning_service import (
     LABEL_SOURCE_ACCOUNTING_TEMP,
     LABEL_SOURCE_REVIEWER_CORRECTION,
@@ -85,7 +86,8 @@ def _same_document_type(document: Dict[str, Any], example: Dict[str, Any]) -> bo
     return bool(wanted and found and wanted == found)
 
 
-def _rank_score(document: Dict[str, Any], example: Dict[str, Any]) -> float:
+def learned_relevance_score(document: Dict[str, Any], example: Dict[str, Any]) -> float:
+    """Route-neutral relevance used for prompt retrieval and authority neighborhoods."""
     score = score_example_similarity(
         example,
         vendor_name=_document_vendor(document),
@@ -95,6 +97,7 @@ def _rank_score(document: Dict[str, Any], example: Dict[str, Any]) -> float:
         raw_text=str(document.get("raw_text") or document.get("raw_text_excerpt") or ""),
         extracted_fields=document.get("extracted_fields") or {},
     )
+    score += float(feature_similarity(document, example).get("score") or 0.0)
     score += _authority_bonus(example)
     if _same_vendor(document, example):
         score += 4.0
@@ -107,18 +110,13 @@ def build_relevant_learning_examples(
     current_document: Dict[str, Any],
     examples: Sequence[Dict[str, Any]],
     *,
-    limit: int = 20,
+    limit: int = 8,
 ) -> List[Dict[str, Any]]:
-    """Return correction-first relevant examples plus deliberate contrasts.
+    """Return the strongest TRAIN examples plus a small boundary contrast set.
 
-    The caller must pass TRAIN candidates. This function independently rejects
-    holdout/test rows and non-human/self-generated authority anyway.
-
-    Selection strategy:
-    * rank human labels by current-document similarity and correction authority;
-    * reserve capacity for same-vendor contradictory routes so the LLM sees
-      decision boundaries instead of learning a false one-vendor/one-route rule;
-    * preserve some route diversity after the relevant core is selected.
+    Prompt retrieval and autonomy authority are intentionally separate. This
+    function teaches the AI. A different service independently decides whether
+    the AI's exact route has earned authority.
     """
     if limit <= 0:
         return []
@@ -128,9 +126,10 @@ def build_relevant_learning_examples(
         return []
 
     for row in eligible:
-        row["_learned_relevance_score"] = _rank_score(current_document, row)
+        row["_learned_relevance_score"] = learned_relevance_score(current_document, row)
         row["_learned_same_vendor"] = _same_vendor(current_document, row)
         row["_learned_same_document_type"] = _same_document_type(current_document, row)
+        row["_learned_feature_similarity"] = feature_similarity(current_document, row)
 
     ranked = sorted(
         eligible,
@@ -156,57 +155,43 @@ def build_relevant_learning_examples(
         seen.add(key)
         selected.append(row)
 
-    # Relevant core: approximately 60% of the prompt context.
-    core_limit = max(1, min(limit, int(round(limit * 0.60))))
+    # The AI should mostly see the nearest learned cases, not a miniature route
+    # catalog. With limit=8 this reserves six slots for strongest similarity.
+    core_limit = max(1, min(limit, int(round(limit * 0.75))))
     for row in ranked:
         add(row)
         if len(selected) >= core_limit:
             break
 
-    # Deliberate same-vendor route contrasts. These are especially important
-    # for variable vendors and reviewer corrections.
+    # Add at most two strongest same-vendor route contrasts. This teaches the
+    # decision boundary without letting deliberately contradictory examples
+    # dominate the prompt.
     same_vendor_rows = [row for row in ranked if row.get("_learned_same_vendor")]
-    route_counts = Counter(normalize_route_path(row.get("route_path")) for row in same_vendor_rows)
-    contrast_routes = [route for route, _ in route_counts.most_common() if route]
-    already_routes = {normalize_route_path(row.get("route_path")) for row in selected}
-    for route in contrast_routes:
-        if len(selected) >= limit:
-            break
-        if route in already_routes and len(contrast_routes) > 1:
-            continue
-        candidate = next(
-            (row for row in same_vendor_rows if normalize_route_path(row.get("route_path")) == route),
-            None,
-        )
-        if candidate:
-            add(candidate)
-            already_routes.add(route)
-
-    # Correction-first boundary examples, even if cross-vendor, then general
-    # relevant/diverse fill. A correction can reveal a semantic boundary that
-    # matters more than another generic same-route invoice.
-    for row in ranked:
-        if str(row.get("label_source") or "") == LABEL_SOURCE_REVIEWER_CORRECTION:
-            add(row)
-            if len(selected) >= limit:
-                break
-
-    routes_seen = Counter(normalize_route_path(row.get("route_path")) for row in selected)
-    for row in ranked:
-        if len(selected) >= limit:
+    selected_routes = {normalize_route_path(row.get("route_path")) for row in selected}
+    contrast_budget = min(2, max(0, limit - len(selected)))
+    for row in same_vendor_rows:
+        if contrast_budget <= 0 or len(selected) >= limit:
             break
         route = normalize_route_path(row.get("route_path"))
-        if route and routes_seen[route] == 0:
-            before = len(selected)
+        if not route or route in selected_routes:
+            continue
+        before = len(selected)
+        add(row)
+        if len(selected) > before:
+            selected_routes.add(route)
+            contrast_budget -= 1
+
+    # Reviewer corrections are valuable boundary cases. Only use remaining
+    # capacity so a correction cannot evict the most relevant current pattern.
+    for row in ranked:
+        if len(selected) >= limit:
+            break
+        if str(row.get("label_source") or "") == LABEL_SOURCE_REVIEWER_CORRECTION:
             add(row)
-            if len(selected) > before:
-                routes_seen[route] += 1
 
     for row in ranked:
         add(row)
         if len(selected) >= limit:
             break
 
-    # Internal ranking metadata is useful to evaluator/audit and harmless to
-    # the LLM, but do not mutate the caller's examples.
     return selected

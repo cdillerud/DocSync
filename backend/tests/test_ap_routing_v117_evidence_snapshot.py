@@ -6,6 +6,7 @@ from services.ap_routing_evidence_snapshot_service import (
     load_valid_evidence_snapshot,
     snapshot_examples_sha256,
 )
+from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
 
 
 AUTHORITY = "gamerpackaging1.sharepoint.com/sites/GamerAccounting/General/Accounting/Accounts Payable/Temp Folder"
@@ -22,6 +23,7 @@ def contract(*routes):
 
 
 def example(idx, route, **overrides):
+    features = ["explicit_stop_pay"] if route == ROUTE_A else []
     row = {
         "fingerprint": f"example-{idx}",
         "file_name": f"example-{idx}.pdf",
@@ -30,7 +32,13 @@ def example(idx, route, **overrides):
         "route_path": route,
         "label_source": "accounting_temp",
         "active": True,
-        "extracted_fields": {"vendor": "Test Vendor"},
+        "learned_feature_schema": SEMANTIC_FEATURE_SCHEMA,
+        "learned_semantic_features": features,
+        "extracted_fields": {
+            "vendor": "Test Vendor",
+            "_learned_feature_schema": SEMANTIC_FEATURE_SCHEMA,
+            "_learned_semantic_features": features,
+        },
         "bc_context": {},
     }
     row.update(overrides)
@@ -40,9 +48,11 @@ def example(idx, route, **overrides):
 def write_snapshot(path, examples, **overrides):
     payload = {
         "schema_version": "1.0",
+        "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
         "feature_commit": "source-feature",
         "authority": AUTHORITY,
         "example_count": len(examples),
+        "examples_sha256": snapshot_examples_sha256(examples),
         "examples": examples,
     }
     payload.update(overrides)
@@ -64,23 +74,22 @@ def two_examples():
     return [example(1, ROUTE_A), example(2, ROUTE_B)]
 
 
-def test_valid_legacy_snapshot_is_accepted_without_granting_new_authority(tmp_path):
+def test_snapshot_without_digest_is_rejected_for_live_rebuild(tmp_path):
     path = tmp_path / "snapshot.json"
-    write_snapshot(path, two_examples())
+    write_snapshot(path, two_examples(), examples_sha256="")
     result = load(path)
-    assert result["valid"] is True
-    assert result["reason"] == "validated"
-    assert result["example_count"] == 2
-    assert result["integrity"] == "legacy_no_digest"
+    assert result["valid"] is False
+    assert result["reason"] == "snapshot_digest_missing"
 
 
 def test_new_snapshot_sha256_is_verified(tmp_path):
     path = tmp_path / "snapshot.json"
     rows = two_examples()
-    write_snapshot(path, rows, examples_sha256=snapshot_examples_sha256(rows))
+    write_snapshot(path, rows)
     result = load(path)
     assert result["valid"] is True
     assert result["integrity"] == "sha256_verified"
+    assert result["semantic_feature_schema"] == SEMANTIC_FEATURE_SCHEMA
 
 
 def test_digest_mismatch_fails_closed(tmp_path):

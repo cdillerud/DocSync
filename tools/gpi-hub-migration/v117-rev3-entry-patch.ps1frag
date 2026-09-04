@@ -1,7 +1,7 @@
 # ---- V117 REV3 fast human-evidence replay overlay ----
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old '$ExpectedFeatureCommit = ''a728eba4dd9014a91e47947292d046e59924f3c7''' `
-    -New '$ExpectedFeatureCommit = ''7a983c610b206cff2d059f7a009a6d63bd15d4d0''' `
+    -New '$ExpectedFeatureCommit = ''025d0ac203e8a950f853918fd40b1a038ce19824''' `
     -Marker 'REV3 learned feature pin'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `

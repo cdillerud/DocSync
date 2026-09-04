@@ -1,7 +1,7 @@
 # ---- V117 REV3 fast human-evidence replay overlay ----
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old '$ExpectedFeatureCommit = ''a728eba4dd9014a91e47947292d046e59924f3c7''' `
-    -New '$ExpectedFeatureCommit = ''830bc9611f3e6c7bef12c66215ddd070214c593f''' `
+    -New '$ExpectedFeatureCommit = ''7a983c610b206cff2d059f7a009a6d63bd15d4d0''' `
     -Marker 'REV3 learned feature pin'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
@@ -11,8 +11,8 @@ $EntryRaw = Replace-Required -Text $EntryRaw `
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py'," `
-    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py'," `
-    -Marker 'REV3 evidence snapshot regression materialization'
+    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_exception_semantic_authority.py'," `
+    -Marker 'REV3 evidence snapshot and exception-semantic regression materialization'
 
 $CompileServiceOld = @'
  "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
@@ -28,9 +28,10 @@ $SnapshotTestOld = @'
 '@
 $SnapshotTestNew = @'
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_evidence_snapshot.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_evidence_snapshot.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_exception_semantic_authority.py"
 '@
-Require ($EntryRaw.Contains($SnapshotTestOld)) 'REV3 snapshot test compile/pytest anchor missing.'
+Require ($EntryRaw.Contains($SnapshotTestOld)) 'REV3 snapshot/exception test compile/pytest anchor missing.'
 $EntryRaw = $EntryRaw.Replace($SnapshotTestOld,$SnapshotTestNew)
 
 $OriginOld = 'services.ap_routing_learned_evaluation_service as e; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e)]'
@@ -39,8 +40,8 @@ $EntryRaw = Replace-Required -Text $EntryRaw -Old $OriginOld -New $OriginNew -Ma
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old 'echo V117_FOCUSED_REGRESSION_TARGET=107' `
-    -New 'echo V117_FOCUSED_REGRESSION_TARGET=116' `
-    -Marker 'REV3 focused regression target 116'
+    -New 'echo V117_FOCUSED_REGRESSION_TARGET=120' `
+    -Marker 'REV3 focused regression target 120'
 
 $ProbeImportOld = @'
 from services.ap_routing_learned_evaluation_service import (

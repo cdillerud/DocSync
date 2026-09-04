@@ -62,6 +62,7 @@ class OrderDocument:
     customer_order_reference: Optional[str] = None
     order_date: Optional[date] = None
     currency: Optional[str] = None
+    source_vendor_reference: Optional[str] = None
 
 
 @dataclass

@@ -1,11 +1,11 @@
 """Normalized models for order-intake source documents.
 
 Source facts and Business Central transaction values are deliberately separate.
-A customer PO may state BC-ready values directly, while a supplier/manufacturer
-schedule may describe a linked customer order using the supplier's own quantity,
-UOM, plant, or reference scheme. Parsers must preserve source evidence and never
-promote supplier-side values into BC Sales Order fields without authoritative
-customer/item resolution.
+A customer PO may state a quantity/UOM that later proves to map directly into BC,
+but that equivalence is not assumed. Supplier/manufacturer schedules may likewise
+describe linked customer orders using their own quantity, UOM, plant, or reference
+scheme. Parsers preserve source evidence; authoritative customer/item rules decide
+whether BC transaction values are direct, converted, or REVIEW.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -74,7 +74,7 @@ class NormalizedRelease:
     description: Optional[str] = None
 
     # Source-line identity and evidence. Preserve exactly enough information to
-    # explain how the parser interpreted the customer's source document.
+    # explain how the parser interpreted the source document.
     source_line_number: Optional[str] = None
     source_quantity_text: Optional[str] = None
     source_uom_text: Optional[str] = None
@@ -82,14 +82,13 @@ class NormalizedRelease:
     source_price_uom: Optional[str] = None
     source_line_total: Optional[float] = None
 
-    # BC-ready transaction values. Populate these only when the source is actually
-    # the customer order context or after an authoritative BC/customer/item mapping
-    # resolves source quantity/UOM into the BC sales transaction values.
+    # BC-ready transaction values. Populate only after an authoritative customer/
+    # item mapping proves direct equivalence or an explicit deterministic conversion.
     quantity: Optional[float] = None
     uom: Optional[str] = None
 
-    # Source physical quantity evidence. Supplier/manufacturer schedules belong here
-    # until their relationship to the end-customer Sales Order is explicitly proven.
+    # Source quantity/UOM evidence. Customer POs and supplier/manufacturer schedules
+    # both belong here until their relationship to the BC transaction is proven.
     physical_quantity: Optional[float] = None
     physical_uom: Optional[str] = None
     source_facility_reference: Optional[str] = None

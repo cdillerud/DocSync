@@ -30,6 +30,8 @@ def _document_from_example(example: Dict[str, Any]) -> Dict[str, Any]:
         "extracted_fields": example.get("extracted_fields") or {},
         "normalized_fields": example.get("normalized_fields") or {},
         "raw_text": example.get("raw_text_excerpt") or example.get("raw_text") or "",
+        "learned_feature_schema": example.get("learned_feature_schema"),
+        "learned_semantic_features": example.get("learned_semantic_features") or [],
     }
 
 
@@ -119,6 +121,12 @@ async def evaluate_holdout_learned(
                 "neighborhood_support_margin": authority_guard.get("support_margin"),
                 "neighborhood_routes": authority_guard.get("neighbor_routes") or [],
                 "neighborhood_scores": authority_guard.get("neighbor_scores") or [],
+                "current_semantic_features": authority_guard.get("current_semantic_features") or [],
+                "exceptional_workflow_features": authority_guard.get("exceptional_workflow_features") or [],
+                "exception_support_count": authority_guard.get("exception_support_count"),
+                "exception_mismatch_support_count": authority_guard.get("exception_mismatch_support_count"),
+                "exception_support_ready": authority_guard.get("exception_support_ready"),
+                "learned_feature_schema": test.get("learned_feature_schema"),
                 "earned_by": authority_guard.get("earned_by"),
                 "autonomy_score": authority_guard.get("autonomy_score"),
                 "hard_safety_blockers": authority_guard.get("hard_safety_blockers") or [],

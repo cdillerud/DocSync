@@ -7,402 +7,82 @@ $ErrorActionPreference = 'Stop'
 
 $ToolRoot = Split-Path -Parent $PSCommandPath
 $StatePath = Join-Path $ToolRoot 'state.json'
-$BaseSourcePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1'
-$EntrySourcePath = Join-Path $ToolRoot 'Invoke-GPIHub-V117-Entry.ps1'
+$LegacyControlCommit = 'b45ae78800b8f6666a6a105318cf0b7bf6fe6648'
+$LegacyRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1'
+$ExpectedFeatureCommit = '830bc9611f3e6c7bef12c66215ddd070214c593f'
 
 function Require {
     param([bool]$Condition,[string]$Message)
     if (-not $Condition) { throw $Message }
 }
 
-function Replace-Required {
-    param(
-        [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Old,
-        [Parameter(Mandatory)][string]$New,
-        [Parameter(Mandatory)][string]$Marker
-    )
-    Require ($Text.Contains($Old)) "V117 REV2 patch anchor missing: $Marker"
-    return $Text.Replace($Old,$New)
-}
-
-Require (Test-Path -LiteralPath $StatePath -PathType Leaf) "State missing: $StatePath"
-Require (Test-Path -LiteralPath $BaseSourcePath -PathType Leaf) "Base V116 controller missing: $BaseSourcePath"
-Require (Test-Path -LiteralPath $EntrySourcePath -PathType Leaf) "V117 entry missing: $EntrySourcePath"
-
+Require (Test-Path -LiteralPath $StatePath -PathType Leaf) "V117 REV3 state missing: $StatePath"
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$PatchRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-rev2-detached-controller'
-$PatchedBasePath = Join-Path $PatchRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluation.ps1'
-$PatchedEntryPath = Join-Path $PatchRoot 'Invoke-GPIHub-V117-Entry.ps1'
-$PatchedStatePath = Join-Path $PatchRoot 'state.json'
+Require (Test-Path -LiteralPath $OperationalRoot -PathType Container) "V117 REV3 operational repo missing: $OperationalRoot"
+Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
+Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe unavailable.'
 
-New-Item -ItemType Directory -Path $PatchRoot -Force | Out-Null
+$spec = "{0}:{1}" -f $LegacyControlCommit,$LegacyRepoPath
+$legacyLines = & git.exe -C $OperationalRoot show $spec
+$gitExit = $LASTEXITCODE
+Require ($gitExit -eq 0) "Could not load immutable V117 REV2 controller from $LegacyControlCommit."
+$LegacyRaw = ((@($legacyLines) | ForEach-Object { [string]$_ }) -join "`n") -replace "`r",''
 
-$BaseRaw = (Get-Content -LiteralPath $BaseSourcePath -Raw) -replace "`r",''
+$EntryReadAnchor = @'
 $EntryRaw = (Get-Content -LiteralPath $EntrySourcePath -Raw) -replace "`r",''
-
-$BaseRaw = $BaseRaw.Replace(
-    "        '-o','ConnectTimeout=20',",
-    "        '-o','ConnectTimeout=20',`n        '-o','ServerAliveInterval=30',`n        '-o','ServerAliveCountMax=6',`n        '-o','TCPKeepAlive=yes',"
-)
-
-$BackendSelectorOld = @'
-backend=$(docker ps --filter 'label=com.docker.compose.service=backend' --format '{{.Names}}' | head -n 1)
-[ -n "$backend" ] || { echo 'Source backend missing.' >&2; exit 71; }
-[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image drift.' >&2; exit 72; }
-[ "$(docker exec "$backend" sha256sum /app/services/document_intel_helpers.py | awk '{print $1}')" = "$EXPECTED_HELPER" ] || { echo 'Source document helper drift.' >&2; exit 73; }
 '@
-$BackendSelectorNew = @'
-backend=''
-backend_candidates=0
-image_matches=0
-certified_matches=0
-while IFS= read -r candidate; do
-    [ -n "$candidate" ] || continue
-    backend_candidates=$((backend_candidates+1))
-    candidate_image=$(docker inspect "$candidate" -f '{{.Image}}' 2>/dev/null || true)
-    candidate_project=$(docker inspect "$candidate" -f '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)
-    candidate_helper=''
-    if docker exec "$candidate" test -f /app/services/document_intel_helpers.py >/dev/null 2>&1; then
-        candidate_helper=$(docker exec "$candidate" sha256sum /app/services/document_intel_helpers.py 2>/dev/null | awk '{print $1}' || true)
-    fi
-    echo "V116_BACKEND_CANDIDATE=name=$candidate;project=$candidate_project;image=$candidate_image;helper=$candidate_helper"
-    if [ "$candidate_image" = "$EXPECTED_IMAGE" ]; then
-        image_matches=$((image_matches+1))
-        if [ "$candidate_helper" = "$EXPECTED_HELPER" ]; then
-            backend="$candidate"
-            certified_matches=$((certified_matches+1))
-        fi
-    fi
-done < <(docker ps --filter 'label=com.docker.compose.service=backend' --format '{{.Names}}')
-[ "$backend_candidates" -gt 0 ] || { echo 'Source backend missing.' >&2; exit 71; }
-[ "$image_matches" -gt 0 ] || { echo 'Source certified backend image not found among backend containers.' >&2; exit 72; }
-[ "$certified_matches" -gt 0 ] || { echo 'Source document helper drift on certified backend image.' >&2; exit 73; }
-[ "$certified_matches" -eq 1 ] || { echo "Source certified backend selection ambiguous: matches=$certified_matches" >&2; exit 78; }
-backend_id_before=$(docker inspect "$backend" -f '{{.Id}}')
-echo "V116_SOURCE_BACKEND_SELECTED=$backend"
-echo "V116_SOURCE_BACKEND_ID_BEFORE=$backend_id_before"
-'@
-$BaseRaw = Replace-Required -Text $BaseRaw -Old $BackendSelectorOld -New $BackendSelectorNew -Marker 'certified backend container selector'
-
-$HealthProbeOld = @'
-health=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=4); print(r.status)')
-case "$health" in 2??|3??) ;; *) echo "Source backend unhealthy: $health" >&2; exit 77;; esac
-echo "V116_SOURCE_HEALTH_BEFORE=$health"
-echo V116_SOURCE_SAFETY=PASS
-'@
-$HealthProbeNew = @'
-health=''
-health_attempt=0
-while [ "$health_attempt" -lt 6 ]; do
-    health_attempt=$((health_attempt+1))
-    health=$(docker exec "$backend" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=8).status)' 2>/dev/null || true)
-    if [ -n "$health" ]; then
-        echo "V116_SOURCE_HEALTH_ATTEMPT=$health_attempt;result=$health"
-    else
-        echo "V116_SOURCE_HEALTH_ATTEMPT=$health_attempt;result=TIMEOUT_OR_ERROR"
-    fi
-    case "$health" in
-        2??|3??) break ;;
-    esac
-    sleep 5
-done
-case "$health" in
-    2??|3??) ;;
-    *)
-        docker inspect "$backend" -f 'V116_SOURCE_CONTAINER_STATE=status={{.State.Status}};running={{.State.Running}};restart_count={{.RestartCount}};oom_killed={{.State.OOMKilled}};started={{.State.StartedAt}}' 2>/dev/null || true
-        echo "Source backend unhealthy after bounded retries: $health" >&2
-        exit 77
-        ;;
-esac
-echo "V116_SOURCE_HEALTH_BEFORE=$health"
-echo V116_SOURCE_SAFETY=PASS
-'@
-$BaseRaw = Replace-Required -Text $BaseRaw -Old $HealthProbeOld -New $HealthProbeNew -Marker 'bounded source health retries'
-
-$PostProbeOld = @'
-echo "V116_HELDOUT_PROBE_EXIT=$probe_exit"
-
-after=$(docker exec "$backend" python -c 'import urllib.request; r=urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=4); print(r.status)')
-echo "V116_SOURCE_HEALTH_AFTER=$after"
-[ "$after" = "$health" ] || { echo 'Source health changed during V116.' >&2; exit 78; }
-[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image changed during V116.' >&2; exit 79; }
-
-docker exec "$backend" rm -rf "$CONTAINER_STAGE" "$PROBE"
-rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE"
-echo V116_TEMP_CLEANUP=PASS
-echo V116_SOURCE_RUNTIME_UNCHANGED=PASS
-exit "$probe_exit"
-'@
-$PostProbeNew = @'
-echo "V116_HELDOUT_PROBE_EXIT=$probe_exit"
-
-backend_id_after=$(docker inspect "$backend" -f '{{.Id}}' 2>/dev/null || true)
-echo "V116_SOURCE_BACKEND_ID_AFTER=$backend_id_after"
-if [ -z "$backend_id_after" ] || [ "$backend_id_after" != "$backend_id_before" ]; then
-    echo "V116_SOURCE_BACKEND_REPLACED_DURING_EVALUATION=FAIL;before=$backend_id_before;after=$backend_id_after" >&2
-    rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE" || true
-    exit 80
-fi
-
-after=''
-after_attempt=0
-while [ "$after_attempt" -lt 6 ]; do
-    after_attempt=$((after_attempt+1))
-    after=$(docker exec "$backend" python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8001/api/health",timeout=8).status)' 2>/dev/null || true)
-    if [ -n "$after" ]; then
-        echo "V116_SOURCE_HEALTH_AFTER_ATTEMPT=$after_attempt;result=$after"
-    else
-        echo "V116_SOURCE_HEALTH_AFTER_ATTEMPT=$after_attempt;result=TIMEOUT_OR_ERROR"
-    fi
-    case "$after" in
-        2??|3??) break ;;
-    esac
-    sleep 5
-done
-case "$after" in
-    2??|3??) ;;
-    *)
-        docker inspect "$backend" -f 'V116_SOURCE_CONTAINER_STATE_AFTER=status={{.State.Status}};running={{.State.Running}};restart_count={{.RestartCount}};oom_killed={{.State.OOMKilled}};started={{.State.StartedAt}}' 2>/dev/null || true
-        echo 'Source backend unhealthy after V116 bounded retries.' >&2
-        exit 77
-        ;;
-esac
-echo "V116_SOURCE_HEALTH_AFTER=$after"
-[ "$after" = "$health" ] || { echo 'Source health changed during V116.' >&2; exit 78; }
-[ "$(docker inspect "$backend" -f '{{.Image}}')" = "$EXPECTED_IMAGE" ] || { echo 'Source backend image changed during V116.' >&2; exit 79; }
-
-docker exec "$backend" rm -rf "$CONTAINER_STAGE" "$PROBE"
-rm -rf /tmp/gpi-ap-routing-v116-stage "$PROBE"
-echo V116_TEMP_CLEANUP=PASS
-echo V116_SOURCE_RUNTIME_UNCHANGED=PASS
-exit "$probe_exit"
-'@
-$BaseRaw = Replace-Required -Text $BaseRaw -Old $PostProbeOld -New $PostProbeNew -Marker 'backend replacement detection and bounded post health'
-
-$BaseRaw = Replace-Required -Text $BaseRaw `
-    -Old "        concurrency=2,`n        persist=False," `
-    -New "        concurrency=4,`n        persist=False," `
-    -Marker 'base corpus concurrency 4'
-
-$DetachedFunction = @'
-function Invoke-SshScriptDetachedPolled {
-    param(
-        [Parameter(Mandatory)][string]$KnownHosts,
-        [Parameter(Mandatory)][string]$ScriptText
-    )
-
-    $runId = [guid]::NewGuid().ToString('N')
-    $remoteScript = "/tmp/gpi-v117-$runId.sh"
-    $remoteRunner = "/tmp/gpi-v117-$runId-runner.sh"
-    $remoteLog = "/tmp/gpi-v117-$runId.log"
-    $remoteExit = "/tmp/gpi-v117-$runId.exit"
-    $remotePid = "/tmp/gpi-v117-$runId.pid"
-    $normalized = $ScriptText -replace "`r",''
-    $payload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($normalized))
-
-    $statusPath = Join-Path $DiagDir 'V117-Detached-Remote.txt'
-    @(
-        "run_id=$runId",
-        "script=$remoteScript",
-        "runner=$remoteRunner",
-        "log=$remoteLog",
-        "exit=$remoteExit",
-        "pid=$remotePid"
-    ) | Set-Content -LiteralPath $statusPath -Encoding utf8
-
-    $launcher = @"
-set -euo pipefail
-rm -f '$remoteScript' '$remoteRunner' '$remoteLog' '$remoteExit' '$remotePid'
-printf '%s' '$payload' | base64 -di > '$remoteScript'
-chmod 700 '$remoteScript'
-cat > '$remoteRunner' <<'GPI_RUNNER'
-#!/usr/bin/env bash
-set +e
-bash '$remoteScript' > '$remoteLog' 2>&1
-rc=`$?
-printf '%s\n' "`$rc" > '$remoteExit'
-exit 0
-GPI_RUNNER
-chmod 700 '$remoteRunner'
-nohup bash '$remoteRunner' >/dev/null 2>&1 < /dev/null &
-printf '%s\n' "`$!" > '$remotePid'
-echo "V117_DETACHED_REMOTE_PID=`$!"
-echo "V117_DETACHED_REMOTE_LOG=$remoteLog"
-echo "V117_DETACHED_REMOTE_EXIT_FILE=$remoteExit"
-"@
-
-    $start = Invoke-SshScript -KnownHosts $KnownHosts -ScriptText $launcher
-    Require ($start.ExitCode -eq 0) "Could not start detached V117 remote evaluator: $($start.StdErr)"
-    if (-not [string]::IsNullOrWhiteSpace($start.StdOut)) { Write-Host $start.StdOut }
-    Write-Host 'V117_DETACHED_REMOTE_START=PASS' -ForegroundColor Green
-    Write-Host "V117_DETACHED_STATUS_FILE=$statusPath"
-
-    $seenLines = 0
-    $remoteCode = $null
-    $consecutivePollFailures = 0
-
-    while ($null -eq $remoteCode) {
-        $pollScript = @"
-set -u
-if [ -f '$remoteLog' ]; then
-    cat '$remoteLog'
-fi
-if [ -f '$remoteExit' ]; then
-    printf '__GPI_REMOTE_EXIT__=%s\n' "`$(cat '$remoteExit')"
-fi
-"@
-        $poll = Invoke-SshScript -KnownHosts $KnownHosts -ScriptText $pollScript
-
-        if ($poll.ExitCode -ne 0) {
-            $consecutivePollFailures++
-            Write-Host "V117_MONITOR_SSH_RETRY=$consecutivePollFailures;exit=$($poll.ExitCode)" -ForegroundColor DarkYellow
-            if ($consecutivePollFailures -ge 120) {
-                throw "V117 detached evaluator may still be running, but polling failed 120 consecutive times. Recovery metadata: $statusPath"
-            }
-            Start-Sleep -Seconds 15
-            continue
-        }
-
-        $consecutivePollFailures = 0
-        $lines = @()
-        if (-not [string]::IsNullOrWhiteSpace($poll.StdOut)) {
-            $lines = @($poll.StdOut -split "`n")
-        }
-
-        $exitLine = $lines | Where-Object { $_ -like '__GPI_REMOTE_EXIT__=*' } | Select-Object -Last 1
-        $logLines = @($lines | Where-Object { $_ -notlike '__GPI_REMOTE_EXIT__=*' })
-
-        if ($logLines.Count -lt $seenLines) { $seenLines = 0 }
-        if ($logLines.Count -gt $seenLines) {
-            for ($i = $seenLines; $i -lt $logLines.Count; $i++) {
-                Write-Host ([string]$logLines[$i])
-            }
-            $seenLines = $logLines.Count
-        }
-
-        if ($exitLine) {
-            $value = ([string]$exitLine).Substring('__GPI_REMOTE_EXIT__='.Length).Trim()
-            $parsed = 0
-            Require ([int]::TryParse($value,[ref]$parsed)) "Invalid detached V117 exit marker: $exitLine"
-            $remoteCode = $parsed
-            break
-        }
-
-        Start-Sleep -Seconds 15
-    }
-
-    Write-Host "V117_DETACHED_REMOTE_EXIT=$remoteCode"
-    Write-Host "V117_DETACHED_REMOTE_LOG_PRESERVED=$remoteLog"
-
-    $cleanupScript = @"
-rm -f '$remoteScript' '$remoteRunner' '$remoteExit' '$remotePid'
-"@
-    $null = Invoke-SshScript -KnownHosts $KnownHosts -ScriptText $cleanupScript
-
-    return [pscustomobject]@{
-        ExitCode = [int]$remoteCode
-        StdOut = ''
-        StdErr = ''
-    }
-}
-
-'@
-
-$BaseRaw = Replace-Required -Text $BaseRaw `
-    -Old 'function Materialize-GitTextFile {' `
-    -New ($DetachedFunction + 'function Materialize-GitTextFile {') `
-    -Marker 'detached polling function insertion'
-
-$OldProbeInvocation = @'
-    $probe = Invoke-SshScript -KnownHosts $Known -ScriptText $Remote
-    if (-not [string]::IsNullOrWhiteSpace($probe.StdOut)) { Write-Host $probe.StdOut }
-    if (-not [string]::IsNullOrWhiteSpace($probe.StdErr)) { Write-Host $probe.StdErr -ForegroundColor DarkYellow }
-    Write-Host "V116_REMOTE_EXIT=$($probe.ExitCode)"
-    Require ($probe.ExitCode -eq 0) "V116 held-out evaluation gate failed with exit code $($probe.ExitCode)."
-'@
-$NewProbeInvocation = @'
-    $probe = Invoke-SshScriptDetachedPolled -KnownHosts $Known -ScriptText $Remote
-    Write-Host "V116_REMOTE_EXIT=$($probe.ExitCode)"
-    Require ($probe.ExitCode -eq 0) "V116 held-out evaluation gate failed with exit code $($probe.ExitCode)."
-'@
-$BaseRaw = Replace-Required -Text $BaseRaw -Old $OldProbeInvocation -New $NewProbeInvocation -Marker 'detached long-running remote invocation'
+Require ($LegacyRaw.Contains($EntryReadAnchor)) 'V117 REV3 legacy entry-read anchor missing.'
+$EntryPatch = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('IyAtLS0tIFYxMTcgUkVWMyBmYXN0IGh1bWFuLWV2aWRlbmNlIHJlcGxheSBvdmVybGF5IC0tLS0KJEVudHJ5UmF3ID0gUmVwbGFjZS1SZXF1aXJlZCAtVGV4dCAkRW50cnlSYXcgYAogICAgLU9sZCAnJEV4cGVjdGVkRmVhdHVyZUNvbW1pdCA9ICcnYTcyOGViYTRkZDkwMTRhOTFlNDc5NDcyOTJkMDQ2ZTU5OTI0ZjNjNycnJyBgCiAgICAtTmV3ICckRXhwZWN0ZWRGZWF0dXJlQ29tbWl0ID0gJyczMGJjOTYxMWYzZTZjN2JlZjEyYzY2MjE1ZGRkMDcwMjE0YzU5M2YnJycgYAogICAgLU1hcmtlciAnUkVWMyBsZWFybmVkIGZlYXR1cmUgcGluJwoKJEVudHJ5UmF3ID0gUmVwbGFjZS1SZXF1aXJlZCAtVGV4dCAkRW50cnlSYXcgYAogICAgLU9sZCAiICAgICAgICAnYmFja2VuZC9zZXJ2aWNlcy9hcF9yb3V0aW5nX2xlYXJuZWRfZXZhbHVhdGlvbl9zZXJ2aWNlLnB5JywiIGAKICAgIC1OZXcgIiAgICAgICAgJ2JhY2tlbmQvc2VydmljZXMvYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZS5weScsYG4gICAgICAgICdiYWNrZW5kL3NlcnZpY2VzL2FwX3JvdXRpbmdfZXZpZGVuY2Vfc25hcHNob3Rfc2VydmljZS5weScsIiBgCiAgICAtTWFya2VyICdSRVYzIGV2aWRlbmNlIHNuYXBzaG90IHNlcnZpY2UgbWF0ZXJpYWxpemF0aW9uJwoKJEVudHJ5UmF3ID0gUmVwbGFjZS1SZXF1aXJlZCAtVGV4dCAkRW50cnlSYXcgYAogICAgLU9sZCAiICAgICAgICAnYmFja2VuZC90ZXN0cy90ZXN0X2FwX3JvdXRpbmdfdjExN19sZWFybmVkX3Byb21wdF9hbmRfc2FmZXR5LnB5JywiIGAKICAgIC1OZXcgIiAgICAgICAgJ2JhY2tlbmQvdGVzdHMvdGVzdF9hcF9yb3V0aW5nX3YxMTdfbGVhcm5lZF9wcm9tcHRfYW5kX3NhZmV0eS5weScsYG4gICAgICAgICdiYWNrZW5kL3Rlc3RzL3Rlc3RfYXBfcm91dGluZ192MTE3X2V2aWRlbmNlX3NuYXBzaG90LnB5JywiIGAKICAgIC1NYXJrZXIgJ1JFVjMgZXZpZGVuY2Ugc25hcHNob3QgcmVncmVzc2lvbiBtYXRlcmlhbGl6YXRpb24nCgokQ29tcGlsZVNlcnZpY2VPbGQgPSBAJwogIiRDT05UQUlORVJfU1RBR0Uvc2VydmljZXMvYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZS5weSIgXAonQAokQ29tcGlsZVNlcnZpY2VOZXcgPSBAJwogIiRDT05UQUlORVJfU1RBR0Uvc2VydmljZXMvYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZS5weSIgXAogIiRDT05UQUlORVJfU1RBR0Uvc2VydmljZXMvYXBfcm91dGluZ19ldmlkZW5jZV9zbmFwc2hvdF9zZXJ2aWNlLnB5IiBcCidACiRFbnRyeVJhdyA9IFJlcGxhY2UtUmVxdWlyZWQgLVRleHQgJEVudHJ5UmF3IC1PbGQgJENvbXBpbGVTZXJ2aWNlT2xkIC1OZXcgJENvbXBpbGVTZXJ2aWNlTmV3IC1NYXJrZXIgJ1JFVjMgc25hcHNob3Qgc2VydmljZSBweWNvbXBpbGUnCgokU25hcHNob3RUZXN0T2xkID0gQCcKICIkQ09OVEFJTkVSX1NUQUdFL3Rlc3RzL3Rlc3RfYXBfcm91dGluZ192MTE3X2xlYXJuZWRfcHJvbXB0X2FuZF9zYWZldHkucHkiCidACiRTbmFwc2hvdFRlc3ROZXcgPSBAJwogIiRDT05UQUlORVJfU1RBR0UvdGVzdHMvdGVzdF9hcF9yb3V0aW5nX3YxMTdfbGVhcm5lZF9wcm9tcHRfYW5kX3NhZmV0eS5weSIgXAogIiRDT05UQUlORVJfU1RBR0UvdGVzdHMvdGVzdF9hcF9yb3V0aW5nX3YxMTdfZXZpZGVuY2Vfc25hcHNob3QucHkiCidAClJlcXVpcmUgKCRFbnRyeVJhdy5Db250YWlucygkU25hcHNob3RUZXN0T2xkKSkgJ1JFVjMgc25hcHNob3QgdGVzdCBjb21waWxlL3B5dGVzdCBhbmNob3IgbWlzc2luZy4nCiRFbnRyeVJhdyA9ICRFbnRyeVJhdy5SZXBsYWNlKCRTbmFwc2hvdFRlc3RPbGQsJFNuYXBzaG90VGVzdE5ldykKCiRPcmlnaW5PbGQgPSAnc2VydmljZXMuYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZSBhcyBlOyBwYXRocz1bc3RyKHguX19maWxlX18pIGZvciB4IGluIChhLGwscyxwLHYscixtLGYsbixlKV0nCiRPcmlnaW5OZXcgPSAnc2VydmljZXMuYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZSBhcyBlLCBzZXJ2aWNlcy5hcF9yb3V0aW5nX2V2aWRlbmNlX3NuYXBzaG90X3NlcnZpY2UgYXMgcTsgcGF0aHM9W3N0cih4Ll9fZmlsZV9fKSBmb3IgeCBpbiAoYSxsLHMscCx2LHIsbSxmLG4sZSxxKV0nCiRFbnRyeVJhdyA9IFJlcGxhY2UtUmVxdWlyZWQgLVRleHQgJEVudHJ5UmF3IC1PbGQgJE9yaWdpbk9sZCAtTmV3ICRPcmlnaW5OZXcgLU1hcmtlciAnUkVWMyBzbmFwc2hvdCBpbXBvcnQgb3JpZ2luIGdhdGUnCgokRW50cnlSYXcgPSBSZXBsYWNlLVJlcXVpcmVkIC1UZXh0ICRFbnRyeVJhdyBgCiAgICAtT2xkICdlY2hvIFYxMTdfRk9DVVNFRF9SRUdSRVNTSU9OX1RBUkdFVD0xMDcnIGAKICAgIC1OZXcgJ2VjaG8gVjExN19GT0NVU0VEX1JFR1JFU1NJT05fVEFSR0VUPTExNicgYAogICAgLU1hcmtlciAnUkVWMyBmb2N1c2VkIHJlZ3Jlc3Npb24gdGFyZ2V0IDExNicKCiRQcm9iZUltcG9ydE9sZCA9IEAnCmZyb20gc2VydmljZXMuYXBfcm91dGluZ19sZWFybmVkX2V2YWx1YXRpb25fc2VydmljZSBpbXBvcnQgKAogICAgZXZhbHVhdGVfaG9sZG91dF9sZWFybmVkIGFzIF92MTE3X2xlYXJuZWRfZXZhbHVhdGVfaG9sZG91dCwKKQonQAokUHJvYmVJbXBvcnROZXcgPSBAJwpmcm9tIHNlcnZpY2VzLmFwX3JvdXRpbmdfbGVhcm5lZF9ldmFsdWF0aW9uX3NlcnZpY2UgaW1wb3J0ICgKICAgIGV2YWx1YXRlX2hvbGRvdXRfbGVhcm5lZCBhcyBfdjExN19sZWFybmVkX2V2YWx1YXRlX2hvbGRvdXQsCikKZnJvbSBzZXJ2aWNlcy5hcF9yb3V0aW5nX2V2aWRlbmNlX3NuYXBzaG90X3NlcnZpY2UgaW1wb3J0ICgKICAgIGxvYWRfdmFsaWRfZXZpZGVuY2Vfc25hcHNob3QsCiAgICBzbmFwc2hvdF9leGFtcGxlc19zaGEyNTYsCikKCl92MTE3X2xpdmVfZXhwYW5kX2hpZ2hfdmFsdWVfdmVuZG9yX2NvcnB1cz1leHBhbmRfaGlnaF92YWx1ZV92ZW5kb3JfY29ycHVzCl92MTE3X3NuYXBzaG90X3JlcGxheV9hY3RpdmU9RmFsc2UKYXN5bmMgZGVmIF92MTE3X2V4cGFuZF9oaWdoX3ZhbHVlX3ZlbmRvcl9jb3JwdXNfZ3VhcmRlZCgqYXJncywqKmt3YXJncyk6CiAgICBpZiBfdjExN19zbmFwc2hvdF9yZXBsYXlfYWN0aXZlOgogICAgICAgIHByaW50KCdWMTE3X1ZFTkRPUl9FWFBBTlNJT049U0tJUFBFRF9WQUxJREFURURfU05BUFNIT1QnLGZsdXNoPVRydWUpCiAgICAgICAgcmV0dXJuIHsKICAgICAgICAgICAgJ3RhcmdldF92ZW5kb3JzJzpbXSwKICAgICAgICAgICAgJ2NhbmRpZGF0ZV92ZW5kb3JfY291bnRzJzp7fSwKICAgICAgICAgICAgJ3NlbGVjdGVkX2NvdW50JzowLAogICAgICAgICAgICAnaHlkcmF0ZWRfY291bnQnOjAsCiAgICAgICAgICAgICdoeWRyYXRlZF9ieV92ZW5kb3InOnt9LAogICAgICAgICAgICAnZmFpbHVyZV9jb3VudCc6MCwKICAgICAgICAgICAgJ2ZhaWx1cmVzJzpbXSwKICAgICAgICAgICAgJ2V4YW1wbGVzJzpbXSwKICAgICAgICB9CiAgICByZXR1cm4gYXdhaXQgX3YxMTdfbGl2ZV9leHBhbmRfaGlnaF92YWx1ZV92ZW5kb3JfY29ycHVzKCphcmdzLCoqa3dhcmdzKQpleHBhbmRfaGlnaF92YWx1ZV92ZW5kb3JfY29ycHVzPV92MTE3X2V4cGFuZF9oaWdoX3ZhbHVlX3ZlbmRvcl9jb3JwdXNfZ3VhcmRlZAonQAokRW50cnlSYXcgPSBSZXBsYWNlLVJlcXVpcmVkIC1UZXh0ICRFbnRyeVJhdyAtT2xkICRQcm9iZUltcG9ydE9sZCAtTmV3ICRQcm9iZUltcG9ydE5ldyAtTWFya2VyICdSRVYzIHNuYXBzaG90IHJlcGxheSBpbXBvcnRzIGFuZCBleHBhbnNpb24gYnlwYXNzJwoKJEVudHJ5UmF3ID0gUmVwbGFjZS1SZXF1aXJlZCAtVGV4dCAkRW50cnlSYXcgYAogICAgLU9sZCAicHJpbnQoJ1YxMTdfQUlfUFJPUE9TQUxfU0hBRE9XX01FVFJJQ1M9QUNUSVZFJyxmbHVzaD1UcnVlKSIgYAogICAgLU5ldyAicHJpbnQoJ1YxMTdfQUlfUFJPUE9TQUxfU0hBRE9XX01FVFJJQ1M9QUNUSVZFJyxmbHVzaD1UcnVlKWBucHJpbnQoJ1YxMTdfRVZJREVOQ0VfUkVQTEFZX1ZBTElEQVRPUj1BQ1RJVkUnLGZsdXNoPVRydWUpIiBgCiAgICAtTWFya2VyICdSRVYzIHJlcGxheSBydW50aW1lIG1hcmtlcicKCiRSZXBsYXlUcmFuc2Zvcm1BbmNob3IgPSBAJwokUmF3ID0gJFJhdy5SZXBsYWNlKCdWMTE2IGhlbGQtb3V0IGV2YWx1YXRpb24gZ2F0ZSBmYWlsZWQnLCdWMTE3IGxlYXJuZWQtYXV0b25vbXkgaGVsZC1vdXQgZXZhbHVhdGlvbiBnYXRlIGZhaWxlZCcpCidACiRSZXBsYXlUcmFuc2Zvcm1Db2RlID0gW1RleHQuRW5jb2RpbmddOjpVVEY4LkdldFN0cmluZyhbQ29udmVydF06OkZyb21CYXNlNjRTdHJpbmcoJ0pGSmxjR3hoZVUxaGFXNVBiR1FnUFNCQUp3cFljM2x1WXlCa1pXWWdiV0ZwYmlncE9nb2dJQ0FnWTI5dWRISmhZM1E5Ykc5aFpGOWpiMjUwY21GamRDZ3BDaUFnSUNCd2NtbHVkQ2duVmpFeE4xOURUMUpRVlZOZlFsVkpURVJmVTFSQlVsUTlNU2NzWm14MWMyZzlWSEoxWlNrS0lDQWdJR052Y25CMWN6MWhkMkZwZENCaWRXbHNaRjl6ZFhCbGNuWnBjMlZrWDNKdmRYUnBibWRmWTI5eWNIVnpLQW9nSUNBZ0lDQWdJRTV2Ym1Vc0NpQWdJQ0FnSUNBZ1pHbHpZMjkyWlhKNVgyMWhlRjltYVd4bGN6MDFNREF3TUN3S0lDQWdJQ0FnSUNCdFlYaGZjR1Z5WDNKdmRYUmxQVGdzQ2lBZ0lDQWdJQ0FnYldGNFgzUnZkR0ZzUFRFNE1Dd0tJQ0FnSUNBZ0lDQmpiMjVqZFhKeVpXNWplVDB3TEFvZ0lDQWdJQ0FnSUhCbGNuTnBjM1E5Um1Gc2MyVXNDaUFnSUNBZ0lDQWdj m...'))
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $ReplayTransformAnchor -New ($ReplayTransformAnchor + "`n" + $ReplayTransformCode) -Marker 'REV3 generated probe replay transforms'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
-    -Old "        concurrency=2,`n        retry_count=3,`n        progress_callback=expansion_progress," `
-    -New "        concurrency=4,`n        retry_count=3,`n        progress_callback=expansion_progress," `
-    -Marker 'targeted expansion concurrency 4'
+    -Old "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'" `
+    -New "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE')) 'V117 generated script lacks evidence replay validator.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY=VALIDATED')) 'V117 generated script lacks validated replay path.'`nRequire (`$Raw.Contains('V117_LIVE_CORPUS_REBUILD=USED')) 'V117 generated script lacks live rebuild fallback.'" `
+    -Marker 'REV3 generated replay assertions'
 
-$SnapshotOld = @'
-    examples=list(merged.values())
-    merged_route_counts=Counter(str(e.get('route_path') or '') for e in examples)
-'@
-$SnapshotNew = @'
-    examples=list(merged.values())
-    snapshot_path=Path('/tmp/gpi-ap-routing-v117-evidence-snapshot.json')
-    snapshot_path.write_text(
-        json.dumps(
-            {
-                'schema_version':'1.0',
-                'feature_commit':FEATURE_COMMIT,
-                'authority':authority,
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green" `
+    -New "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_EVIDENCE_REPLAY_VALIDATOR_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_FAST_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green" `
+    -Marker 'REV3 replay configured markers'
+# ---- end V117 REV3 overlay ----'))
+$LegacyRaw = $LegacyRaw.Replace($EntryReadAnchor,$EntryReadAnchor + "`n" + $EntryPatch)
+
+$SnapshotDigestOld = @'
                 'example_count':len(examples),
                 'examples':examples,
-            },
-            sort_keys=True,
-            default=str,
-        ),
-        encoding='utf-8',
-    )
-    print('V117_EVIDENCE_SNAPSHOT='+str(snapshot_path),flush=True)
-    print('V117_EVIDENCE_SNAPSHOT_COUNT='+str(len(examples)),flush=True)
-    merged_route_counts=Counter(str(e.get('route_path') or '') for e in examples)
 '@
-$EntryRaw = Replace-Required -Text $EntryRaw -Old $SnapshotOld -New $SnapshotNew -Marker 'reusable evidence snapshot'
+$SnapshotDigestNew = @'
+                'example_count':len(examples),
+                'examples_sha256':snapshot_examples_sha256(examples),
+                'examples':examples,
+'@
+Require ($LegacyRaw.Contains($SnapshotDigestOld)) 'V117 REV3 snapshot digest anchor missing.'
+$LegacyRaw = $LegacyRaw.Replace($SnapshotDigestOld,$SnapshotDigestNew)
 
-$EntryRaw = Replace-Required -Text $EntryRaw `
-    -Old "& `$GeneratedPath`nexit `$LASTEXITCODE" `
-    -New "& `$GeneratedPath`nif (`$LASTEXITCODE -ne 0) { throw `"V117 generated controller returned exit code `$LASTEXITCODE.`" }" `
-    -Marker 'propagate failure without closing host'
+$Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=116' -ForegroundColor Green"
+Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
+$LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
-Set-Content -LiteralPath $PatchedBasePath -Value $BaseRaw -Encoding utf8 -NoNewline
-Set-Content -LiteralPath $PatchedEntryPath -Value $EntryRaw -Encoding utf8 -NoNewline
-Copy-Item -LiteralPath $StatePath -Destination $PatchedStatePath -Force
+$OverlayPath = Join-Path $ToolRoot 'Invoke-GPIHub-V117-REV3-Replay-Generated.ps1'
+Set-Content -LiteralPath $OverlayPath -Value $LegacyRaw -Encoding utf8 -NoNewline
 
 $tokens = $null
 $errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile($PatchedBasePath,[ref]$tokens,[ref]$errors)
-Require (@($errors).Count -eq 0) ('V117 REV2 patched base parse failed: ' + ((@($errors) | ForEach-Object { $_.Message }) -join '; '))
-$tokens = $null
-$errors = $null
-[void][System.Management.Automation.Language.Parser]::ParseFile($PatchedEntryPath,[ref]$tokens,[ref]$errors)
-Require (@($errors).Count -eq 0) ('V117 REV2 patched entry parse failed: ' + ((@($errors) | ForEach-Object { $_.Message }) -join '; '))
-
-Write-Host 'V117_REV2_DETACHED_SSH_EXECUTION_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_SHORT_POLL_STREAMING_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_BASE_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_EXPANSION_CONCURRENCY_4_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_CERTIFIED_BACKEND_SELECTOR_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_BOUNDED_SOURCE_HEALTH_RETRY_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host 'V117_REV2_BACKEND_REPLACEMENT_DETECTION_CONFIGURED=PASS' -ForegroundColor Green
-Write-Host "V117_REV2_PATCH_ROOT=$PatchRoot"
-
-try {
-    & $PatchedEntryPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "V117 REV2 detached entry returned exit code $LASTEXITCODE."
-    }
+[void][System.Management.Automation.Language.Parser]::ParseFile($OverlayPath,[ref]$tokens,[ref]$errors)
+if (@($errors).Count -gt 0) {
+    $text = (@($errors) | ForEach-Object { $_.Message }) -join '; '
+    throw "V117 REV3 overlay parse failed: $text"
 }
-catch {
-    Write-Host ''
-    Write-Host ('=' * 120) -ForegroundColor Red
-    Write-Host 'V117 REV2 FAILED - WINDOW PRESERVED' -ForegroundColor Red
-    Write-Host ('=' * 120) -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-    Write-Host "Patch root : $PatchRoot"
-    Write-Host 'The remote detached log path is recorded in the latest V117-Detached-Remote.txt diagnostic file when remote execution started.'
-    [void](Read-Host 'Press Enter to close this window')
-    exit 1
-}
+
+Write-Host 'V117_REV3_RESTARTED_SPRINT=PASS' -ForegroundColor Green
+Write-Host "V117_REV3_LEGACY_CONTROL_BASE=$LegacyControlCommit"
+Write-Host "V117_REV3_FEATURE_COMMIT=$ExpectedFeatureCommit"
+Write-Host 'V117_REV3_SNAPSHOT_MAX_AGE_HOURS=24'
+Write-Host 'V117_REV3_SNAPSHOT_FAILS_CLOSED_TO_LIVE_REBUILD=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
+Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
+
+& pwsh.exe -NoProfile -ExecutionPolicy Bypass -File $OverlayPath
+exit $LASTEXITCODE

@@ -57,6 +57,12 @@ class OrderDocument:
     period: Optional[str] = None
     source_revision_key: Optional[str] = None
 
+    # Customer-PO document evidence. These are source facts, not proof that the
+    # corresponding Business Central customer/order context has been resolved.
+    customer_order_reference: Optional[str] = None
+    order_date: Optional[date] = None
+    currency: Optional[str] = None
+
 
 @dataclass
 class NormalizedRelease:
@@ -65,6 +71,15 @@ class NormalizedRelease:
     product_context: Optional[str] = None
     customer_item_reference: Optional[str] = None
     description: Optional[str] = None
+
+    # Source-line identity and evidence. Preserve exactly enough information to
+    # explain how the parser interpreted the customer's source document.
+    source_line_number: Optional[str] = None
+    source_quantity_text: Optional[str] = None
+    source_uom_text: Optional[str] = None
+    source_unit_price: Optional[float] = None
+    source_price_uom: Optional[str] = None
+    source_line_total: Optional[float] = None
 
     # BC-ready transaction values. Populate these only when the source is actually
     # the customer order context or after an authoritative BC/customer/item mapping
@@ -128,6 +143,8 @@ class NormalizedInboundOrder:
             value["validation"]["proposed_action"] = self.validation.proposed_action.value
         if self.source.received_datetime:
             value["source"]["received_datetime"] = self.source.received_datetime.isoformat()
+        if self.document.order_date:
+            value["document"]["order_date"] = self.document.order_date.isoformat()
         for index, release in enumerate(self.releases):
             if release.requested_shipment_date:
                 value["releases"][index]["requested_shipment_date"] = release.requested_shipment_date.isoformat()

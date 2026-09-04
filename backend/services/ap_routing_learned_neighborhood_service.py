@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
 
+from services.ap_routing_learned_features_service import reference_family, semantic_features
 from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
 from services.ap_routing_relevant_learning_service import (
     LABEL_SOURCE_REVIEWER_CONFIRMATION,
@@ -80,6 +81,11 @@ def summarize_authority_neighborhood(
         and (not doc_type or not _row_type(row) or _row_type(row) == doc_type)
     ]
 
+    current_semantics = semantic_features(document)
+    current_ref = reference_family(document)
+    structural_refs = {"wtr_reference", "wa_reference", "w_reference", "numeric_reference", "alpha_reference"}
+    semantic_anchor = bool(current_semantics or current_ref in structural_refs)
+
     # Local history is preferred when it is large enough to describe a pattern.
     # Otherwise use a cross-vendor semantic neighborhood so generic workflows
     # can be learned rather than requiring one hard-coded rule per vendor.
@@ -130,6 +136,15 @@ def summarize_authority_neighborhood(
         if str(row.get("label_source") or "").lower() == "reviewer_correction"
     )
 
+    authority_ready = bool(
+        proposed
+        and len(support) >= minimum_support
+        and share >= minimum_share
+        and margin >= minimum_margin
+        and correction_contradictions == 0
+        and (scope == "same_vendor" or semantic_anchor)
+    )
+
     return {
         "scope": scope,
         "proposed_route": proposed,
@@ -149,13 +164,10 @@ def summarize_authority_neighborhood(
         "minimum_support": minimum_support,
         "minimum_support_share": minimum_share,
         "minimum_support_margin": minimum_margin,
-        "authority_ready": bool(
-            proposed
-            and len(support) >= minimum_support
-            and share >= minimum_share
-            and margin >= minimum_margin
-            and correction_contradictions == 0
-        ),
+        "semantic_anchor": semantic_anchor,
+        "current_reference_family": current_ref,
+        "current_semantic_features": sorted(current_semantics),
+        "authority_ready": authority_ready,
         "neighbor_routes": [normalize_route_path(row.get("route_path")) for row in neighborhood],
         "neighbor_ids": [
             str(row.get("fingerprint") or row.get("source_item_id") or row.get("document_id") or row.get("file_name") or "")

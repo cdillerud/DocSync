@@ -61,10 +61,11 @@ from services.ap_routing_evidence_snapshot_service import (
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
 from services.ap_routing_semantic_hydration_service import hydrate_accounting_label_with_semantics
 import services.ap_routing_corpus_service as _v117_corpus_service
+import services.ap_routing_corpus_expansion_service as _v117_expansion_service
 
-# The certified source runtime keeps the proven corpus builder. Replace only its
-# hydration function so human evidence retains route-neutral semantic substrate.
+# Keep both live read-only corpus passes on the same semantic-preserving hydrator.
 _v117_corpus_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics
+_v117_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics
 
 _v117_live_expand_high_value_vendor_corpus=expand_high_value_vendor_corpus
 _v117_snapshot_replay_active=False

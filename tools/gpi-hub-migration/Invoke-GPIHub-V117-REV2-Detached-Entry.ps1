@@ -13,9 +13,9 @@ $LegacyControlCommit = 'b45ae78800b8f6666a6a105318cf0b7bf6fe6648'
 $LegacyRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1'
 $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
-$ExpectedEntryPatchSha256 = 'A869667DAACA23AA723480CAA1B92C41B7FAE8DE6C13071A368951CBEB2668F9'
+$ExpectedEntryPatchSha256 = '4F81CD9E8A890E6F58E6AD74827ACFA2574D3E5D2C6936F0ABB7E2EBB8EBCD37'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = '830bc9611f3e6c7bef12c66215ddd070214c593f'
+$ExpectedFeatureCommit = '7a983c610b206cff2d059f7a009a6d63bd15d4d0'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -80,7 +80,7 @@ Require ($LegacyRaw.Contains($SnapshotDigestOld)) 'V117 REV3 snapshot digest anc
 $LegacyRaw = $LegacyRaw.Replace($SnapshotDigestOld,$SnapshotDigestNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=116' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=120' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 

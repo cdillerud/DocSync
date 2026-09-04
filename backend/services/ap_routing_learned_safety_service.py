@@ -106,11 +106,15 @@ def _reference_family(value: Any) -> str:
 
 
 def _current_reference_family(document: Dict[str, Any], context: Dict[str, Any]) -> str:
+    """Resolve structural family without letting an incidental numeric BC ref mask W/WTR/WA."""
+    filename_family = _reference_family(_leading_reference_from_filename(document.get("file_name")))
+    if filename_family in {"warehouse", "warehouse_assembly", "warehouse_transfer"}:
+        return filename_family
     for ref in sorted(_context_refs(context)):
         family = _reference_family(ref)
         if family:
             return family
-    return _reference_family(_leading_reference_from_filename(document.get("file_name")))
+    return filename_family
 
 
 def _route_family(route: Any) -> str:

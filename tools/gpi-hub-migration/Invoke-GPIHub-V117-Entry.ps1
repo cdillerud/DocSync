@@ -10,7 +10,7 @@ $BasePath = Join-Path $ToolRoot 'Invoke-GPIHub-V116-AP-Routing-Heldout-Evaluatio
 $StatePath = Join-Path $ToolRoot 'state.json'
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
-$ExpectedFeatureCommit = '3d581ff6def9eb0d42733f35ca46ea1d2232de99'
+$ExpectedFeatureCommit = 'a728eba4dd9014a91e47947292d046e59924f3c7'
 $GeneratedRoot = Join-Path $OperationalRoot '.gpi-diagnostics\v117-generated'
 $GeneratedPath = Join-Path $GeneratedRoot 'Invoke-GPIHub-V117-Generated.ps1'
 $GeneratedStatePath = Join-Path $GeneratedRoot 'state.json'
@@ -53,7 +53,7 @@ $Raw = Replace-Required -Text $Raw `
 
 $Raw = Replace-Required -Text $Raw `
     -Old "        'backend/services/ap_routing_decision_service.py'," `
-    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_safety_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/services/ap_routing_relevant_learning_service.py',`r`n        'backend/services/ap_routing_feedback_service.py',`r`n        'backend/services/ap_routing_autonomy_performance_service.py',`r`n        'backend/services/ap_routing_ai_primary_service.py',`r`n        'backend/services/ap_routing_learned_autonomy_service.py',`r`n        'backend/services/ap_routing_learned_safety_service.py',`r`n        'backend/services/ap_routing_learned_pipeline_service.py',`r`n        'backend/services/ap_routing_learned_v117_adapter.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery_safety.py',`r`n        'backend/tests/test_ap_routing_v117_learned_autonomy.py'," `
+    -New "        'backend/services/ap_routing_decision_service.py',`r`n        'backend/services/ap_routing_authority_guard_service.py',`r`n        'backend/services/ap_routing_runtime_authority_service.py',`r`n        'backend/services/ap_routing_coverage_authority_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_service.py',`r`n        'backend/services/ap_routing_coverage_recovery_safety_service.py',`r`n        'backend/services/ap_routing_evaluation_context_service.py',`r`n        'backend/services/ap_routing_corpus_expansion_service.py',`r`n        'backend/services/ap_routing_learned_features_service.py',`r`n        'backend/services/ap_routing_relevant_learning_service.py',`r`n        'backend/services/ap_routing_learned_neighborhood_service.py',`r`n        'backend/services/ap_routing_feedback_service.py',`r`n        'backend/services/ap_routing_autonomy_performance_service.py',`r`n        'backend/services/ap_routing_ai_primary_service.py',`r`n        'backend/services/ap_routing_learned_autonomy_service.py',`r`n        'backend/services/ap_routing_learned_safety_service.py',`r`n        'backend/services/ap_routing_learned_pipeline_service.py',`r`n        'backend/services/ap_routing_learned_v117_adapter.py',`r`n        'backend/services/ap_routing_learned_evaluation_service.py',`r`n        'backend/tests/test_ap_routing_v117_authority.py',`r`n        'backend/tests/test_ap_routing_v117_runtime_authority_boundaries.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_authority.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery.py',`r`n        'backend/tests/test_ap_routing_v117_coverage_recovery_safety.py',`r`n        'backend/tests/test_ap_routing_v117_learned_autonomy.py',`r`n        'backend/tests/test_ap_routing_v117_learned_neighborhood.py',`r`n        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py'," `
     -Marker 'V117 learned candidate materialization'
 
 $Raw = Replace-Required -Text $Raw `
@@ -75,7 +75,9 @@ docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backen
  "$CONTAINER_STAGE/services/ap_routing_coverage_recovery_safety_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_evaluation_context_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_corpus_expansion_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_features_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_relevant_learning_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_neighborhood_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_feedback_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_autonomy_performance_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_ai_primary_service.py" \
@@ -83,25 +85,30 @@ docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backen
  "$CONTAINER_STAGE/services/ap_routing_learned_safety_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_learned_pipeline_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_learned_v117_adapter.py" \
+ "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_neighborhood.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py"
 echo V117_LEARNED_STACK_PYCOMPILE=PASS
 
-docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_ai_primary_service as a, services.ap_routing_learned_autonomy_service as l, services.ap_routing_learned_safety_service as s, services.ap_routing_learned_pipeline_service as p, services.ap_routing_learned_v117_adapter as v, services.ap_routing_relevant_learning_service as r, services.ap_routing_autonomy_performance_service as m; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(path.startswith("/tmp/gpi-ap-routing-v116/") for path in paths), paths'
+docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -c 'import services.ap_routing_ai_primary_service as a, services.ap_routing_learned_autonomy_service as l, services.ap_routing_learned_safety_service as s, services.ap_routing_learned_pipeline_service as p, services.ap_routing_learned_v117_adapter as v, services.ap_routing_relevant_learning_service as r, services.ap_routing_autonomy_performance_service as m, services.ap_routing_learned_features_service as f, services.ap_routing_learned_neighborhood_service as n, services.ap_routing_learned_evaluation_service as e; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e)]; print("V117_CANDIDATE_IMPORT_ORIGINS="+"|".join(paths)); assert all(path.startswith("/tmp/gpi-ap-routing-v116/") for path in paths), paths'
 echo V117_CANDIDATE_IMPORT_ORIGIN=PASS
 
-echo V117_FOCUSED_REGRESSION_TARGET=83
+echo V117_FOCUSED_REGRESSION_TARGET=107
 docker exec -w "$CONTAINER_STAGE" -e "PYTHONPATH=$CONTAINER_STAGE:/app" "$backend" python -m pytest -q \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_runtime_authority_boundaries.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_coverage_recovery_safety.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_autonomy.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_neighborhood.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py"
 echo V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS
 '@
 $Raw = Replace-Required -Text $Raw `
@@ -121,12 +128,20 @@ from services.ap_routing_evaluation_context_service import (
 from services.ap_routing_learned_v117_adapter import (
     decide_ap_route_with_learned_autonomy as _v117_runtime_decide,
 )
+from services.ap_routing_learned_evaluation_service import (
+    evaluate_holdout_learned as _v117_learned_evaluate_holdout,
+)
 
 _v117_corpus_module.resolve_ap_routing_context = resolve_ap_routing_context_resilient
 _v117_eval_module.decide_ap_route_with_authority_guard = _v117_runtime_decide
+_v117_eval_module.evaluate_holdout = _v117_learned_evaluate_holdout
 print('V117_AI_PRIMARY_ROUTER=ACTIVE',flush=True)
 print('V117_LEARNED_AUTONOMY=ACTIVE',flush=True)
 print('V117_RELEVANT_EXAMPLE_RETRIEVAL=ACTIVE',flush=True)
+print('V117_LEARNED_WORKFLOW_FEATURES=ACTIVE',flush=True)
+print('V117_LEARNED_NEIGHBORHOOD_AUTHORITY=ACTIVE',flush=True)
+print('V117_ACTUAL_PROMPT_LIMIT=8',flush=True)
+print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)
 print('V117_HUMAN_CONFIRMED_LEARNING=ACTIVE',flush=True)
 print('V117_SELF_TRAINING_BLOCKED=ACTIVE',flush=True)
 print('V117_DETERMINISTIC_SAFETY_ENVELOPE=ACTIVE',flush=True)
@@ -208,12 +223,31 @@ $NewExamples = @'
 '@
 $Raw = Replace-Required -Text $Raw -Old $OldExamples -New $NewExamples -Marker 'vendor expansion execution and progress telemetry'
 
+$EvaluationTelemetryOld = @'
+    for row in evaluation.get('rows') or []:
+'@
+$EvaluationTelemetryNew = @'
+    print('V117_AI_PROPOSAL_COUNT='+str(evaluation.get('ai_proposal_count') or 0),flush=True)
+    print('V117_AI_PROPOSAL_CORRECT_COUNT='+str(evaluation.get('ai_proposal_correct_count') or 0),flush=True)
+    print('V117_AI_PROPOSAL_ACCURACY='+str(evaluation.get('ai_proposal_accuracy')),flush=True)
+    print('V117_WRONG_AI_PROPOSAL_COUNT='+str(evaluation.get('wrong_ai_proposal_count') or 0),flush=True)
+    print('V117_AI_PROPOSAL_CONFIDENCE_BANDS='+json.dumps(evaluation.get('ai_proposal_confidence_bands') or [],sort_keys=True,default=str),flush=True)
+    print('V117_EVALUATED_PROMPT_LIMIT='+str(evaluation.get('actual_prompt_limit') or 0),flush=True)
+    for row in evaluation.get('rows') or []:
+'@
+$Raw = Replace-Required -Text $Raw -Old $EvaluationTelemetryOld -New $EvaluationTelemetryNew -Marker 'AI proposal shadow telemetry'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "        'wrong_auto_routes':evaluation.get('wrong_auto_routes')," `
+    -New "        'wrong_auto_routes':evaluation.get('wrong_auto_routes'),`n        'ai_proposal_count':evaluation.get('ai_proposal_count'),`n        'ai_proposal_correct_count':evaluation.get('ai_proposal_correct_count'),`n        'ai_proposal_accuracy':evaluation.get('ai_proposal_accuracy'),`n        'wrong_ai_proposal_count':evaluation.get('wrong_ai_proposal_count'),`n        'ai_proposal_confidence_bands':evaluation.get('ai_proposal_confidence_bands'),`n        'actual_prompt_limit':evaluation.get('actual_prompt_limit')," `
+    -Marker 'summary AI proposal shadow metrics'
+
 $Raw = Replace-Required -Text $Raw `
     -Old "        'hydrated_route_counts':corpus.get('hydrated_route_counts')," `
     -New "        'hydrated_route_counts':dict(merged_route_counts),`n        'vendor_expansion_selected':expansion.get('selected_count'),`n        'vendor_expansion_hydrated':expansion.get('hydrated_count'),`n        'vendor_expansion_failure_count':expansion.get('failure_count'),`n        'mongo_fallback_latched':mongo_fallback_latched(),`n        'merged_vendor_counts':dict(merged_vendor_counts),`n        'routing_architecture':'AI_PRIMARY_LEARNED_AUTONOMY'," `
     -Marker 'summary merged corpus evidence'
 
-$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.4'")
+$Raw = $Raw.Replace("'schema_version':'1.1'","'schema_version':'1.5'")
 $Raw = $Raw.Replace('V116_','V117_')
 $Raw = $Raw.Replace('V116 - AP ROUTING BROAD HELD-OUT EVALUATION','V117 - AI PRIMARY LEARNED AUTONOMY HELD-OUT EVALUATION')
 $Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 learned-autonomy held-out evaluation gate failed')
@@ -224,14 +258,23 @@ Require ($Raw.Contains('backend/services/ap_routing_ai_primary_service.py')) 'V1
 Require ($Raw.Contains('backend/services/ap_routing_learned_autonomy_service.py')) 'V117 generated script lacks learned autonomy service.'
 Require ($Raw.Contains('backend/services/ap_routing_learned_safety_service.py')) 'V117 generated script lacks learned safety service.'
 Require ($Raw.Contains('backend/services/ap_routing_relevant_learning_service.py')) 'V117 generated script lacks relevant learning retrieval.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_features_service.py')) 'V117 generated script lacks learned workflow features.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_neighborhood_service.py')) 'V117 generated script lacks learned neighborhood authority.'
+Require ($Raw.Contains('backend/services/ap_routing_learned_evaluation_service.py')) 'V117 generated script lacks learned evaluation telemetry.'
 Require ($Raw.Contains('backend/services/ap_routing_autonomy_performance_service.py')) 'V117 generated script lacks performance calibration.'
 Require ($Raw.Contains('test_ap_routing_v117_learned_autonomy.py')) 'V117 generated script lacks learned autonomy tests.'
+Require ($Raw.Contains('test_ap_routing_v117_learned_neighborhood.py')) 'V117 generated script lacks neighborhood tests.'
+Require ($Raw.Contains('test_ap_routing_v117_learned_prompt_and_safety.py')) 'V117 generated script lacks prompt/safety tests.'
 Require ($Raw.Contains('V117_PYTEST_PREFLIGHT=PASS')) 'V117 generated script lacks pytest preflight.'
 Require ($Raw.Contains('V117_CANDIDATE_IMPORT_ORIGIN=PASS')) 'V117 generated script lacks candidate import-origin gate.'
 Require ($Raw.Contains('V117_FOCUSED_AUTHORITY_REGRESSIONS=PASS')) 'V117 generated script lacks focused regression gate.'
 Require ($Raw.Contains('V117_AI_PRIMARY_ROUTER=ACTIVE')) 'V117 generated script lacks AI-primary activation.'
 Require ($Raw.Contains('V117_LEARNED_AUTONOMY=ACTIVE')) 'V117 generated script lacks learned autonomy activation.'
 Require ($Raw.Contains('V117_RELEVANT_EXAMPLE_RETRIEVAL=ACTIVE')) 'V117 generated script lacks relevant retrieval activation.'
+Require ($Raw.Contains('V117_LEARNED_WORKFLOW_FEATURES=ACTIVE')) 'V117 generated script lacks learned workflow feature activation.'
+Require ($Raw.Contains('V117_LEARNED_NEIGHBORHOOD_AUTHORITY=ACTIVE')) 'V117 generated script lacks learned neighborhood activation.'
+Require ($Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'
+Require ($Raw.Contains('V117_ACTUAL_PROMPT_LIMIT=8')) 'V117 generated script lacks exact prompt limit proof.'
 Require ($Raw.Contains('V117_SELF_TRAINING_BLOCKED=ACTIVE')) 'V117 generated script lacks self-training block.'
 Require ($Raw.Contains('V117_DETERMINISTIC_ROUTE_SUBSTITUTION=DISABLED')) 'V117 generated script lacks deterministic route-substitution disable proof.'
 Require ($Raw.Contains('V117_RESILIENT_CONTEXT_FALLBACK=ACTIVE')) 'V117 generated script lacks resilient context activation.'
@@ -259,6 +302,10 @@ Write-Host 'V117_SELF_TRAINING_BLOCKED_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_DETERMINISTIC_SAFETY_ENVELOPE_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_DETERMINISTIC_ROUTE_SUBSTITUTION_DISABLED_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_RELEVANT_EXAMPLE_RETRIEVAL_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_LEARNED_WORKFLOW_FEATURES_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_LEARNED_NEIGHBORHOOD_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green
+Write-Host 'V117_ACTUAL_PROMPT_LIMIT_CONFIGURED=8' -ForegroundColor Green
 Write-Host 'V117_AUTONOMY_PERFORMANCE_CALIBRATION_CONFIGURED=PASS' -ForegroundColor Green
 Write-Host 'V117_FROZEN_ZERO_WRONG_FALLBACK=6c455f1a027361115eba3ea9ecde989009bda76e' -ForegroundColor Green
 Write-Host 'V117_TARGETED_VENDOR_CORPUS_EXPANSION=PASS' -ForegroundColor Green

@@ -1,0 +1,99 @@
+# ---- V117 REV3 fast human-evidence replay overlay ----
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old '$ExpectedFeatureCommit = ''a728eba4dd9014a91e47947292d046e59924f3c7''' `
+    -New '$ExpectedFeatureCommit = ''830bc9611f3e6c7bef12c66215ddd070214c593f''' `
+    -Marker 'REV3 learned feature pin'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "        'backend/services/ap_routing_learned_evaluation_service.py'," `
+    -New "        'backend/services/ap_routing_learned_evaluation_service.py',`n        'backend/services/ap_routing_evidence_snapshot_service.py'," `
+    -Marker 'REV3 evidence snapshot service materialization'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py'," `
+    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py'," `
+    -Marker 'REV3 evidence snapshot regression materialization'
+
+$CompileServiceOld = @'
+ "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
+'@
+$CompileServiceNew = @'
+ "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_evidence_snapshot_service.py" \
+'@
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $CompileServiceOld -New $CompileServiceNew -Marker 'REV3 snapshot service pycompile'
+
+$SnapshotTestOld = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py"
+'@
+$SnapshotTestNew = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_evidence_snapshot.py"
+'@
+Require ($EntryRaw.Contains($SnapshotTestOld)) 'REV3 snapshot test compile/pytest anchor missing.'
+$EntryRaw = $EntryRaw.Replace($SnapshotTestOld,$SnapshotTestNew)
+
+$OriginOld = 'services.ap_routing_learned_evaluation_service as e; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e)]'
+$OriginNew = 'services.ap_routing_learned_evaluation_service as e, services.ap_routing_evidence_snapshot_service as q; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e,q)]'
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $OriginOld -New $OriginNew -Marker 'REV3 snapshot import origin gate'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old 'echo V117_FOCUSED_REGRESSION_TARGET=107' `
+    -New 'echo V117_FOCUSED_REGRESSION_TARGET=116' `
+    -Marker 'REV3 focused regression target 116'
+
+$ProbeImportOld = @'
+from services.ap_routing_learned_evaluation_service import (
+    evaluate_holdout_learned as _v117_learned_evaluate_holdout,
+)
+'@
+$ProbeImportNew = @'
+from services.ap_routing_learned_evaluation_service import (
+    evaluate_holdout_learned as _v117_learned_evaluate_holdout,
+)
+from services.ap_routing_evidence_snapshot_service import (
+    load_valid_evidence_snapshot,
+    snapshot_examples_sha256,
+)
+
+_v117_live_expand_high_value_vendor_corpus=expand_high_value_vendor_corpus
+_v117_snapshot_replay_active=False
+async def _v117_expand_high_value_vendor_corpus_guarded(*args,**kwargs):
+    if _v117_snapshot_replay_active:
+        print('V117_VENDOR_EXPANSION=SKIPPED_VALIDATED_SNAPSHOT',flush=True)
+        return {
+            'target_vendors':[],
+            'candidate_vendor_counts':{},
+            'selected_count':0,
+            'hydrated_count':0,
+            'hydrated_by_vendor':{},
+            'failure_count':0,
+            'failures':[],
+            'examples':[],
+        }
+    return await _v117_live_expand_high_value_vendor_corpus(*args,**kwargs)
+expand_high_value_vendor_corpus=_v117_expand_high_value_vendor_corpus_guarded
+'@
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $ProbeImportOld -New $ProbeImportNew -Marker 'REV3 snapshot replay imports and expansion bypass'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)" `
+    -New "print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)`nprint('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE',flush=True)" `
+    -Marker 'REV3 replay runtime marker'
+
+$ReplayTransformAnchor = @'
+$Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 learned-autonomy held-out evaluation gate failed')
+'@
+$ReplayTransformCode = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__REPLAY_TRANSFORM_B64__'))
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $ReplayTransformAnchor -New ($ReplayTransformAnchor + "`n" + $ReplayTransformCode) -Marker 'REV3 generated probe replay transforms'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'" `
+    -New "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE')) 'V117 generated script lacks evidence replay validator.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY=VALIDATED')) 'V117 generated script lacks validated replay path.'`nRequire (`$Raw.Contains('V117_LIVE_CORPUS_REBUILD=USED')) 'V117 generated script lacks live rebuild fallback.'" `
+    -Marker 'REV3 generated replay assertions'
+
+$EntryRaw = Replace-Required -Text $EntryRaw `
+    -Old "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green" `
+    -New "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_EVIDENCE_REPLAY_VALIDATOR_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_FAST_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green" `
+    -Marker 'REV3 replay configured markers'
+# ---- end V117 REV3 overlay ----

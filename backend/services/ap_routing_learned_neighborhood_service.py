@@ -18,13 +18,12 @@ from services.ap_routing_relevant_learning_service import (
 )
 
 
-EXCEPTIONAL_WORKFLOW_FEATURES = frozenset(
-    {
-        "explicit_stop_pay",
-        "replacement_or_offset",
-        "reversal_or_void",
-    }
-)
+# Only transaction-reversal semantics require exception-matched human support.
+# Explicit stop-pay remains governed by the existing safety envelope, and
+# replacement/offset remains a route-neutral relevance feature. Keeping those
+# concerns separate preserves established DNP autonomy while preventing an
+# ordinary transaction neighborhood from authorizing a reversal/void document.
+EXCEPTIONAL_WORKFLOW_FEATURES = frozenset({"reversal_or_void"})
 
 
 def _vendor(document: Dict[str, Any]) -> str:

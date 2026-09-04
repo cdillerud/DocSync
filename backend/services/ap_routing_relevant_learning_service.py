@@ -7,7 +7,6 @@ predictions and held-out examples are explicitly excluded.
 
 from __future__ import annotations
 
-from collections import Counter
 from typing import Any, Dict, List, Sequence
 
 from services.ap_routing_learned_features_service import feature_similarity
@@ -116,10 +115,12 @@ def build_relevant_learning_examples(
 
     Prompt retrieval and autonomy authority are intentionally separate. This
     function teaches the AI. A different service independently decides whether
-    the AI's exact route has earned authority.
+    the AI's exact route has earned authority. The prompt boundary is hard-capped
+    at eight examples even if a caller requests more.
     """
     if limit <= 0:
         return []
+    limit = min(8, int(limit))
 
     eligible = [dict(e) for e in examples if is_train_human_example(e)]
     if not eligible:

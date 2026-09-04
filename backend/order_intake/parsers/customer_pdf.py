@@ -18,7 +18,7 @@ from decimal import Decimal
 import hashlib
 import json
 import re
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
 from ..models import (
     DocumentType,
@@ -144,6 +144,7 @@ class CustomerPoEvidenceNormalizer:
                 customer_order_reference=evidence.customer_order_reference,
                 order_date=evidence.order_date,
                 currency=evidence.currency,
+                source_vendor_reference=evidence.vendor_reference,
                 source_revision_key=evidence.customer_order_reference,
             ),
             releases=releases,

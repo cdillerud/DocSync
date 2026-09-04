@@ -87,6 +87,14 @@ class NormalizedRelease:
     quantity: Optional[float] = None
     uom: Optional[str] = None
 
+    # Resolved BC identity. These are deliberately separate from source item and
+    # source ship-to evidence so a customer-specific alias never overwrites what
+    # was actually printed on the PO.
+    resolved_item_no: Optional[str] = None
+    item_resolution_method: Optional[str] = None
+    resolved_ship_to_code: Optional[str] = None
+    ship_to_resolution_method: Optional[str] = None
+
     # Source quantity/UOM evidence. Customer POs and supplier/manufacturer schedules
     # both belong here until their relationship to the BC transaction is proven.
     physical_quantity: Optional[float] = None

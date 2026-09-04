@@ -1,5 +1,5 @@
 /// <summary>
-/// Minimal permission set for the Phase-0 GPI Order Intake authority and read-only pricing/event/identity diagnostics.
+/// Minimal permission set for the Phase-0 GPI Order Intake authority and read-only pricing/event/identity/history diagnostics.
 /// Does not grant release, shipment, invoicing or posting permissions.
 /// </summary>
 permissionset 71200 "GPI ORDER INTAKE"
@@ -21,6 +21,8 @@ permissionset 71200 "GPI ORDER INTAKE"
         tabledata "Customer Item Sales" = R,
         tabledata "Sales Header" = RIM,
         tabledata "Sales Line" = RIM,
+        tabledata "Sales Header Archive" = R,
+        tabledata "Sales Line Archive" = R,
         tabledata "Sales Invoice Header" = R,
         tabledata "Sales Invoice Line" = R,
         codeunit "GPI Order Intake Authority" = X,
@@ -35,5 +37,8 @@ permissionset 71200 "GPI ORDER INTAKE"
         page "GPI Order Intake CustItemSales" = X,
         page "GPI Order Intake InvLine Hist" = X,
         page "GPI Order Intake Item Ref" = X,
-        page "GPI Order Intake Ship-To" = X;
+        page "GPI Order Intake Ship-To" = X,
+        page "GPI Order Intake SalesHdrArc" = X,
+        page "GPI Order Intake SalesLineArc" = X,
+        page "GPI Order Intake InvHdr Hist" = X;
 }

@@ -1,0 +1,87 @@
+$ReplayMainOld = @'
+async def main():
+    contract=load_contract()
+    print('V117_CORPUS_BUILD_START=1',flush=True)
+    corpus=await build_supervised_routing_corpus(
+        None,
+        discovery_max_files=50000,
+        max_per_route=8,
+        max_total=180,
+        concurrency=4,
+        persist=False,
+        routing_contract=contract,
+    )
+    authority=str(corpus.get('authority') or '')
+'@
+$ReplayMainNew = @'
+async def main():
+    global _v117_snapshot_replay_active
+    contract=load_contract()
+    snapshot_path=Path('/tmp/gpi-ap-routing-v117-evidence-snapshot.json')
+    replay=load_valid_evidence_snapshot(
+        snapshot_path,
+        expected_authority=EXPECTED_AUTHORITY,
+        contract=contract,
+        max_age_hours=24.0,
+        minimum_examples=20,
+    )
+    snapshot_replay=bool(replay.get('valid'))
+    _v117_snapshot_replay_active=snapshot_replay
+    if snapshot_replay:
+        examples=list(replay.get('examples') or [])
+        authority=str(replay.get('authority') or '')
+        replay_route_counts=Counter(str(e.get('route_path') or '') for e in examples)
+        corpus={
+            'authority':authority,
+            'persisted':False,
+            'discovered_file_count':len(examples),
+            'discovered_route_counts':dict(replay_route_counts),
+            'canonical_discovered_route_counts':dict(replay_route_counts),
+            'collapsed_route_path_count':0,
+            'unmapped_route_counts':{},
+            'selected_count':len(examples),
+            'selected_route_counts':dict(replay_route_counts),
+            'hydrated_count':len(examples),
+            'hydrated_route_counts':dict(replay_route_counts),
+            'route_label_resolution_counts':{'validated_snapshot_replay':len(examples)},
+            'failure_count':0,
+            'failures':[],
+            'examples':examples,
+        }
+        print('V117_EVIDENCE_REPLAY=VALIDATED',flush=True)
+        print('V117_EVIDENCE_REPLAY_PATH='+str(snapshot_path),flush=True)
+        print('V117_EVIDENCE_REPLAY_COUNT='+str(len(examples)),flush=True)
+        print('V117_EVIDENCE_REPLAY_SOURCE_FEATURE_COMMIT='+str(replay.get('source_feature_commit') or ''),flush=True)
+        print('V117_EVIDENCE_REPLAY_AGE_SECONDS='+str(replay.get('age_seconds')),flush=True)
+        print('V117_EVIDENCE_REPLAY_INTEGRITY='+str(replay.get('integrity') or ''),flush=True)
+        print('V117_LIVE_CORPUS_REBUILD=SKIPPED_VALIDATED_SNAPSHOT',flush=True)
+    else:
+        print('V117_EVIDENCE_REPLAY=REJECTED;reason='+str(replay.get('reason') or 'unknown'),flush=True)
+        print('V117_EVIDENCE_REPLAY_AGE_SECONDS='+str(replay.get('age_seconds')),flush=True)
+        print('V117_LIVE_CORPUS_REBUILD=USED',flush=True)
+        print('V117_CORPUS_BUILD_START=1',flush=True)
+        corpus=await build_supervised_routing_corpus(
+            None,
+            discovery_max_files=50000,
+            max_per_route=8,
+            max_total=180,
+            concurrency=4,
+            persist=False,
+            routing_contract=contract,
+        )
+        authority=str(corpus.get('authority') or '')
+'@
+$Raw = Replace-Required -Text $Raw -Old $ReplayMainOld -New $ReplayMainNew -Marker 'REV3 validated snapshot replay before corpus hydration'
+
+$SummaryReplayOld = @'
+        'routing_architecture':'AI_PRIMARY_LEARNED_AUTONOMY',
+'@
+$SummaryReplayNew = @'
+        'routing_architecture':'AI_PRIMARY_LEARNED_AUTONOMY',
+        'evidence_replay_used':snapshot_replay,
+        'evidence_replay_reason':replay.get('reason'),
+        'evidence_replay_age_seconds':replay.get('age_seconds'),
+        'evidence_replay_integrity':replay.get('integrity'),
+        'evidence_replay_source_feature_commit':replay.get('source_feature_commit'),
+'@
+$Raw = Replace-Required -Text $Raw -Old $SummaryReplayOld -New $SummaryReplayNew -Marker 'REV3 replay evaluation summary telemetry'

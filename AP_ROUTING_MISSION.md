@@ -18,7 +18,11 @@ The restarted fast-replay candidate `830bc9611f3e6c7bef12c66215ddd070214c593f` w
 
 The sole wrong automatic route was Ball invoice/credit memo `6363143`: Accounting truth was `DO NOT PAY`, while the AI proposed and learned authority auto-approved `Vendor Credit Memos/Ball Detention Credits`. The current-document text contains both ordinary detention-credit semantics and the exceptional transaction instruction `Reversing this credit memo as per the request...`. The old neighborhood model treated five ordinary same-vendor detention-credit examples as pure authority and did not recognize transaction reversal as a workflow boundary.
 
-Current learned-autonomy candidate: `7a983c610b206cff2d059f7a009a6d63bd15d4d0` on `feature/ap-ai-learned-autonomy`. The active control logic commit is `1f441704cc8313d2bcf37b6b55691932582f760c` on `migration/gpi-hub-dedicated-vm`. Next configured focused target: 120 tests. Do not claim 120/120 or any improved held-out metric until the certified runtime proves it.
+Candidate `7a983c610b206cff2d059f7a009a6d63bd15d4d0` introduced the general reversal/void semantic boundary, but its first certified runtime attempt stopped at the focused test gate with 118/120 passing. No held-out evaluation ran. The two failures proved the new exception set was too broad: established explicit `DO NOT PAY` behavior had been incorrectly subjected to exception-matched support, changing one expected safety demotion into an earlier review and preventing one previously earned DNP auto-route.
+
+Current learned-autonomy candidate: `025d0ac203e8a950f853918fd40b1a038ce19824` on `feature/ap-ai-learned-autonomy`. The repair narrows exception-matched authority to `reversal_or_void` only. Explicit stop-pay remains governed by the existing safety envelope, and replacement/offset remains a route-neutral relevance feature. This preserves mature DNP autonomy while still preventing ordinary transaction history from authorizing a reversed, voided, or cancelled transaction.
+
+Active control commit: `9450cc68f34f1ce8ff62c180f15a174ebe4f0e0d` on `migration/gpi-hub-dedicated-vm`. The entry fragment is SHA256-pinned to `2AA3DBC390369F6388DA6D8975D23E283822B0F278DE5EE62C6E5353F0CB2429`. Next configured focused target remains 120 tests. Do not claim 120/120 or any improved held-out metric until the certified runtime proves it.
 
 Current candidate changes:
 - hard max 8 actual human learning examples in the AI prompt;
@@ -32,10 +36,11 @@ Current candidate changes:
 - explicit W/WTR/WA filename reference families outrank incidental numeric BC references for the safety-family check;
 - resolved BC-vendor mismatch is a safety veto only for logistics routes, so unrelated BC matches do not poison special Accounting queues;
 - deterministic route substitution remains disabled; safety may only demote to review;
-- route-neutral `reversal_or_void` semantics now identify reversed, voided, or cancelled invoice/credit transactions;
-- `explicit_stop_pay`, `replacement_or_offset`, and `reversal_or_void` are exceptional workflow features;
-- when the current document carries an exceptional workflow feature, ordinary proposed-route neighbors that lack the same exception no longer count as autonomy support;
-- exception-matched human support can still earn autonomy, so the repair is learned and general rather than a Ball/vendor-specific template.
+- route-neutral `reversal_or_void` semantics identify reversed, voided, or cancelled invoice/credit transactions;
+- only `reversal_or_void` is an exception-matched authority boundary;
+- when the current document carries `reversal_or_void`, ordinary proposed-route neighbors lacking the same exception no longer count as autonomy support;
+- exception-matched human support can still earn autonomy, so the repair is learned and general rather than a Ball/vendor-specific template;
+- explicit stop-pay retains its existing deterministic fail-closed safety behavior and can still earn AI autonomy from established human evidence.
 
 ## Restarted sprint fast replay
 

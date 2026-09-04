@@ -65,6 +65,12 @@ _SEMANTIC_PATTERNS = {
         r"\b(?:replaced\s+by|replacement|offset|issued\s+in\s+error|wrong\s+cost|cost\s+is\s+wrong)\b",
         re.IGNORECASE,
     ),
+    "reversal_or_void": re.compile(
+        r"(?:\b(?:reversing|reverse|reversed|reversal)\b.{0,40}\b(?:credit\s+memo|invoice)\b)"
+        r"|(?:\b(?:credit\s+memo|invoice)\b.{0,40}\b(?:reversing|reverse|reversed|reversal|voided|cancelled|canceled)\b)"
+        r"|(?:\b(?:voided|cancelled|canceled)\b.{0,40}\b(?:credit\s+memo|invoice)\b)",
+        re.IGNORECASE,
+    ),
     "detention": re.compile(r"\bdetention\b", re.IGNORECASE),
     "storage_accessorial": re.compile(
         r"\b(?:yard\s+storage|storage\s+(?:fee|charge|cost)|accessorial|demurrage|layover|lumper|redelivery)\b",
@@ -125,6 +131,8 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
     # a mismatch improves retrieval without assigning either side to a route.
     for feature, penalty in {
         "explicit_stop_pay": 4.0,
+        "replacement_or_offset": 4.0,
+        "reversal_or_void": 4.0,
         "detention": 2.5,
         "inventory": 2.0,
         "dunnage": 1.5,

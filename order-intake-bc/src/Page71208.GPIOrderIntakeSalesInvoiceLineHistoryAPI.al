@@ -1,6 +1,6 @@
 /// <summary>
 /// Read-only diagnostic API over posted Sales Invoice Line history.
-/// Used to reconstruct the Boyer Customer Item Sales rolling state for an exact customer/item.
+/// Used to reconstruct the Boyer Customer Item Sales rolling state and retained customer item-reference evidence.
 /// </summary>
 page 71208 "GPI Order Intake InvLine Hist"
 {
@@ -49,6 +49,11 @@ page 71208 "GPI Order Intake InvLine Hist"
                     Caption = 'No.';
                     Editable = false;
                 }
+                field(description; Rec.Description)
+                {
+                    Caption = 'Description';
+                    Editable = false;
+                }
                 field(shipmentDate; Rec."Shipment Date")
                 {
                     Caption = 'Shipment Date';
@@ -77,6 +82,26 @@ page 71208 "GPI Order Intake InvLine Hist"
                 field(locationCode; Rec."Location Code")
                 {
                     Caption = 'Location Code';
+                    Editable = false;
+                }
+                field(itemReferenceNumber; Rec."Item Reference No.")
+                {
+                    Caption = 'Item Reference No.';
+                    Editable = false;
+                }
+                field(itemReferenceUnitOfMeasure; Rec."Item Reference Unit of Measure")
+                {
+                    Caption = 'Item Reference Unit of Measure';
+                    Editable = false;
+                }
+                field(itemReferenceType; Rec."Item Reference Type")
+                {
+                    Caption = 'Item Reference Type';
+                    Editable = false;
+                }
+                field(itemReferenceTypeNumber; Rec."Item Reference Type No.")
+                {
+                    Caption = 'Item Reference Type No.';
                     Editable = false;
                 }
                 field(systemCreatedAt; Rec.SystemCreatedAt)

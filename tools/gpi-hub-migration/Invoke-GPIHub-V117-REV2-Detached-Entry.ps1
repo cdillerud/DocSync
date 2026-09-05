@@ -13,9 +13,9 @@ $LegacyControlCommit = 'b45ae78800b8f6666a6a105318cf0b7bf6fe6648'
 $LegacyRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1'
 $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
-$ExpectedEntryPatchSha256 = '39165FED128063D4107CF3DA922B604E6212EE67E44B97202CC8226C82D2A6D8'
+$ExpectedEntryPatchSha256 = 'CE0346D72867D9C6807AA6A12AE0EE210460055E01621DA04946F0F126D980F1'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = '502678f47bf2f373b0a7c19c915ba28ce6658f28'
+$ExpectedFeatureCommit = '5d59fbb95fe9581e0db6c77dc98f78f78264bbf8'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -81,7 +81,7 @@ Require ($LegacyRaw.Contains($SnapshotDigestOld)) 'V117 REV3 snapshot digest anc
 $LegacyRaw = $LegacyRaw.Replace($SnapshotDigestOld,$SnapshotDigestNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=128' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=142' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 

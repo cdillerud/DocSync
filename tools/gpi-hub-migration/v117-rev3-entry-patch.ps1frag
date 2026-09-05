@@ -1,18 +1,18 @@
 # ---- V117 REV3 fast human-evidence replay overlay ----
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old '$ExpectedFeatureCommit = ''a728eba4dd9014a91e47947292d046e59924f3c7''' `
-    -New '$ExpectedFeatureCommit = ''502678f47bf2f373b0a7c19c915ba28ce6658f28''' `
+    -New '$ExpectedFeatureCommit = ''5d59fbb95fe9581e0db6c77dc98f78f78264bbf8''' `
     -Marker 'REV3 learned feature pin'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "        'backend/services/ap_routing_learned_evaluation_service.py'," `
-    -New "        'backend/services/ap_routing_learned_evaluation_service.py',`n        'backend/services/ap_routing_evidence_snapshot_service.py',`n        'backend/services/ap_routing_semantic_hydration_service.py'," `
-    -Marker 'REV3 evidence snapshot and semantic hydration materialization'
+    -New "        'backend/services/ap_routing_learned_evaluation_service.py',`n        'backend/services/ap_routing_evidence_snapshot_service.py',`n        'backend/services/ap_routing_semantic_hydration_service.py',`n        'backend/services/ap_routing_train_context_service.py',`n        'backend/services/ap_routing_anchor_authority_service.py'," `
+    -Marker 'REV3 evidence snapshot semantic hydration and coverage-learning materialization'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py'," `
-    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_exception_semantic_authority.py',`n        'backend/tests/test_ap_routing_v117_semantic_evidence_snapshot.py'," `
-    -Marker 'REV3 evidence and semantic regression materialization'
+    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_exception_semantic_authority.py',`n        'backend/tests/test_ap_routing_v117_semantic_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_train_context_and_anchor.py'," `
+    -Marker 'REV3 evidence semantic and coverage regression materialization'
 
 $CompileServiceOld = @'
  "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
@@ -21,8 +21,10 @@ $CompileServiceNew = @'
  "$CONTAINER_STAGE/services/ap_routing_learned_evaluation_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_evidence_snapshot_service.py" \
  "$CONTAINER_STAGE/services/ap_routing_semantic_hydration_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_train_context_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_anchor_authority_service.py" \
 '@
-$EntryRaw = Replace-Required -Text $EntryRaw -Old $CompileServiceOld -New $CompileServiceNew -Marker 'REV3 semantic evidence service pycompile'
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $CompileServiceOld -New $CompileServiceNew -Marker 'REV3 coverage learning service pycompile'
 
 $SnapshotTestOld = @'
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py"
@@ -31,19 +33,20 @@ $SnapshotTestNew = @'
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_learned_prompt_and_safety.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_evidence_snapshot.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_exception_semantic_authority.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_semantic_evidence_snapshot.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_semantic_evidence_snapshot.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_train_context_and_anchor.py"
 '@
-Require ($EntryRaw.Contains($SnapshotTestOld)) 'REV3 semantic evidence test compile/pytest anchor missing.'
+Require ($EntryRaw.Contains($SnapshotTestOld)) 'REV3 coverage learning test compile/pytest anchor missing.'
 $EntryRaw = $EntryRaw.Replace($SnapshotTestOld,$SnapshotTestNew)
 
 $OriginOld = 'services.ap_routing_learned_evaluation_service as e; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e)]'
-$OriginNew = 'services.ap_routing_learned_evaluation_service as e, services.ap_routing_evidence_snapshot_service as q, services.ap_routing_semantic_hydration_service as h; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e,q,h)]'
-$EntryRaw = Replace-Required -Text $EntryRaw -Old $OriginOld -New $OriginNew -Marker 'REV3 semantic evidence import origin gate'
+$OriginNew = 'services.ap_routing_learned_evaluation_service as e, services.ap_routing_evidence_snapshot_service as q, services.ap_routing_semantic_hydration_service as h, services.ap_routing_train_context_service as t, services.ap_routing_anchor_authority_service as z; paths=[str(x.__file__) for x in (a,l,s,p,v,r,m,f,n,e,q,h,t,z)]'
+$EntryRaw = Replace-Required -Text $EntryRaw -Old $OriginOld -New $OriginNew -Marker 'REV3 coverage learning import origin gate'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old 'echo V117_FOCUSED_REGRESSION_TARGET=107' `
-    -New 'echo V117_FOCUSED_REGRESSION_TARGET=128' `
-    -Marker 'REV3 focused regression target 128'
+    -New 'echo V117_FOCUSED_REGRESSION_TARGET=142' `
+    -Marker 'REV3 focused regression target 142'
 
 $ProbeImportOld = @'
 from services.ap_routing_learned_evaluation_service import (
@@ -89,8 +92,8 @@ $EntryRaw = Replace-Required -Text $EntryRaw -Old $ProbeImportOld -New $ProbeImp
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)" `
-    -New "print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)`nprint('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE',flush=True)`nprint('V117_SEMANTIC_EVIDENCE_SCHEMA='+SEMANTIC_FEATURE_SCHEMA,flush=True)`nprint('V117_SEMANTIC_HYDRATION=ACTIVE',flush=True)" `
-    -Marker 'REV3 semantic evidence runtime markers'
+    -New "print('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE',flush=True)`nprint('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE',flush=True)`nprint('V117_SEMANTIC_EVIDENCE_SCHEMA='+SEMANTIC_FEATURE_SCHEMA,flush=True)`nprint('V117_SEMANTIC_HYDRATION=ACTIVE',flush=True)`nprint('V117_FULL_TRAIN_PROMPT_CONTEXT=ACTIVE',flush=True)`nprint('V117_HIGH_SPECIFICITY_ANCHOR_AUTHORITY=ACTIVE',flush=True)" `
+    -Marker 'REV3 coverage-learning runtime markers'
 
 $ReplayTransformAnchor = @'
 $Raw = $Raw.Replace('V116 held-out evaluation gate failed','V117 learned-autonomy held-out evaluation gate failed')
@@ -100,11 +103,11 @@ $EntryRaw = Replace-Required -Text $EntryRaw -Old $ReplayTransformAnchor -New ($
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'" `
-    -New "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE')) 'V117 generated script lacks evidence replay validator.'`nRequire (`$Raw.Contains('V117_SEMANTIC_HYDRATION=ACTIVE')) 'V117 generated script lacks semantic hydration activation.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY=VALIDATED')) 'V117 generated script lacks validated replay path.'`nRequire (`$Raw.Contains('V117_LIVE_CORPUS_REBUILD=USED')) 'V117 generated script lacks live rebuild fallback.'" `
-    -Marker 'REV3 generated semantic replay assertions'
+    -New "Require (`$Raw.Contains('V117_AI_PROPOSAL_SHADOW_METRICS=ACTIVE')) 'V117 generated script lacks AI shadow metric activation.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY_VALIDATOR=ACTIVE')) 'V117 generated script lacks evidence replay validator.'`nRequire (`$Raw.Contains('V117_SEMANTIC_HYDRATION=ACTIVE')) 'V117 generated script lacks semantic hydration activation.'`nRequire (`$Raw.Contains('V117_FULL_TRAIN_PROMPT_CONTEXT=ACTIVE')) 'V117 generated script lacks full TRAIN prompt context.'`nRequire (`$Raw.Contains('V117_HIGH_SPECIFICITY_ANCHOR_AUTHORITY=ACTIVE')) 'V117 generated script lacks high-specificity anchor authority.'`nRequire (`$Raw.Contains('V117_EVIDENCE_REPLAY=VALIDATED')) 'V117 generated script lacks validated replay path.'`nRequire (`$Raw.Contains('V117_LIVE_CORPUS_REBUILD=USED')) 'V117 generated script lacks live rebuild fallback.'" `
+    -Marker 'REV3 generated coverage-learning assertions'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green" `
-    -New "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_EVIDENCE_REPLAY_VALIDATOR_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_FAST_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_SEMANTIC_EVIDENCE_SCHEMA_CONFIGURED=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_SEMANTIC_HYDRATION_CONFIGURED=PASS' -ForegroundColor Green" `
-    -Marker 'REV3 semantic evidence configured markers'
+    -New "Write-Host 'V117_AI_PROPOSAL_SHADOW_METRICS_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_EVIDENCE_REPLAY_VALIDATOR_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_FAST_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_SEMANTIC_EVIDENCE_SCHEMA_CONFIGURED=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_SEMANTIC_HYDRATION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green" `
+    -Marker 'REV3 coverage-learning configured markers'
 # ---- end V117 REV3 overlay ----

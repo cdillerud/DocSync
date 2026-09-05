@@ -4,7 +4,7 @@ ACTIVE UNTIL THE IMMUTABLE GATE IS MET.
 
 Before changing AP routing, read `docs/V117_LEARNED_AUTONOMY_CHARTER.md`.
 
-Goal: replace Square9 templates with an AI-driven AP router that learns Gamer Accounting's human-confirmed decisions and reviewer corrections. The AI is the primary route selector. Learned performance and high-purity route-neutral workflow neighborhoods earn autonomy. Deterministic logic is only a fail-closed safety envelope and MUST NOT choose a replacement route.
+Goal: replace Square9 templates with an AI-driven AP router that learns Gamer Accounting's human-confirmed decisions and reviewer corrections. The AI is the primary route selector. Learned performance and high-purity human evidence earn autonomy. Deterministic logic is only a fail-closed safety envelope and MUST NOT choose a replacement route.
 
 Immutable promotion gate: 0 wrong automatic routes, 100% automatic-route accuracy, >=90% representative held-out automatic-route coverage, minimum 20 labels.
 
@@ -12,71 +12,115 @@ Frozen runtime-proven zero-wrong fallback: `6c455f1a027361115eba3ea9ecde989009bd
 
 ## Runtime progression
 
-First AI-primary runtime candidate `3d581ff6def9eb0d42733f35ca46ea1d2232de99` was genuinely runtime-proven with 83/83 focused regressions, certified backend continuity, read-only Accounting/BC access, and no Production mutation. Its held-out result was 58/58 review, 0 automatic routes, 0% coverage. Offline analysis of the held-out rows showed the raw AI proposal was correct on 43/58 (74.14%).
+First AI-primary candidate `3d581ff6def9eb0d42733f35ca46ea1d2232de99` was runtime-proven with 83/83 focused regressions and 0% coverage. Raw AI proposal accuracy was 43/58 (74.14%).
 
-The first learned-neighborhood fast-replay candidate `830bc9611f3e6c7bef12c66215ddd070214c593f` was runtime-proven with 116/116 focused regressions. The 278-label replay preserved the stable 220-train / 58-holdout evaluation split. Raw AI proposal accuracy was 45/58 (77.59%). Promotion measured 14 automatic routes, 44 reviews, 24.14% coverage, 92.86% automatic-route accuracy, and one wrong automatic route. The gate correctly failed with `FAIL_WRONG_AUTO_ROUTE`.
+Learned-neighborhood candidate `830bc9611f3e6c7bef12c66215ddd070214c593f` was runtime-proven with 116/116 focused regressions. On the 278-label 220-train / 58-holdout split it reached 14 autos / 24.14% coverage but produced one wrong auto: Ball credit memo `6363143`, expected `DO NOT PAY`, auto-routed to `Vendor Credit Memos/Ball Detention Credits`.
 
-The wrong auto was Ball invoice/credit memo `6363143`: Accounting truth was `DO NOT PAY`, while the AI proposed and learned authority auto-approved `Vendor Credit Memos/Ball Detention Credits`. The actual current-document text contains both normal detention-credit semantics and the exceptional transaction instruction `Reversing this credit memo as per the request...`.
+Candidate `025d0ac203e8a950f853918fd40b1a038ce19824` reached 120/120 focused regressions, but the same Ball reversal remained wrong. That run proved the reversal rule itself was not the root problem: the old corpus hydrator extracted PDF text for transient context and then discarded it before writing the supervised evidence example/snapshot.
 
-Candidate `7a983c610b206cff2d059f7a009a6d63bd15d4d0` introduced a route-neutral reversal/void semantic boundary, but its first certified attempt stopped at 118/120 focused tests because explicit stop-pay had also been treated as an exception-matched workflow. No held-out evaluation ran. Candidate `025d0ac203e8a950f853918fd40b1a038ce19824` narrowed exception matching to `reversal_or_void` only and restored the mature explicit-DNP contract.
+The semantic-evidence repair persisted a bounded raw-text excerpt plus versioned route-neutral semantics (`v117-semantic-v1`) before deleting the temporary PDF, required semantic-complete SHA256 snapshots, and bound both balanced corpus hydration and targeted vendor expansion to the semantic-preserving hydrator.
 
-Candidate `025d0ac203e8a950f853918fd40b1a038ce19824` then ran successfully through 120/120 focused regressions on September 4, 2026. The existing 278-label snapshot replay validated and the source backend remained unchanged and healthy. The held-out result was 58 documents, 12 automatic routes, 46 reviews, 20.69% coverage, 91.67% automatic-route accuracy, one wrong automatic route, and `FAIL_WRONG_AUTO_ROUTE`. Raw AI proposal accuracy was 42/58 (72.41%). The same Ball `6363143` document remained the sole wrong automatic route.
+## Current runtime-proven checkpoint: zero wrong restored
 
-## Root cause proven after the 120/120 run
+Feature `502678f47bf2f373b0a7c19c915ba28ce6658f28` was runtime-proven on September 5, 2026 with:
 
-The reversal policy itself was not receiving the semantic evidence it was designed to use. `ap_routing_corpus_service.hydrate_accounting_label()` extracted up to five PDF pages / 12,000 characters into `document['raw_text']` for context work, but the subsequent `prepare_routing_example()` payload omitted that raw text and omitted any durable semantic feature snapshot. The local source file was then deleted. As a result, the old 278-label snapshot was cryptographically valid but semantically incomplete.
+- 128/128 focused regressions PASS;
+- certified backend unchanged and healthy before/after;
+- semantic schema `v117-semantic-v1` ACTIVE;
+- validated SHA256 evidence replay;
+- 291 human Accounting labels;
+- 232 TRAIN / 59 held-out;
+- raw AI proposals correct 45/59 = 76.27%;
+- 13 automatic routes;
+- 46 reviews;
+- 22.03% automatic-route coverage;
+- 100% automatic-route accuracy;
+- 0 wrong automatic routes;
+- promotion result `FAIL_COVERAGE` only;
+- no Production mutation.
 
-That explains the runtime/unit-test mismatch: unit tests could see `Reversing this credit memo...`, while replayed held-out evidence typically retained only filename, classification fields, BC context and route label. The old replay therefore continued treating Ball `6363143` as an ordinary detention credit and saw five same-vendor detention examples as pure support.
+This is the first learned-autonomy runtime after the semantic-evidence repair to restore the immutable safety side of the gate.
 
-Targeted vendor expansion had the same risk because `ap_routing_corpus_expansion_service.py` imported `hydrate_accounting_label` by value. The current controller therefore binds BOTH the route-balanced base corpus builder and targeted expansion to the semantic-preserving hydrator.
+Ball `6363143` now behaves correctly. The held-out document exposes `reversal_or_void`; the AI proposes `DO NOT PAY`; ordinary detention-credit history is counted as exception-mismatched support; and the result safely remains review because exception-matched human support has not earned autonomy. The old wrong Ball Detention Credits auto-route is gone.
 
-## Current candidate: semantic-complete learned evidence
+## Current blocker: proposal quality and earned coverage
 
-Current feature head: `502678f47bf2f373b0a7c19c915ba28ce6658f28` on `feature/ap-ai-learned-autonomy`.
+Coverage is now the only promotion blocker, but authority tuning alone cannot solve it. The AI is currently correct on 45/59 held-out documents (76.27%), so AI-owned exact routes cannot reach >=90% automatic coverage until proposal accuracy itself rises to at least 54/59 on this split.
 
-The candidate introduces a versioned route-neutral semantic evidence contract:
+The current run contains 32 correct AI proposals that were still reviewed, including 13 `DO NOT PAY` cases, Ball warehouse orders, Tumalo/Rhonda Issues, S&H approval leaves, freight process states, WTR transfer, Canpack/Ball dropship, and credit-memo workflows. These are authority opportunities only after preserving zero-wrong behavior.
 
-- semantic schema: `v117-semantic-v1`;
-- bounded `raw_text_excerpt` is retained before the temporary source file is deleted;
-- `learned_semantic_features` and `learned_reference_family` are persisted as route-neutral evidence;
-- semantic schema/features are mirrored in `extracted_fields` so held-out reconstruction cannot silently discard them;
-- semantic derivation never inspects or selects a route label;
-- stored semantic features are accepted only from the exact known schema and known feature vocabulary;
-- `reversal_or_void` remains the exceptional authority boundary, while explicit stop-pay retains its existing safety behavior;
-- held-out telemetry now exposes current semantic features, exceptional workflow features, exception support, exception mismatches, and semantic schema;
-- evidence snapshot replay now REQUIRES the exact semantic schema and a SHA256 digest;
-- legacy/digest-less or semantically incomplete snapshots are intentionally rejected and force a live read-only rebuild;
-- both base corpus hydration and targeted vendor expansion are bound to `hydrate_accounting_label_with_semantics`;
-- no deterministic route substitution was added and no vendor-specific routing template was added.
+The 14 wrong raw proposals expose proposal-level weaknesses rather than a single vendor template problem. Representative failure classes include:
 
-The new semantic evidence regression layer adds eight tests for persistence, replay, route-label independence, schema rejection, mirror validation, SHA verification, stored reversal behavior, and preserved explicit-DNP behavior. The next configured focused target is **128 tests**. Do not claim 128/128 until the certified runtime proves it.
+- dynamic-child overspecialization (`Dropship International/114022` when Accounting uses the parent);
+- BC process-state overreach (`Ready to process Purch Inv` / `Sales Order not posted` inferred from generic open/posted status);
+- generic S&H parent vs exact approver leaf;
+- generic correction or sales-shipment evidence incorrectly driving `DO NOT PAY`;
+- transfer/warehouse receipt semantics collapsing into generic return/special handling;
+- credit memo purpose confused with DNP or specialized credit leaves;
+- generic storage/freight semantics overriding GPI-specific workflows.
 
-## Current control plane
+## Current coverage candidate
 
-The final semantic-evidence entry fragment is pinned by SHA256:
-`39165FED128063D4107CF3DA922B604E6212EE67E44B97202CC8226C82D2A6D8`.
+Current feature candidate: `5d59fbb95fe9581e0db6c77dc98f78f78264bbf8` on `feature/ap-ai-learned-autonomy`.
 
-The replay-transform SHA256 remains:
-`EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6`.
+The candidate adds two complementary learned mechanisms without lowering any gate or allowing route substitution.
 
-The control wrapper code commit that pins feature `502678f47bf2f373b0a7c19c915ba28ce6658f28`, focused target 128, the semantic schema, and the fragment hash is `f996fcecc97254c5298fba7509ad599e98dda142`. Later documentation-only commits may advance the control branch head; the launcher must use the current fetched control head while these exact code pins remain unchanged.
+### 1. Full TRAIN prompt context
 
-## Next certified run behavior
+The model still receives at most eight raw human examples. In addition it now receives a bounded aggregate summary of the full human TRAIN set containing:
 
-The currently stored 278-label snapshot predates `v117-semantic-v1`. Its rejection is EXPECTED and is a safety PASS, not a regression. A correct next run should show a reason equivalent to:
+- current route-neutral semantic features and reference family;
+- same-vendor route distributions;
+- same-vendor + same-document-type route distributions;
+- matching reference-family route distributions;
+- bounded nearest-human route observations with relevance, vendor/type/reference counts and shared semantics;
+- observed parent-vs-dynamic-child usage for contract-declared dynamic route prefixes.
 
-`V117_EVIDENCE_REPLAY=REJECTED;reason=semantic_feature_schema_mismatch:missing!=v117-semantic-v1`
+This summary is PROMPT CONTEXT ONLY. It does not recommend, authorize, or substitute a route.
 
-followed by:
+The AI-primary prompt now explicitly enforces learned GPI workflow granularity:
 
-`V117_LIVE_CORPUS_REBUILD=USED`
+- verified BC/order references alone do not justify a dynamic child;
+- dynamic children require comparable human TRAIN evidence using dynamic children;
+- process-state leaves such as `Ready to process Purch Inv` and `Sales Order not posted` require comparable human-labelled evidence, not BC state alone;
+- do not stop at a generic workflow parent when comparable human labels consistently use a child;
+- `DO NOT PAY` is exceptional and must not be inferred merely from generic correction, sales-shipment/missing-PO evidence, a credit memo, or unrelated historical DNP cases;
+- credit memo alone does not imply DNP or a specialized credit child;
+- WTR/WA/W structural families must be interpreted with human workflow evidence rather than generic return/freight semantics.
 
-The live rebuild remains read-only against GamerAccounting and Business Central. It may take hours and must not be interrupted. After the base corpus and targeted expansion finish, the newly written snapshot must carry `semantic_feature_schema=v117-semantic-v1` plus its examples SHA256. Future candidate reruns can use fast replay again as long as that snapshot validates.
+### 2. High-specificity human anchor authority
 
-For Ball `6363143`, the next held-out telemetry should visibly include `reversal_or_void` in current/exceptional semantic features. Ordinary detention-credit examples lacking reversal semantics must move into exception-mismatch support and must not grant autonomy to the detention route. The system does not need to force a replacement route; safe review is acceptable unless the AI's exact route has genuinely earned exception-matched authority.
+Nearest-neighbor authority remains unchanged. A second authority path may confirm ONLY the AI's exact proposed route when a deliberately tiny route-neutral anchor has broad unanimous human TRAIN support.
 
-The immutable gate remains unchanged. Even after zero wrong automatic routes are restored, 20.69% measured coverage is far below the required 90%, so subsequent sprints must immediately target correct-but-reviewed AI proposals by improving learned context, semantic discrimination, calibration and earned authority, never by lowering thresholds.
+Eligible anchors are intentionally restricted to:
+
+- `explicit_stop_pay`;
+- `wtr_reference`;
+- `wa_reference`.
+
+Generic freight, return, storage, credit, inventory, detention, W/numeric references, vendor identity, filenames, etc. cannot use this path.
+
+Anchor authority requires at least five human TRAIN supports for the AI's exact route, zero contradictory Accounting routes, and zero reviewer-correction contradictions. Any conflicting human route blocks the anchor path and also prevents a neighborhood from bypassing that high-specificity conflict. The mechanism never chooses a route and remains subject to the normal deterministic safety envelope afterward.
+
+## Next configured proof
+
+Active control code commit: `e95f4e932b926f0a648d3278a20065f51ab76492` on `migration/gpi-hub-dedicated-vm`. Later documentation commits may advance the branch head while this exact code pin remains the execution authority.
+
+Feature pin:
+`5d59fbb95fe9581e0db6c77dc98f78f78264bbf8`
+
+Entry-fragment SHA256:
+`CE0346D72867D9C6807AA6A12AE0EE210460055E01621DA04946F0F126D980F1`
+
+Replay-transform SHA256:
+`EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6`
+
+Next focused regression target: **142 tests**. Do not claim 142/142 or any coverage/accuracy improvement until certified runtime proves it.
+
+The 291-label semantic-complete snapshot is already valid, so the next correct run should normally use validated fast replay rather than rebuilding the corpus, provided the snapshot remains within its 24-hour age limit and passes all integrity/authority/schema checks. Any validation failure must still fail closed to the live read-only rebuild.
+
+Desired next telemetry includes the aggregate TRAIN-context activation, high-specificity anchor authority measurements, raw proposal accuracy, anchor-earned auto count, zero-wrong metrics, and full held-out rows. Promotion remains impossible unless every immutable gate passes.
 
 ## Non-negotiable architecture rules
 
-Never lower the immutable gate to create coverage. Improve the AI's learned context, evidence similarity, calibration, and earned authority instead. Never self-train from unreviewed AI predictions. Never recreate Square9 as vendor-specific Python templates. Reviewer corrections are stronger evidence than passive confirmations. Deterministic safety may only demote the AI's exact route to review and must never select a replacement route. Future agents/new chats must continue the fullest repo-safe sprint without pausing for approval and stop only for an actual execution or authorization boundary. Never touch Production without explicit authorization.
+Never lower the immutable gate to create coverage. Improve AI learned context, semantic discrimination, calibration and earned human authority instead. Never self-train from unreviewed AI predictions. Never recreate Square9 as vendor-specific Python templates. Reviewer corrections are stronger evidence than passive confirmations. Deterministic safety may only demote the AI's exact route to review and must never select a replacement route. Future agents/new chats must continue the fullest repo-safe sprint without pausing for approval and stop only for an actual execution or authorization boundary. Never touch Production without explicit authorization.

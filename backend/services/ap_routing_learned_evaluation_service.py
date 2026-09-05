@@ -75,6 +75,7 @@ async def evaluate_holdout_learned(
         ai_correct = bool(ai_proposed and ai_proposed == expected)
         ensemble = result.get("ensemble_reconciliation") or {}
         authority_guard = result.get("authority_guard") or {}
+        anchor_authority = authority_guard.get("anchor_authority") or {}
         prompt_routes = [str(route) for route in (result.get("prompt_routes") or []) if route]
 
         rows.append(
@@ -121,11 +122,30 @@ async def evaluate_holdout_learned(
                 "neighborhood_support_margin": authority_guard.get("support_margin"),
                 "neighborhood_routes": authority_guard.get("neighbor_routes") or [],
                 "neighborhood_scores": authority_guard.get("neighbor_scores") or [],
+                "current_reference_family": authority_guard.get("current_reference_family"),
                 "current_semantic_features": authority_guard.get("current_semantic_features") or [],
                 "exceptional_workflow_features": authority_guard.get("exceptional_workflow_features") or [],
                 "exception_support_count": authority_guard.get("exception_support_count"),
                 "exception_mismatch_support_count": authority_guard.get("exception_mismatch_support_count"),
                 "exception_support_ready": authority_guard.get("exception_support_ready"),
+                "anchor_authority_ready": bool(anchor_authority.get("authority_ready")),
+                "anchor_earned_anchor": anchor_authority.get("earned_anchor"),
+                "anchor_earned_anchor_type": anchor_authority.get("earned_anchor_type"),
+                "anchor_support_count": anchor_authority.get("support_count"),
+                "anchor_contradiction_count": anchor_authority.get("contradiction_count"),
+                "anchor_measurements": anchor_authority.get("measurements") or [],
+                "train_learning_context_active": bool(
+                    authority_guard.get("train_learning_context_active")
+                ),
+                "train_learning_context_example_count": authority_guard.get(
+                    "train_learning_context_example_count"
+                ),
+                "train_learning_context_current_reference_family": authority_guard.get(
+                    "train_learning_context_current_reference_family"
+                ),
+                "train_learning_context_current_semantic_features": authority_guard.get(
+                    "train_learning_context_current_semantic_features"
+                ) or [],
                 "learned_feature_schema": test.get("learned_feature_schema"),
                 "earned_by": authority_guard.get("earned_by"),
                 "autonomy_score": authority_guard.get("autonomy_score"),
@@ -148,6 +168,9 @@ async def evaluate_holdout_learned(
             ),
             "wrong_ai_proposal_examples": wrong_ai[:25],
             "actual_prompt_limit": prompt_limit,
+            "high_specificity_anchor_auto_count": sum(
+                1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "high_specificity_human_anchor"
+            ),
         }
     )
 

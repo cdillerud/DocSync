@@ -44,6 +44,7 @@ async def decide_ap_route_with_learned_autonomy(
     )
 
     neighborhood = result.get("neighborhood") or {}
+    anchor_authority = result.get("anchor_authority") or {}
     neighbor_routes = [str(route) for route in (neighborhood.get("neighbor_routes") or []) if route]
     scope = str(neighborhood.get("scope") or "")
     same_vendor_count = int(neighborhood.get("neighborhood_count") or 0) if scope == "same_vendor" else 0
@@ -76,9 +77,20 @@ async def decide_ap_route_with_learned_autonomy(
         "exception_support_count": neighborhood.get("exception_support_count"),
         "exception_mismatch_support_count": neighborhood.get("exception_mismatch_support_count"),
         "exception_support_ready": neighborhood.get("exception_support_ready"),
+        "anchor_authority": anchor_authority,
         "performance": result.get("performance") or {},
         "earned_by": result.get("earned_by"),
         "hard_safety_blockers": list(result.get("safety_blockers") or []),
+        "train_learning_context_active": bool(result.get("train_learning_context_active")),
+        "train_learning_context_example_count": int(
+            result.get("train_learning_context_example_count") or 0
+        ),
+        "train_learning_context_current_reference_family": result.get(
+            "train_learning_context_current_reference_family"
+        ),
+        "train_learning_context_current_semantic_features": result.get(
+            "train_learning_context_current_semantic_features"
+        ) or [],
     }
     result["ensemble_reconciliation"] = {
         "action": "ai_primary_no_route_substitution",

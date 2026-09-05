@@ -9,6 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, List, Sequence
 
+from services.ap_routing_anchor_authority_service import (
+    summarize_high_specificity_anchor_authority,
+)
 from services.ap_routing_autonomy_performance_service import summarize_pattern_performance
 from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
 from services.ap_routing_learning_service import normalize_route_path
@@ -55,6 +58,12 @@ def evaluate_learned_autonomy(
             "contradiction_count": 0,
             "support_share": 0.0,
             "earned_by": "none",
+            "anchor_authority": {
+                "purpose": "CONFIRM_AI_EXACT_ROUTE_ONLY_NO_ROUTE_SELECTION",
+                "authority_ready": False,
+                "current_high_specificity_anchors": [],
+                "measurements": [],
+            },
         }
 
     neighborhood = summarize_authority_neighborhood(
@@ -62,6 +71,11 @@ def evaluate_learned_autonomy(
         proposed_route=proposed,
         train_examples=train_examples,
         limit=relevant_limit,
+    )
+    anchor_authority = summarize_high_specificity_anchor_authority(
+        document=document,
+        proposed_route=proposed,
+        train_examples=train_examples,
     )
     performance = summarize_pattern_performance(
         document=document,
@@ -80,6 +94,11 @@ def evaluate_learned_autonomy(
         hard_reasons.append(
             f"{int(neighborhood.get('reviewer_correction_contradictions') or 0)} reviewer correction(s) contradict the AI route"
         )
+    if any(
+        int(measurement.get("contradiction_count") or 0) > 0
+        for measurement in (anchor_authority.get("measurements") or [])
+    ):
+        hard_reasons.append("high-specificity human anchor has contradictory Accounting routes")
     if performance.get("suspended"):
         hard_reasons.append("learned pattern suspended by historical human-resolved AI error")
 
@@ -105,7 +124,8 @@ def evaluate_learned_autonomy(
         and float(performance.get("wilson_lower_bound") or 0.0) >= minimum_performance_lower_bound
     )
     neighborhood_earned = bool(neighborhood.get("authority_ready"))
-    earned = not hard_reasons and (performance_earned or neighborhood_earned)
+    anchor_earned = bool(anchor_authority.get("authority_ready"))
+    earned = not hard_reasons and (performance_earned or neighborhood_earned or anchor_earned)
 
     if earned:
         tier = EARNED_AUTO
@@ -114,6 +134,12 @@ def evaluate_learned_autonomy(
         if performance_earned:
             earned_by = "measured_performance"
             reason = "AI route earned autonomy from measured human-resolved AI performance"
+        elif anchor_earned:
+            earned_by = "high_specificity_human_anchor"
+            reason = (
+                "AI route earned autonomy from unanimous high-specificity human Accounting anchor: "
+                + str(anchor_authority.get("earned_anchor") or "unknown")
+            )
         else:
             earned_by = "human_consensus_bootstrap"
             reason = "AI route earned autonomy from a high-purity nearby human Accounting neighborhood"
@@ -160,6 +186,7 @@ def evaluate_learned_autonomy(
         "support_share": float(neighborhood.get("support_share") or 0.0),
         "support_margin": float(neighborhood.get("support_margin") or 0.0),
         "neighborhood": neighborhood,
+        "anchor_authority": anchor_authority,
         "performance": performance,
         "earned_by": earned_by,
         "policy": {
@@ -167,5 +194,6 @@ def evaluate_learned_autonomy(
             "minimum_performance_observations": minimum_performance_observations,
             "minimum_performance_lower_bound": minimum_performance_lower_bound,
             "authority_neighborhood_limit": relevant_limit,
+            "high_specificity_anchor_minimum_support": anchor_authority.get("minimum_support"),
         },
     }

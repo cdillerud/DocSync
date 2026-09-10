@@ -1,5 +1,6 @@
 import json
 
+from services.ap_routing_anchor_authority_service import summarize_high_specificity_anchor_authority
 from services.ap_routing_evidence_snapshot_service import (
     load_valid_evidence_snapshot,
     snapshot_examples_sha256,
@@ -205,3 +206,41 @@ def test_explicit_stop_pay_is_not_forced_into_reversal_exception_boundary():
     )
     assert result["exceptional_workflow_features"] == []
     assert result["authority_ready"] is True
+
+    reversal_current = semantic_example(
+        DNP,
+        "This credit memo fully reverses the original invoice.",
+        "current-reversal-anchor",
+    )
+    reversal_rows = [
+        semantic_example(
+            DNP,
+            "This credit memo fully reverses the original invoice.",
+            f"reversal-anchor-{i}",
+        )
+        for i in range(5)
+    ]
+    reversal_result = summarize_high_specificity_anchor_authority(
+        document=reversal_current,
+        proposed_route=DNP,
+        train_examples=reversal_rows,
+    )
+    assert reversal_result["authority_ready"] is True
+    assert reversal_result["earned_anchor"] == "reversal_or_void"
+    assert reversal_result["support_count"] == 5
+    assert reversal_result["contradiction_count"] == 0
+
+    contradictory_rows = reversal_rows + [
+        semantic_example(
+            DETENTION,
+            "This credit memo fully reverses the original invoice.",
+            "reversal-anchor-contradiction",
+        )
+    ]
+    blocked_result = summarize_high_specificity_anchor_authority(
+        document=reversal_current,
+        proposed_route=DNP,
+        train_examples=contradictory_rows,
+    )
+    assert blocked_result["authority_ready"] is False
+    assert blocked_result["contradiction_count"] == 1

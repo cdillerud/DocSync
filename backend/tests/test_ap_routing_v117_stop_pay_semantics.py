@@ -18,6 +18,7 @@ def test_explicit_stop_pay_recognizes_filename_safe_strong_variants():
         "vendor_DNP_123.pdf",
         "vendor_DO_NOT_PAY_123.pdf",
         "vendor-do-not-pay-123.pdf",
+        "Anchor_invoice_issued_in_error.pdf",
     ]
     for file_name in file_names:
         assert "explicit_stop_pay" in _features(file_name=file_name), file_name
@@ -29,6 +30,7 @@ def test_explicit_stop_pay_preserves_existing_strong_prose_variants():
         "Don't pay this invoice",
         "Do not process this invoice",
         "Hold payment until corrected",
+        "This invoice was issued in error and should be replaced.",
     ]
     for raw_text in texts:
         assert "explicit_stop_pay" in _features(raw_text=raw_text), raw_text
@@ -40,6 +42,7 @@ def test_explicit_stop_pay_rejects_loose_or_embedded_not_pay_tokens():
         "invoice_ADNP_123.pdf",
         "invoice_DNPX_123.pdf",
         "invoice_DP_NOT_PAYMENT.pdf",
+        "invoice_error_in_issuance_review.pdf",
     ]
     for file_name in file_names:
         assert "explicit_stop_pay" not in _features(file_name=file_name), file_name

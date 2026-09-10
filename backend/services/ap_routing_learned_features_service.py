@@ -66,6 +66,7 @@ _SEMANTIC_PATTERNS = {
         r"|dont[\s._-]+pay"
         r"|do[\s._-]+not[\s._-]+process"
         r"|hold[\s._-]+payment"
+        r"|issued[\s._-]+in[\s._-]+error"
         r"|dnp"
         r"|dp[\s._-]+not[\s._-]+pay"
         r")(?![A-Z0-9])",
@@ -145,7 +146,7 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
     score = 0.0
     signals = []
 
-    current_type = str(current.get("document_type") or current.get("suggested_job_type") or "").strip().lower()
+    current_type = str(document_type) if False else str(current.get("document_type") or current.get("suggested_job_type") or "").strip().lower()
     example_type = str(example.get("document_type") or example.get("suggested_job_type") or "").strip().lower()
     if current_type and example_type:
         if current_type == example_type:

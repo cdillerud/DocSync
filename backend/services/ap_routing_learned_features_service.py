@@ -60,7 +60,15 @@ def reference_family(document: Dict[str, Any]) -> str:
 
 _SEMANTIC_PATTERNS = {
     "explicit_stop_pay": re.compile(
-        r"\b(?:do\s+not\s+pay|don['’]?t\s+pay|dont\s+pay|do\s+not\s+process|hold\s+payment)\b",
+        r"(?<![A-Z0-9])(?:"
+        r"do[\s._-]+not[\s._-]+pay"
+        r"|don['’]?t[\s._-]+pay"
+        r"|dont[\s._-]+pay"
+        r"|do[\s._-]+not[\s._-]+process"
+        r"|hold[\s._-]+payment"
+        r"|dnp"
+        r"|dp[\s._-]+not[\s._-]+pay"
+        r")(?![A-Z0-9])",
         re.IGNORECASE,
     ),
     "replacement_or_offset": re.compile(

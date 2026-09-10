@@ -95,7 +95,7 @@ _SEMANTIC_PATTERNS = {
     "return": re.compile(r"\b(?:return|returned|returns)\b", re.IGNORECASE),
     "quality_or_claim": re.compile(r"\b(?:quality\s+claim|claim|replacement)\b", re.IGNORECASE),
     "cost_variance": re.compile(r"\bcost\s+variance\b", re.IGNORECASE),
-    "bol": re.compile(r"\b(?:BOL|bill\s+of\s+lading)\b", re.IGNORECASE),
+    "bol": re.compile(r"(?<![A-Z0-9])(?:BOL|bill\s+of\s+lading)(?![A-Z0-9])", re.IGNORECASE),
     "international": re.compile(r"\b(?:international|customs|ocean\s+freight|import|export)\b", re.IGNORECASE),
 }
 

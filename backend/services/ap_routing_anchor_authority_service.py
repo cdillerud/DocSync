@@ -23,7 +23,7 @@ from services.ap_routing_relevant_learning_service import is_train_human_example
 # Keep this set intentionally narrow. Generic concepts such as freight, return,
 # storage, inventory, credit, W/numeric order references, etc. are NOT specific
 # enough to grant authority across vendors/document types.
-HIGH_SPECIFICITY_SEMANTIC_ANCHORS = frozenset({"explicit_stop_pay"})
+HIGH_SPECIFICITY_SEMANTIC_ANCHORS = frozenset({"explicit_stop_pay", "reversal_or_void"})
 HIGH_SPECIFICITY_REFERENCE_ANCHORS = frozenset({"wtr_reference", "wa_reference"})
 
 

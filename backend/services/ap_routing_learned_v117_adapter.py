@@ -45,6 +45,7 @@ async def decide_ap_route_with_learned_autonomy(
 
     neighborhood = result.get("neighborhood") or {}
     anchor_authority = result.get("anchor_authority") or {}
+    corroboration_authority = result.get("corroboration_authority") or {}
     neighbor_routes = [str(route) for route in (neighborhood.get("neighbor_routes") or []) if route]
     scope = str(neighborhood.get("scope") or "")
     same_vendor_count = int(neighborhood.get("neighborhood_count") or 0) if scope == "same_vendor" else 0
@@ -78,6 +79,11 @@ async def decide_ap_route_with_learned_autonomy(
         "exception_mismatch_support_count": neighborhood.get("exception_mismatch_support_count"),
         "exception_support_ready": neighborhood.get("exception_support_ready"),
         "anchor_authority": anchor_authority,
+        "corroboration_authority": corroboration_authority,
+        "corroboration_authority_ready": bool(corroboration_authority.get("authority_ready")),
+        "corroboration_earned_slice": corroboration_authority.get("earned_slice"),
+        "corroboration_support_count": corroboration_authority.get("support_count"),
+        "corroboration_purity": corroboration_authority.get("purity"),
         "performance": result.get("performance") or {},
         "earned_by": result.get("earned_by"),
         "hard_safety_blockers": list(result.get("safety_blockers") or []),

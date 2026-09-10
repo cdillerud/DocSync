@@ -137,15 +137,20 @@ def _route_family(route: Any) -> str:
 
 
 def _family_conflict(reference_family: str, route: str) -> bool:
-    """Veto only structural families that truly contradict the proposed family.
+    """Veto structural contradictions without turning numeric orders into templates.
 
-    W, WA and WTR are explicit warehouse-family signals. A plain numeric order
-    number is not a universal dropship signal and therefore cannot veto a
-    warehouse route.
+    W, WA and WTR are explicit warehouse-family signals and cannot auto-route to
+    dropship. A plain numeric order is not enough to veto a generic warehouse
+    parent, because real warehouse receipts can carry numeric order references.
+    It can still veto a specialized warehouse child whose extra workflow claim
+    requires stronger structural evidence than a generic warehouse parent.
     """
-    family = _route_family(route)
+    normalized = normalize_route_path(route)
+    family = _route_family(normalized)
     if reference_family in {"warehouse", "warehouse_assembly", "warehouse_transfer"}:
         return family == "dropship"
+    if reference_family == "standard_order" and family == "warehouse":
+        return normalized not in {"Warehouse International", "Warehouse Not International"}
     return False
 
 

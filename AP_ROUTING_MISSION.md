@@ -57,13 +57,28 @@ There are also 37 correct AI proposals still being held for review. The next spr
 
 The seven remaining raw proposal failures represent generic workflow-discrimination problems: WA assembly vs Dropship family, S&H owner/approver assignment, WTR/warehouse-transfer semantics, generic credit memo vs DNP, storage/accessorial vs DNP, and storage workflow vs Warehouse family. These are being addressed as general route-neutral workflow rules, not vendor-specific templates.
 
-## Current candidate: TRAIN corroboration plus safety-scope correction
+## TRAIN corroboration candidate and preflight outcome
 
-Current feature candidate: `a2b2111cde741c840c19573e0e50c311c98f95dd` on `feature/ap-ai-learned-autonomy`.
+Candidate `a2b2111cde741c840c19573e0e50c311c98f95dd` added TRAIN-only corroboration authority, prompt-discrimination repairs, and safety-scope corrections. Its September 10 runtime attempt reached the focused regression gate but stopped before any held-out evaluation because two regressions failed: 156 passed and 2 failed.
 
-This candidate retains every existing neighborhood threshold and the immutable promotion gate. It adds one new learned authority view, sharpens the AI prompt, and narrows two deterministic safety rules that were proven to create false review decisions.
+The first failure was provenance precedence, not route behavior. Five unanimous local human examples correctly earned autonomy, but the new corroboration layer reported `train_corroboration` instead of preserving the pre-existing and more specific `human_consensus_bootstrap` provenance. The repaired code now gives established local-neighborhood authority precedence when both mechanisms independently agree. This does not grant any additional route.
 
-### TRAIN-only corroboration authority
+The second failure exposed an over-broad interpretation of the numeric-order safety repair. Removing every numeric-order -> Warehouse veto invalidated the existing specialized-child safeguard. The repaired rule now distinguishes generic Warehouse parents from specialized Warehouse leaves: a plain numeric order reference cannot veto `Warehouse International` or `Warehouse Not International`, because runtime evidence shows legitimate warehouse receipts may carry numeric order references; however it can still veto a specialized Warehouse child when the structural evidence does not support that extra workflow claim. Explicit W/WA/WTR -> Dropship contradictions remain unchanged.
+
+The failed `a2b2111...` run did not execute the held-out routing evaluation, so it created no new coverage or accuracy measurement and does not replace the runtime-proven `5d59fbb...` checkpoint.
+
+## Current repaired candidate
+
+Current feature candidate: `79f91e8dafa05affb671039dc43ff151c58f0b75` on `feature/ap-ai-learned-autonomy`.
+
+This candidate retains every existing learned-autonomy threshold, the TRAIN-only corroboration design, the no-route-substitution rule, the zero-wrong safety envelope, and the immutable promotion gate. It changes only the two behaviors exposed by the failed focused regression gate:
+
+- local high-purity neighborhood authority remains the reported authority source when corroboration independently reaches the same exact AI route;
+- numeric standard-order evidence is no longer treated as a universal anti-Warehouse signal, but specialized Warehouse children still require stronger structural consistency than generic Warehouse parents.
+
+No Production code or business data has been mutated. The candidate remains temp-staged only when the V117 runner executes.
+
+## TRAIN-only corroboration authority
 
 `ap_routing_corroboration_authority_service.py` may confirm ONLY the AI's exact route. It never selects or substitutes a route. It considers only human TRAIN examples and only route-neutral slices:
 
@@ -76,9 +91,9 @@ Static same-vendor/reference corroboration requires at least five exact-route hu
 
 This authority path cannot grant `DO NOT PAY` without explicit current stop-pay evidence and cannot bypass a `reversal_or_void` exception boundary. High-specificity DNP remains governed by the existing explicit-stop-pay anchor authority.
 
-### Prompt discrimination repairs
+## Prompt discrimination repairs
 
-The AI prompt now makes the following business-workflow distinctions explicit:
+The AI prompt makes the following business-workflow distinctions explicit:
 
 - approver/processor child folders are ownership assignments, not generic meanings of storage/freight terms;
 - same-vendor ownership evidence outranks a cross-vendor approver example;
@@ -87,28 +102,20 @@ The AI prompt now makes the following business-workflow distinctions explicit:
 - a WA-prefixed reference is a warehouse-assembly family and must never cross into Dropship;
 - a plain numeric BC/order reference does not determine warehouse vs dropship.
 
-### Safety-scope corrections
-
-The prior safety envelope treated any plain numeric BC order reference as `standard_order` and therefore automatically contradictory to every Warehouse route. Runtime evidence proved that premise false. The candidate removes that numeric-reference veto while retaining explicit W/WA/WTR -> Dropship family vetoes.
-
-Resolved BC-vendor mismatch and cross-vendor exact-reference dependency are now applied only when the document type actually represents a payable supplier identity, such as AP invoice or credit memo. Shipping documents and warehouse receipts commonly expose customer/warehouse/carrier/ship-to parties in a generic vendor field, so those fields cannot safely be interpreted as payable-vendor conflicts.
-
-For an exact DNP proposal with a current explicit stop-pay instruction and already-earned unanimous human stop-pay anchor authority, an incidental foreign BC reference or ordinary unresolved BC context no longer defeats the direct stop-pay evidence. Actual model/parse/invalid-route failures remain fail-closed.
-
 ## Next configured proof
 
 Feature pin:
-`a2b2111cde741c840c19573e0e50c311c98f95dd`
+`79f91e8dafa05affb671039dc43ff151c58f0b75`
 
 Entry-fragment SHA256:
-`5B4B46952D94E1725D38C829E6F7CC513EEC0B584853457309B5F060EC71789F`
+`6D263E16C61AA6609E7F226E41022CFA5FB11992C5963ACC78FA37A826F299C4`
 
 Replay-transform SHA256:
 `EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6`
 
-Next focused regression target: **158 tests**. Do not claim 158/158 or any coverage/accuracy improvement until certified runtime proves it.
+Focused regression target remains **158 tests**. Do not claim 158/158 or any coverage/accuracy improvement until certified runtime proves it.
 
-The September 10 semantic-complete 314-label snapshot is fresh. The next correct run should normally use validated fast replay, skipping the multi-hour live rebuild, provided the snapshot remains within its 24-hour age limit and passes authority/schema/SHA validation.
+The September 10 semantic-complete 314-label snapshot should still be fresh enough for validated fast replay if the rerun occurs within its 24-hour validity window and all authority/schema/SHA checks pass. If not, the controller must fail closed to the live read-only rebuild.
 
 Desired telemetry includes raw proposal accuracy, `train_corroboration_auto_count`, high-specificity anchor auto count, corroboration slice/purity/support for each held-out row, automatic coverage/accuracy, wrong-auto count, and source-runtime continuity.
 

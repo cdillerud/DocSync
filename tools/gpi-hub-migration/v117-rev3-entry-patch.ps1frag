@@ -1,7 +1,7 @@
 # ---- V117 REV3 fast human-evidence replay overlay ----
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old '$ExpectedFeatureCommit = ''a728eba4dd9014a91e47947292d046e59924f3c7''' `
-    -New '$ExpectedFeatureCommit = ''79f91e8dafa05affb671039dc43ff151c58f0b75''' `
+    -New '$ExpectedFeatureCommit = ''dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1''' `
     -Marker 'REV3 learned feature pin'
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
@@ -11,7 +11,7 @@ $EntryRaw = Replace-Required -Text $EntryRaw `
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py'," `
-    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_exception_semantic_authority.py',`n        'backend/tests/test_ap_routing_v117_semantic_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_train_context_and_anchor.py',`n        'backend/tests/test_ap_routing_v117_corroboration_and_safety_scope.py'," `
+    -New "        'backend/tests/test_ap_routing_v117_learned_prompt_and_safety.py',`n        'backend/tests/test_ap_routing_v117_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_exception_semantic_authority.py',`n        'backend/tests/test_ap_routing_v117_semantic_evidence_snapshot.py',`n        'backend/tests/test_ap_routing_v117_stop_pay_semantics.py',`n        'backend/tests/test_ap_routing_v117_train_context_and_anchor.py',`n        'backend/tests/test_ap_routing_v117_corroboration_and_safety_scope.py'," `
     -Marker 'REV3 evidence semantic and coverage regression materialization'
 
 $CompileServiceOld = @'
@@ -35,6 +35,7 @@ $SnapshotTestNew = @'
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_evidence_snapshot.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_exception_semantic_authority.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_semantic_evidence_snapshot.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_stop_pay_semantics.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_train_context_and_anchor.py" \
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_corroboration_and_safety_scope.py"
 '@
@@ -47,8 +48,8 @@ $EntryRaw = Replace-Required -Text $EntryRaw -Old $OriginOld -New $OriginNew -Ma
 
 $EntryRaw = Replace-Required -Text $EntryRaw `
     -Old 'echo V117_FOCUSED_REGRESSION_TARGET=107' `
-    -New 'echo V117_FOCUSED_REGRESSION_TARGET=158' `
-    -Marker 'REV3 focused regression target 158'
+    -New 'echo V117_FOCUSED_REGRESSION_TARGET=161' `
+    -Marker 'REV3 focused regression target 161'
 
 $ProbeImportOld = @'
 from services.ap_routing_learned_evaluation_service import (

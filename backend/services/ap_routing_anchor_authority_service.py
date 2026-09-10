@@ -142,6 +142,9 @@ def summarize_high_specificity_anchor_authority(
         "earned_anchor_type": best.get("anchor_type") if best else "",
         "earned_anchor": best.get("anchor") if best else "",
         "support_count": int(best.get("support_count") or 0) if best else 0,
-        "contradiction_count": int(best.get("contradiction_count") or 0) if best else 0,
+        "contradiction_count": max(
+            (int(measurement.get("contradiction_count") or 0) for measurement in measurements),
+            default=0,
+        ),
         "minimum_support": max(1, int(minimum_support)),
     }

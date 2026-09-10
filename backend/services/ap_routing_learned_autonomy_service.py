@@ -165,15 +165,15 @@ def evaluate_learned_autonomy(
                 "AI route earned autonomy from unanimous high-specificity human Accounting anchor: "
                 + str(anchor_authority.get("earned_anchor") or "unknown")
             )
-        elif corroboration_earned:
+        elif neighborhood_earned:
+            earned_by = "human_consensus_bootstrap"
+            reason = "AI route earned autonomy from a high-purity nearby human Accounting neighborhood"
+        else:
             earned_by = "train_corroboration"
             reason = (
                 "AI route earned autonomy from high-purity TRAIN corroboration slice: "
                 + str(corroboration_authority.get("earned_slice") or "unknown")
             )
-        else:
-            earned_by = "human_consensus_bootstrap"
-            reason = "AI route earned autonomy from a high-purity nearby human Accounting neighborhood"
     else:
         promising = bool(
             proposed

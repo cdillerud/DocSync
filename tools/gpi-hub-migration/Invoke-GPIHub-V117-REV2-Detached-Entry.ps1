@@ -15,7 +15,8 @@ $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
 $ExpectedEntryPatchSha256 = '67D0F30B1A4D547C186BC15C8450C3777BF7CDA76CF49B6DCD8E01607B831537'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
+$ExpectedFeatureCommit = '6b10fdadd5f01ece53fcc7edc2c0af0d5b683be0'
+$EntryPatchFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -57,6 +58,9 @@ $ReplayTransform = Get-GitText -Repo $OperationalRoot -Ref $RemoteTrackingRef -R
 Require ((Get-TextSha256 $EntryPatchTemplate) -eq $ExpectedEntryPatchSha256) 'V117 REV3 entry patch SHA256 drift.'
 Require ((Get-TextSha256 $ReplayTransform) -eq $ExpectedReplayTransformSha256) 'V117 REV3 replay transform SHA256 drift.'
 Require ($EntryPatchTemplate.Contains('__REPLAY_TRANSFORM_B64__')) 'V117 REV3 replay transform placeholder missing.'
+Require ($EntryPatchTemplate.Contains($EntryPatchFeatureCommit)) 'V117 REV3 feature pin anchor missing from validated entry patch.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($EntryPatchFeatureCommit,$ExpectedFeatureCommit)
+Require ($EntryPatchTemplate.Contains($ExpectedFeatureCommit)) 'V117 REV3 dynamic feature repin failed.'
 
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
@@ -99,6 +103,7 @@ if (@($errors).Count -gt 0) {
 Write-Host 'V117_REV3_RESTARTED_SPRINT=PASS' -ForegroundColor Green
 Write-Host "V117_REV3_LEGACY_CONTROL_BASE=$LegacyControlCommit"
 Write-Host "V117_REV3_FEATURE_COMMIT=$ExpectedFeatureCommit"
+Write-Host 'V117_REV3_DYNAMIC_FEATURE_REPIN=PASS' -ForegroundColor Green
 Write-Host "V117_REV3_ENTRY_PATCH_SHA256=$ExpectedEntryPatchSha256"
 Write-Host "V117_REV3_REPLAY_TRANSFORM_SHA256=$ExpectedReplayTransformSha256"
 Write-Host 'V117_REV3_SNAPSHOT_MAX_AGE_HOURS=24'

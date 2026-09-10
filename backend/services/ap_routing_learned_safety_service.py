@@ -29,6 +29,16 @@ def _document_text(document: Dict[str, Any]) -> str:
     )
 
 
+def _document_type(document: Dict[str, Any]) -> str:
+    fields = document.get("extracted_fields") or {}
+    return str(
+        document.get("document_type")
+        or document.get("suggested_job_type")
+        or fields.get("document_type")
+        or ""
+    ).strip().lower()
+
+
 def _document_vendor(document: Dict[str, Any]) -> str:
     fields = document.get("extracted_fields") or document.get("ai_extraction") or {}
     return str(
@@ -127,11 +137,15 @@ def _route_family(route: Any) -> str:
 
 
 def _family_conflict(reference_family: str, route: str) -> bool:
+    """Veto only structural families that truly contradict the proposed family.
+
+    W, WA and WTR are explicit warehouse-family signals. A plain numeric order
+    number is not a universal dropship signal and therefore cannot veto a
+    warehouse route.
+    """
     family = _route_family(route)
     if reference_family in {"warehouse", "warehouse_assembly", "warehouse_transfer"}:
         return family == "dropship"
-    if reference_family == "standard_order":
-        return family == "warehouse"
     return False
 
 
@@ -170,6 +184,21 @@ def _vendors_conflict(left: str, right: str) -> bool:
     a_tokens = {token for token in a.split() if len(token) >= 4}
     b_tokens = {token for token in b.split() if len(token) >= 4}
     return bool(a_tokens and b_tokens and not a_tokens.intersection(b_tokens))
+
+
+def _payable_vendor_identity_is_meaningful(document: Dict[str, Any]) -> bool:
+    """Return true only when `vendor` is expected to be the payable supplier.
+
+    Shipping documents and warehouse receipts often expose a customer,
+    warehouse, carrier, or ship-to party in the generic vendor field. Treating
+    that field as payable-vendor identity creates false BC/vendor conflicts.
+    """
+    doc_type = _document_type(document).replace("-", "_").replace(" ", "_")
+    return bool(
+        doc_type in {"ap_invoice", "invoice", "vendor_invoice", "credit_memo", "vendor_credit_memo"}
+        or "invoice" in doc_type
+        or "credit_memo" in doc_type
+    )
 
 
 def _prediction_payload(autonomy_decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -234,6 +263,36 @@ def _cross_vendor_exact_reference_dependency(
     return relied_on_ref or relied_on_foreign_example
 
 
+def _direct_stop_pay_human_authority(
+    document: Dict[str, Any],
+    proposed_route: str,
+    autonomy_decision: Dict[str, Any],
+) -> bool:
+    anchor = autonomy_decision.get("anchor_authority") or {}
+    return bool(
+        normalize_route_path(proposed_route) == "DO NOT PAY"
+        and _STOP_PAY.search(_document_text(document))
+        and anchor.get("authority_ready")
+        and str(anchor.get("earned_anchor") or "") == "explicit_stop_pay"
+    )
+
+
+def _fatal_unresolved(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    fatal_markers = (
+        "model_error:",
+        "routing model failure",
+        "parse error",
+        "invalid json",
+        "json decode",
+        "route not allowed",
+        "invalid route",
+    )
+    return any(marker in text for marker in fatal_markers)
+
+
 def derive_universal_safety_blockers(
     *,
     document: Dict[str, Any],
@@ -265,24 +324,37 @@ def derive_universal_safety_blockers(
             f"current reference family {reference_family} conflicts with AI route family {_route_family(proposed)}"
         )
 
-    # A resolved BC vendor mismatch is relevant only to logistics routes. This
-    # avoids the old failure mode where an unrelated BC match poisoned special
-    # Accounting queues that do not depend on order context.
+    payable_vendor_role = _payable_vendor_identity_is_meaningful(document)
+    direct_stop_pay = _direct_stop_pay_human_authority(document, proposed, autonomy_decision)
+
+    # Resolved BC vendor mismatch is meaningful only when the current document's
+    # vendor field represents the payable supplier. Warehouse/shipping documents
+    # commonly contain a different business party and must not be poisoned by it.
     context_vendor = _context_vendor_name(context)
     if (
         proposed
+        and payable_vendor_role
         and _route_family(proposed) in {"warehouse", "dropship"}
         and _context_is_resolved(context)
         and _vendors_conflict(_document_vendor(document), context_vendor)
     ):
         blockers.append("resolved Business Central vendor conflicts with current document vendor")
 
-    if proposed and _cross_vendor_exact_reference_dependency(
-        document=document,
-        proposed_route=proposed,
-        autonomy_decision=autonomy_decision,
-        bc_context=context,
-        support_examples=support_examples,
+    # Foreign-vendor exact-reference reliance is a payable-document hazard. For
+    # shipping/warehouse evidence the generic vendor field may not be a supplier.
+    # A current explicit stop-pay instruction with unanimous human anchor support
+    # also makes the DNP decision independent of any incidental BC reference.
+    if (
+        proposed
+        and payable_vendor_role
+        and not direct_stop_pay
+        and _cross_vendor_exact_reference_dependency(
+            document=document,
+            proposed_route=proposed,
+            autonomy_decision=autonomy_decision,
+            bc_context=context,
+            support_examples=support_examples,
+        )
     ):
         blockers.append("AI relied on foreign-vendor exact-reference evidence without same-vendor authority")
 
@@ -332,8 +404,13 @@ def apply_learned_autonomy_safety(
 
     prediction = autonomy_decision.get("prediction") or {}
     unresolved = list(prediction.get("unresolved") or autonomy_decision.get("model_unresolved") or [])
+    direct_stop_pay = _direct_stop_pay_human_authority(document, proposed, autonomy_decision)
     if unresolved:
-        blockers.append("AI reported unresolved/model-error evidence")
+        # A current explicit stop-pay instruction plus unanimous human anchor is
+        # independent of ordinary missing BC context. True model/parse/route
+        # failures still fail closed exactly as before.
+        if not direct_stop_pay or any(_fatal_unresolved(item) for item in unresolved):
+            blockers.append("AI reported unresolved/model-error evidence")
 
     blockers = list(dict.fromkeys(blockers))
     result = dict(autonomy_decision)

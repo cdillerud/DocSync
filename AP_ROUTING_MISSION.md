@@ -20,106 +20,101 @@ Candidate `025d0ac203e8a950f853918fd40b1a038ce19824` reached 120/120 focused reg
 
 The semantic-evidence repair persisted a bounded raw-text excerpt plus versioned route-neutral semantics (`v117-semantic-v1`) before deleting the temporary PDF, required semantic-complete SHA256 snapshots, and bound both balanced corpus hydration and targeted vendor expansion to the semantic-preserving hydrator.
 
-## Current runtime-proven checkpoint: zero wrong restored
+Feature `502678f47bf2f373b0a7c19c915ba28ce6658f28` was then runtime-proven on September 5, 2026 with 128/128 focused regressions, 291 labels, 232 TRAIN / 59 held-out, 45/59 raw AI proposals correct, 13 autos, 22.03% coverage, 100% automatic-route accuracy, 0 wrong autos, and `FAIL_COVERAGE` only. Ball `6363143` was correctly recognized as `reversal_or_void` and safely held for review instead of being auto-routed to Ball Detention Credits.
 
-Feature `502678f47bf2f373b0a7c19c915ba28ce6658f28` was runtime-proven on September 5, 2026 with:
+## Current runtime-proven checkpoint: proposal quality jumped, safety held
 
-- 128/128 focused regressions PASS;
+Feature `5d59fbb95fe9581e0db6c77dc98f78f78264bbf8` was runtime-proven on September 10, 2026.
+
+The previous semantic snapshot was stale, so the controller correctly rejected replay and performed a live read-only Accounting/BC rebuild. The rebuild discovered 2,889 Accounting files, selected 180 balanced examples, hydrated 165, recorded 15 hydration failures, then completed targeted vendor expansion at 149/149 with zero expansion failures. The resulting semantic-complete snapshot contains 314 human Accounting labels and the evaluation split is 255 TRAIN / 59 held-out.
+
+Runtime result:
+
+- 142/142 focused regressions PASS;
 - certified backend unchanged and healthy before/after;
 - semantic schema `v117-semantic-v1` ACTIVE;
-- validated SHA256 evidence replay;
-- 291 human Accounting labels;
-- 232 TRAIN / 59 held-out;
-- raw AI proposals correct 45/59 = 76.27%;
-- 13 automatic routes;
-- 46 reviews;
-- 22.03% automatic-route coverage;
+- full TRAIN prompt context ACTIVE;
+- high-specificity human anchor authority ACTIVE;
+- raw AI proposals correct 52/59 = 88.14%;
+- wrong raw AI proposals: 7;
+- 15 automatic routes;
+- 44 reviews;
+- 25.42% automatic-route coverage;
 - 100% automatic-route accuracy;
 - 0 wrong automatic routes;
 - promotion result `FAIL_COVERAGE` only;
 - no Production mutation.
 
-This is the first learned-autonomy runtime after the semantic-evidence repair to restore the immutable safety side of the gate.
+Compared with the previous zero-wrong checkpoint, the full-TRAIN prompt context improved raw proposal accuracy from 45/59 to 52/59, a gain of seven correct proposals and 11.87 percentage points, while automatic safety remained perfect. Automatic coverage improved from 22.03% to 25.42%.
 
-Ball `6363143` now behaves correctly. The held-out document exposes `reversal_or_void`; the AI proposes `DO NOT PAY`; ordinary detention-credit history is counted as exception-mismatched support; and the result safely remains review because exception-matched human support has not earned autonomy. The old wrong Ball Detention Credits auto-route is gone.
+The confidence telemetry is also materially stronger: >=95% confidence proposals were 38/39 correct (97.44%), and >=98% confidence proposals were 27/27 correct. Confidence alone is not promotion authority; these values are diagnostic evidence only.
 
-## Current blocker: proposal quality and earned coverage
+## Current mathematical blocker
 
-Coverage is now the only promotion blocker, but authority tuning alone cannot solve it. The AI is currently correct on 45/59 held-out documents (76.27%), so AI-owned exact routes cannot reach >=90% automatic coverage until proposal accuracy itself rises to at least 54/59 on this split.
+On a 59-document evaluation set, >=90% coverage requires at least 54 automatic routes. The AI currently proposes the correct exact route on 52/59. Therefore no authority policy can legitimately reach the immutable 90% coverage gate on this set until at least two additional raw AI errors are corrected.
 
-The current run contains 32 correct AI proposals that were still reviewed, including 13 `DO NOT PAY` cases, Ball warehouse orders, Tumalo/Rhonda Issues, S&H approval leaves, freight process states, WTR transfer, Canpack/Ball dropship, and credit-memo workflows. These are authority opportunities only after preserving zero-wrong behavior.
+There are also 37 correct AI proposals still being held for review. The next sprint must therefore improve both proposal discrimination and learned authority. It must not create coverage by weakening the immutable promotion gate.
 
-The 14 wrong raw proposals expose proposal-level weaknesses rather than a single vendor template problem. Representative failure classes include:
+The seven remaining raw proposal failures represent generic workflow-discrimination problems: WA assembly vs Dropship family, S&H owner/approver assignment, WTR/warehouse-transfer semantics, generic credit memo vs DNP, storage/accessorial vs DNP, and storage workflow vs Warehouse family. These are being addressed as general route-neutral workflow rules, not vendor-specific templates.
 
-- dynamic-child overspecialization (`Dropship International/114022` when Accounting uses the parent);
-- BC process-state overreach (`Ready to process Purch Inv` / `Sales Order not posted` inferred from generic open/posted status);
-- generic S&H parent vs exact approver leaf;
-- generic correction or sales-shipment evidence incorrectly driving `DO NOT PAY`;
-- transfer/warehouse receipt semantics collapsing into generic return/special handling;
-- credit memo purpose confused with DNP or specialized credit leaves;
-- generic storage/freight semantics overriding GPI-specific workflows.
+## Current candidate: TRAIN corroboration plus safety-scope correction
 
-## Current coverage candidate
+Current feature candidate: `a2b2111cde741c840c19573e0e50c311c98f95dd` on `feature/ap-ai-learned-autonomy`.
 
-Current feature candidate: `5d59fbb95fe9581e0db6c77dc98f78f78264bbf8` on `feature/ap-ai-learned-autonomy`.
+This candidate retains every existing neighborhood threshold and the immutable promotion gate. It adds one new learned authority view, sharpens the AI prompt, and narrows two deterministic safety rules that were proven to create false review decisions.
 
-The candidate adds two complementary learned mechanisms without lowering any gate or allowing route substitution.
+### TRAIN-only corroboration authority
 
-### 1. Full TRAIN prompt context
+`ap_routing_corroboration_authority_service.py` may confirm ONLY the AI's exact route. It never selects or substitutes a route. It considers only human TRAIN examples and only route-neutral slices:
 
-The model still receives at most eight raw human examples. In addition it now receives a bounded aggregate summary of the full human TRAIN set containing:
+- same vendor + same document type at large high purity;
+- same vendor + same document type + structural reference family;
+- same vendor + same document type + discriminating semantic signature;
+- an exceptionally strict cross-vendor slice requiring document type + structural reference family + discriminating semantics.
 
-- current route-neutral semantic features and reference family;
-- same-vendor route distributions;
-- same-vendor + same-document-type route distributions;
-- matching reference-family route distributions;
-- bounded nearest-human route observations with relevance, vendor/type/reference counts and shared semantics;
-- observed parent-vs-dynamic-child usage for contract-declared dynamic route prefixes.
+Static same-vendor/reference corroboration requires at least five exact-route human supports and >=85% purity; broader same-vendor/type support requires at least five and >=90% purity. Dynamic children require >=98% model confidence, at least three exact human supports, and 100% purity. Reviewer-correction contradictions block corroboration. Generic global route frequency cannot earn autonomy.
 
-This summary is PROMPT CONTEXT ONLY. It does not recommend, authorize, or substitute a route.
+This authority path cannot grant `DO NOT PAY` without explicit current stop-pay evidence and cannot bypass a `reversal_or_void` exception boundary. High-specificity DNP remains governed by the existing explicit-stop-pay anchor authority.
 
-The AI-primary prompt now explicitly enforces learned GPI workflow granularity:
+### Prompt discrimination repairs
 
-- verified BC/order references alone do not justify a dynamic child;
-- dynamic children require comparable human TRAIN evidence using dynamic children;
-- process-state leaves such as `Ready to process Purch Inv` and `Sales Order not posted` require comparable human-labelled evidence, not BC state alone;
-- do not stop at a generic workflow parent when comparable human labels consistently use a child;
-- `DO NOT PAY` is exceptional and must not be inferred merely from generic correction, sales-shipment/missing-PO evidence, a credit memo, or unrelated historical DNP cases;
-- credit memo alone does not imply DNP or a specialized credit child;
-- WTR/WA/W structural families must be interpreted with human workflow evidence rather than generic return/freight semantics.
+The AI prompt now makes the following business-workflow distinctions explicit:
 
-### 2. High-specificity human anchor authority
+- approver/processor child folders are ownership assignments, not generic meanings of storage/freight terms;
+- same-vendor ownership evidence outranks a cross-vendor approver example;
+- a generic credit memo without current invalidation evidence must not become DNP from one historical DNP or a sales-shipment mismatch;
+- storage/accessorial language by itself is not stop-pay evidence;
+- a WA-prefixed reference is a warehouse-assembly family and must never cross into Dropship;
+- a plain numeric BC/order reference does not determine warehouse vs dropship.
 
-Nearest-neighbor authority remains unchanged. A second authority path may confirm ONLY the AI's exact proposed route when a deliberately tiny route-neutral anchor has broad unanimous human TRAIN support.
+### Safety-scope corrections
 
-Eligible anchors are intentionally restricted to:
+The prior safety envelope treated any plain numeric BC order reference as `standard_order` and therefore automatically contradictory to every Warehouse route. Runtime evidence proved that premise false. The candidate removes that numeric-reference veto while retaining explicit W/WA/WTR -> Dropship family vetoes.
 
-- `explicit_stop_pay`;
-- `wtr_reference`;
-- `wa_reference`.
+Resolved BC-vendor mismatch and cross-vendor exact-reference dependency are now applied only when the document type actually represents a payable supplier identity, such as AP invoice or credit memo. Shipping documents and warehouse receipts commonly expose customer/warehouse/carrier/ship-to parties in a generic vendor field, so those fields cannot safely be interpreted as payable-vendor conflicts.
 
-Generic freight, return, storage, credit, inventory, detention, W/numeric references, vendor identity, filenames, etc. cannot use this path.
-
-Anchor authority requires at least five human TRAIN supports for the AI's exact route, zero contradictory Accounting routes, and zero reviewer-correction contradictions. Any conflicting human route blocks the anchor path and also prevents a neighborhood from bypassing that high-specificity conflict. The mechanism never chooses a route and remains subject to the normal deterministic safety envelope afterward.
+For an exact DNP proposal with a current explicit stop-pay instruction and already-earned unanimous human stop-pay anchor authority, an incidental foreign BC reference or ordinary unresolved BC context no longer defeats the direct stop-pay evidence. Actual model/parse/invalid-route failures remain fail-closed.
 
 ## Next configured proof
 
-Active control code commit: `e95f4e932b926f0a648d3278a20065f51ab76492` on `migration/gpi-hub-dedicated-vm`. Later documentation commits may advance the branch head while this exact code pin remains the execution authority.
-
 Feature pin:
-`5d59fbb95fe9581e0db6c77dc98f78f78264bbf8`
+`a2b2111cde741c840c19573e0e50c311c98f95dd`
 
 Entry-fragment SHA256:
-`CE0346D72867D9C6807AA6A12AE0EE210460055E01621DA04946F0F126D980F1`
+`5B4B46952D94E1725D38C829E6F7CC513EEC0B584853457309B5F060EC71789F`
 
 Replay-transform SHA256:
 `EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6`
 
-Next focused regression target: **142 tests**. Do not claim 142/142 or any coverage/accuracy improvement until certified runtime proves it.
+Next focused regression target: **158 tests**. Do not claim 158/158 or any coverage/accuracy improvement until certified runtime proves it.
 
-The 291-label semantic-complete snapshot is already valid, so the next correct run should normally use validated fast replay rather than rebuilding the corpus, provided the snapshot remains within its 24-hour age limit and passes all integrity/authority/schema checks. Any validation failure must still fail closed to the live read-only rebuild.
+The September 10 semantic-complete 314-label snapshot is fresh. The next correct run should normally use validated fast replay, skipping the multi-hour live rebuild, provided the snapshot remains within its 24-hour age limit and passes authority/schema/SHA validation.
 
-Desired next telemetry includes the aggregate TRAIN-context activation, high-specificity anchor authority measurements, raw proposal accuracy, anchor-earned auto count, zero-wrong metrics, and full held-out rows. Promotion remains impossible unless every immutable gate passes.
+Desired telemetry includes raw proposal accuracy, `train_corroboration_auto_count`, high-specificity anchor auto count, corroboration slice/purity/support for each held-out row, automatic coverage/accuracy, wrong-auto count, and source-runtime continuity.
+
+## Evaluation-integrity note
+
+The stable 59-document split has now been inspected repeatedly during engineering. It remains useful as a regression/development evaluation set, but repeated tuning means it must not be treated as the sole final blind proof of generalization. Before Production cutover, the immutable promotion gate must also be demonstrated on a fresh representative blind holdout epoch or equivalent shadow set that was not used to choose candidate behavior. This strengthens the existing gate; it does not replace or lower it.
 
 ## Non-negotiable architecture rules
 

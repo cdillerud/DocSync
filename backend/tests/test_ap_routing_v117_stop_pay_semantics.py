@@ -35,6 +35,10 @@ def test_explicit_stop_pay_preserves_existing_strong_prose_variants():
     for raw_text in texts:
         assert "explicit_stop_pay" in _features(raw_text=raw_text), raw_text
 
+    typo_features = _features(file_name="Buske Tampa Dunnage Reconcilication - JE T01640 260616.pdf")
+    assert "reconciliation" in typo_features
+    assert "reconciliation" not in _features(file_name="vendor_reconcilicator_notes.pdf")
+
 
 def test_explicit_stop_pay_rejects_loose_or_embedded_not_pay_tokens():
     file_names = [

@@ -76,6 +76,7 @@ async def evaluate_holdout_learned(
         ensemble = result.get("ensemble_reconciliation") or {}
         authority_guard = result.get("authority_guard") or {}
         anchor_authority = authority_guard.get("anchor_authority") or {}
+        corroboration_authority = authority_guard.get("corroboration_authority") or {}
         prompt_routes = [str(route) for route in (result.get("prompt_routes") or []) if route]
 
         rows.append(
@@ -134,6 +135,13 @@ async def evaluate_holdout_learned(
                 "anchor_support_count": anchor_authority.get("support_count"),
                 "anchor_contradiction_count": anchor_authority.get("contradiction_count"),
                 "anchor_measurements": anchor_authority.get("measurements") or [],
+                "corroboration_authority_ready": bool(corroboration_authority.get("authority_ready")),
+                "corroboration_earned_slice": corroboration_authority.get("earned_slice"),
+                "corroboration_support_count": corroboration_authority.get("support_count"),
+                "corroboration_contradiction_count": corroboration_authority.get("contradiction_count"),
+                "corroboration_purity": corroboration_authority.get("purity"),
+                "corroboration_hard_blockers": corroboration_authority.get("hard_blockers") or [],
+                "corroboration_measurements": corroboration_authority.get("measurements") or [],
                 "train_learning_context_active": bool(
                     authority_guard.get("train_learning_context_active")
                 ),
@@ -170,6 +178,9 @@ async def evaluate_holdout_learned(
             "actual_prompt_limit": prompt_limit,
             "high_specificity_anchor_auto_count": sum(
                 1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "high_specificity_human_anchor"
+            ),
+            "train_corroboration_auto_count": sum(
+                1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "train_corroboration"
             ),
         }
     )

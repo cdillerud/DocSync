@@ -13,9 +13,9 @@ $LegacyControlCommit = 'b45ae78800b8f6666a6a105318cf0b7bf6fe6648'
 $LegacyRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1'
 $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
-$ExpectedEntryPatchSha256 = '5B4B46952D94E1725D38C829E6F7CC513EEC0B584853457309B5F060EC71789F'
+$ExpectedEntryPatchSha256 = '6D263E16C61AA6609E7F226E41022CFA5FB11992C5963ACC78FA37A826F299C4'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = 'a2b2111cde741c840c19573e0e50c311c98f95dd'
+$ExpectedFeatureCommit = '79f91e8dafa05affb671039dc43ff151c58f0b75'
 
 function Require {
     param([bool]$Condition,[string]$Message)

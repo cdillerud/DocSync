@@ -77,7 +77,20 @@ def _augment_prompt_with_train_context(prompt: str, learning_context: Optional[D
         "purpose and learned human workflow decide the exact queue.\n"
         "15. WTR/WA/W reference families are structural workflow evidence. Do not collapse a transfer/assembly/warehouse "
         "pattern into a generic return, freight, or special-handling interpretation when human labels show a more specific "
-        "GPI workflow.\n\n"
+        "GPI workflow.\n"
+        "16. Approval/processor child folders are GPI ownership assignments. A child learned for one vendor is not a "
+        "generic meaning of storage, handling, inventory, or freight. When same-vendor human labels identify a different "
+        "owner or approver, same-vendor ownership evidence outranks a cross-vendor approver example.\n"
+        "17. For a generic credit memo with no current stop-pay/invalidation evidence, do not choose DO NOT PAY merely "
+        "because one same-vendor historical document was DNP or because BC resolves to a sales shipment rather than a "
+        "purchase. Use the human credit-memo workflow evidence that matches the current document's purpose.\n"
+        "18. Storage/accessorial language by itself is not a stop-pay instruction. Without current stop-pay, replacement, "
+        "void, reversal, or other invalidation evidence, storage/accessorial history must not be converted into DO NOT PAY.\n"
+        "19. A WA-prefixed current reference is a warehouse-assembly structural family. Never propose a Dropship route for "
+        "a WA document. If the exact assembly child is uncertain, lower confidence and state the ambiguity rather than "
+        "crossing into the Dropship family.\n"
+        "20. A plain numeric BC/order reference is not a warehouse-versus-dropship discriminator. Determine that family "
+        "from current document role, explicit structural references, and comparable human workflow evidence instead.\n\n"
     )
     return prefix + learned_rules + marker + json.dumps(payload, ensure_ascii=False, default=str)
 

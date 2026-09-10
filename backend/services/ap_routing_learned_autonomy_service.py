@@ -1,8 +1,8 @@
 """Learned authority for AI-primary AP routing.
 
 The AI proposes the route. This module decides whether that exact proposal has
-earned autonomy from nearby human evidence and historical AI-vs-human
-performance. It never substitutes another route.
+earned autonomy from nearby human evidence, TRAIN-only corroboration, or
+historical AI-vs-human performance. It never substitutes another route.
 """
 
 from __future__ import annotations
@@ -13,6 +13,9 @@ from services.ap_routing_anchor_authority_service import (
     summarize_high_specificity_anchor_authority,
 )
 from services.ap_routing_autonomy_performance_service import summarize_pattern_performance
+from services.ap_routing_corroboration_authority_service import (
+    summarize_train_corroboration_authority,
+)
 from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
 from services.ap_routing_learning_service import normalize_route_path
 
@@ -26,6 +29,7 @@ def evaluate_learned_autonomy(
     document: Dict[str, Any],
     ai_decision: Dict[str, Any],
     train_examples: Sequence[Dict[str, Any]],
+    contract: Dict[str, Any] | None = None,
     performance_outcomes: Iterable[Dict[str, Any]] = (),
     relevant_limit: int = 8,
     minimum_model_confidence: float = 0.90,
@@ -64,6 +68,12 @@ def evaluate_learned_autonomy(
                 "current_high_specificity_anchors": [],
                 "measurements": [],
             },
+            "corroboration_authority": {
+                "purpose": "CONFIRM_AI_EXACT_ROUTE_FROM_TRAIN_CORROBORATION_ONLY",
+                "authority_ready": False,
+                "measurements": [],
+                "hard_blockers": [],
+            },
         }
 
     neighborhood = summarize_authority_neighborhood(
@@ -76,6 +86,13 @@ def evaluate_learned_autonomy(
         document=document,
         proposed_route=proposed,
         train_examples=train_examples,
+    )
+    corroboration_authority = summarize_train_corroboration_authority(
+        document=document,
+        proposed_route=proposed,
+        confidence=confidence,
+        train_examples=train_examples,
+        contract=contract or {},
     )
     performance = summarize_pattern_performance(
         document=document,
@@ -99,6 +116,11 @@ def evaluate_learned_autonomy(
         for measurement in (anchor_authority.get("measurements") or [])
     ):
         hard_reasons.append("high-specificity human anchor has contradictory Accounting routes")
+    if any(
+        int(measurement.get("reviewer_correction_contradictions") or 0) > 0
+        for measurement in (corroboration_authority.get("measurements") or [])
+    ):
+        hard_reasons.append("TRAIN corroboration slice contains a contradictory reviewer correction")
     if performance.get("suspended"):
         hard_reasons.append("learned pattern suspended by historical human-resolved AI error")
 
@@ -125,7 +147,10 @@ def evaluate_learned_autonomy(
     )
     neighborhood_earned = bool(neighborhood.get("authority_ready"))
     anchor_earned = bool(anchor_authority.get("authority_ready"))
-    earned = not hard_reasons and (performance_earned or neighborhood_earned or anchor_earned)
+    corroboration_earned = bool(corroboration_authority.get("authority_ready"))
+    earned = not hard_reasons and (
+        performance_earned or anchor_earned or corroboration_earned or neighborhood_earned
+    )
 
     if earned:
         tier = EARNED_AUTO
@@ -139,6 +164,12 @@ def evaluate_learned_autonomy(
             reason = (
                 "AI route earned autonomy from unanimous high-specificity human Accounting anchor: "
                 + str(anchor_authority.get("earned_anchor") or "unknown")
+            )
+        elif corroboration_earned:
+            earned_by = "train_corroboration"
+            reason = (
+                "AI route earned autonomy from high-purity TRAIN corroboration slice: "
+                + str(corroboration_authority.get("earned_slice") or "unknown")
             )
         else:
             earned_by = "human_consensus_bootstrap"
@@ -187,6 +218,7 @@ def evaluate_learned_autonomy(
         "support_margin": float(neighborhood.get("support_margin") or 0.0),
         "neighborhood": neighborhood,
         "anchor_authority": anchor_authority,
+        "corroboration_authority": corroboration_authority,
         "performance": performance,
         "earned_by": earned_by,
         "policy": {
@@ -195,5 +227,6 @@ def evaluate_learned_autonomy(
             "minimum_performance_lower_bound": minimum_performance_lower_bound,
             "authority_neighborhood_limit": relevant_limit,
             "high_specificity_anchor_minimum_support": anchor_authority.get("minimum_support"),
+            "train_corroboration_exact_route_only": True,
         },
     }

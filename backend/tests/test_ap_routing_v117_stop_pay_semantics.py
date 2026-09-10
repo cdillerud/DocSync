@@ -39,6 +39,10 @@ def test_explicit_stop_pay_preserves_existing_strong_prose_variants():
     assert "reconciliation" in typo_features
     assert "reconciliation" not in _features(file_name="vendor_reconcilicator_notes.pdf")
 
+    bol_features = _features(file_name="118911_REILE'S_090326_BOL - need to receive.pdf")
+    assert "bol" in bol_features
+    assert "bol" not in _features(file_name="118911_REILE'S_BOLSTER_notes.pdf")
+
 
 def test_explicit_stop_pay_rejects_loose_or_embedded_not_pay_tokens():
     file_names = [

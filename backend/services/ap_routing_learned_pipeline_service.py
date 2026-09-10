@@ -62,6 +62,7 @@ async def decide_ap_route_learned(
         document=document_with_context,
         ai_decision=ai,
         train_examples=train_examples,
+        contract=contract,
         performance_outcomes=performance_outcomes,
         relevant_limit=8,
     )

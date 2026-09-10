@@ -62,6 +62,23 @@ Require ($EntryPatchTemplate.Contains($EntryPatchFeatureCommit)) 'V117 REV3 feat
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($EntryPatchFeatureCommit,$ExpectedFeatureCommit)
 Require ($EntryPatchTemplate.Contains($ExpectedFeatureCommit)) 'V117 REV3 dynamic feature repin failed.'
 
+$SnapshotExpansionOld = @'
+async def _v117_expand_high_value_vendor_corpus_guarded(*args,**kwargs):
+    if _v117_snapshot_replay_active:
+        print('V117_VENDOR_EXPANSION=SKIPPED_VALIDATED_SNAPSHOT',flush=True)
+        return {
+'@
+$SnapshotExpansionNew = @'
+async def _v117_expand_high_value_vendor_corpus_guarded(*args,**kwargs):
+    if _v117_snapshot_replay_active:
+        print('V117_VENDOR_EXPANSION=LIVE_READONLY_AFTER_VALIDATED_SNAPSHOT',flush=True)
+    if False:
+        return {
+'@
+Require ($EntryPatchTemplate.Contains($SnapshotExpansionOld)) 'V117 REV3 snapshot expansion guard anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($SnapshotExpansionOld,$SnapshotExpansionNew)
+Require ($EntryPatchTemplate.Contains('V117_VENDOR_EXPANSION=LIVE_READONLY_AFTER_VALIDATED_SNAPSHOT')) 'V117 REV3 snapshot targeted expansion enablement failed.'
+
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
 
@@ -85,7 +102,7 @@ Require ($LegacyRaw.Contains($SnapshotDigestOld)) 'V117 REV3 snapshot digest anc
 $LegacyRaw = $LegacyRaw.Replace($SnapshotDigestOld,$SnapshotDigestNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=161' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=161' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -108,6 +125,7 @@ Write-Host "V117_REV3_ENTRY_PATCH_SHA256=$ExpectedEntryPatchSha256"
 Write-Host "V117_REV3_REPLAY_TRANSFORM_SHA256=$ExpectedReplayTransformSha256"
 Write-Host 'V117_REV3_SNAPSHOT_MAX_AGE_HOURS=24'
 Write-Host 'V117_REV3_SNAPSHOT_FAILS_CLOSED_TO_LIVE_REBUILD=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION=LIVE_READONLY' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
 

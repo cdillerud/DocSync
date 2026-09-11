@@ -89,7 +89,10 @@ _SEMANTIC_PATTERNS = {
     ),
     "freight": re.compile(r"\bfreight\b", re.IGNORECASE),
     "dunnage": re.compile(r"\bdunnage\b", re.IGNORECASE),
-    "inventory": re.compile(r"\binventory\b", re.IGNORECASE),
+    "inventory": re.compile(
+        r"\b(?:inventory|purchase\s+receipt|warehouse\s+receipt|receipt\s+notification|need\s+to\s+receive|ready\s+to\s+receive)\b",
+        re.IGNORECASE,
+    ),
     "reconciliation": re.compile(r"\b(?:reconciliation|reconcile|reconcil(?:e|iation|ication)|\brecon\b)\b", re.IGNORECASE),
     "credit_document": re.compile(r"\b(?:credit\s+memo|credit\s+for|vendor\s+credit)\b", re.IGNORECASE),
     "return": re.compile(r"\b(?:return|returned|returns)\b", re.IGNORECASE),

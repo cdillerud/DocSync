@@ -180,6 +180,7 @@ async def expand_high_value_vendor_corpus(
     base_examples: List[Dict[str, Any]],
     *,
     routing_contract: Dict[str, Any],
+    excluded_source_item_ids: Optional[Set[str]] = None,
     discovery_max_files: int = 50000,
     max_vendors: int = 10,
     desired_total_per_vendor: int = 30,
@@ -194,10 +195,21 @@ async def expand_high_value_vendor_corpus(
     hydrate. It never uses an expected route to predict another route. The live
     Accounting parent queue remains the supervised label after hydration.
 
+    ``base_examples`` alone controls target-vendor ranking and existing vendor
+    counts. ``excluded_source_item_ids`` is a route-neutral identity exclusion
+    boundary: those source documents may not be selected or hydrated, but their
+    labels never influence target ranking. This keeps held-out evidence isolated
+    while still preventing any base document from re-entering TRAIN via expansion.
+
     `progress_callback`, when supplied, receives each completion as
     `(completed, total, result_row)`. It is telemetry only; callback failures are
     deliberately ignored so observability cannot affect evaluation behavior.
     """
+    explicit_excluded_ids: Set[str] = {
+        str(item_id)
+        for item_id in (excluded_source_item_ids or set())
+        if str(item_id or "").strip()
+    }
     targets = _target_vendors(base_examples, max_vendors=max_vendors)
     if not targets:
         return {
@@ -205,6 +217,7 @@ async def expand_high_value_vendor_corpus(
             "selected_count": 0,
             "hydrated_count": 0,
             "failure_count": 0,
+            "excluded_source_item_id_count": len(explicit_excluded_ids),
             "examples": [],
             "failures": [],
         }
@@ -217,6 +230,7 @@ async def expand_high_value_vendor_corpus(
         for example in base_examples
         if example.get("source_item_id")
     }
+    existing_ids.update(explicit_excluded_ids)
     existing_counts = Counter(
         normalize_vendor_name(example.get("vendor_name"))
         for example in base_examples
@@ -319,6 +333,7 @@ async def expand_high_value_vendor_corpus(
         "hydrated_count": len(examples),
         "hydrated_by_vendor": dict(by_vendor),
         "failure_count": len(failures),
+        "excluded_source_item_id_count": len(explicit_excluded_ids),
         "examples": examples,
         "failures": failures[:100],
     }

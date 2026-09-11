@@ -57,7 +57,7 @@ $ReplayTransform = Get-GitText -Repo $OperationalRoot -Ref $RemoteTrackingRef -R
 
 Require ((Get-TextSha256 $EntryPatchTemplate) -eq $ExpectedEntryPatchSha256) 'V117 REV3 entry patch SHA256 drift.'
 Require ((Get-TextSha256 $ReplayTransform) -eq $ExpectedReplayTransformSha256) 'V117 REV3 replay transform SHA256 drift.'
-Require ($EntryPatchTemplate.Contains('__REPLAY_TRANSFORM_B64__')) 'V117 REV3 entry patch SHA256 drift.'
+Require ($EntryPatchTemplate.Contains('__REPLAY_TRANSFORM_B64__')) 'V117 REV3 replay transform placeholder missing.'
 Require ($EntryPatchTemplate.Contains($EntryPatchFeatureCommit)) 'V117 REV3 feature pin anchor missing from validated entry patch.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($EntryPatchFeatureCommit,$ExpectedFeatureCommit)
 Require ($EntryPatchTemplate.Contains($ExpectedFeatureCommit)) 'V117 REV3 dynamic feature repin failed.'

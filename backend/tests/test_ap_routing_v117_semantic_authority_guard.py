@@ -1,4 +1,5 @@
 from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
+from services.ap_routing_learned_features_service import semantic_features
 
 
 PROPOSED = "Rhonda - Issues"
@@ -93,6 +94,61 @@ def test_discriminating_workflow_allows_broad_vendor_autonomy_after_two_semantic
 
     guard = decision["discriminating_semantic_authority"]
     assert guard["active"] is True
+    assert guard["support_count"] >= 2
+    assert guard["authority_ready"] is True
+    assert decision["decision"] == "auto_route"
+    assert decision["route_path"] == PROPOSED
+    assert decision["route_preserved"] is True
+
+
+def test_receiving_language_is_inventory_semantic_and_one_matching_support_stays_review():
+    receiving = doc(text="purchase receipt notification ready to receive into warehouse")
+    assert "inventory" in semantic_features(receiving)
+    assert "inventory" in semantic_features(
+        {
+            "file_name": "118911_REILE'S_090326_BOL - need to receive.pdf",
+            "raw_text": "",
+            "extracted_fields": {},
+        }
+    )
+
+    rows = [
+        ex(PROPOSED, "receiving-support-1", text="warehouse receipt ready to receive"),
+        *[ex(PROPOSED, f"receiving-broad-{i}") for i in range(6)],
+        ex(OTHER, "receiving-contradiction"),
+    ]
+    decision = evaluate_learned_autonomy(
+        document=receiving,
+        ai_decision=ai(),
+        train_examples=rows,
+    )
+
+    guard = decision["discriminating_semantic_authority"]
+    assert guard["active"] is True
+    assert "inventory" in guard["features"]
+    assert guard["support_count"] == 1
+    assert guard["authority_ready"] is False
+    assert decision["decision"] == "needs_review"
+    assert decision["route_path"] == ""
+
+
+def test_receiving_language_can_earn_only_after_two_route_matching_semantic_supports():
+    receiving = doc(text="purchase receipt notification need to receive into warehouse")
+    rows = [
+        ex(PROPOSED, "receiving-support-1", text="warehouse receipt ready to receive"),
+        ex(PROPOSED, "receiving-support-2", text="purchase receipt need to receive"),
+        *[ex(PROPOSED, f"receiving-broad-{i}") for i in range(5)],
+        ex(OTHER, "receiving-contradiction"),
+    ]
+    decision = evaluate_learned_autonomy(
+        document=receiving,
+        ai_decision=ai(),
+        train_examples=rows,
+    )
+
+    guard = decision["discriminating_semantic_authority"]
+    assert guard["active"] is True
+    assert "inventory" in guard["features"]
     assert guard["support_count"] >= 2
     assert guard["authority_ready"] is True
     assert decision["decision"] == "auto_route"

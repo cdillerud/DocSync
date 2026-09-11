@@ -23,6 +23,24 @@ REVIEW = "review"
 GUARDED = "guarded"
 EARNED_AUTO = "earned_auto"
 
+# Broad same-vendor/reference-family history is useful, but these workflow
+# semantics are discriminating enough that it must not grant autonomy on its
+# own. Require at least a small amount of route-matching human evidence that
+# shares the current workflow signal. This remains route-neutral: it never
+# selects a route and does not change any existing confidence/purity threshold.
+DISCRIMINATING_WORKFLOW_SEMANTICS = frozenset(
+    {
+        "detention",
+        "dunnage",
+        "inventory",
+        "reconciliation",
+        "cost_variance",
+        "quality_or_claim",
+        "storage_accessorial",
+    }
+)
+MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT = 2
+
 
 def evaluate_learned_autonomy(
     *,
@@ -101,6 +119,22 @@ def evaluate_learned_autonomy(
         minimum_observations=minimum_performance_observations,
     )
 
+    current_semantics = set(corroboration_authority.get("current_semantic_features") or [])
+    discriminating_semantics = current_semantics.intersection(DISCRIMINATING_WORKFLOW_SEMANTICS)
+    semantic_measurements = [
+        measurement
+        for measurement in (corroboration_authority.get("measurements") or [])
+        if "semantic" in str(measurement.get("slice") or "")
+    ]
+    discriminating_semantic_support_count = max(
+        (int(measurement.get("support_count") or 0) for measurement in semantic_measurements),
+        default=0,
+    )
+    discriminating_semantic_authority_ready = bool(
+        not discriminating_semantics
+        or discriminating_semantic_support_count >= MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT
+    )
+
     hard_reasons: List[str] = []
     neighborhood_reasons: List[str] = []
     if confidence < minimum_model_confidence:
@@ -138,6 +172,13 @@ def evaluate_learned_autonomy(
         )
     if neighborhood.get("scope") == "semantic_cross_vendor" and not neighborhood.get("semantic_anchor"):
         neighborhood_reasons.append("cross-vendor authority lacks a route-neutral semantic/reference anchor")
+    if not discriminating_semantic_authority_ready:
+        neighborhood_reasons.append(
+            "discriminating workflow semantics "
+            + ",".join(sorted(discriminating_semantics))
+            + f" have only {discriminating_semantic_support_count} route-matching semantic human supports; "
+            + f"need {MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT}"
+        )
 
     performance_earned = bool(
         performance.get("sufficient_observations")
@@ -145,9 +186,13 @@ def evaluate_learned_autonomy(
         and int(performance.get("wrong") or 0) == 0
         and float(performance.get("wilson_lower_bound") or 0.0) >= minimum_performance_lower_bound
     )
-    neighborhood_earned = bool(neighborhood.get("authority_ready"))
+    neighborhood_earned = bool(
+        neighborhood.get("authority_ready") and discriminating_semantic_authority_ready
+    )
     anchor_earned = bool(anchor_authority.get("authority_ready"))
-    corroboration_earned = bool(corroboration_authority.get("authority_ready"))
+    corroboration_earned = bool(
+        corroboration_authority.get("authority_ready") and discriminating_semantic_authority_ready
+    )
     earned = not hard_reasons and (
         performance_earned or anchor_earned or corroboration_earned or neighborhood_earned
     )
@@ -221,6 +266,14 @@ def evaluate_learned_autonomy(
         "corroboration_authority": corroboration_authority,
         "performance": performance,
         "earned_by": earned_by,
+        "discriminating_semantic_authority": {
+            "active": bool(discriminating_semantics),
+            "features": sorted(discriminating_semantics),
+            "support_count": discriminating_semantic_support_count,
+            "minimum_support": MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT,
+            "authority_ready": discriminating_semantic_authority_ready,
+            "route_neutral": True,
+        },
         "policy": {
             "minimum_model_confidence": minimum_model_confidence,
             "minimum_performance_observations": minimum_performance_observations,
@@ -228,5 +281,6 @@ def evaluate_learned_autonomy(
             "authority_neighborhood_limit": relevant_limit,
             "high_specificity_anchor_minimum_support": anchor_authority.get("minimum_support"),
             "train_corroboration_exact_route_only": True,
+            "minimum_discriminating_semantic_support": MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT,
         },
     }

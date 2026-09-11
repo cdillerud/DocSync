@@ -62,19 +62,6 @@ Require ($EntryPatchTemplate.Contains($EntryPatchFeatureCommit)) 'V117 REV3 feat
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($EntryPatchFeatureCommit,$ExpectedFeatureCommit)
 Require ($EntryPatchTemplate.Contains($ExpectedFeatureCommit)) 'V117 REV3 dynamic feature repin failed.'
 
-$BaseCaptureOld = @'
-    examples=list(corpus.get('examples') or [])
-    print('V117_VENDOR_EXPANSION_START=1',flush=True)
-'@
-$BaseCaptureNew = @'
-    examples=list(corpus.get('examples') or [])
-    base_examples=list(examples)
-    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)
-    print('V117_VENDOR_EXPANSION_START=1',flush=True)
-'@
-Require ($EntryPatchTemplate.Contains($BaseCaptureOld)) 'V117 REV3 base-evidence capture anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace($BaseCaptureOld,$BaseCaptureNew)
-
 $EvalModuleImportOld = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
 from services.ap_routing_semantic_hydration_service import hydrate_accounting_label_with_semantics
@@ -166,6 +153,14 @@ $ReplayRoleNew = @'
 '@
 Require ($ReplayTransform.Contains($ReplayRoleOld)) 'V117 REV3 replay snapshot-role anchor missing.'
 $ReplayTransform = $ReplayTransform.Replace($ReplayRoleOld,$ReplayRoleNew)
+
+$ReplayBaseCaptureTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    examples=list(corpus.get('examples') or [])`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
+    -New "    examples=list(corpus.get('examples') or [])`n    base_examples=list(examples)`n    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
+    -Marker 'REV3 base evidence capture before targeted expansion'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayBaseCaptureTransform
 
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)

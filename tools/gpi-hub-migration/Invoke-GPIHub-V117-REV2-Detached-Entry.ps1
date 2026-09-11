@@ -15,7 +15,7 @@ $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
 $ExpectedEntryPatchSha256 = '67D0F30B1A4D547C186BC15C8450C3777BF7CDA76CF49B6DCD8E01607B831537'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = 'c83eae5a9c8bee404ae1b43fd69340a1d752d4e0'
+$ExpectedFeatureCommit = '7007e358da73ca843eb33bd43726d188fbf61f82'
 $EntryPatchFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
 
 function Require {
@@ -68,6 +68,7 @@ $SemanticGuardMaterializationOld = @'
 $SemanticGuardMaterializationNew = @'
         'backend/tests/test_ap_routing_v117_corroboration_and_safety_scope.py',
         'backend/tests/test_ap_routing_v117_semantic_authority_guard.py',
+        'backend/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py',
 '@
 Require ($EntryPatchTemplate.Contains($SemanticGuardMaterializationOld)) 'V117 REV3 semantic guard materialization anchor missing.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($SemanticGuardMaterializationOld,$SemanticGuardMaterializationNew)
@@ -77,12 +78,13 @@ $SemanticGuardPytestOld = @'
 '@
 $SemanticGuardPytestNew = @'
  "$CONTAINER_STAGE/tests/test_ap_routing_v117_corroboration_and_safety_scope.py" \
- "$CONTAINER_STAGE/tests/test_ap_routing_v117_semantic_authority_guard.py"
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_semantic_authority_guard.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py"
 '@
 Require ($EntryPatchTemplate.Contains($SemanticGuardPytestOld)) 'V117 REV3 semantic guard focused-test anchor missing.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($SemanticGuardPytestOld,$SemanticGuardPytestNew)
 Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=161')) 'V117 REV3 focused regression target anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=163')
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=164')
 
 $EvalModuleImportOld = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
@@ -107,11 +109,20 @@ async def _v117_expand_high_value_vendor_corpus_guarded(*args,**kwargs):
 $StableSplitNew = @'
 _v117_live_expand_high_value_vendor_corpus=expand_high_value_vendor_corpus
 _v117_snapshot_replay_active=False
+_v117_expected_holdout_source_item_ids=set()
 
 def _v117_split_train_holdout_with_expansion_train_only(examples,*,holdout_bucket=0,buckets=5):
     base=[row for row in examples if not bool(row.get('_v117_expansion_train_only'))]
     expansion=[row for row in examples if bool(row.get('_v117_expansion_train_only'))]
     train,holdout=_v117_native_split_train_holdout(base,holdout_bucket=holdout_bucket,buckets=buckets)
+    holdout_source_item_ids={str(row.get('source_item_id')) for row in holdout if row.get('source_item_id')}
+    if holdout_source_item_ids!=_v117_expected_holdout_source_item_ids:
+        raise RuntimeError(
+            'V117 stable holdout identity changed: expected='
+            +str(len(_v117_expected_holdout_source_item_ids))
+            +';actual='+str(len(holdout_source_item_ids))
+        )
+    print('V117_STABLE_BASE_HOLDOUT_IDENTITY=PASS',flush=True)
     print('V117_STABLE_BASE_HOLDOUT_COUNT='+str(len(holdout)),flush=True)
     print('V117_EXPANSION_TRAIN_ONLY_COUNT='+str(len(expansion)),flush=True)
     print('V117_EVALUATION_TRAIN_COUNT='+str(len(train)+len(expansion)),flush=True)
@@ -176,21 +187,45 @@ $ReplayRoleNew = @'
 Require ($ReplayTransform.Contains($ReplayRoleOld)) 'V117 REV3 replay snapshot-role anchor missing.'
 $ReplayTransform = $ReplayTransform.Replace($ReplayRoleOld,$ReplayRoleNew)
 
+$ReplayMainGlobalTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    global _v117_snapshot_replay_active" `
+    -New "    global _v117_snapshot_replay_active,_v117_expected_holdout_source_item_ids" `
+    -Marker 'REV3 stable holdout identity global'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayMainGlobalTransform
+
 $ReplayBaseCaptureTransform = @'
 $Raw = Replace-Required -Text $Raw `
     -Old "    examples=list(corpus.get('examples') or [])`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
-    -New "    examples=list(corpus.get('examples') or [])`n    base_examples=list(examples)`n    base_train_examples,_v117_expansion_holdout=_v117_native_split_train_holdout(base_examples)`n    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_BASE_TRAIN_COUNT='+str(len(base_train_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_HOLDOUT_EXCLUDED='+str(len(_v117_expansion_holdout)),flush=True)`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
-    -Marker 'REV3 base TRAIN capture before targeted expansion'
+    -New "    examples=list(corpus.get('examples') or [])`n    base_examples=list(examples)`n    base_train_examples,_v117_expansion_holdout=_v117_native_split_train_holdout(base_examples)`n    base_source_item_ids={str(row.get('source_item_id')) for row in base_examples if row.get('source_item_id')}`n    _v117_expected_holdout_source_item_ids={str(row.get('source_item_id')) for row in _v117_expansion_holdout if row.get('source_item_id')}`n    if len(base_source_item_ids)!=len(base_examples):`n        raise RuntimeError('V117 base source-item identity incomplete')`n    if len(_v117_expected_holdout_source_item_ids)!=len(_v117_expansion_holdout):`n        raise RuntimeError('V117 holdout source-item identity incomplete')`n    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_BASE_TRAIN_COUNT='+str(len(base_train_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_HOLDOUT_EXCLUDED='+str(len(_v117_expansion_holdout)),flush=True)`n    print('V117_EXPANSION_EXCLUDED_BASE_ID_COUNT='+str(len(base_source_item_ids)),flush=True)`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
+    -Marker 'REV3 base TRAIN capture plus immutable base identity exclusion'
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayBaseCaptureTransform
 
 $ReplayExpansionTargetTransform = @'
 $Raw = Replace-Required -Text $Raw `
     -Old "    expansion=await expand_high_value_vendor_corpus(`n        examples," `
-    -New "    expansion=await expand_high_value_vendor_corpus(`n        base_train_examples," `
-    -Marker 'REV3 expansion target selection excludes heldout labels'
+    -New "    expansion=await expand_high_value_vendor_corpus(`n        base_train_examples,`n        excluded_source_item_ids=base_source_item_ids," `
+    -Marker 'REV3 expansion target selection excludes heldout labels and all base identities'
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayExpansionTargetTransform
+
+$ReplayExpansionOverlapTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    merged={}`n    for example in examples + list(expansion.get('examples') or []):" `
+    -New "    expansion_examples=list(expansion.get('examples') or [])`n    expansion_source_item_ids={str(row.get('source_item_id')) for row in expansion_examples if row.get('source_item_id')}`n    expansion_base_overlap=sorted(base_source_item_ids & expansion_source_item_ids)`n    print('V117_EXPANSION_SERVICE_EXCLUDED_ID_COUNT='+str(expansion.get('excluded_source_item_id_count') or 0),flush=True)`n    print('V117_EXPANSION_BASE_ID_OVERLAP_COUNT='+str(len(expansion_base_overlap)),flush=True)`n    if expansion_base_overlap:`n        raise RuntimeError('V117 expansion/base source-item overlap detected')`n    merged={}`n    for example in examples + expansion_examples:" `
+    -Marker 'REV3 fail closed on expansion/base source identity overlap'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayExpansionOverlapTransform
+
+$ReplayMergedCountTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    examples=list(merged.values())`n    merged_route_counts=Counter" `
+    -New "    examples=list(merged.values())`n    expected_merged_count=len(base_examples)+len(expansion_examples)`n    if len(examples)!=expected_merged_count:`n        raise RuntimeError('V117 merged corpus identity collision: expected='+str(expected_merged_count)+';actual='+str(len(examples)))`n    print('V117_EXPANSION_MERGE_IDENTITY=PASS',flush=True)`n    merged_route_counts=Counter" `
+    -Marker 'REV3 fail closed on any merged identity collision'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayMergedCountTransform
 
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
@@ -241,7 +276,7 @@ Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count ancho
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=163' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=164' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -270,6 +305,8 @@ Write-Host 'V117_REV3_EXPANSION_TRAIN_ONLY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_BASE_ONLY_SNAPSHOT=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_LEGACY_SCP_STAGING=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"

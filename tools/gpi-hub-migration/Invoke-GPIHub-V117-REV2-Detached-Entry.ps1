@@ -221,8 +221,8 @@ $ReplayTransform = $ReplayTransform + "`n" + $ReplayExpansionOverlapTransform
 
 $ReplayMergedCountTransform = @'
 $Raw = Replace-Required -Text $Raw `
-    -Old "    examples=list(merged.values())`n    merged_route_counts=Counter" `
-    -New "    examples=list(merged.values())`n    expected_merged_count=len(base_examples)+len(expansion_examples)`n    if len(examples)!=expected_merged_count:`n        raise RuntimeError('V117 merged corpus identity collision: expected='+str(expected_merged_count)+';actual='+str(len(examples)))`n    print('V117_EXPANSION_MERGE_IDENTITY=PASS',flush=True)`n    merged_route_counts=Counter" `
+    -Old "    examples=list(merged.values())`n    snapshot_path=Path('/tmp/gpi-ap-routing-v117-evidence-snapshot.json')" `
+    -New "    examples=list(merged.values())`n    expected_merged_count=len(base_examples)+len(expansion_examples)`n    if len(examples)!=expected_merged_count:`n        raise RuntimeError('V117 merged corpus identity collision: expected='+str(expected_merged_count)+';actual='+str(len(examples)))`n    print('V117_EXPANSION_MERGE_IDENTITY=PASS',flush=True)`n    snapshot_path=Path('/tmp/gpi-ap-routing-v117-evidence-snapshot.json')" `
     -Marker 'REV3 fail closed on any merged identity collision'
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayMergedCountTransform

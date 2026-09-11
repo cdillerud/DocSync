@@ -201,6 +201,26 @@ $EntryRaw = (Get-Content -LiteralPath $EntrySourcePath -Raw) -replace "`r",''
 Require ($LegacyRaw.Contains($EntryReadAnchor)) 'V117 REV3 legacy entry-read anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($EntryReadAnchor,$EntryReadAnchor + "`n" + $EntryPatch)
 
+$LegacyScpPatchAnchor = @'
+$BaseRaw = Replace-Required -Text $BaseRaw `
+    -Old "        concurrency=2,`n        persist=False," `
+    -New "        concurrency=4,`n        persist=False," `
+    -Marker 'base corpus concurrency 4'
+'@
+$LegacyScpPatchReplacement = @'
+$BaseRaw = Replace-Required -Text $BaseRaw `
+    -Old "        concurrency=2,`n        persist=False," `
+    -New "        concurrency=4,`n        persist=False," `
+    -Marker 'base corpus concurrency 4'
+
+$BaseRaw = Replace-Required -Text $BaseRaw `
+    -Old "    `$scpArgs = @(`n        '-r'," `
+    -New "    `$scpArgs = @(`n        '-O',`n        '-r'," `
+    -Marker 'force legacy scp protocol for candidate staging'
+'@
+Require ($LegacyRaw.Contains($LegacyScpPatchAnchor)) 'V117 REV3 legacy SCP staging patch anchor missing.'
+$LegacyRaw = $LegacyRaw.Replace($LegacyScpPatchAnchor,$LegacyScpPatchReplacement)
+
 $SnapshotDigestOld = @'
                 'example_count':len(examples),
                 'examples':examples,
@@ -221,7 +241,7 @@ Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count ancho
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=163' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=163' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -250,6 +270,7 @@ Write-Host 'V117_REV3_EXPANSION_TRAIN_ONLY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_BASE_ONLY_SNAPSHOT=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_LEGACY_SCP_STAGING=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
 

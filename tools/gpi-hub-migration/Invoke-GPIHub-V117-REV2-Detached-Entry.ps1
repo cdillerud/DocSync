@@ -179,10 +179,18 @@ $ReplayTransform = $ReplayTransform.Replace($ReplayRoleOld,$ReplayRoleNew)
 $ReplayBaseCaptureTransform = @'
 $Raw = Replace-Required -Text $Raw `
     -Old "    examples=list(corpus.get('examples') or [])`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
-    -New "    examples=list(corpus.get('examples') or [])`n    base_examples=list(examples)`n    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
-    -Marker 'REV3 base evidence capture before targeted expansion'
+    -New "    examples=list(corpus.get('examples') or [])`n    base_examples=list(examples)`n    base_train_examples,_v117_expansion_holdout=_v117_native_split_train_holdout(base_examples)`n    print('V117_EVALUATION_BASE_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_BASE_TRAIN_COUNT='+str(len(base_train_examples)),flush=True)`n    print('V117_EXPANSION_TARGET_HOLDOUT_EXCLUDED='+str(len(_v117_expansion_holdout)),flush=True)`n    print('V117_VENDOR_EXPANSION_START=1',flush=True)" `
+    -Marker 'REV3 base TRAIN capture before targeted expansion'
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayBaseCaptureTransform
+
+$ReplayExpansionTargetTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    expansion=await expand_high_value_vendor_corpus(`n        examples," `
+    -New "    expansion=await expand_high_value_vendor_corpus(`n        base_train_examples," `
+    -Marker 'REV3 expansion target selection excludes heldout labels'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayExpansionTargetTransform
 
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
@@ -213,7 +221,7 @@ Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count ancho
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=163' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=163' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -241,6 +249,7 @@ Write-Host 'V117_REV3_STABLE_BASE_HOLDOUT=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_EXPANSION_TRAIN_ONLY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_BASE_ONLY_SNAPSHOT=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
 

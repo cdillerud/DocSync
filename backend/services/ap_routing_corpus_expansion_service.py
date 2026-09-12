@@ -152,23 +152,31 @@ def _round_robin_vendor_routes(
     desired_total_per_vendor: int,
     existing_counts: Dict[str, int],
     max_additional: int,
+    max_additional_per_route: Optional[int] = None,
 ) -> List[Tuple[str, Dict[str, Any]]]:
-    """Select vendor-admitted labels while rotating across human route buckets.
+    """Select vendor-admitted labels with vendor-local and global route balance.
 
     Candidate admission has already happened using filename/vendor evidence. The
     live Accounting placement is allowed here only to keep TRAIN representative;
-    it is never converted into a routing rule. The cursor must advance after each
-    pick so a large route cannot starve smaller legitimate workflows.
+    it is never converted into a routing rule. Vendor cursors rotate so a large
+    route cannot starve smaller workflows for one vendor, and the optional global
+    cap prevents the same large queue from dominating again across many vendors.
     """
     selected: List[Tuple[str, Dict[str, Any]]] = []
     target_map = {row["normalized_vendor"]: row for row in targets}
     per_vendor_added = Counter()
+    selected_route_counts = Counter()
     route_indices: Dict[Tuple[str, str], int] = defaultdict(int)
     route_cursors = Counter()
     route_orders: Dict[str, List[str]] = {
         vendor_key: sorted(candidates.get(vendor_key, {}))
         for vendor_key in target_map
     }
+    route_cap = (
+        None
+        if max_additional_per_route is None
+        else max(1, int(max_additional_per_route))
+    )
 
     while len(selected) < max_additional:
         progressed = False
@@ -184,6 +192,8 @@ def _round_robin_vendor_routes(
             for offset in range(len(routes)):
                 position = (start + offset) % len(routes)
                 route = routes[position]
+                if route_cap is not None and selected_route_counts[route] >= route_cap:
+                    continue
                 rows = candidates[vendor_key][route]
                 idx_key = (vendor_key, route)
                 idx = route_indices[idx_key]
@@ -192,6 +202,7 @@ def _round_robin_vendor_routes(
                 selected.append((vendor_key, rows[idx]))
                 route_indices[idx_key] += 1
                 per_vendor_added[vendor_key] += 1
+                selected_route_counts[route] += 1
                 chosen_position = position
                 progressed = True
                 break
@@ -297,6 +308,7 @@ async def expand_high_value_vendor_corpus(
     max_vendors: int = 10,
     desired_total_per_vendor: int = 30,
     max_additional: int = 180,
+    max_additional_per_route: Optional[int] = None,
     concurrency: int = 2,
     retry_count: int = 3,
     progress_callback: Optional[ProgressCallback] = None,
@@ -305,9 +317,12 @@ async def expand_high_value_vendor_corpus(
 
     Vendor candidate admission uses vendor identity in filenames only. After a
     candidate is admitted, its live human Accounting placement may be used only
-    to balance TRAIN sampling across that vendor's observed workflows. The second
-    pass uses discriminating workflow semantics visible in filenames only. No
-    selector turns a human route label into a rule for a new document.
+    to balance TRAIN sampling across that vendor's observed workflows. Targeted
+    vendor expansion also uses the broad corpus's 30-per-route balancing principle
+    by default so one queue cannot re-dominate merely by appearing for many target
+    vendors. The second pass uses discriminating workflow semantics visible in
+    filenames only. No selector turns a human route label into a rule for a new
+    document.
 
     ``base_examples`` alone controls target-vendor ranking and existing vendor
     counts. ``excluded_source_item_ids`` is a route-neutral identity exclusion
@@ -365,12 +380,22 @@ async def expand_high_value_vendor_corpus(
         for rows in vendor_routes.values():
             rows.sort(key=lambda row: (str(row.get("modified_at") or ""), str(row.get("file_name") or "")), reverse=True)
 
+    vendor_route_cap = (
+        max(1, int(max_additional_per_route))
+        if max_additional_per_route is not None
+        else max(1, int(desired_total_per_vendor))
+    )
     selected_pairs = _round_robin_vendor_routes(
         candidates,
         targets,
         desired_total_per_vendor=max(1, int(desired_total_per_vendor)),
         existing_counts=existing_counts,
         max_additional=max(0, int(max_additional)),
+        max_additional_per_route=vendor_route_cap,
+    )
+    vendor_selected_by_route = Counter(
+        str(label.get("route_path") or "") or "unknown"
+        for _, label in selected_pairs
     )
 
     already_selected_ids = {
@@ -452,6 +477,8 @@ async def expand_high_value_vendor_corpus(
         },
         "semantic_candidate_counts": semantic_candidate_counts,
         "semantic_selected_count": len(semantic_pairs),
+        "vendor_route_cap": vendor_route_cap,
+        "vendor_selected_by_route": dict(vendor_selected_by_route),
         "selected_count": len(selected_pairs),
         "hydrated_count": len(examples),
         "hydrated_by_vendor": dict(by_vendor),

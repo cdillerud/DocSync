@@ -3,10 +3,11 @@
 The broad corpus builder is intentionally route-balanced. That prevents large
 queues from dominating evaluation, but it can leave high-value/variable vendors
 with too few examples to learn their legitimate workflow variations. This module
-adds a second read-only sampling pass using vendor identity only to select more
-Accounting-labeled examples, plus a bounded route-neutral workflow-semantic pass
-for discriminating document purposes. Route labels remain the live Temp placement;
-selection evidence is never converted into a route rule.
+adds a second read-only sampling pass using vendor identity to admit candidate
+Accounting documents, balances those already-admitted candidates across their
+human Accounting placements, and adds a bounded route-neutral workflow-semantic
+pass for discriminating document purposes. Human route labels are training truth,
+never deterministic routing rules.
 
 No SharePoint writes, Mongo writes, Business Central writes, or runtime changes
 are performed here.
@@ -152,22 +153,37 @@ def _round_robin_vendor_routes(
     existing_counts: Dict[str, int],
     max_additional: int,
 ) -> List[Tuple[str, Dict[str, Any]]]:
+    """Select vendor-admitted labels while rotating across human route buckets.
+
+    Candidate admission has already happened using filename/vendor evidence. The
+    live Accounting placement is allowed here only to keep TRAIN representative;
+    it is never converted into a routing rule. The cursor must advance after each
+    pick so a large route cannot starve smaller legitimate workflows.
+    """
     selected: List[Tuple[str, Dict[str, Any]]] = []
     target_map = {row["normalized_vendor"]: row for row in targets}
     per_vendor_added = Counter()
     route_indices: Dict[Tuple[str, str], int] = defaultdict(int)
+    route_cursors = Counter()
+    route_orders: Dict[str, List[str]] = {
+        vendor_key: sorted(candidates.get(vendor_key, {}))
+        for vendor_key in target_map
+    }
 
     while len(selected) < max_additional:
         progressed = False
         for vendor_key in target_map:
             if existing_counts.get(vendor_key, 0) + per_vendor_added[vendor_key] >= desired_total_per_vendor:
                 continue
-            routes = sorted(
-                candidates.get(vendor_key, {}),
-                key=lambda route: len(candidates[vendor_key][route]),
-                reverse=True,
-            )
-            for route in routes:
+            routes = route_orders.get(vendor_key) or []
+            if not routes:
+                continue
+
+            start = route_cursors[vendor_key] % len(routes)
+            chosen_position: Optional[int] = None
+            for offset in range(len(routes)):
+                position = (start + offset) % len(routes)
+                route = routes[position]
                 rows = candidates[vendor_key][route]
                 idx_key = (vendor_key, route)
                 idx = route_indices[idx_key]
@@ -176,8 +192,12 @@ def _round_robin_vendor_routes(
                 selected.append((vendor_key, rows[idx]))
                 route_indices[idx_key] += 1
                 per_vendor_added[vendor_key] += 1
+                chosen_position = position
                 progressed = True
                 break
+
+            if chosen_position is not None:
+                route_cursors[vendor_key] = (chosen_position + 1) % len(routes)
             if len(selected) >= max_additional:
                 break
         if not progressed:
@@ -281,12 +301,13 @@ async def expand_high_value_vendor_corpus(
     retry_count: int = 3,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> Dict[str, Any]:
-    """Add more live labels using route-neutral vendor/workflow selection.
+    """Add more live labels using bounded vendor/workflow selection.
 
-    Vendor expansion uses vendor identity in filenames only. The second bounded
-    pass uses discriminating workflow semantics visible in filenames only. Neither
-    selector inspects a route label to decide what route a document should take.
-    The live Accounting parent queue remains the supervised label after hydration.
+    Vendor candidate admission uses vendor identity in filenames only. After a
+    candidate is admitted, its live human Accounting placement may be used only
+    to balance TRAIN sampling across that vendor's observed workflows. The second
+    pass uses discriminating workflow semantics visible in filenames only. No
+    selector turns a human route label into a rule for a new document.
 
     ``base_examples`` alone controls target-vendor ranking and existing vendor
     counts. ``excluded_source_item_ids`` is a route-neutral identity exclusion
@@ -419,6 +440,10 @@ async def expand_high_value_vendor_corpus(
         normalize_vendor_name(example.get("vendor_name")) or "unknown"
         for example in examples
     )
+    by_route = Counter(
+        str(example.get("route_path") or "") or "unknown"
+        for example in examples
+    )
     return {
         "target_vendors": targets,
         "candidate_vendor_counts": {
@@ -430,6 +455,7 @@ async def expand_high_value_vendor_corpus(
         "selected_count": len(selected_pairs),
         "hydrated_count": len(examples),
         "hydrated_by_vendor": dict(by_vendor),
+        "hydrated_by_route": dict(by_route),
         "failure_count": len(failures),
         "excluded_source_item_id_count": len(explicit_excluded_ids),
         "examples": examples,

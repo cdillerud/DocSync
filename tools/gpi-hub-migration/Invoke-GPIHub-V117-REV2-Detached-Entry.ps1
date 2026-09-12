@@ -15,7 +15,7 @@ $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
 $ExpectedEntryPatchSha256 = '67D0F30B1A4D547C186BC15C8450C3777BF7CDA76CF49B6DCD8E01607B831537'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = '2c766d8caf6c64be830949eeddb6ee28a85ef9e6'
+$ExpectedFeatureCommit = '0409a288480cb196fb818cf057e4098b4c766bfe'
 $EntryPatchFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
 
 function Require {
@@ -84,7 +84,7 @@ $SemanticGuardPytestNew = @'
 Require ($EntryPatchTemplate.Contains($SemanticGuardPytestOld)) 'V117 REV3 semantic guard focused-test anchor missing.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($SemanticGuardPytestOld,$SemanticGuardPytestNew)
 Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=161')) 'V117 REV3 focused regression target anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=166')
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=168')
 
 $EvalModuleImportOld = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
@@ -276,7 +276,7 @@ Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count ancho
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=166' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=168' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 

@@ -249,3 +249,34 @@ def test_vendor_route_sampler_preserves_vendor_cap_while_rotating_routes():
 
     assert len(selected) == 3
     assert [row["route_path"] for _, row in selected] == ["Route A", "Route B", "Route C"]
+
+
+def test_vendor_route_sampler_enforces_global_route_cap_across_vendors():
+    candidates = {
+        "vendor a": {
+            "DO NOT PAY": [{"item_id": f"a-dnp-{i}", "route_path": "DO NOT PAY"} for i in range(5)],
+            "Route B": [{"item_id": "a-b-1", "route_path": "Route B"}],
+        },
+        "vendor b": {
+            "DO NOT PAY": [{"item_id": f"b-dnp-{i}", "route_path": "DO NOT PAY"} for i in range(5)],
+            "Route C": [{"item_id": "b-c-1", "route_path": "Route C"}],
+        },
+    }
+    targets = [
+        {"normalized_vendor": "vendor a"},
+        {"normalized_vendor": "vendor b"},
+    ]
+
+    selected = expansion._round_robin_vendor_routes(
+        candidates,
+        targets,
+        desired_total_per_vendor=20,
+        existing_counts={},
+        max_additional=20,
+        max_additional_per_route=2,
+    )
+
+    routes = [row["route_path"] for _, row in selected]
+    assert routes.count("DO NOT PAY") == 2
+    assert routes.count("Route B") == 1
+    assert routes.count("Route C") == 1

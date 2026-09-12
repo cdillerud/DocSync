@@ -4,8 +4,9 @@ The broad corpus builder is intentionally route-balanced. That prevents large
 queues from dominating evaluation, but it can leave high-value/variable vendors
 with too few examples to learn their legitimate workflow variations. This module
 adds a second read-only sampling pass using vendor identity only to select more
-Accounting-labeled examples. Route labels remain the live Temp placement; vendor
-identity is never converted into a route rule.
+Accounting-labeled examples, plus a bounded route-neutral workflow-semantic pass
+for discriminating document purposes. Route labels remain the live Temp placement;
+selection evidence is never converted into a route rule.
 
 No SharePoint writes, Mongo writes, Business Central writes, or runtime changes
 are performed here.
@@ -25,9 +26,25 @@ from services.ap_routing_corpus_service import (
     discover_accounting_temp_labels,
     hydrate_accounting_label,
 )
+from services.ap_routing_learned_features_service import semantic_features
 from services.ap_routing_learning_service import normalize_vendor_name
 
 ProgressCallback = Callable[[int, int, Dict[str, Any]], None]
+
+# These are the same route-neutral workflow signals that the autonomy layer
+# treats as discriminating. Expansion may use them only to choose which live
+# human-labeled documents to hydrate. The Accounting folder is still the label.
+SEMANTIC_EXPANSION_FEATURES = frozenset(
+    {
+        "detention",
+        "dunnage",
+        "inventory",
+        "reconciliation",
+        "cost_variance",
+        "quality_or_claim",
+        "storage_accessorial",
+    }
+)
 
 
 def _compact(value: Any) -> str:
@@ -71,6 +88,13 @@ def _filename_vendor_score(file_name: str, vendor_name: str) -> float:
         elif term in compact_name:
             score += 1.0
     return score
+
+
+def _filename_workflow_semantics(file_name: str) -> Set[str]:
+    """Return route-neutral discriminating semantics visible in a filename."""
+    return set(
+        semantic_features({"file_name": str(file_name or "")})
+    ).intersection(SEMANTIC_EXPANSION_FEATURES)
 
 
 def _target_vendors(
@@ -161,6 +185,74 @@ def _round_robin_vendor_routes(
     return selected
 
 
+def _round_robin_semantic_workflows(
+    labels: List[Dict[str, Any]],
+    *,
+    excluded_source_item_ids: Set[str],
+    already_selected_source_item_ids: Set[str],
+    max_additional: int,
+) -> Tuple[List[Tuple[str, Dict[str, Any]]], Dict[str, int]]:
+    """Select live documents by filename workflow semantics without using routes.
+
+    `route_path` is deliberately ignored for candidate membership, ranking, and
+    round-robin selection. It remains attached only because hydration later uses
+    the live Accounting placement as supervised truth.
+    """
+    if max_additional <= 0:
+        return [], {}
+
+    by_feature: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for label in labels:
+        item_id = str(label.get("item_id") or "")
+        if not item_id:
+            continue
+        if item_id in excluded_source_item_ids or item_id in already_selected_source_item_ids:
+            continue
+        for feature in sorted(_filename_workflow_semantics(label.get("file_name") or "")):
+            by_feature[feature].append(label)
+
+    for rows in by_feature.values():
+        rows.sort(
+            key=lambda row: (
+                str(row.get("modified_at") or ""),
+                str(row.get("file_name") or ""),
+                str(row.get("item_id") or ""),
+            ),
+            reverse=True,
+        )
+
+    candidate_counts = {feature: len(rows) for feature, rows in sorted(by_feature.items())}
+    selected: List[Tuple[str, Dict[str, Any]]] = []
+    seen = set(already_selected_source_item_ids)
+    indices = Counter()
+    features = sorted(by_feature)
+
+    while len(selected) < max_additional:
+        progressed = False
+        for feature in features:
+            rows = by_feature[feature]
+            idx = indices[feature]
+            while idx < len(rows) and str(rows[idx].get("item_id") or "") in seen:
+                idx += 1
+            indices[feature] = idx
+            if idx >= len(rows):
+                continue
+            row = rows[idx]
+            indices[feature] += 1
+            item_id = str(row.get("item_id") or "")
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            selected.append((f"semantic:{feature}", row))
+            progressed = True
+            if len(selected) >= max_additional:
+                break
+        if not progressed:
+            break
+
+    return selected, candidate_counts
+
+
 def _emit_progress(
     callback: Optional[ProgressCallback],
     completed: int,
@@ -189,11 +281,12 @@ async def expand_high_value_vendor_corpus(
     retry_count: int = 3,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> Dict[str, Any]:
-    """Add more live labels for high-value/variable vendors, read-only.
+    """Add more live labels using route-neutral vendor/workflow selection.
 
-    Selection uses vendor identity in filenames only to decide which documents to
-    hydrate. It never uses an expected route to predict another route. The live
-    Accounting parent queue remains the supervised label after hydration.
+    Vendor expansion uses vendor identity in filenames only. The second bounded
+    pass uses discriminating workflow semantics visible in filenames only. Neither
+    selector inspects a route label to decide what route a document should take.
+    The live Accounting parent queue remains the supervised label after hydration.
 
     ``base_examples`` alone controls target-vendor ranking and existing vendor
     counts. ``excluded_source_item_ids`` is a route-neutral identity exclusion
@@ -211,16 +304,6 @@ async def expand_high_value_vendor_corpus(
         if str(item_id or "").strip()
     }
     targets = _target_vendors(base_examples, max_vendors=max_vendors)
-    if not targets:
-        return {
-            "target_vendors": [],
-            "selected_count": 0,
-            "hydrated_count": 0,
-            "failure_count": 0,
-            "excluded_source_item_id_count": len(explicit_excluded_ids),
-            "examples": [],
-            "failures": [],
-        }
 
     discovered = await discover_accounting_temp_labels(max_files=discovery_max_files)
     canonical = _canonicalize_discovered_labels(discovered.get("files") or [], routing_contract)
@@ -269,9 +352,22 @@ async def expand_high_value_vendor_corpus(
         max_additional=max(0, int(max_additional)),
     )
 
+    already_selected_ids = {
+        str(label.get("item_id") or "")
+        for _, label in selected_pairs
+        if str(label.get("item_id") or "")
+    }
+    semantic_pairs, semantic_candidate_counts = _round_robin_semantic_workflows(
+        labels,
+        excluded_source_item_ids=existing_ids,
+        already_selected_source_item_ids=already_selected_ids,
+        max_additional=max(0, int(max_additional) - len(selected_pairs)),
+    )
+    selected_pairs.extend(semantic_pairs)
+
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
 
-    async def hydrate(vendor_key: str, label: Dict[str, Any]) -> Dict[str, Any]:
+    async def hydrate(selection_key: str, label: Dict[str, Any]) -> Dict[str, Any]:
         async with semaphore:
             last_error: Optional[Exception] = None
             for attempt in range(1, max(1, int(retry_count)) + 1):
@@ -282,7 +378,7 @@ async def expand_high_value_vendor_corpus(
                     )
                     return {
                         "ok": True,
-                        "selected_vendor": vendor_key,
+                        "selected_vendor": selection_key,
                         "example": example,
                         "attempt": attempt,
                     }
@@ -297,15 +393,15 @@ async def expand_high_value_vendor_corpus(
                     break
             return {
                 "ok": False,
-                "selected_vendor": vendor_key,
+                "selected_vendor": selection_key,
                 "file_name": label.get("file_name"),
                 "route_path": label.get("route_path"),
                 "error": f"{type(last_error).__name__}:{last_error}"[:500] if last_error else "unknown",
             }
 
     tasks = [
-        asyncio.create_task(hydrate(vendor_key, label))
-        for vendor_key, label in selected_pairs
+        asyncio.create_task(hydrate(selection_key, label))
+        for selection_key, label in selected_pairs
     ]
     results: List[Dict[str, Any]] = []
     total = len(tasks)
@@ -329,6 +425,8 @@ async def expand_high_value_vendor_corpus(
             vendor: sum(len(rows) for rows in route_map.values())
             for vendor, route_map in candidates.items()
         },
+        "semantic_candidate_counts": semantic_candidate_counts,
+        "semantic_selected_count": len(semantic_pairs),
         "selected_count": len(selected_pairs),
         "hydrated_count": len(examples),
         "hydrated_by_vendor": dict(by_vendor),

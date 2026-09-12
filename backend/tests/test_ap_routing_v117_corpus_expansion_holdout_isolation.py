@@ -190,3 +190,62 @@ def test_semantic_workflow_expansion_hydrates_non_vendor_receiving_evidence(monk
     assert result["selected_count"] == 1
     assert hydrated_item_ids == ["semantic-1"]
     assert result["examples"][0]["source_item_id"] == "semantic-1"
+
+
+def test_vendor_route_sampler_rotates_instead_of_exhausting_largest_route_first():
+    vendor = "test vendor"
+    candidates = {
+        vendor: {
+            "Route A": [
+                {"item_id": f"a-{i}", "route_path": "Route A"}
+                for i in range(1, 6)
+            ],
+            "Route B": [
+                {"item_id": f"b-{i}", "route_path": "Route B"}
+                for i in range(1, 3)
+            ],
+            "Route C": [
+                {"item_id": "c-1", "route_path": "Route C"}
+            ],
+        }
+    }
+    targets = [{"normalized_vendor": vendor}]
+
+    selected = expansion._round_robin_vendor_routes(
+        candidates,
+        targets,
+        desired_total_per_vendor=20,
+        existing_counts={},
+        max_additional=5,
+    )
+
+    assert [row["route_path"] for _, row in selected] == [
+        "Route A",
+        "Route B",
+        "Route C",
+        "Route A",
+        "Route B",
+    ]
+
+
+def test_vendor_route_sampler_preserves_vendor_cap_while_rotating_routes():
+    vendor = "test vendor"
+    candidates = {
+        vendor: {
+            "Route A": [{"item_id": f"a-{i}", "route_path": "Route A"} for i in range(5)],
+            "Route B": [{"item_id": f"b-{i}", "route_path": "Route B"} for i in range(5)],
+            "Route C": [{"item_id": f"c-{i}", "route_path": "Route C"} for i in range(5)],
+        }
+    }
+    targets = [{"normalized_vendor": vendor}]
+
+    selected = expansion._round_robin_vendor_routes(
+        candidates,
+        targets,
+        desired_total_per_vendor=5,
+        existing_counts={vendor: 2},
+        max_additional=20,
+    )
+
+    assert len(selected) == 3
+    assert [row["route_path"] for _, row in selected] == ["Route A", "Route B", "Route C"]

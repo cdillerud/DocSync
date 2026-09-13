@@ -1,8 +1,9 @@
 """Learned authority for AI-primary AP routing.
 
 The AI proposes the route. This module decides whether that exact proposal has
-earned autonomy from nearby human evidence, TRAIN-only corroboration, or
-historical AI-vs-human performance. It never substitutes another route.
+earned autonomy from nearby human evidence, exact resolved-reference consensus,
+TRAIN-only corroboration, or historical AI-vs-human performance. It never
+substitutes another route.
 """
 
 from __future__ import annotations
@@ -16,7 +17,10 @@ from services.ap_routing_autonomy_performance_service import summarize_pattern_p
 from services.ap_routing_corroboration_authority_service import (
     summarize_train_corroboration_authority,
 )
-from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
+from services.ap_routing_learned_neighborhood_service import (
+    summarize_authority_neighborhood,
+    summarize_exact_reference_authority,
+)
 from services.ap_routing_learning_service import normalize_route_path
 
 REVIEW = "review"
@@ -86,6 +90,11 @@ def evaluate_learned_autonomy(
                 "current_high_specificity_anchors": [],
                 "measurements": [],
             },
+            "exact_reference_authority": {
+                "purpose": "CONFIRM_AI_EXACT_ROUTE_FROM_RESOLVED_WINNING_BC_REFERENCE_ONLY",
+                "authority_ready": False,
+                "route_neutral": True,
+            },
             "corroboration_authority": {
                 "purpose": "CONFIRM_AI_EXACT_ROUTE_FROM_TRAIN_CORROBORATION_ONLY",
                 "authority_ready": False,
@@ -103,6 +112,12 @@ def evaluate_learned_autonomy(
     anchor_authority = summarize_high_specificity_anchor_authority(
         document=document,
         proposed_route=proposed,
+        train_examples=train_examples,
+    )
+    exact_reference_authority = summarize_exact_reference_authority(
+        document=document,
+        proposed_route=proposed,
+        confidence=confidence,
         train_examples=train_examples,
     )
     corroboration_authority = summarize_train_corroboration_authority(
@@ -190,11 +205,19 @@ def evaluate_learned_autonomy(
         neighborhood.get("authority_ready") and discriminating_semantic_authority_ready
     )
     anchor_earned = bool(anchor_authority.get("authority_ready"))
+    exact_reference_earned = bool(
+        exact_reference_authority.get("authority_ready")
+        and discriminating_semantic_authority_ready
+    )
     corroboration_earned = bool(
         corroboration_authority.get("authority_ready") and discriminating_semantic_authority_ready
     )
     earned = not hard_reasons and (
-        performance_earned or anchor_earned or corroboration_earned or neighborhood_earned
+        performance_earned
+        or anchor_earned
+        or exact_reference_earned
+        or corroboration_earned
+        or neighborhood_earned
     )
 
     if earned:
@@ -209,6 +232,11 @@ def evaluate_learned_autonomy(
             reason = (
                 "AI route earned autonomy from unanimous high-specificity human Accounting anchor: "
                 + str(anchor_authority.get("earned_anchor") or "unknown")
+            )
+        elif exact_reference_earned:
+            earned_by = "exact_reference_human_consensus"
+            reason = (
+                "AI route earned autonomy from unanimous TRAIN human labels on one resolved winning BC reference"
             )
         elif neighborhood_earned:
             earned_by = "human_consensus_bootstrap"
@@ -263,6 +291,7 @@ def evaluate_learned_autonomy(
         "support_margin": float(neighborhood.get("support_margin") or 0.0),
         "neighborhood": neighborhood,
         "anchor_authority": anchor_authority,
+        "exact_reference_authority": exact_reference_authority,
         "corroboration_authority": corroboration_authority,
         "performance": performance,
         "earned_by": earned_by,
@@ -280,6 +309,9 @@ def evaluate_learned_autonomy(
             "minimum_performance_lower_bound": minimum_performance_lower_bound,
             "authority_neighborhood_limit": relevant_limit,
             "high_specificity_anchor_minimum_support": anchor_authority.get("minimum_support"),
+            "exact_reference_minimum_support": exact_reference_authority.get("minimum_support"),
+            "exact_reference_minimum_confidence": exact_reference_authority.get("minimum_confidence"),
+            "exact_reference_requires_unanimous_resolved_winner": True,
             "train_corroboration_exact_route_only": True,
             "minimum_discriminating_semantic_support": MINIMUM_DISCRIMINATING_SEMANTIC_SUPPORT,
         },

@@ -28,11 +28,11 @@ from services.ap_routing_relevant_learning_service import (
 EXCEPTIONAL_WORKFLOW_FEATURES = frozenset({"reversal_or_void"})
 
 # Authority diagnostics must be stricter than the broad fail-closed safety
-# reference set. Explicit verified_order_numbers are already typed as verified
-# evidence and may be used when no failure status is present. Other BC PO/order
-# fields require a resolved/verified context. Generic order_numbers and
-# shipment_number values are intentionally excluded because they can be common
-# across unrelated documents and are useful only as broad safety evidence.
+# reference set. For resolved contexts, only the resolver's winning PO and the
+# live BC document number are exact-reference evidence. The broader
+# verified_order_numbers collection may contain alternate BC matches and is used
+# only as a legacy/status-less fallback when no winning reference is available.
+# Generic order_numbers and shipment_number values are intentionally excluded.
 _STRICT_VERIFIED_BC_REF = re.compile(
     r"^(?:"
     r"\d{4,7}(?:[-/]\d{1,3})?"
@@ -50,31 +50,39 @@ def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
     status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
     live = context.get("live_bc_context") or {}
     explicit_failure = bool(status and status not in _VERIFIED_CONTEXT_STATUSES)
+    if explicit_failure:
+        return set()
+
     resolved_context = bool(
         status in _VERIFIED_CONTEXT_STATUSES
         or str(live.get("bc_document_no") or "").strip()
     )
 
     values: List[Any] = []
-    if not explicit_failure:
-        verified_values = context.get("verified_order_numbers") or []
-        if isinstance(verified_values, (list, tuple, set)):
-            values.extend(verified_values)
-        elif verified_values:
-            values.append(verified_values)
-
     if resolved_context:
-        for source in (context, live):
-            for key in (
-                "po_number",
-                "bc_document_no",
-                "bc_order_number",
-            ):
+        # Prefer only the resolver winner and the live BC record. Do not fold in
+        # verified_order_numbers here because that collection can contain every
+        # alternate BC match considered during resolution.
+        for source, keys in (
+            (context, ("po_number", "bc_document_no", "bc_order_number")),
+            (live, ("bc_document_no", "bc_order_number")),
+        ):
+            for key in keys:
                 value = source.get(key)
                 if isinstance(value, (list, tuple, set)):
                     values.extend(value)
                 elif value:
                     values.append(value)
+
+    # Legacy/test contexts and older snapshots may expose only the explicitly
+    # typed verified_order_numbers field. Use it only when no winning reference
+    # was available above and no explicit failure status exists.
+    if not values:
+        verified_values = context.get("verified_order_numbers") or []
+        if isinstance(verified_values, (list, tuple, set)):
+            values.extend(verified_values)
+        elif verified_values:
+            values.append(verified_values)
 
     refs = set()
     for value in values:

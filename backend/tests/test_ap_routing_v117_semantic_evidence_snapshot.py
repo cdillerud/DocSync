@@ -10,7 +10,11 @@ from services.ap_routing_learned_features_service import (
     semantic_features,
 )
 from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
-from services.ap_routing_semantic_hydration_service import enrich_routing_example_with_semantics
+from services.ap_routing_semantic_hydration_service import (
+    compact_unlabeled_filename_date_refs,
+    enrich_routing_example_with_semantics,
+    sanitize_filename_for_reference_resolution,
+)
 
 DNP = "DO NOT PAY"
 DETENTION = "Vendor Credit Memos/Ball Detention Credits"
@@ -172,6 +176,43 @@ def test_semantic_complete_snapshot_replays_with_sha_verification(tmp_path):
     assert result["valid"] is True
     assert result["integrity"] == "sha256_verified"
     assert result["semantic_feature_schema"] == SEMANTIC_FEATURE_SCHEMA
+
+
+def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot_fails_closed(tmp_path):
+    buske = "119065_Buske_091026_.pdf"
+    reile = "118911_REILE'S_090326_BOL - need to receive.pdf"
+    bb = "119006_B&B Packaging_090926_BOL.pdf"
+
+    assert compact_unlabeled_filename_date_refs(buske) == {"91026"}
+    assert compact_unlabeled_filename_date_refs(reile) == {"90326"}
+    assert compact_unlabeled_filename_date_refs(bb) == {"90926"}
+    assert "091026" not in sanitize_filename_for_reference_resolution(buske)
+    assert "090326" not in sanitize_filename_for_reference_resolution(reile)
+    assert "090926" not in sanitize_filename_for_reference_resolution(bb)
+    assert "119065" in sanitize_filename_for_reference_resolution(buske)
+    assert "118911" in sanitize_filename_for_reference_resolution(reile)
+    assert "119006" in sanitize_filename_for_reference_resolution(bb)
+
+    explicit = "PO_091026_vendor.pdf"
+    assert compact_unlabeled_filename_date_refs(explicit) == set()
+    assert "091026" in sanitize_filename_for_reference_resolution(explicit)
+
+    examples = [
+        semantic_example(DNP, "DO NOT PAY", "dnp"),
+        semantic_example(DETENTION, "detention credit memo", "detention"),
+    ]
+    examples[0]["file_name"] = buske
+    examples[0]["bc_context"] = {"status": "resolved", "po_number": "91026"}
+    path = tmp_path / "date-derived-ref.json"
+    write_snapshot(path, examples)
+    result = load_valid_evidence_snapshot(
+        path,
+        expected_authority=AUTHORITY,
+        contract=contract(),
+        minimum_examples=2,
+    )
+    assert result["valid"] is False
+    assert result["reason"] == "resolved_bc_reference_matches_compact_filename_date"
 
 
 def test_stored_reversal_feature_blocks_ordinary_detention_bootstrap():

@@ -8,10 +8,10 @@ never chooses or substitutes a route.
 from __future__ import annotations
 
 from collections import Counter
+import re
 from typing import Any, Dict, List, Sequence
 
 from services.ap_routing_learned_features_service import reference_family, semantic_features
-from services.ap_routing_learned_safety_service import _context_refs
 from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
 from services.ap_routing_relevant_learning_service import (
     LABEL_SOURCE_REVIEWER_CONFIRMATION,
@@ -26,6 +26,50 @@ from services.ap_routing_relevant_learning_service import (
 # concerns separate preserves established DNP autonomy while preventing an
 # ordinary transaction neighborhood from authorizing a reversal/void document.
 EXCEPTIONAL_WORKFLOW_FEATURES = frozenset({"reversal_or_void"})
+
+# Authority diagnostics must be stricter than the broad fail-closed safety
+# reference set. Only references from a resolved/verified BC context and from
+# explicit BC PO/order fields are eligible here. Generic order_numbers and
+# shipment_number values are intentionally excluded because they can be common
+# across unrelated documents and are useful only as broad safety evidence.
+_STRICT_VERIFIED_BC_REF = re.compile(
+    r"^(?:"
+    r"\d{4,7}(?:[-/]\d{1,3})?"
+    r"|[A-Z]{1,3}-?\d{3,7}[A-Z]?(?:[-/]\d{1,3})?"
+    r"|\d{5,7}[A-Z_]\w{0,3}"
+    r")$"
+)
+_VERIFIED_CONTEXT_STATUSES = frozenset({"resolved", "resolved_shipment", "matched", "verified"})
+
+
+def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
+    if not context:
+        return set()
+    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
+    live = context.get("live_bc_context") or {}
+    if status not in _VERIFIED_CONTEXT_STATUSES and not str(live.get("bc_document_no") or "").strip():
+        return set()
+
+    values: List[Any] = []
+    for source in (context, live):
+        for key in (
+            "verified_order_numbers",
+            "po_number",
+            "bc_document_no",
+            "bc_order_number",
+        ):
+            value = source.get(key)
+            if isinstance(value, (list, tuple, set)):
+                values.extend(value)
+            elif value:
+                values.append(value)
+
+    refs = set()
+    for value in values:
+        token = str(value or "").strip().upper()
+        if token and _STRICT_VERIFIED_BC_REF.fullmatch(token):
+            refs.add(token)
+    return refs
 
 
 def _vendor(document: Dict[str, Any]) -> str:
@@ -85,15 +129,14 @@ def summarize_authority_neighborhood(
         row["_authority_relevance_score"] = learned_relevance_score(document, row)
         eligible.append(row)
 
-    # Read-only diagnostic only: measure exact resolved-reference agreement across
-    # TRAIN human labels using the same normalization as the foreign-reference
-    # safety veto. These counts do not alter relevance, neighborhood membership,
-    # authority thresholds, or the AI's proposed route.
-    current_exact_refs = _context_refs(document.get("bc_context") or {})
+    # Read-only diagnostic only: measure exact resolved BC PO/order agreement
+    # across TRAIN human labels. These counts do not alter relevance,
+    # neighborhood membership, authority thresholds, or the AI's proposed route.
+    current_exact_refs = _verified_bc_refs(document.get("bc_context") or {})
     exact_reference_rows = [
         row
         for row in eligible
-        if current_exact_refs.intersection(_context_refs(row.get("bc_context") or {}))
+        if current_exact_refs.intersection(_verified_bc_refs(row.get("bc_context") or {}))
     ] if current_exact_refs else []
     exact_reference_route_counter = Counter(
         normalize_route_path(row.get("route_path")) or "unknown"

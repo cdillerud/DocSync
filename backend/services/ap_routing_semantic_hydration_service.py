@@ -8,8 +8,10 @@ inspect or select route labels; Accounting placement remains the only label.
 
 from __future__ import annotations
 
+from datetime import datetime
 import os
 from pathlib import Path
+import re
 from typing import Any, Dict, Optional
 
 from services import ap_routing_corpus_service as corpus
@@ -17,6 +19,60 @@ from services.ap_routing_learned_features_service import (
     SEMANTIC_FEATURE_SCHEMA,
     semantic_feature_snapshot,
 )
+
+
+_COMPACT_FILENAME_DATE_TOKEN = re.compile(r"(?<![A-Z0-9])(\d{6}|\d{8})(?![A-Z0-9])", re.IGNORECASE)
+_EXPLICIT_PO_PREFIX = re.compile(
+    r"(?:^|[_\-\s.])(?:P\.?O\.?|PURCHASE[_\-\s.]+ORDER)[_\-\s.]*$",
+    re.IGNORECASE,
+)
+
+
+def _is_compact_calendar_date(value: str) -> bool:
+    token = str(value or "").strip()
+    if not token.isdigit():
+        return False
+    formats = ("%m%d%y",) if len(token) == 6 else (("%m%d%Y", "%Y%m%d") if len(token) == 8 else ())
+    for fmt in formats:
+        try:
+            datetime.strptime(token, fmt)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def compact_unlabeled_filename_date_refs(file_name: str) -> set[str]:
+    """Return normalized compact date tokens that must not act as PO evidence.
+
+    Explicitly PO-labeled values (for example PO_091026) are intentionally
+    retained because the label is stronger evidence than the numeric shape.
+    """
+    name = str(file_name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    refs: set[str] = set()
+    for match in _COMPACT_FILENAME_DATE_TOKEN.finditer(name):
+        raw = match.group(1)
+        if not _is_compact_calendar_date(raw):
+            continue
+        if _EXPLICIT_PO_PREFIX.search(name[: match.start()]):
+            continue
+        refs.add(raw.lstrip("0") or "0")
+    return refs
+
+
+def sanitize_filename_for_reference_resolution(file_name: str) -> str:
+    """Blank ambiguous compact dates before the read-only BC PO resolver runs."""
+    name = str(file_name or "")
+
+    def _replace(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        if not _is_compact_calendar_date(raw):
+            return raw
+        if _EXPLICIT_PO_PREFIX.search(name[: match.start()]):
+            return raw
+        return " "
+
+    return _COMPACT_FILENAME_DATE_TOKEN.sub(_replace, name)
 
 
 def enrich_routing_example_with_semantics(
@@ -73,7 +129,14 @@ async def hydrate_accounting_label_with_semantics(
             "extracted_fields": primary_fields,
             "raw_text": raw_text,
         }
-        bc_context = await corpus.resolve_ap_routing_context(document, bundle_refs=bundle)
+        # Filename dates such as 091026, 090326, and 090926 can otherwise look
+        # like legitimate 5-6 digit BC POs after leading-zero normalization.
+        # Keep the original filename on the supervised example, but remove those
+        # ambiguous unlabeled date tokens only from the resolver input. Explicit
+        # PO_091026-style values remain eligible.
+        resolution_document = dict(document)
+        resolution_document["file_name"] = sanitize_filename_for_reference_resolution(file_name)
+        bc_context = await corpus.resolve_ap_routing_context(resolution_document, bundle_refs=bundle)
         vendor_name = (
             primary_fields.get("vendor")
             or primary_fields.get("vendor_name")

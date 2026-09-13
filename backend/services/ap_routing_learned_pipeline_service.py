@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Sequence
 
 from services.ap_routing_ai_primary_service import propose_ap_route_ai_primary
@@ -10,6 +11,57 @@ from services.ap_routing_learned_safety_service import apply_learned_autonomy_sa
 from services.ap_routing_learning_service import normalize_route_path
 from services.ap_routing_relevant_learning_service import build_relevant_learning_examples
 from services.ap_routing_train_context_service import build_train_learning_context
+
+
+_STRONG_LEADING_REFERENCE = re.compile(
+    r"^(?:WTR[A-Z0-9_-]{2,20}|WA\d{3,8}[A-Z]?|W\d{4,8}[A-Z]?|\d{5,7}[A-Z]?)$",
+    re.IGNORECASE,
+)
+
+
+def _leading_filename_reference(file_name: Any) -> str:
+    """Return a strong leading business reference when the filename has one."""
+    name = str(file_name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem = re.sub(r"\.[A-Za-z0-9]{2,5}$", "", name).strip()
+    if not stem or stem[0] in "_-":
+        return ""
+    first = re.split(r"[_\s]+", stem, maxsplit=1)[0].strip("-").upper()
+    return first if _STRONG_LEADING_REFERENCE.fullmatch(first) else ""
+
+
+def _exact_reference_filename_alignment_blocker(
+    document: Dict[str, Any],
+    autonomy_decision: Dict[str, Any],
+) -> str:
+    """Fail closed when exact-reference authority conflicts with filename identity.
+
+    This is a safety veto only. It cannot choose a route or create authority.
+    Exact-reference consensus is unusually strong, so when the current document
+    itself exposes a strong leading order/warehouse reference, the BC reference
+    that earned authority must agree with it. This prevents date-like resolver
+    winners (for example 091026 -> 91026) from earning autonomy for a different
+    leading order such as 119065.
+    """
+    if str(autonomy_decision.get("earned_by") or "") != "exact_reference_human_consensus":
+        return ""
+    leading = _leading_filename_reference(document.get("file_name"))
+    if not leading:
+        return ""
+    exact = autonomy_decision.get("exact_reference_authority") or {}
+    current_refs = {
+        str(value or "").strip().upper()
+        for value in (exact.get("current_refs") or [])
+        if str(value or "").strip()
+    }
+    if leading in current_refs:
+        return ""
+    refs_text = ",".join(sorted(current_refs)) if current_refs else "none"
+    return (
+        "exact-reference authority winning BC reference "
+        + refs_text
+        + " conflicts with current filename leading reference "
+        + leading
+    )
 
 
 async def decide_ap_route_learned(
@@ -96,12 +148,20 @@ async def decide_ap_route_learned(
         "current_semantic_features"
     ) or []
 
+    combined_hard_blockers = [str(item) for item in hard_blockers if str(item).strip()]
+    exact_reference_alignment_blocker = _exact_reference_filename_alignment_blocker(
+        document,
+        autonomy,
+    )
+    if exact_reference_alignment_blocker:
+        combined_hard_blockers.append(exact_reference_alignment_blocker)
+
     final = apply_learned_autonomy_safety(
         document=document,
         autonomy_decision=autonomy,
         contract=contract,
         bc_context=bc_context or {},
-        hard_blockers=hard_blockers,
+        hard_blockers=combined_hard_blockers,
         support_examples=train_examples,
     )
     final["ai_primary_router"] = True

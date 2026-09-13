@@ -222,12 +222,15 @@ def _round_robin_semantic_workflows(
     excluded_source_item_ids: Set[str],
     already_selected_source_item_ids: Set[str],
     max_additional: int,
+    initial_selected_route_counts: Optional[Dict[str, int]] = None,
+    max_additional_per_route: Optional[int] = None,
 ) -> Tuple[List[Tuple[str, Dict[str, Any]]], Dict[str, int]]:
-    """Select live documents by filename workflow semantics without using routes.
+    """Select live documents by route-neutral filename workflow semantics.
 
-    `route_path` is deliberately ignored for candidate membership, ranking, and
-    round-robin selection. It remains attached only because hydration later uses
-    the live Accounting placement as supervised truth.
+    `route_path` is deliberately ignored for semantic candidate membership and
+    feature ranking. After a semantic candidate exists, its human Accounting
+    placement may only enforce the same shared TRAIN balancing cap already used
+    by vendor expansion; it is never converted into a routing rule.
     """
     if max_additional <= 0:
         return [], {}
@@ -257,24 +260,47 @@ def _round_robin_semantic_workflows(
     seen = set(already_selected_source_item_ids)
     indices = Counter()
     features = sorted(by_feature)
+    selected_route_counts = Counter(
+        {
+            str(route): int(count)
+            for route, count in (initial_selected_route_counts or {}).items()
+            if str(route or "").strip() and int(count) > 0
+        }
+    )
+    route_cap = (
+        None
+        if max_additional_per_route is None
+        else max(1, int(max_additional_per_route))
+    )
 
     while len(selected) < max_additional:
         progressed = False
         for feature in features:
             rows = by_feature[feature]
             idx = indices[feature]
-            while idx < len(rows) and str(rows[idx].get("item_id") or "") in seen:
-                idx += 1
+            while idx < len(rows):
+                row = rows[idx]
+                item_id = str(row.get("item_id") or "")
+                route = str(row.get("route_path") or "") or "unknown"
+                if not item_id or item_id in seen:
+                    idx += 1
+                    continue
+                if route_cap is not None and selected_route_counts[route] >= route_cap:
+                    idx += 1
+                    continue
+                break
             indices[feature] = idx
             if idx >= len(rows):
                 continue
             row = rows[idx]
             indices[feature] += 1
             item_id = str(row.get("item_id") or "")
+            route = str(row.get("route_path") or "") or "unknown"
             if not item_id or item_id in seen:
                 continue
             seen.add(item_id)
             selected.append((f"semantic:{feature}", row))
+            selected_route_counts[route] += 1
             progressed = True
             if len(selected) >= max_additional:
                 break
@@ -317,12 +343,11 @@ async def expand_high_value_vendor_corpus(
 
     Vendor candidate admission uses vendor identity in filenames only. After a
     candidate is admitted, its live human Accounting placement may be used only
-    to balance TRAIN sampling across that vendor's observed workflows. Targeted
-    vendor expansion also uses the broad corpus's 30-per-route balancing principle
-    by default so one queue cannot re-dominate merely by appearing for many target
-    vendors. The second pass uses discriminating workflow semantics visible in
-    filenames only. No selector turns a human route label into a rule for a new
-    document.
+    to balance TRAIN sampling across that vendor's observed workflows. Vendor and
+    semantic expansion share the broad corpus's 30-per-route balancing principle
+    by default so one queue cannot re-dominate via either expansion path. Semantic
+    candidate discovery itself remains route-blind. No selector turns a human
+    route label into a rule for a new document.
 
     ``base_examples`` alone controls target-vendor ranking and existing vendor
     counts. ``excluded_source_item_ids`` is a route-neutral identity exclusion
@@ -380,7 +405,7 @@ async def expand_high_value_vendor_corpus(
         for rows in vendor_routes.values():
             rows.sort(key=lambda row: (str(row.get("modified_at") or ""), str(row.get("file_name") or "")), reverse=True)
 
-    vendor_route_cap = (
+    expansion_route_cap = (
         max(1, int(max_additional_per_route))
         if max_additional_per_route is not None
         else max(1, int(desired_total_per_vendor))
@@ -391,7 +416,7 @@ async def expand_high_value_vendor_corpus(
         desired_total_per_vendor=max(1, int(desired_total_per_vendor)),
         existing_counts=existing_counts,
         max_additional=max(0, int(max_additional)),
-        max_additional_per_route=vendor_route_cap,
+        max_additional_per_route=expansion_route_cap,
     )
     vendor_selected_by_route = Counter(
         str(label.get("route_path") or "") or "unknown"
@@ -408,8 +433,14 @@ async def expand_high_value_vendor_corpus(
         excluded_source_item_ids=existing_ids,
         already_selected_source_item_ids=already_selected_ids,
         max_additional=max(0, int(max_additional) - len(selected_pairs)),
+        initial_selected_route_counts=vendor_selected_by_route,
+        max_additional_per_route=expansion_route_cap,
     )
     selected_pairs.extend(semantic_pairs)
+    selected_by_route = Counter(
+        str(label.get("route_path") or "") or "unknown"
+        for _, label in selected_pairs
+    )
 
     semaphore = asyncio.Semaphore(max(1, int(concurrency)))
 
@@ -477,8 +508,10 @@ async def expand_high_value_vendor_corpus(
         },
         "semantic_candidate_counts": semantic_candidate_counts,
         "semantic_selected_count": len(semantic_pairs),
-        "vendor_route_cap": vendor_route_cap,
+        "vendor_route_cap": expansion_route_cap,
+        "expansion_route_cap": expansion_route_cap,
         "vendor_selected_by_route": dict(vendor_selected_by_route),
+        "selected_by_route": dict(selected_by_route),
         "selected_count": len(selected_pairs),
         "hydrated_count": len(examples),
         "hydrated_by_vendor": dict(by_vendor),

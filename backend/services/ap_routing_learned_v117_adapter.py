@@ -45,6 +45,7 @@ async def decide_ap_route_with_learned_autonomy(
 
     neighborhood = result.get("neighborhood") or {}
     anchor_authority = result.get("anchor_authority") or {}
+    exact_reference_authority = result.get("exact_reference_authority") or {}
     corroboration_authority = result.get("corroboration_authority") or {}
     neighbor_routes = [str(route) for route in (neighborhood.get("neighbor_routes") or []) if route]
     scope = str(neighborhood.get("scope") or "")
@@ -79,6 +80,14 @@ async def decide_ap_route_with_learned_autonomy(
         "exact_reference_support_count": neighborhood.get("exact_reference_support_count"),
         "exact_reference_contradiction_count": neighborhood.get("exact_reference_contradiction_count"),
         "exact_reference_route_counts": neighborhood.get("exact_reference_route_counts") or [],
+        "exact_reference_authority": exact_reference_authority,
+        "exact_reference_authority_ready": bool(exact_reference_authority.get("authority_ready")),
+        "exact_reference_authority_current_refs": exact_reference_authority.get("current_refs") or [],
+        "exact_reference_authority_match_count": exact_reference_authority.get("match_count"),
+        "exact_reference_authority_support_count": exact_reference_authority.get("support_count"),
+        "exact_reference_authority_contradiction_count": exact_reference_authority.get("contradiction_count"),
+        "exact_reference_authority_same_vendor_support_count": exact_reference_authority.get("same_vendor_support_count"),
+        "exact_reference_authority_vendor_identity_ready": exact_reference_authority.get("vendor_identity_ready"),
         "exceptional_workflow_features": neighborhood.get("exceptional_workflow_features") or [],
         "exception_support_count": neighborhood.get("exception_support_count"),
         "exception_mismatch_support_count": neighborhood.get("exception_mismatch_support_count"),

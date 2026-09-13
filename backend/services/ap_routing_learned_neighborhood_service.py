@@ -7,9 +7,11 @@ never chooses or substitutes a route.
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import Any, Dict, List, Sequence
 
 from services.ap_routing_learned_features_service import reference_family, semantic_features
+from services.ap_routing_learned_safety_service import _context_refs
 from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
 from services.ap_routing_relevant_learning_service import (
     LABEL_SOURCE_REVIEWER_CONFIRMATION,
@@ -82,6 +84,34 @@ def summarize_authority_neighborhood(
         row = dict(source)
         row["_authority_relevance_score"] = learned_relevance_score(document, row)
         eligible.append(row)
+
+    # Read-only diagnostic only: measure exact resolved-reference agreement across
+    # TRAIN human labels using the same normalization as the foreign-reference
+    # safety veto. These counts do not alter relevance, neighborhood membership,
+    # authority thresholds, or the AI's proposed route.
+    current_exact_refs = _context_refs(document.get("bc_context") or {})
+    exact_reference_rows = [
+        row
+        for row in eligible
+        if current_exact_refs.intersection(_context_refs(row.get("bc_context") or {}))
+    ] if current_exact_refs else []
+    exact_reference_route_counter = Counter(
+        normalize_route_path(row.get("route_path")) or "unknown"
+        for row in exact_reference_rows
+    )
+    exact_reference_support_count = sum(
+        1
+        for row in exact_reference_rows
+        if normalize_route_path(row.get("route_path")) == proposed
+    )
+    exact_reference_contradiction_count = len(exact_reference_rows) - exact_reference_support_count
+    exact_reference_route_counts = [
+        {"route_path": route, "count": count}
+        for route, count in sorted(
+            exact_reference_route_counter.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    ]
 
     same_vendor = [
         row for row in eligible
@@ -206,6 +236,11 @@ def summarize_authority_neighborhood(
         "semantic_anchor": semantic_anchor,
         "current_reference_family": current_ref,
         "current_semantic_features": sorted(current_semantics),
+        "exact_reference_current_ref_count": len(current_exact_refs),
+        "exact_reference_match_count": len(exact_reference_rows),
+        "exact_reference_support_count": exact_reference_support_count,
+        "exact_reference_contradiction_count": exact_reference_contradiction_count,
+        "exact_reference_route_counts": exact_reference_route_counts,
         "exceptional_workflow_features": sorted(exceptional_semantics),
         "exception_support_count": len(support) if exceptional_semantics else 0,
         "exception_mismatch_support_count": len(exception_mismatch_support),

@@ -28,8 +28,9 @@ from services.ap_routing_relevant_learning_service import (
 EXCEPTIONAL_WORKFLOW_FEATURES = frozenset({"reversal_or_void"})
 
 # Authority diagnostics must be stricter than the broad fail-closed safety
-# reference set. Only references from a resolved/verified BC context and from
-# explicit BC PO/order fields are eligible here. Generic order_numbers and
+# reference set. Explicit verified_order_numbers are already typed as verified
+# evidence and may be used when no failure status is present. Other BC PO/order
+# fields require a resolved/verified context. Generic order_numbers and
 # shipment_number values are intentionally excluded because they can be common
 # across unrelated documents and are useful only as broad safety evidence.
 _STRICT_VERIFIED_BC_REF = re.compile(
@@ -45,24 +46,35 @@ _VERIFIED_CONTEXT_STATUSES = frozenset({"resolved", "resolved_shipment", "matche
 def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
     if not context:
         return set()
+
     status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
     live = context.get("live_bc_context") or {}
-    if status not in _VERIFIED_CONTEXT_STATUSES and not str(live.get("bc_document_no") or "").strip():
-        return set()
+    explicit_failure = bool(status and status not in _VERIFIED_CONTEXT_STATUSES)
+    resolved_context = bool(
+        status in _VERIFIED_CONTEXT_STATUSES
+        or str(live.get("bc_document_no") or "").strip()
+    )
 
     values: List[Any] = []
-    for source in (context, live):
-        for key in (
-            "verified_order_numbers",
-            "po_number",
-            "bc_document_no",
-            "bc_order_number",
-        ):
-            value = source.get(key)
-            if isinstance(value, (list, tuple, set)):
-                values.extend(value)
-            elif value:
-                values.append(value)
+    if not explicit_failure:
+        verified_values = context.get("verified_order_numbers") or []
+        if isinstance(verified_values, (list, tuple, set)):
+            values.extend(verified_values)
+        elif verified_values:
+            values.append(verified_values)
+
+    if resolved_context:
+        for source in (context, live):
+            for key in (
+                "po_number",
+                "bc_document_no",
+                "bc_order_number",
+            ):
+                value = source.get(key)
+                if isinstance(value, (list, tuple, set)):
+                    values.extend(value)
+                elif value:
+                    values.append(value)
 
     refs = set()
     for value in values:

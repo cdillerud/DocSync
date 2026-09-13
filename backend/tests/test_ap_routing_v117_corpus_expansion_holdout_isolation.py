@@ -130,6 +130,31 @@ def test_semantic_workflow_selection_is_route_blind_and_identity_safe():
     assert "holdout-receive" not in ids_a
     assert "ordinary-1" not in ids_a
 
+    capped_labels = [
+        {
+            "item_id": "dunnage-capped",
+            "file_name": "dunnage return 118010.pdf",
+            "route_path": "Route A",
+            "modified_at": "2026-09-11T13:00:00Z",
+        },
+        {
+            "item_id": "receive-open",
+            "file_name": "purchase receipt notification 118011.pdf",
+            "route_path": "Route B",
+            "modified_at": "2026-09-11T12:30:00Z",
+        },
+    ]
+    capped, capped_counts = expansion._round_robin_semantic_workflows(
+        capped_labels,
+        excluded_source_item_ids=set(),
+        already_selected_source_item_ids=set(),
+        max_additional=10,
+        initial_selected_route_counts={"Route A": 2},
+        max_additional_per_route=2,
+    )
+    assert [row["item_id"] for _, row in capped] == ["receive-open"]
+    assert capped_counts == {"dunnage": 1, "inventory": 1}
+
 
 def test_semantic_workflow_expansion_hydrates_non_vendor_receiving_evidence(monkeypatch):
     train_examples = [

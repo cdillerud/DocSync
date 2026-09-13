@@ -76,6 +76,7 @@ async def evaluate_holdout_learned(
         ensemble = result.get("ensemble_reconciliation") or {}
         authority_guard = result.get("authority_guard") or {}
         anchor_authority = authority_guard.get("anchor_authority") or {}
+        exact_reference_authority = authority_guard.get("exact_reference_authority") or {}
         corroboration_authority = authority_guard.get("corroboration_authority") or {}
         prompt_routes = [str(route) for route in (result.get("prompt_routes") or []) if route]
 
@@ -130,6 +131,18 @@ async def evaluate_holdout_learned(
                 "exact_reference_support_count": authority_guard.get("exact_reference_support_count"),
                 "exact_reference_contradiction_count": authority_guard.get("exact_reference_contradiction_count"),
                 "exact_reference_route_counts": authority_guard.get("exact_reference_route_counts") or [],
+                "exact_reference_authority_ready": bool(exact_reference_authority.get("authority_ready")),
+                "exact_reference_authority_current_refs": exact_reference_authority.get("current_refs") or [],
+                "exact_reference_authority_match_count": exact_reference_authority.get("match_count"),
+                "exact_reference_authority_support_count": exact_reference_authority.get("support_count"),
+                "exact_reference_authority_contradiction_count": exact_reference_authority.get("contradiction_count"),
+                "exact_reference_authority_route_counts": exact_reference_authority.get("route_counts") or [],
+                "exact_reference_authority_same_vendor_support_count": exact_reference_authority.get("same_vendor_support_count"),
+                "exact_reference_authority_payable_vendor_identity_required": exact_reference_authority.get("payable_vendor_identity_required"),
+                "exact_reference_authority_vendor_identity_ready": exact_reference_authority.get("vendor_identity_ready"),
+                "exact_reference_authority_unanimous": exact_reference_authority.get("unanimous"),
+                "exact_reference_authority_minimum_support": exact_reference_authority.get("minimum_support"),
+                "exact_reference_authority_minimum_confidence": exact_reference_authority.get("minimum_confidence"),
                 "exceptional_workflow_features": authority_guard.get("exceptional_workflow_features") or [],
                 "exception_support_count": authority_guard.get("exception_support_count"),
                 "exception_mismatch_support_count": authority_guard.get("exception_mismatch_support_count"),
@@ -183,6 +196,9 @@ async def evaluate_holdout_learned(
             "actual_prompt_limit": prompt_limit,
             "high_specificity_anchor_auto_count": sum(
                 1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "high_specificity_human_anchor"
+            ),
+            "exact_reference_auto_count": sum(
+                1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "exact_reference_human_consensus"
             ),
             "train_corroboration_auto_count": sum(
                 1 for row in rows if row.get("auto_routed") and row.get("earned_by") == "train_corroboration"

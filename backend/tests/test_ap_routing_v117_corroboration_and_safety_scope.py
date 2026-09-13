@@ -5,6 +5,7 @@ from services.ap_routing_ai_primary_service import propose_ap_route_ai_primary
 from services.ap_routing_corroboration_authority_service import (
     summarize_train_corroboration_authority,
 )
+from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
 from services.ap_routing_learned_safety_service import (
     apply_learned_autonomy_safety,
     derive_universal_safety_blockers,
@@ -278,11 +279,33 @@ def test_shipping_document_foreign_reference_is_not_a_supplier_identity_hazard()
 
 def test_ap_invoice_foreign_reference_dependency_still_fails_closed():
     support = [
-        ex(DROP, fingerprint="foreign", vendor="Other Carrier", bc_context={"verified_order_numbers": ["118434"]})
+        ex(DROP, fingerprint="foreign-support", vendor="Other Carrier", bc_context={"verified_order_numbers": ["118434"]}),
+        ex(WAREHOUSE, fingerprint="foreign-contradiction", vendor="Other Warehouse", bc_context={"verified_order_numbers": ["118434"]}),
+        ex(DROP, fingerprint="different-reference", vendor="Other Carrier", bc_context={"verified_order_numbers": ["999999"]}),
     ]
-    decision = autonomy(DROP, refs=["118434"], matched=["foreign"])
+    current = doc(
+        vendor="Current Carrier",
+        document_type="AP_Invoice",
+        bc_context={"verified_order_numbers": ["118434"]},
+    )
+    telemetry = summarize_authority_neighborhood(
+        document=current,
+        proposed_route=DROP,
+        train_examples=support,
+    )
+    assert telemetry["exact_reference_current_ref_count"] == 1
+    assert telemetry["exact_reference_match_count"] == 2
+    assert telemetry["exact_reference_support_count"] == 1
+    assert telemetry["exact_reference_contradiction_count"] == 1
+    assert telemetry["exact_reference_route_counts"] == [
+        {"route_path": DROP, "count": 1},
+        {"route_path": WAREHOUSE, "count": 1},
+    ]
+    assert telemetry["authority_ready"] is False
+
+    decision = autonomy(DROP, refs=["118434"], matched=["foreign-support"])
     blockers = derive_universal_safety_blockers(
-        document=doc(vendor="Current Carrier", document_type="AP_Invoice"),
+        document=current,
         autonomy_decision=decision,
         contract=contract(),
         bc_context={"verified_order_numbers": ["118434"]},

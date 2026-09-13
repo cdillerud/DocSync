@@ -98,6 +98,7 @@ def test_discriminating_workflow_allows_broad_vendor_autonomy_after_two_semantic
 
     guard = decision["discriminating_semantic_authority"]
     assert guard["active"] is True
+    assert "detention" in guard["features"]
     assert guard["support_count"] >= 2
     assert guard["authority_ready"] is True
     assert decision["decision"] == "auto_route"
@@ -279,3 +280,88 @@ def test_exact_reference_telemetry_requires_resolved_verified_bc_order_refs():
         {"route_path": "Dropship Not International/Freight", "count": 1},
         {"route_path": "Warehouse Not International", "count": 1},
     ]
+
+
+def test_exact_reference_authority_requires_unanimous_resolved_winner_and_payable_vendor_support():
+    route = "Warehouse Not International"
+    current = {
+        "file_name": "119065_Buske_091026_.pdf",
+        "vendor_name": "",
+        "document_type": "Shipping_Document",
+        "extracted_fields": {"document_type": "Shipping_Document"},
+        "bc_context": {"status": "resolved", "po_number": "119065"},
+    }
+
+    def exact_row(index, row_route=route, vendor=None):
+        return {
+            "fingerprint": f"exact-{index}",
+            "vendor_name": vendor or f"Carrier {index}",
+            "document_type": "Shipping_Document",
+            "route_path": row_route,
+            "label_source": "accounting_temp",
+            "active": True,
+            "split": "train",
+            "file_name": f"exact-{index}.pdf",
+            "extracted_fields": {"document_type": "Shipping_Document"},
+            "bc_context": {"status": "resolved", "po_number": "119065"},
+        }
+
+    unanimous = [exact_row(i) for i in range(4)]
+    decision = evaluate_learned_autonomy(
+        document=current,
+        ai_decision=ai(route=route, confidence=0.99),
+        train_examples=unanimous,
+    )
+    exact = decision["exact_reference_authority"]
+    assert exact["current_refs"] == ["119065"]
+    assert exact["match_count"] == 4
+    assert exact["support_count"] == 4
+    assert exact["contradiction_count"] == 0
+    assert exact["unanimous"] is True
+    assert exact["authority_ready"] is True
+    assert decision["decision"] == "auto_route"
+    assert decision["route_path"] == route
+    assert decision["earned_by"] == "exact_reference_human_consensus"
+    assert decision["route_preserved"] is True
+
+    mixed = unanimous + [exact_row(5, row_route="Dropship Not International/Freight")]
+    mixed_decision = evaluate_learned_autonomy(
+        document=current,
+        ai_decision=ai(route=route, confidence=0.99),
+        train_examples=mixed,
+    )
+    mixed_exact = mixed_decision["exact_reference_authority"]
+    assert mixed_exact["support_count"] == 4
+    assert mixed_exact["contradiction_count"] == 1
+    assert mixed_exact["unanimous"] is False
+    assert mixed_exact["authority_ready"] is False
+    assert mixed_decision["decision"] == "needs_review"
+
+    payable = {
+        "file_name": "_CRALER_259746337_20260904 storage.pdf",
+        "vendor_name": "CRALER",
+        "document_type": "AP_Invoice",
+        "extracted_fields": {"vendor": "CRALER", "document_type": "AP_Invoice"},
+        "bc_context": {"status": "resolved", "po_number": "259746"},
+    }
+    foreign_rows = [
+        {
+            **exact_row(i, row_route="Warehouse International", vendor=f"Foreign Vendor {i}"),
+            "document_type": "AP_Invoice",
+            "extracted_fields": {"vendor": f"Foreign Vendor {i}", "document_type": "AP_Invoice"},
+            "bc_context": {"status": "resolved", "po_number": "259746"},
+        }
+        for i in range(4)
+    ]
+    payable_decision = evaluate_learned_autonomy(
+        document=payable,
+        ai_decision=ai(route="Warehouse International", confidence=0.99),
+        train_examples=foreign_rows,
+    )
+    payable_exact = payable_decision["exact_reference_authority"]
+    assert payable_exact["support_count"] == 4
+    assert payable_exact["same_vendor_support_count"] == 0
+    assert payable_exact["payable_vendor_identity_required"] is True
+    assert payable_exact["vendor_identity_ready"] is False
+    assert payable_exact["authority_ready"] is False
+    assert payable_decision["decision"] == "needs_review"

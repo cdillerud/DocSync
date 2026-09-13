@@ -27,12 +27,10 @@ from services.ap_routing_relevant_learning_service import (
 # ordinary transaction neighborhood from authorizing a reversal/void document.
 EXCEPTIONAL_WORKFLOW_FEATURES = frozenset({"reversal_or_void"})
 
-# Authority diagnostics must be stricter than the broad fail-closed safety
-# reference set. For resolved contexts, only the resolver's winning PO and the
-# live BC document number are exact-reference evidence. The broader
-# verified_order_numbers collection may contain alternate BC matches and is used
-# only as a legacy/status-less fallback when no winning reference is available.
-# Generic order_numbers and shipment_number values are intentionally excluded.
+# Exact-reference authority is intentionally stricter than the broad
+# fail-closed safety reference set. Only a resolved winning BC PO/document is
+# eligible to earn authority. Legacy verified_order_numbers remain useful for
+# read-only diagnostics but can never earn exact-reference autonomy by itself.
 _STRICT_VERIFIED_BC_REF = re.compile(
     r"^(?:"
     r"\d{4,7}(?:[-/]\d{1,3})?"
@@ -43,53 +41,68 @@ _STRICT_VERIFIED_BC_REF = re.compile(
 _VERIFIED_CONTEXT_STATUSES = frozenset({"resolved", "resolved_shipment", "matched", "verified"})
 
 
-def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
-    if not context:
-        return set()
-
-    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
-    live = context.get("live_bc_context") or {}
-    explicit_failure = bool(status and status not in _VERIFIED_CONTEXT_STATUSES)
-    if explicit_failure:
-        return set()
-
-    resolved_context = bool(
-        status in _VERIFIED_CONTEXT_STATUSES
-        or str(live.get("bc_document_no") or "").strip()
-    )
-
-    values: List[Any] = []
-    if resolved_context:
-        # Prefer only the resolver winner and the live BC record. Do not fold in
-        # verified_order_numbers here because that collection can contain every
-        # alternate BC match considered during resolution.
-        for source, keys in (
-            (context, ("po_number", "bc_document_no", "bc_order_number")),
-            (live, ("bc_document_no", "bc_order_number")),
-        ):
-            for key in keys:
-                value = source.get(key)
-                if isinstance(value, (list, tuple, set)):
-                    values.extend(value)
-                elif value:
-                    values.append(value)
-
-    # Legacy/test contexts and older snapshots may expose only the explicitly
-    # typed verified_order_numbers field. Use it only when no winning reference
-    # was available above and no explicit failure status exists.
-    if not values:
-        verified_values = context.get("verified_order_numbers") or []
-        if isinstance(verified_values, (list, tuple, set)):
-            values.extend(verified_values)
-        elif verified_values:
-            values.append(verified_values)
-
+def _normalize_bc_ref_values(values: Sequence[Any]) -> set[str]:
     refs = set()
     for value in values:
         token = str(value or "").strip().upper()
         if token and _STRICT_VERIFIED_BC_REF.fullmatch(token):
             refs.add(token)
     return refs
+
+
+def _resolved_winning_bc_refs(context: Dict[str, Any]) -> set[str]:
+    """Return only authoritative resolver-winning BC references.
+
+    This deliberately excludes alternate matches and legacy verified-order
+    collections. It is the only reference source allowed to earn exact-reference
+    autonomy.
+    """
+    if not context:
+        return set()
+
+    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
+    live = context.get("live_bc_context") or {}
+    if status and status not in _VERIFIED_CONTEXT_STATUSES:
+        return set()
+    if status not in _VERIFIED_CONTEXT_STATUSES and not str(live.get("bc_document_no") or "").strip():
+        return set()
+
+    values: List[Any] = []
+    for source, keys in (
+        (context, ("po_number", "bc_document_no", "bc_order_number")),
+        (live, ("bc_document_no", "bc_order_number")),
+    ):
+        for key in keys:
+            value = source.get(key)
+            if isinstance(value, (list, tuple, set)):
+                values.extend(value)
+            elif value:
+                values.append(value)
+    return _normalize_bc_ref_values(values)
+
+
+def _verified_bc_refs(context: Dict[str, Any]) -> set[str]:
+    """Diagnostic exact-reference set with legacy fallback.
+
+    Resolved contexts use only the winning BC reference. Older/status-less test
+    or snapshot contexts may fall back to verified_order_numbers for diagnostics,
+    but that fallback is never used by summarize_exact_reference_authority().
+    """
+    if not context:
+        return set()
+
+    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
+    if status and status not in _VERIFIED_CONTEXT_STATUSES:
+        return set()
+
+    winner_refs = _resolved_winning_bc_refs(context)
+    if winner_refs:
+        return winner_refs
+
+    verified_values = context.get("verified_order_numbers") or []
+    if not isinstance(verified_values, (list, tuple, set)):
+        verified_values = [verified_values] if verified_values else []
+    return _normalize_bc_ref_values(list(verified_values))
 
 
 def _vendor(document: Dict[str, Any]) -> str:
@@ -120,6 +133,15 @@ def _row_type(row: Dict[str, Any]) -> str:
     return str(row.get("document_type") or row.get("suggested_job_type") or "").strip().lower()
 
 
+def _payable_vendor_identity_is_required(document: Dict[str, Any]) -> bool:
+    doc_type = _doc_type(document).replace("-", "_").replace(" ", "_")
+    return bool(
+        doc_type in {"ap_invoice", "invoice", "vendor_invoice", "credit_memo", "vendor_credit_memo"}
+        or "invoice" in doc_type
+        or "credit_memo" in doc_type
+    )
+
+
 def _label_multiplier(row: Dict[str, Any]) -> float:
     source = str(row.get("label_source") or row.get("source") or "").lower()
     if source == "reviewer_correction":
@@ -127,6 +149,93 @@ def _label_multiplier(row: Dict[str, Any]) -> float:
     if source == LABEL_SOURCE_REVIEWER_CONFIRMATION:
         return 1.5
     return 1.0
+
+
+def summarize_exact_reference_authority(
+    *,
+    document: Dict[str, Any],
+    proposed_route: str,
+    confidence: float,
+    train_examples: Sequence[Dict[str, Any]],
+    minimum_support: int = 4,
+    minimum_confidence: float = 0.98,
+) -> Dict[str, Any]:
+    """Measure unanimity on one resolved winning BC reference.
+
+    This corroborator can only confirm the AI's exact proposed route. It never
+    selects a route. Every matching TRAIN row must independently resolve to the
+    same winning BC reference. For payable documents, at least one matching
+    support must share the current payable vendor so foreign-reference history
+    cannot independently earn authority.
+    """
+    proposed = normalize_route_path(proposed_route)
+    current_refs = _resolved_winning_bc_refs(document.get("bc_context") or {})
+    current_vendor = _vendor(document)
+    payable_vendor_required = _payable_vendor_identity_is_required(document)
+
+    eligible = [dict(row) for row in train_examples if is_train_human_example(row)]
+    matched_rows = [
+        row
+        for row in eligible
+        if current_refs.intersection(_resolved_winning_bc_refs(row.get("bc_context") or {}))
+    ] if current_refs else []
+    support_rows = [
+        row for row in matched_rows
+        if normalize_route_path(row.get("route_path")) == proposed
+    ]
+    contradiction_rows = [
+        row for row in matched_rows
+        if normalize_route_path(row.get("route_path")) != proposed
+    ]
+    route_counter = Counter(
+        normalize_route_path(row.get("route_path")) or "unknown"
+        for row in matched_rows
+    )
+    same_vendor_support_count = sum(
+        1
+        for row in support_rows
+        if current_vendor and _row_vendor(row) == current_vendor
+    )
+    vendor_identity_ready = bool(
+        not payable_vendor_required
+        or (current_vendor and same_vendor_support_count >= 1)
+    )
+    unanimous = bool(
+        matched_rows
+        and len(support_rows) == len(matched_rows)
+        and not contradiction_rows
+    )
+    authority_ready = bool(
+        proposed
+        and len(current_refs) == 1
+        and float(confidence or 0.0) >= float(minimum_confidence)
+        and len(support_rows) >= int(minimum_support)
+        and unanimous
+        and vendor_identity_ready
+    )
+
+    return {
+        "purpose": "CONFIRM_AI_EXACT_ROUTE_FROM_RESOLVED_WINNING_BC_REFERENCE_ONLY",
+        "route_neutral": True,
+        "proposed_route": proposed,
+        "current_refs": sorted(current_refs),
+        "current_ref_count": len(current_refs),
+        "match_count": len(matched_rows),
+        "support_count": len(support_rows),
+        "contradiction_count": len(contradiction_rows),
+        "route_counts": [
+            {"route_path": route, "count": count}
+            for route, count in sorted(route_counter.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "same_vendor_support_count": same_vendor_support_count,
+        "payable_vendor_identity_required": payable_vendor_required,
+        "vendor_identity_ready": vendor_identity_ready,
+        "unanimous": unanimous,
+        "minimum_support": int(minimum_support),
+        "minimum_confidence": float(minimum_confidence),
+        "confidence": float(confidence or 0.0),
+        "authority_ready": authority_ready,
+    }
 
 
 def summarize_authority_neighborhood(
@@ -149,9 +258,9 @@ def summarize_authority_neighborhood(
         row["_authority_relevance_score"] = learned_relevance_score(document, row)
         eligible.append(row)
 
-    # Read-only diagnostic only: measure exact resolved BC PO/order agreement
-    # across TRAIN human labels. These counts do not alter relevance,
-    # neighborhood membership, authority thresholds, or the AI's proposed route.
+    # Read-only diagnostic: measure exact BC PO/order agreement across TRAIN
+    # human labels. Unlike summarize_exact_reference_authority(), this retains a
+    # legacy verified_order_numbers fallback for backward-compatible telemetry.
     current_exact_refs = _verified_bc_refs(document.get("bc_context") or {})
     exact_reference_rows = [
         row

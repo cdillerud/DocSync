@@ -26,6 +26,7 @@ from services.ap_routing_learning_service import (
     LABEL_SOURCE_REVIEWER_CORRECTION,
     normalize_route_path,
 )
+from services.ap_routing_semantic_hydration_service import compact_unlabeled_filename_date_refs
 
 LABEL_SOURCE_REVIEWER_CONFIRMATION = "reviewer_confirmation"
 HUMAN_SNAPSHOT_SOURCES = {
@@ -33,6 +34,7 @@ HUMAN_SNAPSHOT_SOURCES = {
     LABEL_SOURCE_REVIEWER_CORRECTION,
     LABEL_SOURCE_REVIEWER_CONFIRMATION,
 }
+_RESOLVED_BC_CONTEXT_STATUSES = {"resolved", "resolved_shipment", "matched", "verified"}
 
 
 def snapshot_examples_sha256(examples: list[Dict[str, Any]]) -> str:
@@ -45,6 +47,36 @@ def snapshot_examples_sha256(examples: list[Dict[str, Any]]) -> str:
         default=str,
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _resolved_reference_matches_unlabeled_filename_date(row: Dict[str, Any]) -> bool:
+    """Detect stale resolver winners that came from compact filename dates."""
+    context = row.get("bc_context") or {}
+    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
+    if status not in _RESOLVED_BC_CONTEXT_STATUSES:
+        return False
+
+    date_refs = compact_unlabeled_filename_date_refs(str(row.get("file_name") or ""))
+    if not date_refs:
+        return False
+
+    live = context.get("live_bc_context") or {}
+    values = [
+        context.get("po_number"),
+        context.get("bc_document_no"),
+        context.get("bc_order_number"),
+        live.get("bc_document_no"),
+        live.get("bc_order_number"),
+    ]
+    normalized = set()
+    for value in values:
+        token = str(value or "").strip().upper()
+        if not token:
+            continue
+        if token.isdigit():
+            token = token.lstrip("0") or "0"
+        normalized.add(token)
+    return bool(date_refs.intersection(normalized))
 
 
 def load_valid_evidence_snapshot(
@@ -154,6 +186,9 @@ def load_valid_evidence_snapshot(
             return result
         if bool(row.get("ai_generated")) and not bool(row.get("human_resolved")):
             result["reason"] = "unreviewed_ai_example"
+            return result
+        if _resolved_reference_matches_unlabeled_filename_date(row):
+            result["reason"] = "resolved_bc_reference_matches_compact_filename_date"
             return result
 
         route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))

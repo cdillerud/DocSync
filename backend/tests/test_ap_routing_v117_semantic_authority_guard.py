@@ -3,6 +3,7 @@ import json
 from services.ap_routing_ai_primary_service import _augment_prompt_with_train_context
 from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
 from services.ap_routing_learned_features_service import semantic_features
+from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
 
 
 PROPOSED = "Rhonda - Issues"
@@ -195,3 +196,86 @@ def test_dynamic_child_prompt_preserves_exact_observed_child_as_candidate():
     )
     assert "If the exact current child route itself appears in dynamic_children" in prompt
     assert "that exact observed child may still be considered" in prompt
+
+
+def test_exact_reference_telemetry_requires_resolved_verified_bc_order_refs():
+    current = {
+        "file_name": "119065_Buske_091026_.pdf",
+        "vendor_name": "",
+        "document_type": "Shipping_Document",
+        "extracted_fields": {"document_type": "Shipping_Document"},
+        "bc_context": {
+            "status": "resolved",
+            "verified_order_numbers": ["119065"],
+            "order_numbers": ["COMMON-ORDER"],
+            "shipment_number": "COMMON-SHIPMENT",
+        },
+    }
+    rows = [
+        {
+            "fingerprint": "verified-support",
+            "vendor_name": "Buske Logistics",
+            "document_type": "Shipping_Document",
+            "route_path": "Warehouse Not International",
+            "label_source": "accounting_temp",
+            "active": True,
+            "split": "train",
+            "file_name": "verified-support.pdf",
+            "extracted_fields": {"document_type": "Shipping_Document"},
+            "bc_context": {"status": "resolved", "verified_order_numbers": ["119065"]},
+        },
+        {
+            "fingerprint": "verified-contradiction",
+            "vendor_name": "Other Carrier",
+            "document_type": "Shipping_Document",
+            "route_path": "Dropship Not International/Freight",
+            "label_source": "accounting_temp",
+            "active": True,
+            "split": "train",
+            "file_name": "verified-contradiction.pdf",
+            "extracted_fields": {"document_type": "Shipping_Document"},
+            "bc_context": {"status": "resolved", "po_number": "119065"},
+        },
+        {
+            "fingerprint": "generic-only",
+            "vendor_name": "Other Carrier",
+            "document_type": "Shipping_Document",
+            "route_path": "DO NOT PAY",
+            "label_source": "accounting_temp",
+            "active": True,
+            "split": "train",
+            "file_name": "generic-only.pdf",
+            "extracted_fields": {"document_type": "Shipping_Document"},
+            "bc_context": {
+                "status": "resolved",
+                "order_numbers": ["COMMON-ORDER"],
+                "shipment_number": "COMMON-SHIPMENT",
+            },
+        },
+        {
+            "fingerprint": "unresolved-same-token",
+            "vendor_name": "Other Carrier",
+            "document_type": "Shipping_Document",
+            "route_path": "DO NOT PAY",
+            "label_source": "accounting_temp",
+            "active": True,
+            "split": "train",
+            "file_name": "unresolved-same-token.pdf",
+            "extracted_fields": {"document_type": "Shipping_Document"},
+            "bc_context": {"status": "not_found", "verified_order_numbers": ["119065"]},
+        },
+    ]
+
+    telemetry = summarize_authority_neighborhood(
+        document=current,
+        proposed_route="Warehouse Not International",
+        train_examples=rows,
+    )
+    assert telemetry["exact_reference_current_ref_count"] == 1
+    assert telemetry["exact_reference_match_count"] == 2
+    assert telemetry["exact_reference_support_count"] == 1
+    assert telemetry["exact_reference_contradiction_count"] == 1
+    assert telemetry["exact_reference_route_counts"] == [
+        {"route_path": "Dropship Not International/Freight", "count": 1},
+        {"route_path": "Warehouse Not International", "count": 1},
+    ]

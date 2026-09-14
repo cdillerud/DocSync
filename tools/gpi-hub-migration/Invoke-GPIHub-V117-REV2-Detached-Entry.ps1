@@ -15,7 +15,7 @@ $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
 $ExpectedEntryPatchSha256 = '67D0F30B1A4D547C186BC15C8450C3777BF7CDA76CF49B6DCD8E01607B831537'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = 'f9136db29a71ff5a565c89cd843f5acd453f087c'
+$ExpectedFeatureCommit = '37d7825a3cab948683db48dca28290f12aa3035c'
 $EntryPatchFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
 
 function Require {
@@ -84,7 +84,7 @@ $SemanticGuardPytestNew = @'
 Require ($EntryPatchTemplate.Contains($SemanticGuardPytestOld)) 'V117 REV3 semantic guard focused-test anchor missing.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($SemanticGuardPytestOld,$SemanticGuardPytestNew)
 Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=161')) 'V117 REV3 focused regression target anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=176')
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=179')
 
 $EvalModuleImportOld = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
@@ -93,7 +93,10 @@ import services.ap_routing_corpus_service as _v117_corpus_service
 '@
 $EvalModuleImportNew = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
-from services.ap_routing_semantic_hydration_service import hydrate_accounting_label_with_semantics
+from services.ap_routing_semantic_hydration_service import (
+    HYDRATION_POLICY_VERSION,
+    hydrate_accounting_label_with_semantics,
+)
 from services.ap_routing_evaluation_service import split_train_holdout as _v117_native_split_train_holdout
 import services.ap_routing_learned_evaluation_service as _v117_learned_eval_module
 import services.ap_routing_corpus_service as _v117_corpus_service
@@ -227,6 +230,14 @@ $Raw = Replace-Required -Text $Raw `
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayMergedCountTransform
 
+$ReplayHydrationPolicyTelemetryTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "        print('V117_EVIDENCE_REPLAY_INTEGRITY='+str(replay.get('integrity') or ''),flush=True)" `
+    -New "        print('V117_EVIDENCE_REPLAY_INTEGRITY='+str(replay.get('integrity') or ''),flush=True)`n        print('V117_EVIDENCE_REPLAY_HYDRATION_POLICY='+str(replay.get('hydration_policy_version') or ''),flush=True)" `
+    -Marker 'REV3 evidence replay hydration policy telemetry'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayHydrationPolicyTelemetryTransform
+
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
 
@@ -263,6 +274,7 @@ $SnapshotDigestOld = @'
 $SnapshotDigestNew = @'
                 'example_count':len(base_examples),
                 'semantic_feature_schema':'v117-semantic-v1',
+                'hydration_policy_version':HYDRATION_POLICY_VERSION,
                 'snapshot_role':'base_corpus_only',
                 'examples_sha256':snapshot_examples_sha256(base_examples),
                 'examples':base_examples,
@@ -271,12 +283,12 @@ Require ($LegacyRaw.Contains($SnapshotDigestOld)) 'V117 REV3 snapshot digest anc
 $LegacyRaw = $LegacyRaw.Replace($SnapshotDigestOld,$SnapshotDigestNew)
 
 $SnapshotCountOld = "print('V117_EVIDENCE_SNAPSHOT_COUNT='+str(len(examples)),flush=True)"
-$SnapshotCountNew = "print('V117_EVIDENCE_SNAPSHOT_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_EVIDENCE_SNAPSHOT_ROLE=base_corpus_only',flush=True)"
+$SnapshotCountNew = "print('V117_EVIDENCE_SNAPSHOT_COUNT='+str(len(base_examples)),flush=True)`n    print('V117_EVIDENCE_SNAPSHOT_ROLE=base_corpus_only',flush=True)`n    print('V117_EVIDENCE_SNAPSHOT_HYDRATION_POLICY='+HYDRATION_POLICY_VERSION,flush=True)"
 Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=176' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=179' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_POLICY_CONFIGURED=v117-hydration-retry-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_MAX_ATTEMPTS_CONFIGURED=3' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_HYDRATION_POLICY_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -308,6 +320,9 @@ Write-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_LEGACY_SCP_STAGING=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_HYDRATION_RETRY_POLICY=v117-hydration-retry-v1' -ForegroundColor Green
+Write-Host 'V117_REV3_HYDRATION_RETRY_MAX_ATTEMPTS=3' -ForegroundColor Green
+Write-Host 'V117_REV3_SNAPSHOT_HYDRATION_POLICY=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
 

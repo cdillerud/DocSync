@@ -7,6 +7,7 @@ from services.ap_routing_evidence_snapshot_service import (
     snapshot_examples_sha256,
 )
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
+from services.ap_routing_semantic_hydration_service import HYDRATION_POLICY_VERSION
 
 
 AUTHORITY = "gamerpackaging1.sharepoint.com/sites/GamerAccounting/General/Accounting/Accounts Payable/Temp Folder"
@@ -48,6 +49,7 @@ def example(idx, route, **overrides):
 def write_snapshot(path, examples, **overrides):
     payload = {
         "schema_version": "1.0",
+        "hydration_policy_version": HYDRATION_POLICY_VERSION,
         "semantic_feature_schema": SEMANTIC_FEATURE_SCHEMA,
         "feature_commit": "source-feature",
         "authority": AUTHORITY,
@@ -89,6 +91,7 @@ def test_new_snapshot_sha256_is_verified(tmp_path):
     result = load(path)
     assert result["valid"] is True
     assert result["integrity"] == "sha256_verified"
+    assert result["hydration_policy_version"] == HYDRATION_POLICY_VERSION
     assert result["semantic_feature_schema"] == SEMANTIC_FEATURE_SCHEMA
 
 

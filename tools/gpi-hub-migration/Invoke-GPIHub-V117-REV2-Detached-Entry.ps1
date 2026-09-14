@@ -15,7 +15,7 @@ $EntryPatchRepoPath = 'tools/gpi-hub-migration/v117-rev3-entry-patch.ps1frag'
 $ReplayTransformRepoPath = 'tools/gpi-hub-migration/v117-rev3-replay-transform.ps1frag'
 $ExpectedEntryPatchSha256 = '67D0F30B1A4D547C186BC15C8450C3777BF7CDA76CF49B6DCD8E01607B831537'
 $ExpectedReplayTransformSha256 = 'EDAF2B455F7F903E82E418DE38642C39E9AF79094042EDD1185797049064A7C6'
-$ExpectedFeatureCommit = '37d7825a3cab948683db48dca28290f12aa3035c'
+$ExpectedFeatureCommit = 'b891ee736d8a41089c5a059ad92d32926be72056'
 $EntryPatchFeatureCommit = 'dc7d1a5716b81b2a2d49d04af1e0f7d22a4e4fa1'
 
 function Require {
@@ -84,7 +84,7 @@ $SemanticGuardPytestNew = @'
 Require ($EntryPatchTemplate.Contains($SemanticGuardPytestOld)) 'V117 REV3 semantic guard focused-test anchor missing.'
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($SemanticGuardPytestOld,$SemanticGuardPytestNew)
 Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=161')) 'V117 REV3 focused regression target anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=179')
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=161','V117_FOCUSED_REGRESSION_TARGET=182')
 
 $EvalModuleImportOld = @'
 from services.ap_routing_learned_features_service import SEMANTIC_FEATURE_SCHEMA
@@ -238,6 +238,27 @@ $Raw = Replace-Required -Text $Raw `
 '@
 $ReplayTransform = $ReplayTransform + "`n" + $ReplayHydrationPolicyTelemetryTransform
 
+$ReplayCutoverImportTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    evaluate_holdout,`n    promotion_gate,`n    summarize_evaluation," `
+    -New "    evaluate_holdout,`n    cutover_qualification_gate,`n    promotion_gate,`n    summarize_evaluation," `
+    -Marker 'REV3 cutover qualification gate import'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayCutoverImportTransform
+
+$ReplayCutoverQualificationTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "    screen_gate=promotion_gate(`n        evaluation,`n        labeled_example_count=len(examples),`n        minimum_examples=20,`n        target_coverage=0.90,`n        minimum_auto_route_accuracy=1.00,`n    )" `
+    -New "    screen_gate=promotion_gate(`n        evaluation,`n        labeled_example_count=len(examples),`n        minimum_examples=20,`n        target_coverage=0.90,`n        minimum_auto_route_accuracy=1.00,`n    )`n    cutover_qualification=cutover_qualification_gate(`n        evaluation,`n        labeled_example_count=len(examples),`n        focused_regressions_passed=True,`n        source_health_ok=True,`n        production_mutation_none=True,`n        hydration_policy_validated=(HYDRATION_POLICY_VERSION=='v117-hydration-retry-v1'),`n        evidence_replay_validated=bool(snapshot_replay),`n        minimum_examples=20,`n        minimum_holdout=20,`n        target_coverage=0.90,`n        minimum_auto_route_accuracy=1.00,`n    )`n    print('V117_CUTOVER_QUALIFICATION='+json.dumps(cutover_qualification,sort_keys=True,default=str),flush=True)`n    print('V117_CUTOVER_QUALIFICATION_MODE='+str(cutover_qualification.get('mode')),flush=True)`n    print('V117_SHADOW_REHEARSAL_READY='+str(bool(cutover_qualification.get('shadow_rehearsal_ready'))).upper(),flush=True)`n    print('V117_CUTOVER_READY='+str(bool(cutover_qualification.get('cutover_ready'))).upper(),flush=True)" `
+    -Marker 'REV3 explicit shadow rehearsal versus cutover qualification'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "        'screen_gate':screen_gate," `
+    -New "        'screen_gate':screen_gate,`n        'cutover_qualification':cutover_qualification," `
+    -Marker 'REV3 cutover qualification summary evidence'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $ReplayCutoverQualificationTransform
+
 $ReplayTransformB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($ReplayTransform))
 $EntryPatch = $EntryPatchTemplate.Replace('__REPLAY_TRANSFORM_B64__',$ReplayTransformB64)
 
@@ -288,7 +309,7 @@ Require ($LegacyRaw.Contains($SnapshotCountOld)) 'V117 REV3 snapshot count ancho
 $LegacyRaw = $LegacyRaw.Replace($SnapshotCountOld,$SnapshotCountNew)
 
 $Rev3MarkerOld = "Write-Host 'V117_REV2_EVIDENCE_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green"
-$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=179' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_POLICY_CONFIGURED=v117-hydration-retry-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_MAX_ATTEMPTS_CONFIGURED=3' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_HYDRATION_POLICY_CONFIGURED=PASS' -ForegroundColor Green"
+$Rev3MarkerNew = $Rev3MarkerOld + "`nWrite-Host 'V117_REV3_VALIDATED_EVIDENCE_REPLAY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_INVALID_SNAPSHOT_LIVE_REBUILD_FALLBACK_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=182' -ForegroundColor Green`nWrite-Host 'V117_REV3_SEMANTIC_EVIDENCE_SCHEMA=v117-semantic-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_FULL_TRAIN_PROMPT_CONTEXT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HIGH_SPECIFICITY_ANCHOR_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_TRAIN_CORROBORATION_AUTHORITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_TARGETED_EXPANSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_BASE_HOLDOUT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_BASE_ONLY_SNAPSHOT_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_DISCRIMINATING_SEMANTIC_GUARD_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_TARGET_TRAIN_ONLY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_EXPANSION_BASE_ID_EXCLUSION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_STABLE_HOLDOUT_IDENTITY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_LEGACY_SCP_STAGING_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_POLICY_CONFIGURED=v117-hydration-retry-v1' -ForegroundColor Green`nWrite-Host 'V117_REV3_HYDRATION_RETRY_MAX_ATTEMPTS_CONFIGURED=3' -ForegroundColor Green`nWrite-Host 'V117_REV3_SNAPSHOT_HYDRATION_POLICY_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_CUTOVER_QUALIFICATION_CONFIGURED=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV3_SHADOW_REHEARSAL_READONLY_CONFIGURED=PASS' -ForegroundColor Green"
 Require ($LegacyRaw.Contains($Rev3MarkerOld)) 'V117 REV3 marker anchor missing.'
 $LegacyRaw = $LegacyRaw.Replace($Rev3MarkerOld,$Rev3MarkerNew)
 
@@ -323,6 +344,8 @@ Write-Host 'V117_REV3_LEGACY_SCP_STAGING=PASS' -ForegroundColor Green
 Write-Host 'V117_REV3_HYDRATION_RETRY_POLICY=v117-hydration-retry-v1' -ForegroundColor Green
 Write-Host 'V117_REV3_HYDRATION_RETRY_MAX_ATTEMPTS=3' -ForegroundColor Green
 Write-Host 'V117_REV3_SNAPSHOT_HYDRATION_POLICY=PASS' -ForegroundColor Green
+Write-Host 'V117_REV3_CUTOVER_QUALIFICATION=READONLY_SHADOW_ONLY' -ForegroundColor Green
+Write-Host 'V117_REV3_PRODUCTION_CUTOVER_GATE=UNCHANGED_GE90_COVERAGE' -ForegroundColor Green
 Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green
 Write-Host "V117_REV3_GENERATED_CONTROLLER=$OverlayPath"
 

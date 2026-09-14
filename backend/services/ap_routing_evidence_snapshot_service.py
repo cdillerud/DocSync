@@ -26,7 +26,10 @@ from services.ap_routing_learning_service import (
     LABEL_SOURCE_REVIEWER_CORRECTION,
     normalize_route_path,
 )
-from services.ap_routing_semantic_hydration_service import compact_unlabeled_filename_date_refs
+from services.ap_routing_semantic_hydration_service import (
+    HYDRATION_POLICY_VERSION,
+    compact_unlabeled_filename_date_refs,
+)
 
 LABEL_SOURCE_REVIEWER_CONFIRMATION = "reviewer_confirmation"
 HUMAN_SNAPSHOT_SOURCES = {
@@ -87,6 +90,7 @@ def load_valid_evidence_snapshot(
     max_age_hours: float = 24.0,
     minimum_examples: int = 20,
     required_semantic_feature_schema: str = SEMANTIC_FEATURE_SCHEMA,
+    required_hydration_policy_version: str = HYDRATION_POLICY_VERSION,
 ) -> Dict[str, Any]:
     """Return validated snapshot metadata; otherwise return a fail-closed result."""
     snapshot_path = Path(path)
@@ -100,6 +104,7 @@ def load_valid_evidence_snapshot(
         "age_seconds": None,
         "integrity": "unverified",
         "semantic_feature_schema": "",
+        "hydration_policy_version": "",
     }
     if not snapshot_path.is_file():
         result["reason"] = "snapshot_missing"
@@ -124,6 +129,15 @@ def load_valid_evidence_snapshot(
     result["source_feature_commit"] = str(payload.get("feature_commit") or "")
     if authority != expected_authority:
         result["reason"] = "authority_mismatch"
+        return result
+
+    hydration_policy = str(payload.get("hydration_policy_version") or "")
+    result["hydration_policy_version"] = hydration_policy
+    if hydration_policy != required_hydration_policy_version:
+        result["reason"] = (
+            "hydration_policy_version_mismatch:"
+            f"{hydration_policy or 'missing'}!={required_hydration_policy_version}"
+        )
         return result
 
     semantic_schema = str(payload.get("semantic_feature_schema") or "")

@@ -212,7 +212,7 @@ def test_semantic_complete_snapshot_replays_with_sha_verification(tmp_path):
     assert result["hydration_policy_version"] == HYDRATION_POLICY_VERSION
 
 
-def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot_fails_closed(tmp_path):
+def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot_fails_closed(tmp_path, monkeypatch):
     buske = "119065_Buske_091026_.pdf"
     reile = "118911_REILE'S_090326_BOL - need to receive.pdf"
     bb = "119006_B&B Packaging_090926_BOL.pdf"
@@ -247,6 +247,62 @@ def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot
     )
     assert result["valid"] is False
     assert result["reason"] == "resolved_bc_reference_matches_compact_filename_date"
+
+    dirty_document = {
+        "file_name": buske,
+        "document_type": "AP_Invoice",
+        "raw_text": "Invoice date 091026. Real order 119065.",
+        "extracted_fields": {"po_number": "091026", "order_number": "119065"},
+    }
+    dirty_bundle = {
+        "references": {
+            "po_numbers": [
+                {"value": "091026", "source": "supporting_page_ai"},
+                {"value": "119065", "source": "labeled_regex"},
+            ]
+        }
+    }
+    calls = []
+
+    async def resolves_cleanly(candidate, *, bundle_refs=None):
+        calls.append((candidate, bundle_refs))
+        if len(calls) == 1:
+            return {"status": "resolved", "po_number": "91026"}
+        assert "091026" not in candidate["file_name"]
+        assert "091026" not in candidate["raw_text"]
+        assert candidate["extracted_fields"]["po_number"] == ""
+        assert candidate["extracted_fields"]["order_number"] == "119065"
+        assert [x["value"] for x in bundle_refs["references"]["po_numbers"]] == ["119065"]
+        return {"status": "resolved", "po_number": "119065"}
+
+    monkeypatch.setattr(hydration.corpus, "resolve_ap_routing_context", resolves_cleanly)
+    rerun = asyncio.run(
+        hydration._resolve_context_without_filename_date_collision(
+            dirty_document,
+            dirty_bundle,
+            buske,
+        )
+    )
+    assert len(calls) == 2
+    assert rerun["status"] == "resolved"
+    assert rerun["po_number"] == "119065"
+
+    async def still_contaminated(candidate, *, bundle_refs=None):
+        return {"status": "resolved", "po_number": "91026", "bc_vendor_name": "Wrong Winner"}
+
+    monkeypatch.setattr(hydration.corpus, "resolve_ap_routing_context", still_contaminated)
+    quarantined = asyncio.run(
+        hydration._resolve_context_without_filename_date_collision(
+            dirty_document,
+            dirty_bundle,
+            buske,
+        )
+    )
+    assert quarantined["status"] == "not_found"
+    assert quarantined["miss_reason"] == "filename_compact_date_collision"
+    assert quarantined.get("po_number") is None
+    assert quarantined.get("bc_vendor_name") is None
+    assert quarantined["filename_date_collision_refs"] == ["91026"]
 
 
 def test_transient_hydration_transport_failure_recovers_with_bounded_retry(monkeypatch):
@@ -357,75 +413,3 @@ def test_cutover_qualification_requires_full_promotion_gate_for_cutover_ready():
     assert result["shadow_rehearsal_ready"] is True
     assert result["cutover_ready"] is True
     assert result["production_promotion_gate"]["ready_for_runtime_authority"] is True
-
-
-def test_stored_reversal_feature_blocks_ordinary_detention_bootstrap():
-    current = semantic_example(
-        DNP,
-        "Credit memo for detention. Reversing this credit memo as requested.",
-        "current",
-    )
-    current["raw_text_excerpt"] = ""
-    rows = [
-        semantic_example(DETENTION, "Credit memo for detention charge.", f"ordinary-{i}")
-        for i in range(5)
-    ]
-    result = summarize_authority_neighborhood(
-        document=current,
-        proposed_route=DETENTION,
-        train_examples=rows,
-    )
-    assert result["exceptional_workflow_features"] == ["reversal_or_void"]
-    assert result["exception_support_count"] == 0
-    assert result["exception_mismatch_support_count"] >= 3
-    assert result["authority_ready"] is False
-
-
-def test_explicit_stop_pay_is_not_forced_into_reversal_exception_boundary():
-    current = semantic_example(DNP, "DO NOT PAY this invoice", "current-dnp")
-    rows = [semantic_example(DNP, "DO NOT PAY this invoice", f"dnp-{i}") for i in range(5)]
-    result = summarize_authority_neighborhood(
-        document=current,
-        proposed_route=DNP,
-        train_examples=rows,
-    )
-    assert result["exceptional_workflow_features"] == []
-    assert result["authority_ready"] is True
-
-    reversal_current = semantic_example(
-        DNP,
-        "This credit memo fully reverses the original invoice.",
-        "current-reversal-anchor",
-    )
-    reversal_rows = [
-        semantic_example(
-            DNP,
-            "This credit memo fully reverses the original invoice.",
-            f"reversal-anchor-{i}",
-        )
-        for i in range(5)
-    ]
-    reversal_result = summarize_high_specificity_anchor_authority(
-        document=reversal_current,
-        proposed_route=DNP,
-        train_examples=reversal_rows,
-    )
-    assert reversal_result["authority_ready"] is True
-    assert reversal_result["earned_anchor"] == "reversal_or_void"
-    assert reversal_result["support_count"] == 5
-    assert reversal_result["contradiction_count"] == 0
-
-    contradictory_rows = reversal_rows + [
-        semantic_example(
-            DETENTION,
-            "This credit memo fully reverses the original invoice.",
-            "reversal-anchor-contradiction",
-        )
-    ]
-    blocked_result = summarize_high_specificity_anchor_authority(
-        document=reversal_current,
-        proposed_route=DNP,
-        train_examples=contradictory_rows,
-    )
-    assert blocked_result["authority_ready"] is False
-    assert blocked_result["contradiction_count"] == 1

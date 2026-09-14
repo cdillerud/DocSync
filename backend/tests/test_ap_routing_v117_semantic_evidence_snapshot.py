@@ -9,6 +9,7 @@ from services.ap_routing_evidence_snapshot_service import (
     load_valid_evidence_snapshot,
     snapshot_examples_sha256,
 )
+from services.ap_routing_evaluation_service import cutover_qualification_gate
 from services.ap_routing_learned_features_service import (
     SEMANTIC_FEATURE_SCHEMA,
     semantic_features,
@@ -290,6 +291,72 @@ def test_permanent_hydration_failure_does_not_retry(monkeypatch):
             hydration.hydrate_accounting_label_with_semantics({"file_name": "bad.pdf"})
         )
     assert calls == 1
+
+
+def test_cutover_qualification_allows_shadow_rehearsal_but_not_cutover_at_low_coverage():
+    result = cutover_qualification_gate(
+        {
+            "holdout_count": 37,
+            "coverage": 0.2162,
+            "auto_route_accuracy": 1.0,
+            "wrong_auto_routes": 0,
+        },
+        labeled_example_count=323,
+        focused_regressions_passed=True,
+        source_health_ok=True,
+        production_mutation_none=True,
+        hydration_policy_validated=True,
+        evidence_replay_validated=True,
+    )
+    assert result["mode"] == "SHADOW_REHEARSAL"
+    assert result["shadow_rehearsal_ready"] is True
+    assert result["cutover_ready"] is False
+    assert result["production_promotion_gate"]["ready_for_runtime_authority"] is False
+    assert result["production_promotion_gate"]["reasons"] == [
+        "auto-route coverage 21.6% below 90.0%"
+    ]
+
+
+def test_cutover_qualification_blocks_shadow_rehearsal_on_any_wrong_auto_route():
+    result = cutover_qualification_gate(
+        {
+            "holdout_count": 37,
+            "coverage": 0.95,
+            "auto_route_accuracy": 0.9722,
+            "wrong_auto_routes": 1,
+        },
+        labeled_example_count=323,
+        focused_regressions_passed=True,
+        source_health_ok=True,
+        production_mutation_none=True,
+        hydration_policy_validated=True,
+        evidence_replay_validated=True,
+    )
+    assert result["mode"] == "BLOCKED"
+    assert result["shadow_rehearsal_ready"] is False
+    assert result["cutover_ready"] is False
+    assert "1 wrong auto-route(s) in holdout" in result["reasons"]
+
+
+def test_cutover_qualification_requires_full_promotion_gate_for_cutover_ready():
+    result = cutover_qualification_gate(
+        {
+            "holdout_count": 40,
+            "coverage": 0.90,
+            "auto_route_accuracy": 1.0,
+            "wrong_auto_routes": 0,
+        },
+        labeled_example_count=323,
+        focused_regressions_passed=True,
+        source_health_ok=True,
+        production_mutation_none=True,
+        hydration_policy_validated=True,
+        evidence_replay_validated=True,
+    )
+    assert result["mode"] == "CUTOVER_READY"
+    assert result["shadow_rehearsal_ready"] is True
+    assert result["cutover_ready"] is True
+    assert result["production_promotion_gate"]["ready_for_runtime_authority"] is True
 
 
 def test_stored_reversal_feature_blocks_ordinary_detention_bootstrap():

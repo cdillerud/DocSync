@@ -8,11 +8,15 @@ inspect or select route labels; Accounting placement remains the only label.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
+import logging
 import os
 from pathlib import Path
 import re
 from typing import Any, Dict, Optional
+
+import httpx
 
 from services import ap_routing_corpus_service as corpus
 from services.ap_routing_learned_features_service import (
@@ -20,6 +24,12 @@ from services.ap_routing_learned_features_service import (
     semantic_feature_snapshot,
 )
 
+
+logger = logging.getLogger(__name__)
+
+HYDRATION_POLICY_VERSION = "v117-hydration-retry-v1"
+HYDRATION_MAX_ATTEMPTS = 3
+_HYDRATION_RETRY_DELAYS_SECONDS = (0.5, 1.5)
 
 _COMPACT_FILENAME_DATE_TOKEN = re.compile(r"(?<![A-Z0-9])(\d{6}|\d{8})(?![A-Z0-9])", re.IGNORECASE)
 _EXPLICIT_PO_PREFIX = re.compile(
@@ -100,12 +110,31 @@ def enrich_routing_example_with_semantics(
     return prepared
 
 
-async def hydrate_accounting_label_with_semantics(
+def _is_transient_hydration_error(exc: BaseException) -> bool:
+    """Return True only for bounded retry-safe transport failures."""
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(
+            current,
+            (
+                httpx.TimeoutException,
+                httpx.NetworkError,
+                httpx.RemoteProtocolError,
+            ),
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _hydrate_accounting_label_with_semantics_once(
     label: Dict[str, Any],
     *,
     routing_contract: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Hydrate one Accounting label and persist semantic substrate before cleanup."""
+    """Hydrate one Accounting label once; caller owns retry policy."""
     file_name = str(label["file_name"])
     suffix = Path(file_name).suffix or ".bin"
     local_path = await corpus._download_graph_file(label["drive_id"], label["item_id"], suffix)
@@ -190,3 +219,44 @@ async def hydrate_accounting_label_with_semantics(
             os.remove(local_path)
         except OSError:
             pass
+
+
+async def hydrate_accounting_label_with_semantics(
+    label: Dict[str, Any],
+    *,
+    routing_contract: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Hydrate with bounded retry for transient transport failures only."""
+    file_name = str(label.get("file_name") or "")
+    for attempt in range(1, HYDRATION_MAX_ATTEMPTS + 1):
+        try:
+            result = await _hydrate_accounting_label_with_semantics_once(
+                label,
+                routing_contract=routing_contract,
+            )
+            if attempt > 1:
+                print(
+                    "V117_HYDRATION_RETRY_RECOVERED="
+                    f"file={file_name};attempts={attempt};policy={HYDRATION_POLICY_VERSION}",
+                    flush=True,
+                )
+            return result
+        except Exception as exc:
+            transient = _is_transient_hydration_error(exc)
+            if not transient or attempt >= HYDRATION_MAX_ATTEMPTS:
+                raise
+            delay = _HYDRATION_RETRY_DELAYS_SECONDS[attempt - 1]
+            print(
+                "V117_HYDRATION_RETRY="
+                f"file={file_name};attempt={attempt};next_attempt={attempt + 1};"
+                f"delay_seconds={delay};error={type(exc).__name__};policy={HYDRATION_POLICY_VERSION}",
+                flush=True,
+            )
+            logger.warning(
+                "V117 transient hydration failure for %s on attempt %s/%s: %s",
+                file_name,
+                attempt,
+                HYDRATION_MAX_ATTEMPTS,
+                str(exc)[:300],
+            )
+            await asyncio.sleep(delay)

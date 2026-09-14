@@ -1,4 +1,8 @@
+import asyncio
 import json
+
+import httpx
+import pytest
 
 from services.ap_routing_anchor_authority_service import summarize_high_specificity_anchor_authority
 from services.ap_routing_evidence_snapshot_service import (
@@ -10,7 +14,9 @@ from services.ap_routing_learned_features_service import (
     semantic_features,
 )
 from services.ap_routing_learned_neighborhood_service import summarize_authority_neighborhood
+import services.ap_routing_semantic_hydration_service as hydration
 from services.ap_routing_semantic_hydration_service import (
+    HYDRATION_POLICY_VERSION,
     compact_unlabeled_filename_date_refs,
     enrich_routing_example_with_semantics,
     sanitize_filename_for_reference_resolution,
@@ -72,10 +78,17 @@ def semantic_example(route, text, fingerprint):
     )
 
 
-def write_snapshot(path, examples, *, semantic_schema=SEMANTIC_FEATURE_SCHEMA):
+def write_snapshot(
+    path,
+    examples,
+    *,
+    semantic_schema=SEMANTIC_FEATURE_SCHEMA,
+    hydration_policy=HYDRATION_POLICY_VERSION,
+):
     payload = {
         "schema_version": "v117",
         "semantic_feature_schema": semantic_schema,
+        "hydration_policy_version": hydration_policy,
         "authority": AUTHORITY,
         "feature_commit": "test",
         "example_count": len(examples),
@@ -142,6 +155,25 @@ def test_old_snapshot_without_semantic_schema_is_rejected(tmp_path):
     assert result["reason"].startswith("semantic_feature_schema_mismatch:")
 
 
+def test_snapshot_missing_hydration_policy_is_rejected(tmp_path):
+    examples = [
+        semantic_example(DNP, "DO NOT PAY", "dnp"),
+        semantic_example(DETENTION, "detention credit memo", "detention"),
+    ]
+    path = tmp_path / "pre-retry-policy.json"
+    write_snapshot(path, examples, hydration_policy="")
+    result = load_valid_evidence_snapshot(
+        path,
+        expected_authority=AUTHORITY,
+        contract=contract(),
+        minimum_examples=2,
+    )
+    assert result["valid"] is False
+    assert result["reason"] == (
+        "hydration_policy_version_mismatch:missing!=" + HYDRATION_POLICY_VERSION
+    )
+
+
 def test_snapshot_missing_semantic_mirror_is_rejected(tmp_path):
     examples = [
         semantic_example(DNP, "DO NOT PAY", "dnp"),
@@ -176,6 +208,7 @@ def test_semantic_complete_snapshot_replays_with_sha_verification(tmp_path):
     assert result["valid"] is True
     assert result["integrity"] == "sha256_verified"
     assert result["semantic_feature_schema"] == SEMANTIC_FEATURE_SCHEMA
+    assert result["hydration_policy_version"] == HYDRATION_POLICY_VERSION
 
 
 def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot_fails_closed(tmp_path):
@@ -213,6 +246,50 @@ def test_compact_filename_dates_are_not_bc_reference_evidence_and_stale_snapshot
     )
     assert result["valid"] is False
     assert result["reason"] == "resolved_bc_reference_matches_compact_filename_date"
+
+
+def test_transient_hydration_transport_failure_recovers_with_bounded_retry(monkeypatch):
+    calls = 0
+
+    async def flaky_once(label, *, routing_contract=None):
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise httpx.ConnectTimeout("temporary Graph timeout")
+        return {"file_name": label["file_name"], "route_path": "DO NOT PAY"}
+
+    async def no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(hydration, "_hydrate_accounting_label_with_semantics_once", flaky_once)
+    monkeypatch.setattr(hydration.asyncio, "sleep", no_sleep)
+
+    result = asyncio.run(
+        hydration.hydrate_accounting_label_with_semantics({"file_name": "retry.pdf"})
+    )
+    assert result["file_name"] == "retry.pdf"
+    assert calls == hydration.HYDRATION_MAX_ATTEMPTS == 3
+
+
+def test_permanent_hydration_failure_does_not_retry(monkeypatch):
+    calls = 0
+
+    async def malformed_once(label, *, routing_contract=None):
+        nonlocal calls
+        calls += 1
+        raise ValueError("malformed pdf")
+
+    async def unexpected_sleep(_delay):
+        raise AssertionError("permanent failures must not sleep/retry")
+
+    monkeypatch.setattr(hydration, "_hydrate_accounting_label_with_semantics_once", malformed_once)
+    monkeypatch.setattr(hydration.asyncio, "sleep", unexpected_sleep)
+
+    with pytest.raises(ValueError, match="malformed pdf"):
+        asyncio.run(
+            hydration.hydrate_accounting_label_with_semantics({"file_name": "bad.pdf"})
+        )
+    assert calls == 1
 
 
 def test_stored_reversal_feature_blocks_ordinary_detention_bootstrap():

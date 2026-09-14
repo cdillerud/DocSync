@@ -24,6 +24,7 @@ DEFAULT_MIN_EXAMPLES = 20
 DEFAULT_TARGET_COVERAGE = 0.90
 DEFAULT_MIN_AUTO_ROUTE_ACCURACY = 1.00
 DEFAULT_FEW_SHOT_LIMIT = 8
+DEFAULT_CUTOVER_QUALIFICATION_MIN_HOLDOUT = 20
 
 
 def _stable_bucket(example: Dict[str, Any], buckets: int = 5) -> int:
@@ -344,5 +345,96 @@ def promotion_gate(
             "target_coverage": target_coverage,
             "minimum_auto_route_accuracy": minimum_auto_route_accuracy,
             "wrong_auto_routes_allowed": 0,
+        },
+    }
+
+
+def cutover_qualification_gate(
+    evaluation: Dict[str, Any],
+    *,
+    labeled_example_count: int,
+    focused_regressions_passed: bool,
+    source_health_ok: bool,
+    production_mutation_none: bool,
+    hydration_policy_validated: bool,
+    evidence_replay_validated: bool,
+    minimum_examples: int = DEFAULT_MIN_EXAMPLES,
+    minimum_holdout: int = DEFAULT_CUTOVER_QUALIFICATION_MIN_HOLDOUT,
+    target_coverage: float = DEFAULT_TARGET_COVERAGE,
+    minimum_auto_route_accuracy: float = DEFAULT_MIN_AUTO_ROUTE_ACCURACY,
+) -> Dict[str, Any]:
+    """Separate safe shadow-rehearsal readiness from production cutover readiness.
+
+    Shadow rehearsal is deliberately read-only: it may begin before the system
+    earns 90% automatic coverage, but only after the evidence denominator is
+    reproducible and the zero-wrong / 100%-accuracy safety bar is satisfied.
+    Actual cutover remains bound to the immutable promotion gate, including the
+    full coverage target.
+    """
+    production_gate = promotion_gate(
+        evaluation,
+        labeled_example_count=labeled_example_count,
+        minimum_examples=minimum_examples,
+        target_coverage=target_coverage,
+        minimum_auto_route_accuracy=minimum_auto_route_accuracy,
+    )
+
+    reasons: List[str] = []
+    holdout_count = int(evaluation.get("holdout_count") or 0)
+    accuracy = evaluation.get("auto_route_accuracy")
+    wrong = int(evaluation.get("wrong_auto_routes") or 0)
+
+    if not focused_regressions_passed:
+        reasons.append("focused regression gate not certified")
+    if not source_health_ok:
+        reasons.append("source runtime health not certified")
+    if not production_mutation_none:
+        reasons.append("production mutation safety not certified")
+    if not hydration_policy_validated:
+        reasons.append("hydration retry policy not certified")
+    if not evidence_replay_validated:
+        reasons.append("stable evidence replay not yet certified")
+    if labeled_example_count < minimum_examples:
+        reasons.append(f"only {labeled_example_count} labels; need at least {minimum_examples}")
+    if holdout_count < minimum_holdout:
+        reasons.append(f"holdout set has {holdout_count}; need at least {minimum_holdout}")
+    if wrong > 0:
+        reasons.append(f"{wrong} wrong auto-route(s) in holdout")
+    if accuracy is None or float(accuracy) < minimum_auto_route_accuracy:
+        reasons.append(
+            f"auto-route accuracy {accuracy} below {minimum_auto_route_accuracy:.1%}"
+        )
+
+    rehearsal_ready = not reasons
+    cutover_ready = rehearsal_ready and bool(production_gate["ready_for_runtime_authority"])
+    if cutover_ready:
+        mode = "CUTOVER_READY"
+    elif rehearsal_ready:
+        mode = "SHADOW_REHEARSAL"
+    else:
+        mode = "BLOCKED"
+
+    return {
+        "mode": mode,
+        "shadow_rehearsal_ready": rehearsal_ready,
+        "cutover_ready": cutover_ready,
+        "reasons": reasons,
+        "labeled_example_count": labeled_example_count,
+        "holdout_count": holdout_count,
+        "coverage": float(evaluation.get("coverage") or 0.0),
+        "auto_route_accuracy": accuracy,
+        "wrong_auto_routes": wrong,
+        "evidence_replay_validated": bool(evidence_replay_validated),
+        "hydration_policy_validated": bool(hydration_policy_validated),
+        "focused_regressions_passed": bool(focused_regressions_passed),
+        "source_health_ok": bool(source_health_ok),
+        "production_mutation_none": bool(production_mutation_none),
+        "production_promotion_gate": production_gate,
+        "targets": {
+            "minimum_examples": minimum_examples,
+            "minimum_holdout": minimum_holdout,
+            "minimum_auto_route_accuracy": minimum_auto_route_accuracy,
+            "wrong_auto_routes_allowed": 0,
+            "production_target_coverage": target_coverage,
         },
     }

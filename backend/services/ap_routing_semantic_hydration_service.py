@@ -36,6 +36,28 @@ _EXPLICIT_PO_PREFIX = re.compile(
     r"(?:^|[_\-\s.])(?:P\.?O\.?|PURCHASE[_\-\s.]+ORDER)[_\-\s.]*$",
     re.IGNORECASE,
 )
+_RESOLVED_BC_CONTEXT_STATUSES = {"resolved", "resolved_shipment", "matched", "verified"}
+_BC_AUTHORITY_KEYS = (
+    "po_number",
+    "bc_record_id",
+    "bc_entity_type",
+    "confidence",
+    "match_method",
+    "lookup_source",
+    "bc_vendor_no",
+    "bc_vendor_name",
+    "bc_customer_no",
+    "bc_customer_name",
+    "bc_order_number",
+    "bc_status",
+    "live_bc_context",
+    "location_code",
+    "ship_to_name",
+    "ship_to_address",
+    "ship_to_city",
+    "ship_to_state",
+    "ship_to_country",
+)
 
 
 def _is_compact_calendar_date(value: str) -> bool:
@@ -50,6 +72,13 @@ def _is_compact_calendar_date(value: str) -> bool:
         except ValueError:
             continue
     return False
+
+
+def _normalize_numeric_reference(value: Any) -> str:
+    token = str(value or "").strip().upper()
+    if token.isdigit():
+        return token.lstrip("0") or "0"
+    return token
 
 
 def compact_unlabeled_filename_date_refs(file_name: str) -> set[str]:
@@ -83,6 +112,156 @@ def sanitize_filename_for_reference_resolution(file_name: str) -> str:
         return " "
 
     return _COMPACT_FILENAME_DATE_TOKEN.sub(_replace, name)
+
+
+def _resolved_filename_date_collisions(context: Dict[str, Any], file_name: str) -> set[str]:
+    """Return compact filename-date refs that won a resolved BC lookup."""
+    status = str(context.get("status") or context.get("resolution_status") or "").strip().lower()
+    if status not in _RESOLVED_BC_CONTEXT_STATUSES:
+        return set()
+    blocked = compact_unlabeled_filename_date_refs(file_name)
+    if not blocked:
+        return set()
+    live = context.get("live_bc_context") or {}
+    values = (
+        context.get("po_number"),
+        context.get("bc_document_no"),
+        context.get("bc_order_number"),
+        live.get("bc_document_no"),
+        live.get("bc_order_number"),
+    )
+    resolved = {_normalize_numeric_reference(value) for value in values if value}
+    return blocked.intersection(resolved)
+
+
+def _remove_blocked_reference_tokens(value: Any, blocked_refs: set[str]) -> Any:
+    """Remove only tokens that normalize to blocked filename-date references."""
+    if not blocked_refs:
+        return value
+    if isinstance(value, str):
+        def _replace(match: re.Match[str]) -> str:
+            raw = match.group(1)
+            return " " if _normalize_numeric_reference(raw) in blocked_refs else raw
+
+        cleaned = _COMPACT_FILENAME_DATE_TOKEN.sub(_replace, value)
+        if "," in cleaned:
+            parts = []
+            for part in cleaned.split(","):
+                candidate = part.strip()
+                if candidate and _normalize_numeric_reference(candidate) not in blocked_refs:
+                    parts.append(candidate)
+            return ", ".join(parts)
+        return cleaned.strip()
+    if isinstance(value, list):
+        return [
+            cleaned
+            for item in value
+            if (cleaned := _remove_blocked_reference_tokens(item, blocked_refs)) not in (None, "")
+        ]
+    return value
+
+
+def _sanitize_resolver_inputs_for_filename_dates(
+    document: Dict[str, Any],
+    bundle: Optional[Dict[str, Any]],
+    file_name: str,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Remove filename-date-shaped values from every BC resolver input channel.
+
+    This is intentionally conservative. If a filename contains an unlabeled
+    compact calendar date, that value may not become BC authority through a
+    secondary extraction channel (AI fields, raw text, or supporting refs).
+    Explicitly PO-labeled filename values are not in the blocked set and remain.
+    """
+    blocked_refs = compact_unlabeled_filename_date_refs(file_name)
+    prepared = dict(document)
+    prepared["file_name"] = sanitize_filename_for_reference_resolution(file_name)
+    if not blocked_refs:
+        return prepared, bundle
+
+    fields = dict(prepared.get("extracted_fields") or {})
+    for key, value in list(fields.items()):
+        fields[key] = _remove_blocked_reference_tokens(value, blocked_refs)
+    prepared["extracted_fields"] = fields
+    prepared["raw_text"] = _remove_blocked_reference_tokens(prepared.get("raw_text") or "", blocked_refs)
+
+    if not bundle:
+        return prepared, bundle
+    cleaned_bundle = dict(bundle)
+    references = {}
+    for field, items in dict(bundle.get("references") or {}).items():
+        kept = []
+        for item in items or []:
+            raw_value = item.get("value") if isinstance(item, dict) else item
+            if _normalize_numeric_reference(raw_value) in blocked_refs:
+                continue
+            kept.append(dict(item) if isinstance(item, dict) else item)
+        references[field] = kept
+    cleaned_bundle["references"] = references
+    return prepared, cleaned_bundle
+
+
+def _quarantine_filename_date_collision(
+    context: Dict[str, Any],
+    collisions: set[str],
+) -> Dict[str, Any]:
+    """Fail closed when a compact filename date still wins after re-resolution."""
+    quarantined = dict(context)
+    for key in _BC_AUTHORITY_KEYS:
+        quarantined.pop(key, None)
+    quarantined.update(
+        {
+            "status": "not_found",
+            "miss_reason": "filename_compact_date_collision",
+            "reason": "resolved_bc_reference_matches_compact_filename_date",
+            "verified_order_numbers": [],
+            "best_match": None,
+            "matches": [],
+            "candidates_raw": [],
+            "candidates_valid": [],
+            "candidates_tried": [],
+            "lookup_trace": [],
+            "filename_date_collision_refs": sorted(collisions),
+        }
+    )
+    return quarantined
+
+
+async def _resolve_context_without_filename_date_collision(
+    document: Dict[str, Any],
+    bundle: Optional[Dict[str, Any]],
+    file_name: str,
+) -> Dict[str, Any]:
+    """Resolve BC context and guarantee the stored winner is replay-safe."""
+    initial_document = dict(document)
+    initial_document["file_name"] = sanitize_filename_for_reference_resolution(file_name)
+    context = await corpus.resolve_ap_routing_context(initial_document, bundle_refs=bundle)
+    collisions = _resolved_filename_date_collisions(context, file_name)
+    if not collisions:
+        return context
+
+    safe_document, safe_bundle = _sanitize_resolver_inputs_for_filename_dates(
+        document,
+        bundle,
+        file_name,
+    )
+    rerun = await corpus.resolve_ap_routing_context(safe_document, bundle_refs=safe_bundle)
+    remaining = _resolved_filename_date_collisions(rerun, file_name)
+    if remaining:
+        final = _quarantine_filename_date_collision(rerun, remaining)
+        outcome = "quarantined"
+        final_ref = ""
+    else:
+        final = rerun
+        outcome = "reresolved"
+        final_ref = str(rerun.get("po_number") or rerun.get("bc_order_number") or "")
+    print(
+        "V117_FILENAME_DATE_COLLISION_RERESOLVE="
+        f"file={file_name};blocked_refs={','.join(sorted(collisions))};"
+        f"outcome={outcome};final_ref={final_ref}",
+        flush=True,
+    )
+    return final
 
 
 def enrich_routing_example_with_semantics(
@@ -160,12 +339,15 @@ async def _hydrate_accounting_label_with_semantics_once(
         }
         # Filename dates such as 091026, 090326, and 090926 can otherwise look
         # like legitimate 5-6 digit BC POs after leading-zero normalization.
-        # Keep the original filename on the supervised example, but remove those
-        # ambiguous unlabeled date tokens only from the resolver input. Explicit
-        # PO_091026-style values remain eligible.
-        resolution_document = dict(document)
-        resolution_document["file_name"] = sanitize_filename_for_reference_resolution(file_name)
-        bc_context = await corpus.resolve_ap_routing_context(resolution_document, bundle_refs=bundle)
+        # The first pass preserves all non-filename evidence. If one of those
+        # unlabeled filename dates still wins through another extraction channel,
+        # re-resolve with that date removed from every resolver input and fail
+        # closed if it somehow remains the winner.
+        bc_context = await _resolve_context_without_filename_date_collision(
+            document,
+            bundle,
+            file_name,
+        )
         vendor_name = (
             primary_fields.get("vendor")
             or primary_fields.get("vendor_name")

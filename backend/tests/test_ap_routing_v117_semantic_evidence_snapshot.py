@@ -413,3 +413,75 @@ def test_cutover_qualification_requires_full_promotion_gate_for_cutover_ready():
     assert result["shadow_rehearsal_ready"] is True
     assert result["cutover_ready"] is True
     assert result["production_promotion_gate"]["ready_for_runtime_authority"] is True
+
+
+def test_stored_reversal_feature_blocks_ordinary_detention_bootstrap():
+    current = semantic_example(
+        DNP,
+        "Credit memo for detention. Reversing this credit memo as requested.",
+        "current",
+    )
+    current["raw_text_excerpt"] = ""
+    rows = [
+        semantic_example(DETENTION, "Credit memo for detention charge.", f"ordinary-{i}")
+        for i in range(5)
+    ]
+    result = summarize_authority_neighborhood(
+        document=current,
+        proposed_route=DETENTION,
+        train_examples=rows,
+    )
+    assert result["exceptional_workflow_features"] == ["reversal_or_void"]
+    assert result["exception_support_count"] == 0
+    assert result["exception_mismatch_support_count"] >= 3
+    assert result["authority_ready"] is False
+
+
+def test_explicit_stop_pay_is_not_forced_into_reversal_exception_boundary():
+    current = semantic_example(DNP, "DO NOT PAY this invoice", "current-dnp")
+    rows = [semantic_example(DNP, "DO NOT PAY this invoice", f"dnp-{i}") for i in range(5)]
+    result = summarize_authority_neighborhood(
+        document=current,
+        proposed_route=DNP,
+        train_examples=rows,
+    )
+    assert result["exceptional_workflow_features"] == []
+    assert result["authority_ready"] is True
+
+    reversal_current = semantic_example(
+        DNP,
+        "This credit memo fully reverses the original invoice.",
+        "current-reversal-anchor",
+    )
+    reversal_rows = [
+        semantic_example(
+            DNP,
+            "This credit memo fully reverses the original invoice.",
+            f"reversal-anchor-{i}",
+        )
+        for i in range(5)
+    ]
+    reversal_result = summarize_high_specificity_anchor_authority(
+        document=reversal_current,
+        proposed_route=DNP,
+        train_examples=reversal_rows,
+    )
+    assert reversal_result["authority_ready"] is True
+    assert reversal_result["earned_anchor"] == "reversal_or_void"
+    assert reversal_result["support_count"] == 5
+    assert reversal_result["contradiction_count"] == 0
+
+    contradictory_rows = reversal_rows + [
+        semantic_example(
+            DETENTION,
+            "This credit memo fully reverses the original invoice.",
+            "reversal-anchor-contradiction",
+        )
+    ]
+    blocked_result = summarize_high_specificity_anchor_authority(
+        document=reversal_current,
+        proposed_route=DNP,
+        train_examples=contradictory_rows,
+    )
+    assert blocked_result["authority_ready"] is False
+    assert blocked_result["contradiction_count"] == 1

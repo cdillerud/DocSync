@@ -2,13 +2,16 @@
 
 These features improve example retrieval and learned-authority similarity. They
 never inspect route names and never select a route. They describe the current
-business document: reference shape, document purpose, and semantic markers.
+business document: reference shape, document purpose, semantic markers, and
+route-neutral documented business context.
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any, Dict, Set
+
+from services.ap_routing_business_context_service import business_context_similarity
 
 SEMANTIC_FEATURE_SCHEMA = "v117-semantic-v1"
 
@@ -189,6 +192,10 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
             score -= penalty
             signals.append(f"semantic_mismatch:{feature}")
 
+    business = business_context_similarity(current, example)
+    score += float(business.get("score") or 0.0)
+    signals.extend(business.get("signals") or [])
+
     return {
         "score": round(score, 4),
         "current_reference_family": current_ref,
@@ -196,5 +203,12 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
         "current_semantic_features": sorted(current_sem),
         "example_semantic_features": sorted(example_sem),
         "shared_semantic_features": sorted(overlap),
+        "business_context_schema": business.get("schema"),
+        "current_business_context_features": business.get("current_features") or [],
+        "example_business_context_features": business.get("example_features") or [],
+        "shared_business_context_features": business.get("shared_features") or [],
+        "current_business_authority_signature": business.get("current_authority_signature") or [],
+        "example_business_authority_signature": business.get("example_authority_signature") or [],
+        "business_context_score": float(business.get("score") or 0.0),
         "signals": signals,
     }

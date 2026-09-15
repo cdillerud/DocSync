@@ -12,8 +12,9 @@ $ControllerRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-
 $ExpectedControllerBlob = 'e5dbabe7e313c733a027820f79a817a2a833339a'
 $FrozenFeatureCommit = 'f423c94ca23fc137a80f03fe5694412403c41443'
 $Rev4FeatureCommit = 'e55ee1432051dc48e4ad30cc421615b4e8ebc5f3'
-$OverlayPath = Join-Path $ToolRoot 'v117-rev4-controller-overlay.ps1frag'
-$ExpectedOverlaySha256 = '9BF0462A65D8C98DFF53D5F94096C14891E1913FD94D39A799D0860C23CDE315'
+$OverlaySourceCommit = '9858b2b4a000ce8d049274ac6f8394422af4a578'
+$OverlayRepoPath = 'tools/gpi-hub-migration/v117-rev4-controller-overlay.ps1frag'
+$ExpectedOverlayBlob = '4d695ea648844b801b196400cc299ff59269d416'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -29,24 +30,9 @@ function Get-GitText {
     return ((@($lines) | ForEach-Object { [string]$_ }) -join "`n") -replace "`r",''
 }
 
-function Get-TextSha256 {
-    param([string]$Text)
-    $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','')
-    }
-    finally {
-        $sha.Dispose()
-    }
-}
-
 Require (Test-Path -LiteralPath $StatePath -PathType Leaf) "V117 REV4 state missing: $StatePath"
-Require (Test-Path -LiteralPath $OverlayPath -PathType Leaf) "V117 REV4 overlay missing: $OverlayPath"
 Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
 Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe unavailable.'
-$OverlayRaw = (Get-Content -LiteralPath $OverlayPath -Raw) -replace "`r",''
-Require ((Get-TextSha256 $OverlayRaw) -eq $ExpectedOverlaySha256) 'V117 REV4 controller overlay SHA256 drift.'
 
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
@@ -57,7 +43,13 @@ $controllerBlob = (& git.exe -C $OperationalRoot rev-parse $controllerSpec).Trim
 Require ($LASTEXITCODE -eq 0) 'Could not resolve frozen REV3 controller blob.'
 Require ($controllerBlob -ceq $ExpectedControllerBlob) "Frozen REV3 controller blob drift: $controllerBlob"
 
+$overlaySpec = "{0}:{1}" -f $OverlaySourceCommit,$OverlayRepoPath
+$overlayBlob = (& git.exe -C $OperationalRoot rev-parse $overlaySpec).Trim()
+Require ($LASTEXITCODE -eq 0) 'Could not resolve REV4 controller overlay blob.'
+Require ($overlayBlob -ceq $ExpectedOverlayBlob) "REV4 controller overlay blob drift: $overlayBlob"
+
 $ControllerRaw = Get-GitText -Repo $OperationalRoot -Ref $ControllerCommit -RepoPath $ControllerRepoPath
+$OverlayRaw = Get-GitText -Repo $OperationalRoot -Ref $OverlaySourceCommit -RepoPath $OverlayRepoPath
 
 $featureOld = "`$ExpectedFeatureCommit = '$FrozenFeatureCommit'"
 $featureNew = "`$ExpectedFeatureCommit = '$Rev4FeatureCommit'"
@@ -92,8 +84,9 @@ if (@($errors).Count -gt 0) {
 Write-Host 'V117_REV4_CONTROLLER_OVERLAY=PASS' -ForegroundColor Green
 Write-Host "V117_REV4_CONTROLLER_BASE=$ControllerCommit"
 Write-Host "V117_REV4_CONTROLLER_BLOB=$ExpectedControllerBlob"
+Write-Host "V117_REV4_OVERLAY_SOURCE_COMMIT=$OverlaySourceCommit"
+Write-Host "V117_REV4_OVERLAY_BLOB=$ExpectedOverlayBlob"
 Write-Host "V117_REV4_FEATURE_COMMIT=$Rev4FeatureCommit"
-Write-Host "V117_REV4_OVERLAY_SHA256=$ExpectedOverlaySha256"
 Write-Host 'V117_REV4_FROZEN_HOLDOUT=PRESERVED' -ForegroundColor Green
 Write-Host 'V117_REV4_EVIDENCE_REPLAY=UNCHANGED' -ForegroundColor Green
 Write-Host 'V117_REV4_AUTHORITY_THRESHOLDS=UNCHANGED' -ForegroundColor Green

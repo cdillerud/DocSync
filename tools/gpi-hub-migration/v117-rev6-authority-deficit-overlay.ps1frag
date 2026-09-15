@@ -1,0 +1,102 @@
+# ---- V117 REV6 TRAIN-only authority-deficit expansion overlay ----
+# REV6 keeps the REV5 120/60 budget reservation, but replaces the reserved
+# route-count sampler with TRAIN-derived authority-deficit selection.
+
+Require ($EntryPatchTemplate.Contains('feature/v117-rev4-route-balanced-train-context')) 'V117 REV6 feature branch anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('feature/v117-rev4-route-balanced-train-context','feature/v117-rev6-train-authority-deficit-expansion')
+
+$Rev6ServiceMaterializationOld = @'
+        'backend/services/ap_routing_route_balance_expansion_service.py',
+'@
+$Rev6ServiceMaterializationNew = @'
+        'backend/services/ap_routing_route_balance_expansion_service.py',
+        'backend/services/ap_routing_authority_deficit_expansion_service.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev6ServiceMaterializationOld)) 'V117 REV6 authority-deficit service materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev6ServiceMaterializationOld,$Rev6ServiceMaterializationNew)
+
+$Rev6TestMaterializationOld = @'
+        'backend/tests/test_ap_routing_v117_route_balance_expansion.py',
+'@
+$Rev6TestMaterializationNew = @'
+        'backend/tests/test_ap_routing_v117_route_balance_expansion.py',
+        'backend/tests/test_ap_routing_v117_authority_deficit_expansion.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev6TestMaterializationOld)) 'V117 REV6 authority-deficit test materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev6TestMaterializationOld,$Rev6TestMaterializationNew)
+
+$Rev6ServiceCompileOld = @'
+ "$CONTAINER_STAGE/services/ap_routing_route_balance_expansion_service.py" \
+'@
+$Rev6ServiceCompileNew = @'
+ "$CONTAINER_STAGE/services/ap_routing_route_balance_expansion_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_authority_deficit_expansion_service.py" \
+'@
+Require ($EntryPatchTemplate.Contains($Rev6ServiceCompileOld)) 'V117 REV6 authority-deficit pycompile anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev6ServiceCompileOld,$Rev6ServiceCompileNew)
+
+$Rev6FocusedTestsOld = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_route_balance_expansion.py"
+'@
+$Rev6FocusedTestsNew = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_route_balance_expansion.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority_deficit_expansion.py"
+'@
+Require ($EntryPatchTemplate.Contains($Rev6FocusedTestsOld)) 'V117 REV6 focused pytest anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev6FocusedTestsOld,$Rev6FocusedTestsNew)
+
+Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=190')) 'V117 REV6 focused regression target anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=190','V117_FOCUSED_REGRESSION_TARGET=198')
+
+$Rev6OriginImportOld = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_anchor_authority_service as z'
+$Rev6OriginImportNew = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_authority_deficit_expansion_service as ad, services.ap_routing_anchor_authority_service as z'
+Require ($EntryPatchTemplate.Contains($Rev6OriginImportOld)) 'V117 REV6 import-origin module anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev6OriginImportOld,$Rev6OriginImportNew)
+Require ($EntryPatchTemplate.Contains('(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,z,c)')) 'V117 REV6 import-origin tuple anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,z,c)','(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,ad,z,c)')
+
+$Rev6RuntimeTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "from services.ap_routing_route_balance_expansion_service import expand_underrepresented_train_routes" `
+    -New "from services.ap_routing_route_balance_expansion_service import expand_underrepresented_train_routes`nimport services.ap_routing_authority_deficit_expansion_service as _v117_authority_deficit_expansion_service`nfrom services.ap_routing_authority_deficit_expansion_service import expand_train_authority_deficits" `
+    -Marker 'REV6 authority-deficit expansion import'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "_v117_route_balance_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -New "_v117_route_balance_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics`n_v117_authority_deficit_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -Marker 'REV6 authority-deficit semantic hydration alignment'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "    route_balance=await expand_underrepresented_train_routes(`n        base_train_examples," `
+    -New "    route_balance=await expand_train_authority_deficits(`n        base_train_examples + expansion_examples," `
+    -Marker 'REV6 replace route-count expansion with TRAIN authority-deficit expansion'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old 'V117_ROUTE_BALANCE_' `
+    -New 'V117_AUTHORITY_DEFICIT_' `
+    -Marker 'REV6 authority-deficit telemetry namespace'
+
+$Rev6TelemetryOld = "    print('V117_AUTHORITY_DEFICIT_FAILURES='+str(route_balance.get('failure_count') or 0),flush=True)"
+$Rev6TelemetryNew = @"
+    print('V117_AUTHORITY_DEFICIT_FAILURES='+str(route_balance.get('failure_count') or 0),flush=True)
+    print('V117_AUTHORITY_DEFICIT_PREFILTERED_CANDIDATES='+str(route_balance.get('prefiltered_candidate_count') or 0),flush=True)
+    print('V117_AUTHORITY_DEFICIT_HYDRATED_CANDIDATES='+str(route_balance.get('hydrated_candidate_count') or 0),flush=True)
+    print('V117_AUTHORITY_DEFICIT_COUNT_BEFORE='+str(route_balance.get('authority_deficit_count_before') or 0),flush=True)
+    print('V117_AUTHORITY_DEFICIT_COUNT_REMAINING='+str(route_balance.get('authority_deficit_count_remaining') or 0),flush=True)
+    print('V117_AUTHORITY_DEFICIT_SELECTED_BY_KIND='+json.dumps(route_balance.get('selected_by_deficit_kind') or {},sort_keys=True),flush=True)
+"@
+$Raw = Replace-Required -Text $Raw `
+    -Old $Rev6TelemetryOld `
+    -New $Rev6TelemetryNew `
+    -Marker 'REV6 authority-deficit detailed telemetry'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "        row['_v117_expansion_train_only']=True" `
+    -New "        row['_v117_expansion_train_only']=True`n        row['_v117_authority_deficit_expansion']=True" `
+    -Marker 'REV6 authority-deficit TRAIN-only marker'
+
+$Raw = $Raw.Replace('V117 REV4 route-balance/base source-item overlap detected','V117 REV6 authority-deficit/base source-item overlap detected')
+$Raw = $Raw.Replace('V117 REV4 route-balance/prior-expansion source-item overlap detected','V117 REV6 authority-deficit/prior-expansion source-item overlap detected')
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $Rev6RuntimeTransform
+# ---- end V117 REV6 TRAIN-only authority-deficit expansion overlay ----

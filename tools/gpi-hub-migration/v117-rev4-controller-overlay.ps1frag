@@ -1,0 +1,140 @@
+# ---- V117 REV4 route-balanced TRAIN expansion overlay ----
+$Rev4FeatureBranchPatch = @'
+Require ($EntryRaw.Contains('feature/ap-ai-learned-autonomy')) 'V117 REV4 feature branch anchor missing.'
+$EntryRaw = $EntryRaw.Replace('feature/ap-ai-learned-autonomy','feature/v117-rev4-route-balanced-train-context')
+'@
+$EntryPatchTemplate = $EntryPatchTemplate + "`n" + $Rev4FeatureBranchPatch
+
+$Rev4ServiceMaterializationOld = @'
+        'backend/services/ap_routing_train_context_service.py',
+'@
+$Rev4ServiceMaterializationNew = @'
+        'backend/services/ap_routing_train_context_service.py',
+        'backend/services/ap_routing_route_balance_expansion_service.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev4ServiceMaterializationOld)) 'V117 REV4 route-balance service materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev4ServiceMaterializationOld,$Rev4ServiceMaterializationNew)
+
+$Rev4TestMaterializationOld = @'
+        'backend/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py',
+'@
+$Rev4TestMaterializationNew = @'
+        'backend/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py',
+        'backend/tests/test_ap_routing_v117_train_context_balance.py',
+        'backend/tests/test_ap_routing_v117_route_balance_expansion.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev4TestMaterializationOld)) 'V117 REV4 focused test materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev4TestMaterializationOld,$Rev4TestMaterializationNew)
+
+$Rev4ServiceCompileOld = @'
+ "$CONTAINER_STAGE/services/ap_routing_train_context_service.py" \
+'@
+$Rev4ServiceCompileNew = @'
+ "$CONTAINER_STAGE/services/ap_routing_train_context_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_route_balance_expansion_service.py" \
+'@
+Require ($EntryPatchTemplate.Contains($Rev4ServiceCompileOld)) 'V117 REV4 route-balance service pycompile anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev4ServiceCompileOld,$Rev4ServiceCompileNew)
+
+$Rev4FocusedTestsOld = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py"
+'@
+$Rev4FocusedTestsNew = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_corpus_expansion_holdout_isolation.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_train_context_balance.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_route_balance_expansion.py"
+'@
+Require ($EntryPatchTemplate.Contains($Rev4FocusedTestsOld)) 'V117 REV4 focused pytest anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev4FocusedTestsOld,$Rev4FocusedTestsNew)
+
+Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=182')) 'V117 REV4 focused regression target anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=182','V117_FOCUSED_REGRESSION_TARGET=190')
+
+$Rev4OriginImportOld = 'services.ap_routing_train_context_service as t, services.ap_routing_anchor_authority_service as z'
+$Rev4OriginImportNew = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_anchor_authority_service as z'
+Require ($EntryPatchTemplate.Contains($Rev4OriginImportOld)) 'V117 REV4 import-origin module anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev4OriginImportOld,$Rev4OriginImportNew)
+Require ($EntryPatchTemplate.Contains('(a,l,s,p,v,r,m,f,n,e,q,h,t,z,c)')) 'V117 REV4 import-origin tuple anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('(a,l,s,p,v,r,m,f,n,e,q,h,t,z,c)','(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,z,c)')
+
+$Rev4ImportTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "from services.ap_routing_corpus_expansion_service import expand_high_value_vendor_corpus" `
+    -New "from services.ap_routing_corpus_expansion_service import expand_high_value_vendor_corpus`nimport services.ap_routing_route_balance_expansion_service as _v117_route_balance_expansion_service`nfrom services.ap_routing_route_balance_expansion_service import expand_underrepresented_train_routes" `
+    -Marker 'REV4 route-balanced TRAIN expansion import'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "_v117_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -New "_v117_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics`n_v117_route_balance_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -Marker 'REV4 route-balance semantic hydration alignment'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $Rev4ImportTransform
+
+$Rev4ExecutionTransform = @'
+$Rev4RouteBalanceOld = @"
+    merged={}
+    for example in examples + expansion_examples:
+"@
+$Rev4RouteBalanceNew = @"
+    route_balance_remaining=max(0,180-int(expansion.get('selected_count') or 0))
+    print('V117_ROUTE_BALANCE_REMAINING_BUDGET='+str(route_balance_remaining),flush=True)
+    route_balance_progress_state={'ok':0,'fail':0}
+    def route_balance_progress(done,total,row):
+        if row.get('ok'):
+            route_balance_progress_state['ok']+=1
+        else:
+            route_balance_progress_state['fail']+=1
+        if done==1 or done%10==0 or done==total:
+            print(
+                'V117_ROUTE_BALANCE_PROGRESS='
+                +str(done)+'/'+str(total)
+                +';ok='+str(route_balance_progress_state['ok'])
+                +';fail='+str(route_balance_progress_state['fail']),
+                flush=True,
+            )
+
+    route_balance=await expand_underrepresented_train_routes(
+        base_train_examples,
+        routing_contract=contract,
+        excluded_source_item_ids=base_source_item_ids,
+        already_selected_source_item_ids=expansion_source_item_ids,
+        initial_selected_route_counts=expansion.get('selected_by_route') or {},
+        discovery_max_files=50000,
+        max_additional=route_balance_remaining,
+        max_additional_per_route=int(expansion.get('expansion_route_cap') or 30),
+        concurrency=4,
+        retry_count=3,
+        progress_callback=route_balance_progress,
+    )
+    route_balance_examples=list(route_balance.get('examples') or [])
+    route_balance_source_item_ids={str(row.get('source_item_id')) for row in route_balance_examples if row.get('source_item_id')}
+    route_balance_base_overlap=sorted(base_source_item_ids & route_balance_source_item_ids)
+    route_balance_prior_overlap=sorted(expansion_source_item_ids & route_balance_source_item_ids)
+    print('V117_ROUTE_BALANCE_BASE_TRAIN_ROUTE_COUNTS='+json.dumps(route_balance.get('base_train_route_counts') or {},sort_keys=True),flush=True)
+    print('V117_ROUTE_BALANCE_CANDIDATE_ROUTE_COUNTS='+json.dumps(route_balance.get('candidate_route_counts') or {},sort_keys=True),flush=True)
+    print('V117_ROUTE_BALANCE_SELECTED='+str(route_balance.get('selected_count') or 0),flush=True)
+    print('V117_ROUTE_BALANCE_SELECTED_BY_ROUTE='+json.dumps(route_balance.get('selected_by_route') or {},sort_keys=True),flush=True)
+    print('V117_ROUTE_BALANCE_TRAIN_COUNTS_AFTER='+json.dumps(route_balance.get('train_route_counts_after_selection') or {},sort_keys=True),flush=True)
+    print('V117_ROUTE_BALANCE_HYDRATED='+str(route_balance.get('hydrated_count') or 0),flush=True)
+    print('V117_ROUTE_BALANCE_FAILURES='+str(route_balance.get('failure_count') or 0),flush=True)
+    print('V117_ROUTE_BALANCE_BASE_ID_OVERLAP_COUNT='+str(len(route_balance_base_overlap)),flush=True)
+    print('V117_ROUTE_BALANCE_PRIOR_EXPANSION_OVERLAP_COUNT='+str(len(route_balance_prior_overlap)),flush=True)
+    if route_balance_base_overlap:
+        raise RuntimeError('V117 REV4 route-balance/base source-item overlap detected')
+    if route_balance_prior_overlap:
+        raise RuntimeError('V117 REV4 route-balance/prior-expansion source-item overlap detected')
+    for row in route_balance_examples:
+        row['_v117_expansion_train_only']=True
+    expansion_examples.extend(route_balance_examples)
+    expansion_source_item_ids.update(route_balance_source_item_ids)
+
+    merged={}
+    for example in examples + expansion_examples:
+"@
+$Raw = Replace-Required -Text $Raw `
+    -Old $Rev4RouteBalanceOld `
+    -New $Rev4RouteBalanceNew `
+    -Marker 'REV4 bounded route-balanced TRAIN expansion execution'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $Rev4ExecutionTransform
+# ---- end V117 REV4 route-balanced TRAIN expansion overlay ----

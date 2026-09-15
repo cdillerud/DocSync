@@ -29,16 +29,24 @@ function Get-GitText {
     return ((@($lines) | ForEach-Object { [string]$_ }) -join "`n") -replace "`r",''
 }
 
-function Get-FileSha256 {
-    param([string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant()
+function Get-TextSha256 {
+    param([string]$Text)
+    $bytes = [Text.Encoding]::UTF8.GetBytes($Text)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','')
+    }
+    finally {
+        $sha.Dispose()
+    }
 }
 
 Require (Test-Path -LiteralPath $StatePath -PathType Leaf) "V117 REV4 state missing: $StatePath"
 Require (Test-Path -LiteralPath $OverlayPath -PathType Leaf) "V117 REV4 overlay missing: $OverlayPath"
 Require ($null -ne (Get-Command git.exe -ErrorAction SilentlyContinue)) 'git.exe unavailable.'
 Require ($null -ne (Get-Command pwsh.exe -ErrorAction SilentlyContinue)) 'pwsh.exe unavailable.'
-Require ((Get-FileSha256 $OverlayPath) -eq $ExpectedOverlaySha256) 'V117 REV4 controller overlay SHA256 drift.'
+$OverlayRaw = (Get-Content -LiteralPath $OverlayPath -Raw) -replace "`r",''
+Require ((Get-TextSha256 $OverlayRaw) -eq $ExpectedOverlaySha256) 'V117 REV4 controller overlay SHA256 drift.'
 
 $State = Get-Content -LiteralPath $StatePath -Raw | ConvertFrom-Json -Depth 80
 $OperationalRoot = [string]$State.local.operational_root
@@ -50,7 +58,6 @@ Require ($LASTEXITCODE -eq 0) 'Could not resolve frozen REV3 controller blob.'
 Require ($controllerBlob -ceq $ExpectedControllerBlob) "Frozen REV3 controller blob drift: $controllerBlob"
 
 $ControllerRaw = Get-GitText -Repo $OperationalRoot -Ref $ControllerCommit -RepoPath $ControllerRepoPath
-$OverlayRaw = (Get-Content -LiteralPath $OverlayPath -Raw) -replace "`r",''
 
 $featureOld = "`$ExpectedFeatureCommit = '$FrozenFeatureCommit'"
 $featureNew = "`$ExpectedFeatureCommit = '$Rev4FeatureCommit'"

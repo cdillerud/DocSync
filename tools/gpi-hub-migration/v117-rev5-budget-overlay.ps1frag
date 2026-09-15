@@ -1,0 +1,12 @@
+# ---- V117 REV5 reserved route-balance budget overlay ----
+# Controller-only allocation correction. Total expansion remains 180.
+# Existing vendor + semantic expansion is capped at 120 so at least 60 slots
+# remain available to the existing REV4 TRAIN-only route-balance pass.
+$Rev5BudgetTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "        desired_total_per_vendor=30,`n        max_additional=180," `
+    -New "        desired_total_per_vendor=30,`n        max_additional=120," `
+    -Marker 'REV5 reserve 60 of 180 expansion slots for route-balanced TRAIN expansion'
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $Rev5BudgetTransform
+# ---- end V117 REV5 reserved route-balance budget overlay ----

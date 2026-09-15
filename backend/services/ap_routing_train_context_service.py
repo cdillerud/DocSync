@@ -73,6 +73,48 @@ def _bounded_route_counts(rows: Sequence[Dict[str, Any]], *, limit: int = 12) ->
     ]
 
 
+def _route_balanced_neighborhood(
+    ranked: Sequence[Dict[str, Any]],
+    *,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Bound a relevance-ranked TRAIN neighborhood without route crowd-out.
+
+    The first pass keeps the highest-ranked example for each distinct observed
+    route. The second pass fills any remaining slots in the original relevance
+    order. This changes prompt evidence composition only; it does not create or
+    relax routing authority.
+    """
+    bounded_limit = max(1, int(limit))
+    if len(ranked) <= bounded_limit:
+        return [dict(row) for row in ranked]
+
+    selected_indexes: List[int] = []
+    selected_index_set = set()
+    seen_routes = set()
+
+    for index, row in enumerate(ranked):
+        route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))
+        if not route or route in seen_routes:
+            continue
+        selected_indexes.append(index)
+        selected_index_set.add(index)
+        seen_routes.add(route)
+        if len(selected_indexes) >= bounded_limit:
+            break
+
+    if len(selected_indexes) < bounded_limit:
+        for index in range(len(ranked)):
+            if index in selected_index_set:
+                continue
+            selected_indexes.append(index)
+            selected_index_set.add(index)
+            if len(selected_indexes) >= bounded_limit:
+                break
+
+    return [dict(ranked[index]) for index in selected_indexes]
+
+
 def _dynamic_route_usage(
     rows: Sequence[Dict[str, Any]],
     *,
@@ -146,7 +188,7 @@ def build_train_learning_context(
         row["_context_feature_similarity"] = feature_similarity(document, row)
         ranked.append(row)
     ranked.sort(key=lambda row: float(row.get("_context_relevance_score") or 0.0), reverse=True)
-    nearest = ranked[: max(1, int(neighborhood_limit))]
+    nearest = _route_balanced_neighborhood(ranked, limit=neighborhood_limit)
 
     route_stats: Dict[str, Dict[str, Any]] = {}
     for row in nearest:

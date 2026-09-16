@@ -10,6 +10,7 @@ from services.ap_routing_business_context_expansion_service import (
 from services.ap_routing_corroboration_authority_service import (
     summarize_train_corroboration_authority,
 )
+from services.ap_routing_learned_features_service import feature_similarity
 
 
 def _doc(
@@ -125,6 +126,17 @@ def test_business_similarity_rewards_same_context_and_penalizes_conflicting_frei
     assert same_score > 8
     assert same_score > conflict_score
     assert any("business_mismatch:freight_line" == x for x in business_context_similarity(current, conflict)["signals"])
+
+
+def test_learned_similarity_counts_detention_once_when_semantic_and_business_vocab_overlap():
+    current = _doc(raw_text="detention invoice awaiting correction")
+    example = _doc(raw_text="detention freight invoice")
+    result = feature_similarity(current, example)
+    assert "semantic:detention" in result["signals"]
+    assert "business_duplicate_suppressed:service:detention" in result["signals"]
+    assert "service:detention" in result["shared_business_context_features"]
+    assert result["business_context_raw_score"] == 2.5
+    assert result["business_context_score"] == 0.0
 
 
 def test_same_vendor_business_context_can_earn_existing_strict_corroboration_without_five_generic_examples():

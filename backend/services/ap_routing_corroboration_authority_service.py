@@ -8,7 +8,7 @@ sufficiently large, high-purity human slice corroborates that proposal.
 
 This is deliberately different from vendor frequency. A slice must include the
 current document type plus either the same vendor alone at high purity, the same
-vendor and structural reference family, or a route-neutral cross-vendor
+vendor and structural/business context, or a route-neutral cross-vendor
 workflow signature. Sparse/global route popularity cannot earn autonomy.
 """
 
@@ -17,6 +17,10 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Dict, List, Sequence
 
+from services.ap_routing_business_context_service import (
+    authority_business_signature,
+    business_context_signal_families,
+)
 from services.ap_routing_learned_features_service import reference_family, semantic_features
 from services.ap_routing_learning_service import normalize_route_path, normalize_vendor_name
 from services.ap_routing_relevant_learning_service import is_train_human_example
@@ -173,6 +177,8 @@ def summarize_train_corroboration_authority(
     doc_type = _doc_type(document)
     current_ref = reference_family(document)
     current_semantics = semantic_features(document)
+    current_business_signature = authority_business_signature(document)
+    current_business_families = business_context_signal_families(current_business_signature)
     dynamic_child = _is_dynamic_child(proposed, contract)
 
     hard_blockers: List[str] = []
@@ -253,9 +259,60 @@ def summarize_train_corroboration_authority(
             )
         )
 
-    # Cross-vendor corroboration is allowed only for a route-neutral structural
-    # family plus document type and a discriminating semantic signature. This
-    # cannot devolve into global route popularity.
+    # Documented business context is independent of the Accounting route label.
+    # Same-vendor corroboration may use a compact exact business signature such
+    # as order-family + location, freight-line family, or service/workflow facts.
+    if current_business_signature:
+        same_business = [
+            row
+            for row in same_vendor_same_type
+            if current_business_signature.issubset(authority_business_signature(row))
+        ]
+        measurements.append(
+            _measurement(
+                name="same_vendor_same_document_type_business_context",
+                rows=same_business,
+                proposed=proposed,
+                confidence=confidence,
+                minimum_support=3,
+                minimum_purity=1.0 if dynamic_child else 0.90,
+                minimum_confidence=0.98 if dynamic_child else 0.95,
+                hard_blocked=bool(hard_blockers),
+            )
+        )
+
+    # Cross-vendor business-context authority is intentionally stricter and
+    # requires at least two independent fact families. One generic marker such
+    # as "freight" or one location can never earn autonomy globally.
+    if (
+        current_business_signature
+        and len(current_business_families) >= 2
+        and doc_type
+        and not dynamic_child
+        and proposed != DNP
+    ):
+        cross_business = [
+            row
+            for row in eligible
+            if _row_type(row) == doc_type
+            and current_business_signature.issubset(authority_business_signature(row))
+        ]
+        if len({_row_vendor(row) for row in cross_business if _row_vendor(row)}) >= 2:
+            measurements.append(
+                _measurement(
+                    name="cross_vendor_document_type_business_context",
+                    rows=cross_business,
+                    proposed=proposed,
+                    confidence=confidence,
+                    minimum_support=5,
+                    minimum_purity=0.95,
+                    minimum_confidence=0.98,
+                    hard_blocked=bool(hard_blockers),
+                )
+            )
+
+    # Cross-vendor semantic corroboration remains available only for a
+    # route-neutral structural family plus a discriminating semantic signature.
     if (
         current_ref in STRUCTURAL_REFERENCE_FAMILIES
         and semantic_signature
@@ -302,6 +359,8 @@ def summarize_train_corroboration_authority(
         "current_document_type": doc_type,
         "current_reference_family": current_ref,
         "current_semantic_features": sorted(current_semantics),
+        "current_business_context_signature": sorted(current_business_signature),
+        "current_business_context_families": sorted(current_business_families),
         "dynamic_child": dynamic_child,
         "hard_blockers": hard_blockers,
         "measurements": measurements,

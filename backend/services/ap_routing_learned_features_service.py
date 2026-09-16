@@ -143,6 +143,28 @@ def semantic_feature_snapshot(document: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# Some documented-business features are simply a more explicit representation
+# of an existing semantic signal. Count that evidence once in nearest-neighbor
+# relevance so adding the documented-context vocabulary cannot accidentally
+# narrow a previously valid human neighborhood. More specific facts such as
+# freight-line family, shipment method, order family, location, and context
+# pairs remain fully additive.
+_SEMANTIC_BUSINESS_DUPLICATES = {
+    "detention": {"service:detention"},
+    "dunnage": {"service:dunnage"},
+    "storage_accessorial": {"service:storage"},
+    "return": {"workflow:return"},
+    "inventory": {"workflow:warehouse_inbound"},
+}
+_BUSINESS_DUPLICATE_WEIGHTS = {
+    "service:detention": 2.5,
+    "service:dunnage": 2.5,
+    "service:storage": 2.5,
+    "workflow:return": 2.5,
+    "workflow:warehouse_inbound": 2.5,
+}
+
+
 def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict[str, Any]:
     """Score route-neutral workflow similarity and expose auditable features."""
     current_ref = reference_family(current)
@@ -193,8 +215,28 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
             signals.append(f"semantic_mismatch:{feature}")
 
     business = business_context_similarity(current, example)
-    score += float(business.get("score") or 0.0)
-    signals.extend(business.get("signals") or [])
+    raw_business_score = float(business.get("score") or 0.0)
+    shared_business = set(business.get("shared_features") or [])
+    suppressed_business = set()
+    for semantic in overlap:
+        suppressed_business.update(
+            shared_business.intersection(_SEMANTIC_BUSINESS_DUPLICATES.get(semantic, set()))
+        )
+    duplicate_weight = sum(_BUSINESS_DUPLICATE_WEIGHTS.get(feature, 0.0) for feature in suppressed_business)
+    business_score = raw_business_score - duplicate_weight
+    score += business_score
+    signals.extend(
+        signal
+        for signal in (business.get("signals") or [])
+        if not (
+            signal.startswith("business:")
+            and signal.split("business:", 1)[1] in suppressed_business
+        )
+    )
+    signals.extend(
+        f"business_duplicate_suppressed:{feature}"
+        for feature in sorted(suppressed_business)
+    )
 
     return {
         "score": round(score, 4),
@@ -209,6 +251,8 @@ def feature_similarity(current: Dict[str, Any], example: Dict[str, Any]) -> Dict
         "shared_business_context_features": business.get("shared_features") or [],
         "current_business_authority_signature": business.get("current_authority_signature") or [],
         "example_business_authority_signature": business.get("example_authority_signature") or [],
-        "business_context_score": float(business.get("score") or 0.0),
+        "business_context_raw_score": raw_business_score,
+        "business_context_score": round(business_score, 4),
+        "suppressed_business_context_features": sorted(suppressed_business),
         "signals": signals,
     }

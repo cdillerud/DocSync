@@ -50,7 +50,7 @@ Require ($EntryPatchTemplate.Contains($Rev7FocusedTestsOld)) 'V117 REV7 focused 
 $EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7FocusedTestsOld,$Rev7FocusedTestsNew)
 
 Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=198')) 'V117 REV7 focused regression target anchor missing.'
-$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=198','V117_FOCUSED_REGRESSION_TARGET=208')
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=198','V117_FOCUSED_REGRESSION_TARGET=209')
 
 $Rev7OriginImportOld = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_authority_deficit_expansion_service as ad, services.ap_routing_anchor_authority_service as z'
 $Rev7OriginImportNew = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_authority_deficit_expansion_service as ad, services.ap_routing_business_context_service as bc, services.ap_routing_business_context_expansion_service as bx, services.ap_routing_anchor_authority_service as z'

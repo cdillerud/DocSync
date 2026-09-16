@@ -1,0 +1,98 @@
+# ---- V117 REV7 documented-business-context learning overlay ----
+# REV7 keeps the frozen holdout, evidence replay, 120/remaining-180 budget,
+# authority thresholds, and production-write prohibition unchanged. The reserved
+# expansion pass is selected by TRAIN-derived documented business context rather
+# than route count or holdout behavior.
+
+Require ($EntryPatchTemplate.Contains('feature/v117-rev6-train-authority-deficit-expansion')) 'V117 REV7 feature branch anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('feature/v117-rev6-train-authority-deficit-expansion','feature/v117-rev7-documented-business-context')
+
+$Rev7ServiceMaterializationOld = @'
+        'backend/services/ap_routing_authority_deficit_expansion_service.py',
+'@
+$Rev7ServiceMaterializationNew = @'
+        'backend/services/ap_routing_authority_deficit_expansion_service.py',
+        'backend/services/ap_routing_business_context_service.py',
+        'backend/services/ap_routing_business_context_expansion_service.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev7ServiceMaterializationOld)) 'V117 REV7 business-context service materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7ServiceMaterializationOld,$Rev7ServiceMaterializationNew)
+
+$Rev7TestMaterializationOld = @'
+        'backend/tests/test_ap_routing_v117_authority_deficit_expansion.py',
+'@
+$Rev7TestMaterializationNew = @'
+        'backend/tests/test_ap_routing_v117_authority_deficit_expansion.py',
+        'backend/tests/test_ap_routing_v117_documented_business_context.py',
+'@
+Require ($EntryPatchTemplate.Contains($Rev7TestMaterializationOld)) 'V117 REV7 business-context test materialization anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7TestMaterializationOld,$Rev7TestMaterializationNew)
+
+$Rev7ServiceCompileOld = @'
+ "$CONTAINER_STAGE/services/ap_routing_authority_deficit_expansion_service.py" \
+'@
+$Rev7ServiceCompileNew = @'
+ "$CONTAINER_STAGE/services/ap_routing_authority_deficit_expansion_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_business_context_service.py" \
+ "$CONTAINER_STAGE/services/ap_routing_business_context_expansion_service.py" \
+'@
+Require ($EntryPatchTemplate.Contains($Rev7ServiceCompileOld)) 'V117 REV7 business-context pycompile anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7ServiceCompileOld,$Rev7ServiceCompileNew)
+
+$Rev7FocusedTestsOld = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority_deficit_expansion.py"
+'@
+$Rev7FocusedTestsNew = @'
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_authority_deficit_expansion.py" \
+ "$CONTAINER_STAGE/tests/test_ap_routing_v117_documented_business_context.py"
+'@
+Require ($EntryPatchTemplate.Contains($Rev7FocusedTestsOld)) 'V117 REV7 focused pytest anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7FocusedTestsOld,$Rev7FocusedTestsNew)
+
+Require ($EntryPatchTemplate.Contains('V117_FOCUSED_REGRESSION_TARGET=198')) 'V117 REV7 focused regression target anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('V117_FOCUSED_REGRESSION_TARGET=198','V117_FOCUSED_REGRESSION_TARGET=208')
+
+$Rev7OriginImportOld = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_authority_deficit_expansion_service as ad, services.ap_routing_anchor_authority_service as z'
+$Rev7OriginImportNew = 'services.ap_routing_train_context_service as t, services.ap_routing_route_balance_expansion_service as rb, services.ap_routing_authority_deficit_expansion_service as ad, services.ap_routing_business_context_service as bc, services.ap_routing_business_context_expansion_service as bx, services.ap_routing_anchor_authority_service as z'
+Require ($EntryPatchTemplate.Contains($Rev7OriginImportOld)) 'V117 REV7 import-origin module anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace($Rev7OriginImportOld,$Rev7OriginImportNew)
+Require ($EntryPatchTemplate.Contains('(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,ad,z,c)')) 'V117 REV7 import-origin tuple anchor missing.'
+$EntryPatchTemplate = $EntryPatchTemplate.Replace('(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,ad,z,c)','(a,l,s,p,v,r,m,f,n,e,q,h,t,rb,ad,bc,bx,z,c)')
+
+$Rev7RuntimeTransform = @'
+$Raw = Replace-Required -Text $Raw `
+    -Old "from services.ap_routing_authority_deficit_expansion_service import expand_train_authority_deficits" `
+    -New "from services.ap_routing_authority_deficit_expansion_service import expand_train_authority_deficits`nimport services.ap_routing_business_context_expansion_service as _v117_business_context_expansion_service`nfrom services.ap_routing_business_context_expansion_service import expand_train_business_context_deficits" `
+    -Marker 'REV7 documented business-context expansion import'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "_v117_authority_deficit_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -New "_v117_authority_deficit_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics`n_v117_business_context_expansion_service.hydrate_accounting_label=hydrate_accounting_label_with_semantics" `
+    -Marker 'REV7 business-context semantic hydration alignment'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "    route_balance=await expand_train_authority_deficits(`n        base_train_examples + expansion_examples," `
+    -New "    route_balance=await expand_train_business_context_deficits(`n        base_train_examples + expansion_examples," `
+    -Marker 'REV7 replace generic authority-deficit pass with TRAIN business-context deficit pass'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old 'V117_AUTHORITY_DEFICIT_' `
+    -New 'V117_BUSINESS_CONTEXT_' `
+    -Marker 'REV7 business-context telemetry namespace'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "route_balance.get('authority_deficit_count_before')" `
+    -New "route_balance.get('business_context_deficit_count_before')" `
+    -Marker 'REV7 business-context deficit-before telemetry source'
+
+$Raw = Replace-Required -Text $Raw `
+    -Old "route_balance.get('authority_deficit_count_remaining')" `
+    -New "route_balance.get('business_context_deficit_count_remaining')" `
+    -Marker 'REV7 business-context deficit-remaining telemetry source'
+
+$Raw = $Raw.Replace("row['_v117_authority_deficit_expansion']=True","row['_v117_business_context_expansion']=True")
+$Raw = $Raw.Replace('V117 REV6 authority-deficit/base source-item overlap detected','V117 REV7 business-context/base source-item overlap detected')
+$Raw = $Raw.Replace('V117 REV6 authority-deficit/prior-expansion source-item overlap detected','V117 REV7 business-context/prior-expansion source-item overlap detected')
+'@
+$ReplayTransform = $ReplayTransform + "`n" + $Rev7RuntimeTransform
+# ---- end V117 REV7 documented-business-context learning overlay ----

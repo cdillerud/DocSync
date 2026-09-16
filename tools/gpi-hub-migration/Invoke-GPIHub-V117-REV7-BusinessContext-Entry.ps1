@@ -11,7 +11,7 @@ $ControllerCommit = '338e17116a3c02cacbf1a6fc756c1f9e07d80858'
 $ControllerRepoPath = 'tools/gpi-hub-migration/Invoke-GPIHub-V117-REV2-Detached-Entry.ps1'
 $ExpectedControllerBlob = 'e5dbabe7e313c733a027820f79a817a2a833339a'
 $FrozenFeatureCommit = 'f423c94ca23fc137a80f03fe5694412403c41443'
-$Rev7FeatureCommit = '2393bbafe501d26051259f2d48aec88e79a56eec'
+$Rev7FeatureCommit = '3b811146c326a990831603cd340ed61b2f19283c'
 $Rev4OverlaySourceCommit = '9858b2b4a000ce8d049274ac6f8394422af4a578'
 $Rev4OverlayRepoPath = 'tools/gpi-hub-migration/v117-rev4-controller-overlay.ps1frag'
 $ExpectedRev4OverlayBlob = '4d695ea648844b801b196400cc299ff59269d416'
@@ -21,9 +21,9 @@ $ExpectedRev5OverlayBlob = '897404f7b87b806baeda05259c6afeacbb57f8bd'
 $Rev6OverlaySourceCommit = '301871d71c5e1d7ae8e0b6d1aa20e86d3ec4d488'
 $Rev6OverlayRepoPath = 'tools/gpi-hub-migration/v117-rev6-authority-deficit-overlay.ps1frag'
 $ExpectedRev6OverlayBlob = 'af55b85f3d40bb0ca8a13db5272d9e9c9495bc41'
-$Rev7OverlaySourceCommit = '727e9526d37c57fec5be3ba6af5657ad7ac3efb4'
+$Rev7OverlaySourceCommit = 'b33952df697793b1650b1870fd813432d339e723'
 $Rev7OverlayRepoPath = 'tools/gpi-hub-migration/v117-rev7-business-context-overlay.ps1frag'
-$ExpectedRev7OverlayBlob = '6647a62bac5b8b6d60b5ef9ff21194a28b715134'
+$ExpectedRev7OverlayBlob = '89c8ef37d1a0bc8f449bc9fba4ed12e6eb07c30c'
 
 function Require {
     param([bool]$Condition,[string]$Message)
@@ -84,7 +84,7 @@ Require ($ControllerRaw.Contains($featureOld)) 'V117 REV7 frozen feature pin anc
 $ControllerRaw = $ControllerRaw.Replace($featureOld,$featureNew)
 
 $targetOld = 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=182'
-$targetNew = 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=208'
+$targetNew = 'V117_REV3_FOCUSED_REGRESSION_TARGET_CONFIGURED=209'
 Require ($ControllerRaw.Contains($targetOld)) 'V117 REV7 configured focused-regression marker anchor missing.'
 $ControllerRaw = $ControllerRaw.Replace($targetOld,$targetNew)
 
@@ -94,7 +94,7 @@ $combinedOverlays = $Rev4OverlayRaw + "`n`n" + $Rev5OverlayRaw + "`n`n" + $Rev6O
 $ControllerRaw = $ControllerRaw.Replace($insertAnchor,$combinedOverlays + "`n`n" + $insertAnchor)
 
 $productionMarker = "Write-Host 'V117_REV3_PRODUCTION_MUTATION=NONE' -ForegroundColor Green"
-$rev7Markers = $productionMarker + "`nWrite-Host 'V117_REV7_FEATURE_COMMIT=$Rev7FeatureCommit' -ForegroundColor Green`nWrite-Host 'V117_REV7_DOCUMENTED_BUSINESS_CONTEXT=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV7_TRAIN_BUSINESS_CONTEXT_EXPANSION=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV7_HOLDOUT_SELECTION_INPUT=NONE' -ForegroundColor Green`nWrite-Host 'V117_REV7_VENDOR_SEMANTIC_BUDGET=120' -ForegroundColor Green`nWrite-Host 'V117_REV7_BUSINESS_CONTEXT_RESERVED_BUDGET=60' -ForegroundColor Green`nWrite-Host 'V117_REV7_TOTAL_EXPANSION_BUDGET=180' -ForegroundColor Green`nWrite-Host 'V117_REV7_FOCUSED_REGRESSION_TARGET=208' -ForegroundColor Green`nWrite-Host 'V117_REV7_FROZEN_HOLDOUT=PRESERVED' -ForegroundColor Green`nWrite-Host 'V117_REV7_EVIDENCE_REPLAY=UNCHANGED' -ForegroundColor Green`nWrite-Host 'V117_REV7_AUTHORITY_THRESHOLDS=UNCHANGED' -ForegroundColor Green`nWrite-Host 'V117_REV7_PRODUCTION_MUTATION=NONE' -ForegroundColor Green"
+$rev7Markers = $productionMarker + "`nWrite-Host 'V117_REV7_FEATURE_COMMIT=$Rev7FeatureCommit' -ForegroundColor Green`nWrite-Host 'V117_REV7_DOCUMENTED_BUSINESS_CONTEXT=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV7_SEMANTIC_BUSINESS_DUPLICATE_SUPPRESSION=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV7_TRAIN_BUSINESS_CONTEXT_EXPANSION=PASS' -ForegroundColor Green`nWrite-Host 'V117_REV7_HOLDOUT_SELECTION_INPUT=NONE' -ForegroundColor Green`nWrite-Host 'V117_REV7_VENDOR_SEMANTIC_BUDGET=120' -ForegroundColor Green`nWrite-Host 'V117_REV7_BUSINESS_CONTEXT_RESERVED_BUDGET=60' -ForegroundColor Green`nWrite-Host 'V117_REV7_TOTAL_EXPANSION_BUDGET=180' -ForegroundColor Green`nWrite-Host 'V117_REV7_FOCUSED_REGRESSION_TARGET=209' -ForegroundColor Green`nWrite-Host 'V117_REV7_FROZEN_HOLDOUT=PRESERVED' -ForegroundColor Green`nWrite-Host 'V117_REV7_EVIDENCE_REPLAY=UNCHANGED' -ForegroundColor Green`nWrite-Host 'V117_REV7_AUTHORITY_THRESHOLDS=UNCHANGED' -ForegroundColor Green`nWrite-Host 'V117_REV7_PRODUCTION_MUTATION=NONE' -ForegroundColor Green"
 Require ($ControllerRaw.Contains($productionMarker)) 'V117 REV7 production marker anchor missing.'
 $ControllerRaw = $ControllerRaw.Replace($productionMarker,$rev7Markers)
 
@@ -122,12 +122,13 @@ Write-Host "V117_REV7_BUSINESS_OVERLAY_SOURCE_COMMIT=$Rev7OverlaySourceCommit"
 Write-Host "V117_REV7_BUSINESS_OVERLAY_BLOB=$ExpectedRev7OverlayBlob"
 Write-Host "V117_REV7_FEATURE_COMMIT=$Rev7FeatureCommit"
 Write-Host 'V117_REV7_DOCUMENTED_BUSINESS_CONTEXT=PASS' -ForegroundColor Green
+Write-Host 'V117_REV7_SEMANTIC_BUSINESS_DUPLICATE_SUPPRESSION=PASS' -ForegroundColor Green
 Write-Host 'V117_REV7_TRAIN_BUSINESS_CONTEXT_EXPANSION=PASS' -ForegroundColor Green
 Write-Host 'V117_REV7_HOLDOUT_SELECTION_INPUT=NONE' -ForegroundColor Green
 Write-Host 'V117_REV7_VENDOR_SEMANTIC_BUDGET=120' -ForegroundColor Green
 Write-Host 'V117_REV7_BUSINESS_CONTEXT_RESERVED_BUDGET=60' -ForegroundColor Green
 Write-Host 'V117_REV7_TOTAL_EXPANSION_BUDGET=180' -ForegroundColor Green
-Write-Host 'V117_REV7_FOCUSED_REGRESSION_TARGET=208' -ForegroundColor Green
+Write-Host 'V117_REV7_FOCUSED_REGRESSION_TARGET=209' -ForegroundColor Green
 Write-Host 'V117_REV7_FROZEN_HOLDOUT=PRESERVED' -ForegroundColor Green
 Write-Host 'V117_REV7_EVIDENCE_REPLAY=UNCHANGED' -ForegroundColor Green
 Write-Host 'V117_REV7_AUTHORITY_THRESHOLDS=UNCHANGED' -ForegroundColor Green

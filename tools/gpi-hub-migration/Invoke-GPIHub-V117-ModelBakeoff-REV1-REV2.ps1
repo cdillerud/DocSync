@@ -44,12 +44,8 @@ Require ($baseBlob -ceq $ExpectedBaseControllerBlob) "Bakeoff REV1 controller bl
 
 $Raw = Get-GitText -Repo $OperationalRoot -Ref $BaseControllerCommit -RepoPath $BaseControllerRepoPath
 
-$PytestOld = @'
-docker exec "`$backend" sh -c "PYTHONPATH='`$CONTAINER_STAGE:/app' python -m pytest -q \\
-'@
-$PytestNew = @'
-docker exec "`$backend" sh -c "cd '`$CONTAINER_STAGE' && PYTHONPATH='`$CONTAINER_STAGE:/app' python -m pytest -q \\
-'@
+$PytestOld = "docker exec ```"`$backend```" sh -c ```"PYTHONPATH='```$CONTAINER_STAGE:/app' python -m pytest -q"
+$PytestNew = "docker exec ```"`$backend```" sh -c ```"cd '```$CONTAINER_STAGE' && PYTHONPATH='```$CONTAINER_STAGE:/app' python -m pytest -q"
 Require ($Raw.Contains($PytestOld)) 'Bakeoff REV2 pytest working-directory anchor missing.'
 $Raw = $Raw.Replace($PytestOld,$PytestNew)
 

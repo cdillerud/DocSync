@@ -1,0 +1,48 @@
+{
+  "schema_version": "v117-model-selection-v1",
+  "selected_model": {
+    "provider": "openai",
+    "model": "gpt-5.6-sol",
+    "name": "gpt-5.6-sol"
+  },
+  "selection_rule": "REV2 reliability-aware ordering: response success rate first, then all-target exact-route accuracy, then overconfident wrong count, contract invalid count, all-target family accuracy, model error count, latency, name",
+  "confirmation": {
+    "schema": "v117-model-selection-confirm-frozen40-standalone-rev4",
+    "isolation_pass": true,
+    "residual_row_overlap": 0,
+    "residual_source_overlap": 0,
+    "observed_benchmark_overlap": 0,
+    "validation_response_sufficiency": true,
+    "prompt_hash_mismatch_count": 0,
+    "gpt_5_6_sol": {
+      "attempted_target_count": 100,
+      "successful_response_count": 100,
+      "response_sufficiency": 1.0,
+      "proposal_accuracy": 0.62,
+      "family_accuracy": 0.89,
+      "overconfident_wrong_count": 5,
+      "safe_auto_count": 9,
+      "safe_coverage": 0.09,
+      "safe_auto_accuracy": 1.0,
+      "safe_wrong_auto_count": 0,
+      "model_error_count": 0
+    },
+    "claude_sonnet_4_6": {
+      "attempted_target_count": 100,
+      "successful_response_count": 98,
+      "response_sufficiency": 0.98,
+      "proposal_accuracy": 0.6327,
+      "family_accuracy": 0.898,
+      "overconfident_wrong_count": 1,
+      "safe_auto_count": 10,
+      "safe_coverage": 0.10,
+      "safe_auto_accuracy": 1.0,
+      "safe_wrong_auto_count": 0,
+      "model_error_count": 2
+    }
+  },
+  "authority_thresholds_changed": false,
+  "production_mutation_authorized": false,
+  "frozen_holdout_evaluated_during_selection": false,
+  "notes": "Selection pin for pre-production V117 qualification only. Production remains blocked pending full focused regressions, one frozen-40 evaluation, and later fresh Accounting confirmation holdout."
+}

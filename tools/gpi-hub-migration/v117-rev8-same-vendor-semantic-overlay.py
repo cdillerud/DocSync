@@ -19,9 +19,9 @@ def patch_relevant_learning(path: Path) -> None:
     # catalog. With limit=8 this reserves six slots for strongest similarity.
     core_limit = max(1, min(limit, int(round(limit * 0.75))))
     for row in ranked:
-        add(row)
         if len(selected) >= core_limit:
             break
+        add(row)
 
     # Add at most two strongest same-vendor route contrasts. This teaches the
     # decision boundary without letting deliberately contradictory examples

@@ -15,41 +15,46 @@ def replace_once(raw: str, old: str, new: str, label: str) -> str:
 
 def patch_relevant_learning(path: Path) -> None:
     raw = path.read_text(encoding="utf-8")
-    old = '''    # The AI should mostly see the nearest learned cases, not a miniature route
-    # catalog. With limit=8 this reserves six slots for strongest similarity.
-    core_limit = max(1, min(limit, int(round(limit * 0.75))))
-    for row in ranked:
-        add(row)
-        if len(selected) >= core_limit:
-            break
 
-    # Add at most two strongest same-vendor route contrasts. This teaches the
-    # decision boundary without letting deliberately contradictory examples
-    # dominate the prompt.
-    same_vendor_rows = [row for row in ranked if row.get("_learned_same_vendor")]
-'''
-    new = '''    # REV8: when human TRAIN evidence exists for the current vendor, make it the
-    # primary prompt evidence before unrelated vendors. This changes prompt
-    # composition only; it does not create routing authority or substitute a
-    # route. With limit=8 the six-slot core is filled from same-vendor evidence
-    # first, then from the global relevance ranking only if capacity remains.
-    core_limit = max(1, min(limit, int(round(limit * 0.75))))
-    same_vendor_rows = [row for row in ranked if row.get("_learned_same_vendor")]
-    same_vendor_core_target = min(core_limit, len(same_vendor_rows))
-    for row in same_vendor_rows:
-        add(row)
-        if len(selected) >= same_vendor_core_target:
-            break
-    for row in ranked:
-        add(row)
-        if len(selected) >= core_limit:
-            break
+    core_anchor = "    core_limit = max(1, min(limit, int(round(limit * 0.75))))\n"
+    ranked_loop_anchor = "    for row in ranked:\n        add(row)\n        if len(selected) >= core_limit:\n            break\n"
+    contrast_anchor = (
+        "    # Add at most two strongest same-vendor route contrasts. This teaches the\n"
+        "    # decision boundary without letting deliberately contradictory examples\n"
+        "    # dominate the prompt.\n"
+        "    same_vendor_rows = [row for row in ranked if row.get(\"_learned_same_vendor\")]\n"
+        "    selected_routes = {normalize_route_path(row.get(\"route_path\")) for row in selected}\n"
+    )
 
-    # Add at most two strongest same-vendor route contrasts. This teaches the
-    # decision boundary without letting deliberately contradictory examples
-    # dominate the prompt.
-'''
-    raw = replace_once(raw, old, new, "same-vendor prompt core")
+    require(core_anchor in raw, "same-vendor core-limit anchor missing")
+    require(ranked_loop_anchor in raw, "same-vendor ranked-loop anchor missing")
+    require(contrast_anchor in raw, "same-vendor contrast anchor missing")
+
+    same_vendor_block = (
+        core_anchor
+        + "    same_vendor_rows = [row for row in ranked if row.get(\"_learned_same_vendor\")]\n"
+        + "    same_vendor_core_target = min(core_limit, len(same_vendor_rows))\n"
+        + "    for row in same_vendor_rows:\n"
+        + "        add(row)\n"
+        + "        if len(selected) >= same_vendor_core_target:\n"
+        + "            break\n"
+        + ranked_loop_anchor
+    )
+    raw = raw.replace(core_anchor + ranked_loop_anchor, same_vendor_block, 1)
+
+    contrast_replacement = (
+        "    # Add at most two strongest same-vendor route contrasts. This teaches the\n"
+        "    # decision boundary without letting deliberately contradictory examples\n"
+        "    # dominate the prompt.\n"
+        "    selected_routes = {normalize_route_path(row.get(\"route_path\")) for row in selected}\n"
+    )
+    raw = raw.replace(contrast_anchor, contrast_replacement, 1)
+
+    require(raw.count("same_vendor_core_target = min(core_limit, len(same_vendor_rows))") == 1,
+            "same-vendor prompt core was not patched exactly once")
+    require(raw.count('same_vendor_rows = [row for row in ranked if row.get("_learned_same_vendor")]') == 1,
+            "same-vendor row set should exist exactly once after patch")
+
     compile(raw, str(path), "exec")
     path.write_text(raw, encoding="utf-8", newline="\n")
 

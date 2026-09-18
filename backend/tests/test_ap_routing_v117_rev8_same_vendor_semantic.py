@@ -146,7 +146,7 @@ def test_rev8_semantic_expansion_requires_exact_human_route_and_semantic_match()
 
     semantic_selected = [
         row["source_item_id"]
-        for row in result["examples"]
+        for row in result["selected_examples"]
         if row["source_item_id"] in {"good", "wrong-route", "wrong-semantic"}
     ]
     assert semantic_selected == ["good"]

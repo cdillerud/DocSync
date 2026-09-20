@@ -136,6 +136,8 @@ def test_rev9_foreign_prompt_example_redacts_exact_reference_material():
     assert "extracted_fields" not in prompt_row["key_evidence"]
     assert prompt_row["key_evidence"]["exact_reference_fields"] == "redacted_cross_vendor"
     assert prompt_row["key_evidence"]["reference_family"] == "w_reference"
+    assert "warehouse inbound freight" in prompt_row["key_evidence"]["semantic_excerpt"]
+    assert "[REDACTED_REF]" in prompt_row["key_evidence"]["semantic_excerpt"]
     assert prompt_row["route_path"] == "Warehouse Not International"
     serialized = json.dumps(prompt_row)
     assert "123456" not in serialized

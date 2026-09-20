@@ -67,7 +67,16 @@ def patch_relevant_learning(path: Path) -> None:
             for prefix in structural_prefixes
         )
 
-    reserved_structural = min(2, max(0, core_limit - 1))
+    structural_rows = [
+        row
+        for row in ranked
+        if structural_prompt_match(row) and not row.get("_learned_same_vendor")
+    ]
+    reserved_structural = min(
+        2,
+        len(structural_rows),
+        max(0, core_limit - 1),
+    )
     same_vendor_core_target = min(
         len(same_vendor_rows),
         max(1, core_limit - reserved_structural),
@@ -77,7 +86,6 @@ def patch_relevant_learning(path: Path) -> None:
         if len(selected) >= same_vendor_core_target:
             break
 
-    structural_rows = [row for row in ranked if structural_prompt_match(row)]
     for row in structural_rows:
         add(row)
         if len(selected) >= core_limit:
@@ -91,7 +99,7 @@ def patch_relevant_learning(path: Path) -> None:
     # Add at most two strongest same-vendor route contrasts. This teaches the
 '''
     raw = replace_once(raw, old, new, "REV9 structural prompt reservation")
-    require("reserved_structural = min(2, max(0, core_limit - 1))" in raw,
+    require("reserved_structural = min(" in raw and "len(structural_rows)" in raw,
             "REV9 structural reservation missing after patch")
     compile(raw, str(path), "exec")
     path.write_text(raw, encoding="utf-8", newline="\n")

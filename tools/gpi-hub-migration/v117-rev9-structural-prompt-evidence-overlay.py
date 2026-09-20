@@ -246,6 +246,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 import json
 import logging
+import re
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from services.ap_routing_business_context_service import business_context_features
@@ -264,7 +265,40 @@ from services.ap_routing_learned_features_service import reference_family, seman
     }
     return row
 '''
-    new_helper = '''def _prompt_learning_example(
+    new_helper = '''def _redact_cross_vendor_semantic_excerpt(example: Dict[str, Any]) -> str:
+    excerpt = str(
+        example.get("raw_text_excerpt")
+        or example.get("raw_text")
+        or ""
+    )[:1600]
+    fields = example.get("extracted_fields") or {}
+    bc = example.get("bc_context") or {}
+    live = bc.get("live_bc_context") or {}
+
+    exact_values = []
+    for value in (
+        fields.get("po_number"),
+        fields.get("order_number"),
+        fields.get("reference_number"),
+        fields.get("invoice_number"),
+        fields.get("vendor_invoice_number"),
+        (example.get("key_evidence") or {}).get("po_number"),
+        bc.get("po_number"),
+        bc.get("bc_document_no"),
+        bc.get("bc_order_number"),
+        live.get("bc_document_no"),
+        live.get("bc_order_number"),
+    ):
+        token = str(value or "").strip()
+        if len(token) >= 3:
+            exact_values.append(token)
+
+    for token in sorted(set(exact_values), key=len, reverse=True):
+        excerpt = re.sub(re.escape(token), "[REDACTED_REF]", excerpt, flags=re.IGNORECASE)
+    return excerpt
+
+
+def _prompt_learning_example(
     example: Dict[str, Any],
     current_document: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -324,6 +358,7 @@ from services.ap_routing_learned_features_service import reference_family, seman
         "cross_vendor_exact_reference_redacted": True,
         "key_evidence": {
             "semantic_features": sorted(semantic_features(example)),
+            "semantic_excerpt": _redact_cross_vendor_semantic_excerpt(example),
             "reference_family": reference_family(example),
             "business_context_features": sorted(business_context_features(example)),
             "exact_reference_fields": "redacted_cross_vendor",

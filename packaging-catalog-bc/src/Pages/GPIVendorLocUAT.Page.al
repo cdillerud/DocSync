@@ -46,6 +46,10 @@ page 71024 "GPI Vendor Loc UAT"
                 {
                     Caption = 'State/Province';
                 }
+                field(countryRegionCode; Rec."Country/Region Code")
+                {
+                    Caption = 'Country/Region Code';
+                }
                 field(latitude; Rec.Latitude)
                 {
                     Caption = 'Latitude';
@@ -97,3 +101,4 @@ page 71024 "GPI Vendor Loc UAT"
             Error('The vendorLocationsUAT API is available only in a Business Central sandbox environment.');
     end;
 }
+

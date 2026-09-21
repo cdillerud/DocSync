@@ -146,6 +146,36 @@ def test_rev10_same_vendor_route_support_deficit_is_train_only():
     assert matches[0]["minimum_support"] == 3
     assert matches[0]["additional_support_needed"] == 2
 
+    # A broader REV10 route-support deficit must never bypass REV8's more
+    # specific discriminating-semantic expansion contract.
+    semantic_train = [
+        _train(
+            "semantic-base",
+            "Warehouse Route",
+            vendor="Acme",
+            file_name="invoice.pdf",
+            raw_text="dunnage",
+        ),
+    ]
+    semantic_deficits = build_train_business_context_deficits(
+        semantic_train,
+        routing_contract={},
+    )
+    assert any(
+        row["kind"] == "discriminating_semantic_route_support"
+        and row["route_path"] == "Warehouse Route"
+        for row in semantic_deficits
+    )
+    assert not any(
+        row["kind"] in {
+            "same_vendor_document_type_route_support",
+            "same_vendor_document_type_reference_family_route_support",
+            "reference_family_route_support",
+        }
+        and row["route_path"] == "Warehouse Route"
+        for row in semantic_deficits
+    )
+
 
 def test_rev10_reference_family_deficits_require_exact_human_route_and_reference_family():
     train = [

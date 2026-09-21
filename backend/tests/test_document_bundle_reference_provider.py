@@ -1,87 +1,66 @@
 import asyncio
 import os
-import sys
 import tempfile
-import types
 
 import pytest
 
 from services import document_bundle_reference_service as svc
+from services import gamer_azure_llm_service as azure_llm
 
 
-def _install_fake_emergent(monkeypatch, captured):
-    root = types.ModuleType("emergentintegrations")
-    llm = types.ModuleType("emergentintegrations.llm")
-    chat = types.ModuleType("emergentintegrations.llm.chat")
-
-    class FakeFileContentWithMimeType:
-        def __init__(self, **kwargs):
-            captured["file"] = kwargs
-
-    class FakeUserMessage:
-        def __init__(self, **kwargs):
-            captured["message"] = kwargs
-
-    class FakeLlmChat:
-        def __init__(self, **kwargs):
-            captured["init"] = kwargs
-
-        def with_model(self, provider, model):
-            captured["provider"] = provider
-            captured["model"] = model
-            return self
-
-        async def send_message(self, message):
-            return '{"po_numbers":[],"order_numbers":[],"bol_numbers":[],"shipment_numbers":[],"receipt_numbers":[],"reference_numbers":[],"pro_numbers":[],"load_numbers":[]}'
-
-    chat.LlmChat = FakeLlmChat
-    chat.UserMessage = FakeUserMessage
-    chat.FileContentWithMimeType = FakeFileContentWithMimeType
-    llm.chat = chat
-    root.llm = llm
-
-    monkeypatch.setitem(sys.modules, "emergentintegrations", root)
-    monkeypatch.setitem(sys.modules, "emergentintegrations.llm", llm)
-    monkeypatch.setitem(sys.modules, "emergentintegrations.llm.chat", chat)
+def test_supporting_default_is_gamer_azure_and_isolated_from_router_env():
+    assert svc.DEFAULT_MODEL == os.environ.get(
+        "DOC_BUNDLE_SUPPORTING_MODEL",
+        "gpt-5.6-sol",
+    )
+    assert svc.DEFAULT_MODEL == "gpt-5.6-sol"
+    assert svc.SUPPORTING_LLM_SOURCE == "gamer_azure"
+    assert not hasattr(svc, "EMERGENT_LLM_KEY")
 
 
-def test_supporting_default_isolated_from_ap_routing_model():
-    assert os.environ.get("AP_ROUTING_MODEL") == "gpt-5.6-sol"
-    assert svc.DEFAULT_MODEL == os.environ.get("DOC_BUNDLE_SUPPORTING_MODEL", "gemini-2.5-pro")
-    assert svc.DEFAULT_MODEL == "gemini-2.5-pro"
-
-
-@pytest.mark.parametrize(
-    ("model", "provider"),
-    [
-        ("gemini-2.5-pro", "gemini"),
-        ("gemini-2.5-flash", "gemini"),
-        ("gpt-5.6-sol", "openai"),
-        ("claude-opus-4-6", "anthropic"),
-        ("claude-sonnet-4-6", "anthropic"),
-    ],
-)
-def test_supporting_provider_mapping(monkeypatch, model, provider):
+def test_supporting_provider_is_openai_for_gamer_azure(monkeypatch):
     monkeypatch.delenv("DOC_BUNDLE_SUPPORTING_PROVIDER", raising=False)
-    assert svc._supporting_provider_for_model(model) == provider
+    monkeypatch.setattr(svc, "SUPPORTING_LLM_SOURCE", "gamer_azure")
+    assert svc._supporting_provider_for_model("gpt-5.6-sol") == "openai"
 
 
 def test_supporting_provider_mismatch_fails_closed(monkeypatch):
-    monkeypatch.setenv("DOC_BUNDLE_SUPPORTING_PROVIDER", "openai")
+    monkeypatch.setenv("DOC_BUNDLE_SUPPORTING_PROVIDER", "gemini")
+    monkeypatch.setattr(svc, "SUPPORTING_LLM_SOURCE", "gamer_azure")
     with pytest.raises(RuntimeError, match="provider/model mismatch"):
-        svc._supporting_provider_for_model("gemini-2.5-pro")
+        svc._supporting_provider_for_model("gpt-5.6-sol")
 
 
-def test_unknown_supporting_model_without_provider_fails_closed(monkeypatch):
+def test_unknown_supporting_model_fails_closed(monkeypatch):
     monkeypatch.delenv("DOC_BUNDLE_SUPPORTING_PROVIDER", raising=False)
-    with pytest.raises(RuntimeError, match="unsupported supporting-reference model/provider pair"):
+    monkeypatch.setattr(svc, "SUPPORTING_LLM_SOURCE", "gamer_azure")
+    with pytest.raises(RuntimeError, match="requires deployment gpt-5.6-sol"):
         svc._supporting_provider_for_model("not-a-real-model")
 
 
-def test_supporting_extractor_keeps_gemini_default_when_router_is_gpt(monkeypatch):
+def test_supporting_source_mismatch_fails_closed(monkeypatch):
+    monkeypatch.delenv("DOC_BUNDLE_SUPPORTING_PROVIDER", raising=False)
+    monkeypatch.setattr(svc, "SUPPORTING_LLM_SOURCE", "emergent")
+    with pytest.raises(RuntimeError, match="source must be gamer_azure"):
+        svc._supporting_provider_for_model("gpt-5.6-sol")
+
+
+def test_supporting_extractor_uses_gamer_azure_pdf_transport(monkeypatch):
     captured = {}
-    _install_fake_emergent(monkeypatch, captured)
-    monkeypatch.setattr(svc, "EMERGENT_LLM_KEY", "unit-test-key")
+
+    async def fake_pdf_completion(pdf_path, *, prompt, model, system_message):
+        captured["pdf_path"] = pdf_path
+        captured["prompt"] = prompt
+        captured["model"] = model
+        captured["system_message"] = system_message
+        return (
+            '{"po_numbers":[],"order_numbers":[],"bol_numbers":[],'
+            '"shipment_numbers":[],"receipt_numbers":[],"reference_numbers":[],'
+            '"pro_numbers":[],"load_numbers":[]}'
+        )
+
+    monkeypatch.setattr(azure_llm, "gamer_azure_pdf_completion", fake_pdf_completion)
+    monkeypatch.setattr(svc, "SUPPORTING_LLM_SOURCE", "gamer_azure")
     monkeypatch.delenv("DOC_BUNDLE_SUPPORTING_PROVIDER", raising=False)
 
     temp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
@@ -101,6 +80,7 @@ def test_supporting_extractor_keeps_gemini_default_when_router_is_gpt(monkeypatc
         )
     )
 
-    assert captured["provider"] == "gemini"
-    assert captured["model"] == "gemini-2.5-pro"
+    assert captured["model"] == "gpt-5.6-sol"
+    assert "supporting pages 2 onward" in captured["prompt"]
+    assert "supporting pages only" in captured["system_message"]
     assert result["model_error"] is None

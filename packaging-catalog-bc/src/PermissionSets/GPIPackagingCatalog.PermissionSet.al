@@ -5,6 +5,7 @@ permissionset 71000 "GPI PACK CATALOG"
 
     Permissions =
         tabledata Customer = R,
+        tabledata "Ship-to Address" = R,
         tabledata Item = R,
         tabledata Field = R,
         tabledata "Item Unit of Measure" = R,
@@ -103,6 +104,7 @@ permissionset 71000 "GPI PACK CATALOG"
         page "GPI Comm Evid API" = X,
         page "GPI Comm Queue API" = X,
         page "GPI Comm Product API" = X,
+        page "GPI Cust ShipTo API" = X,
         page "GPI Agent Ex API" = X,
         page "GPI Agent Evid API" = X,
         page "GPI Agent Queue API" = X,

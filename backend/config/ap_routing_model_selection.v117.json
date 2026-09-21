@@ -3,7 +3,12 @@
   "selected_model": {
     "provider": "openai",
     "model": "gpt-5.6-sol",
-    "name": "gpt-5.6-sol"
+    "name": "gpt-5.6-sol",
+    "runtime_source": "gamer_azure",
+    "azure_resource": "GamerLLM",
+    "azure_endpoint": "https://gamerllm.openai.azure.com/openai/v1/",
+    "authentication": "managed_identity",
+    "token_resource": "https://cognitiveservices.azure.com/"
   },
   "selection_rule": "REV2 reliability-aware ordering: response success rate first, then all-target exact-route accuracy, then overconfident wrong count, contract invalid count, all-target family accuracy, model error count, latency, name",
   "confirmation": {
@@ -17,13 +22,13 @@
     "gpt_5_6_sol": {
       "attempted_target_count": 100,
       "successful_response_count": 100,
-      "response_sufficiency": 1.0,
+      "response_sufficiency": 1,
       "proposal_accuracy": 0.62,
       "family_accuracy": 0.89,
       "overconfident_wrong_count": 5,
       "safe_auto_count": 9,
       "safe_coverage": 0.09,
-      "safe_auto_accuracy": 1.0,
+      "safe_auto_accuracy": 1,
       "safe_wrong_auto_count": 0,
       "model_error_count": 0
     },
@@ -35,8 +40,8 @@
       "family_accuracy": 0.898,
       "overconfident_wrong_count": 1,
       "safe_auto_count": 10,
-      "safe_coverage": 0.10,
-      "safe_auto_accuracy": 1.0,
+      "safe_coverage": 0.1,
+      "safe_auto_accuracy": 1,
       "safe_wrong_auto_count": 0,
       "model_error_count": 2
     }
@@ -44,5 +49,12 @@
   "authority_thresholds_changed": false,
   "production_mutation_authorized": false,
   "frozen_holdout_evaluated_during_selection": false,
-  "notes": "Selection pin for pre-production V117 qualification only. Production remains blocked pending full focused regressions, one frozen-40 evaluation, and later fresh Accounting confirmation holdout."
+  "notes": "Selection pin for pre-production V117 qualification only. REV11 moves AP routing and supporting-reference LLM transport off Emergent to GamerLLM Azure OpenAI using managed identity. Production remains blocked pending regression and fresh Accounting confirmation qualification.",
+  "supporting_reference_runtime": {
+    "source": "gamer_azure",
+    "provider": "openai",
+    "deployment": "gpt-5.6-sol",
+    "authentication": "managed_identity",
+    "isolated_from_ap_routing_model_env": true
+  }
 }

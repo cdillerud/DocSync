@@ -233,10 +233,21 @@ def patch_business_context_expansion(path: Path) -> None:
         if doc_type and ref_family and ref_family != "descriptor_or_none":
             reference_route_groups[(doc_type, ref_family, route)].append(row)
 
+    def rev10_generic_deficit_allowed(rows: Sequence[Dict[str, Any]]) -> bool:
+        # Preserve REV8's discriminating-semantic evidence contract. If a route
+        # already exhibits one of those workflow semantics in HUMAN TRAIN, a
+        # broader REV10 vendor/reference-family deficit must not admit generic
+        # candidates that omit the semantic. Let the higher-specificity REV8
+        # semantic deficit own expansion for that route slice.
+        return not any(
+            set(semantic_features(row)).intersection(_REV8_DISCRIMINATING_SEMANTICS)
+            for row in rows
+        )
+
     for (vendor, doc_type, route), rows in sorted(same_vendor_route_groups.items()):
         support = len(rows)
         minimum_support = 3
-        if support >= minimum_support:
+        if support >= minimum_support or not rev10_generic_deficit_allowed(rows):
             continue
         deficits.append(
             {
@@ -262,7 +273,7 @@ def patch_business_context_expansion(path: Path) -> None:
     ):
         support = len(rows)
         minimum_support = 5
-        if support >= minimum_support:
+        if support >= minimum_support or not rev10_generic_deficit_allowed(rows):
             continue
         deficits.append(
             {
@@ -286,7 +297,7 @@ def patch_business_context_expansion(path: Path) -> None:
     for (doc_type, ref_family, route), rows in sorted(reference_route_groups.items()):
         support = len(rows)
         minimum_support = 5
-        if support >= minimum_support:
+        if support >= minimum_support or not rev10_generic_deficit_allowed(rows):
             continue
         deficits.append(
             {
@@ -379,6 +390,11 @@ def patch_business_context_expansion(path: Path) -> None:
     require(
         "same_vendor_document_type_route_support" in raw,
         "REV10 same-vendor route-support deficits missing",
+    )
+    require(
+        "rev10_generic_deficit_allowed" in raw
+        and "_REV8_DISCRIMINATING_SEMANTICS" in raw,
+        "REV10 generic evidence must defer to REV8 discriminating semantics",
     )
     require(
         "reference_family_route_support" in raw,

@@ -181,6 +181,178 @@ def patch_ai_primary(path: Path) -> None:
 '''
     raw = replace_once(raw, old, new, "REV10 hierarchy/topology prompt rules")
 
+    review_anchor = '''async def propose_ap_route_ai_primary(
+'''
+    review_helpers = '''def _route_hierarchy_parent_has_children(
+    route: str,
+    learning_context: Optional[Dict[str, Any]],
+) -> bool:
+    normalized = normalize_route_path(route)
+    if not normalized or not learning_context:
+        return False
+    for key in (
+        "route_hierarchy_same_vendor",
+        "route_hierarchy_same_reference_family",
+        "route_hierarchy_nearest",
+    ):
+        hierarchy = (learning_context or {}).get(key) or {}
+        for row in hierarchy.get("parent_child_counts") or []:
+            if normalize_route_path(row.get("parent_path")) != normalized:
+                continue
+            if int(row.get("child_count") or 0) > 0:
+                return True
+    return False
+
+
+def _proposal_review_needed(
+    prediction: RoutePrediction,
+    learning_context: Optional[Dict[str, Any]],
+) -> bool:
+    """Bound a second AI review to uncertain or topology-sensitive proposals."""
+    proposed = normalize_route_path(prediction.proposed_route)
+    if not proposed:
+        return True
+    if prediction.unresolved:
+        return True
+    if float(prediction.confidence) < 0.90:
+        return True
+    return _route_hierarchy_parent_has_children(proposed, learning_context)
+
+
+def _build_proposal_review_prompt(
+    original_prompt: str,
+    first_pass: RoutePrediction,
+    learning_context: Optional[Dict[str, Any]],
+) -> str:
+    """Ask the same bounded model to independently review its first proposal.
+
+    This is still AI-primary: the second pass receives only current evidence,
+    TRAIN-only human context, and the first AI proposal. No held-out label,
+    deterministic route recommendation, or authority decision is supplied.
+    """
+    first = first_pass.to_dict()
+    return (
+        original_prompt
+        + "\n\nSECOND-PASS PROPOSAL REVIEW\n"
+        + "Independently review the FIRST_PASS_AI_PROPOSAL against the current document, "
+        + "Business Central facts, similar HUMAN TRAIN examples, and train_learning_context. "
+        + "Do not preserve the first answer merely for consistency. The final proposed_route "
+        + "must still be selected by the AI from the supplied routing_contract.\n"
+        + "Review checks:\n"
+        + "A. Re-check top-level workflow family before choosing a child. Document-purpose words "
+        + "(inventory, receipt, BOL, photo, freight, cost, credit) are not folder selections.\n"
+        + "B. If same-vendor or highly relevant HUMAN TRAIN repeatedly supports an exact child and "
+        + "current evidence does not contradict that child, do not collapse it to the parent merely "
+        + "because the child is more specific.\n"
+        + "C. Distinguish sibling children using current facts plus exact-route HUMAN TRAIN support; "
+        + "do not transplant a sibling from another vendor.\n"
+        + "D. If a semantic hypothesis is ruled out (for example generic cost is not literal cost variance, "
+        + "or short-paid language is not a stop-pay instruction), reconsider the remaining supported routes "
+        + "instead of stopping at that rejected hypothesis.\n"
+        + "E. Use unresolved only for a concrete missing or contradictory fact that prevents a supported "
+        + "route selection. Low confidence or ordinary caution alone is not unresolved.\n"
+        + "F. If the first pass produced no route, make a fresh bounded attempt from the TRAIN evidence "
+        + "rather than repeating the abstention when a supported route exists.\n"
+        + "Return JSON only in the exact routing-prediction shape required above.\n"
+        + "FIRST_PASS_AI_PROPOSAL:\n"
+        + json.dumps(first, ensure_ascii=False, default=str)
+        + "\n"
+    )
+
+
+'''
+    require(review_anchor in raw, "REV10 proposal-review insertion anchor missing")
+    raw = raw.replace(review_anchor, review_helpers + review_anchor, 1)
+
+    first_pass_old = '''    sender = llm_send or _default_llm_send
+    try:
+        raw = await sender(prompt, model)
+        prediction = parse_route_prediction(raw, model=model)
+    except Exception as exc:
+        logger.exception("AI-primary AP routing model call failed")
+        prediction = RoutePrediction(
+            proposed_route="",
+            confidence=0.0,
+            evidence=[],
+            reasoning_summary="routing model failure",
+            bc_refs_used=[],
+            unresolved=[f"model_error:{type(exc).__name__}"],
+            matched_example_ids=[],
+            model=model,
+        )
+
+    proposed = normalize_route_path(prediction.proposed_route)
+'''
+    first_pass_new = '''    sender = llm_send or _default_llm_send
+    try:
+        raw = await sender(prompt, model)
+        prediction = parse_route_prediction(raw, model=model)
+    except Exception as exc:
+        logger.exception("AI-primary AP routing model call failed")
+        prediction = RoutePrediction(
+            proposed_route="",
+            confidence=0.0,
+            evidence=[],
+            reasoning_summary="routing model failure",
+            bc_refs_used=[],
+            unresolved=[f"model_error:{type(exc).__name__}"],
+            matched_example_ids=[],
+            model=model,
+        )
+
+    first_pass_prediction = prediction
+    proposal_review_used = False
+    proposal_review_error = ""
+    if _proposal_review_needed(first_pass_prediction, learning_context):
+        proposal_review_used = True
+        review_prompt = _build_proposal_review_prompt(
+            prompt,
+            first_pass_prediction,
+            learning_context,
+        )
+        try:
+            reviewed_raw = await sender(review_prompt, model)
+            reviewed_prediction = parse_route_prediction(reviewed_raw, model=model)
+            if normalize_route_path(reviewed_prediction.proposed_route):
+                prediction = reviewed_prediction
+            elif not normalize_route_path(first_pass_prediction.proposed_route):
+                prediction = reviewed_prediction
+        except Exception as exc:
+            proposal_review_error = f"{type(exc).__name__}:{exc}"[:500]
+            logger.warning(
+                "AI-primary second-pass proposal review failed; preserving first pass: %s",
+                proposal_review_error,
+            )
+
+    proposed = normalize_route_path(prediction.proposed_route)
+'''
+    raw = replace_once(
+        raw,
+        first_pass_old,
+        first_pass_new,
+        "REV10 bounded second-pass AI proposal review",
+    )
+
+    return_anchor = '''        "route_selected_by": "ai_model",
+        "supervised_route_substitution": False,
+'''
+    return_new = '''        "route_selected_by": "ai_model",
+        "supervised_route_substitution": False,
+        "proposal_review_used": proposal_review_used,
+        "proposal_review_error": proposal_review_error,
+        "first_pass_prediction": first_pass_prediction.to_dict(),
+'''
+    raw = replace_once(
+        raw,
+        return_anchor,
+        return_new,
+        "REV10 proposal-review audit fields",
+    )
+
+    require("_proposal_review_needed" in raw, "REV10 proposal-review helper missing")
+    require("SECOND-PASS PROPOSAL REVIEW" in raw, "REV10 second-pass prompt missing")
+    require('"proposal_review_used": proposal_review_used' in raw, "REV10 proposal-review audit missing")
+
     compile(raw, str(path), "exec")
     path.write_text(raw, encoding="utf-8", newline="\n")
 

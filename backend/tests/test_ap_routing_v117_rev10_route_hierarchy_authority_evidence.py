@@ -1,6 +1,11 @@
 import inspect
 
-from services.ap_routing_ai_primary_service import _augment_prompt_with_train_context
+from services.ap_routing_ai_primary_service import (
+    _augment_prompt_with_train_context,
+    _build_proposal_review_prompt,
+    _proposal_review_needed,
+)
+from services.ap_routing_decision_service import RoutePrediction
 from services.ap_routing_business_context_expansion_service import (
     _matches_deficit,
     build_train_business_context_deficits,
@@ -119,6 +124,84 @@ def test_rev10_prompt_requires_topology_before_workflow_and_parent_before_unsupp
     assert "short paid, underpaid, balance difference" in prompt
     assert "Inventory, warehouse receipt, packing-list, BOL, photo, and transfer semantics" in prompt
     assert "Special top-level queues such as Meg to Process, Rhonda - Issues, and Miscellaneous" in prompt
+
+
+def test_rev10_second_pass_review_is_bounded_to_uncertain_or_parent_proposals():
+    high_conf_leaf = RoutePrediction(
+        proposed_route="S&H Invoices waiting for approval/Andy to approve",
+        confidence=0.96,
+        evidence=[],
+        reasoning_summary="supported leaf",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+    context = {
+        "route_hierarchy_same_vendor": {
+            "parent_child_counts": [
+                {
+                    "parent_path": "S&H Invoices waiting for approval",
+                    "parent_exact_count": 1,
+                    "child_count": 4,
+                    "children": [
+                        {
+                            "route_path": "S&H Invoices waiting for approval/Andy to approve",
+                            "count": 4,
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    assert _proposal_review_needed(high_conf_leaf, context) is False
+
+    low_conf_leaf = RoutePrediction(
+        proposed_route=high_conf_leaf.proposed_route,
+        confidence=0.72,
+        evidence=[],
+        reasoning_summary="uncertain leaf",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+    assert _proposal_review_needed(low_conf_leaf, context) is True
+
+    parent = RoutePrediction(
+        proposed_route="S&H Invoices waiting for approval",
+        confidence=0.95,
+        evidence=[],
+        reasoning_summary="generic parent",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+    assert _proposal_review_needed(parent, context) is True
+
+
+def test_rev10_second_pass_prompt_has_no_deterministic_route_recommendation():
+    first = RoutePrediction(
+        proposed_route="S&H Invoices waiting for approval",
+        confidence=0.76,
+        evidence=["first pass"],
+        reasoning_summary="uncertain",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+    prompt = _build_proposal_review_prompt(
+        "SYSTEM\nINPUT:\n{}",
+        first,
+        {"eligible_train_example_count": 10},
+    )
+    assert "SECOND-PASS PROPOSAL REVIEW" in prompt
+    assert "selected by the AI from the supplied routing_contract" in prompt
+    assert "do not collapse it to the parent" in prompt
+    assert "Low confidence or ordinary caution alone is not unresolved" in prompt
+    assert "FIRST_PASS_AI_PROPOSAL" in prompt
 
 
 def test_rev10_same_vendor_route_support_deficit_is_train_only():

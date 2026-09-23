@@ -18,6 +18,19 @@ SUPPORTED_SALES_ORDER_TYPES = {
     "SALESORDER",
     "CUSTOMER_PO",
     "CUSTOMER_PURCHASE_ORDER",
+    # PURCHASE_ORDER is genuinely ambiguous in this codebase (real customer
+    # POs, GPI's own outgoing vendor POs, and 3PL/warehouse documents all
+    # share this doc_type). By the time a candidate reaches this preflight
+    # check it has already passed sales_order_source_inference's
+    # assess_sales_order_source, which only lets a PURCHASE_ORDER-typed
+    # document through when Business Central's own customer master
+    # (entity_resolution_service.resolve_customer) confirms a real,
+    # non-Gamer customer_no - see routes/sales_order_review.py's
+    # _source_assessment. Matches SALES_ORDER_TYPES /
+    # _NORMALIZED_SALES_ORDER_TYPES in services/sales_order_review_service.py
+    # and _VENDOR_PO_DOCUMENT_TYPES's override in
+    # services/sales_order_source_inference.py (2026-09-23).
+    "PURCHASE_ORDER",
 }
 
 UNRESOLVED_MAPPING_STATES = {

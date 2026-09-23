@@ -223,8 +223,26 @@ def _recursive_split_evidence(document: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def assess_sales_order_source(document: Dict[str, Any]) -> Dict[str, Any]:
-    """Identify strong evidence that a record is not valid customer intake."""
+def assess_sales_order_source(
+    document: Dict[str, Any],
+    *,
+    bc_customer_no: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Identify strong evidence that a record is not valid customer intake.
+
+    ``bc_customer_no``: pass the result of entity_resolution_service's
+    resolve_customer(document).customer_no when the caller has it (see
+    routes/sales_order_review.py's _source_assessment). PURCHASE_ORDER is a
+    genuinely ambiguous doc_type in this codebase - it covers real inbound
+    customer POs, GPI's own outgoing vendor POs, and third-party (3PL/
+    warehouse) documents alike, all with the same type value. A confirmed
+    match against Business Central's own customer master is stronger,
+    ground-truth evidence of direction than that type label, so it overrides
+    the type-only VENDOR_PURCHASE_ORDER_TYPE exclusion below. It does NOT
+    override the content-based Gamer-vendor-PO checks further down: those
+    detect GPI explicitly identifying itself as the buyer, which is
+    conclusive regardless of what a name-based customer lookup returns.
+    """
 
     if document.get("sales_order_excluded") is True:
         return {
@@ -252,7 +270,7 @@ def assess_sales_order_source(document: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     document_type = _effective_document_type(document)
-    if document_type in _VENDOR_PO_DOCUMENT_TYPES:
+    if document_type in _VENDOR_PO_DOCUMENT_TYPES and not bc_customer_no:
         return {
             "excluded": True,
             "reason_code": "VENDOR_PURCHASE_ORDER_TYPE",

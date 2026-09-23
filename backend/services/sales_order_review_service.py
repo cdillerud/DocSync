@@ -28,6 +28,23 @@ SALES_ORDER_TYPES = [
     "SalesOrder",
     "CUSTOMER_PO",
     "CUSTOMER_PURCHASE_ORDER",
+    # PURCHASE_ORDER is included deliberately: with EMERGENT_LLM_KEY unset,
+    # nothing in the intake pipeline can currently write a Sales_Order-family
+    # doc_type for a genuine new customer PO (see 2026-09-23 investigation).
+    # Real inbound customer POs land with doc_type PURCHASE_ORDER instead,
+    # indistinguishable at the type level from GPI's own outgoing vendor POs
+    # and third-party (3PL/warehouse) documents that share the same type.
+    # Widening the candidate net here is safe only because
+    # sales_order_source_inference.assess_sales_order_source (applied right
+    # after this query, in routes/sales_order_review.py's _filter_review_queue)
+    # now requires actual Business Central customer-master evidence
+    # (resolve_customer's customer_no) before letting a PURCHASE_ORDER-typed
+    # document past its vendor-type exclusion. Without that downstream gate,
+    # this addition would flood the queue with vendor/3PL noise.
+    "PURCHASE_ORDER",
+    "PURCHASEORDER",
+    "Purchase_Order",
+    "Purchase Order",
 ]
 
 _NORMALIZED_SALES_ORDER_TYPES = {
@@ -35,6 +52,7 @@ _NORMALIZED_SALES_ORDER_TYPES = {
     "SALESORDER",
     "CUSTOMER_PO",
     "CUSTOMER_PURCHASE_ORDER",
+    "PURCHASE_ORDER",  # see comment on SALES_ORDER_TYPES above
 }
 
 

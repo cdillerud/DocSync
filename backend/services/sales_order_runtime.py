@@ -18,6 +18,10 @@ _SUPPORTED_SALES_ORDER_TYPES = {
     "SALESORDER",
     "CUSTOMER_PO",
     "CUSTOMER_PURCHASE_ORDER",
+    # Kept in sync with SUPPORTED_SALES_ORDER_TYPES in
+    # services/sales_order_preflight.py (2026-09-23) - see that file's
+    # comment for why PURCHASE_ORDER belongs here.
+    "PURCHASE_ORDER",
 }
 _AP_ONLY_VALIDATION_TERMS = (
     "vendor name",

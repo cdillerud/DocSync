@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 import sales_module
 from services.business_central_service import get_bc_service
+from services.entity_resolution_service import resolve_customer
 from services.sales_order_enrichment_runtime import (
     enrich_and_persist_sales_order_document,
     run_enriched_shadow_preflight,
@@ -59,7 +60,18 @@ def _not_found(document_id: str) -> HTTPException:
 
 async def _source_assessment(document_id: str) -> Dict[str, object]:
     located = await locate_document(_db(), document_id)
-    return assess_sales_order_source(located.document)
+    # PURCHASE_ORDER-typed documents are direction-ambiguous (real customer
+    # POs, GPI's own outgoing vendor POs, and 3PL/warehouse documents all
+    # share this doc_type - see sales_order_review_service.SALES_ORDER_TYPES).
+    # Resolve against Business Central's own customer master and let a real
+    # match override the type-only vendor exclusion; a failed/empty
+    # resolution changes nothing; the existing content-based Gamer-vendor-PO
+    # exclusions in assess_sales_order_source are unaffected either way.
+    customer_resolution = await resolve_customer(located.document)
+    return assess_sales_order_source(
+        located.document,
+        bc_customer_no=customer_resolution.customer_no or None,
+    )
 
 
 async def _require_customer_sales_order(document_id: str) -> None:

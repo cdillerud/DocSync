@@ -99,95 +99,25 @@ async def apply_suggestion(
 ) -> Dict[str, Any]:
     """
     Apply an approved suggestion to the entity's profile.
-    Records full before/after audit trail.
+
+    Delegates to each pipeline's own mutation handlers rather than a
+    generic flat $set: AP's (_add_vendor_alias / _widen_amount /
+    _relax_po / _add_accepted_ref / _increase_variability) and Sales'
+    (_add_to_list / _add_uom_for_item / _widen_amount_range /
+    _revise_po / _increase_variability) compute the change from live
+    profile state and no-op safely when nothing needs to change --
+    a stored flat "mutation" snapshot cannot do either of those.
+    Each delegate records its own before/after audit trail.
     """
-    coll = db[cfg.suggestions_collection]
-    suggestion = await coll.find_one({"suggestion_id": suggestion_id}, {"_id": 0})
-    if not suggestion:
-        return {"error": "Suggestion not found"}
+    if cfg.label == "AP Invoice":
+        from services.ap_invoice_learning_suggestion_apply_service import apply_ap_suggestion
+        return await apply_ap_suggestion(db, suggestion_id, applier)
 
-    current_status = suggestion.get("status", "pending")
-    if current_status != "approved":
-        return {"error": f"Cannot apply — suggestion is '{current_status}', must be 'approved'"}
+    if cfg.label == "Sales Order":
+        from services.sales_order_learning_suggestion_apply_service import apply_suggestion as _apply_so_suggestion
+        return await _apply_so_suggestion(db, suggestion_id, applier)
 
-    entity_no = suggestion.get(cfg.entity_field, "")
-    stype = suggestion.get("suggestion_type", "")
-
-    # Snapshot current profile state (before)
-    profile_coll = db[cfg.profile_collection]
-    profile = await profile_coll.find_one(
-        {cfg.entity_field.replace("_no", ""): entity_no},
-        {"_id": 0},
-    )
-    if not profile:
-        # Try alternate key format
-        profile = await profile_coll.find_one(
-            {cfg.entity_field: entity_no}, {"_id": 0},
-        )
-    before_snapshot = dict(profile) if profile else {}
-
-    # Apply the mutation
-    mutation = suggestion.get("mutation") or suggestion.get("proposed_change") or {}
-    applied_fields = []
-
-    if mutation and profile:
-        update_ops = {}
-        for key, value in mutation.items():
-            if key.startswith("$"):
-                continue
-            update_ops[key] = value
-            applied_fields.append(key)
-
-        if update_ops:
-            filter_key = cfg.entity_field.replace("_no", "") if cfg.entity_field.replace("_no", "") in (profile or {}) else cfg.entity_field
-            await profile_coll.update_one(
-                {filter_key: entity_no},
-                {"$set": update_ops},
-            )
-
-    # Record the apply
-    now = datetime.now(timezone.utc).isoformat()
-    await coll.update_one(
-        {"suggestion_id": suggestion_id},
-        {"$set": {
-            "status": "applied",
-            "applied_by": applier,
-            "applied_at": now,
-        }},
-    )
-
-    # Audit trail
-    after_profile = await profile_coll.find_one(
-        {cfg.entity_field.replace("_no", "") if cfg.entity_field.replace("_no", "") in before_snapshot else cfg.entity_field: entity_no},
-        {"_id": 0},
-    )
-
-    audit = {
-        "suggestion_id": suggestion_id,
-        "suggestion_type": stype,
-        cfg.entity_field: entity_no,
-        cfg.entity_name_field: suggestion.get(cfg.entity_name_field, ""),
-        "applied_by": applier,
-        "applied_at": now,
-        "fields_changed": applied_fields,
-        "before": before_snapshot,
-        "after": dict(after_profile) if after_profile else {},
-        "pipeline": cfg.label,
-    }
-    await db[cfg.audit_collection].insert_one(audit)
-
-    logger.info(
-        "[Learning] Applied %s suggestion %s for %s=%s by %s (%d fields)",
-        cfg.label, suggestion_id, cfg.entity_field, entity_no, applier, len(applied_fields),
-    )
-
-    return {
-        "status": "applied",
-        "suggestion_id": suggestion_id,
-        cfg.entity_field: entity_no,
-        "applied_by": applier,
-        "fields_changed": applied_fields,
-    }
+    return {"error": f"apply_suggestion: no handler wired for pipeline '{cfg.label}'"}
 
 
 async def _transition(
@@ -220,55 +150,26 @@ async def generate_suggestions(
     db, cfg: LearningConfig, limit: int = 100,
 ) -> Dict[str, Any]:
     """
-    Analyze reviewer feedback to generate learning suggestions.
-    Groups feedback by entity, identifies patterns, creates actionable suggestions.
+    Analyze reviewer feedback and generate candidate profile-learning
+    suggestions for this pipeline.
+
+    Delegates to each pipeline's own purpose-built pattern analyzer
+    (AP: vendor-match / PO / amount / variability signals; Sales:
+    ship-to / item / UOM / amount / PO / variability signals, with
+    drift-risk-aware thresholds). Each analyzer emits the specific
+    suggestion_type values its own apply-side handler knows how to
+    act on -- a generic "field disagreed N times" signal does not
+    carry enough information to safely produce a profile change.
     """
-    # Fetch recent feedback that hasn't been processed into suggestions
-    feedback_coll = db[cfg.feedback_collection]
-    all_feedback = await feedback_coll.find(
-        {"processed_into_suggestion": {"$ne": True}},
-        {"_id": 0},
-    ).sort("timestamp", -1).limit(limit * 10).to_list(limit * 10)
+    if cfg.label == "AP Invoice":
+        from services.ap_invoice_feedback_learning_service import generate_ap_learning_suggestions
+        return await generate_ap_learning_suggestions(db, limit=limit)
 
-    if not all_feedback:
-        return {"generated": 0, "message": "No unprocessed feedback found"}
+    if cfg.label == "Sales Order":
+        from services.sales_order_feedback_learning_service import generate_learning_suggestions as _generate_so_suggestions
+        return await _generate_so_suggestions(db, limit=limit)
 
-    # Group by entity
-    by_entity: Dict[str, List] = defaultdict(list)
-    for fb in all_feedback:
-        eno = fb.get(cfg.entity_field, "unknown")
-        by_entity[eno].append(fb)
-
-    generated = 0
-    suggestions_coll = db[cfg.suggestions_collection]
-
-    for entity_no, entity_feedback in by_entity.items():
-        if len(entity_feedback) < 2:
-            continue
-
-        analysis = _analyze_entity_feedback(cfg, entity_no, entity_feedback)
-        for suggestion in analysis:
-            # Check for duplicate suggestion
-            existing = await suggestions_coll.find_one({
-                cfg.entity_field: entity_no,
-                "suggestion_type": suggestion["suggestion_type"],
-                "status": {"$in": ["pending", "approved"]},
-            })
-            if existing:
-                continue
-
-            suggestion["status"] = "pending"
-            suggestion["created_at"] = datetime.now(timezone.utc).isoformat()
-            suggestion["pipeline"] = cfg.label
-            await suggestions_coll.insert_one(suggestion)
-            generated += 1
-
-            if generated >= limit:
-                break
-        if generated >= limit:
-            break
-
-    return {"generated": generated, "entities_analyzed": len(by_entity)}
+    return {"error": f"generate_suggestions: no analyzer wired for pipeline '{cfg.label}'"}
 
 
 async def get_suggestions(
@@ -301,43 +202,6 @@ async def get_suggestion_by_id(
     return await db[cfg.suggestions_collection].find_one(
         {"suggestion_id": suggestion_id}, {"_id": 0},
     )
-
-
-def _analyze_entity_feedback(
-    cfg: LearningConfig, entity_no: str, feedback: List[Dict],
-) -> List[Dict]:
-    """Analyze feedback for a single entity and produce suggestions."""
-    suggestions = []
-
-    # Count disagreements by field
-    field_disagree = Counter()
-    field_agree = Counter()
-    for fb in feedback:
-        assessment = fb.get("reviewer_assessment", "")
-        if assessment in ("incorrect", "partially_correct", "not_helpful"):
-            for f in (fb.get("disagreed_fields") or []):
-                field_disagree[f] += 1
-        elif assessment == "correct":
-            for f in (fb.get("agreed_fields") or fb.get("confirmed_fields") or []):
-                field_agree[f] += 1
-
-    # Suggest profile changes for consistently disagreed fields
-    for fld, count in field_disagree.most_common(5):
-        agree_count = field_agree.get(fld, 0)
-        if count >= 2 and count > agree_count:
-            suggestions.append({
-                "suggestion_id": f"sug_{cfg.entity_type}_{entity_no}_{fld}_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
-                cfg.entity_field: entity_no,
-                cfg.entity_name_field: feedback[0].get(cfg.entity_name_field, ""),
-                "suggestion_type": f"field_correction_{fld}",
-                "field": fld,
-                "evidence_count": count,
-                "agree_count": agree_count,
-                "confidence": min(count / (count + agree_count), 0.95),
-                "description": f"{cfg.entity_type.title()} {entity_no}: field '{fld}' disagreed {count}x vs agreed {agree_count}x",
-            })
-
-    return suggestions
 
 
 # ═══════════════════════════════════════════════════════════════════════════

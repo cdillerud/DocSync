@@ -577,6 +577,210 @@ def patch_business_context_expansion(path: Path) -> None:
 '''
     raw = replace_once(raw, old_score, new_score, "REV10 reference-family prefilter scoring")
 
+    old_selector = '''def _round_robin_prefilter_labels(
+    labels: Sequence[Dict[str, Any]],
+    deficits: Sequence[Dict[str, Any]],
+    *,
+    excluded_source_item_ids: Set[str],
+    already_selected_source_item_ids: Set[str],
+    max_candidates: int,
+) -> List[Dict[str, Any]]:
+    target_routes = {str(row["route_path"]) for row in deficits}
+    by_route: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    excluded = {str(value) for value in excluded_source_item_ids}
+    already = {str(value) for value in already_selected_source_item_ids}
+    for source in labels:
+        row = dict(source)
+        item_id = str(row.get("item_id") or "")
+        route = normalize_route_path(row.get("route_path"))
+        if not item_id or item_id in excluded or item_id in already or route not in target_routes:
+            continue
+        score = _candidate_prefilter_score(row, deficits)
+        if score < 0:
+            continue
+        row["_business_context_prefilter_score"] = score
+        by_route[route].append(row)
+    for rows in by_route.values():
+        rows.sort(
+            key=lambda row: (
+                int(row.get("_business_context_prefilter_score") or 0),
+                str(row.get("modified_at") or ""),
+                str(row.get("file_name") or ""),
+                str(row.get("item_id") or ""),
+            ),
+            reverse=True,
+        )
+    selected: List[Dict[str, Any]] = []
+    indices: Counter[str] = Counter()
+    routes = sorted(by_route)
+    while len(selected) < max(0, int(max_candidates)):
+        progressed = False
+        for route in routes:
+            idx = indices[route]
+            rows = by_route[route]
+            if idx >= len(rows):
+                continue
+            selected.append(rows[idx])
+            indices[route] += 1
+            progressed = True
+            if len(selected) >= max_candidates:
+                break
+        if not progressed:
+            break
+    return selected
+'''
+    new_selector = '''def _candidate_prefilter_score_for_deficit(
+    label: Dict[str, Any],
+    deficit: Dict[str, Any],
+) -> int:
+    route = normalize_route_path(label.get("route_path"))
+    if not route or route != normalize_route_path(deficit.get("route_path")):
+        return -1
+    pseudo = {"file_name": str(label.get("file_name") or "")}
+    pseudo_signature = authority_business_signature(pseudo)
+    pseudo_semantics = semantic_features(pseudo)
+    pseudo_reference_family = reference_family(pseudo)
+    lower = str(label.get("file_name") or "").lower()
+
+    local = 1
+    vendor = str(deficit.get("vendor") or "")
+    if vendor:
+        terms = _vendor_filename_terms(vendor)
+        if terms and any(term in lower for term in terms):
+            local += 5
+    signature = set(deficit.get("business_signature") or [])
+    overlap = signature.intersection(pseudo_signature)
+    local += min(8, 3 * len(overlap))
+    required_semantics = set(deficit.get("required_semantics") or [])
+    if required_semantics and required_semantics.issubset(pseudo_semantics):
+        local += 8
+    required_reference_family = str(deficit.get("required_reference_family") or "")
+    if required_reference_family and pseudo_reference_family == required_reference_family:
+        local += 8
+    return local
+
+
+def _round_robin_prefilter_labels(
+    labels: Sequence[Dict[str, Any]],
+    deficits: Sequence[Dict[str, Any]],
+    *,
+    excluded_source_item_ids: Set[str],
+    already_selected_source_item_ids: Set[str],
+    max_candidates: int,
+) -> List[Dict[str, Any]]:
+    """Allocate hydration candidates across TRAIN deficits, not merely routes.
+
+    REV10 originally round-robined by route. With many vendor/reference-specific
+    deficits under one route, the first few high-scoring files for that route
+    could consume the entire hydration slice while other deficits on the same
+    route received no candidate at all. This selector preserves the same
+    TRAIN-only deficit contract and exact human route label, but gives each
+    deficit a bounded opportunity to contribute candidates before taking a
+    second candidate for already-covered deficits.
+    """
+    limit = max(0, int(max_candidates))
+    if limit <= 0 or not deficits:
+        return []
+
+    excluded = {str(value) for value in excluded_source_item_ids}
+    already = {str(value) for value in already_selected_source_item_ids}
+    target_routes = {
+        normalize_route_path(row.get("route_path"))
+        for row in deficits
+        if normalize_route_path(row.get("route_path"))
+    }
+
+    by_route: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for source in labels:
+        row = dict(source)
+        item_id = str(row.get("item_id") or "")
+        route = normalize_route_path(row.get("route_path"))
+        if (
+            not item_id
+            or item_id in excluded
+            or item_id in already
+            or route not in target_routes
+        ):
+            continue
+        by_route[route].append(row)
+
+    per_deficit_cap = max(
+        2,
+        min(
+            12,
+            int(math.ceil(limit / max(1, len(deficits)))) + 2,
+        ),
+    )
+    buckets: List[List[Dict[str, Any]]] = []
+    for deficit_index, deficit in enumerate(deficits):
+        route = normalize_route_path(deficit.get("route_path"))
+        ranked: List[Dict[str, Any]] = []
+        for source in by_route.get(route, []):
+            score = _candidate_prefilter_score_for_deficit(source, deficit)
+            if score < 0:
+                continue
+            row = dict(source)
+            row["_business_context_prefilter_score"] = score
+            row["_business_context_prefilter_deficit_index"] = deficit_index
+            row["_business_context_prefilter_deficit_kind"] = str(
+                deficit.get("kind") or ""
+            )
+            ranked.append(row)
+        ranked.sort(
+            key=lambda row: (
+                int(row.get("_business_context_prefilter_score") or 0),
+                str(row.get("modified_at") or ""),
+                str(row.get("file_name") or ""),
+                str(row.get("item_id") or ""),
+            ),
+            reverse=True,
+        )
+        buckets.append(ranked[:per_deficit_cap])
+
+    selected: List[Dict[str, Any]] = []
+    selected_ids: Set[str] = set()
+    indices = [0 for _ in buckets]
+    while len(selected) < limit:
+        progressed = False
+        for bucket_index, rows in enumerate(buckets):
+            while indices[bucket_index] < len(rows):
+                row = rows[indices[bucket_index]]
+                indices[bucket_index] += 1
+                item_id = str(row.get("item_id") or "")
+                if not item_id or item_id in selected_ids:
+                    continue
+                selected.append(row)
+                selected_ids.add(item_id)
+                progressed = True
+                break
+            if len(selected) >= limit:
+                break
+        if not progressed:
+            break
+    return selected
+'''
+    raw = replace_once(
+        raw,
+        old_selector,
+        new_selector,
+        "REV10 deficit-aware hydration prefilter",
+    )
+
+    old_candidate_limit = '''    candidate_limit = min(len(labels), max(0, int(max_additional)) * 4)
+'''
+    new_candidate_limit = '''    # REV11 evidence-discovery pass: hydrate a modestly broader, deficit-aware
+    # candidate slice. This does not increase the number of TRAIN examples that
+    # may be admitted (max_additional is unchanged); it only reduces false
+    # negatives in pre-hydration discovery.
+    candidate_limit = min(len(labels), max(0, int(max_additional)) * 6)
+'''
+    raw = replace_once(
+        raw,
+        old_candidate_limit,
+        new_candidate_limit,
+        "REV11 evidence-discovery candidate breadth",
+    )
+
     require(
         "same_vendor_document_type_route_support" in raw,
         "REV10 same-vendor route-support deficits missing",

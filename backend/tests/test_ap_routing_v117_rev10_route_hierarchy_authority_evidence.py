@@ -8,6 +8,7 @@ from services.ap_routing_ai_primary_service import (
 from services.ap_routing_decision_service import RoutePrediction
 from services.ap_routing_business_context_expansion_service import (
     _matches_deficit,
+    _round_robin_prefilter_labels,
     build_train_business_context_deficits,
 )
 from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
@@ -338,6 +339,65 @@ def test_rev10_reference_family_expansion_excludes_descriptor_only_and_dnp():
         and row["route_path"] == "DO NOT PAY"
         for row in deficits
     )
+
+
+def test_rev10_prefilter_round_robins_by_deficit_within_same_route():
+    route = "Dropship Not International/Freight/Freight Issues"
+    deficits = [
+        {
+            "kind": "same_vendor_document_type_route_support",
+            "route_path": route,
+            "vendor": "Vendor Alpha",
+            "document_type": "AP_Invoice",
+            "business_signature": [],
+            "required_semantics": [],
+            "required_reference_family": "",
+            "additional_support_needed": 2,
+        },
+        {
+            "kind": "same_vendor_document_type_route_support",
+            "route_path": route,
+            "vendor": "Vendor Beta",
+            "document_type": "AP_Invoice",
+            "business_signature": [],
+            "required_semantics": [],
+            "required_reference_family": "",
+            "additional_support_needed": 2,
+        },
+    ]
+    labels = [
+        {
+            "item_id": "a-new",
+            "route_path": route,
+            "file_name": "Vendor Alpha invoice newest.pdf",
+            "modified_at": "2026-09-10T00:00:00Z",
+        },
+        {
+            "item_id": "a-old",
+            "route_path": route,
+            "file_name": "Vendor Alpha invoice older.pdf",
+            "modified_at": "2026-09-09T00:00:00Z",
+        },
+        {
+            "item_id": "b-one",
+            "route_path": route,
+            "file_name": "Vendor Beta invoice.pdf",
+            "modified_at": "2026-09-08T00:00:00Z",
+        },
+    ]
+
+    selected = _round_robin_prefilter_labels(
+        labels,
+        deficits,
+        excluded_source_item_ids=set(),
+        already_selected_source_item_ids=set(),
+        max_candidates=2,
+    )
+    names = [row["file_name"] for row in selected]
+
+    assert len(selected) == 2
+    assert any("Alpha" in name for name in names)
+    assert any("Beta" in name for name in names)
 
 
 def test_rev10_preserves_existing_learned_autonomy_confidence_floor():

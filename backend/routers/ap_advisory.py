@@ -363,9 +363,9 @@ async def ap_profile_drift(
 ):
     """Vendor profile drift summary for AP."""
     db = get_db()
-    from services.ap_invoice_profile_drift_service import get_ap_profile_drift_summary
-    return await get_ap_profile_drift_summary(
-        db, date_from=date_from, date_to=date_to, vendor_no=vendor_no,
+    from services.unified_learning_service import get_profile_drift_summary, AP_CONFIG
+    return await get_profile_drift_summary(
+        db, AP_CONFIG, date_from=date_from, date_to=date_to, entity_no=vendor_no,
         drift_risk=drift_risk, suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
@@ -374,16 +374,16 @@ async def ap_profile_drift(
 async def ap_vendor_drift_detail(vendor_no: str):
     """Detailed drift analysis for one AP vendor."""
     db = get_db()
-    from services.ap_invoice_profile_drift_service import get_ap_vendor_drift_detail
-    return await get_ap_vendor_drift_detail(db, vendor_no)
+    from services.unified_learning_service import get_entity_drift_detail, AP_CONFIG
+    return await get_entity_drift_detail(db, AP_CONFIG, vendor_no)
 
 
 @router.get("/profile-change-history/{vendor_no}")
 async def ap_change_history(vendor_no: str, limit: int = Query(50, ge=1, le=200)):
     """Full change history with pre/post snapshots for an AP vendor."""
     db = get_db()
-    from services.ap_invoice_profile_drift_service import get_ap_change_history
-    return await get_ap_change_history(db, vendor_no, limit=limit)
+    from services.unified_learning_service import get_drift_change_history, AP_CONFIG
+    return await get_drift_change_history(db, AP_CONFIG, vendor_no, limit=limit)
 
 
 @router.get("/vendor-hotspots")

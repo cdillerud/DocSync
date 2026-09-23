@@ -1009,11 +1009,11 @@ async def profile_drift_summary(
 ):
     """Profile drift summary across all customers with applied changes."""
     from deps import get_db
-    from services.sales_order_profile_drift_service import get_profile_drift_summary
+    from services.unified_learning_service import get_profile_drift_summary, SALES_CONFIG
     db = get_db()
     return await get_profile_drift_summary(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, drift_risk=drift_risk,
+        db, SALES_CONFIG, date_from=date_from, date_to=date_to,
+        entity_no=customer_no, drift_risk=drift_risk,
         suggestion_type=suggestion_type, applied_by=applied_by,
     )
 
@@ -1022,18 +1022,18 @@ async def profile_drift_summary(
 async def profile_drift_detail(customer_id: str):
     """Detailed drift analysis for a single customer."""
     from deps import get_db
-    from services.sales_order_profile_drift_service import get_customer_drift_detail
+    from services.unified_learning_service import get_entity_drift_detail, SALES_CONFIG
     db = get_db()
-    return await get_customer_drift_detail(db, customer_id)
+    return await get_entity_drift_detail(db, SALES_CONFIG, customer_id)
 
 
 @router.get("/sales-learning/profile-change-history/{customer_id}")
 async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, le=200)):
     """Full change history with pre/post snapshots."""
     from deps import get_db
-    from services.sales_order_profile_drift_service import get_change_history
+    from services.unified_learning_service import get_drift_change_history, SALES_CONFIG
     db = get_db()
-    return await get_change_history(db, customer_id, limit=limit)
+    return await get_drift_change_history(db, SALES_CONFIG, customer_id, limit=limit)
 
 
 # =============================================================================

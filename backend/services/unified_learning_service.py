@@ -489,6 +489,68 @@ async def batch_calibrate(
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Profile Drift & Change History
+# ═══════════════════════════════════════════════════════════════════════════
+# Each pipeline scores drift against different profile signals (AP: known
+# aliases, amount-range swings; Sales: ship-tos, occasional items, profile
+# richness) against different thresholds tuned to that profile schema.
+# These delegate to each pipeline's own assessment rather than force one
+# generic risk model onto two different profile shapes.
+
+async def get_profile_drift_summary(
+    db, cfg: LearningConfig,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    entity_no: Optional[str] = None,
+    drift_risk: Optional[str] = None,
+    suggestion_type: Optional[str] = None,
+    applied_by: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Summarize profile drift across all entities with applied changes."""
+    if cfg.label == "AP Invoice":
+        from services.ap_invoice_profile_drift_service import get_ap_profile_drift_summary
+        return await get_ap_profile_drift_summary(
+            db, date_from=date_from, date_to=date_to, vendor_no=entity_no,
+            drift_risk=drift_risk, suggestion_type=suggestion_type, applied_by=applied_by,
+        )
+
+    if cfg.label == "Sales Order":
+        from services.sales_order_profile_drift_service import get_profile_drift_summary as _get_so_drift_summary
+        return await _get_so_drift_summary(
+            db, date_from=date_from, date_to=date_to, customer_no=entity_no,
+            drift_risk=drift_risk, suggestion_type=suggestion_type, applied_by=applied_by,
+        )
+
+    return {"error": f"get_profile_drift_summary: no handler wired for pipeline '{cfg.label}'"}
+
+
+async def get_entity_drift_detail(db, cfg: LearningConfig, entity_no: str) -> Dict[str, Any]:
+    """Detailed drift analysis for a single entity."""
+    if cfg.label == "AP Invoice":
+        from services.ap_invoice_profile_drift_service import get_ap_vendor_drift_detail
+        return await get_ap_vendor_drift_detail(db, entity_no)
+
+    if cfg.label == "Sales Order":
+        from services.sales_order_profile_drift_service import get_customer_drift_detail
+        return await get_customer_drift_detail(db, entity_no)
+
+    return {"error": f"get_entity_drift_detail: no handler wired for pipeline '{cfg.label}'"}
+
+
+async def get_drift_change_history(db, cfg: LearningConfig, entity_no: str, limit: int = 50) -> Dict[str, Any]:
+    """Full change history with pre/post snapshots for an entity."""
+    if cfg.label == "AP Invoice":
+        from services.ap_invoice_profile_drift_service import get_ap_change_history
+        return await get_ap_change_history(db, entity_no, limit=limit)
+
+    if cfg.label == "Sales Order":
+        from services.sales_order_profile_drift_service import get_change_history as _get_so_change_history
+        return await _get_so_change_history(db, entity_no, limit=limit)
+
+    return {"error": f"get_drift_change_history: no handler wired for pipeline '{cfg.label}'"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Cross-Pipeline Unified View
 # ═══════════════════════════════════════════════════════════════════════════
 

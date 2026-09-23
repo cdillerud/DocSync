@@ -113,6 +113,12 @@ def test_rev10_prompt_requires_topology_before_workflow_and_parent_before_unsupp
     assert "choose the supported parent" in prompt
     assert "Filename comments and historical notes" in prompt
     assert "verified PO, purchase receipt, or BC transaction" in prompt
+    assert "Do not stop at a workflow parent merely because it is broader" in prompt
+    assert "Distinguish sibling leaves by CURRENT evidence" in prompt
+    assert "The exact phrase cost variance is discriminating workflow evidence" in prompt
+    assert "short paid, underpaid, balance difference" in prompt
+    assert "Inventory, warehouse receipt, packing-list, BOL, photo, and transfer semantics" in prompt
+    assert "Special top-level queues such as Meg to Process, Rhonda - Issues, and Miscellaneous" in prompt
 
 
 def test_rev10_same_vendor_route_support_deficit_is_train_only():

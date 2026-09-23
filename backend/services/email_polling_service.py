@@ -824,10 +824,23 @@ async def _email_polling_worker_inner():
 # =========================================================================
 
 async def run_sales_email_poll():
-    """Poll the Sales intake mailbox for new documents."""
-    from sales_module import (
-        ingest_sales_document, check_sales_duplicate, record_sales_mail_log,
-    )
+    """Poll the Sales intake mailbox for new documents.
+
+    Historically this called sales_module.ingest_sales_document(), a
+    separate classification path whose AI step silently falls back to a
+    crude keyword-matcher whenever EMERGENT_LLM_KEY is unset (which it is,
+    in this deployment). Every document ingested through that path landed
+    in the sales_documents collection stuck at the fallback's ~0.6-0.7
+    confidence, "Keyword match (score: N)" reasoning, and no real
+    customer/PO extraction — flooding the review queue with mislabeled
+    internal correspondence (e.g. pick-ticket forwards) rather than real
+    customer POs. Real customer POs already flow correctly through
+    document_bytes_intake_service.intake_document_from_bytes() into
+    hub_documents (the same function the AP mailbox poller below uses).
+    Switched 2026-09-23 to use that one real pipeline for both mailboxes
+    instead of maintaining two.
+    """
+    from sales_module import check_sales_duplicate, record_sales_mail_log
 
     run_id = str(uuid.uuid4())[:8]
     if not SALES_EMAIL_POLLING_USER:
@@ -926,20 +939,27 @@ async def run_sales_email_poll():
                             continue
 
                         try:
-                            result = await ingest_sales_document(
+                            # Lazy import to avoid circular dependency (matches the
+                            # AP mailbox poller's pattern above in this same file).
+                            from services.document_bytes_intake_service import intake_document_from_bytes
+                            result = await intake_document_from_bytes(
                                 file_content=content_bytes, filename=filename,
-                                source="email", email_sender=sender, email_subject=subject,
-                                email_body=body_preview, email_message_id=internet_msg_id,
-                                correlation_id=run_id,
+                                content_type=content_type, source="email",
+                                sender=sender, subject=subject, email_id=internet_msg_id,
+                                mailbox_category=normalize_mailbox_category("SALES"),
+                            )
+                            doc_id = (
+                                result.get("document_id")
+                                or result.get("document", {}).get("id")
                             )
                             await record_sales_mail_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=content_hash,
                                 filename=filename, status="Ingested",
-                                document_id=result.get("document_id"),
+                                document_id=doc_id,
                             )
                             stats["attachments_ingested"] += 1
-                            logger.info("[SalesPoll:%s] Ingested: %s -> %s", run_id, filename, result.get("document_type"))
+                            logger.info("[SalesPoll:%s] Ingested via unified intake: %s -> hub_documents/%s", run_id, filename, doc_id)
                         except Exception as e:
                             stats["attachments_failed"] += 1
                             stats["errors"].append(f"Ingestion failed for {filename}: {str(e)}")

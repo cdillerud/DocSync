@@ -253,11 +253,10 @@ async def reprocess_document_inner(
         )
         if po_result.get("po_number"):
             extracted_fields["_po_resolution_number"] = po_result["po_number"]
-        valid_candidates = [
-            candidate["normalized"]
-            for candidate in po_result.get("candidates_valid", [])
-            if candidate.get("valid_format") and not candidate.get("is_non_po")
-        ]
+        # candidates_valid from resolve_po() is already a list of plain
+        # normalized strings, pre-filtered for valid format / non-PO
+        # exclusion -- no further filtering needed here.
+        valid_candidates = po_result.get("candidates_valid", [])
         if valid_candidates:
             extracted_fields["_po_all_candidates"] = valid_candidates
     except Exception as exc:

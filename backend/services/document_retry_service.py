@@ -16,8 +16,7 @@ from services.document_orchestration_service import (
     run_upload_and_link_workflow as _run_upload_and_link_workflow,
 )
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 
 async def retry_document(doc_id: str):

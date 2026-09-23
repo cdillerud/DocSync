@@ -53,10 +53,7 @@ from services.vendor_matching import (
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = Path(
-    os.environ.get("UPLOAD_DIR", "/app/backend/uploads")
-)
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 
 def _derive_workflow_status_simple(

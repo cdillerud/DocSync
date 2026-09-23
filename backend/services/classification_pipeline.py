@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("classification_pipeline")
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
 
 

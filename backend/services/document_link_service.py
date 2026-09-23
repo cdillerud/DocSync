@@ -16,8 +16,7 @@ from services.bc_link_service import (
     link_document_to_bc as _link_document_to_bc,
 )
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 
 async def link_document(doc_id: str, bc_record_id: str):

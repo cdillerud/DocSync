@@ -26,7 +26,7 @@ logger = logging.getLogger("reprocess_comparison")
 
 router = APIRouter(prefix="/reprocess-comparison", tags=["Reprocess Comparison"])
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 
 async def _recover_file_to_disk(doc: dict, doc_id: str, db) -> Optional[Path]:

@@ -26,8 +26,7 @@ from services.document_learning_hooks import (
     record_document_learning,
 )
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 
 def _get_default_job_types():

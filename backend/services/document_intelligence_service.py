@@ -20,7 +20,7 @@ from models.document_types import DEFAULT_JOB_TYPES
 from services.automation_helpers import utcnow, create_activity
 
 # Upload directory — same convention as server.py / document_handlers.py
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
+from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document_reprocess_service.py)
 
 logger = logging.getLogger(__name__)
 

@@ -175,7 +175,7 @@ def _check_obvious_packing_list(file_path: str, file_name: str) -> dict | None:
                         logger.info("Pre-AI packing list detection: text match (%d indicators) in '%s'", len(matches), file_name)
                         fields = {"packing_list_detected_by": "text_pattern"}
                         # Extract PO reference
-                        po_m = _re.search(r'(?:customer\s+po|po\s*#?|purchase\s+order)\s*[:\s]*([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                        po_m = _re.search(r'(?:customer\s+po\b|\bpo\b\s*#?|purchase\s+order)\s*[:\s]*(?=[A-Z0-9-]*\d)([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
                         order_m = _re.search(r'order\s+id\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
                         customer_m = _re.search(r'customer\s+id\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
                         if po_m:
@@ -281,8 +281,8 @@ def _check_obvious_bol(file_path: str, file_name: str) -> dict | None:
                         # Try to pull shipper/consignee
                         shipper_m = _re.search(r'(?:shipper|from)[:\s]*([^\n]{5,60})', page_text, _re.IGNORECASE)
                         consignee_m = _re.search(r'consignee[:\s]*([^\n]{5,60})', page_text, _re.IGNORECASE)
-                        bol_num_m = _re.search(r'(?:bol|b/l|bl)\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
-                        pro_m = _re.search(r'pro\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        bol_num_m = _re.search(r'(?:\bbol|\bb/l|\bbl)\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
+                        pro_m = _re.search(r'\bpro\s*(?:#|no\.?|number)?\s*[:\s]*([A-Z0-9-]{3,20})', page_text, _re.IGNORECASE)
                         if shipper_m:
                             fields["vendor"] = shipper_m.group(1).strip()
                         if consignee_m:
@@ -306,11 +306,8 @@ def _check_obvious_bol(file_path: str, file_name: str) -> dict | None:
 
 async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     """
-    Use Gemini to analyze a document and extract structured data.
+    Use Azure OpenAI (GamerLLM) to analyze a document and extract structured data.
     Returns classification and extracted fields.
-
-    For multi-page PDFs, extracts only the first page to avoid
-    classification confusion from supporting documents on later pages.
 
     Heuristics provide fast classification for obvious types, but the LLM
     is ALWAYS called for full field extraction so that documents never end
@@ -324,28 +321,25 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         or _check_obvious_bol(file_path, file_name)
     )
 
-    if not EMERGENT_LLM_KEY:
-        # Without LLM key, return heuristic result or empty
+    from services.azure_openai_classifier import is_azure_configured
+    if not is_azure_configured():
         if heuristic_result:
             return heuristic_result
         return {
-            "error": "EMERGENT_LLM_KEY not configured",
+            "error": "Azure OpenAI not configured",
             "suggested_job_type": "Unknown",
             "confidence": 0.0,
             "extracted_fields": {},
         }
 
-    # Always call the LLM for full field extraction
     llm_result = await _call_llm_for_extraction(file_path, file_name)
 
     if heuristic_result:
-        # Heuristic wins for classification, LLM provides richer extraction
         heuristic_type = heuristic_result["suggested_job_type"]
         heuristic_confidence = heuristic_result["confidence"]
         heuristic_fields = heuristic_result.get("extracted_fields", {})
 
         if llm_result and not llm_result.get("error"):
-            # Merge: start with LLM fields, overlay with heuristic fields
             llm_fields = llm_result.get("extracted_fields", {})
             merged_fields = {**llm_fields, **{k: v for k, v in heuristic_fields.items() if v}}
             logger.info(
@@ -358,146 +352,51 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
                 "confidence": heuristic_confidence,
                 "extracted_fields": merged_fields,
                 "reasoning": f"Heuristic classification ({heuristic_result.get('model', 'heuristic')}), LLM extraction",
-                "model": heuristic_result.get("model", "heuristic") + "+gemini-2.5-pro",
+                "model": heuristic_result.get("model", "heuristic") + f"+{llm_result.get('model', 'azure')}",
                 "page_count": llm_result.get("page_count", 1),
                 "classified_from_page": llm_result.get("classified_from_page"),
             }
         else:
-            # LLM failed — try Azure for extraction before falling back to heuristic-only
             logger.warning(
-                "LLM extraction failed for '%s', trying Azure fallback: %s",
+                "LLM extraction failed for '%s': %s",
                 file_name, llm_result.get("error") if llm_result else "null",
             )
-            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_extraction_failed")
-            if azure_result and not azure_result.get("error"):
-                # Use heuristic type but merge Azure extracted fields
-                azure_fields = azure_result.get("extracted_fields", {})
-                merged_fields = {**azure_fields, **{k: v for k, v in heuristic_fields.items() if v}}
-                return {
-                    "suggested_job_type": heuristic_type,
-                    "confidence": heuristic_confidence,
-                    "extracted_fields": merged_fields,
-                    "reasoning": "Heuristic classification, Azure OpenAI extraction",
-                    "model": heuristic_result.get("model", "heuristic") + f"+{azure_result.get('model', 'azure')}",
-                }
             return heuristic_result
 
-    # No heuristic match — use LLM result directly
     if llm_result:
-        # If Gemini confidence is below threshold, try Azure OpenAI fallback
-        gemini_confidence = llm_result.get("confidence", 0.0) if not llm_result.get("error") else 0.0
-        if gemini_confidence < 0.70:
-            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_low_confidence")
-            if azure_result and azure_result.get("confidence", 0) > gemini_confidence:
-                logger.info(
-                    "Azure fallback selected for '%s': azure=%.2f > gemini=%.2f",
-                    file_name, azure_result["confidence"], gemini_confidence,
-                )
-                return azure_result
         return llm_result
 
-    # Both heuristic and Gemini failed — try Azure as last resort
-    azure_result = await _try_azure_fallback(file_path, file_name, "gemini_null_result")
-    if azure_result and not azure_result.get("error"):
-        return azure_result
-
     return {
-        "error": "Both heuristic and LLM extraction failed",
+        "error": "LLM extraction failed and no heuristic match",
         "suggested_job_type": "Unknown",
         "confidence": 0.0,
         "extracted_fields": {},
     }
 
 
-async def _try_azure_fallback(file_path: str, file_name: str, trigger_reason: str) -> dict:
-    """Attempt Azure OpenAI classification as a fallback.
-
-    Extracts raw text from the document, then calls Azure OpenAI.
-    Returns None if Azure is not configured or fails entirely.
-    """
-    from services.azure_openai_classifier import (
-        is_azure_configured, classify_document_with_azure_openai,
-    )
-    if not is_azure_configured():
-        logger.debug("Azure OpenAI fallback skipped (not configured), trigger=%s", trigger_reason)
-        return None
-
-    # Extract text from the document for Azure (text-only API)
-    raw_text = ""
-    try:
-        ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
-        if ext == "pdf":
-            from pypdf import PdfReader
-            reader = PdfReader(file_path)
-            pages_text = []
-            for page in reader.pages[:3]:  # first 3 pages
-                pages_text.append(page.extract_text() or "")
-            raw_text = "\n".join(pages_text)
-        else:
-            with open(file_path, "r", errors="ignore") as f:
-                raw_text = f.read(15000)
-    except Exception as te:
-        logger.warning("Azure fallback: text extraction failed for '%s': %s", file_name, te)
-
-    if not raw_text.strip():
-        logger.debug("Azure fallback: no text extracted from '%s'", file_name)
-        return None
-
-    logger.info("Azure fallback triggered for '%s' (reason=%s)", file_name, trigger_reason)
-    result = await classify_document_with_azure_openai(raw_text, file_name)
-    return result
-
-
 async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
-    """Call the LLM (Gemini) to classify and extract fields from a document."""
+    """Call Azure OpenAI (GamerLLM) to classify and extract fields from a document."""
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
 
         ext = file_name.lower().split(".")[-1] if "." in file_name else ""
         mime_map = {
-            "pdf": "application/pdf",
-            "png": "image/png",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "tiff": "image/tiff",
-            "gif": "image/gif",
-            "txt": "text/plain",
-            "csv": "text/csv",
-            "html": "text/html",
-            "json": "application/json",
-            "xml": "application/xml",
+            "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg",
+            "jpeg": "image/jpeg", "tiff": "image/tiff", "gif": "image/gif",
+            "txt": "text/plain", "csv": "text/csv", "html": "text/html",
+            "json": "application/json", "xml": "application/xml",
         }
         mime_type = mime_map.get(ext, "text/plain")
 
-        # For multi-page PDFs, extract just page 1 to avoid misclassification
-        actual_file_path = file_path
-        temp_pdf_path = None
-        page_count = 1
-        if ext == "pdf":
-            try:
-                actual_file_path, temp_pdf_path, page_count = _extract_first_page_pdf(file_path)
-                if page_count > 1:
-                    logger.info(
-                        "Multi-page PDF (%d pages): sending only page 1 for classification: %s",
-                        page_count, file_name,
-                    )
-            except Exception as e:
-                logger.warning("Failed to extract first page from %s: %s — sending full PDF", file_name, e)
-                actual_file_path = file_path
-
-        # Build dynamic prompt with learned examples
         dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
         try:
             from services.classification_feedback_service import (
-                build_few_shot_prompt_section,
-                build_vendor_hints_prompt_section,
+                build_few_shot_prompt_section, build_vendor_hints_prompt_section,
             )
             few_shot_section = await build_few_shot_prompt_section()
             if few_shot_section:
                 dynamic_prompt = dynamic_prompt + "\n" + few_shot_section
                 logger.info("Injected few-shot examples into classification prompt")
-            
-            # FIX: Try to infer vendor from filename for vendor hint
             vendor_for_hint = ""
             try:
                 from services.vendor_inference_service import infer_vendor
@@ -513,14 +412,12 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
         except Exception as e:
             logger.debug("Few-shot injection skipped: %s", e)
 
-        # FIX: Add feedback loop context (learned corrections from user interactions)
         try:
             from services.feedback_loop_service import build_feedback_context_for_prompt
             from deps import get_db
             feedback_db = get_db()
             feedback_context = await build_feedback_context_for_prompt(
-                feedback_db,
-                vendor_id=vendor_for_hint if 'vendor_for_hint' in dir() else "",
+                feedback_db, vendor_id=vendor_for_hint if 'vendor_for_hint' in dir() else "",
             )
             if feedback_context:
                 dynamic_prompt = dynamic_prompt + "\n\n" + feedback_context
@@ -528,49 +425,77 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
         except Exception as e:
             logger.debug("Feedback loop injection skipped: %s", e)
 
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"classify-{uuid.uuid4()}",
-            system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-2.5-pro")
+        from services.llm_model_config import get_llm_model
+        model = get_llm_model()
 
-        file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)
-
-        bundle_note = ""
-        if page_count > 1:
-            bundle_note = (
-                f" NOTE: This is page 1 of a {page_count}-page document bundle. "
-                "Classify based on THIS page only (the primary/lead document). "
-                "Later pages contain supporting documents like BOLs or freight bills."
+        from services.azure_openai_classifier import (
+            AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_KEY, AZURE_API_VERSION,
+        )
+        if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_KEY and model):
+            raise RuntimeError(
+                "Azure OpenAI is not fully configured -- AZURE_OPENAI_ENDPOINT / "
+                "AZURE_OPENAI_KEY / AZURE_OPENAI_DEPLOYMENT must all be set in .env"
             )
 
+        image_b64_list = []
+        page_count = 1
+        pages_sent = 0
+        prompt_text_suffix = ""
+
+        if ext == "pdf":
+            image_b64_list, page_count, pages_sent = _rasterize_pdf_pages(file_path)
+        elif mime_type.startswith("image/"):
+            import base64
+            with open(file_path, "rb") as imgf:
+                image_b64_list = [base64.standard_b64encode(imgf.read()).decode("utf-8")]
+            pages_sent = 1
+        else:
+            with open(file_path, "r", errors="ignore") as textf:
+                prompt_text_suffix = f"\n\n--- DOCUMENT TEXT ---\n{textf.read(15000)}\n--- END ---"
+
+        bundle_note = ""
+        if page_count > pages_sent:
+            bundle_note = (
+                f" NOTE: This document has {page_count} pages; only the first "
+                f"{pages_sent} are shown. Classify based on the primary/lead "
+                "document (usually page 1) -- later unseen pages may contain "
+                "supporting documents like BOLs or freight bills."
+            )
+        elif page_count > 1:
+            bundle_note = (
+                f" NOTE: You are viewing all {page_count} pages of this document. "
+                "Classify based on the primary/lead document (usually page 1)."
+            )
+
+        prompt_text = (
+            "Please analyze this business document. "
+            "Classify the document and extract all relevant fields. "
+            "Also extract routing fields: is_international, is_tooling, is_storage_handling, "
+            "is_credit_memo, is_dunnage, freight_direction."
+            + bundle_note + " Respond with JSON only." + prompt_text_suffix
+        )
+
+        chat = LlmChat(
+            api_key=AZURE_OPENAI_KEY,
+            session_id=f"classify-{uuid.uuid4()}",
+            system_message=dynamic_prompt,
+        ).with_model("azure", model).with_params(
+            api_base=AZURE_OPENAI_ENDPOINT, api_version=AZURE_API_VERSION,
+        )
+
         user_message = UserMessage(
-            text=(
-                "Please analyze this business document. "
-                "Classify the document and extract all relevant fields. "
-                "Also extract routing fields: is_international, is_tooling, is_storage_handling, "
-                "is_credit_memo, is_dunnage, freight_direction."
-                + bundle_note
-                + " Respond with JSON only."
-            ),
-            file_contents=[file_content],
+            text=prompt_text,
+            file_contents=[ImageContent(image_base64=b64) for b64 in image_b64_list],
         )
 
         response = await chat.send_message(user_message)
 
-        # Clean up temp file
-        if temp_pdf_path:
-            try:
-                os.remove(temp_pdf_path)
-            except Exception:
-                pass
-
         response_text = response.strip()
         if response_text.startswith("```"):
-            lines = response_text.split("\n")
+            lines_ = response_text.split("\n")
             json_lines = []
             in_json = False
-            for line in lines:
+            for line in lines_:
                 if line.startswith("```json"):
                     in_json = True
                     continue
@@ -581,14 +506,11 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             response_text = "\n".join(json_lines)
 
         result = json.loads(response_text)
-
         extracted = result.get("extracted_fields", {})
         logger.info(
-            "LLM extraction result - doc_type: %s, confidence: %s, fields: %d, pages: %d",
-            result.get("document_type"),
-            result.get("confidence"),
-            len(extracted),
-            page_count,
+            "LLM extraction result - doc_type: %s, confidence: %s, fields: %d, pages_sent: %d/%d",
+            result.get("document_type"), result.get("confidence"),
+            len(extracted), pages_sent, page_count,
         )
 
         return {
@@ -596,19 +518,14 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             "confidence": float(result.get("confidence", 0.0)),
             "extracted_fields": extracted,
             "reasoning": result.get("reasoning", ""),
-            "model": "gemini-2.5-pro",
+            "model": f"azure/{model}",
             "page_count": page_count,
+            "pages_sent": pages_sent,
             "classified_from_page": 1 if page_count > 1 else None,
         }
 
     except Exception as e:
         logger.error("LLM extraction failed for '%s': %s", file_name, str(e))
-        # Clean up temp file on error
-        if 'temp_pdf_path' in dir() and temp_pdf_path:
-            try:
-                os.remove(temp_pdf_path)
-            except Exception:
-                pass
         return {
             "error": str(e),
             "suggested_job_type": "Unknown",
@@ -616,6 +533,37 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             "extracted_fields": {},
             "reasoning": f"Extraction failed: {str(e)}",
         }
+
+
+def _rasterize_pdf_pages(file_path: str, max_pages: int = None):
+    """
+    Rasterize up to max_pages of a PDF into base64-encoded PNGs for a
+    vision-capable LLM. Returns (image_b64_list, page_count, pages_sent).
+    """
+    import base64
+    import fitz  # PyMuPDF
+
+    if max_pages is None:
+        max_pages = int(os.environ.get("AZURE_MAX_EXTRACTION_PAGES", "5"))
+
+    doc = fitz.open(file_path)
+    page_count = doc.page_count
+    pages_to_send = min(page_count, max_pages)
+
+    if page_count > max_pages:
+        logger.info(
+            "PDF has %d pages; rasterizing only the first %d for extraction "
+            "(AZURE_MAX_EXTRACTION_PAGES=%d)",
+            page_count, pages_to_send, max_pages,
+        )
+
+    image_b64_list = []
+    for i in range(pages_to_send):
+        pix = doc[i].get_pixmap(dpi=200)
+        image_b64_list.append(base64.standard_b64encode(pix.tobytes("png")).decode("utf-8"))
+    doc.close()
+
+    return image_b64_list, page_count, pages_to_send
 
 
 def _extract_first_page_pdf(file_path: str):
@@ -1019,6 +967,12 @@ Return_Request: Return requests / RMAs / Credit Memos
 - Look for "Return", "RMA", "Credit", "Refund", "Credit Memo", "Adjustment"
 
 Unknown_Document: Cannot determine type confidently
+
+PO NUMBER EXTRACTION RULE (applies to all document types):
+- po_number must be the actual purchase order identifier, typically found next to a label such as "Purchase Order:", "Purchase Order Number:", "PO#", or "PO Number"
+- It is usually a short alphanumeric code (e.g., "PO-63444", "123456")
+- NEVER extract po_number from unrelated instructional text, bullet points, or requirement lists (e.g., a line reading "Delivery Appointment" is NOT a PO number, even though it may superficially resemble one)
+- If no clearly-labeled PO identifier is visible, leave po_number blank rather than guessing
 
 Always respond with valid JSON in this exact format:
 {

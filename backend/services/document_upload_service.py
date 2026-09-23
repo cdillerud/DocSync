@@ -21,8 +21,7 @@ from services.document_orchestration_service import (
 
 logger = logging.getLogger(__name__)
 
-UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", "/app/backend/uploads"))
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+from paths import UPLOAD_DIR  # single source of truth, matches document_reprocess_service.py
 
 
 def _get_workflow_enums():

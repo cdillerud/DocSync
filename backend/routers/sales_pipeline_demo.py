@@ -727,8 +727,7 @@ async def _run_batch_demo_bg(db, job_id: str):
 
         import base64 as b64mod
         from pathlib import Path
-        UPLOAD_DIR = Path("/app/backend/uploads")
-        UPLOAD_DIR.mkdir(exist_ok=True)
+        from paths import UPLOAD_DIR  # unified upload path
 
         # Save parent PDF to disk + DB
         parent_file_path = UPLOAD_DIR / parent_doc_id

@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY", "")
 AZURE_OPENAI_DEPLOYMENT = os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o")
-AZURE_API_VERSION = "2024-02-01"
+AZURE_API_VERSION = os.environ.get("AZURE_API_VERSION", "2024-10-21")
 
 
 def is_azure_configured() -> bool:

@@ -32,6 +32,16 @@ logger = logging.getLogger("main")
 import server
 from sales_module import sales_router
 
+# routes/sales_order_review.py registers its /order-intake/* endpoints onto
+# the shared `sales_router` object at import time (see its own module
+# docstring) rather than exposing a router to include directly. That import
+# was never added here, so the entire customer-PO review/approve/create-draft
+# surface (enrichment, preflight, and the BC sales-order-draft writer) has
+# been dead code since it was committed in fa439ef0 ("recover production
+# sales order workflow source") — reachable by nothing, regardless of the
+# AUTO_CREATE_SALES_ORDER_ENABLED flag. This import is the fix.
+import routes.sales_order_review  # noqa: F401
+
 from routers.automation_rules import router as automation_rules_router
 from routers.freight_routing import router as freight_routing_router
 from routers.label_corrections import router as label_corrections_router

@@ -11,22 +11,32 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, Map, FileSpreadsheet, Gauge, Network, FileSignature, Search
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ChevronDown, ShoppingCart, ClipboardList, Brain, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, TrendingUp, ClipboardCheck, Activity, Shield, FileSpreadsheet, Gauge, Network, FileSignature, Search, Plug, MoreHorizontal
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
 
 const API = process.env.REACT_APP_BACKEND_URL;
 
-// Core navigation — daily workflows + key modules
+// Primary navigation — the two active priorities: Square9 replacement
+// (Inbox/Search/Square9 Readiness/Decision Queue/Monitor) and Sales PO→SO
+// ingestion (Sales), plus the shared infra both depend on (Integrations, Settings).
 const navItems = [
   { to: '/', icon: Files, label: 'Inbox', exact: true },
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
-  { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
+  { to: '/integrations', icon: Plug, label: 'Integrations' },
+  { to: '/config', icon: Settings, label: 'Settings' },
+];
+
+// Everything else: real, working AP/analytics tooling — just not part of
+// either active priority right now. Collapsed by default so it doesn't
+// compete for attention. Nothing here was deleted; it's one click away.
+const moreNavItems = [
+  { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
   { to: '/inventory/health', icon: Activity, label: 'Inventory Health' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
@@ -38,8 +48,6 @@ const navItems = [
   { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
   { to: '/contracts', icon: FileSignature, label: 'Contracts' },
   { to: '/insights', icon: TrendingUp, label: 'Insights' },
-  { to: '/roadmap', icon: Map, label: 'Roadmap' },
-  { to: '/config', icon: Settings, label: 'Settings' },
 ];
 
 export default function Layout() {
@@ -49,6 +57,8 @@ export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, readEnv: '', writeEnv: '' });
   const [reviewBadge, setReviewBadge] = useState(0);
+  // Auto-expand "More" if the user is already on a deferred page (e.g. a bookmark), so it's never hidden mid-use.
+  const [moreOpen, setMoreOpen] = useState(() => moreNavItems.some((item) => location.pathname.startsWith(item.to)));
 
   // Fetch review queue badge count
   useEffect(() => {
@@ -119,6 +129,7 @@ export default function Layout() {
     if (path === '/roadmap') return 'Build Roadmap';
     if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';
+    if (path === '/integrations') return 'Integrations';
     if (path.startsWith('/documents/')) return 'Document Detail';
     if (path.startsWith('/review/')) return 'Sales Order Review';
     return 'GPI Hub';
@@ -166,6 +177,36 @@ export default function Layout() {
               data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
             >
               <Icon className="w-4 h-4 shrink-0" />
+              {label}
+            </NavLink>
+          ))}
+
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-all duration-150"
+            data-testid="nav-more-toggle"
+          >
+            <MoreHorizontal className="w-4 h-4 shrink-0" />
+            More
+            {moreOpen
+              ? <ChevronDown className="w-3.5 h-3.5 ml-auto" />
+              : <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
+          </button>
+          {moreOpen && moreNavItems.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              onClick={() => setSidebarOpen(false)}
+              className={({ isActive }) =>
+                `flex items-center gap-3 pl-6 pr-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ${
+                  isActive
+                    ? 'bg-primary/10 text-primary border-l-2 border-primary'
+                    : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                }`
+              }
+              data-testid={`nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
+            >
+              <Icon className="w-3.5 h-3.5 shrink-0" />
               {label}
               {label === 'Review Queue' && reviewBadge > 0 && (
                 <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1" data-testid="review-badge">

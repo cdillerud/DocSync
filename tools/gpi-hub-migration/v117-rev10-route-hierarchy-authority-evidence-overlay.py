@@ -183,7 +183,7 @@ def patch_ai_primary(path: Path) -> None:
 
     review_anchor = '''async def propose_ap_route_ai_primary(
 '''
-    review_helpers = '''def _route_hierarchy_parent_has_children(
+    review_helpers = r'''def _route_hierarchy_parent_has_children(
     route: str,
     learning_context: Optional[Dict[str, Any]],
 ) -> bool:

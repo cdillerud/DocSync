@@ -629,7 +629,38 @@ def patch_business_context_expansion(path: Path) -> None:
             break
     return selected
 '''
-    new_selector = '''def _candidate_prefilter_score_for_deficit(
+    new_selector = '''def _candidate_prefilter_affinity_for_deficit(
+    label: Dict[str, Any],
+    deficit: Dict[str, Any],
+) -> Dict[str, bool]:
+    pseudo = {"file_name": str(label.get("file_name") or "")}
+    pseudo_signature = authority_business_signature(pseudo)
+    pseudo_semantics = semantic_features(pseudo)
+    pseudo_reference_family = reference_family(pseudo)
+    lower = str(label.get("file_name") or "").lower()
+
+    vendor = str(deficit.get("vendor") or "")
+    vendor_terms = _vendor_filename_terms(vendor) if vendor else set()
+    signature = set(deficit.get("business_signature") or [])
+    required_semantics = set(deficit.get("required_semantics") or [])
+    required_reference_family = str(deficit.get("required_reference_family") or "")
+
+    return {
+        "vendor_requested": bool(vendor_terms),
+        "vendor_match": bool(vendor_terms and any(term in lower for term in vendor_terms)),
+        "signature_requested": bool(signature),
+        "signature_match": bool(signature and signature.issubset(pseudo_signature)),
+        "semantics_requested": bool(required_semantics),
+        "semantics_match": bool(required_semantics and required_semantics.issubset(pseudo_semantics)),
+        "reference_requested": bool(required_reference_family),
+        "reference_match": bool(
+            required_reference_family
+            and pseudo_reference_family == required_reference_family
+        ),
+    }
+
+
+def _candidate_prefilter_score_for_deficit(
     label: Dict[str, Any],
     deficit: Dict[str, Any],
 ) -> int:
@@ -726,6 +757,26 @@ def _round_robin_prefilter_labels(
                 deficit.get("kind") or ""
             )
             ranked.append(row)
+        # Prefer candidates whose filename already exhibits the deficit's
+        # requested vendor/reference/semantic/signature affinity. Critically,
+        # apply each preference only when at least one candidate actually
+        # exhibits it; otherwise fall back to the broader same-route pool so a
+        # sparse/opaque filename cannot starve the deficit completely.
+        affinities = [
+            (row, _candidate_prefilter_affinity_for_deficit(row, deficit))
+            for row in ranked
+        ]
+        for requested_key, match_key in (
+            ("vendor_requested", "vendor_match"),
+            ("reference_requested", "reference_match"),
+            ("semantics_requested", "semantics_match"),
+            ("signature_requested", "signature_match"),
+        ):
+            if affinities and any(meta.get(requested_key) for _, meta in affinities):
+                matched = [(row, meta) for row, meta in affinities if meta.get(match_key)]
+                if matched:
+                    affinities = matched
+        ranked = [row for row, _ in affinities]
         ranked.sort(
             key=lambda row: (
                 int(row.get("_business_context_prefilter_score") or 0),
@@ -784,6 +835,11 @@ def _round_robin_prefilter_labels(
     require(
         "same_vendor_document_type_route_support" in raw,
         "REV10 same-vendor route-support deficits missing",
+    )
+    require(
+        "_candidate_prefilter_affinity_for_deficit" in raw
+        and "apply each preference only when at least one candidate actually" in raw,
+        "REV11 deficit-affinity prefilter missing",
     )
     require(
         "rev10_generic_deficit_allowed" in raw

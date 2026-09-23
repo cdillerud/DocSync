@@ -400,6 +400,40 @@ def test_rev10_prefilter_round_robins_by_deficit_within_same_route():
     assert any("Beta" in name for name in names)
 
 
+def test_rev10_prefilter_vendor_affinity_falls_back_when_filenames_are_opaque():
+    route = "Meg to Process"
+    deficits = [
+        {
+            "kind": "same_vendor_document_type_route_support",
+            "route_path": route,
+            "vendor": "Vendor Gamma",
+            "document_type": "AP_Invoice",
+            "business_signature": [],
+            "required_semantics": [],
+            "required_reference_family": "",
+            "additional_support_needed": 1,
+        }
+    ]
+    labels = [
+        {
+            "item_id": "opaque-one",
+            "route_path": route,
+            "file_name": "78277 230829 1818621A.pdf",
+            "modified_at": "2026-09-08T00:00:00Z",
+        }
+    ]
+
+    selected = _round_robin_prefilter_labels(
+        labels,
+        deficits,
+        excluded_source_item_ids=set(),
+        already_selected_source_item_ids=set(),
+        max_candidates=1,
+    )
+
+    assert [row["item_id"] for row in selected] == ["opaque-one"]
+
+
 def test_rev10_preserves_existing_learned_autonomy_confidence_floor():
     signature = inspect.signature(evaluate_learned_autonomy)
     assert signature.parameters["minimum_model_confidence"].default == 0.90

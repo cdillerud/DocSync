@@ -81,3 +81,53 @@ def test_rev11_transport_has_no_emergent_key_dependency():
     source = open(svc.__file__, "r", encoding="utf-8").read()
     assert "EMERGENT_LLM_KEY" not in source
     assert "emergentintegrations" not in source
+
+def test_rev11_document_completion_posts_pdf_to_responses(monkeypatch, tmp_path):
+    captured = {}
+
+    async def fake_request(payload):
+        captured.update(payload)
+        return {
+            "output": [
+                {
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": '{"document_type":"AP_Invoice","confidence":0.9,"extracted_fields":{}}',
+                        }
+                    ]
+                }
+            ]
+        }
+
+    pdf = tmp_path / "sample.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n% synthetic transport payload\n")
+    monkeypatch.setattr(svc, "_responses_request", fake_request)
+
+    result = asyncio.run(
+        svc.gamer_azure_document_completion(
+            str(pdf),
+            prompt="classify",
+            model="gpt-5.6-sol",
+            system_message="json only",
+        )
+    )
+
+    content = captured["input"][0]["content"]
+    assert captured["model"] == "gpt-5.6-sol"
+    assert content[0]["type"] == "input_file"
+    assert content[0]["filename"] == "sample.pdf"
+    assert content[0]["file_data"].startswith("data:application/pdf;base64,")
+    assert result.startswith('{"document_type":"AP_Invoice"')
+
+
+def test_rev11_document_intelligence_has_no_emergent_or_key_fallback():
+    from services import document_intel_helpers as helpers
+
+    source = open(helpers.__file__, "r", encoding="utf-8").read()
+    assert "EMERGENT_LLM_KEY" not in source
+    assert "emergentintegrations" not in source
+    assert "azure_openai_classifier" not in source
+    assert 'DOCUMENT_INTEL_LLM_SOURCE != "gamer_azure"' in source
+    assert "gamer_azure_document_completion" in source
+

@@ -49,12 +49,20 @@
   "authority_thresholds_changed": false,
   "production_mutation_authorized": false,
   "frozen_holdout_evaluated_during_selection": false,
-  "notes": "Selection pin for pre-production V117 qualification only. REV11 moves AP routing and supporting-reference LLM transport off Emergent to GamerLLM Azure OpenAI using managed identity. Production remains blocked pending regression and fresh Accounting confirmation qualification.",
+  "notes": "Selection pin for pre-production V117 qualification only. REV11 moves AP routing, supporting-reference extraction, and primary document classification/extraction off Emergent to GamerLLM Azure OpenAI using managed identity. Production remains blocked pending regression and fresh Accounting confirmation qualification.",
   "supporting_reference_runtime": {
     "source": "gamer_azure",
     "provider": "openai",
     "deployment": "gpt-5.6-sol",
     "authentication": "managed_identity",
     "isolated_from_ap_routing_model_env": true
+  },
+  "document_intelligence_runtime": {
+    "source": "gamer_azure",
+    "provider": "openai",
+    "deployment": "gpt-5.6-sol",
+    "authentication": "managed_identity",
+    "emergent_fallback": false,
+    "api_key_fallback": false
   }
 }

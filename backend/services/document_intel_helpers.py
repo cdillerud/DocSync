@@ -28,7 +28,8 @@ from dateutil import parser as date_parser
 
 logger = logging.getLogger(__name__)
 
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+DOCUMENT_INTEL_LLM_SOURCE = os.environ.get("DOCUMENT_INTEL_LLM_SOURCE", "gamer_azure").strip().lower()
+DOCUMENT_INTEL_MODEL = os.environ.get("DOCUMENT_INTEL_MODEL", "gpt-5.6-sol").strip()
 
 
 # ---------------------------------------------------------------------------
@@ -305,18 +306,11 @@ def _check_obvious_bol(file_path: str, file_name: str) -> dict | None:
 
 
 async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
-    """
-    Use Gemini to analyze a document and extract structured data.
-    Returns classification and extracted fields.
+    """Classify and extract through GamerLLM Azure OpenAI.
 
-    For multi-page PDFs, extracts only the first page to avoid
-    classification confusion from supporting documents on later pages.
-
-    Heuristics provide fast classification for obvious types, but the LLM
-    is ALWAYS called for full field extraction so that documents never end
-    up with sparse/empty extracted_fields.
+    Heuristics remain deterministic classification guards. Gamer Azure is the
+    only LLM transport for enrichment; there is no Emergent or API-key fallback.
     """
-    # Run heuristics first for classification hints
     heuristic_result = (
         _check_obvious_ap_invoice(file_path, file_name)
         or _check_obvious_packing_list(file_path, file_name)
@@ -324,217 +318,153 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
         or _check_obvious_bol(file_path, file_name)
     )
 
-    if not EMERGENT_LLM_KEY:
-        # Without LLM key, return heuristic result or empty
-        if heuristic_result:
-            return heuristic_result
-        return {
-            "error": "EMERGENT_LLM_KEY not configured",
-            "suggested_job_type": "Unknown",
-            "confidence": 0.0,
-            "extracted_fields": {},
-        }
+    if DOCUMENT_INTEL_LLM_SOURCE != "gamer_azure":
+        raise RuntimeError(
+            "Document-intelligence LLM source must be gamer_azure; "
+            f"configured={DOCUMENT_INTEL_LLM_SOURCE or '<empty>'}"
+        )
 
-    # Always call the LLM for full field extraction
     llm_result = await _call_llm_for_extraction(file_path, file_name)
 
     if heuristic_result:
-        # Heuristic wins for classification, LLM provides richer extraction
         heuristic_type = heuristic_result["suggested_job_type"]
         heuristic_confidence = heuristic_result["confidence"]
         heuristic_fields = heuristic_result.get("extracted_fields", {})
 
         if llm_result and not llm_result.get("error"):
-            # Merge: start with LLM fields, overlay with heuristic fields
             llm_fields = llm_result.get("extracted_fields", {})
-            merged_fields = {**llm_fields, **{k: v for k, v in heuristic_fields.items() if v}}
+            merged_fields = {
+                **llm_fields,
+                **{k: v for k, v in heuristic_fields.items() if v},
+            }
             logger.info(
-                "Heuristic+LLM merge for '%s': heuristic=%s (%.2f), LLM fields=%d, merged=%d",
-                file_name, heuristic_type, heuristic_confidence,
-                len(llm_fields), len(merged_fields),
+                "Heuristic+GamerAzure merge for '%s': heuristic=%s (%.2f), "
+                "Azure fields=%d, merged=%d",
+                file_name,
+                heuristic_type,
+                heuristic_confidence,
+                len(llm_fields),
+                len(merged_fields),
             )
             return {
                 "suggested_job_type": heuristic_type,
                 "confidence": heuristic_confidence,
                 "extracted_fields": merged_fields,
-                "reasoning": f"Heuristic classification ({heuristic_result.get('model', 'heuristic')}), LLM extraction",
-                "model": heuristic_result.get("model", "heuristic") + "+gemini-2.5-pro",
+                "reasoning": (
+                    f"Heuristic classification "
+                    f"({heuristic_result.get('model', 'heuristic')}), "
+                    "Gamer Azure extraction"
+                ),
+                "model": (
+                    heuristic_result.get("model", "heuristic")
+                    + "+"
+                    + str(llm_result.get("model") or "gamer-azure/gpt-5.6-sol")
+                ),
                 "page_count": llm_result.get("page_count", 1),
                 "classified_from_page": llm_result.get("classified_from_page"),
             }
-        else:
-            # LLM failed — try Azure for extraction before falling back to heuristic-only
-            logger.warning(
-                "LLM extraction failed for '%s', trying Azure fallback: %s",
-                file_name, llm_result.get("error") if llm_result else "null",
-            )
-            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_extraction_failed")
-            if azure_result and not azure_result.get("error"):
-                # Use heuristic type but merge Azure extracted fields
-                azure_fields = azure_result.get("extracted_fields", {})
-                merged_fields = {**azure_fields, **{k: v for k, v in heuristic_fields.items() if v}}
-                return {
-                    "suggested_job_type": heuristic_type,
-                    "confidence": heuristic_confidence,
-                    "extracted_fields": merged_fields,
-                    "reasoning": "Heuristic classification, Azure OpenAI extraction",
-                    "model": heuristic_result.get("model", "heuristic") + f"+{azure_result.get('model', 'azure')}",
-                }
-            return heuristic_result
 
-    # No heuristic match — use LLM result directly
+        logger.warning(
+            "Gamer Azure extraction failed for '%s'; using deterministic heuristic only: %s",
+            file_name,
+            llm_result.get("error") if llm_result else "null",
+        )
+        return heuristic_result
+
     if llm_result:
-        # If Gemini confidence is below threshold, try Azure OpenAI fallback
-        gemini_confidence = llm_result.get("confidence", 0.0) if not llm_result.get("error") else 0.0
-        if gemini_confidence < 0.70:
-            azure_result = await _try_azure_fallback(file_path, file_name, "gemini_low_confidence")
-            if azure_result and azure_result.get("confidence", 0) > gemini_confidence:
-                logger.info(
-                    "Azure fallback selected for '%s': azure=%.2f > gemini=%.2f",
-                    file_name, azure_result["confidence"], gemini_confidence,
-                )
-                return azure_result
         return llm_result
 
-    # Both heuristic and Gemini failed — try Azure as last resort
-    azure_result = await _try_azure_fallback(file_path, file_name, "gemini_null_result")
-    if azure_result and not azure_result.get("error"):
-        return azure_result
-
     return {
-        "error": "Both heuristic and LLM extraction failed",
+        "error": "Gamer Azure document extraction returned no result",
         "suggested_job_type": "Unknown",
         "confidence": 0.0,
         "extracted_fields": {},
     }
 
 
-async def _try_azure_fallback(file_path: str, file_name: str, trigger_reason: str) -> dict:
-    """Attempt Azure OpenAI classification as a fallback.
-
-    Extracts raw text from the document, then calls Azure OpenAI.
-    Returns None if Azure is not configured or fails entirely.
-    """
-    from services.azure_openai_classifier import (
-        is_azure_configured, classify_document_with_azure_openai,
-    )
-    if not is_azure_configured():
-        logger.debug("Azure OpenAI fallback skipped (not configured), trigger=%s", trigger_reason)
-        return None
-
-    # Extract text from the document for Azure (text-only API)
-    raw_text = ""
-    try:
-        ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
-        if ext == "pdf":
-            from pypdf import PdfReader
-            reader = PdfReader(file_path)
-            pages_text = []
-            for page in reader.pages[:3]:  # first 3 pages
-                pages_text.append(page.extract_text() or "")
-            raw_text = "\n".join(pages_text)
-        else:
-            with open(file_path, "r", errors="ignore") as f:
-                raw_text = f.read(15000)
-    except Exception as te:
-        logger.warning("Azure fallback: text extraction failed for '%s': %s", file_name, te)
-
-    if not raw_text.strip():
-        logger.debug("Azure fallback: no text extracted from '%s'", file_name)
-        return None
-
-    logger.info("Azure fallback triggered for '%s' (reason=%s)", file_name, trigger_reason)
-    result = await classify_document_with_azure_openai(raw_text, file_name)
-    return result
+def _strip_json_fence(response_text: str) -> str:
+    text = str(response_text or "").strip()
+    fence = chr(96) * 3
+    if not text.startswith(fence):
+        return text
+    lines = text.splitlines()
+    if lines and lines[0].strip().lower() in {fence, fence + "json"}:
+        lines = lines[1:]
+    if lines and lines[-1].strip() == fence:
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
 
 
 async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
-    """Call the LLM (Gemini) to classify and extract fields from a document."""
+    """Classify/extract with GamerLLM Azure OpenAI using managed identity."""
+    temp_pdf_path = None
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
-
         ext = file_name.lower().split(".")[-1] if "." in file_name else ""
-        mime_map = {
-            "pdf": "application/pdf",
-            "png": "image/png",
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "tiff": "image/tiff",
-            "gif": "image/gif",
-            "txt": "text/plain",
-            "csv": "text/csv",
-            "html": "text/html",
-            "json": "application/json",
-            "xml": "application/xml",
-        }
-        mime_type = mime_map.get(ext, "text/plain")
 
-        # For multi-page PDFs, extract just page 1 to avoid misclassification
         actual_file_path = file_path
-        temp_pdf_path = None
         page_count = 1
         if ext == "pdf":
             try:
-                actual_file_path, temp_pdf_path, page_count = _extract_first_page_pdf(file_path)
+                actual_file_path, temp_pdf_path, page_count = _extract_first_page_pdf(
+                    file_path
+                )
                 if page_count > 1:
                     logger.info(
-                        "Multi-page PDF (%d pages): sending only page 1 for classification: %s",
-                        page_count, file_name,
+                        "Multi-page PDF (%d pages): sending only page 1 to Gamer Azure: %s",
+                        page_count,
+                        file_name,
                     )
-            except Exception as e:
-                logger.warning("Failed to extract first page from %s: %s — sending full PDF", file_name, e)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to extract first page from %s: %s — sending full PDF",
+                    file_name,
+                    exc,
+                )
                 actual_file_path = file_path
 
-        # Build dynamic prompt with learned examples
         dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
         try:
             from services.classification_feedback_service import (
                 build_few_shot_prompt_section,
                 build_vendor_hints_prompt_section,
             )
+
             few_shot_section = await build_few_shot_prompt_section()
             if few_shot_section:
                 dynamic_prompt = dynamic_prompt + "\n" + few_shot_section
                 logger.info("Injected few-shot examples into classification prompt")
-            
-            # FIX: Try to infer vendor from filename for vendor hint
+
             vendor_for_hint = ""
             try:
                 from services.vendor_inference_service import infer_vendor
+
                 inferred, _ = infer_vendor(file_name)
                 if inferred:
                     vendor_for_hint = inferred
             except Exception:
                 pass
+
             if vendor_for_hint:
                 vendor_hint = await build_vendor_hints_prompt_section(vendor_for_hint)
                 if vendor_hint:
                     dynamic_prompt = dynamic_prompt + "\n" + vendor_hint
-        except Exception as e:
-            logger.debug("Few-shot injection skipped: %s", e)
+        except Exception as exc:
+            logger.debug("Few-shot injection skipped: %s", exc)
 
-        # FIX: Add feedback loop context (learned corrections from user interactions)
         try:
             from services.feedback_loop_service import build_feedback_context_for_prompt
             from deps import get_db
+
             feedback_db = get_db()
             feedback_context = await build_feedback_context_for_prompt(
                 feedback_db,
-                vendor_id=vendor_for_hint if 'vendor_for_hint' in dir() else "",
+                vendor_id=vendor_for_hint if "vendor_for_hint" in dir() else "",
             )
             if feedback_context:
                 dynamic_prompt = dynamic_prompt + "\n\n" + feedback_context
                 logger.info("Injected feedback loop context into classification prompt")
-        except Exception as e:
-            logger.debug("Feedback loop injection skipped: %s", e)
-
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"classify-{uuid.uuid4()}",
-            system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-2.5-pro")
-
-        file_content = FileContentWithMimeType(file_path=actual_file_path, mime_type=mime_type)
+        except Exception as exc:
+            logger.debug("Feedback loop injection skipped: %s", exc)
 
         bundle_note = ""
         if page_count > 1:
@@ -544,47 +474,29 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
                 "Later pages contain supporting documents like BOLs or freight bills."
             )
 
-        user_message = UserMessage(
-            text=(
-                "Please analyze this business document. "
-                "Classify the document and extract all relevant fields. "
-                "Also extract routing fields: is_international, is_tooling, is_storage_handling, "
-                "is_credit_memo, is_dunnage, freight_direction."
-                + bundle_note
-                + " Respond with JSON only."
-            ),
-            file_contents=[file_content],
+        prompt = (
+            "Please analyze this business document. "
+            "Classify the document and extract all relevant fields. "
+            "Also extract routing fields: is_international, is_tooling, "
+            "is_storage_handling, is_credit_memo, is_dunnage, freight_direction."
+            + bundle_note
+            + " Respond with JSON only."
         )
 
-        response = await chat.send_message(user_message)
+        from services.gamer_azure_llm_service import gamer_azure_document_completion
 
-        # Clean up temp file
-        if temp_pdf_path:
-            try:
-                os.remove(temp_pdf_path)
-            except Exception:
-                pass
+        response = await gamer_azure_document_completion(
+            actual_file_path,
+            prompt=prompt,
+            model=DOCUMENT_INTEL_MODEL,
+            system_message=dynamic_prompt,
+        )
 
-        response_text = response.strip()
-        if response_text.startswith("```"):
-            lines = response_text.split("\n")
-            json_lines = []
-            in_json = False
-            for line in lines:
-                if line.startswith("```json"):
-                    in_json = True
-                    continue
-                if line.startswith("```") and in_json:
-                    break
-                if in_json:
-                    json_lines.append(line)
-            response_text = "\n".join(json_lines)
-
-        result = json.loads(response_text)
-
+        result = json.loads(_strip_json_fence(response))
         extracted = result.get("extracted_fields", {})
         logger.info(
-            "LLM extraction result - doc_type: %s, confidence: %s, fields: %d, pages: %d",
+            "Gamer Azure extraction result - doc_type: %s, confidence: %s, "
+            "fields: %d, pages: %d",
             result.get("document_type"),
             result.get("confidence"),
             len(extracted),
@@ -596,26 +508,31 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
             "confidence": float(result.get("confidence", 0.0)),
             "extracted_fields": extracted,
             "reasoning": result.get("reasoning", ""),
-            "model": "gemini-2.5-pro",
+            "model": "gamer-azure/" + DOCUMENT_INTEL_MODEL,
             "page_count": page_count,
             "classified_from_page": 1 if page_count > 1 else None,
         }
 
-    except Exception as e:
-        logger.error("LLM extraction failed for '%s': %s", file_name, str(e))
-        # Clean up temp file on error
-        if 'temp_pdf_path' in dir() and temp_pdf_path:
-            try:
-                os.remove(temp_pdf_path)
-            except Exception:
-                pass
+    except Exception as exc:
+        logger.error(
+            "Gamer Azure extraction failed for '%s': %s",
+            file_name,
+            str(exc),
+        )
         return {
-            "error": str(e),
+            "error": str(exc),
             "suggested_job_type": "Unknown",
             "confidence": 0.0,
             "extracted_fields": {},
-            "reasoning": f"Extraction failed: {str(e)}",
+            "reasoning": f"Extraction failed: {str(exc)}",
+            "model": "gamer-azure/" + DOCUMENT_INTEL_MODEL,
         }
+    finally:
+        if temp_pdf_path:
+            try:
+                os.remove(temp_pdf_path)
+            except OSError:
+                pass
 
 
 def _extract_first_page_pdf(file_path: str):

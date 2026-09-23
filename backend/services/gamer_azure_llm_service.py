@@ -227,16 +227,63 @@ async def gamer_azure_text_completion(
     return _response_output_text(await _responses_request(payload))
 
 
-async def gamer_azure_pdf_completion(
-    pdf_path: str,
+_IMAGE_MIME_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
+_TEXT_SUFFIXES = {".txt", ".csv", ".html", ".json", ".xml"}
+
+
+async def gamer_azure_document_completion(
+    file_path: str,
     *,
     prompt: str,
     model: str,
     system_message: str,
 ) -> str:
+    """Send one business document to GamerLLM using managed identity only."""
     deployment = gamer_azure_deployment(model)
-    path = Path(pdf_path)
+    path = Path(file_path)
+    suffix = path.suffix.lower()
+
+    if suffix in _TEXT_SUFFIXES:
+        document_text = path.read_text(encoding="utf-8", errors="replace")[:12000]
+        payload = {
+            "model": deployment,
+            "instructions": str(system_message),
+            "input": (
+                str(prompt)
+                + "\n\n--- DOCUMENT TEXT ---\n"
+                + document_text
+                + "\n--- END DOCUMENT TEXT ---"
+            ),
+            "store": False,
+        }
+        return _response_output_text(await _responses_request(payload))
+
     data = base64.b64encode(path.read_bytes()).decode("ascii")
+    if suffix == ".pdf":
+        document_part = {
+            "type": "input_file",
+            "filename": path.name,
+            "file_data": "data:application/pdf;base64," + data,
+        }
+    elif suffix in _IMAGE_MIME_TYPES:
+        mime_type = _IMAGE_MIME_TYPES[suffix]
+        document_part = {
+            "type": "input_image",
+            "image_url": f"data:{mime_type};base64,{data}",
+        }
+    else:
+        raise RuntimeError(
+            "Gamer Azure document completion does not support file type: "
+            f"{suffix or '<none>'}"
+        )
+
     payload = {
         "model": deployment,
         "instructions": str(system_message),
@@ -244,11 +291,7 @@ async def gamer_azure_pdf_completion(
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "input_file",
-                        "filename": path.name,
-                        "file_data": "data:application/pdf;base64," + data,
-                    },
+                    document_part,
                     {
                         "type": "input_text",
                         "text": str(prompt),
@@ -259,3 +302,21 @@ async def gamer_azure_pdf_completion(
         "store": False,
     }
     return _response_output_text(await _responses_request(payload))
+
+
+async def gamer_azure_pdf_completion(
+    pdf_path: str,
+    *,
+    prompt: str,
+    model: str,
+    system_message: str,
+) -> str:
+    path = Path(pdf_path)
+    if path.suffix.lower() != ".pdf":
+        raise RuntimeError("gamer_azure_pdf_completion requires a PDF")
+    return await gamer_azure_document_completion(
+        str(path),
+        prompt=prompt,
+        model=model,
+        system_message=system_message,
+    )

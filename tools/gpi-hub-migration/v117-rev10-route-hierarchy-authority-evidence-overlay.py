@@ -577,6 +577,19 @@ def patch_business_context_expansion(path: Path) -> None:
 '''
     raw = replace_once(raw, old_score, new_score, "REV10 reference-family prefilter scoring")
 
+    old_vendor_terms = '''        "international", "distribution", "storage",
+    }
+'''
+    new_vendor_terms = '''        "international", "distribution", "storage", "vendor",
+    }
+'''
+    raw = replace_once(
+        raw,
+        old_vendor_terms,
+        new_vendor_terms,
+        "REV11 generic vendor-token exclusion",
+    )
+
     old_selector = '''def _round_robin_prefilter_labels(
     labels: Sequence[Dict[str, Any]],
     deficits: Sequence[Dict[str, Any]],

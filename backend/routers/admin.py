@@ -544,326 +544,35 @@ async def get_sh_invoice_queue(
 # Sales Order Learning
 # =============================================================================
 
-@router.post("/sales-learning/backfill-bc-orders")
-async def backfill_sales_learning(background_tasks: BackgroundTasks):
-    """Trigger bulk customer posting profile build from BC sales orders."""
-    from deps import get_db
-    db = get_db()
-
-    async def _run_backfill():
-        try:
-            from services.sales_order_learning_service import build_all_customer_posting_profiles
-            from services.business_central_service import BusinessCentralService
-            bc = BusinessCentralService()
-            await build_all_customer_posting_profiles(db, bc, top_n=50)
-        except Exception as exc:
-            logger.error("[SalesLearning] Background backfill failed: %s", exc)
-
-    background_tasks.add_task(_run_backfill)
-    return {"job_started": True, "message": "Sales order learning backfill started in background"}
-
-
-@router.get("/sales-learning/customer-profiles")
-async def get_customer_profiles_summary():
-    """Summary of all customer posting profiles."""
-    from deps import get_db
-    db = get_db()
-
-    total = await db.customer_posting_profiles.count_documents({})
-    high = await db.customer_posting_profiles.count_documents({"template_confidence": "high"})
-    medium = await db.customer_posting_profiles.count_documents({"template_confidence": "medium"})
-    low = await db.customer_posting_profiles.count_documents({"template_confidence": "low"})
-
-    # Top customers by orders analyzed
-    cursor = db.customer_posting_profiles.find(
-        {"status": "analyzed"},
-        {"_id": 0, "customer_no": 1, "customer_name": 1, "invoices_analyzed": 1,
-         "template_confidence": 1, "typical_order_value": 1, "common_items": 1,
-         "item_diversity_score": 1, "customer_variability_index": 1,
-         "profile_richness_score": 1, "item_frequency_bands": 1}
-    ).sort("invoices_analyzed", -1).limit(20)
-    top_customers = []
-    async for doc in cursor:
-        top_customers.append(doc)
-
-    # Last run
-    last_job = await db.sales_learning_jobs.find_one(
-        {}, {"_id": 0}, sort=[("started_at", -1)]
-    )
-
-    return {
-        "total_profiles": total,
-        "confidence_breakdown": {"high": high, "medium": medium, "low": low},
-        "top_customers": top_customers,
-        "last_job": last_job,
-    }
-
-
-@router.post("/sales-learning/detect-posted-drafts")
-async def detect_posted_so_drafts():
-    """Manually trigger SO draft detection."""
-    from deps import get_db
-    from services.sales_order_learning_service import detect_posted_sales_drafts
-    db = get_db()
-    result = await detect_posted_sales_drafts(db)
-    return result
-
-
 
 # =============================================================================
 # Sales Order Readiness Evaluation
 # =============================================================================
-
-@router.post("/sales-learning/evaluate-readiness")
-async def evaluate_readiness(
-    background_tasks: BackgroundTasks,
-    limit: int = Query(50, ge=1, le=500),
-    sync: bool = Query(False, description="Run synchronously (slower, returns full results)"),
-):
-    """Run readiness reviewer against historical sales docs. Evaluation only — changes nothing."""
-    from deps import get_db
-    from services.sales_order_readiness_evaluator import run_batch_evaluation
-    db = get_db()
-
-    if sync:
-        return await run_batch_evaluation(db, limit=limit)
-
-    async def _run():
-        try:
-            await run_batch_evaluation(db, limit=limit)
-        except Exception as exc:
-            logger.error("[SOEval] Background evaluation failed: %s", exc)
-
-    background_tasks.add_task(_run)
-    return {"job_started": True, "limit": limit, "message": "Readiness evaluation started in background"}
-
-
-@router.get("/sales-learning/readiness-evaluations")
-async def list_readiness_evaluations(limit: int = Query(20, ge=1, le=100)):
-    """Fetch recent evaluation run summaries."""
-    from deps import get_db
-    from services.sales_order_readiness_evaluator import get_evaluation_runs
-    db = get_db()
-    runs = await get_evaluation_runs(db, limit=limit)
-    return {"runs": runs, "total": len(runs)}
-
-
-@router.get("/sales-learning/readiness-evaluations/{run_id}")
-async def get_readiness_evaluation_details(run_id: str, limit: int = Query(100, ge=1, le=500)):
-    """Fetch per-document details for a specific evaluation run."""
-    from deps import get_db
-    from services.sales_order_readiness_evaluator import get_evaluation_details
-    db = get_db()
-    details = await get_evaluation_details(db, run_id, limit=limit)
-    return {"run_id": run_id, "total": len(details), "details": details}
 
 
 # =============================================================================
 # Sales Order Reviewer Feedback Analytics
 # =============================================================================
 
-@router.get("/sales-learning/reviewer-feedback-summary")
-async def reviewer_feedback_summary(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), reviewer: str = Query(None),
-    model: str = Query(None), readiness_status: str = Query(None),
-    assessment: str = Query(None), decision: str = Query(None),
-):
-    """Aggregate metrics on how the advisory system performs against human feedback."""
-    from deps import get_db
-    from services.sales_order_feedback_analytics_service import get_feedback_summary
-    db = get_db()
-    return await get_feedback_summary(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, reviewer=reviewer,
-        model=model, readiness_status=readiness_status,
-        assessment=assessment, decision=decision,
-    )
-
-
-@router.get("/sales-learning/reviewer-feedback-details")
-async def reviewer_feedback_details(
-    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), reviewer: str = Query(None),
-    assessment: str = Query(None),
-):
-    """Individual feedback records with filtering."""
-    from deps import get_db
-    from services.sales_order_feedback_analytics_service import get_feedback_details
-    db = get_db()
-    return await get_feedback_details(
-        db, limit=limit, skip=skip,
-        date_from=date_from, date_to=date_to,
-        customer_no=customer_no, reviewer=reviewer,
-        assessment=assessment,
-    )
-
-
-@router.get("/sales-learning/reviewer-feedback-by-customer")
-async def reviewer_feedback_by_customer(limit: int = Query(30, ge=1, le=100)):
-    """Per-customer feedback summary."""
-    from deps import get_db
-    from services.sales_order_feedback_analytics_service import get_feedback_by_customer
-    db = get_db()
-    customers = await get_feedback_by_customer(db, limit=limit)
-    return {"customers": customers, "total": len(customers)}
-
 
 # =============================================================================
 # Sales Order Disagreement Diagnostics
 # =============================================================================
-
-@router.get("/sales-learning/disagreement-diagnostics")
-async def disagreement_diagnostics(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), reviewer: str = Query(None),
-    model: str = Query(None), readiness_status: str = Query(None),
-    assessment: str = Query(None), root_cause: str = Query(None),
-):
-    """Root-cause analysis of reviewer disagreements for system tuning."""
-    from deps import get_db
-    from services.sales_order_disagreement_diagnostics_service import run_disagreement_diagnostics
-    db = get_db()
-    return await run_disagreement_diagnostics(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, reviewer=reviewer,
-        model=model, readiness_status=readiness_status,
-        assessment=assessment, root_cause=root_cause,
-    )
-
-
-@router.get("/sales-learning/disagreement-diagnostics/examples")
-async def disagreement_examples(
-    root_cause: str = Query(None),
-    limit: int = Query(20, ge=1, le=100),
-):
-    """Example disagreement records, optionally filtered by root cause."""
-    from deps import get_db
-    from services.sales_order_disagreement_diagnostics_service import get_disagreement_examples
-    db = get_db()
-    examples = await get_disagreement_examples(db, root_cause=root_cause, limit=limit)
-    return {"root_cause_filter": root_cause, "total": len(examples), "examples": examples}
 
 
 # =============================================================================
 # Sales Order Confidence Calibration
 # =============================================================================
 
-@router.post("/sales-learning/calibrate-confidence")
-async def calibrate_confidence_batch(
-    background_tasks: BackgroundTasks,
-    limit: int = Query(200, ge=1, le=1000),
-    sync: bool = Query(False),
-):
-    """Run confidence calibration on recent reviewed documents."""
-    from deps import get_db
-    from services.sales_order_confidence_calibration_service import batch_calibrate
-    db = get_db()
-    if sync:
-        return await batch_calibrate(db, limit=limit)
-    async def _run():
-        try:
-            await batch_calibrate(db, limit=limit)
-        except Exception as exc:
-            logger.error("[SOCalibration] Batch failed: %s", exc)
-    background_tasks.add_task(_run)
-    return {"job_started": True, "limit": limit}
-
-
-@router.get("/sales-learning/calibration-comparison")
-async def calibration_comparison(limit: int = Query(100, ge=1, le=500)):
-    """Compare raw vs calibrated confidence with agreement rates per band."""
-    from deps import get_db
-    from services.sales_order_confidence_calibration_service import get_calibration_comparison
-    db = get_db()
-    return await get_calibration_comparison(db, limit=limit)
-
-
-@router.post("/sales-learning/calibrate-document/{document_id}")
-async def calibrate_single_document(document_id: str):
-    """Run calibration on a single document and return the result."""
-    from deps import get_db
-    from services.sales_order_confidence_calibration_service import calibrate_document_review
-    db = get_db()
-    result = await calibrate_document_review(db, document_id)
-    if result.error:
-        raise HTTPException(status_code=404, detail=result.error)
-    return result.to_dict()
-
 
 # =============================================================================
 # Post-Tuning Calibration & Impact Review
 # =============================================================================
 
-@router.get("/sales-learning/post-tuning-review")
-async def post_tuning_review(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), reviewer: str = Query(None),
-    model: str = Query(None), profile_state: str = Query(None),
-    readiness_status: str = Query(None), assessment: str = Query(None),
-):
-    """Comprehensive post-tuning impact analysis."""
-    from deps import get_db
-    from services.sales_order_post_tuning_review_service import run_post_tuning_review
-    db = get_db()
-    return await run_post_tuning_review(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, reviewer=reviewer,
-        model=model, profile_state=profile_state,
-        readiness_status=readiness_status, assessment=assessment,
-    )
-
-
-@router.get("/sales-learning/post-tuning-review/details")
-async def post_tuning_review_details(
-    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-    date_from: str = Query(None), date_to: str = Query(None),
-):
-    """Individual feedback records enriched with tuning context."""
-    from deps import get_db
-    from services.sales_order_post_tuning_review_service import get_post_tuning_details
-    db = get_db()
-    return await get_post_tuning_details(db, limit=limit, skip=skip,
-                                         date_from=date_from, date_to=date_to)
-
 
 # =============================================================================
 # Strong-Profile Validation Review
 # =============================================================================
-
-@router.get("/sales-learning/strong-profile-review")
-async def strong_profile_review(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), reviewer: str = Query(None),
-    model: str = Query(None), readiness_status: str = Query(None),
-    disagreement_field: str = Query(None),
-):
-    """Validate strong-profile tuning impact with pre/post comparison."""
-    from deps import get_db
-    from services.sales_order_strong_profile_review_service import run_strong_profile_review
-    db = get_db()
-    return await run_strong_profile_review(
-        db, date_from=date_from, date_to=date_to,
-        customer_no=customer_no, reviewer=reviewer,
-        model=model, readiness_status=readiness_status,
-        disagreement_field=disagreement_field,
-    )
-
-
-@router.get("/sales-learning/strong-profile-review/details")
-async def strong_profile_review_details(
-    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None),
-):
-    """Individual strong-profile feedback records with enrichment."""
-    from deps import get_db
-    from services.sales_order_strong_profile_review_service import get_strong_profile_details
-    db = get_db()
-    return await get_strong_profile_details(db, limit=limit, skip=skip,
-                                            date_from=date_from, date_to=date_to,
-                                            customer_no=customer_no)
 
 
 # =============================================================================
@@ -911,18 +620,6 @@ async def list_learning_suggestions(
     )
 
 
-@router.get("/sales-learning/learning-suggestions/{suggestion_id}")
-async def get_learning_suggestion(suggestion_id: str):
-    """Fetch a single suggestion by ID."""
-    from deps import get_db
-    from services.unified_learning_service import get_suggestion_by_id, SALES_CONFIG
-    db = get_db()
-    result = await get_suggestion_by_id(db, SALES_CONFIG, suggestion_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="Suggestion not found")
-    return result
-
-
 # =============================================================================
 # Learning Suggestion Approval / Apply Workflow
 # =============================================================================
@@ -967,143 +664,25 @@ async def apply_learning_suggestion(suggestion_id: str):
 # Learning Apply-Impact Review
 # =============================================================================
 
-@router.get("/sales-learning/learning-impact-review")
-async def learning_impact_review(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), suggestion_type: str = Query(None),
-    applied_by: str = Query(None),
-):
-    """Measure whether applied suggestions improved future advisory quality."""
-    from deps import get_db
-    from services.unified_learning_service import run_impact_review, SALES_CONFIG
-    db = get_db()
-    return await run_impact_review(
-        db, SALES_CONFIG, date_from=date_from, date_to=date_to,
-        entity_no=customer_no, suggestion_type=suggestion_type,
-        applied_by=applied_by,
-    )
-
-
-@router.get("/sales-learning/learning-impact-review/details")
-async def learning_impact_details(
-    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-    customer_no: str = Query(None), suggestion_type: str = Query(None),
-):
-    """Per-suggestion apply audit detail records."""
-    from deps import get_db
-    from services.unified_learning_service import get_impact_details, SALES_CONFIG
-    db = get_db()
-    return await get_impact_details(db, SALES_CONFIG, limit=limit, skip=skip,
-                                    entity_no=customer_no, suggestion_type=suggestion_type)
-
 
 # =============================================================================
 # Profile Drift & Change History
 # =============================================================================
-
-@router.get("/sales-learning/profile-drift")
-async def profile_drift_summary(
-    date_from: str = Query(None), date_to: str = Query(None),
-    customer_no: str = Query(None), drift_risk: str = Query(None),
-    suggestion_type: str = Query(None), applied_by: str = Query(None),
-):
-    """Profile drift summary across all customers with applied changes."""
-    from deps import get_db
-    from services.unified_learning_service import get_profile_drift_summary, SALES_CONFIG
-    db = get_db()
-    return await get_profile_drift_summary(
-        db, SALES_CONFIG, date_from=date_from, date_to=date_to,
-        entity_no=customer_no, drift_risk=drift_risk,
-        suggestion_type=suggestion_type, applied_by=applied_by,
-    )
-
-
-@router.get("/sales-learning/profile-drift/{customer_id}")
-async def profile_drift_detail(customer_id: str):
-    """Detailed drift analysis for a single customer."""
-    from deps import get_db
-    from services.unified_learning_service import get_entity_drift_detail, SALES_CONFIG
-    db = get_db()
-    return await get_entity_drift_detail(db, SALES_CONFIG, customer_id)
-
-
-@router.get("/sales-learning/profile-change-history/{customer_id}")
-async def profile_change_history(customer_id: str, limit: int = Query(50, ge=1, le=200)):
-    """Full change history with pre/post snapshots."""
-    from deps import get_db
-    from services.unified_learning_service import get_drift_change_history, SALES_CONFIG
-    db = get_db()
-    return await get_drift_change_history(db, SALES_CONFIG, customer_id, limit=limit)
 
 
 # =============================================================================
 # Customer Hotspot Review
 # =============================================================================
 
-@router.get("/sales-learning/customer-hotspots")
-async def customer_hotspots(
-    date_from: str = Query(None), date_to: str = Query(None),
-    rep: str = Query(None), severity: str = Query(None),
-    root_cause: str = Query(None), customer_no: str = Query(None),
-    limit: int = Query(30, ge=1, le=100),
-):
-    """Rank customers by advisory friction with root-cause diagnosis."""
-    from deps import get_db
-    from services.sales_order_customer_hotspot_review_service import get_customer_hotspots
-    db = get_db()
-    return await get_customer_hotspots(
-        db, date_from=date_from, date_to=date_to,
-        rep=rep, severity=severity, root_cause=root_cause,
-        customer_no=customer_no, limit=limit,
-    )
-
-
-@router.get("/sales-learning/customer-hotspots/{customer_id}")
-async def customer_hotspot_detail(customer_id: str):
-    """Detailed hotspot analysis for one customer."""
-    from deps import get_db
-    from services.sales_order_customer_hotspot_review_service import get_customer_hotspot_detail
-    db = get_db()
-    result = await get_customer_hotspot_detail(db, customer_id)
-    if result.get("error"):
-        raise HTTPException(status_code=404, detail=result["error"])
-    return result
-
 
 # =============================================================================
 # Maturity Checkpoint & Reusability
 # =============================================================================
 
-@router.get("/sales-learning/maturity-checkpoint")
-async def maturity_checkpoint():
-    """Overall maturity assessment of the SO advisory/learning system."""
-    from deps import get_db
-    from services.sales_order_maturity_checkpoint_service import run_maturity_checkpoint
-    db = get_db()
-    return await run_maturity_checkpoint(db)
-
-
-@router.get("/sales-learning/maturity-checkpoint/reusability")
-async def maturity_reusability():
-    """Component reusability inventory and next-workflow recommendation."""
-    from deps import get_db
-    from services.sales_order_maturity_checkpoint_service import get_reusability_review
-    db = get_db()
-    return await get_reusability_review(db)
-
 
 # =============================================================================
 # Unified Learning Summary (Cross-Pipeline View)
 # =============================================================================
-
-@router.get("/unified-learning/summary")
-async def unified_learning_summary():
-    """Cross-pipeline learning summary — powers the AI Learning Intelligence dashboard."""
-    from deps import get_db
-    from services.unified_learning_service import get_unified_learning_summary
-    db = get_db()
-    return await get_unified_learning_summary(db)
-
 
 
 # ─────────────── Unknown-Doc Reclaim (v2.5.5) ───────────────

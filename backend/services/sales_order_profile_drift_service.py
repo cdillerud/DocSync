@@ -8,9 +8,9 @@ GOVERNANCE/VISIBILITY ONLY: Never reverts or blocks changes.
 """
 
 import logging
-from collections import Counter, defaultdict
+from collections import Counter
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -20,82 +20,6 @@ MAX_SHIP_TOS = 8
 MAX_OCCASIONAL_ITEMS = 15
 MAX_VARIABILITY = 0.90
 RICHNESS_JUMP_THRESHOLD = 25  # points in one apply batch
-
-
-async def get_profile_drift_summary(
-    db,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    customer_no: Optional[str] = None,
-    drift_risk: Optional[str] = None,
-    suggestion_type: Optional[str] = None,
-    applied_by: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Summarize profile drift across all customers with applied changes."""
-
-    # Fetch all apply audit records
-    match: Dict[str, Any] = {}
-    if date_from or date_to:
-        ts: Dict[str, Any] = {}
-        if date_from:
-            ts["$gte"] = date_from
-        if date_to:
-            ts["$lte"] = date_to
-        match["applied_at"] = ts
-    if customer_no:
-        match["customer_no"] = customer_no
-    if suggestion_type:
-        match["suggestion_type"] = suggestion_type
-    if applied_by:
-        match["applied_by"] = applied_by
-
-    audits = await db.so_learning_apply_audit.find(match, {"_id": 0}).to_list(2000)
-
-    if not audits:
-        return {"total_customers": 0, "message": "No applied changes found"}
-
-    # Group by customer
-    by_customer: Dict[str, List[Dict]] = defaultdict(list)
-    for a in audits:
-        by_customer[a.get("customer_no", "")].append(a)
-
-    # Load current profiles
-    cust_nos = list(by_customer.keys())
-    profiles = {}
-    if cust_nos:
-        async for p in db.customer_posting_profiles.find(
-            {"customer_no": {"$in": cust_nos}}, {"_id": 0}
-        ):
-            profiles[p["customer_no"]] = p
-
-    # Assess each customer
-    customers = []
-    risk_dist = Counter()
-    type_dist = Counter()
-
-    for cno, changes in sorted(by_customer.items(), key=lambda x: len(x[1]), reverse=True):
-        profile = profiles.get(cno, {})
-        assessment = _assess_customer_drift(cno, changes, profile)
-        risk_dist[assessment["drift_risk"]] += 1
-        for c in changes:
-            type_dist[c.get("suggestion_type", "unknown")] += 1
-
-        if drift_risk and assessment["drift_risk"] != drift_risk:
-            continue
-        customers.append(assessment)
-
-    return {
-        "total_customers": len(by_customer),
-        "total_applied_changes": len(audits),
-        "drift_risk_distribution": dict(risk_dist),
-        "change_type_distribution": dict(type_dist),
-        "customers": customers[:30],
-        "high_risk_count": risk_dist.get("high", 0),
-        "filters_applied": {k: v for k, v in {
-            "date_from": date_from, "date_to": date_to, "customer_no": customer_no,
-            "drift_risk": drift_risk, "suggestion_type": suggestion_type, "applied_by": applied_by,
-        }.items() if v},
-    }
 
 
 async def get_customer_drift_detail(db, customer_no: str) -> Dict[str, Any]:
@@ -139,16 +63,6 @@ async def get_customer_drift_detail(db, customer_no: str) -> Dict[str, Any]:
             "amount_range": (profile or {}).get("amount_range"),
         },
     }
-
-
-async def get_change_history(db, customer_no: str, limit: int = 50) -> Dict[str, Any]:
-    """Full change history with pre/post snapshots."""
-    audits = await db.so_learning_apply_audit.find(
-        {"customer_no": customer_no}, {"_id": 0}
-    ).sort("applied_at", -1).limit(limit).to_list(limit)
-
-    total = await db.so_learning_apply_audit.count_documents({"customer_no": customer_no})
-    return {"customer_no": customer_no, "total": total, "showing": len(audits), "changes": audits}
 
 
 # =============================================================================

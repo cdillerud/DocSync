@@ -2,10 +2,8 @@
 Tests for U6 — SO Suggestion telemetry tick into learning_events_v2
 ────────────────────────────────────────────────────────────────────
 
-Verifies that sales_order_learning_suggestion_apply_service now emits
-unified events for approve / reject / apply actions so reviewer
-activity on sales-order learning suggestions shows up in the Learning
-Ops leaderboard + weekly digest.
+Verifies that unified_learning_service (SALES_CONFIG) emits unified events
+for approve / reject, the path the AI Learning page uses since Round 5b.
 """
 
 import pytest
@@ -63,7 +61,7 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_approve_suggestion_emits_unified_event():
-    from services.sales_order_learning_suggestion_apply_service import approve_suggestion
+    from services.unified_learning_service import approve_suggestion, SALES_CONFIG
 
     db = FakeDb()
     await db["so_learning_suggestions"].insert_one({
@@ -73,7 +71,7 @@ async def test_approve_suggestion_emits_unified_event():
         "suggestion_type": "add_item",
     })
 
-    res = await approve_suggestion(db, "s-1", approver="sally.rep")
+    res = await approve_suggestion(db, SALES_CONFIG, "s-1", approver="sally.rep")
     assert res.get("status") == "approved" or res.get("to_status") == "approved"
 
     # Unified event was ticked
@@ -84,7 +82,7 @@ async def test_approve_suggestion_emits_unified_event():
     assert ev["event_type"] == "so_suggestion_approved"
     assert ev["scope_value"] == "C-10250"
     assert ev["actor"] == "sally.rep"
-    assert ev["source"] == "sales_order_learning_suggestion_apply_service"
+    assert ev["source"] == "unified_learning_service"
     assert ev["applied"]["from_status"] == "pending"
     assert ev["applied"]["to_status"] == "approved"
     assert ev["target"]["suggestion_id"] == "s-1"
@@ -92,7 +90,7 @@ async def test_approve_suggestion_emits_unified_event():
 
 @pytest.mark.asyncio
 async def test_reject_suggestion_emits_unified_event():
-    from services.sales_order_learning_suggestion_apply_service import reject_suggestion
+    from services.unified_learning_service import reject_suggestion, SALES_CONFIG
 
     db = FakeDb()
     await db["so_learning_suggestions"].insert_one({
@@ -101,7 +99,7 @@ async def test_reject_suggestion_emits_unified_event():
         "customer_no": "C-99999",
         "suggestion_type": "add_uom",
     })
-    await reject_suggestion(db, "s-2", approver="marcus.ap")
+    await reject_suggestion(db, SALES_CONFIG, "s-2", approver="marcus.ap")
 
     unified = db["learning_events_v2"].docs
     assert len(unified) == 1
@@ -113,7 +111,7 @@ async def test_reject_suggestion_emits_unified_event():
 @pytest.mark.asyncio
 async def test_invalid_transition_does_not_emit_event():
     """If the state transition is invalid, NO unified event should be written."""
-    from services.sales_order_learning_suggestion_apply_service import approve_suggestion
+    from services.unified_learning_service import approve_suggestion, SALES_CONFIG
 
     db = FakeDb()
     await db["so_learning_suggestions"].insert_one({
@@ -121,7 +119,7 @@ async def test_invalid_transition_does_not_emit_event():
         "status": "applied",  # terminal — cannot approve again
         "customer_no": "C-10250",
     })
-    res = await approve_suggestion(db, "s-3", approver="sally.rep")
+    res = await approve_suggestion(db, SALES_CONFIG, "s-3", approver="sally.rep")
     assert "error" in res
 
     # Critically — no telemetry row was written

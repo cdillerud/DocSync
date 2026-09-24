@@ -138,51 +138,6 @@ async def generate_learning_suggestions(
     }
 
 
-async def get_suggestions(
-    db,
-    customer_no: Optional[str] = None,
-    suggestion_type: Optional[str] = None,
-    status: Optional[str] = None,
-    min_confidence: Optional[float] = None,
-    date_from: Optional[str] = None,
-    date_to: Optional[str] = None,
-    limit: int = 50,
-    skip: int = 0,
-) -> Dict[str, Any]:
-    """Fetch learning suggestions with filters."""
-    match: Dict[str, Any] = {}
-    if customer_no:
-        match["customer_no"] = customer_no
-    if suggestion_type:
-        match["suggestion_type"] = suggestion_type
-    if status:
-        match["status"] = status
-    if min_confidence is not None:
-        match["confidence"] = {"$gte": min_confidence}
-    if date_from or date_to:
-        ts: Dict[str, Any] = {}
-        if date_from:
-            ts["$gte"] = date_from
-        if date_to:
-            ts["$lte"] = date_to
-        match["created_at"] = ts
-
-    total = await db.so_learning_suggestions.count_documents(match)
-    cursor = db.so_learning_suggestions.find(
-        match, {"_id": 0}
-    ).sort("confidence", -1).skip(skip).limit(limit)
-    records = await cursor.to_list(limit)
-
-    return {"total": total, "showing": len(records), "skip": skip, "suggestions": records}
-
-
-async def get_suggestion_by_id(db, suggestion_id: str) -> Optional[Dict[str, Any]]:
-    """Fetch a single suggestion by ID."""
-    return await db.so_learning_suggestions.find_one(
-        {"suggestion_id": suggestion_id}, {"_id": 0}
-    )
-
-
 # =============================================================================
 # Core analysis logic
 # =============================================================================

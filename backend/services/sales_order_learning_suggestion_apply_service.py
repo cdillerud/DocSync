@@ -23,16 +23,6 @@ VALID_TRANSITIONS = {
 }
 
 
-async def approve_suggestion(db, suggestion_id: str, approver: str) -> Dict[str, Any]:
-    """Move a suggestion to approved status."""
-    return await _transition(db, suggestion_id, "approved", approver)
-
-
-async def reject_suggestion(db, suggestion_id: str, approver: str) -> Dict[str, Any]:
-    """Move a suggestion to rejected status."""
-    return await _transition(db, suggestion_id, "rejected", approver)
-
-
 async def apply_suggestion(db, suggestion_id: str, applier: str) -> Dict[str, Any]:
     """
     Apply an approved suggestion to the customer's posting profile.
@@ -149,65 +139,6 @@ async def apply_suggestion(db, suggestion_id: str, applier: str) -> Dict[str, An
 # =============================================================================
 # State transitions
 # =============================================================================
-
-async def _transition(db, suggestion_id: str, target: str, actor: str) -> Dict[str, Any]:
-    suggestion = await db.so_learning_suggestions.find_one(
-        {"suggestion_id": suggestion_id}, {"_id": 0}
-    )
-    if not suggestion:
-        return {"error": "Suggestion not found"}
-
-    current = suggestion.get("status", "pending")
-    allowed = VALID_TRANSITIONS.get(current, set())
-
-    if target not in allowed:
-        return {"error": f"Cannot transition from '{current}' to '{target}'. Allowed: {sorted(allowed) if allowed else 'none (terminal)'}"}
-
-    now = datetime.now(timezone.utc).isoformat()
-    update: Dict[str, Any] = {"status": target, "updated_at": now}
-
-    if target == "approved":
-        update["approved_by"] = actor
-        update["approved_at"] = now
-    elif target == "rejected":
-        update["rejected_by"] = actor
-        update["rejected_at"] = now
-
-    await db.so_learning_suggestions.update_one(
-        {"suggestion_id": suggestion_id}, {"$set": update}
-    )
-
-    logger.info("[SuggestionWorkflow] %s → %s: id=%s customer=%s by=%s",
-                current, target, suggestion_id, suggestion.get("customer_no"), actor)
-
-    # U6 — tick the unified learning log so reviewer activity on SO
-    # suggestions shows up in the Learning Ops leaderboard + weekly digest.
-    # Never blocks the primary transition.
-    try:
-        from workflows.core.learning_core.events_service import record_event
-        await record_event(
-            domain="sales_intake",
-            event_type=f"so_suggestion_{target}",
-            scope_type="customer",
-            scope_value=suggestion.get("customer_no"),
-            target={
-                "suggestion_id": suggestion_id,
-                "suggestion_type": suggestion.get("suggestion_type"),
-            },
-            applied={"from_status": current, "to_status": target},
-            actor=actor,
-            source="sales_order_learning_suggestion_apply_service",
-            db=db,
-        )
-    except Exception as e:
-        logger.debug("[SuggestionWorkflow] unified event tick failed: %s", e)
-
-    return {
-        "suggestion_id": suggestion_id,
-        "previous_status": current,
-        "status": target,
-        "actor": actor,
-    }
 
 
 # =============================================================================

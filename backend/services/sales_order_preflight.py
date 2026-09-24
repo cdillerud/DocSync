@@ -431,6 +431,21 @@ def preflight_sales_order(
             f"Document type '{candidate.get('document_type') or 'unknown'}' is not a supported customer sales order.",
             field="document_type",
         )
+    elif doc.get("sales_order_excluded") is True:
+        # prepare_sales_order_document relabels excluded sources (e.g. Gamer's
+        # own vendor POs) as PURCHASE_ORDER so the type check above rejects
+        # them. PURCHASE_ORDER is now a supported type, so block explicitly
+        # rather than relying on the relabel or on the exclusion message
+        # surviving _remove_ap_only_messages as an upstream validation error.
+        assessment = doc.get("sales_order_source_assessment") or {}
+        result.add_error(
+            "UNSUPPORTED_DOCUMENT_TYPE",
+            str(
+                assessment.get("reason")
+                or "The source is excluded from customer sales-order intake."
+            ),
+            field="document_type",
+        )
 
     confidence = candidate.get("classificationConfidence") or 0
     if confidence < confidence_threshold:

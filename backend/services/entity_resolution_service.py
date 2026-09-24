@@ -893,10 +893,35 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
         customer_name = ""
 
     # ── Step 12: BC reference cache name → customer_no ──
-    if not customer_no and customer_name:
+    # 2026-09-23: this used to be a raw unanchored substring regex
+    # ($regex: re.escape(customer_name[:30]), no length floor) fed
+    # straight into find_one(), which returns the first match Mongo
+    # happens to hand back - not the best one. A short or generic name
+    # ("ACE") could substring-match a completely unrelated cached
+    # customer ("PALACE Industries"), and even a longer name could
+    # substring-match into an unrelated company name containing it
+    # (the BALLIST/BALLCOR pattern Step 14's consistency gate was
+    # added to catch after the fact). Fixed at the source instead:
+    # require a real minimum length before attempting this lookup at
+    # all, fetch multiple substring candidates instead of trusting
+    # find_one()'s arbitrary pick, and only accept the best-scoring
+    # one if its difflib similarity to the actual customer_name clears
+    # a real threshold - the same rigor already applied to Step 14.
+    if not customer_no and customer_name and len(customer_name.strip()) >= 4:
         try:
-            safe = re.escape(customer_name[:30])
-            cached = await db.bc_reference_cache.find_one(
+            # 2026-09-23: shortened the anchor from 30 chars to 15. This
+            # query only finds candidates whose cached name CONTAINS the
+            # anchor as a substring, so a longer anchor made the whole
+            # lookup fail whenever the extracted name carries anything the
+            # cache doesn't (a trailing "Inc"/"LLC"/"Co." is extremely
+            # common on extracted names and not always present on the BC
+            # cache record) - the query returned zero candidates before
+            # difflib ever got a chance to score anything. Safe to shorten
+            # now that every candidate this pulls in still has to clear
+            # the difflib similarity threshold below on the FULL name
+            # before being accepted.
+            safe = re.escape(customer_name.strip()[:15])
+            candidates = await db.bc_reference_cache.find(
                 {"$or": [
                     {"displayName": {"$regex": safe, "$options": "i"},
                      "entity_type": {"$in": ["customer", "Customer"]}},
@@ -904,8 +929,22 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
                      "bc_entity_type": "customer"},
                 ]},
                 {"_id": 0, "number": 1, "bc_customer_no": 1, "displayName": 1, "bc_customer_name": 1}
-            )
-            if cached:
+            ).to_list(length=20)
+
+            best_cached = None
+            best_score = 0.0
+            cn_lower = customer_name.strip().lower()
+            for candidate in candidates:
+                cand_name = (candidate.get("displayName") or candidate.get("bc_customer_name") or "").strip().lower()
+                if not cand_name:
+                    continue
+                score = difflib.SequenceMatcher(None, cn_lower, cand_name).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_cached = candidate
+
+            if best_cached is not None and best_score >= 0.75:
+                cached = best_cached
                 customer_no = cached.get("number") or cached.get("bc_customer_no", "")
                 customer_name = customer_name or cached.get("displayName") or cached.get("bc_customer_name", "")
                 match_method = "cache_lookup" if match_method == "none" else match_method

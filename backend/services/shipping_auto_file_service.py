@@ -185,8 +185,16 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
         "ok" if move_result.get("success") else "failed",
     )
 
+    # 2026-09-23 fix: this return value was hardcoded success=True regardless
+    # of whether the SharePoint move actually succeeded, with the real
+    # outcome buried in the nested "sharepoint" key. The document's own DB
+    # fields were already correctly set on failure (see the update dict
+    # above), but the ONE live caller (document_bytes_intake_service.py)
+    # checks this top-level "success" key to decide whether to log a
+    # success or failure message - so every real auto-file failure was
+    # being logged as a success, making failures invisible in the logs.
     return {
-        "success": True,
+        "success": bool(move_result.get("success")),
         "doc_id": doc_id,
         "folder_path": folder_path,
         "reason": reason,

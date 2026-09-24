@@ -1131,6 +1131,13 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
             "lines_total": existing_so.get("lines_total", 0),
         }
 
+    # Created by the intake auto-create path (services/auto_post_service.py)
+    if doc.get("bc_sales_order_number"):
+        raise HTTPException(status_code=409, detail={
+            "error": "auto_created",
+            "message": f"Sales Order {doc['bc_sales_order_number']} was already created in BC for this document by intake auto-create.",
+        })
+
     # Check eligibility
     doc_type = doc.get("document_type", "")
     if doc_type not in SALES_ORDER_ELIGIBLE_TYPES:

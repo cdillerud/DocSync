@@ -199,3 +199,16 @@ async def test_complete_order_is_created_and_stamped(monkeypatch, bc):
     assert result["lines_added"] == 3
     assert calls["deleted"] == []
     assert stamped(db)[0]["$set"]["bc_sales_order"]["bc_record_no"] == "SO-1"
+
+
+@pytest.mark.asyncio
+async def test_order_from_intake_auto_create_is_not_duplicated(monkeypatch, bc):
+    calls, _ = bc
+    use_db(monkeypatch, customer_po(bc_sales_order_number="SO-5"))
+
+    with pytest.raises(HTTPException) as exc:
+        await gi.create_sales_order_from_document("doc-1")
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error"] == "auto_created"
+    assert calls["created"] == []

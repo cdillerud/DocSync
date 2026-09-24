@@ -1656,6 +1656,24 @@ class BusinessCentralService:
                 "bc_write_environment": BC_WRITE_ENVIRONMENT,
             }
 
+    async def delete_sales_order(self, order_id: str) -> Dict[str, Any]:
+        """Delete a Sales Order in the BC WRITE environment (rollback of a partial create)."""
+        if self.use_mock:
+            return {"deleted": True, "status": 204, "error": "", "mock": True}
+
+        _check_write_protection("delete_sales_order")
+
+        token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+        company_id = await self._get_company_id(environment=BC_WRITE_ENVIRONMENT)
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/v2.0/companies({company_id})/salesOrders({order_id})"
+
+        async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
+            resp = await client.delete(url, headers={"Authorization": f"Bearer {token}"})
+
+        if resp.status_code in (200, 204):
+            return {"deleted": True, "status": resp.status_code, "error": ""}
+        return {"deleted": False, "status": resp.status_code, "error": resp.text[:300]}
+
     async def _add_sales_order_lines(self, order_id: str, lines: List[Dict], token: str, company_id: str):
         """
         Add line items to a sales order.

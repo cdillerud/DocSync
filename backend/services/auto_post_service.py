@@ -606,9 +606,48 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
             reason="Customer lookup failed"
         )
     
-    # Build sales order data
+    # ── Same guards as the rep-initiated path (routers/gpi_integration.py) ──
+    async def _needs_review(error: str, reason: str) -> AutoPostResult:
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "auto_create_attempted": True,
+                "auto_create_error": error,
+                "review_status": "needs_review",
+                "updated_utc": utcnow(),
+            }}
+        )
+        logger.warning("AUTO-CREATE blocked for doc %s: %s", doc_id, error)
+        return AutoPostResult(eligible=True, attempted=False, success=False, error=error, reason=reason)
+
+    if doc.get("bc_sales_order"):
+        return AutoPostResult(eligible=False, reason="A BC sales order was already created from the review page")
+
     line_items = doc.get("line_items", []) or extracted.get("line_items", [])
-    
+    if not line_items:
+        return await _needs_review("No sales lines to submit", "No lines")
+
+    # Gamer's own vendor POs, split artifacts, orders already posted in BC
+    from services.sales_order_source_inference import assess_sales_order_source
+    source_assessment = assess_sales_order_source(doc, bc_customer_no=customer_number)
+    if source_assessment.get("excluded"):
+        return await _needs_review(f"Not a customer order: {source_assessment.get('reason')}", "Source excluded")
+
+    # A PO already keyed into BC (production history). Fail closed.
+    from services.sales_order_bc_lookup import find_existing_bc_sales_order
+    try:
+        bc_duplicate = await find_existing_bc_sales_order(
+            bc_service, customer_number=customer_number, external_document_number=str(order_number),
+        )
+    except Exception as e:
+        return await _needs_review(f"BC duplicate lookup failed: {e}", "Duplicate lookup failed")
+    if bc_duplicate:
+        return await _needs_review(
+            f"PO '{order_number}' already exists in BC as sales order {bc_duplicate.get('number')}",
+            "Already in BC",
+        )
+
+    # Build sales order data
     order_data = {
         "customerNumber": customer_number,
         "externalDocumentNumber": str(order_number),
@@ -653,6 +692,44 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
 
         # Call BC service to create sales order
         result = await bc_service.create_sales_order(order_data)
+
+        # A header with missing lines must not stay in BC: delete it, and let
+        # a later attempt start clean. If the delete fails, record the order
+        # as created (terminal) so no second order is made, and flag it.
+        lines_total = result.get("linesTotal", 0) or 0
+        lines_added = result.get("linesAdded", 0) or 0
+        if result.get("success") and result.get("bcDocumentId") and lines_added < lines_total:
+            partial = f"Only {lines_added}/{lines_total} lines could be added: {result.get('lineErrors')}"[:1000]
+            try:
+                rollback = await bc_service.delete_sales_order(result["bcDocumentId"])
+            except Exception as rb_err:
+                rollback = {"deleted": False, "error": str(rb_err)}
+            if rollback.get("deleted"):
+                await release_claim(
+                    db, doc_id=doc_id, final_state="auto_create_failed",
+                    extra_set={
+                        "bc_posting_error": f"{partial}. Sales order {result.get('bcDocumentNumber')} was deleted from BC.",
+                        "review_status": "needs_review",
+                        "auto_create_success": False,
+                    },
+                )
+                logger.warning("AUTO-CREATE ROLLED BACK: Doc %s - %s", doc_id, partial)
+                return AutoPostResult(eligible=True, attempted=True, success=False, error=partial, reason="Lines failed; order rolled back")
+
+            await release_claim(
+                db, doc_id=doc_id, final_state="created",
+                extra_set={
+                    "bc_document_id": result.get("bcDocumentId"),
+                    "bc_document_number": result.get("bcDocumentNumber"),
+                    "bc_sales_order_id": result.get("bcDocumentId"),
+                    "bc_sales_order_number": result.get("bcDocumentNumber"),
+                    "bc_posting_error": f"{partial}. Rollback failed ({rollback.get('error') or rollback.get('status')}): fix or delete the order in BC.",
+                    "review_status": "needs_review",
+                    "auto_create_success": False,
+                },
+            )
+            logger.error("AUTO-CREATE PARTIAL, ROLLBACK FAILED: Doc %s - %s", doc_id, partial)
+            return AutoPostResult(eligible=True, attempted=True, success=False, error=partial, reason="Lines failed; rollback failed")
 
         if result.get("success"):
             bc_document_id = result.get("bcDocumentId")

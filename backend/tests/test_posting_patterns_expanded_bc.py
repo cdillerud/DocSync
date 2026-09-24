@@ -107,6 +107,77 @@ class TestPostingPatternsExpandedBC:
             print(f"PASS: Learning proof returns data_sources: {data_sources}")
             print(f"  status_distribution: {data.get('status_distribution', {})}")
 
+    def test_settings_endpoint(self):
+        """GET /api/posting-patterns/settings returns current auto-post configuration"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/settings")
+        
+        assert response.status_code == 200, f"Settings endpoint failed: {response.text}"
+        
+        data = response.json()
+        # Verify required fields
+        assert "auto_post_enabled" in data, "Missing auto_post_enabled field"
+        assert "min_confidence" in data, "Missing min_confidence field"
+        assert "min_invoices_analyzed" in data, "Missing min_invoices_analyzed field"
+        
+        print(f"PASS: Settings endpoint returns auto_post_enabled={data.get('auto_post_enabled')}, min_confidence={data.get('min_confidence')}")
+
+    def test_vendor_summary_returns_auto_post_eligible(self):
+        """GET /api/posting-patterns/vendor-summary returns vendor list with auto_post_eligible field"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/vendor-summary")
+        
+        assert response.status_code == 200, f"Vendor summary endpoint failed: {response.text}"
+        
+        data = response.json()
+        assert "count" in data, "Missing count field"
+        assert "vendors" in data, "Missing vendors field"
+        assert "settings" in data, "Missing settings field"
+        
+        # If there are vendors, verify auto_post_eligible field
+        vendors = data.get("vendors", [])
+        if vendors:
+            first_vendor = vendors[0]
+            assert "auto_post_eligible" in first_vendor, "Missing auto_post_eligible field in vendor"
+            print(f"PASS: Vendor summary returns {len(vendors)} vendors with auto_post_eligible field")
+        else:
+            print("PASS: Vendor summary returns empty vendor list (expected with no BC data)")
+
+    def test_ready_queue_endpoint(self):
+        """GET /api/posting-patterns/ready-queue returns document queue"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/ready-queue")
+        
+        assert response.status_code == 200, f"Ready queue endpoint failed: {response.text}"
+        
+        data = response.json()
+        assert "count" in data, "Missing count field"
+        assert "documents" in data, "Missing documents field"
+        
+        print(f"PASS: Ready queue returns count={data.get('count')} documents")
+
+    def test_analyze_top_starts_background_analysis(self):
+        """POST /api/posting-patterns/analyze-top starts background analysis without crashing"""
+        response = requests.post(f"{BASE_URL}/api/posting-patterns/analyze-top?top_n=5")
+        
+        assert response.status_code == 200, f"Analyze top endpoint failed: {response.text}"
+        
+        data = response.json()
+        # Should return started or already_running status
+        status = data.get("status", "")
+        assert status in ["started", "already_running"], f"Unexpected status: {status}"
+        
+        print(f"PASS: Analyze top returns status={status}")
+
+    def test_analyze_top_status_endpoint(self):
+        """GET /api/posting-patterns/analyze-top/status returns analysis status"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/analyze-top/status")
+        
+        assert response.status_code == 200, f"Analyze top status endpoint failed: {response.text}"
+        
+        data = response.json()
+        # Should have running and progress fields
+        assert "running" in data, "Missing running field"
+        assert "progress" in data, "Missing progress field"
+        
+        print(f"PASS: Analyze top status returns running={data.get('running')}, progress={data.get('progress')}")
 
     def test_learning_activity_endpoint(self):
         """GET /api/posting-patterns/learning-activity returns learning events"""

@@ -543,6 +543,7 @@ async def _record_success_feedback(db, doc_id: str, outcome: str, source: str):
         logger.debug("[AP Auto-Post] Success feedback recording failed (non-blocking): %s", e)
 
 
+
 # =============================================================================
 # Phase 2: Confidence-Gated Auto-Draft PI Creation
 # =============================================================================
@@ -749,6 +750,66 @@ async def attempt_auto_draft_pi(doc_id: str, db, source: str = "confidence_gate"
             "reason": f"Error: {str(e)}",
             "eligibility": eligibility,
         }
+
+
+async def process_auto_draft_queue(db, limit: int = 50) -> Dict:
+    """
+    Process all ReadyForPost documents through the confidence gate.
+    Creates draft PIs for qualifying documents.
+
+    Returns summary: {processed, drafted, skipped, errors, details}
+    """
+    settings = await _load_auto_post_settings(db)
+    if not settings["auto_post_enabled"]:
+        return {
+            "processed": 0, "drafted": 0, "skipped": 0, "errors": 0,
+            "reason": "Auto-post is disabled",
+            "details": [],
+        }
+
+    # Find ReadyForPost documents without existing drafts
+    docs = await db.hub_documents.find(
+        {
+            "$or": [
+                {"status": "ReadyForPost"},
+                {"workflow_status": "ready_for_post"},
+            ],
+            "bc_purchase_invoice": {"$exists": False},
+        },
+        {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1}
+    ).limit(limit).to_list(limit)
+
+    results = {"processed": 0, "drafted": 0, "skipped": 0, "errors": 0, "details": []}
+
+    for doc_stub in docs:
+        doc_id = doc_stub.get("id", "")
+        if not doc_id:
+            continue
+
+        results["processed"] += 1
+        try:
+            result = await attempt_auto_draft_pi(doc_id, db, source="batch_queue")
+            if result.get("drafted"):
+                results["drafted"] += 1
+            else:
+                results["skipped"] += 1
+            results["details"].append({
+                "doc_id": doc_id[:8],
+                "vendor_no": doc_stub.get("bc_vendor_number") or doc_stub.get("vendor_no", ""),
+                "drafted": result.get("drafted", False),
+                "reason": result.get("reason", ""),
+                "bc_record_no": result.get("bc_record_no", ""),
+            })
+        except Exception as e:
+            results["errors"] += 1
+            results["details"].append({
+                "doc_id": doc_id[:8],
+                "error": str(e),
+            })
+
+    logger.info("[Auto-Draft Queue] Processed %d: drafted=%d, skipped=%d, errors=%d",
+                results["processed"], results["drafted"], results["skipped"], results["errors"])
+    return results
 
 
 # =============================================================================

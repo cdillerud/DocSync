@@ -17,6 +17,22 @@ class TestInvoiceTraceEndpoints:
         assert response.status_code == 200
         print("PASS: Health check returns 200")
     
+    def test_trace_endpoint_returns_json_not_500(self):
+        """
+        GET /api/posting-patterns/trace/TUMALOC should return proper JSON with error message
+        when BC credentials are missing (not a 500 error)
+        """
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/trace/TUMALOC")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        # Should have error field with message about BC token failure
+        assert "error" in data, "Response should contain 'error' field"
+        assert "vendor_no" in data, "Response should contain 'vendor_no' field"
+        assert data["vendor_no"] == "TUMALOC"
+        # Error should mention BC token failure, not be a 500 error
+        assert "Failed to" in data["error"] or "BC" in data["error"], f"Error should mention BC failure: {data['error']}"
+        print(f"PASS: Trace endpoint returns proper JSON with error: {data['error']}")
     
     def test_trace_list_endpoint_returns_json_not_500(self):
         """
@@ -41,6 +57,16 @@ class TestInvoiceTraceEndpoints:
         
         print(f"PASS: Trace list endpoint returns proper JSON with {len(data.get('invoices', []))} invoices")
     
+    def test_trace_endpoint_with_invoice_index(self):
+        """
+        GET /api/posting-patterns/trace/TUMALOC?invoice_index=0 should work
+        """
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/trace/TUMALOC?invoice_index=0")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        assert "vendor_no" in data
+        print(f"PASS: Trace endpoint with invoice_index=0 returns proper JSON")
     
     def test_trace_list_endpoint_with_limit(self):
         """
@@ -54,6 +80,17 @@ class TestInvoiceTraceEndpoints:
         assert "invoices" in data
         print(f"PASS: Trace list endpoint with limit=5 returns proper JSON")
     
+    def test_trace_endpoint_unknown_vendor(self):
+        """
+        GET /api/posting-patterns/trace/UNKNOWN_VENDOR should return proper JSON
+        (not 500) even for unknown vendors
+        """
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/trace/UNKNOWN_VENDOR_XYZ")
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+        
+        data = response.json()
+        assert "vendor_no" in data or "error" in data
+        print(f"PASS: Trace endpoint for unknown vendor returns proper JSON")
 
 
 if __name__ == "__main__":

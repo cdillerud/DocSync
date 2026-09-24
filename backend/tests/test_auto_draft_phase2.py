@@ -36,6 +36,184 @@ class TestHealthEndpoint:
         print("PASS: /api/health returns 200 with status=healthy")
 
 
+class TestAutoPostSettings:
+    """Test GET/PUT /api/posting-patterns/settings"""
+    
+    def test_get_settings_returns_200(self):
+        """GET /api/posting-patterns/settings returns 200 with expected fields"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/settings")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Verify required fields exist
+        assert "auto_post_enabled" in data, "Response should have auto_post_enabled field"
+        assert "min_confidence" in data, "Response should have min_confidence field"
+        assert "min_invoices_analyzed" in data, "Response should have min_invoices_analyzed field"
+        assert "require_po_match" in data, "Response should have require_po_match field"
+        assert "allowed_vendors" in data, "Response should have allowed_vendors field"
+        assert "blocked_vendors" in data, "Response should have blocked_vendors field"
+        
+        print(f"PASS: GET /api/posting-patterns/settings returns 200 with fields: {list(data.keys())}")
+    
+    def test_put_settings_updates_and_returns_updated_fields(self):
+        """PUT /api/posting-patterns/settings updates configuration"""
+        # First get current settings
+        get_response = requests.get(f"{BASE_URL}/api/posting-patterns/settings")
+        original_settings = get_response.json()
+        
+        # Update with new value
+        new_min_invoices = 25
+        response = requests.put(
+            f"{BASE_URL}/api/posting-patterns/settings",
+            json={"min_invoices_analyzed": new_min_invoices},
+            headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Verify update was applied
+        assert data.get("status") == "updated", "Response should have status=updated"
+        assert data.get("min_invoices_analyzed") == new_min_invoices, f"Expected min_invoices_analyzed={new_min_invoices}"
+        assert "updated_at" in data, "Response should have updated_at field"
+        
+        # Restore original value
+        requests.put(
+            f"{BASE_URL}/api/posting-patterns/settings",
+            json={"min_invoices_analyzed": original_settings.get("min_invoices_analyzed", 10)},
+            headers={"Content-Type": "application/json"}
+        )
+        
+        print(f"PASS: PUT /api/posting-patterns/settings updates and returns updated fields")
+
+
+class TestReadyQueue:
+    """Test GET /api/posting-patterns/ready-queue"""
+    
+    def test_ready_queue_returns_200(self):
+        """GET /api/posting-patterns/ready-queue returns 200 with expected structure"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/ready-queue?limit=10")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Verify structure
+        assert "count" in data, "Response should have count field"
+        assert "documents" in data, "Response should have documents field"
+        assert isinstance(data["documents"], list), "documents should be a list"
+        
+        print(f"PASS: GET /api/posting-patterns/ready-queue returns 200 with count={data['count']}")
+
+
+class TestVendorSummary:
+    """Test GET /api/posting-patterns/vendor-summary"""
+    
+    def test_vendor_summary_returns_200(self):
+        """GET /api/posting-patterns/vendor-summary returns 200 with expected structure"""
+        response = requests.get(f"{BASE_URL}/api/posting-patterns/vendor-summary?limit=10")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Verify structure
+        assert "count" in data, "Response should have count field"
+        assert "vendors" in data, "Response should have vendors field"
+        assert "settings" in data, "Response should have settings field"
+        assert "ready_total" in data, "Response should have ready_total field"
+        assert isinstance(data["vendors"], list), "vendors should be a list"
+        
+        # Verify settings sub-structure
+        settings = data["settings"]
+        assert "auto_post_enabled" in settings, "settings should have auto_post_enabled"
+        assert "min_confidence" in settings, "settings should have min_confidence"
+        assert "min_invoices_analyzed" in settings, "settings should have min_invoices_analyzed"
+        
+        # If there are vendors, verify auto_post_eligible field exists
+        if data["vendors"]:
+            vendor = data["vendors"][0]
+            assert "auto_post_eligible" in vendor, "vendor should have auto_post_eligible field"
+        
+        print(f"PASS: GET /api/posting-patterns/vendor-summary returns 200 with count={data['count']}")
+
+
+class TestDraftPreview:
+    """Test POST /api/posting-patterns/draft-preview/{doc_id}"""
+    
+    def test_draft_preview_returns_graceful_error_for_invalid_doc(self):
+        """POST /api/posting-patterns/draft-preview/{doc_id} returns graceful error for invalid doc"""
+        response = requests.post(f"{BASE_URL}/api/posting-patterns/draft-preview/invalid-doc-id")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Should return error field, not crash
+        assert "error" in data, "Response should have error field for invalid doc"
+        assert data["error"] == "Document not found", f"Expected 'Document not found' but got '{data.get('error')}'"
+        
+        print(f"PASS: POST /api/posting-patterns/draft-preview returns graceful error: {data['error']}")
+
+
+class TestCreateDraft:
+    """Test POST /api/posting-patterns/create-draft/{doc_id}"""
+    
+    def test_create_draft_returns_graceful_error_for_invalid_doc(self):
+        """POST /api/posting-patterns/create-draft/{doc_id} returns graceful error for invalid doc"""
+        response = requests.post(f"{BASE_URL}/api/posting-patterns/create-draft/invalid-doc-id")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Should return error field and success=false, not crash
+        assert "error" in data, "Response should have error field for invalid doc"
+        assert data.get("success") is False, "success should be False for invalid doc"
+        assert data["error"] == "Document not found", f"Expected 'Document not found' but got '{data.get('error')}'"
+        
+        print(f"PASS: POST /api/posting-patterns/create-draft returns graceful error: {data['error']}")
+
+
+class TestAutoDraftQueue:
+    """Test POST /api/posting-patterns/auto-draft-queue"""
+    
+    def test_auto_draft_queue_returns_200_with_results(self):
+        """POST /api/posting-patterns/auto-draft-queue returns 200 with results structure"""
+        response = requests.post(f"{BASE_URL}/api/posting-patterns/auto-draft-queue?limit=10")
+        assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+        data = response.json()
+        
+        # Verify structure - should have counts
+        assert "processed" in data, "Response should have processed field"
+        assert "drafted" in data, "Response should have drafted field"
+        assert "skipped" in data, "Response should have skipped field"
+        assert "errors" in data, "Response should have errors field"
+        assert "details" in data, "Response should have details field"
+        
+        print(f"PASS: POST /api/posting-patterns/auto-draft-queue returns 200 with processed={data['processed']}, drafted={data['drafted']}, skipped={data['skipped']}, errors={data['errors']}")
+    
+    def test_auto_draft_queue_returns_disabled_reason_when_disabled(self):
+        """POST /api/posting-patterns/auto-draft-queue returns reason='Auto-post is disabled' when disabled"""
+        # First disable auto-post
+        requests.put(
+            f"{BASE_URL}/api/posting-patterns/settings",
+            json={"auto_post_enabled": False},
+            headers={"Content-Type": "application/json"}
+        )
+        
+        try:
+            # Run the queue
+            response = requests.post(f"{BASE_URL}/api/posting-patterns/auto-draft-queue?limit=10")
+            assert response.status_code == 200, f"Expected 200 but got {response.status_code}"
+            data = response.json()
+            
+            # Should have reason field indicating disabled
+            assert "reason" in data, "Response should have reason field when disabled"
+            assert data["reason"] == "Auto-post is disabled", f"Expected 'Auto-post is disabled' but got '{data.get('reason')}'"
+            assert data["processed"] == 0, "processed should be 0 when disabled"
+            
+            print(f"PASS: POST /api/posting-patterns/auto-draft-queue returns reason='{data['reason']}' when disabled")
+        finally:
+            # Re-enable auto-post
+            requests.put(
+                f"{BASE_URL}/api/posting-patterns/settings",
+                json={"auto_post_enabled": True},
+                headers={"Content-Type": "application/json"}
+            )
+
+
 class TestAutoDraftEligibility:
     """Test GET /api/posting-patterns/auto-draft-eligibility/{doc_id}"""
     

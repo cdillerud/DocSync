@@ -19,6 +19,9 @@ import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
 import BakeOffPage from "@/pages/BakeOffPage";
 import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
+import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
+import InvoiceTracePage from "@/pages/InvoiceTracePage";
+import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
 import SearchPage from "@/pages/SearchPage";
@@ -46,9 +49,12 @@ function AppRoutes() {
         <Route path="intelligence" element={<IntelligenceHubPage />} />
         <Route path="operations-queue" element={<OperationsQueuePage />} />
         <Route path="integrations" element={<IntegrationsHubPage />} />
+        <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
+        <Route path="invoice-trace" element={<InvoiceTracePage />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
+        <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}
         <Route path="queue" element={<Navigate to="/" replace />} />

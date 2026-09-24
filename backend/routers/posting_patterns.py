@@ -4,11 +4,14 @@ GPI Document Hub — Posting Pattern Analysis API
 Phase 1: Analyze BC posting patterns and build vendor posting profiles.
 Phase 2: Template-driven draft PI creation, auto-post settings, ready document queue.
 """
+import asyncio
 import logging
 import os
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, Query, BackgroundTasks
+from fastapi import APIRouter, Query, BackgroundTasks, Body
+from typing import Optional
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
@@ -19,9 +22,158 @@ router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
 # =============================================================================
 
 
+@router.get("/review-queue/badge-count")
+async def get_review_queue_badge_count():
+    """
+    Lightweight endpoint for the nav badge — returns count of drafts needing attention.
+    Includes pending reviews + BC-edited drafts (feedback detected changes).
+    """
+    db = get_db()
+    count = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
+    })
+    return {"count": count}
+
+
 # =============================================================================
 # Review Queue — Review / Approve / Correct Auto-Drafted PIs
 # =============================================================================
+
+@router.get("/review-queue")
+async def get_review_queue(
+    status_filter: str = Query("pending", description="Filter: pending, approved, corrected, all"),
+    vendor_no: str = Query("", description="Filter by vendor"),
+    limit: int = Query(50, le=200),
+):
+    """
+    List auto-drafted Purchase Invoices that need human review.
+    Shows documents where auto_draft_created=True with their review status.
+    """
+    db = get_db()
+
+    match_filter = {"auto_draft_created": True}
+    if vendor_no:
+        match_filter["$or"] = [
+            {"bc_vendor_number": vendor_no},
+            {"vendor_no": vendor_no},
+        ]
+
+    # Status filter
+    if status_filter == "pending":
+        match_filter["draft_review_status"] = {"$nin": ["approved", "corrected"]}
+    elif status_filter in ("approved", "corrected"):
+        match_filter["draft_review_status"] = status_filter
+
+    docs = await db.hub_documents.find(
+        match_filter,
+        {
+            "_id": 0, "id": 1, "filename": 1, "file_name": 1,
+            "doc_type": 1, "document_type": 1,
+            "bc_vendor_number": 1, "vendor_no": 1, "vendor_canonical": 1,
+            "extracted_fields.invoice_number": 1, "extracted_fields.amount": 1,
+            "extracted_fields.invoice_date": 1,
+            "normalized_fields.invoice_number": 1, "normalized_fields.amount": 1,
+            "auto_draft_created": 1, "auto_draft_at": 1,
+            "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1,
+            "auto_draft_source": 1,
+            "draft_review_status": 1, "draft_reviewed_at": 1, "draft_reviewed_by": 1,
+            "draft_corrections": 1,
+            "bc_purchase_invoice": 1,
+            "status": 1, "workflow_status": 1, "created_utc": 1,
+        }
+    ).sort("auto_draft_at", -1).limit(limit).to_list(limit)
+
+    items = []
+    for doc in docs:
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+        v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+        items.append({
+            "id": doc.get("id", ""),
+            "filename": doc.get("filename") or doc.get("file_name", ""),
+            "vendor_no": v_no,
+            "vendor_name": doc.get("vendor_canonical", ""),
+            "invoice_number": ef.get("invoice_number") or nf.get("invoice_number", ""),
+            "amount": ef.get("amount") or nf.get("amount", ""),
+            "invoice_date": ef.get("invoice_date") or nf.get("invoice_date", ""),
+            "confidence": doc.get("auto_draft_confidence", ""),
+            "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+            "draft_source": doc.get("auto_draft_source", ""),
+            "drafted_at": doc.get("auto_draft_at", ""),
+            "review_status": doc.get("draft_review_status", "pending"),
+            "reviewed_at": doc.get("draft_reviewed_at", ""),
+            "reviewed_by": doc.get("draft_reviewed_by", ""),
+            "corrections": doc.get("draft_corrections") or [],
+        })
+
+    # Summary counts
+    total_pending = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": {"$nin": ["approved", "corrected"]},
+    })
+    total_approved = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": "approved",
+    })
+    total_corrected = await db.hub_documents.count_documents({
+        "auto_draft_created": True,
+        "draft_review_status": "corrected",
+    })
+
+    return {
+        "count": len(items),
+        "items": items,
+        "summary": {
+            "pending": total_pending,
+            "approved": total_approved,
+            "corrected": total_corrected,
+            "total": total_pending + total_approved + total_corrected,
+        },
+    }
+
+
+@router.post("/review-queue/{doc_id}/approve")
+async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
+    """
+    Approve an auto-drafted PI. Marks it as human-verified.
+    Creates a positive feedback event so the system learns that this template worked.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+    if not doc.get("auto_draft_created"):
+        return {"success": False, "error": "Document has no auto-draft to approve"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Mark as approved
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "draft_review_status": "approved",
+            "draft_reviewed_at": now,
+            "draft_reviewed_by": reviewer,
+        }}
+    )
+
+    # Create positive feedback event — template produced correct result
+    await db.posting_learning_events.insert_one({
+        "vendor_no": v_no,
+        "doc_id": doc_id,
+        "event_type": "draft_approved",
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "reviewer": reviewer,
+        "posted_at": now,
+        "feedback": "positive",
+    })
+
+    logger.info("[Review Queue] Approved draft for %s (vendor=%s) by %s", doc_id[:8], v_no, reviewer)
+    return {"success": True, "message": f"Draft approved for {doc_id[:8]}", "review_status": "approved"}
 
 
 async def auto_approve_drafts(
@@ -147,9 +299,140 @@ async def auto_approve_drafts(
     }
 
 
+@router.post("/review-queue/{doc_id}/correct")
+async def correct_draft(
+    doc_id: str,
+    corrections: list = Body(..., description="List of corrections: [{field, original, corrected, note}]"),
+    reviewer: str = Query("admin"),
+):
+    """
+    Submit corrections for an auto-drafted PI. Records what the human changed
+    so the system can learn from mistakes and improve future templates.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "auto_draft_created": 1, "bc_vendor_number": 1, "vendor_no": 1, "auto_draft_confidence": 1, "auto_draft_bc_record_no": 1})
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+    if not doc.get("auto_draft_created"):
+        return {"success": False, "error": "Document has no auto-draft to correct"}
+
+    now = datetime.now(timezone.utc).isoformat()
+    v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+
+    # Mark as corrected with correction details
+    await db.hub_documents.update_one(
+        {"id": doc_id},
+        {"$set": {
+            "draft_review_status": "corrected",
+            "draft_reviewed_at": now,
+            "draft_reviewed_by": reviewer,
+            "draft_corrections": corrections,
+        }}
+    )
+
+    # Create correction feedback event — template needs adjustment
+    await db.posting_learning_events.insert_one({
+        "vendor_no": v_no,
+        "doc_id": doc_id,
+        "event_type": "draft_corrected",
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "corrections": corrections,
+        "reviewer": reviewer,
+        "posted_at": now,
+        "feedback": "corrective",
+    })
+
+    # Also record as classification corrections for the learning dashboard
+    for c in corrections:
+        await db.classification_corrections.insert_one({
+            "doc_id": doc_id,
+            "vendor_id": v_no,
+            "correction_type": f"draft_{c.get('field', 'unknown')}",
+            "original_type": c.get("original", ""),
+            "corrected_type": c.get("corrected", ""),
+            "source": "review_queue",
+            "confirmed_at": now,
+            "applied": True,
+        })
+
+    logger.info("[Review Queue] Corrected draft for %s (vendor=%s): %d corrections by %s",
+                doc_id[:8], v_no, len(corrections), reviewer)
+    return {
+        "success": True,
+        "message": f"Corrections recorded for {doc_id[:8]} — {len(corrections)} fields corrected",
+        "review_status": "corrected",
+        "corrections_count": len(corrections),
+    }
+
+
 # =============================================================================
 # Feedback Loop — BC Draft Sync & Template Adjustment
 # =============================================================================
+
+@router.post("/review-queue/{doc_id}/sync-from-bc")
+async def sync_draft_from_bc_endpoint(doc_id: str):
+    """
+    Fetch the current state of an auto-drafted PI from BC.
+    Compares original draft lines with what's currently in BC (after human edits).
+    If changes are detected, feeds them back into the posting template.
+    """
+    db = get_db()
+    from services.draft_feedback_service import sync_draft_from_bc
+    result = await sync_draft_from_bc(doc_id, db)
+    return result
+
+
+@router.post("/review-queue/sync-all")
+async def sync_all_drafts(limit: int = Query(50, le=200)):
+    """
+    Batch sync all auto-drafted PIs from BC.
+    Detects human edits and feeds corrections back into posting templates.
+    """
+    db = get_db()
+    from services.draft_feedback_service import process_feedback_batch
+    result = await process_feedback_batch(db, limit=limit)
+    return result
+
+
+@router.get("/review-queue/{doc_id}/feedback")
+async def get_draft_feedback(doc_id: str):
+    """
+    Get the feedback details for a specific auto-drafted document.
+    Shows what changed between the original draft and BC current state.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one(
+        {"id": doc_id},
+        {
+            "_id": 0, "id": 1,
+            "original_draft_lines": 1,
+            "draft_bc_current_lines": 1,
+            "draft_bc_sync": 1,
+            "draft_bc_corrections": 1,
+            "auto_draft_bc_record_no": 1,
+            "auto_draft_confidence": 1,
+            "bc_vendor_number": 1, "vendor_no": 1,
+        }
+    )
+    if not doc:
+        return {"success": False, "error": "Document not found"}
+
+    sync = doc.get("draft_bc_sync") or {}
+    return {
+        "success": True,
+        "doc_id": doc_id,
+        "bc_record_no": doc.get("auto_draft_bc_record_no", ""),
+        "vendor_no": doc.get("bc_vendor_number") or doc.get("vendor_no", ""),
+        "confidence": doc.get("auto_draft_confidence", ""),
+        "last_synced": sync.get("synced_at", ""),
+        "bc_status": sync.get("bc_status", ""),
+        "changes_detected": sync.get("changes_detected", False),
+        "changes_summary": sync.get("changes_summary", ""),
+        "original_lines": doc.get("original_draft_lines") or [],
+        "current_lines": doc.get("draft_bc_current_lines") or [],
+        "corrections": doc.get("draft_bc_corrections") or [],
+    }
 
 
 # =============================================================================
@@ -344,6 +627,200 @@ async def debug_invoice_lines(vendor_no: str):
     return result
 
 
+async def _run_top_analysis(top_n: int, force: bool = False):
+    """
+    Background task: discover ALL vendors from BC posted invoices and analyze each.
+    No longer limited to Hub-only vendors — goes straight to BC for the complete picture.
+    """
+    global _analysis_status
+    _analysis_status = {"running": True, "last_result": None, "progress": "discovering vendors from BC..."}
+    try:
+        db = get_db()
+        bc = get_bc_service()
+        from services.posting_pattern_analyzer import analyze_vendor_posting_patterns
+
+        # Step 1: Discover ALL unique vendors from BC purchase invoices (ALL statuses)
+        # AND from historical posted purchase invoices
+        _analysis_status["progress"] = "Discovering vendors from ALL BC invoice sources..."
+        discovered_vendors = {}
+        skip = 0
+        page_size = 500
+
+        # Source 1: purchaseInvoices (all statuses — no filter)
+        while True:
+            pi_result = await bc.get_posted_purchase_invoices(limit=page_size, skip=skip)
+            page = pi_result.get("invoices", [])
+            if not page:
+                break
+            for inv in page:
+                vno = inv.get("vendorNumber", "")
+                if vno:
+                    if vno not in discovered_vendors:
+                        discovered_vendors[vno] = {
+                            "vendor_no": vno,
+                            "vendor_name": inv.get("vendorName", ""),
+                            "invoice_count": 0,
+                        }
+                    discovered_vendors[vno]["invoice_count"] = discovered_vendors[vno].get("invoice_count", 0) + 1
+            logger.info("[PostingPatterns] Discovery (purchaseInvoices): scanned %d invoices, found %d unique vendors so far",
+                         skip + len(page), len(discovered_vendors))
+            if len(page) < page_size:
+                break
+            skip += len(page)
+            # Don't stop early — scan ALL invoices to get accurate counts
+
+        # Source 2: historical postedPurchaseInvoices
+        skip = 0
+        while True:
+            hist_result = await bc.get_historical_posted_purchase_invoices(limit=page_size, skip=skip)
+            page = hist_result.get("invoices", [])
+            source = hist_result.get("source", "none_available")
+            if not page or source == "none_available":
+                break
+            for inv in page:
+                vno = inv.get("vendorNumber", "")
+                if vno:
+                    if vno not in discovered_vendors:
+                        discovered_vendors[vno] = {
+                            "vendor_no": vno,
+                            "vendor_name": inv.get("vendorName", ""),
+                            "invoice_count": 0,
+                        }
+                    discovered_vendors[vno]["invoice_count"] = discovered_vendors[vno].get("invoice_count", 0) + 1
+            logger.info("[PostingPatterns] Discovery (historical %s): scanned %d invoices, found %d unique vendors total",
+                         source, skip + len(page), len(discovered_vendors))
+            if len(page) < page_size:
+                break
+            skip += len(page)
+
+        # Also include vendors from Hub profiles that might not have BC invoices yet
+        hub_vendors = await db.vendor_invoice_profiles.find(
+            {"bc_invoice_count": {"$gte": 1}},
+            {"_id": 0, "vendor_no": 1, "vendor_name": 1, "bc_invoice_count": 1}
+        ).to_list(500)
+        for v in hub_vendors:
+            vno = v.get("vendor_no", "")
+            if vno and vno not in discovered_vendors:
+                discovered_vendors[vno] = {
+                    **v,
+                    "invoice_count": v.get("bc_invoice_count", 0),
+                }
+
+        # Sort by invoice count DESC (highest volume vendors first) and limit to top_n
+        all_vendors = sorted(discovered_vendors.values(), key=lambda x: x.get("invoice_count", 0), reverse=True)
+        if top_n > 0:
+            all_vendors = all_vendors[:top_n]
+
+        _analysis_status["progress"] = f"Found {len(all_vendors)} vendors. Starting analysis..."
+        logger.info("[PostingPatterns] Discovered %d total vendors (%d from BC, %d from Hub). Analyzing %d.",
+                     len(discovered_vendors), len(discovered_vendors) - len(hub_vendors), len(hub_vendors), len(all_vendors))
+
+        results = {
+            "vendors_discovered": len(discovered_vendors),
+            "vendors_queued": len(all_vendors),
+            "analyzed": 0, "errors": 0, "skipped": 0,
+            "vendor_details": [], "error_details": [], "force": force,
+        }
+
+        for i, v in enumerate(all_vendors):
+            vendor_no = v.get("vendor_no", "")
+            if not vendor_no:
+                continue
+            _analysis_status["progress"] = f"Analyzing {vendor_no} ({i+1}/{len(all_vendors)})"
+
+            # Check if recent analysis exists (skip if < 7 days old, unless force=True)
+            if not force:
+                from datetime import datetime, timezone
+                existing = await db.posting_pattern_analysis.find_one(
+                    {"vendor_no": vendor_no, "status": "analyzed"},
+                    {"_id": 0, "analyzed_at": 1}
+                )
+                if existing and existing.get("analyzed_at"):
+                    try:
+                        dt = datetime.fromisoformat(existing["analyzed_at"].replace("Z", "+00:00"))
+                        if (datetime.now(timezone.utc) - dt).days < 7:
+                            results["skipped"] += 1
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+
+            try:
+                analysis = await analyze_vendor_posting_patterns(db, bc, vendor_no)
+                if analysis.get("status") == "analyzed":
+                    results["analyzed"] += 1
+                    results["vendor_details"].append({
+                        "vendor_no": vendor_no,
+                        "vendor_name": v.get("vendor_name", ""),
+                        "invoices": analysis.get("invoices_analyzed", 0),
+                        "lines": analysis.get("lines_analyzed", 0),
+                        "confidence": analysis.get("posting_template", {}).get("confidence", "?"),
+                        "consistency": analysis.get("consistency", {}).get("overall", 0),
+                    })
+                else:
+                    results["errors"] += 1
+                    results["error_details"].append({
+                        "vendor_no": vendor_no,
+                        "vendor_name": v.get("vendor_name", ""),
+                        "status": analysis.get("status", "unknown"),
+                        "error": analysis.get("error", "unknown"),
+                    })
+                    logger.warning("Vendor %s analysis status: %s, error: %s",
+                                   vendor_no, analysis.get("status"), analysis.get("error", ""))
+            except Exception as e:
+                results["errors"] += 1
+                results["error_details"].append({
+                    "vendor_no": vendor_no,
+                    "vendor_name": v.get("vendor_name", ""),
+                    "error": str(e),
+                })
+                logger.error("Failed to analyze vendor %s: %s", vendor_no, str(e))
+
+            # Brief pause to avoid BC API throttling
+            await asyncio.sleep(0.5)
+
+        _analysis_status = {"running": False, "last_result": results, "progress": "complete"}
+        logger.info("[PostingPatterns] Background analysis complete: discovered=%d, analyzed=%d, errors=%d, skipped=%d",
+                     results["vendors_discovered"], results["analyzed"], results["errors"], results["skipped"])
+
+    except Exception as e:
+        _analysis_status = {"running": False, "last_result": {"error": str(e)}, "progress": "failed"}
+        logger.error("[PostingPatterns] Background analysis failed: %s", str(e))
+
+
+@router.post("/analyze-top")
+async def analyze_top_vendors(
+    background_tasks: BackgroundTasks,
+    top_n: int = Query(default=50, le=500, description="Number of top vendors to analyze (0 = all)"),
+    force: bool = Query(default=False, description="Force re-analysis even if recent data exists"),
+):
+    """
+    Analyze posting patterns for the top N vendors by invoice volume.
+    Runs in background to avoid nginx timeout. Check progress via GET /analyze-top/status.
+    Use force=true to re-analyze all vendors (bypasses 7-day freshness check).
+    """
+    global _analysis_status
+    if _analysis_status.get("running"):
+        return {
+            "status": "already_running",
+            "progress": _analysis_status.get("progress", ""),
+            "message": "Analysis is already in progress. Check GET /analyze-top/status for progress.",
+        }
+
+    background_tasks.add_task(_run_top_analysis, top_n, force)
+    return {
+        "status": "started",
+        "vendors_to_analyze": top_n,
+        "force": force,
+        "message": f"Background analysis started for top {top_n} vendors{' (FORCE re-analysis)' if force else ''}. Check GET /api/posting-patterns/analyze-top/status for progress.",
+    }
+
+
+@router.get("/analyze-top/status")
+async def get_analysis_status():
+    """Check the status of a background analyze-top job."""
+    return _analysis_status
+
+
 @router.get("/learning-activity")
 async def get_learning_activity(vendor_no: str = Query("", description="Filter by vendor"), limit: int = Query(20, le=100)):
     """
@@ -503,6 +980,307 @@ async def posting_learning_proof(vendor_no: str):
 # =============================================================================
 # Phase 2: Auto-Post Settings, Draft Preview, Ready Queue
 # =============================================================================
+
+@router.get("/settings")
+async def get_auto_post_settings():
+    """Get current auto-post configuration settings."""
+    db = get_db()
+    settings = await db.auto_post_settings.find_one({"_id": "global"}) or {}
+    return {
+        "auto_post_enabled": settings.get("auto_post_enabled", False),
+        "min_confidence": settings.get("min_confidence", "high"),
+        "min_invoices_analyzed": settings.get("min_invoices_analyzed", 10),
+        "require_po_match": settings.get("require_po_match", True),
+        "allowed_vendors": settings.get("allowed_vendors", []),
+        "blocked_vendors": settings.get("blocked_vendors", []),
+        "updated_at": settings.get("updated_at", ""),
+        "updated_by": settings.get("updated_by", ""),
+    }
+
+
+@router.put("/settings")
+async def update_auto_post_settings(
+    auto_post_enabled: Optional[bool] = Body(None),
+    min_confidence: Optional[str] = Body(None),
+    min_invoices_analyzed: Optional[int] = Body(None),
+    require_po_match: Optional[bool] = Body(None),
+    allowed_vendors: Optional[list] = Body(None),
+    blocked_vendors: Optional[list] = Body(None),
+):
+    """Update auto-post configuration settings."""
+    db = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+
+    update_fields = {"updated_at": now, "updated_by": "admin"}
+    if auto_post_enabled is not None:
+        update_fields["auto_post_enabled"] = auto_post_enabled
+    if min_confidence is not None and min_confidence in ("high", "medium", "low"):
+        update_fields["min_confidence"] = min_confidence
+    if min_invoices_analyzed is not None:
+        update_fields["min_invoices_analyzed"] = max(1, min_invoices_analyzed)
+    if require_po_match is not None:
+        update_fields["require_po_match"] = require_po_match
+    if allowed_vendors is not None:
+        update_fields["allowed_vendors"] = allowed_vendors
+    if blocked_vendors is not None:
+        update_fields["blocked_vendors"] = blocked_vendors
+
+    await db.auto_post_settings.update_one(
+        {"_id": "global"},
+        {"$set": update_fields},
+        upsert=True,
+    )
+
+    return {"status": "updated", **update_fields}
+
+
+@router.get("/ready-queue")
+async def get_ready_queue(
+    limit: int = Query(50, le=200),
+    vendor_no: str = Query("", description="Filter by vendor"),
+    confidence: str = Query("", description="Filter by template confidence: high, medium, low"),
+):
+    """
+    List documents that are ReadyForPost with their posting template info.
+    This is the queue of invoices ready for auto-posting or manual draft creation.
+    """
+    db = get_db()
+
+    match_filter = {
+        "$or": [
+            {"status": "ReadyForPost"},
+            {"workflow_status": "ready_for_post"},
+        ]
+    }
+    if vendor_no:
+        match_filter["$or"] = [
+            {"bc_vendor_number": vendor_no},
+            {"vendor_no": vendor_no},
+        ]
+
+    docs = await db.hub_documents.find(
+        match_filter,
+        {
+            "_id": 0, "id": 1, "filename": 1, "file_name": 1,
+            "doc_type": 1, "suggested_job_type": 1, "document_type": 1,
+            "bc_vendor_number": 1, "vendor_no": 1, "vendor_canonical": 1,
+            "extracted_fields.invoice_number": 1, "extracted_fields.amount": 1,
+            "extracted_fields.invoice_date": 1,
+            "normalized_fields.invoice_number": 1, "normalized_fields.amount": 1,
+            "suggested_posting_template": 1, "posting_profile_confidence": 1,
+            "bc_purchase_invoice": 1, "auto_post_reason": 1,
+            "status": 1, "workflow_status": 1, "created_utc": 1,
+        }
+    ).sort("created_utc", -1).limit(limit).to_list(limit)
+
+    # Enrich with posting profiles
+    enriched = []
+    for doc in docs:
+        v_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+        profile = None
+        if v_no:
+            profile = await db.posting_pattern_analysis.find_one(
+                {"vendor_no": v_no, "status": "analyzed"},
+                {"_id": 0, "posting_template": 1, "invoices_analyzed": 1}
+            )
+
+        template = profile.get("posting_template", {}) if profile else (doc.get("suggested_posting_template") or {})
+        template_confidence = template.get("confidence", "none")
+
+        # Apply confidence filter
+        if confidence and template_confidence != confidence:
+            continue
+
+        ef = doc.get("extracted_fields") or {}
+        nf = doc.get("normalized_fields") or {}
+
+        enriched.append({
+            "id": doc.get("id", ""),
+            "filename": doc.get("filename") or doc.get("file_name", ""),
+            "vendor_no": v_no,
+            "vendor_name": doc.get("vendor_canonical", ""),
+            "invoice_number": ef.get("invoice_number") or nf.get("invoice_number", ""),
+            "amount": ef.get("amount") or nf.get("amount", ""),
+            "invoice_date": ef.get("invoice_date") or nf.get("invoice_date", ""),
+            "template_confidence": template_confidence,
+            "template_line_count": template.get("typical_line_count", 0),
+            "template_gl_accounts": [lt.get("account_number", "") for lt in template.get("line_templates", []) if lt.get("type") == "Account"],
+            "has_draft": bool(doc.get("bc_purchase_invoice")),
+            "draft_no": (doc.get("bc_purchase_invoice") or {}).get("bc_record_no", ""),
+            "status": doc.get("status") or doc.get("workflow_status", ""),
+            "created_utc": doc.get("created_utc", ""),
+        })
+
+    return {
+        "count": len(enriched),
+        "documents": enriched,
+    }
+
+
+@router.post("/draft-preview/{doc_id}")
+async def preview_draft_pi(doc_id: str):
+    """
+    Preview what a Draft Purchase Invoice would look like for this document
+    using the vendor's posting template. Does NOT create anything in BC.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found"}
+
+    vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
+    if not vendor_no:
+        return {"error": "No vendor number resolved", "doc_id": doc_id}
+
+    # Load posting template
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"},
+        {"_id": 0}
+    )
+
+    ef = doc.get("extracted_fields") or {}
+    nf = doc.get("normalized_fields") or {}
+    template = profile.get("posting_template", {}) if profile else {}
+
+    # Build the preview of what would be created
+    invoice_number = ef.get("invoice_number") or nf.get("invoice_number") or ""
+    invoice_date = ef.get("invoice_date") or nf.get("invoice_date") or ""
+    amount = ef.get("amount") or nf.get("amount") or ""
+    po_number = ef.get("po_number") or nf.get("po_number") or doc.get("po_number_clean", "")
+
+    # Build preview lines from template
+    preview_lines = []
+    if template.get("line_templates"):
+        line_templates = template["line_templates"]
+        # Compute total usage_rate to distribute amounts proportionally
+        total_usage = sum(lt.get("usage_rate", 0) for lt in line_templates)
+
+        for lt in line_templates:
+            line = {
+                "lineType": lt.get("type", "Account"),
+                "lineObjectNumber": lt.get("account_number") or lt.get("item_number", ""),
+                "description": "",
+                "quantity": 1,
+                "unitCost": 0,
+                "usage_rate": lt.get("usage_rate", 0),
+            }
+            # Construct description based on reference pattern
+            ref_handling = template.get("reference_handling", {})
+            ref_pattern = ref_handling.get("pattern", "")
+            if ref_pattern == "freight_prefix_plus_ref" and po_number:
+                line["description"] = f"FREIGHT {po_number}"
+            elif ref_pattern == "bol_in_description" and po_number:
+                line["description"] = po_number
+            else:
+                line["description"] = f"Per invoice {invoice_number}" if invoice_number else "Invoice line"
+
+            # Distribute extracted total proportionally using usage_rate
+            try:
+                total = float(str(amount).replace("$", "").replace(",", "").strip())
+                usage_rate = lt.get("usage_rate", 0)
+                if total_usage > 0 and usage_rate > 0:
+                    line["unitCost"] = round(total * (usage_rate / total_usage), 2)
+                elif len(line_templates) > 0:
+                    line["unitCost"] = round(total / len(line_templates), 2)
+                else:
+                    line["unitCost"] = total
+            except (ValueError, TypeError):
+                pass
+
+            preview_lines.append(line)
+
+        # Fix rounding so line amounts sum to exact total
+        try:
+            total = float(str(amount).replace("$", "").replace(",", "").strip())
+            line_sum = sum(l["unitCost"] for l in preview_lines)
+            rounding_diff = round(total - line_sum, 2)
+            if abs(rounding_diff) > 0 and abs(rounding_diff) <= 1.0 and preview_lines:
+                biggest = max(range(len(preview_lines)), key=lambda i: preview_lines[i]["unitCost"])
+                preview_lines[biggest]["unitCost"] = round(preview_lines[biggest]["unitCost"] + rounding_diff, 2)
+        except (ValueError, TypeError):
+            pass
+    else:
+        # Fallback: single line with total amount
+        try:
+            total = float(str(amount).replace("$", "").replace(",", "").strip())
+        except (ValueError, TypeError):
+            total = 0
+        preview_lines.append({
+            "lineType": "Account",
+            "lineObjectNumber": "",
+            "description": f"Per invoice {invoice_number}" if invoice_number else "Invoice line",
+            "quantity": 1,
+            "unitCost": total,
+        })
+
+    return {
+        "doc_id": doc_id,
+        "vendor_no": vendor_no,
+        "vendor_name": doc.get("vendor_canonical", ""),
+        "template_confidence": template.get("confidence", "none"),
+        "invoices_studied": profile.get("invoices_analyzed", 0) if profile else 0,
+        "preview": {
+            "vendorNumber": vendor_no,
+            "vendorInvoiceNumber": invoice_number,
+            "invoiceDate": invoice_date,
+            "currency": template.get("recommended_currency", "USD"),
+            "taxHandling": template.get("tax_handling", "unknown"),
+            "lines": preview_lines,
+        },
+        "template_details": {
+            "line_templates": template.get("line_templates", []),
+            "reference_handling": template.get("reference_handling", {}),
+            "description2_usage": template.get("description2_usage", {}),
+        },
+        "already_has_draft": bool(doc.get("bc_purchase_invoice")),
+        "existing_draft_no": (doc.get("bc_purchase_invoice") or {}).get("bc_record_no", ""),
+    }
+
+
+@router.post("/create-draft/{doc_id}")
+async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
+    """
+    Create a Draft Purchase Invoice in BC using the vendor's posting template.
+    This uses the learned posting patterns to build lines that match human behavior.
+    """
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    if not doc:
+        return {"error": "Document not found", "success": False}
+
+    # Check if already has a draft
+    existing = doc.get("bc_purchase_invoice")
+    if existing and not force:
+        return {
+            "success": True,
+            "already_exists": True,
+            "bc_record_no": existing.get("bc_record_no", ""),
+            "message": "Draft PI already exists. Use force=true to re-create.",
+        }
+
+    # Delegate to existing create_purchase_invoice_from_document
+    try:
+        from routers.gpi_integration import create_purchase_invoice_from_document
+        result = await create_purchase_invoice_from_document(doc_id, vendor_no_override="", force=force)
+        return result
+    except Exception as e:
+        logger.error("Failed to create draft PI for %s: %s", doc_id, str(e))
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/auto-draft-queue")
+async def run_auto_draft_queue(limit: int = Query(50, le=200)):
+    """
+    Process the ReadyForPost queue through the confidence gate.
+    Automatically creates DRAFT Purchase Invoices for qualifying documents
+    (high-confidence vendor templates, min invoices met, vendor not blocked).
+
+    Safety: Only creates DRAFT PIs. Never posts to the ledger.
+    """
+    db = get_db()
+    from services.ap_auto_post_service import process_auto_draft_queue
+    result = await process_auto_draft_queue(db, limit=limit)
+    return result
 
 
 @router.post("/bc-sync-item/{item_number}")
@@ -829,9 +1607,254 @@ async def compare_draft_vs_production(
     }
 
 
+@router.get("/vendor-summary")
+async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
+    """
+    Get a summary of all analyzed vendors with their posting profiles,
+    document counts, and auto-post readiness.
+    """
+    db = get_db()
+
+    # All analyzed profiles
+    profiles = await db.posting_pattern_analysis.find(
+        {"status": "analyzed"},
+        {"_id": 0, "vendor_no": 1, "vendor_names_seen": 1, "invoices_analyzed": 1,
+         "lines_analyzed": 1, "invoices_with_lines_analyzed": 1,
+         "posting_template": 1, "amount_stats": 1, "consistency": 1,
+         "analyzed_at": 1, "tax_pattern": 1, "line_patterns": 1}
+    ).sort("invoices_analyzed", -1).limit(limit).to_list(limit)
+
+    # Count ready docs per vendor
+    pipeline = [
+        {"$match": {"$or": [{"status": "ReadyForPost"}, {"workflow_status": "ready_for_post"}]}},
+        {"$group": {
+            "_id": {"$ifNull": ["$bc_vendor_number", "$vendor_no"]},
+            "count": {"$sum": 1},
+        }},
+    ]
+    ready_counts = {}
+    async for row in db.hub_documents.aggregate(pipeline):
+        if row.get("_id"):
+            ready_counts[row["_id"]] = row["count"]
+
+    # Get auto-post settings
+    settings = await db.auto_post_settings.find_one({"_id": "global"}) or {}
+
+    vendors = []
+    for p in profiles:
+        v_no = p.get("vendor_no", "")
+        template = p.get("posting_template", {})
+        amount_stats = p.get("amount_stats", {})
+        line_patterns = p.get("line_patterns", {})
+        consistency = p.get("consistency", {})
+
+        vendors.append({
+            "vendor_no": v_no,
+            "vendor_name": (p.get("vendor_names_seen") or ["?"])[0],
+            "invoices_analyzed": p.get("invoices_analyzed", 0),
+            "lines_analyzed": p.get("lines_analyzed", 0),
+            "invoices_with_lines": p.get("invoices_with_lines_analyzed", 0),
+            "confidence": template.get("confidence", "low"),
+            "consistency_score": round(consistency.get("overall", 0) * 100),
+            "typical_line_count": template.get("typical_line_count", 0),
+            "tax_handling": template.get("tax_handling", "unknown"),
+            "currency": template.get("recommended_currency", "USD"),
+            "avg_amount": amount_stats.get("mean", 0),
+            "top_gl_accounts": list(line_patterns.get("top_gl_accounts", {}).keys())[:3],
+            "top_items": list(line_patterns.get("top_items", {}).keys())[:3],
+            "ready_docs": ready_counts.get(v_no, 0),
+            "analyzed_at": p.get("analyzed_at", ""),
+            "reference_pattern": template.get("reference_handling", {}).get("pattern", ""),
+            "auto_post_eligible": (
+                settings.get("auto_post_enabled", False) and
+                template.get("confidence", "low") in _confidence_at_or_above(settings.get("min_confidence", "high")) and
+                p.get("invoices_analyzed", 0) >= settings.get("min_invoices_analyzed", 10) and
+                v_no not in settings.get("blocked_vendors", [])
+            ),
+        })
+
+    return {
+        "count": len(vendors),
+        "vendors": vendors,
+        "settings": {
+            "auto_post_enabled": settings.get("auto_post_enabled", False),
+            "min_confidence": settings.get("min_confidence", "high"),
+            "min_invoices_analyzed": settings.get("min_invoices_analyzed", 10),
+        },
+        "ready_total": sum(ready_counts.values()),
+    }
+
+
+def _confidence_at_or_above(min_level: str) -> list:
+    """Return confidence levels at or above the given minimum."""
+    levels = ["low", "medium", "high"]
+    try:
+        idx = levels.index(min_level)
+        return levels[idx:]
+    except ValueError:
+        return ["high"]
+
+
 # =============================================================================
 # Invoice Trace: Human vs AI Side-by-Side Comparison
 # =============================================================================
+
+@router.get("/trace/{vendor_no}")
+async def trace_invoice_comparison(
+    vendor_no: str,
+    invoice_index: int = Query(0, ge=0, description="Which invoice to trace (0 = most recent)"),
+    mode: str = Query("trace", description="'trace' = AI can see human's items (optimistic). 'production' = AI uses only template (realistic)."),
+):
+    """
+    Trace a REAL posted invoice for a vendor from BC Production and compare
+    how the human actually posted it vs what our AI template would generate.
+    Returns a side-by-side diff with matches, mismatches, and gaps.
+    """
+    db = get_db()
+    bc = get_bc_service()
+    import re
+
+    # 1. Load our learned posting template for this vendor
+    profile = await db.posting_pattern_analysis.find_one(
+        {"vendor_no": vendor_no, "status": "analyzed"},
+        {"_id": 0}
+    )
+
+    template = profile.get("posting_template", {}) if profile else {}
+
+    # 2. Fetch real invoices from BC for this vendor
+    try:
+        pi_result = await bc.get_posted_purchase_invoices(
+            vendor_id=vendor_no, limit=invoice_index + 5, skip=0
+        )
+    except Exception as e:
+        return {"error": f"Failed to fetch invoices from BC: {str(e)}", "vendor_no": vendor_no}
+
+    invoices = pi_result.get("invoices", [])
+
+    # Also try historical endpoint
+    if not invoices or len(invoices) <= invoice_index:
+        try:
+            hist_result = await bc.get_historical_posted_purchase_invoices(
+                vendor_id=vendor_no, limit=invoice_index + 5, skip=0
+            )
+            hist_invoices = hist_result.get("invoices", [])
+            seen = {inv.get("id") for inv in invoices}
+            for inv in hist_invoices:
+                if inv.get("id") not in seen:
+                    invoices.append(inv)
+        except Exception:
+            pass
+
+    if not invoices:
+        return {
+            "error": "No invoices found for this vendor in BC",
+            "vendor_no": vendor_no,
+            "has_profile": bool(profile),
+        }
+
+    if invoice_index >= len(invoices):
+        return {
+            "error": f"Only {len(invoices)} invoices available. Max index: {len(invoices) - 1}",
+            "vendor_no": vendor_no,
+            "total_available": len(invoices),
+        }
+
+    # 3. Get the target invoice and its lines
+    invoice = invoices[invoice_index]
+    inv_id = invoice.get("id", "")
+
+    try:
+        human_lines = await bc.get_purchase_invoice_lines(inv_id)
+    except Exception as e:
+        human_lines = []
+        logger.warning("Failed to get lines for traced invoice %s: %s", inv_id, str(e))
+
+    # 4. Build the "human posted" summary
+    human_summary = _build_line_summary(human_lines)
+
+    # 5. Build what our AI template WOULD generate
+    # Extract the BOL/reference from what the human actually typed in descriptions
+    # (the BOL is NOT the invoice number — it's embedded in the line descriptions)
+    human_ref_info = _extract_reference_from_human_lines(human_lines)
+
+    ef = {
+        "invoice_number": invoice.get("vendorInvoiceNumber", ""),
+        "amount": invoice.get("totalAmountExcludingTax") or invoice.get("totalAmountIncludingTax", 0),
+        "invoice_date": invoice.get("invoiceDate", ""),
+        "reference_number": human_ref_info.get("ref", ""),
+        "detected_pattern": human_ref_info.get("pattern", ""),
+    }
+    if mode == "trace":
+        # Trace mode: AI can see human's structure (optimistic comparison)
+        ef["per_line_refs"] = human_ref_info.get("per_line_refs", [])
+        ef["trace_human_line_count"] = len(human_lines)
+    # else: production mode — AI uses only template, no peeking
+    ai_lines = _simulate_template_lines(template, ef)
+    ai_summary = _build_line_summary(ai_lines)
+
+    # 6. Compute the diff
+    comparison = _compute_trace_diff(human_lines, human_summary, ai_lines, ai_summary, template)
+
+    return {
+        "vendor_no": vendor_no,
+        "vendor_name": invoice.get("vendorName", ""),
+        "mode": mode,
+        "invoice_index": invoice_index,
+        "total_invoices_available": len(invoices),
+        "invoice": {
+            "id": inv_id,
+            "number": invoice.get("number", ""),
+            "vendor_invoice_number": invoice.get("vendorInvoiceNumber", ""),
+            "invoice_date": invoice.get("invoiceDate", ""),
+            "due_date": invoice.get("dueDate", ""),
+            "status": invoice.get("status", ""),
+            "total_excl_tax": invoice.get("totalAmountExcludingTax", 0),
+            "total_incl_tax": invoice.get("totalAmountIncludingTax", 0),
+            "total_tax": invoice.get("totalTaxAmount", 0),
+            "currency": invoice.get("currencyCode", "USD"),
+        },
+        "human_posted": {
+            "line_count": len(human_lines),
+            "lines": [
+                {
+                    "line_type": ln.get("lineType", ""),
+                    "item_or_account": ln.get("lineObjectNumber", ""),
+                    "description": ln.get("description", ""),
+                    "description2": ln.get("description2", ""),
+                    "quantity": ln.get("quantity", 0),
+                    "unit_cost": ln.get("unitCost", 0),
+                    "net_amount": ln.get("netAmount") or ln.get("lineAmount", 0),
+                    "tax_code": ln.get("taxCode", ""),
+                    "uom": ln.get("unitOfMeasureCode", ""),
+                }
+                for ln in human_lines
+            ],
+            "summary": human_summary,
+        },
+        "ai_would_post": {
+            "line_count": len(ai_lines),
+            "lines": [
+                {
+                    "line_type": ln.get("lineType", ""),
+                    "item_or_account": ln.get("lineObjectNumber", ""),
+                    "description": ln.get("description", ""),
+                    "quantity": ln.get("quantity", 0),
+                    "unit_cost": ln.get("unitCost", 0),
+                    "net_amount": ln.get("netAmount", 0),
+                    "tax_code": ln.get("taxCode", ""),
+                    "uom": ln.get("uom", ""),
+                }
+                for ln in ai_lines
+            ],
+            "summary": ai_summary,
+            "template_confidence": template.get("confidence", "none"),
+            "template_consistency": template.get("consistency_score", 0),
+        },
+        "comparison": comparison,
+        "has_profile": bool(profile),
+        "profile_invoices_studied": profile.get("invoices_analyzed", 0) if profile else 0,
+    }
 
 
 @router.get("/trace/{vendor_no}/list")
@@ -1380,6 +2403,19 @@ async def _run_daily_traces(count: int = None) -> dict:
     return run_doc
 
 
+@router.post("/daily-trace/run")
+async def run_daily_traces(
+    background_tasks: BackgroundTasks,
+    count: int = Query(None, ge=1, le=50, description="Number of traces (default from env)"),
+    sync: bool = Query(False, description="Run synchronously (slower, returns full results)"),
+):
+    """Trigger a daily random trace run — picks random vendors, traces invoices from BC PROD."""
+    if sync:
+        return await _run_daily_traces(count)
+    background_tasks.add_task(_run_daily_traces, count)
+    return {"status": "started", "count": count or DAILY_TRACE_COUNT, "message": "Daily trace running in background"}
+
+
 @router.get("/daily-trace/results")
 async def get_daily_trace_results(
     limit: int = Query(10, ge=1, le=50),
@@ -1395,6 +2431,83 @@ async def get_daily_trace_results(
         runs.append(doc)
     total = await db.daily_trace_results.count_documents({})
     return {"runs": runs, "total": total}
+
+
+@router.get("/daily-trace/latest")
+async def get_latest_daily_trace():
+    """Fetch the most recent daily trace run with full results."""
+    db = get_db()
+    run = await db.daily_trace_results.find_one({}, {"_id": 0}, sort=[("run_date", -1)])
+    if not run:
+        return {"error": "No daily trace runs found"}
+    return run
+
+
+@router.get("/daily-trace/trend")
+async def get_daily_trace_trend(
+    days: int = Query(30, ge=1, le=365, description="How many days of history"),
+):
+    """
+    Return daily avg match rates over time for trend charting.
+    Also breaks down per-vendor performance across the window.
+    """
+    db = get_db()
+    cutoff = datetime.now(timezone.utc).isoformat()[:10]  # today
+    # Fetch recent runs
+    cursor = db.daily_trace_results.find(
+        {}, {"_id": 0, "run_id": 1, "run_date": 1, "avg_match_rate": 1,
+             "traces_success": 1, "traces_error": 1, "traces_requested": 1,
+             "results": 1}
+    ).sort("run_date", -1).limit(days)
+
+    points = []
+    vendor_agg = {}  # vendor_no -> {total_match, count, name}
+    async for run in cursor:
+        run_date = run.get("run_date", "")[:10]
+        points.append({
+            "date": run_date,
+            "avg_match_rate": run.get("avg_match_rate", 0),
+            "traced": run.get("traces_success", 0),
+            "errors": run.get("traces_error", 0),
+        })
+        # Aggregate per-vendor stats
+        for r in run.get("results", []):
+            vno = r.get("vendor_no", "")
+            if not vno or r.get("match_rate") is None:
+                continue
+            if vno not in vendor_agg:
+                vendor_agg[vno] = {"name": r.get("vendor_name", vno), "total": 0, "count": 0, "rates": []}
+            vendor_agg[vno]["total"] += r["match_rate"]
+            vendor_agg[vno]["count"] += 1
+            vendor_agg[vno]["rates"].append(r["match_rate"])
+
+    points.reverse()  # chronological order
+
+    # Build vendor leaderboard
+    vendor_stats = []
+    for vno, agg in vendor_agg.items():
+        avg = round(agg["total"] / agg["count"]) if agg["count"] else 0
+        vendor_stats.append({
+            "vendor_no": vno,
+            "vendor_name": agg["name"],
+            "avg_match_rate": avg,
+            "traces_count": agg["count"],
+            "min_rate": min(agg["rates"]) if agg["rates"] else 0,
+            "max_rate": max(agg["rates"]) if agg["rates"] else 0,
+        })
+    vendor_stats.sort(key=lambda x: x["avg_match_rate"], reverse=True)
+
+    # Only include runs that actually traced invoices in the average
+    successful_points = [p for p in points if p.get("traced", 0) > 0]
+    overall_avg = round(sum(p["avg_match_rate"] for p in successful_points) / max(len(successful_points), 1)) if successful_points else 0
+
+    return {
+        "days_requested": days,
+        "data_points": len(points),
+        "points": points,
+        "vendor_leaderboard": vendor_stats[:20],
+        "overall_avg": overall_avg,
+    }
 
 
 def _build_line_summary(lines: list) -> dict:

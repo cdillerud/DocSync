@@ -281,7 +281,16 @@ async def stage_classify_llm(
     file_path: str, file_name: str, page_count: int,
     doc: Optional[Dict[str, Any]] = None,
 ) -> StageResult:
-    """Use Gemini to classify the document type.
+    """Use Azure OpenAI (GamerLLM) to classify the document type.
+
+    2026-09-23: migrated off the old Gemini/Emergent path (EMERGENT_LLM_KEY's
+    shared proxy budget was exhausted) onto the same genuine Azure OpenAI
+    route already proven working in document_intel_helpers._call_llm_for_extraction()
+    - LlmChat with_model("azure", ...) against AZURE_OPENAI_ENDPOINT/KEY, no
+    Emergent involvement at all. All the prompt-injection logic below
+    (VEP hints, few-shot, feedback loop, BC intelligence, deep learning
+    hints, amount intelligence, field correlation) is provider-independent
+    and preserved unchanged.
 
     Now receives the full doc dict so we can:
     1. Extract vendor context from previous processing / filename patterns
@@ -291,17 +300,18 @@ async def stage_classify_llm(
     t0 = datetime.now(timezone.utc)
     doc = doc or {}
 
-    if not EMERGENT_LLM_KEY:
+    from services.azure_openai_classifier import is_azure_configured
+    if not is_azure_configured():
         return StageResult(
             stage="classify",
             status=StageStatus.FAILED,
-            error="EMERGENT_LLM_KEY not configured",
+            error="Azure OpenAI not configured",
             quality_gate_passed=False,
             duration_ms=_ms_since(t0),
         )
 
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
         from services.document_intel_helpers import _CLASSIFY_SYSTEM_PROMPT
 
         ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
@@ -312,15 +322,27 @@ async def stage_classify_llm(
         }
         mime_type = mime_map.get(ext, "text/plain")
 
-        # For multi-page PDFs, send only page 1
-        actual_path = file_path
-        temp_path = None
-        if ext == "pdf" and page_count > 1:
+        # Rasterize to base64 image(s) for the vision-capable Azure deployment.
+        # For multi-page PDFs, send only page 1 (this stage is classification-only,
+        # not full extraction, so it doesn't need the full page budget).
+        image_b64_list = []
+        prompt_text_suffix = ""
+        if ext == "pdf":
             try:
-                from services.document_intel_helpers import _extract_first_page_pdf
-                actual_path, temp_path, _ = _extract_first_page_pdf(file_path)
+                from services.document_intel_helpers import _rasterize_pdf_pages
+                image_b64_list, _, _ = _rasterize_pdf_pages(file_path, max_pages=1)
+            except Exception as rast_err:
+                logger.warning("[CLASSIFY:LLM] PDF rasterization failed: %s", rast_err)
+        elif mime_type.startswith("image/"):
+            import base64
+            with open(file_path, "rb") as imgf:
+                image_b64_list = [base64.standard_b64encode(imgf.read()).decode("utf-8")]
+        else:
+            try:
+                with open(file_path, "r", errors="ignore") as textf:
+                    prompt_text_suffix = f"\n\n--- DOCUMENT TEXT ---\n{textf.read(15000)}\n--- END ---"
             except Exception:
-                actual_path = file_path
+                pass
 
         # ── Resolve vendor context BEFORE prompt building ──
         # Try multiple sources: doc history → filename inference → extracted fields
@@ -518,14 +540,18 @@ async def stage_classify_llm(
         except Exception as e:
             logger.debug("[CLASSIFY:LLM] Field correlation injection failed: %s", e)
 
+        from services.llm_model_config import get_llm_model
+        from services.azure_openai_classifier import (
+            AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_API_VERSION,
+        )
+        model = get_llm_model()
+
         chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
+            api_key=AZURE_OPENAI_KEY,
             session_id=f"classify-{uuid.uuid4()}",
             system_message=dynamic_prompt,
-        ).with_model("gemini", "gemini-2.5-pro")
-
-        file_content = FileContentWithMimeType(
-            file_path=actual_path, mime_type=mime_type
+        ).with_model("azure", model).with_params(
+            api_base=AZURE_OPENAI_ENDPOINT, api_version=AZURE_API_VERSION,
         )
 
         bundle_note = ""
@@ -547,15 +573,10 @@ async def stage_classify_llm(
                 "A packing list with a PO reference is STILL a Shipping_Document, not a Sales_Order."
                 + bundle_note
                 + "\nRespond with JSON only."
+                + prompt_text_suffix
             ),
-            file_contents=[file_content],
+            file_contents=[ImageContent(image_base64=b64) for b64 in image_b64_list],
         ))
-
-        if temp_path:
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
 
         import json
         response_text = response.strip()
@@ -590,7 +611,7 @@ async def stage_classify_llm(
             data={
                 "document_type": doc_type,
                 "confidence": confidence,
-                "method": "llm:gemini-2.5-pro",
+                "method": f"llm:azure/{model}",
                 "reasoning": result.get("reasoning", ""),
                 "llm_extracted_fields": extracted,
                 "page_count": page_count,
@@ -602,11 +623,6 @@ async def stage_classify_llm(
 
     except Exception as e:
         logger.error("[CLASSIFY:LLM] failed: %s", e)
-        if "temp_path" in dir() and temp_path:
-            try:
-                os.remove(temp_path)
-            except Exception:
-                pass
         return StageResult(
             stage="classify",
             status=StageStatus.FAILED,

@@ -23,7 +23,7 @@ Usage:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger("document_readiness")
@@ -283,7 +283,6 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     # --- Vendorless docs older than 14 days: archive ---
-    from datetime import datetime, timezone, timedelta
     created = doc.get("created_utc") or doc.get("ingested_at") or ""
     vendor = doc.get("vendor_canonical") or doc.get("bc_vendor_number") or doc.get("vendor_raw")
     if not vendor and created:

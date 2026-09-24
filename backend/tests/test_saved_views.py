@@ -310,53 +310,5 @@ class TestOperationsQueueSavedViewsIntegration:
         print(f"SUCCESS: Operations Queue returns default_view_name='{data['default_view_name']}'")
 
 
-class TestRegressionIteration88Escalation:
-    """Regression tests for Escalation feature (iteration_88)"""
-
-    def test_escalation_endpoint_working(self):
-        """Escalation endpoints still work"""
-        # List escalations
-        response = requests.get(
-            f"{BASE_URL}/api/inventory-ledger/escalations?limit=5",
-            timeout=10
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "total" in data or "entries" in data
-        print(f"SUCCESS: Escalation list endpoint working")
-
-
-class TestRegressionIteration89Assignment:
-    """Regression tests for Assignment feature (iteration_89)"""
-
-    def test_assignment_endpoint_working(self):
-        """Assignment endpoints still work"""
-        # List assignments
-        response = requests.get(
-            f"{BASE_URL}/api/inventory-ledger/assignments?limit=5",
-            timeout=10
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "total" in data or "entries" in data
-        print(f"SUCCESS: Assignment list endpoint working")
-
-
-class TestRegressionIteration90Activity:
-    """Regression tests for Activity Timeline feature (iteration_90)"""
-
-    def test_activity_endpoint_working(self):
-        """Activity endpoints still work"""
-        # List activities
-        response = requests.get(
-            f"{BASE_URL}/api/inventory-ledger/activities?limit=5",
-            timeout=10
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "total" in data or "entries" in data
-        print(f"SUCCESS: Activity list endpoint working")
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

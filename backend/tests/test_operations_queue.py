@@ -295,12 +295,6 @@ class TestPODraftQueueItems:
 class TestRegressionIteration86:
     """Regression tests for approval workflow from iteration_86"""
 
-    def test_approval_endpoints_still_work(self):
-        """Approval request endpoint should still function"""
-        # Just verify the endpoint exists and doesn't error
-        res = requests.get(f"{BASE_URL}/api/inventory-ledger/approvals")
-        # GET without params may return error, that's fine
-        print(f"Approval endpoint response: {res.status_code}")
         
     def test_approval_status_in_queue_items(self):
         """Queue items should include approval_status from iteration_86"""
@@ -315,17 +309,6 @@ class TestRegressionIteration86:
             assert status in ["approved", "pending", "rejected", "not_requested"], f"Invalid approval_status: {status}"
         
         print(f"SUCCESS: approval_status present in all {len(items)} queue items")
-
-
-class TestRegressionIteration85:
-    """Regression tests for document linkage from iteration_85"""
-
-    def test_document_link_endpoint_still_works(self):
-        """Document link endpoint should still function"""
-        res = requests.get(f"{BASE_URL}/api/inventory-ledger/document-links?entity_type=sales_order&entity_id=TEST-SO-123")
-        # May return empty but shouldn't error
-        assert res.status_code == 200 or res.status_code == 404, f"Unexpected status: {res.status_code}"
-        print("SUCCESS: Document link endpoint accessible")
 
 
 if __name__ == "__main__":

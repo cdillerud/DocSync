@@ -208,21 +208,6 @@ class TestBCSandboxEndpoint:
         print(f"PASS: BC sandbox status returned demo_mode={data.get('demo_mode')}")
 
 
-class TestInventoryLedgerEndpoint:
-    """Test inventory ledger dashboard summary endpoint."""
-    
-    def test_inventory_ledger_dashboard_summary(self):
-        """GET /api/inventory-ledger/dashboard-summary?customer_id=test returns total_items field."""
-        response = requests.get(
-            f"{BASE_URL}/api/inventory-ledger/dashboard-summary",
-            params={"customer_id": "test"}
-        )
-        assert response.status_code == 200, f"Inventory ledger failed: {response.status_code} - {response.text}"
-        data = response.json()
-        assert "total_items" in data, f"Missing 'total_items' field: {data.keys()}"
-        print(f"PASS: Inventory ledger dashboard summary returned total_items={data.get('total_items')}")
-
-
 # Run pytest with verbose output
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

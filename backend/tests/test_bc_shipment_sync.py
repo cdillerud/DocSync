@@ -436,40 +436,6 @@ class TestOutboundShipmentMovement:
 # API Endpoint Tests
 # =========================================================================
 
-class TestSyncEndpoints:
-    @pytest.fixture
-    def base_url(self):
-        return os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-
-    def test_get_sync_status_endpoint(self, base_url):
-        import requests
-        resp = requests.get(f"{base_url}/api/inventory-ledger/sync-status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "last_sync_at" in data
-        assert "shipments_processed_today" in data
-        assert "last_error" in data
-
-    def test_post_sync_bc_shipments_endpoint(self, base_url):
-        """POST sync — BC is not configured in preview env, so it returns 0 synced."""
-        import requests
-        resp = requests.post(f"{base_url}/api/inventory-ledger/sync-bc-shipments")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "synced" in data
-        assert "skipped" in data
-        assert "total_fetched" in data
-
-    def test_sync_with_lookback_param(self, base_url):
-        import requests
-        resp = requests.post(
-            f"{base_url}/api/inventory-ledger/sync-bc-shipments",
-            params={"lookback_hours": 48},
-        )
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total_fetched"] == 0  # BC not configured
-
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

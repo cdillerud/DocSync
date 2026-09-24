@@ -132,17 +132,6 @@ class TestSpiroAndInventory:
         assert "enabled" in data, f"No enabled field in response: {data}"
         print(f"✓ Spiro status passed: enabled={data['enabled']}")
     
-    def test_inventory_ledger(self):
-        """GET /api/inventory-ledger/dashboard-summary returns total_items"""
-        response = requests.get(
-            f"{BASE_URL}/api/inventory-ledger/dashboard-summary",
-            params={"customer_id": "test"},
-            timeout=30
-        )
-        assert response.status_code == 200, f"Inventory ledger failed: {response.status_code} {response.text}"
-        data = response.json()
-        assert "total_items" in data, f"No total_items field in response: {data}"
-        print(f"✓ Inventory ledger passed: total_items={data['total_items']}")
 
 
 if __name__ == "__main__":

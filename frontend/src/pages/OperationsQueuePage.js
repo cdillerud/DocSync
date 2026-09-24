@@ -418,8 +418,7 @@ export default function OperationsQueuePage() {
             </div>
             <div className="space-y-1"><p className="text-[10px] font-medium text-muted-foreground uppercase">Actions Required</p>{selectedItem.action_required.map((a, i) => <div key={i} className="flex items-center gap-2 text-xs"><AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" /><span>{a}</span></div>)}</div>
             <div className="flex gap-2 pt-1">
-              <a href="/inventory-ledger" className="flex-1"><Button size="sm" className="h-7 text-[10px] w-full" data-testid="ops-queue-open-workflow"><FileText className="w-3 h-3 mr-1" /> Open</Button></a>
-              <Button variant="outline" size="sm" className="h-7 text-[10px]" onClick={() => setSelectedItem(null)} data-testid="ops-queue-close-detail">Close</Button>
+              <Button variant="outline" size="sm" className="h-7 text-[10px] flex-1" onClick={() => setSelectedItem(null)} data-testid="ops-queue-close-detail">Close</Button>
             </div>
           </div>
         </div>

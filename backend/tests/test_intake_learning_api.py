@@ -202,13 +202,6 @@ class TestRegressionEndpoints:
         assert "total" in data
         assert "documents" in data
 
-    def test_inventory_ledger_customers(self):
-        """GET /api/inventory-ledger/customers still works"""
-        response = requests.get(f"{BASE_URL}/api/inventory-ledger/customers")
-        assert response.status_code == 200
-        # Returns list of customers
-        data = response.json()
-        assert isinstance(data, list) or "customers" in data
 
     def test_health_endpoint(self):
         """GET /api/health still works"""

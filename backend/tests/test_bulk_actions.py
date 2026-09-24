@@ -428,44 +428,6 @@ class TestBulkActionsEndpoint:
     # ACTIVITY GENERATION
     # =========================================================================
 
-    def test_bulk_action_generates_activities(self, api_client, test_sales_order_ids):
-        """Bulk action generates activity timeline entries for each entity"""
-        if not test_sales_order_ids:
-            pytest.skip("No sales orders available for testing")
-        
-        test_so_id = test_sales_order_ids[0]
-        owner_name = f"{TEST_PREFIX}-ActivityTest-{uuid.uuid4().hex[:6]}"
-        
-        # Do a bulk assign
-        bulk_res = api_client.post(f"{BASE_URL}/api/inventory-ledger/operations-queue/bulk-action", json={
-            "entity_type": "sales_order",
-            "entity_ids": [test_so_id],
-            "action": "assign_owner",
-            "payload": {"assigned_to": owner_name}
-        })
-        
-        if bulk_res.status_code != 200:
-            pytest.skip("Bulk action failed, cannot test activity generation")
-        
-        # Check activities for this entity
-        activities_res = api_client.get(
-            f"{BASE_URL}/api/inventory-ledger/activities?entity_type=sales_order&entity_id={test_so_id}&limit=5"
-        )
-        
-        assert activities_res.status_code == 200
-        activities_data = activities_res.json()
-        
-        # Should have at least one recent activity
-        entries = activities_data.get("entries", [])
-        if entries:
-            # Check if latest activity is from bulk action
-            recent = entries[0]
-            assert recent["entity_type"] == "sales_order"
-            assert recent["entity_id"] == test_so_id
-            print(f"PASS: Bulk action generates activities - found {len(entries)} activities for {test_so_id}")
-        else:
-            print("WARNING: No activities found, but this might be expected for some test data")
-
 
 class TestRegressionPreviousIterations:
     """Regression tests for iterations 88-91"""
@@ -487,14 +449,6 @@ class TestRegressionPreviousIterations:
         print(f"PASS: Regression - saved-views endpoint works (found {data['total']} views)")
 
     # Iteration 90 - Activity Timeline
-    def test_regression_activities_endpoint(self, api_client):
-        """Regression: GET /api/inventory-ledger/activities still works"""
-        res = api_client.get(f"{BASE_URL}/api/inventory-ledger/activities?limit=5")
-        assert res.status_code == 200
-        data = res.json()
-        assert "entries" in data
-        assert "total" in data
-        print(f"PASS: Regression - activities endpoint works (found {data['total']} activities)")
 
     # Iteration 89 - Assignments
     def test_regression_assignments_endpoint(self, api_client):

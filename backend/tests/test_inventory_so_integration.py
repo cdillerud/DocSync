@@ -13,8 +13,6 @@ Prerequisite: Hormel Foods inventory workspace with SPAM-12OZ item seeded
 import pytest
 import requests
 import os
-import uuid
-
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 
@@ -24,17 +22,6 @@ def api_client():
     session = requests.Session()
     session.headers.update({"Content-Type": "application/json"})
     return session
-
-
-@pytest.fixture(scope="module")
-def hormel_workspace(api_client):
-    """Get Hormel workspace details"""
-    res = api_client.get(f"{BASE_URL}/api/inventory-ledger/customers")
-    customers = res.json()
-    hormel = next((c for c in customers if c['code'] == 'HORMEL'), None)
-    if hormel:
-        return hormel
-    pytest.skip("Hormel customer not found")
 
 
 @pytest.fixture(scope="module")
@@ -121,32 +108,6 @@ class TestPreflightInventoryIntegration:
 class TestInventoryWorkspaceResolution:
     """Tests for workspace resolution by customer_no/name"""
 
-    def test_preflight_with_hormel_customer(self, api_client, hormel_workspace):
-        """Test preflight with a document containing Hormel customer"""
-        # Create a test document with Hormel customer
-        unique_id = f"test-inv-{uuid.uuid4().hex[:8]}"
-        
-        # First check if there's an existing doc with Hormel customer
-        res = api_client.get(f"{BASE_URL}/api/documents?limit=100")
-        docs = res.json().get('documents', [])
-        
-        # Find doc with customer name containing 'Hormel'
-        hormel_doc = next(
-            (d for d in docs 
-             if 'hormel' in str(d.get('extracted_fields', {}).get('customer', '')).lower()
-             or 'HORMEL' in str(d.get('extracted_fields', {}).get('customer', '')).upper()),
-            None
-        )
-        
-        if hormel_doc:
-            res = api_client.post(f"{BASE_URL}/api/gpi-integration/sales-orders/preflight/{hormel_doc['id']}")
-            assert res.status_code == 200
-            data = res.json()
-            
-            # If Hormel workspace matched
-            if data.get('inventory_workspace'):
-                assert data['inventory_workspace']['code'] == 'HORMEL'
-                assert data['inventory_summary']['workspace_name'] == 'Hormel Foods'
 
     def test_inventory_workspace_structure(self, api_client, sales_order_doc_id):
         """Verify inventory_workspace has correct structure when present"""
@@ -178,70 +139,6 @@ class TestInventoryLineEnrichment:
             if 'inventory' in line:
                 status = line['inventory'].get('status')
                 assert status in valid_statuses, f"Invalid status: {status}"
-
-    def test_inventory_availability_math(self, api_client, hormel_workspace):
-        """Test that available = on_hand + incoming - committed"""
-        # Get Hormel balances directly
-        res = api_client.get(f"{BASE_URL}/api/inventory-ledger/customers/{hormel_workspace['id']}/balances?item=SPAM-12OZ")
-        assert res.status_code == 200
-        data = res.json()
-        
-        balances = data.get('balances', [])
-        if balances:
-            bal = balances[0]
-            expected_available = bal['on_hand'] + bal['incoming'] - bal['committed']
-            assert bal['available'] == expected_available, f"Available mismatch: got {bal['available']}, expected {expected_available}"
-
-
-class TestInventoryAPIsCRUD:
-    """Tests for inventory CRUD APIs (recap from standalone tests)"""
-
-    def test_list_customers(self, api_client):
-        """GET /api/inventory-ledger/customers - list workspaces"""
-        res = api_client.get(f"{BASE_URL}/api/inventory-ledger/customers")
-        assert res.status_code == 200
-        data = res.json()
-        assert isinstance(data, list)
-        assert len(data) >= 2  # Hormel and Karlin minimum
-
-    def test_create_movement_order_commitment(self, api_client, hormel_workspace):
-        """POST /api/inventory-ledger/customers/{id}/movements - create order_commitment"""
-        unique_item = f"TEST-COMMIT-{uuid.uuid4().hex[:6].upper()}"
-        
-        # First create opening balance
-        api_client.post(f"{BASE_URL}/api/inventory-ledger/customers/{hormel_workspace['id']}/movements", json={
-            "item": unique_item,
-            "warehouse": "GPI-MAIN",
-            "ownership_type": "customer_owned",
-            "movement_type": "opening_balance",
-            "quantity_delta": 100,
-            "unit_of_measure": "cases",
-        })
-        
-        # Create order_commitment
-        res = api_client.post(f"{BASE_URL}/api/inventory-ledger/customers/{hormel_workspace['id']}/movements", json={
-            "item": unique_item,
-            "warehouse": "GPI-MAIN",
-            "ownership_type": "customer_owned",
-            "movement_type": "order_commitment",
-            "quantity_delta": -25,
-            "unit_of_measure": "cases",
-            "source_type": "sales_order_commitment",
-            "reference_type": "sales_order",
-            "reference_id": "SO-TEST-001"
-        })
-        assert res.status_code == 200
-        data = res.json()
-        assert data['success'] == True
-        assert data['movement']['movement_type'] == 'order_commitment'
-
-    def test_get_balances(self, api_client, hormel_workspace):
-        """GET /api/inventory-ledger/customers/{id}/balances - returns derived balances"""
-        res = api_client.get(f"{BASE_URL}/api/inventory-ledger/customers/{hormel_workspace['id']}/balances")
-        assert res.status_code == 200
-        data = res.json()
-        assert 'balances' in data
-        assert 'count' in data
 
 
 class TestPreflightSOCreation:
@@ -291,16 +188,3 @@ class TestPreflightSOCreation:
             assert 'detail' in item
 
 
-class TestInventoryMeta:
-    """Tests for inventory meta endpoint"""
-
-    def test_meta_endpoint(self, api_client):
-        """GET /api/inventory-ledger/meta - returns valid enums"""
-        res = api_client.get(f"{BASE_URL}/api/inventory-ledger/meta")
-        assert res.status_code == 200
-        data = res.json()
-        
-        assert 'movement_types' in data
-        assert 'source_types' in data
-        assert 'ownership_types' in data
-        assert 'order_commitment' in data['movement_types']

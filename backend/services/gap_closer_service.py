@@ -645,7 +645,10 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
     """
     import time as _time
     _t0 = _time.monotonic()
-    from services.vendor_name_helpers import normalize_vendor_name, calculate_fuzzy_score
+    from services.vendor_name_helpers import (
+        normalize_vendor_name, calculate_fuzzy_score, vendor_identity_agrees,
+    )
+    from services.vendor_matching import GUARDED_ALIAS_SOURCES
 
     extracted = doc.get("extracted_fields") or {}
     vendor_raw = (
@@ -670,8 +673,15 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
             {"normalized_alias": normalized},
             {"alias_string": vendor_raw},
         ]},
-        {"_id": 0, "vendor_no": 1, "vendor_name": 1},
+        {"_id": 0, "vendor_no": 1, "vendor_name": 1, "source": 1},
     )
+    if (
+        alias
+        and alias.get("source") in GUARDED_ALIAS_SOURCES
+        and alias.get("vendor_name")
+        and not vendor_identity_agrees(vendor_raw, alias["vendor_name"])
+    ):
+        alias = None
     if alias and alias.get("vendor_no"):
         logger.info("[GapCloser:VendorResolve] doc=%s alias hit: '%s' → %s",
                      doc_id, vendor_raw, alias["vendor_no"])
@@ -779,6 +789,21 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
         return {
             "resolved": False,
             "reason": f"no_match_above_threshold (best={best_score:.2f}<{min_score})",
+            "best_candidate": best_match,
+            "best_score": round(best_score, 3),
+        }
+
+    # Variant, word-overlap and abbreviation matches can land on an unrelated
+    # vendor ("Ward Trucking, LLC" -> OWENS via a polluted name variant).
+    # Only accept a match whose vendor name identifies the same company.
+    if not vendor_identity_agrees(vendor_raw, best_match["vendor_name"]):
+        logger.info(
+            "[GapCloser:VendorResolve] doc=%s rejected '%s' -> %s (%s): names disagree",
+            doc_id, vendor_raw, best_match["vendor_no"], best_match["method"],
+        )
+        return {
+            "resolved": False,
+            "reason": "identity_conflict",
             "best_candidate": best_match,
             "best_score": round(best_score, 3),
         }

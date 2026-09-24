@@ -16,6 +16,11 @@ def _matches(doc, clause):
             flags = re.I if "i" in want.get("$options", "") else 0
             if have is None or not re.search(want["$regex"], str(have), flags):
                 return False
+        elif isinstance(want, dict) and {"$exists", "$ne"} & set(want):
+            if want.get("$exists") and field not in doc:
+                return False
+            if "$ne" in want and have == want["$ne"]:
+                return False
         elif have != want:
             return False
     return True
@@ -48,7 +53,7 @@ class Collection:
         found = self._filter(query)
         return dict(found[0]) if found else None
 
-    async def update_one(self, query, update):
+    async def update_one(self, query, update, upsert=False):
         self.updated.append((query, update))
 
 
@@ -249,3 +254,53 @@ async def test_weak_or_conflicting_validation_match_is_rejected(env, validation)
     )
 
     assert result["vendor_canonical"] is None
+
+
+def _gap_db(profiles, aliases=()):
+    return SimpleNamespace(
+        vendor_aliases=Collection(aliases),
+        vendor_invoice_profiles=Collection(profiles),
+        hub_documents=Collection(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_gap_closer_rejects_variant_match_to_other_company():
+    from services.gap_closer_service import auto_resolve_unmatched_vendor
+
+    db = _gap_db([{
+        "vendor_no": "OWENS",
+        "vendor_name": "OI Packaging Solutions",
+        "vendor_name_variants": ["Ward Trucking LLC"],
+    }])
+
+    result = await auto_resolve_unmatched_vendor(
+        db, {"id": "d1", "vendor_raw": "Ward Trucking, LLC"},
+    )
+
+    assert result["resolved"] is False
+    assert result["reason"] == "identity_conflict"
+    assert db.vendor_aliases.updated == []
+    assert db.hub_documents.updated == []
+
+
+@pytest.mark.asyncio
+async def test_gap_closer_ignores_conflicting_learned_alias_but_keeps_good_match():
+    from services.gap_closer_service import auto_resolve_unmatched_vendor
+
+    db = _gap_db(
+        [{"vendor_no": "STRAITL", "vendor_name": "Straitlink Global Logistics"}],
+        aliases=[{
+            "normalized_alias": "straitlink global logistics",
+            "vendor_no": "ARDAGHM",
+            "vendor_name": "Ardagh Metal Beverage USA Inc",
+            "source": "auto_gap_closer",
+        }],
+    )
+
+    result = await auto_resolve_unmatched_vendor(
+        db, {"id": "d2", "vendor_raw": "Straitlink Global Logistics Inc."},
+    )
+
+    assert result["resolved"] is True
+    assert result["vendor_no"] == "STRAITL"

@@ -322,6 +322,83 @@ async def learn_sender_vendor(sender_email: str, vendor_canonical: str,
     logger.info(f"[VendorLearn] {email_lower} → {vendor_canonical} ({vendor_name})")
 
 
+# Aliases created by automated processes are advisory: they are ignored when
+# the vendor name they resolve to conflicts with the vendor printed on the
+# document. auto_gap_closer aliases come from fuzzy "profile variant" matching
+# and include pairs like "Ward Trucking, LLC" -> OWENS. Manual and BC-seeded
+# aliases stay authoritative because they may map a plant or brand name to a
+# legal entity with a different name.
+GUARDED_ALIAS_SOURCES = {
+    "auto_learned",
+    "auto_gap_closer",
+    "document_history",
+    "document_history_seed",
+}
+
+# When several aliases match the same name, prefer the most trustworthy source.
+_ALIAS_SOURCE_RANK = {
+    "manual": 0,
+    "manual_resolution": 0,
+    "auto_confirm": 1,
+    "bc_cache_seed": 2,
+    "positive_outcome": 3,
+}
+
+
+def _alias_key_variants(vendor_normalized: str) -> list:
+    normalize_vendor_name, _, _ = _vendor_helpers()
+    keys = [vendor_normalized]
+    stripped = normalize_vendor_name(vendor_normalized)
+    if stripped and stripped != vendor_normalized:
+        keys.append(stripped)
+    return keys
+
+
+async def _find_vendor_alias(db, vendor_normalized: str):
+    """Return the best usable alias document for a vendor name, or None.
+
+    Every alias matching any key variant is considered. Guarded aliases whose
+    vendor name conflicts with the document's vendor are skipped rather than
+    ending the search, so one bad alias cannot hide a good one.
+    """
+    from services.vendor_name_helpers import vendor_identity_agrees
+
+    keys = _alias_key_variants(vendor_normalized)
+    clauses = []
+    for key in keys:
+        clauses += [
+            {"normalized": key},
+            {"normalized_alias": key},
+            {"alias_string": {"$regex": f"^{re.escape(key)}$", "$options": "i"}},
+            # Learning loop stores aliases with uppercase 'alias' field
+            {"alias": key.strip().upper()},
+        ]
+    candidates = await db.vendor_aliases.find({"$or": clauses}, {"_id": 0}).to_list(50)
+
+    def rank(doc):
+        exact = any(
+            doc.get(f) == keys[0]
+            for f in ("normalized", "normalized_alias")
+        ) or str(doc.get("alias_string") or "").strip().lower() == keys[0] \
+            or doc.get("alias") == keys[0].strip().upper()
+        return (0 if exact else 1, _ALIAS_SOURCE_RANK.get(doc.get("source"), 4))
+
+    for doc in sorted(candidates, key=rank):
+        if doc.get("source") in GUARDED_ALIAS_SOURCES:
+            learned_name = str(doc.get("vendor_name") or "").strip()
+            if learned_name and not vendor_identity_agrees(vendor_normalized, learned_name):
+                logger.warning(
+                    "[VendorAliasGuard] Ignoring conflicting %s alias %r -> %r (%s)",
+                    doc.get("source"),
+                    vendor_normalized,
+                    learned_name,
+                    doc.get("vendor_no") or doc.get("canonical_vendor_id"),
+                )
+                continue
+        return doc
+    return None
+
+
 async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     """
     Multi-source vendor lookup.
@@ -340,40 +417,10 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     if not vendor_normalized:
         return {"vendor_canonical": None, "vendor_match_method": "none"}
 
-    # 1. Check vendor_aliases collection (includes manually created + learning loop aliases)
-    alias_doc = await db.vendor_aliases.find_one({
-        "$or": [
-            {"normalized": vendor_normalized},
-            {"normalized_alias": vendor_normalized},
-            {"alias_string": {"$regex": f"^{re.escape(vendor_normalized)}$", "$options": "i"}},
-            # Learning loop stores aliases with uppercase 'alias' field
-            {"alias": vendor_normalized.strip().upper()},
-        ]
-    }, {"_id": 0})
-
-    # Auto-learned aliases are advisory. Ignore a learned alias when its
-    # resolved vendor name conflicts with the vendor printed on this document.
-    # Manual aliases remain authoritative because they may represent valid
-    # brand-to-legal-entity mappings with different names.
-    if alias_doc and alias_doc.get("source") in {
-        "auto_learned",
-        "document_history",
-        "document_history_seed",
-    }:
-        from services.vendor_name_helpers import vendor_identity_agrees
-
-        learned_name = str(alias_doc.get("vendor_name") or "").strip()
-        if learned_name and not vendor_identity_agrees(
-            vendor_normalized,
-            learned_name,
-        ):
-            logger.warning(
-                "[VendorAliasGuard] Ignoring conflicting learned alias %r -> %r (%s)",
-                vendor_normalized,
-                learned_name,
-                alias_doc.get("vendor_no") or alias_doc.get("canonical_vendor_id"),
-            )
-            alias_doc = None
+    # 1. Check vendor_aliases collection (includes manually created + learning loop aliases).
+    # Intake passes a lowercased name ("o-i packaging solutions llc") while many
+    # aliases are keyed by the stripped form ("oi packaging solutions"), so try both.
+    alias_doc = await _find_vendor_alias(db, vendor_normalized)
 
     if alias_doc:
         canonical_id = (
@@ -384,7 +431,7 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
         # Track alias usage
         try:
             await db.vendor_aliases.update_one(
-                {"$or": [
+                {"alias_id": alias_doc["alias_id"]} if alias_doc.get("alias_id") else {"$or": [
                     {"normalized": vendor_normalized},
                     {"normalized_alias": vendor_normalized},
                     {"alias": vendor_normalized.strip().upper()},
@@ -396,7 +443,7 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
             )
         except Exception:
             pass
-        match_method = "alias_match" if alias_doc.get("source") in ("auto_learned", "manual_resolution") else "alias_match"
+        match_method = "alias_match"
         return {
             "vendor_canonical": canonical_id,
             "vendor_match_method": match_method,
@@ -490,8 +537,21 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
 
     # 3. Live BC API search
     try:
+        normalize_fn, calc_fuzzy, _ = _vendor_helpers()
         vendor_search_term = vendor_normalized.title()
         bc_result = await search_vendors_by_name(vendor_search_term, limit=10)
+
+        # BC's contains() fails when the document adds a suffix BC lacks
+        # ("Straitlink Global Logistics Inc." vs "Straitlink Global Logistics"),
+        # so retry with the suffix-stripped name before the first-word fallback.
+        stripped_term = normalize_fn(vendor_normalized)
+        if (
+            bc_result.status == BCLookupStatus.SUCCESS
+            and not bc_result.data.get("vendors")
+            and stripped_term
+            and stripped_term != vendor_normalized
+        ):
+            bc_result = await search_vendors_by_name(stripped_term.title(), limit=10)
 
         if bc_result.status == BCLookupStatus.SUCCESS:
             vendors = bc_result.data.get("vendors", [])
@@ -513,8 +573,6 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
                 # Fuzzy matching with shared scorer
                 best_match = None
                 best_score = 0
-
-                normalize_fn, calc_fuzzy, _ = _vendor_helpers()
 
                 for vendor in vendors:
                     bc_name = vendor.get("displayName", "")
@@ -551,10 +609,10 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
 
                 for vendor in vendors2:
                     bc_name = vendor.get("displayName", "")
-                    bc_normalized = normalize_fn(bc_name) if 'normalize_fn' in dir() else re.sub(r'\s+', ' ', bc_name.lower().strip())
+                    bc_normalized = normalize_fn(bc_name)
 
-                    if bc_normalized.startswith(first_word):
-                        score = calc_fuzzy(vendor_normalized, bc_name) if 'calc_fuzzy' in dir() else 0
+                    if bc_normalized.startswith(normalize_fn(first_word) or first_word):
+                        score = calc_fuzzy(vendor_normalized, bc_name)
 
                         if score >= 0.90:
                             return {
@@ -578,6 +636,70 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
         logger.warning("BC vendor search failed: %s", e)
 
     return {"vendor_canonical": None, "vendor_match_method": "none"}
+
+
+BC_VALIDATION_MIN_SCORE = 0.9
+
+
+async def resolve_vendor_from_bc_validation(vendor_raw: str, validation_results: dict) -> dict:
+    """Adopt the vendor BC validation matched when the alias lookup found none.
+
+    validate_bc_match often resolves the vendor (bc_record_info) while
+    lookup_vendor_alias does not, and until now that match only reached
+    bc_vendor_number, leaving vendor_canonical empty.
+
+    - business_central matches come from live BC; they are accepted when the
+      score is high and BC's name agrees with the document's vendor.
+    - document_history matches carry a number recorded on past documents,
+      which can be wrong (R+L was recorded as "CA", the California Franchise
+      Tax Board), so the number is confirmed against live BC first.
+    """
+    none = {"vendor_canonical": None, "vendor_match_method": "none"}
+    info = (validation_results or {}).get("bc_record_info") or {}
+    number = info.get("number")
+    bc_name = info.get("displayName") or ""
+    method = (validation_results or {}).get("match_method")
+    try:
+        score = float((validation_results or {}).get("match_score") or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    if not vendor_raw or not number or method not in ("business_central", "document_history"):
+        return none
+    if score < BC_VALIDATION_MIN_SCORE:
+        return none
+
+    from services.vendor_name_helpers import vendor_identity_agrees
+
+    if method == "document_history":
+        search_vendors_by_name, BCLookupStatus = _bc_search()
+        try:
+            result = await search_vendors_by_name(bc_name or vendor_raw, limit=10)
+        except Exception as e:
+            logger.warning("BC confirm of history vendor %s failed: %s", number, e)
+            return none
+        if result.status != BCLookupStatus.SUCCESS:
+            return none
+        confirmed = next(
+            (v for v in result.data.get("vendors", []) if v.get("number") == number),
+            None,
+        )
+        if not confirmed:
+            logger.info(
+                "[VendorResolve] History vendor %s for %r not confirmed in BC", number, vendor_raw
+            )
+            return none
+        bc_name = confirmed.get("displayName") or bc_name
+
+    if not bc_name or not vendor_identity_agrees(vendor_raw, bc_name):
+        return none
+
+    return {
+        "vendor_canonical": number,
+        "vendor_match_method": "bc_validation_match",
+        "vendor_name": bc_name,
+        "vendor_no": number,
+        "match_score": round(score, 3),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -240,6 +240,15 @@ async def intake_document(
     from services.bc_validation_service import validate_bc_match
     validation_results = await validate_bc_match(suggested_type, extracted_fields, job_configs)
 
+    # Adopt BC validation's vendor match when the alias lookup found none
+    if not vendor_alias_result.get("vendor_canonical"):
+        from services.vendor_matching import resolve_vendor_from_bc_validation
+        bc_vendor_result = await resolve_vendor_from_bc_validation(
+            normalized_fields.get("vendor_raw", ""), validation_results
+        )
+        if bc_vendor_result.get("vendor_canonical"):
+            vendor_alias_result = bc_vendor_result
+
     decision, reasoning, decision_metadata = _make_automation_decision(job_configs, confidence, validation_results)
 
     bc_entity = job_configs.get("bc_entity", "salesOrders")

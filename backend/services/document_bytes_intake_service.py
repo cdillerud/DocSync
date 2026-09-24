@@ -422,6 +422,18 @@ async def intake_document_from_bytes(
         logger.warning("BC validation failed for %s: %s", doc_id, str(bc_err))
         validation_results = {"all_passed": False}
 
+    # Adopt BC validation's vendor match when the alias lookup found none
+    if not (vendor_alias_result or {}).get("vendor_canonical"):
+        try:
+            from services.vendor_matching import resolve_vendor_from_bc_validation
+            bc_vendor_result = await resolve_vendor_from_bc_validation(
+                normalized_fields.get("vendor_raw", ""), validation_results
+            )
+            if bc_vendor_result.get("vendor_canonical"):
+                vendor_alias_result = bc_vendor_result
+        except Exception as bcv_err:
+            logger.warning("BC-validation vendor adoption failed for %s: %s", doc_id[:8], bcv_err)
+
     # Make automation decision
     try:
         decision, reasoning, decision_metadata = make_automation_decision(job_configs, confidence, validation_results)

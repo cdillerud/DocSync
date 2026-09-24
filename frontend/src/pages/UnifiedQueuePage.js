@@ -43,7 +43,6 @@ const STATUS_LABELS = {
   LinkedToBC: "Linked to BC",
   rejected: "Rejected", exported: "Exported",
   Completed: "Completed", completed: "Completed",
-  AutoFiled: "Auto-Filed", auto_filed: "Auto-Filed",
   bounds_review: "Qty Review",
   Posted: "Posted", posted: "Posted",
   Archived: "Archived", archived: "Archived",

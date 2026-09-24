@@ -239,9 +239,11 @@ function ReadinessPanel({ readiness, docStatus }) {
   if (!readiness) return null;
 
   // Override readiness display for terminal/completed documents
+  // 'AutoFiled'/'auto_filed' removed: dead vocabulary, never actually set
+  // as a status string (confirmed 2026-09-24).
   const TERMINAL_STATUSES = new Set([
     'Completed', 'completed', 'Posted', 'posted', 'AutoPosted', 'PostedToBC',
-    'AutoFiled', 'auto_filed', 'LinkedToBC', 'Validated', 'validated',
+    'LinkedToBC', 'Validated', 'validated',
   ]);
   const POSTED_STATUSES = new Set(['Posted', 'posted', 'AutoPosted', 'PostedToBC']);
 

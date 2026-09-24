@@ -723,9 +723,11 @@ async def po_retry_scheduler(
             from datetime import datetime, timezone
             now = datetime.now(timezone.utc).isoformat()
 
+            # "AutoFiled" removed: dead vocabulary, never actually set as a
+            # status string (confirmed 2026-09-24).
             DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
                              "archived", "FileMissing", "Exception", "exception",
-                             "Validated", "validated", "ReadyForPost", "AutoFiled"]
+                             "Validated", "validated", "ReadyForPost"]
 
             # Doc types that should NEVER enter the PO retry loop
             NON_PO_TYPES = [

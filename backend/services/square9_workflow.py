@@ -230,7 +230,19 @@ def determine_square9_stage(doc: Dict[str, Any]) -> str:
     # Check for escalation first
     if doc.get("auto_escalated"):
         return Square9Stage.MANUAL_REVIEW.value
-    
+
+    # 2026-09-24: a document with a known, unresolved BC-posting or
+    # auto-file failure must never be shown as EXPORTED (done) here,
+    # regardless of what its top-level status/workflow_status say. Same
+    # failure signal used by derived_state_service.py and
+    # queue_constants.py -- this function is rendered live via
+    # Square9WorkflowTracker on the document detail page.
+    bc_posting_status = (doc.get("bc_posting_status") or "").lower()
+    if bc_posting_status in ("failed", "pending_retry"):
+        return Square9Stage.ERROR_RECOVERY.value
+    if doc.get("auto_file_failed") and not doc.get("auto_filed"):
+        return Square9Stage.ERROR_RECOVERY.value
+
     # Map workflow status to Square9 stage
     status_mapping = {
         "captured": Square9Stage.IMPORT.value,
@@ -261,8 +273,14 @@ def determine_square9_stage(doc: Dict[str, Any]) -> str:
     
     # Also check top-level status for terminal docs
     doc_status = doc.get("status", "")
-    terminal_exported = {"Completed", "Posted", "AutoPosted", "PostedToBC", "AutoFiled",
-                         "LinkedToBC", "Validated", "ValidationPassed", "ReadyForPost"}
+    # "AutoFiled" is dead vocabulary (never actually set as a status string).
+    # "ReadyForPost" is deliberately excluded: ap_auto_post_service.py
+    # reuses it for both "genuinely ready" AND "BC post failed, held for
+    # background retry" -- the failure check above already routes the
+    # latter case to ERROR_RECOVERY, so treating ReadyForPost as terminal
+    # here would silently hide the failure case again.
+    terminal_exported = {"Completed", "Posted", "AutoPosted", "PostedToBC",
+                         "LinkedToBC", "Validated", "ValidationPassed"}
     if doc_status in terminal_exported and workflow_status not in status_mapping:
         return Square9Stage.EXPORTED.value
     

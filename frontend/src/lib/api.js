@@ -43,16 +43,6 @@ export const login = (username, password) => api.post('/auth/login', { username,
 export const getMe = () => api.get('/auth/me');
 
 // Dashboard
-export const getDashboardStats = (date) => api.get('/dashboard/stats', { params: date ? { date } : {} });
-export const getDocumentTypesDashboard = (params) => api.get('/dashboard/document-types', { params });
-export const getWorkflowIntelligence = (date) => api.get('/dashboard/workflow-intelligence', { params: date ? { date } : {} });
-export const exportDocumentTypesDashboard = (params) => {
-  const queryString = new URLSearchParams(
-    Object.entries(params || {}).filter(([_, v]) => v !== null && v !== undefined && v !== 'all')
-  ).toString();
-  const url = `${API_BASE_URL}/dashboard/document-types/export${queryString ? '?' + queryString : ''}`;
-  window.location.href = url;
-};
 
 // Documents
 export const uploadDocument = (formData) => api.post('/documents/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -120,7 +110,6 @@ export const getVendorOverrideHistory = (vendorNo) => api.get(`/stable-vendor/ve
 
 // Stable Vendor Config & Diagnostics
 export const getStableVendorConfig = () => api.get('/stable-vendor/config');
-export const getDailyIngestion = (date) => api.get('/dashboard/daily-ingestion', { params: date ? { date } : {} });
 export const updateStableVendorConfig = (data) => api.put('/stable-vendor/config', data);
 export const diagnoseStableVendors = () => api.get('/stable-vendor/diagnose');
 export const applySuggestedThresholds = () => api.post('/stable-vendor/apply-suggested-thresholds');
@@ -250,8 +239,6 @@ export const rejectDocument = (docId, reason, actor) => api.post(`/ap-review/doc
 // Generic Workflow Actions (for any doc type)
 export const exportDocument = (docId, destination, user) => api.post(`/workflows/${docId}/export`, null, { params: { export_destination: destination, user } });
 
-// Get AP Dashboard metrics (from doc-types dashboard filtered to AP)
-export const getAPDashboardMetrics = () => api.get('/dashboard/document-types', { params: { doc_type: 'AP_INVOICE' } });
 
 // =============================================================================
 // PILOT APIs
@@ -495,47 +482,6 @@ export const getAutomationConfidence = (docId) => api.get(`/documents/${encId(do
 export const getReviewAssist = (docId) => api.post(`/documents/${encId(docId)}/review-assist`);
 export const acceptSuggestion = (docId, data) => api.post(`/documents/${encId(docId)}/accept-suggestion`, data);
 
-// =============================================================================
-// CONTRACT INTELLIGENCE APIs (Phase 3)
-// =============================================================================
-
-export const getContractsHealth = () => api.get('/contracts/health');
-export const getContractSummary = () => api.get('/contracts/summary');
-export const getContractExpiring = (params) => api.get('/contracts/expiring', { params });
-export const getContractCoverage = () => api.get('/contracts/coverage');
-export const getContractThresholdTelemetry = (params) => api.get('/contracts/threshold-telemetry', { params });
-export const listAgreements = (params) => api.get('/contracts/agreements', { params });
-export const getAgreementDetail = (id) => api.get(`/contracts/agreements/${encId(id)}`);
-export const createManualAgreementLink = (id, data) => api.post(`/contracts/agreements/${encId(id)}/links`, data);
-export const confirmAgreementLink = (agreementId, linkId) => api.post(`/contracts/agreements/${encId(agreementId)}/links/${encId(linkId)}/confirm`);
-export const rejectAgreementLink = (agreementId, linkId, data) => api.post(`/contracts/agreements/${encId(agreementId)}/links/${encId(linkId)}/reject`, data || {});
-export const listAgreementExceptions = (params) => api.get('/contracts/exceptions', { params });
-export const resolveAgreementException = (id, data) => api.post(`/contracts/exceptions/${encId(id)}/resolve`, data || {});
-export const getAgreementAudit = (id, limit = 200) => api.get(`/contracts/audit/${encId(id)}`, { params: { limit } });
-export const contractsBCSearch = (params) => api.get('/contracts/bc-search', { params });
-export const importNavigatorExport = (file, { commit = false, sheet } = {}) => {
-  const fd = new FormData();
-  fd.append('file', file);
-  const params = {};
-  if (commit) params.commit = 'true';
-  if (sheet) params.sheet = sheet;
-  return api.post('/contracts/navigator/import', fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    params,
-  });
-};
-
-// Phase 4C(c.1) — PDF Body Extraction (admin-gated, dry-run by default).
-export const pdfExtractAgreement = (agreementId, file, { commit = false } = {}) => {
-  const fd = new FormData();
-  fd.append('file', file);
-  const params = {};
-  if (commit) params.commit = 'true';
-  return api.post(`/contracts/agreements/${encId(agreementId)}/pdf-extract`, fd, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-    params,
-  });
-};
 
 
 

@@ -13,11 +13,14 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Query
 from deps import get_db
 from services.stable_vendor_service import get_stable_vendor_service
+from routers.queue_constants import TERMINAL_STATUSES  # 2026-09-24: was a drifted local
+                                                        # copy missing FileMissing/
+                                                        # Validated/etc - single source
+                                                        # of truth now lives in
+                                                        # queue_constants.py.
 
 logger = logging.getLogger("auto_approve")
 router = APIRouter(prefix="/auto-approve", tags=["Auto-Approve"])
-
-TERMINAL_STATUSES = ["Completed", "Archived", "Posted", "Deleted"]
 
 
 async def _get_approval_candidates(db, limit=5000):

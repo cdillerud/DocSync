@@ -6,7 +6,6 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "@/components/Layout";
 import LoginPage from "@/pages/LoginPage";
-import DashboardPage from "@/pages/DashboardPage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import OperationsQueuePage from "@/pages/OperationsQueuePage";
 
@@ -33,8 +32,6 @@ import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
 import GovernanceDashboard from "@/pages/GovernanceDashboard";
-import RoadmapGanttPage from "@/pages/RoadmapGanttPage";
-import ContractIntelligencePage from "@/pages/ContractIntelligencePage";
 import SearchPage from "@/pages/SearchPage";
 
 function ProtectedRoute({ children }) {
@@ -72,8 +69,6 @@ function AppRoutes() {
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
         <Route path="governance" element={<GovernanceDashboard />} />
-        <Route path="roadmap" element={<RoadmapGanttPage />} />
-        <Route path="contracts" element={<ContractIntelligencePage />} />
         <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}

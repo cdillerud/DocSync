@@ -305,6 +305,11 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
                 "bc_system_id": result.get("bc_system_id", ""),
                 "posted_to_bc_at": now,
                 "bc_posting_error": None,
+                # 2026-09-24: also clear the older auto_post_error field on
+                # success -- a prior failed attempt (e.g. a transient error
+                # that later succeeded on retry) otherwise left this set,
+                # which is stale/misleading once the post actually succeeds.
+                "auto_post_error": None,
             })
             await _write_event(db, doc_id, "automation.decision.completed", {
                 "decision": "Posted",

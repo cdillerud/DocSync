@@ -410,7 +410,6 @@ class TestLiveSurfaceAndCallerImports:
     @pytest.mark.parametrize(
         "module_name",
         [
-            "routers.sales_pipeline_demo",
             "routers.pilot",
             "services.email_polling_service",
             "services.inside_sales_pilot_service",

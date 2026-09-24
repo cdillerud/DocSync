@@ -8,11 +8,13 @@ from services.ap_routing_ai_primary_service import (
 from services.ap_routing_decision_service import RoutePrediction
 from services.ap_routing_business_context_expansion_service import (
     _matches_deficit,
-    _round_robin_prefilter_labels,
     build_train_business_context_deficits,
 )
 from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
-from services.ap_routing_train_context_service import build_train_learning_context
+from services.ap_routing_train_context_service import (
+    _route_balanced_neighborhood,
+    build_train_learning_context,
+)
 
 
 def _train(
@@ -64,6 +66,31 @@ def _current(*, vendor="Acme", file_name="W119900_current.pdf"):
 
 def _counts(rows, key):
     return {row[key]: row["count"] for row in rows}
+
+
+def test_rev11_nearest_train_context_preserves_repeated_route_density_without_crowdout():
+    ranked = [
+        {"fingerprint": "a1", "route_path": "Route A"},
+        {"fingerprint": "a2", "route_path": "Route A"},
+        {"fingerprint": "a3", "route_path": "Route A"},
+        {"fingerprint": "a4", "route_path": "Route A"},
+        {"fingerprint": "b1", "route_path": "Route B"},
+        {"fingerprint": "c1", "route_path": "Route C"},
+        {"fingerprint": "d1", "route_path": "Route D"},
+    ]
+
+    selected = _route_balanced_neighborhood(
+        ranked,
+        limit=6,
+        max_per_route=3,
+    )
+    routes = [row["route_path"] for row in selected]
+
+    assert routes[:3] == ["Route A", "Route A", "Route A"]
+    assert "Route B" in routes
+    assert "Route C" in routes
+    assert "Route D" in routes
+    assert routes.count("Route A") == 3
 
 
 def test_rev10_route_hierarchy_context_preserves_parent_and_child_counts_train_only():
@@ -339,99 +366,6 @@ def test_rev10_reference_family_expansion_excludes_descriptor_only_and_dnp():
         and row["route_path"] == "DO NOT PAY"
         for row in deficits
     )
-
-
-def test_rev10_prefilter_round_robins_by_deficit_within_same_route():
-    route = "Dropship Not International/Freight/Freight Issues"
-    deficits = [
-        {
-            "kind": "same_vendor_document_type_route_support",
-            "route_path": route,
-            "vendor": "Vendor Alpha",
-            "document_type": "AP_Invoice",
-            "business_signature": [],
-            "required_semantics": [],
-            "required_reference_family": "",
-            "additional_support_needed": 2,
-        },
-        {
-            "kind": "same_vendor_document_type_route_support",
-            "route_path": route,
-            "vendor": "Vendor Beta",
-            "document_type": "AP_Invoice",
-            "business_signature": [],
-            "required_semantics": [],
-            "required_reference_family": "",
-            "additional_support_needed": 2,
-        },
-    ]
-    labels = [
-        {
-            "item_id": "a-new",
-            "route_path": route,
-            "file_name": "Vendor Alpha invoice newest.pdf",
-            "modified_at": "2026-09-10T00:00:00Z",
-        },
-        {
-            "item_id": "a-old",
-            "route_path": route,
-            "file_name": "Vendor Alpha invoice older.pdf",
-            "modified_at": "2026-09-09T00:00:00Z",
-        },
-        {
-            "item_id": "b-one",
-            "route_path": route,
-            "file_name": "Vendor Beta invoice.pdf",
-            "modified_at": "2026-09-08T00:00:00Z",
-        },
-    ]
-
-    selected = _round_robin_prefilter_labels(
-        labels,
-        deficits,
-        excluded_source_item_ids=set(),
-        already_selected_source_item_ids=set(),
-        max_candidates=2,
-    )
-    names = [row["file_name"] for row in selected]
-
-    assert len(selected) == 2
-    assert any("Alpha" in name for name in names)
-    assert any("Beta" in name for name in names)
-
-
-def test_rev10_prefilter_vendor_affinity_falls_back_when_filenames_are_opaque():
-    route = "Meg to Process"
-    deficits = [
-        {
-            "kind": "same_vendor_document_type_route_support",
-            "route_path": route,
-            "vendor": "Vendor Gamma",
-            "document_type": "AP_Invoice",
-            "business_signature": [],
-            "required_semantics": [],
-            "required_reference_family": "",
-            "additional_support_needed": 1,
-        }
-    ]
-    labels = [
-        {
-            "item_id": "opaque-one",
-            "route_path": route,
-            "file_name": "78277 230829 1818621A.pdf",
-            "modified_at": "2026-09-08T00:00:00Z",
-        }
-    ]
-
-    selected = _round_robin_prefilter_labels(
-        labels,
-        deficits,
-        excluded_source_item_ids=set(),
-        already_selected_source_item_ids=set(),
-        max_candidates=1,
-    )
-
-    assert [row["item_id"] for row in selected] == ["opaque-one"]
 
 
 def test_rev10_preserves_existing_learned_autonomy_confidence_floor():

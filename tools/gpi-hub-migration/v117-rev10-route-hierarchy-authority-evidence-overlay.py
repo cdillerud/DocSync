@@ -16,6 +16,101 @@ def replace_once(raw: str, old: str, new: str, label: str) -> str:
 def patch_train_context(path: Path) -> None:
     raw = path.read_text(encoding="utf-8")
 
+    old_neighborhood = '''def _route_balanced_neighborhood(
+    ranked: Sequence[Dict[str, Any]],
+    *,
+    limit: int,
+) -> List[Dict[str, Any]]:
+    """Bound a relevance-ranked TRAIN neighborhood without route crowd-out.
+
+    The first pass keeps the highest-ranked example for each distinct observed
+    route. The second pass fills any remaining slots in the original relevance
+    order. This changes prompt evidence composition only; it does not create or
+    relax routing authority.
+    """
+    bounded_limit = max(1, int(limit))
+    if len(ranked) <= bounded_limit:
+        return [dict(row) for row in ranked]
+
+    selected_indexes: List[int] = []
+    selected_index_set = set()
+    seen_routes = set()
+
+    for index, row in enumerate(ranked):
+        route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))
+        if not route or route in seen_routes:
+            continue
+        selected_indexes.append(index)
+        selected_index_set.add(index)
+        seen_routes.add(route)
+        if len(selected_indexes) >= bounded_limit:
+            break
+
+    if len(selected_indexes) < bounded_limit:
+        for index in range(len(ranked)):
+            if index in selected_index_set:
+                continue
+            selected_indexes.append(index)
+            selected_index_set.add(index)
+            if len(selected_indexes) >= bounded_limit:
+                break
+
+    return [dict(ranked[index]) for index in selected_indexes]
+'''
+    new_neighborhood = '''def _route_balanced_neighborhood(
+    ranked: Sequence[Dict[str, Any]],
+    *,
+    limit: int,
+    max_per_route: int = 3,
+) -> List[Dict[str, Any]]:
+    """Build a relevance-first HUMAN TRAIN neighborhood with bounded route density.
+
+    The prior implementation forced one example per distinct route before any
+    route could contribute a second example. That made repeated exact-route
+    evidence look artificially sparse in nearest_human_route_observations and
+    route_hierarchy_nearest. Preserve relevance order instead, while capping any
+    single route so one common workflow cannot crowd out nearby alternatives.
+    This changes prompt evidence composition only; it does not create or relax
+    routing authority.
+    """
+    bounded_limit = max(1, int(limit))
+    route_cap = max(1, int(max_per_route))
+    if not ranked:
+        return []
+
+    selected: List[Dict[str, Any]] = []
+    route_counts: Counter[str] = Counter()
+    deferred: List[Dict[str, Any]] = []
+
+    for source in ranked:
+        row = dict(source)
+        route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))
+        if route and route_counts[route] >= route_cap:
+            deferred.append(row)
+            continue
+        selected.append(row)
+        if route:
+            route_counts[route] += 1
+        if len(selected) >= bounded_limit:
+            return selected
+
+    # If TRAIN has fewer distinct usable routes than the requested context size,
+    # fill the remaining prompt-only context from the original relevance order.
+    # The cap is a diversity preference, not a reason to discard available HUMAN
+    # evidence when there is otherwise unused context capacity.
+    for row in deferred:
+        selected.append(row)
+        if len(selected) >= bounded_limit:
+            break
+    return selected
+'''
+    raw = replace_once(
+        raw,
+        old_neighborhood,
+        new_neighborhood,
+        "REV11 density-aware TRAIN neighborhood",
+    )
+
     insert_anchor = '''def _dynamic_route_usage(
 '''
     helper = '''def _route_parent(route: str) -> str:
@@ -133,6 +228,10 @@ def _route_hierarchy_usage(
 
     require("route_hierarchy_same_vendor" in raw, "REV10 same-vendor route hierarchy missing")
     require("route_hierarchy_same_reference_family" in raw, "REV10 reference-family route hierarchy missing")
+    require(
+        "relevance-first HUMAN TRAIN neighborhood with bounded route density" in raw,
+        "REV11 density-aware TRAIN neighborhood missing",
+    )
     compile(raw, str(path), "exec")
     path.write_text(raw, encoding="utf-8", newline="\n")
 
@@ -577,282 +676,9 @@ def patch_business_context_expansion(path: Path) -> None:
 '''
     raw = replace_once(raw, old_score, new_score, "REV10 reference-family prefilter scoring")
 
-    old_vendor_terms = '''        "international", "distribution", "storage",
-    }
-'''
-    new_vendor_terms = '''        "international", "distribution", "storage", "vendor",
-    }
-'''
-    raw = replace_once(
-        raw,
-        old_vendor_terms,
-        new_vendor_terms,
-        "REV11 generic vendor-token exclusion",
-    )
-
-    old_selector = '''def _round_robin_prefilter_labels(
-    labels: Sequence[Dict[str, Any]],
-    deficits: Sequence[Dict[str, Any]],
-    *,
-    excluded_source_item_ids: Set[str],
-    already_selected_source_item_ids: Set[str],
-    max_candidates: int,
-) -> List[Dict[str, Any]]:
-    target_routes = {str(row["route_path"]) for row in deficits}
-    by_route: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    excluded = {str(value) for value in excluded_source_item_ids}
-    already = {str(value) for value in already_selected_source_item_ids}
-    for source in labels:
-        row = dict(source)
-        item_id = str(row.get("item_id") or "")
-        route = normalize_route_path(row.get("route_path"))
-        if not item_id or item_id in excluded or item_id in already or route not in target_routes:
-            continue
-        score = _candidate_prefilter_score(row, deficits)
-        if score < 0:
-            continue
-        row["_business_context_prefilter_score"] = score
-        by_route[route].append(row)
-    for rows in by_route.values():
-        rows.sort(
-            key=lambda row: (
-                int(row.get("_business_context_prefilter_score") or 0),
-                str(row.get("modified_at") or ""),
-                str(row.get("file_name") or ""),
-                str(row.get("item_id") or ""),
-            ),
-            reverse=True,
-        )
-    selected: List[Dict[str, Any]] = []
-    indices: Counter[str] = Counter()
-    routes = sorted(by_route)
-    while len(selected) < max(0, int(max_candidates)):
-        progressed = False
-        for route in routes:
-            idx = indices[route]
-            rows = by_route[route]
-            if idx >= len(rows):
-                continue
-            selected.append(rows[idx])
-            indices[route] += 1
-            progressed = True
-            if len(selected) >= max_candidates:
-                break
-        if not progressed:
-            break
-    return selected
-'''
-    new_selector = '''def _candidate_prefilter_affinity_for_deficit(
-    label: Dict[str, Any],
-    deficit: Dict[str, Any],
-) -> Dict[str, bool]:
-    pseudo = {"file_name": str(label.get("file_name") or "")}
-    pseudo_signature = authority_business_signature(pseudo)
-    pseudo_semantics = semantic_features(pseudo)
-    pseudo_reference_family = reference_family(pseudo)
-    lower = str(label.get("file_name") or "").lower()
-
-    vendor = str(deficit.get("vendor") or "")
-    vendor_terms = _vendor_filename_terms(vendor) if vendor else set()
-    signature = set(deficit.get("business_signature") or [])
-    required_semantics = set(deficit.get("required_semantics") or [])
-    required_reference_family = str(deficit.get("required_reference_family") or "")
-
-    return {
-        "vendor_requested": bool(vendor_terms),
-        "vendor_match": bool(vendor_terms and any(term in lower for term in vendor_terms)),
-        "signature_requested": bool(signature),
-        "signature_match": bool(signature and signature.issubset(pseudo_signature)),
-        "semantics_requested": bool(required_semantics),
-        "semantics_match": bool(required_semantics and required_semantics.issubset(pseudo_semantics)),
-        "reference_requested": bool(required_reference_family),
-        "reference_match": bool(
-            required_reference_family
-            and pseudo_reference_family == required_reference_family
-        ),
-    }
-
-
-def _candidate_prefilter_score_for_deficit(
-    label: Dict[str, Any],
-    deficit: Dict[str, Any],
-) -> int:
-    route = normalize_route_path(label.get("route_path"))
-    if not route or route != normalize_route_path(deficit.get("route_path")):
-        return -1
-    pseudo = {"file_name": str(label.get("file_name") or "")}
-    pseudo_signature = authority_business_signature(pseudo)
-    pseudo_semantics = semantic_features(pseudo)
-    pseudo_reference_family = reference_family(pseudo)
-    lower = str(label.get("file_name") or "").lower()
-
-    local = 1
-    vendor = str(deficit.get("vendor") or "")
-    if vendor:
-        terms = _vendor_filename_terms(vendor)
-        if terms and any(term in lower for term in terms):
-            local += 5
-    signature = set(deficit.get("business_signature") or [])
-    overlap = signature.intersection(pseudo_signature)
-    local += min(8, 3 * len(overlap))
-    required_semantics = set(deficit.get("required_semantics") or [])
-    if required_semantics and required_semantics.issubset(pseudo_semantics):
-        local += 8
-    required_reference_family = str(deficit.get("required_reference_family") or "")
-    if required_reference_family and pseudo_reference_family == required_reference_family:
-        local += 8
-    return local
-
-
-def _round_robin_prefilter_labels(
-    labels: Sequence[Dict[str, Any]],
-    deficits: Sequence[Dict[str, Any]],
-    *,
-    excluded_source_item_ids: Set[str],
-    already_selected_source_item_ids: Set[str],
-    max_candidates: int,
-) -> List[Dict[str, Any]]:
-    """Allocate hydration candidates across TRAIN deficits, not merely routes.
-
-    REV10 originally round-robined by route. With many vendor/reference-specific
-    deficits under one route, the first few high-scoring files for that route
-    could consume the entire hydration slice while other deficits on the same
-    route received no candidate at all. This selector preserves the same
-    TRAIN-only deficit contract and exact human route label, but gives each
-    deficit a bounded opportunity to contribute candidates before taking a
-    second candidate for already-covered deficits.
-    """
-    limit = max(0, int(max_candidates))
-    if limit <= 0 or not deficits:
-        return []
-
-    excluded = {str(value) for value in excluded_source_item_ids}
-    already = {str(value) for value in already_selected_source_item_ids}
-    target_routes = {
-        normalize_route_path(row.get("route_path"))
-        for row in deficits
-        if normalize_route_path(row.get("route_path"))
-    }
-
-    by_route: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for source in labels:
-        row = dict(source)
-        item_id = str(row.get("item_id") or "")
-        route = normalize_route_path(row.get("route_path"))
-        if (
-            not item_id
-            or item_id in excluded
-            or item_id in already
-            or route not in target_routes
-        ):
-            continue
-        by_route[route].append(row)
-
-    per_deficit_cap = max(
-        2,
-        min(
-            12,
-            int(math.ceil(limit / max(1, len(deficits)))) + 2,
-        ),
-    )
-    buckets: List[List[Dict[str, Any]]] = []
-    for deficit_index, deficit in enumerate(deficits):
-        route = normalize_route_path(deficit.get("route_path"))
-        ranked: List[Dict[str, Any]] = []
-        for source in by_route.get(route, []):
-            score = _candidate_prefilter_score_for_deficit(source, deficit)
-            if score < 0:
-                continue
-            row = dict(source)
-            row["_business_context_prefilter_score"] = score
-            row["_business_context_prefilter_deficit_index"] = deficit_index
-            row["_business_context_prefilter_deficit_kind"] = str(
-                deficit.get("kind") or ""
-            )
-            ranked.append(row)
-        # Prefer candidates whose filename already exhibits the deficit's
-        # requested vendor/reference/semantic/signature affinity. Critically,
-        # apply each preference only when at least one candidate actually
-        # exhibits it; otherwise fall back to the broader same-route pool so a
-        # sparse/opaque filename cannot starve the deficit completely.
-        affinities = [
-            (row, _candidate_prefilter_affinity_for_deficit(row, deficit))
-            for row in ranked
-        ]
-        for requested_key, match_key in (
-            ("vendor_requested", "vendor_match"),
-            ("reference_requested", "reference_match"),
-            ("semantics_requested", "semantics_match"),
-            ("signature_requested", "signature_match"),
-        ):
-            if affinities and any(meta.get(requested_key) for _, meta in affinities):
-                matched = [(row, meta) for row, meta in affinities if meta.get(match_key)]
-                if matched:
-                    affinities = matched
-        ranked = [row for row, _ in affinities]
-        ranked.sort(
-            key=lambda row: (
-                int(row.get("_business_context_prefilter_score") or 0),
-                str(row.get("modified_at") or ""),
-                str(row.get("file_name") or ""),
-                str(row.get("item_id") or ""),
-            ),
-            reverse=True,
-        )
-        buckets.append(ranked[:per_deficit_cap])
-
-    selected: List[Dict[str, Any]] = []
-    selected_ids: Set[str] = set()
-    indices = [0 for _ in buckets]
-    while len(selected) < limit:
-        progressed = False
-        for bucket_index, rows in enumerate(buckets):
-            while indices[bucket_index] < len(rows):
-                row = rows[indices[bucket_index]]
-                indices[bucket_index] += 1
-                item_id = str(row.get("item_id") or "")
-                if not item_id or item_id in selected_ids:
-                    continue
-                selected.append(row)
-                selected_ids.add(item_id)
-                progressed = True
-                break
-            if len(selected) >= limit:
-                break
-        if not progressed:
-            break
-    return selected
-'''
-    raw = replace_once(
-        raw,
-        old_selector,
-        new_selector,
-        "REV10 deficit-aware hydration prefilter",
-    )
-
-    old_candidate_limit = '''    candidate_limit = min(len(labels), max(0, int(max_additional)) * 4)
-'''
-    new_candidate_limit = '''    # REV11 evidence-discovery pass: hydrate a modestly broader, deficit-aware
-    # candidate slice. This does not increase the number of TRAIN examples that
-    # may be admitted (max_additional is unchanged); it only reduces false
-    # negatives in pre-hydration discovery.
-    candidate_limit = min(len(labels), max(0, int(max_additional)) * 6)
-'''
-    raw = replace_once(
-        raw,
-        old_candidate_limit,
-        new_candidate_limit,
-        "REV11 evidence-discovery candidate breadth",
-    )
-
     require(
         "same_vendor_document_type_route_support" in raw,
         "REV10 same-vendor route-support deficits missing",
-    )
-    require(
-        "_candidate_prefilter_affinity_for_deficit" in raw
-        and "apply each preference only when at least one candidate actually" in raw,
-        "REV11 deficit-affinity prefilter missing",
     )
     require(
         "rev10_generic_deficit_allowed" in raw

@@ -781,6 +781,9 @@ export default function UnifiedQueuePage() {
                             {doc.bounds_alert && (
                               <Badge className="bg-red-500/15 text-red-400 text-[9px] px-1 py-0 shrink-0" data-testid={`bounds-flag-${doc.id}`}>QTY ALERT</Badge>
                             )}
+                            {doc.auto_file_failed && !doc.auto_filed && !isTerminal(doc) && (
+                              <Badge className="bg-red-500/15 text-red-400 text-[9px] px-1 py-0 shrink-0" data-testid={`auto-file-failed-${doc.id}`}>AUTO-FILE FAILED</Badge>
+                            )}
                             {doc.status === "batch_parent" && doc.batch_children_count > 0 && (
                               <Badge className="bg-sky-500/15 text-sky-400 text-[9px] px-1 py-0 shrink-0">{doc.batch_children_count} pages</Badge>
                             )}

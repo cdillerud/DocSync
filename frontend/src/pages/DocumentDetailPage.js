@@ -198,6 +198,43 @@ function RelatedDocsLink({ doc }) {
 
 
 
+const AUTO_FILE_TERMINAL_STATUSES = new Set(['completed', 'posted', 'archived']);
+
+function AutoFileFailureBanner({ doc }) {
+  // 2026-09-23: surfaces the new auto_file_failed/auto_file_error state
+  // introduced when shipping_auto_file_service.py was fixed to stop
+  // silently marking a failed auto-file attempt as "Completed". Before
+  // that fix there was no failure state to show; now there is one, and
+  // without this banner the team would have no way to tell "auto-file
+  // was attempted and failed" apart from an ordinary needs-review
+  // document, which defeats the point of surfacing the failure at all.
+  //
+  // Guard against stale flags: found 378 real documents where an older
+  // bug in the success path never cleared auto_file_failed after a
+  // later successful retry, so the flag alone isn't reliable evidence
+  // of a live problem. doc.auto_filed (this document's own later
+  // success) and a terminal status (completed through any other path,
+  // e.g. manual review) both mean there is nothing left to act on here.
+  if (!doc.auto_file_failed || doc.auto_filed) return null;
+  if (AUTO_FILE_TERMINAL_STATUSES.has((doc.status || '').toLowerCase())) return null;
+  return (
+    <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 flex items-start gap-3">
+      <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-red-500">Auto-file failed</p>
+        <p className="text-xs text-red-400 mt-0.5 break-words">
+          {doc.auto_file_error || "The automatic filing attempt failed for an unspecified reason."}
+        </p>
+        {doc.auto_file_failed_at && (
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Failed: {formatDate(doc.auto_file_failed_at)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReadinessPanel({ readiness, docStatus }) {
   if (!readiness) return null;
 
@@ -890,6 +927,9 @@ export default function DocumentDetailPage() {
             </Card>
             );
           })()}
+
+          {/* Auto-File Failure Banner */}
+          <AutoFileFailureBanner doc={doc} />
 
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} docStatus={doc.status} />

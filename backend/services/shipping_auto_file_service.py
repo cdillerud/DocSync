@@ -121,6 +121,16 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
             "filed_at": now,
             "filed_folder": folder_path,
             "updated_utc": now,
+            # 2026-09-23: a document that failed once and is now being
+            # retried successfully must have its stale failure markers
+            # cleared - otherwise it keeps showing as failed forever even
+            # after the underlying problem is resolved. Found 378 real
+            # documents carrying auto_file_failed=True despite having
+            # since reached status=Completed, because this branch never
+            # cleared the fields the failure branch below sets.
+            "auto_file_failed": False,
+            "auto_file_error": None,
+            "auto_file_failed_at": None,
         }
     else:
         update = {

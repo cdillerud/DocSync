@@ -21,6 +21,7 @@ Endpoints:
 
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
+import uuid
 
 router = APIRouter(prefix="/readiness", tags=["Readiness"])
 
@@ -124,9 +125,22 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     not_terminal = {"status": {"$nin": TERMINAL}}
     not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
 
+    # 2026-09-24: a document with a known, unresolved BC-posting or
+    # auto-file failure must never be marked Completed/auto_cleared by this
+    # job. This mirrors the carve-out in queue_constants.py. Without it,
+    # this job (which runs on a 30-min schedule) can silently re-complete a
+    # document that genuinely never posted to Business Central -- which is
+    # exactly what happened to a real AP invoice (bc_posting_status=failed,
+    # marked Completed by force-cleanup, invisible for 5 months).
+    has_unresolved_failure = {"$or": [
+        {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+        {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
+    ]}
+    not_failing = {"$nor": [has_unresolved_failure]}
+
     def base_and(*extra):
         """Build a query with base stuck conditions + extra filters using $and."""
-        return {"$and": [not_dup, not_terminal, not_cleared, *extra]}
+        return {"$and": [not_dup, not_terminal, not_cleared, not_failing, *extra]}
 
     def completed_update(rule):
         return {"$set": {
@@ -139,6 +153,73 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
         }}
 
     results = {}
+
+    # ── Rule 0: Reconcile documents this job already (mis)marked Completed ──
+    # A document can end up here two ways: (a) a BC-posting failure that
+    # happened AFTER this job already force-completed it based on readiness
+    # signals alone (readiness ≠ "actually posted"), or (b) any other rule
+    # above running before bc_posting_status was known to be failing. Either
+    # way: if force_cleanup_rule is set, auto_cleared is True, and BC
+    # posting never actually succeeded, this was wrong -- revert it.
+    rollback_query = {"$and": [
+        not_dup,
+        {"force_cleanup_rule": {"$exists": True}},
+        {"auto_cleared": True},
+        {"$or": [
+            {"$and": [
+                {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+                {"posted_to_bc_at": {"$exists": False}},
+            ]},
+            {"$and": [
+                {"auto_file_failed": True},
+                {"auto_filed": {"$ne": True}},
+            ]},
+        ]},
+    ]}
+    rollback_candidates = await db.hub_documents.find(
+        rollback_query,
+        {"_id": 0, "id": 1, "force_cleanup_rule": 1, "bc_posting_status": 1,
+         "bc_posting_error": 1, "auto_post_error": 1, "auto_file_error": 1},
+    ).to_list(200)
+
+    rollback_count = 0
+    for cand in rollback_candidates:
+        prior_rule = cand.get("force_cleanup_rule")
+        reason = (cand.get("bc_posting_error") or cand.get("auto_post_error")
+                  or cand.get("auto_file_error")
+                  or "Posting/filing never actually completed despite force-cleanup")
+        await db.hub_documents.update_one(
+            {"id": cand["id"]},
+            {
+                "$set": {
+                    "status": "NeedsReview",
+                    "workflow_status": "needs_review",
+                    "auto_cleared": False,
+                    "force_cleanup_reverted_rule": prior_rule,
+                    "force_cleanup_reverted_at": now,
+                },
+                "$unset": {
+                    "force_cleanup_rule": "",
+                    "force_cleanup_at": "",
+                },
+            },
+        )
+        await db.workflow_events.insert_one({
+            "event_id": str(uuid.uuid4()),
+            "document_id": cand["id"],
+            "event_type": "automation.force_cleanup.reverted",
+            "timestamp": now,
+            "source_service": "sync_readiness_to_status",
+            "payload": {
+                "reason": f"Force-cleanup rule '{prior_rule}' marked this Completed, "
+                          f"but it never actually posted/filed successfully: {reason}",
+                "previous_force_cleanup_rule": prior_rule,
+                "bc_posting_status": cand.get("bc_posting_status"),
+            },
+        })
+        rollback_count += 1
+    results["rule0_rollback_false_completion"] = rollback_count
+    logger.info("[ForceCleanup] Rule 0 (rollback false completions): %d docs reverted to NeedsReview", rollback_count)
 
     # ── Rule 1: Has BC Purchase Invoice Number → mark Completed ──
     r1 = await db.hub_documents.update_many(
@@ -193,7 +274,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
 
     # ── Rule 6: ReadyForPost status (from old sync) → mark Completed ──
     r6 = await db.hub_documents.update_many(
-        {"$and": [not_dup, {"status": "ReadyForPost"}, not_cleared]},
+        {"$and": [not_dup, {"status": "ReadyForPost"}, not_cleared, not_failing]},
         completed_update("readyforpost_to_completed"),
     )
     results["rule6_readyforpost"] = r6.modified_count
@@ -449,7 +530,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     # ── Rule 20: Duplicate filenames — same file_name appears multiple times ──
     # Find filenames that appear more than once among stuck docs
     dup_pipe = [
-        {"$match": {"$and": [not_dup, not_terminal, not_cleared]}},
+        {"$match": {"$and": [not_dup, not_terminal, not_cleared, not_failing]}},
         {"$group": {"_id": "$file_name", "count": {"$sum": 1}, "ids": {"$push": "$id"}}},
         {"$match": {"count": {"$gt": 1}}},
     ]
@@ -486,6 +567,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
             {"status": {"$nin": TERMINAL}},
             {"status": {"$in": ["NeedsReview", "Classified", "StoredInSP", "Received",
                                 "ReadyToLink", "captured", "received"]}},
+            not_failing,
         ]},
         completed_update("reverted_auto_cleared"),
     )
@@ -503,6 +585,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
                 {"readiness.blocking_reasons": {"$size": 0}},
                 {"readiness.blocking_reasons": {"$exists": False}},
             ]},
+            not_failing,
         ]},
         completed_update("readiness_status_mismatch"),
     )
@@ -578,6 +661,7 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
                 {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
                 {"readiness.signals.vendor_resolved": True},
             ]},
+            not_failing,
         ]},
         completed_update("no_blockers_with_vendor"),
     )

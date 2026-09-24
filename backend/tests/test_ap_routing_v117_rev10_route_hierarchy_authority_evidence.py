@@ -2,7 +2,10 @@ import inspect
 
 from services.ap_routing_ai_primary_service import (
     _augment_prompt_with_train_context,
+    _build_candidate_adjudication_prompt,
     _build_proposal_review_prompt,
+    _candidate_adjudication_needed,
+    _candidate_route_evidence,
     _proposal_review_needed,
 )
 from services.ap_routing_decision_service import RoutePrediction
@@ -124,6 +127,78 @@ def test_rev10_prompt_requires_topology_before_workflow_and_parent_before_unsupp
     assert "short paid, underpaid, balance difference" in prompt
     assert "Inventory, warehouse receipt, packing-list, BOL, photo, and transfer semantics" in prompt
     assert "Special top-level queues such as Meg to Process, Rhonda - Issues, and Miscellaneous" in prompt
+
+
+def test_rev11_candidate_adjudication_uses_only_retrieved_exact_routes_plus_current():
+    examples = [
+        _train("a", "Dropship Not International/Freight/Freight Issues"),
+        _train("b", "Dropship Not International/Freight/Freight Issues"),
+        _train("c", "Dropship International"),
+    ]
+    prediction = RoutePrediction(
+        proposed_route="Dropship Not International/Freight",
+        confidence=0.99,
+        evidence=[],
+        reasoning_summary="prior model answer",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+
+    candidates = _candidate_route_evidence(examples, prediction)
+    routes = [row["route_path"] for row in candidates]
+
+    assert routes == [
+        "Dropship Not International/Freight/Freight Issues",
+        "Dropship International",
+        "Dropship Not International/Freight",
+    ]
+    parent = next(
+        row
+        for row in candidates
+        if row["route_path"] == "Dropship Not International/Freight"
+    )
+    assert parent["human_support_count"] == 0
+    assert parent["is_current_ai_proposal"] is True
+    assert _candidate_adjudication_needed(
+        candidates,
+        proposal_review_used=True,
+    ) is True
+    assert _candidate_adjudication_needed(
+        candidates,
+        proposal_review_used=False,
+    ) is False
+
+
+def test_rev11_candidate_adjudication_prompt_is_comparison_not_open_route_generation():
+    examples = [
+        _train("a", "Vendor Credit Memos/Unclaimed credits posted"),
+        _train("b", "Vendor Credit Memos"),
+    ]
+    prediction = RoutePrediction(
+        proposed_route="Vendor Credit Memos",
+        confidence=0.80,
+        evidence=[],
+        reasoning_summary="prior model answer",
+        bc_refs_used=[],
+        unresolved=[],
+        matched_example_ids=[],
+        model="gpt-5.6-sol",
+    )
+    candidates = _candidate_route_evidence(examples, prediction)
+    prompt = _build_candidate_adjudication_prompt(
+        document=_current(vendor="Acme"),
+        bc_context={},
+        candidate_evidence=candidates,
+        current_prediction=prediction,
+    )
+
+    assert "bounded set of exact GPI Accounts Payable routes" in prompt
+    assert "MUST be exactly one value in candidate_routes" in prompt
+    assert "Vendor Credit Memos/Unclaimed credits posted" in prompt
+    assert "Vendor Credit Memos" in prompt
+    assert "human_support_count=0" in prompt
 
 
 def test_rev10_second_pass_review_is_bounded_to_uncertain_or_parent_proposals():

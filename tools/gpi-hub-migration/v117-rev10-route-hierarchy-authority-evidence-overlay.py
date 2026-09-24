@@ -219,6 +219,132 @@ def _proposal_review_needed(
     return _route_hierarchy_parent_has_children(proposed, learning_context)
 
 
+def _candidate_route_evidence(
+    prompt_examples: List[Dict[str, Any]],
+    prediction: RoutePrediction,
+) -> List[Dict[str, Any]]:
+    """Build exact-route candidates from already-retrieved HUMAN TRAIN evidence.
+
+    This does not search additional data and does not infer a route. It exposes
+    the exact routes already present in the bounded prompt examples, plus the
+    current AI proposal so adjudication can preserve it when TRAIN evidence does
+    not justify a change.
+    """
+    ordered_routes: List[str] = []
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+
+    for source in prompt_examples[:8]:
+        route = normalize_route_path(source.get("route_path"))
+        if not route:
+            continue
+        if route not in grouped:
+            grouped[route] = []
+            ordered_routes.append(route)
+        if len(grouped[route]) >= 3:
+            continue
+        grouped[route].append(
+            {
+                "example_id": (
+                    source.get("fingerprint")
+                    or source.get("document_id")
+                    or source.get("source_item_id")
+                ),
+                "vendor_name": source.get("vendor_name"),
+                "document_type": (
+                    source.get("document_type")
+                    or source.get("suggested_job_type")
+                ),
+                "file_name": source.get("file_name"),
+                "relevance_score": source.get("_learned_relevance_score"),
+                "same_vendor": bool(source.get("_learned_same_vendor")),
+                "same_document_type": bool(
+                    source.get("_learned_same_document_type")
+                ),
+                "key_evidence": source.get("key_evidence") or {},
+            }
+        )
+
+    current = normalize_route_path(prediction.proposed_route)
+    if current and current not in grouped:
+        grouped[current] = []
+        ordered_routes.append(current)
+
+    return [
+        {
+            "route_path": route,
+            "human_support_count": len(grouped[route]),
+            "human_examples": grouped[route],
+            "is_current_ai_proposal": route == current,
+        }
+        for route in ordered_routes
+    ]
+
+
+def _build_candidate_adjudication_prompt(
+    *,
+    document: Dict[str, Any],
+    bc_context: Dict[str, Any],
+    candidate_evidence: List[Dict[str, Any]],
+    current_prediction: RoutePrediction,
+) -> str:
+    """Ask the model to compare only exact routes already surfaced by TRAIN.
+
+    HUMAN TRAIN retrieval has already happened. This stage is deliberately a
+    comparison task rather than another open-ended route-generation task.
+    """
+    candidate_routes = [
+        normalize_route_path(row.get("route_path"))
+        for row in candidate_evidence
+        if normalize_route_path(row.get("route_path"))
+    ]
+    payload = {
+        "document": _document_evidence(document),
+        "bc_context": bc_context or {},
+        "candidate_routes": candidate_routes,
+        "candidate_human_train_evidence": candidate_evidence,
+        "current_ai_prediction": current_prediction.to_dict(),
+    }
+    return (
+        "You are adjudicating among a bounded set of exact GPI Accounts Payable "
+        "routes that were already surfaced by HUMAN TRAIN retrieval.\n\n"
+        "Choose the exact route whose HUMAN TRAIN examples and current document/"
+        "Business Central facts are most comparable. AP folder names are GPI "
+        "workflow labels, not ordinary-English definitions. Do not prefer the "
+        "current AI prediction merely because it was chosen earlier. Do not infer "
+        "Warehouse, Dropship, International, Freight, Credit, DO NOT PAY, approval "
+        "ownership, or a child route from generic words alone. Parent and child "
+        "routes are distinct Accounting outcomes.\n\n"
+        "The proposed_route MUST be exactly one value in candidate_routes. "
+        "A route with human_support_count=0 is the prior AI proposal only and has "
+        "no retrieved HUMAN TRAIN backing; preserve it only when current facts "
+        "justify it better than the human-backed alternatives. Use unresolved only "
+        "for a concrete missing or contradictory fact.\n\n"
+        "Return JSON only in the same routing-prediction shape used by the primary "
+        "router.\n\n"
+        "INPUT:\n"
+        + json.dumps(payload, ensure_ascii=False, default=str)
+    )
+
+
+def _candidate_adjudication_needed(
+    candidate_evidence: List[Dict[str, Any]],
+    *,
+    proposal_review_used: bool,
+) -> bool:
+    routes = {
+        normalize_route_path(row.get("route_path"))
+        for row in candidate_evidence
+        if normalize_route_path(row.get("route_path"))
+    }
+    human_routes = {
+        normalize_route_path(row.get("route_path"))
+        for row in candidate_evidence
+        if normalize_route_path(row.get("route_path"))
+        and int(row.get("human_support_count") or 0) > 0
+    }
+    return bool(proposal_review_used and len(routes) >= 2 and len(human_routes) >= 1)
+
+
 def _build_proposal_review_prompt(
     original_prompt: str,
     first_pass: RoutePrediction,
@@ -324,6 +450,67 @@ def _build_proposal_review_prompt(
                 proposal_review_error,
             )
 
+    pre_adjudication_prediction = prediction
+    candidate_adjudication_used = False
+    candidate_adjudication_error = ""
+    candidate_evidence = _candidate_route_evidence(
+        prompt_examples,
+        pre_adjudication_prediction,
+    )
+    if _candidate_adjudication_needed(
+        candidate_evidence,
+        proposal_review_used=proposal_review_used,
+    ):
+        candidate_adjudication_used = True
+        candidate_prompt = _build_candidate_adjudication_prompt(
+            document=document,
+            bc_context=context,
+            candidate_evidence=candidate_evidence,
+            current_prediction=pre_adjudication_prediction,
+        )
+        try:
+            candidate_raw = await sender(candidate_prompt, model)
+            candidate_prediction = parse_route_prediction(
+                candidate_raw,
+                model=model,
+            )
+            candidate_route = normalize_route_path(
+                candidate_prediction.proposed_route
+            )
+            allowed_candidate_routes = {
+                normalize_route_path(row.get("route_path"))
+                for row in candidate_evidence
+                if normalize_route_path(row.get("route_path"))
+            }
+            human_backed_routes = {
+                normalize_route_path(row.get("route_path"))
+                for row in candidate_evidence
+                if normalize_route_path(row.get("route_path"))
+                and int(row.get("human_support_count") or 0) > 0
+            }
+            prior_route = normalize_route_path(
+                pre_adjudication_prediction.proposed_route
+            )
+            if (
+                candidate_route in allowed_candidate_routes
+                and (
+                    candidate_route == prior_route
+                    or candidate_route in human_backed_routes
+                )
+            ):
+                prediction = candidate_prediction
+            else:
+                candidate_adjudication_error = (
+                    "invalid_or_unbacked_candidate:" + candidate_route
+                )[:500]
+        except Exception as exc:
+            candidate_adjudication_error = f"{type(exc).__name__}:{exc}"[:500]
+            logger.warning(
+                "AI-primary candidate adjudication failed; preserving "
+                "pre-adjudication prediction: %s",
+                candidate_adjudication_error,
+            )
+
     proposed = normalize_route_path(prediction.proposed_route)
 '''
     raw = replace_once(
@@ -341,6 +528,14 @@ def _build_proposal_review_prompt(
         "proposal_review_used": proposal_review_used,
         "proposal_review_error": proposal_review_error,
         "first_pass_prediction": first_pass_prediction.to_dict(),
+        "candidate_adjudication_used": candidate_adjudication_used,
+        "candidate_adjudication_error": candidate_adjudication_error,
+        "candidate_routes": [
+            normalize_route_path(row.get("route_path"))
+            for row in candidate_evidence
+            if normalize_route_path(row.get("route_path"))
+        ],
+        "pre_adjudication_prediction": pre_adjudication_prediction.to_dict(),
 '''
     raw = replace_once(
         raw,
@@ -350,6 +545,9 @@ def _build_proposal_review_prompt(
     )
 
     require("_proposal_review_needed" in raw, "REV10 proposal-review helper missing")
+    require("_candidate_route_evidence" in raw, "REV11 candidate evidence helper missing")
+    require("_build_candidate_adjudication_prompt" in raw, "REV11 candidate adjudication prompt missing")
+    require('"candidate_adjudication_used": candidate_adjudication_used' in raw, "REV11 candidate adjudication audit missing")
     require("SECOND-PASS PROPOSAL REVIEW" in raw, "REV10 second-pass prompt missing")
     require('"proposal_review_used": proposal_review_used' in raw, "REV10 proposal-review audit missing")
 

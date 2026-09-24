@@ -244,7 +244,7 @@ export default function MonitoringDashboard() {
         />
         <MetricCard
           icon={Activity}
-          title="3. Auto-File Rate"
+          title="3. Straight-Through Rate"
           value={metrics.autoFileRate}
           subtitle={metrics.autoFileSubtitle}
           status={metrics.autoFileStatus}
@@ -555,14 +555,20 @@ function computeMetrics(data) {
     m.vendorMaturityDetail = 'Vendors are tracked automatically as documents flow in.';
   }
 
-  // 3. Auto-File Rate
+  // 3. Straight-Through Rate
+  // 2026-09-24: this was labeled "Auto-File Rate", which reads as "filed to
+  // SharePoint". It actually measures the OUTCOME_AUTO_FILED classification
+  // from per_document_learning_service.py, which fires whenever
+  // doc.auto_cleared is truthy -- i.e. "processed without human review",
+  // across every pipeline (AP posting, sales orders, shipping, etc.), not
+  // specifically SharePoint filing. Renamed to describe what it measures.
   const outcomes = pulse?.outcomes || {};
   const autoFiled = outcomes.auto_filed || 0;
   const totalLearned = pulse?.total_documents_learned_from || 0;
   if (totalLearned > 0) {
     const rate = Math.round((autoFiled / totalLearned) * 100);
     m.autoFileRate = `${rate}%`;
-    m.autoFileSubtitle = `${autoFiled} auto-filed out of ${totalLearned} documents`;
+    m.autoFileSubtitle = `${autoFiled} processed straight-through (no human review) out of ${totalLearned} documents`;
     m.autoFileStatus = rate >= 60 ? 'good' : rate >= 30 ? 'warning' : 'critical';
     m.autoFileDetail = rate < 30
       ? `Most documents still need human review. This will improve dramatically as vendor maturity and confidence accuracy climb.`

@@ -375,6 +375,19 @@ const STATUS_CLASSES = {
   Completed: 'status-completed',
 };
 
+// 2026-09-24: single source of truth for the header status badge's color,
+// matching derived_state_service.get_state_badge_color()'s palette exactly,
+// so the badge can never disagree with the debug panel below it or with
+// the queue page's own derived_state-driven badges.
+const DERIVED_COLOR_CLASSES = {
+  gray: 'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600',
+  blue: 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-700',
+  green: 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700',
+  yellow: 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700',
+  red: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700',
+  purple: 'bg-purple-100 text-purple-700 border-purple-300 dark:bg-purple-900/30 dark:text-purple-400 dark:border-purple-700',
+};
+
 // Must match AI classification output types (see document_intel_helpers.py prompt)
 const DOC_TYPES = [
   { value: 'AP_Invoice', label: 'AP Invoice' },
@@ -589,22 +602,16 @@ export default function DocumentDetailPage() {
             <h2 className="text-2xl font-bold tracking-tight truncate" style={{ fontFamily: 'Chivo, sans-serif' }}>
               {doc.file_name}
             </h2>
-            <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
-              derivedState ? (
-                derivedState.validation_state === 'pass' ? 'bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700' :
-                derivedState.validation_state === 'warning' ? 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700' :
-                derivedState.validation_state === 'fail' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700' :
-                'bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600'
-              ) : (STATUS_CLASSES[doc.status] || '')
-            }`} data-testid="doc-status-badge">
-              {derivedState ? (
-                derivedState.workflow_state === 'completed' && derivedState.automation_state === 'autonomous' ? 'Posted' :
-                derivedState.workflow_state === 'ready' && derivedState.validation_state === 'pass' ? 'Ready to Post' :
-                derivedState.validation_state === 'pass' ? 'Validated' :
-                derivedState.validation_state === 'warning' ? 'Warnings' :
-                derivedState.validation_state === 'fail' ? 'Failed' :
-                doc.status
-              ) : ({'Approved': 'Ready to Post', 'auto_approved': 'Ready to Post', 'reviewing': 'Needs Review', 'ReadyForPost': 'Ready to Post'}[doc.status] || doc.status)}
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
+                derivedState?.display?.workflow
+                  ? (DERIVED_COLOR_CLASSES[derivedState.display.workflow.color] || DERIVED_COLOR_CLASSES.gray)
+                  : (STATUS_CLASSES[doc.status] || '')
+              }`}
+              data-testid="doc-status-badge"
+              title={derivedState?.state_reason || undefined}
+            >
+              {derivedState?.display?.workflow?.label || doc.status}
             </span>
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1" data-testid="doc-id-display">{doc.id}</p>

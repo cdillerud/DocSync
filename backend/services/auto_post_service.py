@@ -202,7 +202,7 @@ async def attempt_auto_post(doc_id: str, doc: Dict[str, Any], db, bc_service) ->
     Attempt to auto-post a document to Business Central.
     """
     # Enrich doc with stable vendor data if not already present
-    if not doc.get("stable_vendor_flag") and db:
+    if not doc.get("stable_vendor_flag") and db is not None:
         vendor_id = doc.get("vendor_canonical") or doc.get("vendor_id") or doc.get("vendor_no")
         if vendor_id:
             try:

@@ -139,7 +139,7 @@ class StableVendorService:
         # This overrides low all-time stats from historical failures.
         vendor_no = profile.get("vendor_no") or profile.get("bc_vendor_no") or ""
         posting_template_boost = False
-        if vendor_no and self.db:
+        if vendor_no and self.db is not None:
             try:
                 posting_analysis = await self.db.posting_pattern_analysis.find_one(
                     {"vendor_no": vendor_no, "status": "analyzed"},

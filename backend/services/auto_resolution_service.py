@@ -24,12 +24,17 @@ Events emitted:
 import asyncio
 import hashlib
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 
 from services.automation_helpers import utcnow, build_document_update
 
 logger = logging.getLogger(__name__)
+
+# Stable-vendor routing decisions are recorded on every document; they only
+# change review_priority / queue_visible when this is explicitly enabled.
+STABLE_VENDOR_ROUTING_APPLY = os.environ.get("STABLE_VENDOR_ROUTING_APPLY", "false").lower() in ("true", "1", "yes")
 
 # Auto-resolution configuration
 AUTO_RESOLVE_MAX_WORKERS = 5
@@ -527,17 +532,23 @@ class AutoResolutionService:
                             },
                             "updated_utc": utcnow(),
                         }
-                        # If auto_ready, update workflow signals
-                        if routing == "auto_ready":
-                            sv_update["review_priority"] = "auto_ready"
-                            sv_update["queue_visible"] = True
-                        elif routing == "low_priority_review":
-                            sv_update["review_priority"] = "low"
+                        # The decision is always recorded; it only changes queue
+                        # priority/visibility once STABLE_VENDOR_ROUTING_APPLY=true.
+                        # (Evaluation never ran before 2026-09-24 because of a
+                        # Motor truth-test bug, so its decisions are unreviewed.)
+                        if STABLE_VENDOR_ROUTING_APPLY:
+                            if routing == "auto_ready":
+                                sv_update["review_priority"] = "auto_ready"
+                                sv_update["queue_visible"] = True
+                            elif routing == "low_priority_review":
+                                sv_update["review_priority"] = "low"
+                        sv_update["stable_vendor_routing"]["applied"] = STABLE_VENDOR_ROUTING_APPLY
                         await self.db.hub_documents.update_one({"id": doc_id}, {"$set": sv_update})
                         if routing != "manual_review":
                             logger.info(
-                                "[AutoResolve:W%d] Stable vendor routing: %s for %s",
-                                worker_id, routing, doc_id[:8]
+                                "[AutoResolve:W%d] Stable vendor routing: %s for %s (%s)",
+                                worker_id, routing, doc_id[:8],
+                                "applied" if STABLE_VENDOR_ROUTING_APPLY else "recorded only",
                             )
                 except Exception as sve:
                     logger.warning("[AutoResolve:W%d] Stable vendor eval error: %s", worker_id, str(sve))

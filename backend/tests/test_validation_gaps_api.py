@@ -211,35 +211,6 @@ class TestReadinessQueueEndpoint:
         print("PASS: readiness/queue status filters work")
 
 
-class TestAutomationRateEndpoint:
-    """Tests for GET /api/readiness/automation-rate"""
-    
-    def test_automation_rate_returns_200(self):
-        """Test that automation-rate endpoint returns 200"""
-        response = requests.get(f"{BASE_URL}/api/readiness/automation-rate", timeout=30)
-        print(f"automation-rate status: {response.status_code}")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: automation-rate returns 200")
-    
-    def test_automation_rate_response_structure(self):
-        """Test that automation-rate returns expected structure"""
-        response = requests.get(f"{BASE_URL}/api/readiness/automation-rate", timeout=30)
-        assert response.status_code == 200
-        
-        data = response.json()
-        
-        # Check for expected keys
-        expected_keys = ["automation_rate", "total_documents"]
-        for key in expected_keys:
-            assert key in data, f"Missing '{key}' in automation-rate response"
-        
-        assert isinstance(data["automation_rate"], (int, float)), "automation_rate should be numeric"
-        assert isinstance(data["total_documents"], int), "total_documents should be int"
-        
-        print(f"Automation rate: {data['automation_rate']}%, Total docs: {data['total_documents']}")
-        print("PASS: automation-rate has correct structure")
-
-
 class TestPOPendingEndpoints:
     """Tests for PO Pending queue endpoints"""
     
@@ -250,12 +221,6 @@ class TestPOPendingEndpoints:
         assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
         print("PASS: po-pending returns 200")
     
-    def test_po_pending_park_returns_200(self):
-        """Test that PO pending park endpoint returns 200"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park", timeout=60)
-        print(f"po-pending/park status: {response.status_code}")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: po-pending/park returns 200")
     
     def test_po_pending_retry_returns_200(self):
         """Test that PO pending retry endpoint returns 200"""
@@ -289,17 +254,6 @@ class TestExceptionQueueEndpoint:
         
         print(f"Exception queue: total={data['total']}, docs returned={len(data['documents'])}")
         print("PASS: exception-queue has correct structure")
-
-
-class TestLearningDashboardEndpoint:
-    """Tests for learning dashboard endpoint"""
-    
-    def test_learning_dashboard_returns_200(self):
-        """Test that learning dashboard endpoint returns 200"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard", timeout=30)
-        print(f"learning-dashboard status: {response.status_code}")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: learning-dashboard returns 200")
 
 
 # Run tests if executed directly

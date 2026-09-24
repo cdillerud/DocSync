@@ -105,21 +105,6 @@ class TestExtractionPatterns:
 class TestSelfCorrection:
     """Test self-correction audit endpoints"""
     
-    def test_run_self_correction_audit(self):
-        """POST /api/posting-patterns/deep-learning/self-correction/run runs audit"""
-        response = requests.post(
-            f"{BASE_URL}/api/posting-patterns/deep-learning/self-correction/run",
-            params={"sample_size": 20}
-        )
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        
-        data = response.json()
-        assert "audited" in data, "Missing audited count"
-        assert "drifts" in data, "Missing drifts count"
-        assert "drift_rate" in data, "Missing drift_rate"
-        assert "message" in data, "Missing message"
-        
-        print(f"PASS: Self-correction audit - {data['audited']} audited, {data['drifts']} drifts ({data['drift_rate']*100:.1f}%)")
         
     def test_self_correction_history(self):
         """GET /api/posting-patterns/deep-learning/self-correction/history returns audit history"""
@@ -178,15 +163,6 @@ class TestVendorMaturity:
         assert data["maturity_level"] == "unknown" or "message" in data
         print(f"PASS: Unknown vendor maturity returns graceful response")
         
-    def test_compute_all_vendor_maturity(self):
-        """POST /api/posting-patterns/deep-learning/vendor-maturity/compute-all starts computation"""
-        response = requests.post(f"{BASE_URL}/api/posting-patterns/deep-learning/vendor-maturity/compute-all")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        assert "message" in data, "Missing message"
-        assert "async" in data or "computed" in data, "Should indicate async or computed"
-        print(f"PASS: Compute all maturity - {data.get('message', 'started')}")
 
 
 class TestDocumentSimilarity:
@@ -212,14 +188,6 @@ class TestHealthAndIntegration:
         assert response.status_code == 200, f"Health check failed: {response.status_code}"
         print("PASS: Health endpoint OK")
         
-    def test_learning_dashboard_loads(self):
-        """Learning dashboard endpoint returns data"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        assert "summary" in data, "Missing summary"
-        print(f"PASS: Learning dashboard loads - {data['summary'].get('total_learning_events', 0)} events")
 
 
 if __name__ == "__main__":

@@ -17,37 +17,6 @@ import os
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 
-class TestAdvancedLearningSummary:
-    """Test GET /api/posting-patterns/advanced-learning/summary"""
-    
-    def test_summary_returns_all_7_engines(self):
-        """Summary endpoint returns data for all 7 advanced learning engines"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/advanced-learning/summary")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        # Verify all 7 engines are present
-        assert "line_item_intelligence" in data, "Missing line_item_intelligence"
-        assert "document_flow" in data, "Missing document_flow"
-        assert "amount_patterns" in data, "Missing amount_patterns"
-        assert "correction_replay" in data, "Missing correction_replay"
-        assert "field_correlations" in data, "Missing field_correlations"
-        assert "temporal_intelligence" in data, "Missing temporal_intelligence"
-        assert "error_patterns" in data, "Missing error_patterns"
-        
-        # Verify structure of each engine
-        assert "vendors_tracked" in data["line_item_intelligence"]
-        assert "vendors_with_sequences" in data["document_flow"]
-        assert "vendors_tracked" in data["amount_patterns"]
-        assert "total_replays" in data["correction_replay"]
-        assert "total_correlations" in data["field_correlations"]
-        assert "by_day_of_week" in data["temporal_intelligence"]
-        assert "categories" in data["error_patterns"]
-        
-        print(f"All 7 engines present with data")
-
-
 class TestVolumePrediction:
     """Test GET /api/posting-patterns/advanced-learning/volume-prediction"""
     

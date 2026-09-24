@@ -86,24 +86,6 @@ class TestPerDocumentLearningPulse:
         print(f"  - Vendor calibrations: {len(data['by_vendor'])}")
         print(f"  - Doc type calibrations: {len(data['by_doc_type'])}")
 
-    def test_backfill_endpoint(self):
-        """POST /api/posting-patterns/learning-pulse/backfill - Backfills learning from existing docs"""
-        # Test with small limit to avoid long processing
-        response = requests.post(f"{BASE_URL}/api/posting-patterns/learning-pulse/backfill?limit=50")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text[:200]}"
-        
-        data = response.json()
-        
-        # Response can be either sync (processed, errors) or async (message, async)
-        if "async" in data and data["async"]:
-            assert "message" in data, "Async response missing message"
-            print(f"✓ Backfill endpoint started async: {data['message']}")
-        else:
-            assert "processed" in data, "Sync response missing processed count"
-            assert "errors" in data, "Sync response missing errors count"
-            assert isinstance(data["processed"], int), "processed should be int"
-            assert isinstance(data["errors"], int), "errors should be int"
-            print(f"✓ Backfill endpoint completed: {data['processed']} processed, {data['errors']} errors")
 
     def test_vendor_learning_profile_existing_vendor(self):
         """GET /api/posting-patterns/learning-pulse/vendor/ANCH - Returns vendor-specific learning profile"""
@@ -217,21 +199,6 @@ class TestPerDocumentLearningPulse:
 class TestPerDocumentLearningIntegration:
     """Integration tests for the Per-Document Learning Engine"""
 
-    def test_backfill_then_verify_pulse(self):
-        """Run backfill and verify learning pulse reflects the data"""
-        # First, run a small backfill
-        backfill_response = requests.post(f"{BASE_URL}/api/posting-patterns/learning-pulse/backfill?limit=10")
-        assert backfill_response.status_code == 200
-        
-        # Then check the learning pulse
-        pulse_response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-pulse")
-        assert pulse_response.status_code == 200
-        
-        pulse_data = pulse_response.json()
-        
-        # After backfill, we should have some data (if there are documents)
-        print(f"✓ Backfill + Pulse integration test passed")
-        print(f"  - Documents learned from: {pulse_data['total_documents_learned_from']}")
 
     def test_calibration_consistency(self):
         """Verify calibration data is consistent between endpoints"""

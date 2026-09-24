@@ -23,75 +23,6 @@ PO_MAX_WAIT_DAYS = 3
 PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18
 
 
-class TestPOPendingPark:
-    """Tests for POST /api/readiness/po-pending/park endpoint"""
-    
-    def test_park_endpoint_returns_200(self):
-        """POST /api/readiness/po-pending/park returns 200"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: POST /api/readiness/po-pending/park returns 200")
-    
-    def test_park_response_structure(self):
-        """POST /api/readiness/po-pending/park returns correct response structure"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify required fields
-        assert "parked" in data, "Response missing 'parked' field"
-        assert "retry_interval_hours" in data, "Response missing 'retry_interval_hours' field"
-        assert "max_wait_days" in data, "Response missing 'max_wait_days' field"
-        assert "max_retries" in data, "Response missing 'max_retries' field"
-        assert "details" in data, "Response missing 'details' field"
-        assert "message" in data, "Response missing 'message' field"
-        
-        print(f"PASS: Response structure correct - parked={data['parked']}, retry_interval={data['retry_interval_hours']}h, max_wait={data['max_wait_days']}d, max_retries={data['max_retries']}")
-    
-    def test_park_response_values(self):
-        """POST /api/readiness/po-pending/park returns correct config values"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify config values match expected
-        assert data["retry_interval_hours"] == PO_RETRY_INTERVAL_HOURS, f"Expected retry_interval_hours={PO_RETRY_INTERVAL_HOURS}, got {data['retry_interval_hours']}"
-        assert data["max_wait_days"] == PO_MAX_WAIT_DAYS, f"Expected max_wait_days={PO_MAX_WAIT_DAYS}, got {data['max_wait_days']}"
-        assert data["max_retries"] == PO_MAX_RETRIES, f"Expected max_retries={PO_MAX_RETRIES}, got {data['max_retries']}"
-        
-        print(f"PASS: Config values correct - interval={PO_RETRY_INTERVAL_HOURS}h, max_wait={PO_MAX_WAIT_DAYS}d, max_retries={PO_MAX_RETRIES}")
-    
-    def test_park_parked_count_is_integer(self):
-        """POST /api/readiness/po-pending/park returns integer parked count"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert isinstance(data["parked"], int), f"Expected parked to be int, got {type(data['parked'])}"
-        assert data["parked"] >= 0, f"Expected parked >= 0, got {data['parked']}"
-        
-        print(f"PASS: parked count is valid integer: {data['parked']}")
-    
-    def test_park_details_is_list(self):
-        """POST /api/readiness/po-pending/park returns details as list"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200
-        data = response.json()
-        
-        assert isinstance(data["details"], list), f"Expected details to be list, got {type(data['details'])}"
-        
-        # If there are details, verify structure
-        if len(data["details"]) > 0:
-            detail = data["details"][0]
-            assert "doc_id" in detail, "Detail missing 'doc_id'"
-            assert "file" in detail, "Detail missing 'file'"
-            assert "vendor" in detail, "Detail missing 'vendor'"
-            assert "po" in detail, "Detail missing 'po'"
-            print(f"PASS: details list has correct structure, {len(data['details'])} items")
-        else:
-            print("PASS: details is empty list (no PO-gap docs found - expected in clean preview env)")
-
-
 class TestPOPendingRetry:
     """Tests for POST /api/readiness/po-pending/retry endpoint"""
     
@@ -208,33 +139,6 @@ class TestPOPendingQueue:
             print("PASS: No documents in PO pending queue (expected in clean preview env)")
 
 
-class TestSyncStatusStillWorks:
-    """Tests for POST /api/readiness/sync-status (force cleanup)"""
-    
-    def test_sync_status_returns_200(self):
-        """POST /api/readiness/sync-status returns 200"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: POST /api/readiness/sync-status returns 200")
-    
-    def test_sync_status_response_structure(self):
-        """POST /api/readiness/sync-status returns correct response structure"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify key fields
-        assert "total_fixed" in data, "Response missing 'total_fixed' field"
-        assert "remaining_in_inbox" in data, "Response missing 'remaining_in_inbox' field"
-        assert "message" in data, "Response missing 'message' field"
-        
-        # Verify rule counts exist
-        rule_fields = [f for f in data.keys() if f.startswith("rule")]
-        assert len(rule_fields) > 0, "Response missing rule count fields"
-        
-        print(f"PASS: Response structure correct - total_fixed={data['total_fixed']}, remaining={data['remaining_in_inbox']}, rules={len(rule_fields)}")
-
-
 class TestExceptionQueueStillWorks:
     """Tests for GET /api/readiness/exception-queue"""
     
@@ -327,40 +231,6 @@ class TestPOPendingExcludedFromInbox:
         data = response.json()
         
         print(f"PASS: Documents list with include_cleared returned {len(data.get('documents', []))} docs")
-
-
-class TestPOPendingWorkflow:
-    """Integration tests for the full PO pending workflow"""
-    
-    def test_park_then_retry_workflow(self):
-        """Test park → retry workflow sequence"""
-        # Step 1: Park PO-gap docs
-        park_response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert park_response.status_code == 200
-        park_data = park_response.json()
-        
-        # Step 2: Check queue
-        queue_response = requests.get(f"{BASE_URL}/api/readiness/po-pending")
-        assert queue_response.status_code == 200
-        queue_data = queue_response.json()
-        
-        # Step 3: Retry pending docs
-        retry_response = requests.post(f"{BASE_URL}/api/readiness/po-pending/retry")
-        assert retry_response.status_code == 200
-        retry_data = retry_response.json()
-        
-        print(f"PASS: Workflow sequence completed - parked={park_data['parked']}, queue_total={queue_data['total']}, retry_checked={retry_data['total_checked']}")
-    
-    def test_max_retries_config(self):
-        """Verify max_retries = 18 (3 days * 24h / 4h interval)"""
-        response = requests.post(f"{BASE_URL}/api/readiness/po-pending/park")
-        assert response.status_code == 200
-        data = response.json()
-        
-        expected_max_retries = 18  # 3 days * 24 hours / 4 hour interval
-        assert data["max_retries"] == expected_max_retries, f"Expected max_retries={expected_max_retries}, got {data['max_retries']}"
-        
-        print(f"PASS: max_retries correctly calculated as {expected_max_retries} (3 days * 24h / 4h)")
 
 
 if __name__ == "__main__":

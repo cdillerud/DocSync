@@ -186,29 +186,5 @@ class TestReviewQueueFilters:
         print(f"PASS: all filter works, returned {len(data['items'])} items")
 
 
-class TestLearningDashboard:
-    """Test learning dashboard endpoint (from previous iteration, ensure still works)"""
-    
-    def test_learning_dashboard_returns_valid_data(self):
-        """Learning dashboard returns valid structure"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        data = response.json()
-        
-        # Verify summary exists
-        assert "summary" in data, "Missing 'summary' field"
-        summary = data["summary"]
-        
-        # Verify key summary fields
-        expected_fields = ["total_learning_events", "total_corrections", "total_posting_profiles"]
-        for field in expected_fields:
-            assert field in summary, f"Missing summary field: {field}"
-        
-        print(f"PASS: learning-dashboard returns valid data: "
-              f"learning_events={summary.get('total_learning_events')}, "
-              f"corrections={summary.get('total_corrections')}, "
-              f"profiles={summary.get('total_posting_profiles')}")
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

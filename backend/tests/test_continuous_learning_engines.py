@@ -25,31 +25,6 @@ class TestContinuousLearningEngines:
         assert response.status_code == 200, f"Health check failed: {response.text}"
         print("PASS: Health check returns 200")
 
-    def test_run_all_learning_engines(self):
-        """
-        POST /api/posting-patterns/learning/run-all
-        Should return valid JSON with posted_draft_detection, cross_vendor_learning, 
-        confidence_auto_promotion, timestamp
-        """
-        response = requests.post(f"{BASE_URL}/api/posting-patterns/learning/run-all")
-        assert response.status_code == 200, f"run-all failed: {response.status_code} - {response.text}"
-        
-        data = response.json()
-        
-        # Verify required top-level keys
-        assert "posted_draft_detection" in data, "Missing posted_draft_detection key"
-        assert "cross_vendor_learning" in data, "Missing cross_vendor_learning key"
-        assert "confidence_auto_promotion" in data, "Missing confidence_auto_promotion key"
-        assert "timestamp" in data, "Missing timestamp key"
-        
-        # Verify timestamp is a valid ISO format string
-        assert isinstance(data["timestamp"], str), "timestamp should be a string"
-        assert "T" in data["timestamp"], "timestamp should be ISO format"
-        
-        print(f"PASS: run-all returns valid structure with timestamp={data['timestamp']}")
-        print(f"  posted_draft_detection: {data['posted_draft_detection']}")
-        print(f"  cross_vendor_learning: {data['cross_vendor_learning']}")
-        print(f"  confidence_auto_promotion: {data['confidence_auto_promotion']}")
 
     def test_detect_posted_drafts(self):
         """
@@ -202,28 +177,6 @@ class TestContinuousLearningEngines:
         
         print(f"PASS: extraction-profile/NONEXIST returns empty profile")
         print(f"  vendor_no={data['vendor_no']}, total_corrections={data['total_corrections']}, field_corrections={data['field_corrections']}")
-
-    def test_learning_dashboard_still_works(self):
-        """
-        GET /api/posting-patterns/learning-dashboard
-        Verify the learning dashboard endpoint still works after adding new engines
-        """
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"learning-dashboard failed: {response.status_code} - {response.text}"
-        
-        data = response.json()
-        
-        # Verify summary exists
-        assert "summary" in data, "Missing summary key"
-        summary = data["summary"]
-        
-        # Verify key summary fields
-        assert "total_learning_events" in summary, "Missing total_learning_events"
-        assert "total_corrections" in summary, "Missing total_corrections"
-        assert "total_posting_profiles" in summary, "Missing total_posting_profiles"
-        
-        print(f"PASS: learning-dashboard returns valid structure")
-        print(f"  total_learning_events={summary['total_learning_events']}, total_corrections={summary['total_corrections']}, total_posting_profiles={summary['total_posting_profiles']}")
 
 
 class TestContinuousLearningServiceExists:

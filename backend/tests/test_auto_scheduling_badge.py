@@ -116,24 +116,5 @@ class TestHealthEndpoint:
         print("PASS: Health check OK")
 
 
-class TestLearningDashboard:
-    """Tests for learning dashboard (related to auto-draft tracking)"""
-    
-    def test_learning_dashboard_includes_auto_draft_stats(self):
-        """GET /api/posting-patterns/learning-dashboard includes auto-draft stats"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        assert "summary" in data, f"Response missing 'summary' field"
-        
-        summary = data["summary"]
-        # Should include total_auto_drafted count
-        assert "total_auto_drafted" in summary, f"Summary missing 'total_auto_drafted': {summary}"
-        assert isinstance(summary["total_auto_drafted"], int)
-        
-        print(f"PASS: learning-dashboard includes total_auto_drafted={summary['total_auto_drafted']}")
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

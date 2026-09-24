@@ -64,17 +64,6 @@ async def batch_evaluate_readiness(limit: int = Query(200, ge=1, le=1000)):
     return await batch_evaluate(limit=limit)
 
 
-@router.post("/reevaluate-all")
-async def reevaluate_all_readiness(limit: int = Query(5000, ge=1, le=10000)):
-    """
-    Re-evaluate ALL documents — finds and fixes signal contradictions.
-    Every correction feeds into the learning pipeline.
-    Returns: status transitions, signal corrections, per-vendor breakdown.
-    """
-    from services.document_readiness_service import batch_reevaluate_all
-    return await batch_reevaluate_all(limit=limit)
-
-
 @router.post("/fix-validation-gaps")
 async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000)):
     """
@@ -92,7 +81,6 @@ async def fix_validation_gaps(limit: int = Query(500, ge=1, le=5000)):
 
     db = get_db()
     return await fix_all_validation_gaps(db, limit=limit)
-@router.post("/sync-status")
 async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     """
     Aggressive force-cleanup: Directly moves documents OUT of the Inbox queue
@@ -696,7 +684,6 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     return results
 
 
-
 @router.get("/inbox-diagnostic")
 async def inbox_diagnostic():
     """
@@ -840,149 +827,6 @@ async def inbox_diagnostic():
     }
 
 
-@router.get("/automation-rate")
-async def get_automation_rate(days: int = Query(30, ge=1, le=90)):
-    """
-    Automation rate dashboard data:
-    - Current automation rate %
-    - Daily trend of auto-processed vs manual-review
-    - Queue size breakdown
-    - Top vendors still requiring manual review
-    """
-    from deps import get_db
-    from datetime import datetime, timezone, timedelta
-
-    db = get_db()
-    now = datetime.now(timezone.utc)
-    cutoff = (now - timedelta(days=days)).isoformat()
-
-    # --- Current snapshot ---
-    total = await db.hub_documents.count_documents({"is_duplicate": {"$ne": True}})
-    auto_statuses = ["ready_auto_draft", "ready_auto_link"]
-    manual_statuses = ["needs_review", "ambiguous"]
-
-    auto_count = await db.hub_documents.count_documents({
-        "is_duplicate": {"$ne": True},
-        "$or": [
-            {"readiness.status": {"$in": auto_statuses}},
-            {"status": {"$in": ["Completed", "Posted", "completed", "posted"]}},
-            {"bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]}},
-            {"automation_decision": {"$in": ["auto_filed", "auto_linked", "auto_approved", "auto_drafted"]}},
-            {"auto_cleared": True},
-        ],
-    })
-    manual_count = await db.hub_documents.count_documents({
-        "is_duplicate": {"$ne": True},
-        "readiness.status": {"$in": manual_statuses},
-    })
-    blocked_count = await db.hub_documents.count_documents({
-        "is_duplicate": {"$ne": True},
-        "readiness.status": "blocked",
-    })
-
-    # Docs with BC PI = successfully auto-processed
-    bc_posted = await db.hub_documents.count_documents({
-        "bc_purchase_invoice_no": {"$exists": True, "$nin": [None, ""]},
-    })
-
-    automation_rate = round(auto_count / max(total, 1) * 100, 1)
-    posting_rate = round(bc_posted / max(total, 1) * 100, 1)
-
-    # --- Daily trend (bucketed by readiness.last_evaluated_at or updated_utc) ---
-    daily_pipeline = [
-        {"$match": {
-            "is_duplicate": {"$ne": True},
-            "readiness.last_evaluated_at": {"$exists": True, "$gte": cutoff},
-        }},
-        {"$addFields": {
-            "eval_date": {"$substr": ["$readiness.last_evaluated_at", 0, 10]},
-        }},
-        {"$group": {
-            "_id": "$eval_date",
-            "total": {"$sum": 1},
-            "auto_ready": {"$sum": {"$cond": [
-                {"$in": ["$readiness.status", auto_statuses]}, 1, 0
-            ]}},
-            "manual_review": {"$sum": {"$cond": [
-                {"$in": ["$readiness.status", manual_statuses]}, 1, 0
-            ]}},
-            "blocked": {"$sum": {"$cond": [
-                {"$eq": ["$readiness.status", "blocked"]}, 1, 0
-            ]}},
-        }},
-        {"$sort": {"_id": 1}},
-    ]
-    daily_raw = await db.hub_documents.aggregate(daily_pipeline).to_list(days + 5)
-    daily_trend = [
-        {
-            "date": r["_id"],
-            "auto": r["auto_ready"],
-            "manual": r["manual_review"],
-            "blocked": r["blocked"],
-            "total": r["total"],
-            "rate": round(r["auto_ready"] / max(r["total"], 1) * 100, 1),
-        }
-        for r in daily_raw if r["_id"]
-    ]
-
-    # --- Top vendors requiring manual review ---
-    vendor_manual_pipeline = [
-        {"$match": {
-            "is_duplicate": {"$ne": True},
-            "readiness.status": {"$in": manual_statuses + ["blocked"]},
-        }},
-        {"$group": {
-            "_id": {"$ifNull": ["$bc_vendor_number", {"$ifNull": ["$vendor_canonical", "Unknown"]}]},
-            "count": {"$sum": 1},
-            "top_reasons": {"$push": {"$arrayElemAt": [{"$ifNull": ["$readiness.blocking_reasons", ["$readiness.warning_reasons"]]}, 0]}},
-        }},
-        {"$sort": {"count": -1}},
-        {"$limit": 10},
-    ]
-    vendor_manual_raw = await db.hub_documents.aggregate(vendor_manual_pipeline).to_list(10)
-    top_manual_vendors = []
-    for v in vendor_manual_raw:
-        vendor_id = v["_id"] or "Unknown"
-        reasons = [r for r in (v.get("top_reasons") or []) if r]
-        # Count most common reason
-        reason_counts = {}
-        for r in reasons:
-            if isinstance(r, list):
-                for sub_r in r:
-                    reason_counts[sub_r] = reason_counts.get(sub_r, 0) + 1
-            elif isinstance(r, str):
-                reason_counts[r] = reason_counts.get(r, 0) + 1
-        top_reason = max(reason_counts, key=reason_counts.get) if reason_counts else "unknown"
-        top_manual_vendors.append({
-            "vendor": vendor_id,
-            "count": v["count"],
-            "primary_reason": top_reason,
-        })
-
-    # --- Readiness distribution ---
-    dist_pipeline = [
-        {"$match": {"is_duplicate": {"$ne": True}, "readiness.status": {"$exists": True}}},
-        {"$group": {"_id": "$readiness.status", "count": {"$sum": 1}}},
-    ]
-    dist_raw = await db.hub_documents.aggregate(dist_pipeline).to_list(10)
-    distribution = {r["_id"]: r["count"] for r in dist_raw if r["_id"]}
-
-    return {
-        "automation_rate": automation_rate,
-        "posting_rate": posting_rate,
-        "total_documents": total,
-        "auto_processed": auto_count,
-        "manual_review": manual_count,
-        "blocked": blocked_count,
-        "bc_posted": bc_posted,
-        "distribution": distribution,
-        "daily_trend": daily_trend,
-        "top_manual_vendors": top_manual_vendors,
-        "period_days": days,
-    }
-
-
-@router.post("/retry-failed")
 async def retry_failed_extractions(
     limit: int = Query(100, le=500),
     force_escalate: bool = Query(False, description="If true, immediately move all stuck docs to Exception Queue regardless of retry count"),
@@ -1275,94 +1119,6 @@ async def get_exception_queue(
 PO_RETRY_INTERVAL_HOURS = 4
 PO_MAX_WAIT_DAYS = 3
 PO_MAX_RETRIES = PO_MAX_WAIT_DAYS * 24 // PO_RETRY_INTERVAL_HOURS  # = 18 cycles
-
-
-@router.post("/po-pending/park")
-async def park_po_pending_docs():
-    """
-    Finds documents stuck on PO validation gaps and parks them in the
-    'po_pending' queue. These docs will be auto-retried every 4 hours.
-    After 3 days (18 retries) they escalate to the Exception Queue.
-    """
-    from deps import get_db
-    from datetime import datetime, timezone
-
-    db = get_db()
-    now = datetime.now(timezone.utc).isoformat()
-
-    DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
-                     "archived", "FileMissing", "Exception", "exception",
-                     "Validated", "validated", "ReadyForPost", "AutoFiled",
-                     "batch_parent"]
-
-    # Find docs where PO is the issue — multiple detection methods
-    po_gap_filter = {
-        "is_duplicate": {"$ne": True},
-        "is_batch_parent": {"$ne": True},
-        "status": {"$nin": DONE_STATUSES},
-        "auto_cleared": {"$ne": True},
-        "po_pending_parked": {"$ne": True},  # not already parked
-        "$or": [
-            # Readiness says po_missing in warnings
-            {"readiness.warning_reasons": "po_missing"},
-            # BC validation has po_validation or po_check failed
-            {"validation_results.checks": {
-                "$elemMatch": {
-                    "check_name": {"$in": ["po_validation", "po_check"]},
-                    "passed": False,
-                },
-            }},
-            {"bc_validation.checks": {
-                "$elemMatch": {
-                    "check_name": {"$in": ["po_validation", "po_check"]},
-                    "passed": False,
-                },
-            }},
-            # Readiness blocking includes po_validation
-            {"readiness.blocking_reasons": {"$regex": "po"}},
-        ],
-    }
-
-    docs = await db.hub_documents.find(
-        po_gap_filter,
-        {"_id": 0, "id": 1, "file_name": 1, "vendor_canonical": 1,
-         "po_number_clean": 1, "extracted_fields.po_number": 1},
-    ).limit(500).to_list(500)
-
-    parked = 0
-    details = []
-
-    for doc in docs:
-        doc_id = doc["id"]
-        po = doc.get("po_number_clean") or (doc.get("extracted_fields") or {}).get("po_number", "?")
-
-        await db.hub_documents.update_one(
-            {"id": doc_id},
-            {"$set": {
-                "po_pending_parked": True,
-                "po_pending_parked_at": now,
-                "po_pending_retry_count": 0,
-                "po_pending_max_retries": PO_MAX_RETRIES,
-                "po_pending_next_retry": now,  # retry immediately on first cycle
-                "workflow_status": "po_pending",
-            }},
-        )
-        parked += 1
-        details.append({
-            "doc_id": doc_id[:8],
-            "file": doc.get("file_name", "?"),
-            "vendor": doc.get("vendor_canonical", "?"),
-            "po": po,
-        })
-
-    return {
-        "parked": parked,
-        "retry_interval_hours": PO_RETRY_INTERVAL_HOURS,
-        "max_wait_days": PO_MAX_WAIT_DAYS,
-        "max_retries": PO_MAX_RETRIES,
-        "details": details[:30],
-        "message": f"Parked {parked} docs in PO Pending queue. Will retry every {PO_RETRY_INTERVAL_HOURS}h for up to {PO_MAX_WAIT_DAYS} days.",
-    }
 
 
 @router.post("/po-pending/retry")

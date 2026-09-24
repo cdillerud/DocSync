@@ -201,37 +201,6 @@ class TestVendorAliases:
         print(f"Correctly skipped invalid mapping: {result}")
 
 
-class TestReadinessReevaluate:
-    """Test readiness reevaluate-all endpoint"""
-
-    def test_reevaluate_all_works(self):
-        """POST /api/readiness/reevaluate-all should work without errors"""
-        response = requests.post(
-            f"{BASE_URL}/api/readiness/reevaluate-all",
-            params={"limit": 100},  # Use small limit for test
-            timeout=60  # Longer timeout as this may process documents
-        )
-        
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        
-        data = response.json()
-        # Validate response structure
-        assert "total_processed" in data, "Missing total_processed field"
-        assert "total_corrections" in data, "Missing total_corrections field"
-        assert "status_transitions" in data, "Missing status_transitions field"
-        assert "by_status" in data, "Missing by_status field"
-        assert "errors" in data, "Missing errors field"
-        
-        # Validate types
-        assert isinstance(data["total_processed"], int), "total_processed should be int"
-        assert isinstance(data["total_corrections"], int), "total_corrections should be int"
-        assert isinstance(data["status_transitions"], list), "status_transitions should be list"
-        assert isinstance(data["by_status"], dict), "by_status should be dict"
-        assert isinstance(data["errors"], int), "errors should be int"
-        
-        print(f"Reevaluate-all result: processed={data['total_processed']}, corrections={data['total_corrections']}, errors={data['errors']}")
-
-
 class TestCleanup:
     """Cleanup test data"""
 

@@ -21,160 +21,6 @@ router = APIRouter(prefix="/posting-patterns", tags=["posting-patterns"])
 # Learning Intelligence API — Proof of AI Learning
 # =============================================================================
 
-@router.get("/learning-dashboard")
-async def get_learning_dashboard():
-    """
-    Comprehensive view of what the AI has learned.
-    Aggregates data from all learning subsystems:
-    - Posting pattern learning events
-    - Classification corrections & feedback
-    - Label correction patterns (e.g., BOL→PO)
-    - Vendor extraction profiles
-    - Stable vendor evaluations
-    """
-    db = get_db()
-
-    # 1. Posting Learning Events — proof of continuous template learning
-    # Exclude noise events (readiness self-corrections) that have no amount/line data
-    MEANINGFUL_EVENT_TYPES = {
-        "$nin": ["readiness_contradiction_fix", "readiness_self_correction"]
-    }
-    MEANINGFUL_EVENT_FILTER = {
-        "event_type": MEANINGFUL_EVENT_TYPES,
-        "$or": [
-            {"amount": {"$gt": 0}},
-            {"line_count": {"$gt": 0}},
-            {"items_used": {"$ne": None, "$not": {"$size": 0}}},
-        ],
-    }
-    total_learning_events = await db.posting_learning_events.count_documents(
-        MEANINGFUL_EVENT_FILTER
-    )
-    recent_learning = await db.posting_learning_events.find(
-        MEANINGFUL_EVENT_FILTER,
-        {"_id": 0, "vendor_no": 1, "posted_at": 1, "line_count": 1, "items_used": 1, "amount": 1}
-    ).sort("posted_at", -1).limit(20).to_list(20)
-
-    # Learning events by vendor — exclude blank vendors and noise events
-    vendor_learning_pipeline = [
-        {"$match": {
-            "vendor_no": {"$nin": [None, ""]},
-            "event_type": MEANINGFUL_EVENT_TYPES,
-        }},
-        {"$group": {
-            "_id": "$vendor_no",
-            "events": {"$sum": 1},
-            "last_learned": {"$max": "$posted_at"},
-            "total_amount": {"$sum": {"$ifNull": ["$amount", 0]}},
-            "avg_lines": {"$avg": {"$ifNull": ["$line_count", 0]}},
-        }},
-        {"$sort": {"events": -1}},
-        {"$limit": 20},
-    ]
-    vendor_learning = await db.posting_learning_events.aggregate(vendor_learning_pipeline).to_list(20)
-
-    # 2. Classification Corrections — proof of classification learning
-    total_corrections = await db.classification_corrections.count_documents({})
-    correction_types = await db.classification_corrections.aggregate([
-        {"$group": {"_id": "$correction_type", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}},
-    ]).to_list(20)
-
-    recent_corrections = await db.classification_corrections.find(
-        {}, {"_id": 0, "vendor_id": 1, "correction_type": 1, "original_type": 1,
-             "corrected_type": 1, "confirmed_at": 1, "source": 1}
-    ).sort("confirmed_at", -1).limit(10).to_list(10)
-
-    # 3. Classification Feedback — few-shot examples for LLM
-    total_feedback = await db.classification_feedback.count_documents({})
-
-    # 4. Label Corrections — proof of reference intelligence learning (BOL→PO etc.)
-    total_label_corrections = await db.reference_label_corrections.count_documents({})
-    label_correction_patterns = await db.reference_label_corrections.aggregate([
-        {"$group": {
-            "_id": {"predicted": "$predicted_label", "correct": "$correct_label"},
-            "count": {"$sum": 1},
-            "vendors": {"$addToSet": "$vendor_name"},
-            "last_seen": {"$max": "$created_at"},
-        }},
-        {"$sort": {"count": -1}},
-        {"$limit": 10},
-    ]).to_list(10)
-
-    # 5. Posting Template Profiles — how many vendors have learned templates
-    total_profiles = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
-    profiles_by_confidence = await db.posting_pattern_analysis.aggregate([
-        {"$match": {"status": "analyzed"}},
-        {"$group": {
-            "_id": "$posting_template.confidence",
-            "count": {"$sum": 1},
-            "avg_invoices": {"$avg": "$invoices_analyzed"},
-        }},
-        {"$sort": {"count": -1}},
-    ]).to_list(5)
-
-    # Vendors with continuous learning (template updated after initial analysis)
-    continuously_learning = await db.posting_pattern_analysis.count_documents({
-        "status": "analyzed",
-        "continuous_learning_count": {"$gte": 1},
-    })
-
-    # 6. Vendor Extraction Profiles — learned extraction biases
-    total_extraction_profiles = await db.vendor_extraction_profiles.count_documents({})
-
-    # 7. Vendor Intelligence Profiles — overall vendor knowledge
-    total_vendor_profiles = await db.vendor_intelligence_profiles.count_documents({})
-
-    # 8. Auto-draft success tracking
-    total_auto_drafted = await db.hub_documents.count_documents({"auto_draft_created": True})
-    auto_draft_by_vendor = await db.hub_documents.aggregate([
-        {"$match": {"auto_draft_created": True}},
-        {"$group": {
-            "_id": "$bc_vendor_number",
-            "drafts_created": {"$sum": 1},
-            "last_draft": {"$max": "$auto_draft_at"},
-        }},
-        {"$sort": {"drafts_created": -1}},
-        {"$limit": 10},
-    ]).to_list(10)
-
-    return {
-        "summary": {
-            "total_learning_events": total_learning_events,
-            "total_corrections": total_corrections,
-            "total_feedback_examples": total_feedback,
-            "total_label_corrections": total_label_corrections,
-            "total_posting_profiles": total_profiles,
-            "continuously_learning_vendors": continuously_learning,
-            "total_extraction_profiles": total_extraction_profiles,
-            "total_vendor_profiles": total_vendor_profiles,
-            "total_auto_drafted": total_auto_drafted,
-        },
-        "posting_template_confidence": [
-            {"confidence": p["_id"], "vendor_count": p["count"], "avg_invoices_analyzed": round(p.get("avg_invoices") or 0, 1)}
-            for p in profiles_by_confidence
-        ],
-        "vendor_learning_activity": [
-            {"vendor_no": v["_id"], "learning_events": v["events"], "last_learned": v["last_learned"],
-             "total_amount_learned": round(v.get("total_amount") or 0, 2), "avg_lines_per_invoice": round(v.get("avg_lines") or 0, 1)}
-            for v in vendor_learning
-        ],
-        "label_correction_patterns": [
-            {"from_label": p["_id"]["predicted"], "to_label": p["_id"]["correct"],
-             "corrections": p["count"], "vendors_affected": len(p.get("vendors", [])),
-             "last_seen": p.get("last_seen")}
-            for p in label_correction_patterns
-        ],
-        "correction_types": [{"type": c["_id"], "count": c["count"]} for c in correction_types],
-        "recent_learning_events": recent_learning,
-        "recent_corrections": recent_corrections,
-        "auto_draft_by_vendor": [
-            {"vendor_no": d["_id"], "drafts_created": d["drafts_created"], "last_draft": d["last_draft"]}
-            for d in auto_draft_by_vendor
-        ],
-    }
-
-
 
 @router.get("/review-queue/badge-count")
 async def get_review_queue_badge_count():
@@ -188,7 +34,6 @@ async def get_review_queue_badge_count():
         "draft_review_status": {"$nin": ["approved", "corrected", "feedback_synced"]},
     })
     return {"count": count}
-
 
 
 # =============================================================================
@@ -331,7 +176,6 @@ async def approve_draft(doc_id: str, reviewer: str = Query("admin")):
     return {"success": True, "message": f"Draft approved for {doc_id[:8]}", "review_status": "approved"}
 
 
-@router.post("/review-queue/auto-approve")
 async def auto_approve_drafts(
     min_vendor_invoices: int = Query(5, description="Minimum invoices analyzed for vendor template"),
     min_confidence: str = Query("medium", description="Minimum template confidence: low, medium, high"),
@@ -591,23 +435,9 @@ async def get_draft_feedback(doc_id: str):
     }
 
 
-
 # =============================================================================
 # Continuous Learning Engines — On-Demand Trigger & Status
 # =============================================================================
-
-@router.post("/learning/run-all")
-async def run_all_learning_engines_endpoint():
-    """
-    Trigger all continuous learning engines on-demand:
-    A. Detect posted drafts in BC and learn from final versions
-    B. Propagate corrections across similar vendors
-    C. Auto-promote/demote vendor confidence based on approval ratio
-    """
-    db = get_db()
-    from services.continuous_learning_service import run_all_learning_engines
-    result = await run_all_learning_engines(db)
-    return result
 
 
 @router.post("/learning/detect-posted")
@@ -641,7 +471,6 @@ async def get_extraction_profile(vendor_no: str):
     from services.continuous_learning_service import get_vendor_extraction_profile
     profile = await get_vendor_extraction_profile(db, vendor_no)
     return profile or {"vendor_no": vendor_no, "total_corrections": 0, "field_corrections": {}}
-
 
 
 # Track background analysis status
@@ -990,7 +819,6 @@ async def analyze_top_vendors(
 async def get_analysis_status():
     """Check the status of a background analyze-top job."""
     return _analysis_status
-
 
 
 @router.get("/learning-activity")
@@ -1621,7 +1449,6 @@ async def sync_item_to_sandbox(
             except Exception:
                 err = resp.text[:300]
             return {"status": "error", "item": item_number, "error": err}
-
 
 
 @router.get("/auto-draft-eligibility/{doc_id}")
@@ -3588,7 +3415,6 @@ def _align_lines(human_lines: list, ai_lines: list) -> dict:
     }
 
 
-
 # =============================================================================
 # Per-Document Intelligence — Real-time AI Learning Pulse
 # =============================================================================
@@ -3632,7 +3458,6 @@ async def get_confidence_calibration():
     return await get_confidence_calibration_report(db)
 
 
-@router.post("/learning-pulse/backfill")
 async def backfill_per_document_learning(
     limit: int = Query(500, description="Max documents to process"),
     background_tasks: BackgroundTasks = None,
@@ -3670,7 +3495,6 @@ async def backfill_per_document_learning(
     else:
         result = await _backfill()
         return result
-
 
 
 @router.post("/intelligence/recalibrate-confidence")
@@ -3790,7 +3614,6 @@ async def recalibrate_confidence_bands():
     return await _recalibrate()
 
 
-
 # =============================================================================
 # Deep Learning Engine — Advanced Intelligence APIs
 # =============================================================================
@@ -3839,17 +3662,6 @@ async def find_similar_documents(doc_id: str):
     return {"doc_id": doc_id, "similar_documents": results}
 
 
-@router.post("/deep-learning/self-correction/run")
-async def run_self_correction(
-    sample_size: int = Query(50, description="Number of documents to audit"),
-):
-    """Run a self-correction audit — spot-check auto-filed decisions."""
-    from deps import get_db
-    from services.deep_learning_engine import run_self_correction_audit
-    db = get_db()
-    return await run_self_correction_audit(db, sample_size)
-
-
 @router.get("/deep-learning/self-correction/history")
 async def get_self_correction_history():
     """Get history of self-correction audits."""
@@ -3868,20 +3680,6 @@ async def get_vendor_maturity(vendor_no: str):
     return await compute_vendor_maturity(db, vendor_no)
 
 
-@router.post("/deep-learning/vendor-maturity/compute-all")
-async def compute_all_maturity(background_tasks: BackgroundTasks):
-    """Compute maturity scores for all vendors."""
-    from deps import get_db
-    from services.deep_learning_engine import compute_all_vendor_maturity
-    db = get_db()
-
-    async def _compute():
-        return await compute_all_vendor_maturity(db)
-
-    background_tasks.add_task(_compute)
-    return {"message": "Computing maturity scores for all vendors", "async": True}
-
-
 @router.post("/deep-learning/predict-readiness/{doc_id}")
 async def predict_document_readiness(doc_id: str):
     """Predict whether a document will need human review."""
@@ -3894,14 +3692,6 @@ async def predict_document_readiness(doc_id: str):
 # =============================================================================
 # Advanced Learning Engine — 7 Intelligence Layer APIs
 # =============================================================================
-
-@router.get("/advanced-learning/summary")
-async def get_advanced_learning_summary():
-    """Complete summary of all 7 advanced learning engines."""
-    from deps import get_db
-    from services.advanced_learning_engine import get_advanced_learning_summary as _get_summary
-    db = get_db()
-    return await _get_summary(db)
 
 
 @router.get("/advanced-learning/line-items/{vendor_no}")
@@ -3961,41 +3751,6 @@ async def get_volume_prediction():
     from services.advanced_learning_engine import predict_volume
     db = get_db()
     return await predict_volume(db)
-
-
-@router.post("/advanced-learning/backfill")
-async def backfill_advanced_learning(
-    limit: int = Query(500),
-    background_tasks: BackgroundTasks = None,
-):
-    """Backfill all 7 advanced learning engines from existing documents."""
-    from deps import get_db
-    from services.advanced_learning_engine import run_advanced_learning
-    db = get_db()
-
-    async def _backfill():
-        docs = await db.hub_documents.find(
-            {"status": {"$exists": True}},
-            {"_id": 0, "id": 1}
-        ).sort("updated_utc", -1).limit(limit).to_list(limit)
-
-        processed = 0
-        for doc in docs:
-            try:
-                await run_advanced_learning(db, doc["id"], trigger="backfill")
-                processed += 1
-            except Exception:
-                pass
-
-        logger.info("[AdvancedBackfill] %d documents processed", processed)
-        return {"processed": processed}
-
-    if background_tasks:
-        background_tasks.add_task(_backfill)
-        return {"message": f"Advanced learning backfill started for up to {limit} documents", "async": True}
-    result = await _backfill()
-    return result
-
 
 
 # =============================================================================

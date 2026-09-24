@@ -189,38 +189,5 @@ class TestRegressionDeepLearning:
         print(f"SUCCESS: deep-learning/summary regression passed")
 
 
-class TestRegressionAdvancedLearning:
-    """Regression test for GET /api/posting-patterns/advanced-learning"""
-    
-    def test_advanced_learning_summary_endpoint(self):
-        """Verify advanced-learning/summary still works"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/advanced-learning/summary")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        
-        data = response.json()
-        
-        # Verify expected sections
-        assert "line_item_intelligence" in data or "document_flow" in data or "amount_patterns" in data, \
-            "Missing expected advanced learning sections"
-        
-        print(f"SUCCESS: advanced-learning/summary regression passed")
-
-
-class TestLearningDashboard:
-    """Test GET /api/posting-patterns/learning-dashboard"""
-    
-    def test_learning_dashboard_endpoint(self):
-        """Verify learning-dashboard still works"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        
-        data = response.json()
-        
-        # Verify expected fields
-        assert "summary" in data, "Missing summary"
-        
-        print(f"SUCCESS: learning-dashboard regression passed")
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

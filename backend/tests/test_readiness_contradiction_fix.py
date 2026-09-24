@@ -401,29 +401,6 @@ class TestReadinessAPIEndpoint:
         print("PASS: POST /api/readiness/evaluate returns 404 for non-existent document")
 
 
-class TestLearningDashboardIncludesCorrections:
-    """Test GET /api/posting-patterns/learning-dashboard includes readiness_self_correction events"""
-
-    def test_learning_dashboard_returns_corrections_count(self):
-        """Verify learning dashboard includes total_corrections which counts readiness_self_correction events"""
-        session = requests.Session()
-        session.headers.update({"Content-Type": "application/json"})
-
-        response = session.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-
-        data = response.json()
-        assert "summary" in data, "Response should have 'summary' field"
-        assert "total_corrections" in data["summary"], "Summary should have 'total_corrections' field"
-        assert isinstance(data["summary"]["total_corrections"], int), "total_corrections should be an integer"
-
-        # Check correction_types includes readiness corrections if any exist
-        if "correction_types" in data:
-            print(f"Correction types found: {data['correction_types']}")
-
-        print(f"PASS: Learning dashboard returns total_corrections={data['summary']['total_corrections']}")
-
-
 class TestIntegrationScenario:
     """
     Integration test: Create document matching the exact production scenario,

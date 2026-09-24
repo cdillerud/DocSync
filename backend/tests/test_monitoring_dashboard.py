@@ -101,17 +101,7 @@ class TestMonitoringDashboardAPIs:
 class TestRegressionAPIs:
     """Regression tests for existing APIs"""
     
-    def test_learning_dashboard_endpoint(self):
-        """Regression: learning-dashboard API still works"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/learning-dashboard")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        print("Learning dashboard API: OK")
     
-    def test_advanced_learning_summary_endpoint(self):
-        """Regression: advanced-learning/summary API still works"""
-        response = requests.get(f"{BASE_URL}/api/posting-patterns/advanced-learning/summary")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        print("Advanced learning summary API: OK")
     
     def test_health_endpoint(self):
         """Regression: health endpoint still works"""

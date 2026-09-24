@@ -362,45 +362,6 @@ class TestExceptionQueue:
         print(f"PASS: Pagination works - returned {len(data['documents'])} documents with limit=5")
 
 
-class TestSyncStatus:
-    """Tests for POST /api/readiness/sync-status endpoint"""
-
-    def test_sync_status_endpoint_returns_200(self):
-        """Verify endpoint returns 200"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: sync-status endpoint returns 200")
-
-    def test_sync_status_response_structure(self):
-        """Verify response has expected fields"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Should have cleanup results
-        assert isinstance(data, dict), "Response should be a dict"
-        # Common fields in sync-status response
-        expected_fields = ["total_cleaned", "rules_applied"]
-        for field in expected_fields:
-            if field in data:
-                print(f"  Found field: {field}={data[field]}")
-        
-        print(f"PASS: sync-status response structure valid")
-
-    def test_sync_status_force_cleanup(self):
-        """Verify force cleanup functionality"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Verify it returns cleanup statistics
-        if "total_cleaned" in data:
-            assert isinstance(data["total_cleaned"], int), "total_cleaned should be int"
-            print(f"PASS: Force cleanup returned total_cleaned={data['total_cleaned']}")
-        else:
-            print("PASS: sync-status completed (no total_cleaned field)")
-
-
 class TestCleanup:
     """Cleanup test data created during testing"""
 

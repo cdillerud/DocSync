@@ -118,45 +118,6 @@ class TestFixValidationGaps:
         print(f"PASS: reevaluation section present: upgraded={re.get('upgraded')}")
 
 
-class TestSyncStatus:
-    """Tests for POST /api/readiness/sync-status (force_cleanup with rules 23-25)"""
-
-    def test_sync_status_returns_200(self):
-        """sync-status endpoint returns 200"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status", timeout=60)
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: sync-status returns 200")
-
-    def test_sync_status_has_rule23_po_relaxed_vendor(self):
-        """sync-status includes Rule 23: PO-relaxed vendor"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status", timeout=60)
-        data = response.json()
-        assert "rule23_po_relaxed_vendor" in data, f"Missing rule23_po_relaxed_vendor. Keys: {list(data.keys())}"
-        print(f"PASS: Rule 23 (PO-relaxed vendor) present: {data.get('rule23_po_relaxed_vendor')} docs")
-
-    def test_sync_status_has_rule24_shipping_supporting(self):
-        """sync-status includes Rule 24: shipping supporting docs"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status", timeout=60)
-        data = response.json()
-        assert "rule24_shipping_supporting" in data, f"Missing rule24_shipping_supporting. Keys: {list(data.keys())}"
-        print(f"PASS: Rule 24 (shipping supporting docs) present: {data.get('rule24_shipping_supporting')} docs")
-
-    def test_sync_status_has_rule25_no_blockers(self):
-        """sync-status includes Rule 25: no blockers catchall"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status", timeout=60)
-        data = response.json()
-        assert "rule25_no_blockers" in data, f"Missing rule25_no_blockers. Keys: {list(data.keys())}"
-        print(f"PASS: Rule 25 (no blockers catchall) present: {data.get('rule25_no_blockers')} docs")
-
-    def test_sync_status_has_total_fixed_and_remaining(self):
-        """sync-status returns total_fixed and remaining_in_inbox"""
-        response = requests.post(f"{BASE_URL}/api/readiness/sync-status", timeout=60)
-        data = response.json()
-        assert "total_fixed" in data, f"Missing total_fixed. Keys: {list(data.keys())}"
-        assert "remaining_in_inbox" in data, f"Missing remaining_in_inbox. Keys: {list(data.keys())}"
-        print(f"PASS: total_fixed={data.get('total_fixed')}, remaining_in_inbox={data.get('remaining_in_inbox')}")
-
-
 class TestReadinessMetrics:
     """Tests for GET /api/readiness/metrics"""
 
@@ -174,26 +135,6 @@ class TestReadinessMetrics:
         for key in expected_keys:
             assert key in data, f"Missing key: {key}. Keys: {list(data.keys())}"
         print(f"PASS: readiness/metrics structure valid. total_documents={data.get('total_documents')}")
-
-
-class TestAutomationRate:
-    """Tests for GET /api/readiness/automation-rate"""
-
-    def test_automation_rate_returns_200(self):
-        """automation-rate endpoint returns 200"""
-        response = requests.get(f"{BASE_URL}/api/readiness/automation-rate", timeout=30)
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: automation-rate returns 200")
-
-    def test_automation_rate_has_valid_structure(self):
-        """automation-rate has automation_rate and total_documents"""
-        response = requests.get(f"{BASE_URL}/api/readiness/automation-rate", timeout=30)
-        data = response.json()
-        assert "automation_rate" in data, f"Missing automation_rate. Keys: {list(data.keys())}"
-        assert "total_documents" in data, f"Missing total_documents. Keys: {list(data.keys())}"
-        rate = data.get("automation_rate")
-        assert isinstance(rate, (int, float)), f"automation_rate should be numeric, got {type(rate)}"
-        print(f"PASS: automation_rate={rate}, total_documents={data.get('total_documents')}")
 
 
 class TestUnitTestsDirectExecution:

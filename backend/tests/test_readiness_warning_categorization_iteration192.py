@@ -258,33 +258,6 @@ class TestReadinessAPIEndpoints:
         print(f"  by_status: {data.get('by_status')}")
         print("  PASS: Metrics endpoint returns valid structure")
     
-    def test_reevaluate_all_endpoint(self):
-        """POST /api/readiness/reevaluate-all should work and return auto_acted fields"""
-        response = requests.post(f"{BASE_URL}/api/readiness/reevaluate-all")
-        
-        print(f"\nTest API - POST /api/readiness/reevaluate-all:")
-        print(f"  Status code: {response.status_code}")
-        
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        print(f"  Response keys: {list(data.keys())}")
-        
-        # Verify expected fields
-        assert 'total_processed' in data, "Missing total_processed"
-        assert 'total_corrections' in data, "Missing total_corrections"
-        assert 'by_status' in data, "Missing by_status"
-        assert 'errors' in data, "Missing errors"
-        
-        # Check for new auto_acted fields (may be 0 if no docs ready)
-        print(f"  total_processed: {data.get('total_processed')}")
-        print(f"  total_corrections: {data.get('total_corrections')}")
-        print(f"  auto_acted: {data.get('auto_acted', 'not present')}")
-        print(f"  auto_act_skipped: {data.get('auto_act_skipped', 'not present')}")
-        print(f"  auto_act_skip_reasons: {data.get('auto_act_skip_reasons', 'not present')}")
-        print(f"  errors: {data.get('errors')}")
-        
-        print("  PASS: Reevaluate-all endpoint works")
 
 
 class TestVendorBypassEndpoint:

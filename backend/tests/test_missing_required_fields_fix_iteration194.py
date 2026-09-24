@@ -381,41 +381,7 @@ class TestReadinessAPIEndpoints:
         
         print("PASS: GET /api/readiness/metrics returns valid response")
     
-    def test_get_automation_rate(self):
-        """GET /api/readiness/automation-rate returns valid response"""
-        response = requests.get(f"{BASE_URL}/api/readiness/automation-rate", timeout=30)
-        
-        print(f"Status: {response.status_code}")
-        print(f"Response: {response.json() if response.status_code == 200 else response.text}")
-        
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        # Check required fields
-        assert "automation_rate" in data, "Missing automation_rate"
-        assert "total_documents" in data, "Missing total_documents"
-        
-        print("PASS: GET /api/readiness/automation-rate returns valid response")
     
-    def test_post_reevaluate_all(self):
-        """POST /api/readiness/reevaluate-all works without errors"""
-        response = requests.post(
-            f"{BASE_URL}/api/readiness/reevaluate-all",
-            json={"limit": 10},  # Small limit for testing
-            timeout=60
-        )
-        
-        print(f"Status: {response.status_code}")
-        print(f"Response: {response.json() if response.status_code == 200 else response.text}")
-        
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        # Check required fields
-        assert "total_processed" in data, "Missing total_processed"
-        assert "by_status" in data, "Missing by_status"
-        
-        print("PASS: POST /api/readiness/reevaluate-all works without errors")
 
 
 class TestMissingRequiredFieldsWarningVsBlocking:

@@ -123,7 +123,13 @@ async def fetch_vendor_invoices_from_bc(
     url = f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/companies({company_id})/purchaseInvoices"
     params = {
         "$filter": f"vendorNumber eq '{vendor_no}'",
-        "$select": "id,number,vendorInvoiceNumber,vendorNumber,vendorName,postingDate,dueDate,currencyCode,totalAmountIncludingTax,totalAmountExcludingTax,status,paymentTermsId",
+        # 2026-09-23 fix: paymentTermsId is not a field on BC's purchaseInvoice
+        # entity (it's a vendor-level field, correctly fetched separately via
+        # the vendor query above and read from vendor_card downstream - nothing
+        # reads it off invoice records here). Including it in this $select made
+        # BC reject the WHOLE query with a 400, silently returning zero
+        # invoices for every vendor - not just a missing field.
+        "$select": "id,number,vendorInvoiceNumber,vendorNumber,vendorName,postingDate,dueDate,currencyCode,totalAmountIncludingTax,totalAmountExcludingTax,status",
         "$expand": "purchaseInvoiceLines($select=id,lineType,lineObjectNumber,description,quantity,unitCost,amountExcludingTax)",
         "$top": str(max_invoices),
         "$orderby": "postingDate desc",

@@ -296,11 +296,40 @@ async def list_documents(
 
     from routers.queue_constants import TERMINAL_STATUSES, DONE_WORKFLOW_STATUSES
     if queue_view and not include_cleared and not status:
-        not_cleared = {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]}
-        not_terminal = {"status": {"$nin": TERMINAL_STATUSES}}
+        # 2026-09-24: a document can be auto_cleared=True (treated as fully
+        # done, hidden from every queue) while carrying an active,
+        # unresolved BC-posting or SharePoint-filing failure - found one
+        # real AP invoice sitting in exactly this state for 5 months
+        # (status=Completed, auto_cleared=True, bc_posting_status=failed,
+        # posted_to_bc_at=null - it was never actually posted). The
+        # unresolved-failure carve-out must apply here too, not just to the
+        # terminal-status check below, since auto_cleared is checked
+        # independently.
+        not_cleared = {"$or": [
+            {"auto_cleared": {"$ne": True}},
+            {"auto_cleared": {"$exists": False}},
+            {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+            {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
+        ]}
+        # 2026-09-24: a document with an active, unresolved BC-posting or
+        # SharePoint-filing failure must stay visible in the active queue
+        # even if its raw status string (e.g. "ReadyForPost", "Completed")
+        # is normally treated as terminal - otherwise silently-failing
+        # documents disappear from view entirely. See queue_constants.py.
+        not_terminal = {"$or": [
+            {"status": {"$nin": TERMINAL_STATUSES}},
+            {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+            {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
+        ]}
+        # 2026-09-24: same unresolved-failure carve-out as not_cleared/
+        # not_terminal above - workflow_status="completed" alone was still
+        # excluding the stale AP invoice described above even after fixing
+        # the other two conditions, since all three are AND'd together.
         not_done_wf = {"$or": [
             {"workflow_status": {"$nin": DONE_WORKFLOW_STATUSES}},
             {"workflow_status": {"$exists": False}},
+            {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+            {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
         ]}
         if "$and" in fq:
             fq["$and"].extend([not_cleared, not_terminal, not_done_wf])
@@ -310,18 +339,50 @@ async def list_documents(
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
 
+    # 2026-09-24: attach the same canonical derived_state model the detail
+    # endpoint already computes, so the queue/list view can render status
+    # from ONE source of truth instead of re-deriving its own (and
+    # previously buggy) status interpretation client-side. Uses the
+    # synchronous, no-DB-call legacy-field derivation rather than the full
+    # event-history lookup the detail endpoint uses - fetching workflow
+    # events per row would mean up to `limit` extra DB round-trips on every
+    # list request, which isn't viable for a paginated queue of up to 500
+    # rows. The legacy derivation reads only fields already present on each
+    # already-fetched document, so this adds zero additional queries.
+    try:
+        from services.derived_state_service import get_derived_state_service, format_state_for_display
+        derived_state_service = get_derived_state_service()
+        if derived_state_service:
+            for _doc in docs:
+                try:
+                    _derived = derived_state_service._derive_from_legacy(_doc)
+                    _derived = derived_state_service._apply_silent_failure_overrides(_doc, _derived)
+                    _derived["display"] = format_state_for_display(_derived)
+                    _doc["derived_state"] = _derived
+                except Exception:
+                    _doc["derived_state"] = None
+    except Exception:
+        pass
+
     # Compute global counts (excluding duplicates)
     not_dup = {"is_duplicate": {"$ne": True}}
     total_all = await db.hub_documents.count_documents(not_dup)
     cleared_count = await db.hub_documents.count_documents({"auto_cleared": True, **not_dup})
 
     DONE_WF = DONE_WORKFLOW_STATUSES
+    # 2026-09-24: same active-failure carve-out as the main queue filter
+    # above, applied to the tab-count badges so "Pending"/"Completed" stay
+    # consistent with what the queue actually shows.
+    has_unresolved_failure = {"$or": [
+        {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+        {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
+    ]}
 
     pending_count = await db.hub_documents.count_documents({
         "$and": [
             not_dup,
             {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
-            {"status": {"$nin": TERMINAL_STATUSES}},
+            {"$or": [{"status": {"$nin": TERMINAL_STATUSES}}, has_unresolved_failure]},
             {"$or": [
                 {"workflow_status": {"$nin": DONE_WF}},
                 {"workflow_status": {"$exists": False}},
@@ -333,6 +394,7 @@ async def list_documents(
         "$and": [
             not_dup,
             {"status": {"$ne": "batch_parent"}},  # Exclude batch_parent containers
+            {"$nor": [has_unresolved_failure]},
             {"$or": [
                 {"status": {"$in": TERMINAL_STATUSES}},
                 {"auto_cleared": True},

@@ -118,9 +118,47 @@ class DerivedStateService:
             ).sort("timestamp", -1).limit(100).to_list(100)
         
         if events and len(events) > 0:
-            return self._derive_from_events(document, events)
+            result = self._derive_from_events(document, events)
         else:
-            return self._derive_from_legacy(document)
+            result = self._derive_from_legacy(document)
+
+        return self._apply_silent_failure_overrides(document, result)
+
+    def _apply_silent_failure_overrides(self, document: Dict, derived: Dict) -> Dict[str, Any]:
+        """
+        2026-09-24: bc_posting_status/auto_post_error (AP invoice -> Business
+        Central posting) and auto_file_failed/auto_file_error (shipping ->
+        SharePoint filing) are real, live failure signals that neither the
+        event-based nor legacy-field-based derivation above knows about.
+        Without this, a document can sit in workflow_state=READY (raw
+        status="ReadyForPost") while silently failing to post to BC on every
+        retry, or workflow_state=COMPLETED while a shipping auto-file attempt
+        actually failed - with the real reason invisible in the derived
+        state entirely, even though the underlying fields already carry it.
+
+        Both source fields are kept fresh on success by their own services
+        (bc_posting_status flips to "posted", auto_file_failed flips to
+        False), so checking their CURRENT value here is safe from staleness
+        - see the 2026-09-23 shipping auto-file fix for the same pattern.
+        """
+        bc_posting_status = (document.get("bc_posting_status") or "").lower()
+        if bc_posting_status in ("failed", "pending_retry"):
+            reason = document.get("bc_posting_error") or document.get("auto_post_error") or "Business Central posting failed"
+            derived["workflow_state"] = WorkflowState.FAILED.value
+            derived["needs_review"] = True
+            if reason not in derived["blocking_issues"]:
+                derived["blocking_issues"] = [reason] + list(derived.get("blocking_issues") or [])
+            derived["state_reason"] = f"BC posting failed and is awaiting retry: {reason}"
+
+        if document.get("auto_file_failed") and not document.get("auto_filed"):
+            reason = document.get("auto_file_error") or "Automatic filing to SharePoint failed"
+            derived["workflow_state"] = WorkflowState.FAILED.value
+            derived["needs_review"] = True
+            if reason not in derived["blocking_issues"]:
+                derived["blocking_issues"] = [reason] + list(derived.get("blocking_issues") or [])
+            derived["state_reason"] = f"Auto-file to SharePoint failed: {reason}"
+
+        return derived
     
     def _derive_from_events(
         self,

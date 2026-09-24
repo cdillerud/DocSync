@@ -77,13 +77,38 @@ const getTypeColor = (type) => {
 const AP_TYPES = ["AP_Invoice", "AP_INVOICE", "Purchase_Order", "PURCHASE_ORDER", "Remittance", "REMITTANCE", "Credit_Memo", "PURCHASE_CREDIT_MEMO"];
 const SALES_TYPES = ["Sales_Order", "SALES_ORDER", "Sales_PO", "Sales_Quote", "Order_Confirmation", "SALES_INVOICE", "SALES_CREDIT_MEMO", "PurchaseOrder", "Purchase_Order"];
 
-// Terminal statuses — docs that are "done"
+// 2026-09-24: audited against the backend (routers/queue_constants.py) -
+// "ReadyForPost"/"ready_for_post" is NOT done (it means still needs to post
+// to Business Central, and is also reused for a BC post that silently
+// FAILED and is awaiting retry - see derived_state.workflow_state below for
+// the real signal), "Exception" means needs review (the opposite of done),
+// "AutoFiled"/"auto_filed" as a status STRING is never actually set by the
+// backend (the real signal is the separate `auto_filed` boolean field), and
+// "po_pending" literally means still pending. All were previously treated
+// as terminal/done here, which hid genuinely unfinished and silently
+// failing documents from the queue.
 const TERMINAL_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted", "archived",
-  "exported", "auto_filed", "AutoFiled", "Validated", "validated", "ValidationPassed",
-  "ReadyForPost", "ready_for_post", "LinkedToBC", "Exception", "exception"];
-const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed", "exception_review", "po_pending"];
+  "exported", "Validated", "validated", "ValidationPassed", "LinkedToBC"];
+const DONE_WORKFLOW_STATUSES = ["completed", "exported", "validation_passed", "processed", "exception_review"];
+
+function hasUnresolvedFailure(doc) {
+  const bcStatus = (doc.bc_posting_status || "").toLowerCase();
+  if (bcStatus === "failed" || bcStatus === "pending_retry") return true;
+  if (doc.auto_file_failed && !doc.auto_filed) return true;
+  return false;
+}
 
 function isTerminal(doc) {
+  if (hasUnresolvedFailure(doc)) return false;
+  // Prefer the backend's canonical derived state when the list endpoint
+  // provided one - it already accounts for silent BC-posting/auto-file
+  // failures (see derived_state_service.py). Falls back to the raw-status
+  // heuristic below only when derived_state is unavailable (e.g. documents
+  // fetched from an endpoint that doesn't attach it yet, like the
+  // po-pending tab).
+  const ws_derived = doc.derived_state?.workflow_state;
+  if (ws_derived) return ws_derived === "completed";
+
   const s = (doc.status || "").toLowerCase();
   const ws = (doc.workflow_status || "").toLowerCase();
   if (s === "batch_parent") return false; // containers, not processed work
@@ -784,6 +809,19 @@ export default function UnifiedQueuePage() {
                             {doc.auto_file_failed && !doc.auto_filed && !isTerminal(doc) && (
                               <Badge className="bg-red-500/15 text-red-400 text-[9px] px-1 py-0 shrink-0" data-testid={`auto-file-failed-${doc.id}`}>AUTO-FILE FAILED</Badge>
                             )}
+                            {(() => {
+                              const bcStatus = (doc.bc_posting_status || "").toLowerCase();
+                              if (bcStatus !== "failed" && bcStatus !== "pending_retry") return null;
+                              return (
+                                <Badge
+                                  className="bg-red-500/15 text-red-400 text-[9px] px-1 py-0 shrink-0"
+                                  data-testid={`bc-posting-failed-${doc.id}`}
+                                  title={doc.bc_posting_error || doc.auto_post_error || "Posting to Business Central failed and is awaiting retry."}
+                                >
+                                  BC POST FAILED
+                                </Badge>
+                              );
+                            })()}
                             {doc.status === "batch_parent" && doc.batch_children_count > 0 && (
                               <Badge className="bg-sky-500/15 text-sky-400 text-[9px] px-1 py-0 shrink-0">{doc.batch_children_count} pages</Badge>
                             )}

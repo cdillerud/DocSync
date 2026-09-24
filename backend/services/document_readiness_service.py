@@ -254,8 +254,11 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
             "confidence": 1.0,
             "blocking_reasons": [],
             "warning_reasons": [],
+            "required_reviewer_actions": [],
             "explanations": [f"Document already in terminal state: {current_status}"],
             "signals": compute_signals(doc),
+            "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_override": False,
         }
 
     # --- Non-postable doc types: route to archive, not review ---
@@ -272,8 +275,11 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
             "confidence": 1.0,
             "blocking_reasons": [],
             "warning_reasons": [],
+            "required_reviewer_actions": [],
             "explanations": [f"Document type '{doc_type}' is non-postable — auto-archived"],
             "signals": compute_signals(doc),
+            "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_override": False,
         }
 
     # --- Vendorless docs older than 14 days: archive ---
@@ -291,8 +297,11 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
                     "confidence": 1.0,
                     "blocking_reasons": [],
                     "warning_reasons": [],
+                    "required_reviewer_actions": [],
                     "explanations": [f"No vendor identified after {age_days} days — auto-archived"],
                     "signals": compute_signals(doc),
+                    "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+                    "reviewed_override": False,
                 }
         except (ValueError, TypeError):
             pass
@@ -310,8 +319,11 @@ def evaluate_readiness(doc: Dict[str, Any]) -> Dict[str, Any]:
             "confidence": 1.0,
             "blocking_reasons": [],
             "warning_reasons": [],
+            "required_reviewer_actions": [],
             "explanations": [f"No extractable data after {retry_count} retries — auto-archived"],
             "signals": compute_signals(doc),
+            "last_evaluated_at": datetime.now(timezone.utc).isoformat(),
+            "reviewed_override": False,
         }
 
     signals = compute_signals(doc)

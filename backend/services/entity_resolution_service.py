@@ -16,6 +16,7 @@ Resolution strategy (layered):
 import re
 import uuid
 import logging
+import difflib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
@@ -652,7 +653,12 @@ class CustomerResolution:
     """Result of customer resolution. Single return type for all consumers."""
     customer_name: str = ""
     customer_no: str = ""
-    match_method: str = "none"
+    match_method: str = "none"  # sentinel string, not Python None - relied on
+    # as a literal string by callers across the codebase (auto_approve.py,
+    # bc_validation_service.py, document_batch_revalidate_service.py, tests).
+    # Because "none" is a non-empty (truthy) string, `match_method = match_method
+    # or "X"` fallbacks below never fire once match_method starts at its
+    # default - fixed 2026-09-23 by checking the sentinel explicitly instead.
     confidence: float = 0.0
     source: str = ""           # Which step resolved it
     spiro_relationship: str = ""  # vendor/customer/prospect
@@ -726,6 +732,26 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
             match_method = vr.get("match_method", "validation")
             confidence = float(vr.get("match_score", 0.9))
             source = "bc_validation"
+
+    # ── Step 1.5: po_resolution (PO-number-grounded BC lookup) ──
+    # po_resolution is a live PO-number-based BC lookup - a stronger,
+    # independently-verified signal than legacy/staged customer_no fields
+    # like matched_customer_no, which can go stale or come from an earlier
+    # low-quality pass. 2026-09-23 investigation: found 16 documents where
+    # matched_customer_no directly contradicted this document's own
+    # po_resolution (one caused a genuine GPI vendor PO for Berner Foods to
+    # be misresolved to "Blue Tape Brewing" and leak into the customer
+    # sales-order review queue). Prefer po_resolution when it reflects a
+    # real, posted Business Central record.
+    if not customer_no:
+        po_res = doc.get("po_resolution") or {}
+        po_cno = po_res.get("bc_customer_no") or ""
+        if po_cno and po_cno.upper() not in _GAMER_NOS and po_res.get("bc_status") == "posted":
+            customer_no = po_cno
+            customer_name = po_res.get("bc_customer_name", "")
+            match_method = po_res.get("match_method", "po_resolution")
+            confidence = float(po_res.get("confidence", 0.85))
+            source = "po_resolution"
 
     # ── Step 2: Extracted/normalized customer_no ──
     if not customer_no:
@@ -818,7 +844,7 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
                     customer_no = alias["customer_no"]
                     if not customer_name or customer_name == alias.get("customer_name", ""):
                         customer_name = alias.get("customer_name") or customer_name
-                    match_method = match_method or "customer_alias"
+                    match_method = "customer_alias" if match_method == "none" else match_method
                     confidence = confidence or alias.get("confidence", 0.7)
                     source = source or "customer_alias"
             except Exception:
@@ -854,7 +880,7 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
                     if customer_no and customer_no.upper() in _GAMER_NOS:
                         customer_no = ""
                 if customer_no or customer_name:
-                    match_method = match_method or "batch_parent"
+                    match_method = "batch_parent" if match_method == "none" else match_method
                     confidence = confidence or 0.75
                     source = source or "batch_parent"
         except Exception:
@@ -882,7 +908,7 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
             if cached:
                 customer_no = cached.get("number") or cached.get("bc_customer_no", "")
                 customer_name = customer_name or cached.get("displayName") or cached.get("bc_customer_name", "")
-                match_method = match_method or "cache_lookup"
+                match_method = "cache_lookup" if match_method == "none" else match_method
                 confidence = confidence or 0.7
                 source = source or "bc_cache"
         except Exception:
@@ -917,8 +943,19 @@ async def resolve_customer(doc: dict) -> CustomerResolution:
                 bc_name = (cached.get("displayName") or cached.get("bc_customer_name") or "").lower()
                 ext_first = customer_name.lower().split()[0] if customer_name else ""
                 bc_first = bc_name.split()[0] if bc_name else ""
-                if ext_first and bc_first and ext_first[:3] != bc_first[:3]:
-                    customer_name = cached.get("displayName") or cached.get("bc_customer_name") or customer_name
+                # 2026-09-23 fix: this previously compared only the first 3
+                # characters of the first word (ext_first[:3] != bc_first[:3]).
+                # That's far too short to distinguish real companies sharing a
+                # common prefix - e.g. "BALLIST" and "BALLCOR" both start with
+                # "bal", so the old check treated them as consistent and never
+                # corrected a wrong customer_no -> customer_name pairing.
+                # Use a proper similarity ratio on the full first word instead,
+                # so short shared prefixes no longer mask a real mismatch,
+                # while minor OCR/typo variations of the same name still pass.
+                if ext_first and bc_first:
+                    similarity = difflib.SequenceMatcher(None, ext_first, bc_first).ratio()
+                    if similarity < 0.75:
+                        customer_name = cached.get("displayName") or cached.get("bc_customer_name") or customer_name
         except Exception:
             pass
 

@@ -692,7 +692,19 @@ async def intake_document_from_bytes(
     # If this is a multi-page document, detect boundaries and flag for splitting
     try:
         from services.batch_po_splitter import detect_batch_po
-        batch_info = detect_batch_po(file_content, suggested_type)
+        # 2026-09-23 fix: detect_batch_po() was being called unconditionally
+        # for every intake, regardless of actual file type. Its internal
+        # try/except already caught the resulting PdfReader failure for non-PDF
+        # attachments (.xlsx, .docx, images) and returned should_split=False
+        # safely - so this never broke processing - but it logged a noisy,
+        # misleading "[BatchSplit] Failed to read PDF: invalid pdf header"
+        # warning for every non-PDF file. Check the real file signature (not
+        # just the filename extension, which can be wrong) before attempting
+        # a PDF-specific parse at all.
+        if file_content[:5] == b"%PDF-":
+            batch_info = detect_batch_po(file_content, suggested_type)
+        else:
+            batch_info = {"should_split": False, "page_count": 0, "reason": "not_a_pdf"}
         if batch_info.get("should_split"):
             await db.hub_documents.update_one(
                 {"id": doc_id},

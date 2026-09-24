@@ -38,6 +38,27 @@ _VENDOR_PO_DOCUMENT_TYPES = {
     "VENDOR_PURCHASE_ORDER",
 }
 
+# 2026-09-23 investigation: 66 documents found stuck in the sales-order
+# review queue whose po_resolution already points at a POSTED sales-side
+# BC transaction for a real customer - almost all GPI's own outbound
+# shipping/BOL confirmations for orders that are already fulfilled.
+# These need no new sales-order draft; they need to be recognized as
+# already-completed transactions, which no existing exclusion category
+# covered.
+_ALREADY_POSTED_SALES_ENTITY_TYPES = {
+    "posted_sales_shipment",
+    "posted_sales_invoice",
+}
+
+_NON_SALES_ORDER_CLASSIFIED_TYPES = {
+    "SHIPPING_DOCUMENT",
+    "WAREHOUSE_RECEIPT",
+    "INSPECTION_FORM",
+    "SALES_QUOTE",
+    "REMITTANCE",
+    "INVENTORY_REPORT",
+}
+
 _SPLIT_SUFFIX_PATTERN = re.compile(r"_doc\d+", re.IGNORECASE)
 _PAGE_RANGE_PATTERN = re.compile(
     r"\[pages?\s+\d+(?:-\d+)?/\d+\]",
@@ -97,6 +118,14 @@ def _effective_document_type(document: Dict[str, Any]) -> str:
         classification.get("final_type") if isinstance(classification, dict) else None,
         classification.get("suggested_type") if isinstance(classification, dict) else None,
     ):
+        normalized = _normalize_document_type(value)
+        if normalized:
+            return normalized
+    return ""
+
+
+def _classified_document_type(document: Dict[str, Any]) -> str:
+    for value in (document.get("document_type"), document.get("suggested_job_type")):
         normalized = _normalize_document_type(value)
         if normalized:
             return normalized
@@ -251,6 +280,39 @@ def assess_sales_order_source(
             "reason": str(
                 document.get("sales_order_exclusion_reason")
                 or "The document is explicitly excluded from sales-order intake."
+            ),
+        }
+
+    classified_type = _classified_document_type(document)
+    if classified_type in _NON_SALES_ORDER_CLASSIFIED_TYPES:
+        return {
+            "excluded": True,
+            "reason_code": "NON_SALES_ORDER_DOCUMENT_TYPE",
+            "reason": (
+                f"The document's own classification ({classified_type}) is not a "
+                "customer sales-order intake document. This overrides any legacy "
+                "doc_type value and is not affected by BC customer resolution: a "
+                "shipping/warehouse/inspection/quote record can legitimately "
+                "correlate to a real customer's existing sales order without "
+                "itself being a new order to create."
+            ),
+        }
+
+    po_res = document.get("po_resolution") or {}
+    if (
+        po_res.get("bc_status") == "posted"
+        and po_res.get("bc_entity_type") in _ALREADY_POSTED_SALES_ENTITY_TYPES
+        and str(po_res.get("bc_customer_name") or "").strip()
+    ):
+        return {
+            "excluded": True,
+            "reason_code": "ALREADY_POSTED_SALES_TRANSACTION",
+            "reason": (
+                "The referenced PO/order number already has a posted "
+                f"{po_res.get('bc_entity_type')} in Business Central for "
+                f"{po_res.get('bc_customer_name')} (BC order "
+                f"{po_res.get('bc_order_number')}). No new sales-order "
+                "draft is needed."
             ),
         }
 

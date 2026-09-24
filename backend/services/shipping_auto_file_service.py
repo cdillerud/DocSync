@@ -85,32 +85,58 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
     # Attempt SharePoint upload
     move_result = await _move_to_sharepoint(doc_id, folder_path)
 
-    # Mark as auto-filed
+    # 2026-09-23 fix: this previously marked EVERY document as auto_filed,
+    # auto_cleared, and status=Completed regardless of whether the SharePoint
+    # move actually succeeded - the failure was only ever recorded in a buried
+    # auto_file_details.sharepoint_result sub-field, while the document was
+    # removed from every review queue as if it had genuinely been filed.
+    # Found 374 documents system-wide silently marked "Completed" despite a
+    # failed move (missing/deleted SharePoint items, etc). Now: only clear the
+    # document when the move actually succeeded; on failure, surface it for
+    # review instead of hiding it.
     now = datetime.now(timezone.utc).isoformat()
-    update = {
-        "auto_filed": True,
-        "auto_filed_at": now,
-        "auto_file_details": {
-            "po_number": po_number,
-            "so_number": so_number,
-            "location_code": location_code,
-            "is_international": is_international,
-            "freight_direction": freight_direction,
-            "folder_path": folder_path,
-            "routing_reason": reason,
-            "sharepoint_result": "success" if move_result.get("success") else "failed",
-        },
-        "auto_cleared": True,
-        "auto_clear_decision": "Cleared",
-        "auto_clear_reason": f"Shipping auto-filed: {reason}",
-        "status": "Completed",
-        "workflow_status": "completed",
-        "sharepoint_folder_suggestion": folder_path,
-        "sharepoint_folder_reason": reason,
-        "filed_at": now,
-        "filed_folder": folder_path,
-        "updated_utc": now,
+    auto_file_details = {
+        "po_number": po_number,
+        "so_number": so_number,
+        "location_code": location_code,
+        "is_international": is_international,
+        "freight_direction": freight_direction,
+        "folder_path": folder_path,
+        "routing_reason": reason,
+        "sharepoint_result": "success" if move_result.get("success") else "failed",
     }
+
+    if move_result.get("success"):
+        update = {
+            "auto_filed": True,
+            "auto_filed_at": now,
+            "auto_file_details": auto_file_details,
+            "auto_cleared": True,
+            "auto_clear_decision": "Cleared",
+            "auto_clear_reason": f"Shipping auto-filed: {reason}",
+            "status": "Completed",
+            "workflow_status": "completed",
+            "sharepoint_folder_suggestion": folder_path,
+            "sharepoint_folder_reason": reason,
+            "filed_at": now,
+            "filed_folder": folder_path,
+            "updated_utc": now,
+        }
+    else:
+        update = {
+            "auto_filed": False,
+            "auto_file_failed": True,
+            "auto_file_failed_at": now,
+            "auto_file_details": auto_file_details,
+            "auto_file_error": move_result.get("message", "unknown error"),
+            "sharepoint_folder_suggestion": folder_path,
+            "sharepoint_folder_reason": reason,
+            "updated_utc": now,
+        }
+        logger.warning(
+            "[AutoFile] doc=%s NOT cleared - SharePoint move failed: %s",
+            doc_id, move_result.get("message", "unknown error"),
+        )
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
 
     # Record filing action for AI learning

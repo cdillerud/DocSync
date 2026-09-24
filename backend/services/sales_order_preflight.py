@@ -277,7 +277,14 @@ def build_sales_order_candidate(doc: Dict[str, Any]) -> Dict[str, Any]:
     normalized_fields = doc.get("normalized_fields") or {}
     extracted_fields = doc.get("extracted_fields") or {}
     data = doc.get("data") or {}
-    classification = doc.get("classification") or {}
+    # 2026-09-23 fix: this previously read doc.get("classification"), a field
+    # that does not exist on real documents (the actual field is
+    # "ai_classification" - confirmed via direct document inspection). That
+    # typo meant classification.get("confidence") below always returned None,
+    # so classificationConfidence silently fell through to 0 regardless of
+    # the document's real AI classification confidence, incorrectly blocking
+    # documents on LOW_CLASSIFICATION_CONFIDENCE.
+    classification = doc.get("ai_classification") or {}
     resolved_customer = doc.get("resolved_customer") or data.get("resolved_customer") or {}
 
     customer_number = _first_value(
@@ -367,7 +374,7 @@ def build_sales_order_candidate(doc: Dict[str, Any]) -> Dict[str, Any]:
             doc.get("doc_type"),
             doc.get("document_type"),
             doc.get("suggested_job_type"),
-            classification.get("suggested_type")
+            classification.get("proposed_doc_type")  # ai_classification's real key
             if isinstance(classification, dict)
             else None,
         ),

@@ -356,6 +356,24 @@ async def add_sales_order_lines(
     return {"added": added, "total": len(lines), "errors": errors}
 
 
+async def delete_sales_order(order_system_id: str) -> Dict[str, Any]:
+    """Delete a Sales Order in the BC WRITE environment (rollback of a partial create)."""
+    _check_write_protection("delete_sales_order")
+    if not HAS_CREDENTIALS:
+        raise ValueError("BC credentials not configured")
+
+    token = await _get_token()
+    company_id = await _get_company_id_standard_api()
+    url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/{BC_STANDARD_API}/companies({company_id})/salesOrders({order_system_id})"
+
+    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+        resp = await client.delete(url, headers={"Authorization": f"Bearer {token}"})
+
+    if resp.status_code in (200, 204):
+        return {"deleted": True, "status": resp.status_code, "error": ""}
+    return {"deleted": False, "status": resp.status_code, "error": resp.text[:300]}
+
+
 async def attach_document_to_bc_record(
     bc_record_id: str,
     file_name: str,

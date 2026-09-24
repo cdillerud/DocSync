@@ -30,10 +30,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from deps import get_db
+from services.business_central_service import get_bc_service
+from services.sales_order_bc_lookup import find_existing_bc_sales_order
+from services.sales_order_source_inference import assess_sales_order_source
 from services.gpi_integration_service import (
     list_companies,
     create_sales_order,
     add_sales_order_lines,
+    delete_sales_order,
     create_purchase_invoice,
     add_purchase_invoice_lines,
     delete_purchase_invoice_lines,
@@ -547,9 +551,14 @@ async def gpi_create_sales_order(req: CreateSalesOrderRequest):
         raise HTTPException(status_code=502, detail=f"BC API error: {str(e)}")
 
 
-def _build_idempotency_key(doc_id: str) -> str:
-    """Build a stable, deterministic idempotency key from a document ID."""
-    return f"SO_{hashlib.sha256(doc_id.encode()).hexdigest()[:24]}"
+def _build_idempotency_key(doc_id: str, rollback_count: int = 0) -> str:
+    """Build a stable, deterministic idempotency key from a document ID.
+
+    After a partial create is rolled back, the next attempt needs a fresh key so
+    BC's salesOrderRequests doesn't answer "already exists" with the deleted order.
+    """
+    key = f"SO_{hashlib.sha256(doc_id.encode()).hexdigest()[:24]}"
+    return f"{key}_R{rollback_count}" if rollback_count else key
 
 
 async def _resolve_customer_no(doc: dict) -> dict:
@@ -853,9 +862,14 @@ async def sales_order_preflight(doc_id: str):
     from services.gpi_integration_service import BC_WRITE_ENVIRONMENT, BC_READ_ENVIRONMENT, BC_COMPANY_ID
     bc_company = BC_COMPANY_ID or "auto-detect"
 
+    # Source exclusion: Gamer's own vendor POs, split artifacts, already-posted orders
+    source_assessment = assess_sales_order_source(doc, bc_customer_no=customer_no or None)
+    if source_assessment.get("excluded"):
+        errors.append(f"NOT A CUSTOMER ORDER: {source_assessment['reason']}")
+
     ready = eligible and bool(customer_no) and bool(resolved_lines) and not errors
 
-    idempotency_key = _build_idempotency_key(doc_id)
+    idempotency_key = _build_idempotency_key(doc_id, doc.get("bc_sales_order_rollback_count", 0))
 
     # ── Inventory Lookup ──
     inventory_workspace = None
@@ -929,6 +943,25 @@ async def sales_order_preflight(doc_id: str):
             duplicate_detail = f"PO '{external_doc_no}' already used on SO {dup_so} (doc {dup['id'][:8]}...)"
             warnings.append(duplicate_detail)
 
+    # ── BC Duplicate Check (production history, where staff key orders by hand) ──
+    bc_duplicate = None
+    bc_duplicate_detail = "No existing BC order for this PO"
+    if external_doc_no:
+        try:
+            bc_duplicate = await find_existing_bc_sales_order(
+                get_bc_service(), customer_number=customer_no or "", external_document_number=external_doc_no,
+            )
+        except Exception as e:
+            bc_duplicate_detail = f"BC duplicate lookup failed: {e}"
+            warnings.append(f"{bc_duplicate_detail}. Creation will be refused until the lookup succeeds.")
+        if bc_duplicate:
+            bc_duplicate_detail = (
+                f"PO '{external_doc_no}' already exists in BC as sales order {bc_duplicate.get('number')} "
+                f"({bc_duplicate.get('lookupEnvironment')})"
+            )
+            errors.append(bc_duplicate_detail)
+            ready = False
+
     # ── Quantity Bounds Check ──
     bounds_check = {"in_bounds": True, "violations": []}
     if customer_no and resolved_lines:
@@ -961,6 +994,9 @@ async def sales_order_preflight(doc_id: str):
         {"label": "Customer resolved in BC", "passed": bool(customer_no), "detail": f"{customer_no} — {customer_name}" if customer_no else "Not resolved"},
         {"label": "Required fields present", "passed": "customer_no" not in missing_fields, "detail": f"Missing: {', '.join(missing_fields)}" if missing_fields else "All present"},
         {"label": "Duplicate check", "passed": not duplicate_found, "detail": duplicate_detail, "blocking": False},
+        {"label": "Not already in BC", "passed": not bc_duplicate, "detail": bc_duplicate_detail, "blocking": bool(bc_duplicate)},
+        {"label": "Customer order (not a vendor PO)", "passed": not source_assessment.get("excluded"),
+         "detail": source_assessment.get("reason") or "No exclusion evidence", "blocking": bool(source_assessment.get("excluded"))},
         {"label": "Lines resolved", "passed": bool(resolved_lines), "detail": f"{len(resolved_lines)} line(s)" if resolved_lines else "No lines"},
         {"label": "Quantity bounds check", "passed": bounds_check["in_bounds"],
          "detail": f"{len(bounds_check['violations'])} item(s) outside historical range — requires review" if not bounds_check["in_bounds"] else "All quantities within historical norms",
@@ -1137,11 +1173,41 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     external_doc_no = ef.get("po_number") or nf.get("po_number") or ""
     order_date = ef.get("order_date") or nf.get("order_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+    # Refuse sources that aren't customer orders (Gamer's own vendor POs,
+    # recursive split artifacts, orders already posted in BC)
+    source_assessment = assess_sales_order_source(doc, bc_customer_no=customer_no)
+    if source_assessment.get("excluded"):
+        raise HTTPException(status_code=422, detail={
+            "error": "source_excluded",
+            "reason_code": source_assessment.get("reason_code"),
+            "message": source_assessment.get("reason"),
+        })
+
+    # Refuse a PO that already has a BC sales order (production history, where
+    # staff key orders by hand). Fail closed: no lookup, no create.
+    if external_doc_no:
+        try:
+            bc_duplicate = await find_existing_bc_sales_order(
+                get_bc_service(), customer_number=customer_no, external_document_number=external_doc_no,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail={
+                "error": "duplicate_lookup_failed",
+                "message": f"Could not check BC for an existing order for PO '{external_doc_no}': {e}",
+            })
+        if bc_duplicate:
+            raise HTTPException(status_code=409, detail={
+                "error": "bc_duplicate",
+                "message": f"PO '{external_doc_no}' already exists in BC as sales order {bc_duplicate.get('number')}.",
+                "bc_order_number": bc_duplicate.get("number"),
+                "lookup_environment": bc_duplicate.get("lookupEnvironment"),
+            })
+
     # Resolve SO type routing (Drop-Ship vs Warehouse)
     so_type = _resolve_so_type(doc)
     so_routing = _resolve_so_routing_fields(doc, so_type)
 
-    idempotency_key = _build_idempotency_key(doc_id)
+    idempotency_key = _build_idempotency_key(doc_id, doc.get("bc_sales_order_rollback_count", 0))
     transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
     # Step 1: Create SO header via GPI custom API
@@ -1180,6 +1246,58 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         logger.warning("No bc_system_id returned for SO %s — cannot add lines", bc_record_no)
 
     now = datetime.now(timezone.utc).isoformat()
+
+    # ── Roll back a partial order: a header with missing lines must not stay in BC ──
+    rollback_error = ""
+    if (
+        result.get("success")
+        and result.get("status") != "already_exists"
+        and bc_system_id
+        and line_result["added"] < line_result["total"]
+    ):
+        try:
+            rollback = await delete_sales_order(bc_system_id)
+        except Exception as e:
+            rollback = {"deleted": False, "error": str(e)}
+        failure = {
+            "bc_record_no": bc_record_no,
+            "idempotency_key": idempotency_key,
+            "lines_added": line_result["added"],
+            "lines_total": line_result["total"],
+            "line_errors": line_result["errors"],
+            "rolled_back": rollback["deleted"],
+            "rollback_error": rollback.get("error", ""),
+            "at": now,
+        }
+        try:
+            await db.bc_so_creation_audit.insert_one({
+                "id": str(uuid.uuid4()), "doc_id": doc_id, "status": "rolled_back" if rollback["deleted"] else "rollback_failed",
+                **failure, "created_at": now, "created_by": "gpi_hub",
+            })
+        except Exception as ae:
+            logger.warning("Failed to write SO rollback audit: %s", ae)
+
+        if rollback["deleted"]:
+            logger.warning("Rolled back SO %s for doc %s: %d/%d lines added", bc_record_no, doc_id, line_result["added"], line_result["total"])
+            # Bump the counter so the next attempt gets a fresh idempotency key
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$inc": {"bc_sales_order_rollback_count": 1}, "$set": {"bc_sales_order_last_failure": failure, "updated_utc": now}},
+            )
+            raise HTTPException(status_code=502, detail={
+                "error": "lines_failed_rolled_back",
+                "message": (
+                    f"Only {line_result['added']}/{line_result['total']} lines could be added, so Sales Order "
+                    f"{bc_record_no} was deleted from BC. Fix the failing lines and try again."
+                ),
+                "line_errors": line_result["errors"],
+            })
+
+        # Delete failed: record the partial order below so a retry can't create a second one
+        rollback_error = rollback.get("error") or f"HTTP {rollback.get('status')}"
+        logger.error("Rollback of partial SO %s failed: %s", bc_record_no, rollback_error)
+
+    created_ok = bool(result.get("success")) and not rollback_error
 
     # Record mapping history for audit
     for idx, line in enumerate(submitted_lines):
@@ -1227,7 +1345,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
 
     # ── Inventory Commitment Creation ──
     commitment_result = None
-    if inv_workspace_id and result.get("success") and result.get("status") != "already_exists":
+    if inv_workspace_id and created_ok and result.get("status") != "already_exists":
         try:
             from services.inventory_so_integration import create_order_commitments
             commitment_result = await create_order_commitments(
@@ -1267,6 +1385,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         "created_by": "gpi_hub",
         "error_message": result.get("error_message", ""),
         "inventory_commitments": commitment_result,
+        "rollback_error": rollback_error,
     }
 
     await db.hub_documents.update_one(
@@ -1285,7 +1404,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         if es:
             await es.emit_event(
                 document_id=doc_id,
-                event_type="bc.sales_order.created" if result.get("success") else "bc.sales_order.failed",
+                event_type="bc.sales_order.created" if created_ok else "bc.sales_order.failed",
                 source_service="gpi_integration",
                 payload={
                     "bc_record_no": bc_record_no,
@@ -1306,7 +1425,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
     # ── Intake Learning auto-refresh on successful BC write ──
     # Fire-and-forget so the very next ingested doc for this customer
     # picks up fresh patterns without waiting for the daily scheduler.
-    if result.get("success") and customer_no:
+    if created_ok and customer_no:
         try:
             import asyncio as _asyncio
             from services.sales_intake_learning_service import refresh_customer_after_bc_write
@@ -1316,7 +1435,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
 
     # ── Auto-approve dropship SOs ──
     ds_auto_approved = False
-    if so_type == "dropship" and result.get("success") and result.get("status") != "already_exists":
+    if so_type == "dropship" and created_ok and result.get("status") != "already_exists":
         try:
             ds_auto_approved = await _auto_approve_dropship_so(db, doc_id, bc_record_no, so_type)
         except Exception as ds_err:
@@ -1343,7 +1462,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
 
     # ── Warehouse SO Booked Notifications ──
     notification_results = None
-    if so_type == "warehouse" and result.get("success") and result.get("status") != "already_exists":
+    if so_type == "warehouse" and created_ok and result.get("status") != "already_exists":
         try:
             from services.notification_service import on_warehouse_so_booked
             notification_results = await on_warehouse_so_booked(
@@ -1360,15 +1479,26 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         except Exception:
             pass
 
+    if rollback_error:
+        message = (
+            f"Sales Order {bc_record_no} was created with only {line_result['added']}/{line_result['total']} lines "
+            f"and could not be deleted ({rollback_error}). Fix or delete it in BC."
+        )
+    elif result.get("success"):
+        message = f"Sales Order {bc_record_no} created with {line_result['added']}/{line_result['total']} lines"
+    else:
+        message = result.get("error_message", "Creation failed")
+
     return {
-        "success": result.get("success", False),
+        "success": result.get("success", False) and not rollback_error,
         "already_exists": result.get("status") == "already_exists",
         "bc_record_no": bc_record_no,
         "bc_system_id": bc_system_id,
         "idempotency_key": idempotency_key,
         "transaction_id": transaction_id,
         "status": result.get("status", ""),
-        "message": f"Sales Order {bc_record_no} created with {line_result['added']}/{line_result['total']} lines" if result.get("success") else result.get("error_message", "Creation failed"),
+        "message": message,
+        "rollback_error": rollback_error,
         "error_message": result.get("error_message", ""),
         "so_type": so_type,
         "so_routing": so_routing,

@@ -1,36 +1,11 @@
-"""Infer customer-order references for historical records without OCR extraction."""
+"""Detect documents that are not customer sales-order intake (vendor POs, split artifacts, posted orders)."""
 
 from __future__ import annotations
 
-import copy
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from services.sales_order_preflight import build_sales_order_candidate
-
-
-_CUSTOMER_REFERENCE_PATTERNS = (
-    re.compile(
-        r"(?:customer\s+(?:purchase\s+order|po)|customer\s+order)"
-        r"(?:\s+(?:number|no\.?))?\s*[:#-]?\s*"
-        r"([A-Z0-9][A-Z0-9-]{3,24})",
-        re.IGNORECASE,
-    ),
-)
-
-_GENERIC_REFERENCE_PATTERNS = (
-    re.compile(
-        r"(?:purchase\s+order|p\.?\s*o\.?|po|order)"
-        r"(?:\s+(?:number|no\.?))?\s*[:#-]?\s*"
-        r"([A-Z0-9][A-Z0-9-]{3,24})",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:number|no\.?)\s*[:#-]\s*([A-Z0-9][A-Z0-9-]{3,24})",
-        re.IGNORECASE,
-    ),
-)
 
 _VENDOR_PO_DOCUMENT_TYPES = {
     "PURCHASE_ORDER",
@@ -64,45 +39,6 @@ _PAGE_RANGE_PATTERN = re.compile(
     r"\[pages?\s+\d+(?:-\d+)?/\d+\]",
     re.IGNORECASE,
 )
-
-
-def _clean_reference(value: Any) -> str:
-    text = str(value or "").strip().strip("-_:;,.()[]{}")
-    return text.upper()
-
-
-def _is_plausible_reference(value: str) -> bool:
-    if not value or len(value) < 4 or len(value) > 25:
-        return False
-    if not any(character.isdigit() for character in value):
-        return False
-    normalized = re.sub(r"[^A-Z0-9]", "", value)
-    if len(normalized) < 4:
-        return False
-    return True
-
-
-def _extract_reference(
-    text: Any,
-    *,
-    allow_generic: bool,
-) -> Optional[str]:
-    value = str(text or "").strip()
-    if not value:
-        return None
-
-    patterns = list(_CUSTOMER_REFERENCE_PATTERNS)
-    if allow_generic:
-        patterns.extend(_GENERIC_REFERENCE_PATTERNS)
-
-    for pattern in patterns:
-        match = pattern.search(value)
-        if not match:
-            continue
-        candidate = _clean_reference(match.group(1))
-        if _is_plausible_reference(candidate):
-            return candidate
-    return None
 
 
 def _normalize_document_type(value: Any) -> str:
@@ -144,26 +80,6 @@ def _document_text(document: Dict[str, Any]) -> str:
         document.get("document_text"),
     ]
     return "\n".join(str(value) for value in values if value)
-
-
-def _has_customer_context(document: Dict[str, Any]) -> bool:
-    extracted = document.get("extracted_fields") or {}
-    normalized = document.get("normalized_fields") or {}
-    resolved = document.get("resolved_customer") or {}
-    return any(
-        str(value or "").strip()
-        for value in (
-            document.get("bc_customer_no"),
-            document.get("bc_customer_number"),
-            document.get("customer_name_extracted"),
-            extracted.get("customer_name") if isinstance(extracted, dict) else None,
-            extracted.get("customer_number") if isinstance(extracted, dict) else None,
-            normalized.get("customer_name") if isinstance(normalized, dict) else None,
-            normalized.get("customer_number") if isinstance(normalized, dict) else None,
-            resolved.get("customerNumber") if isinstance(resolved, dict) else None,
-            resolved.get("number") if isinstance(resolved, dict) else None,
-        )
-    )
 
 
 def _line_candidates(document: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -261,7 +177,7 @@ def assess_sales_order_source(
 
     ``bc_customer_no``: pass the result of entity_resolution_service's
     resolve_customer(document).customer_no when the caller has it (see
-    routes/sales_order_review.py's _source_assessment). PURCHASE_ORDER is a
+    routers/gpi_integration.py's sales-order preflight and create). PURCHASE_ORDER is a
     genuinely ambiguous doc_type in this codebase - it covers real inbound
     customer POs, GPI's own outgoing vendor POs, and third-party (3PL/
     warehouse) documents alike, all with the same type value. A confirmed
@@ -377,80 +293,4 @@ def assess_sales_order_source(
         "excluded": False,
         "reason_code": None,
         "reason": None,
-    }
-
-
-def infer_sales_order_reference(
-    document: Dict[str, Any],
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Return a copy with a conservatively inferred customer reference."""
-
-    inferred = copy.deepcopy(document)
-    assessment = assess_sales_order_source(inferred)
-    if assessment["excluded"]:
-        return inferred, {
-            "inferred": False,
-            "reference": None,
-            "source": None,
-            "confidence": 0.0,
-            "excluded_from_sales_order": True,
-            "exclusion_reason_code": assessment["reason_code"],
-            "exclusion_reason": assessment["reason"],
-        }
-
-    candidate = build_sales_order_candidate(inferred)
-    existing = candidate.get("externalDocumentNumber")
-    if existing:
-        return inferred, {
-            "inferred": False,
-            "reference": str(existing),
-            "source": "existing_extraction",
-            "confidence": 1.0,
-            "excluded_from_sales_order": False,
-        }
-
-    allow_generic = _has_customer_context(inferred)
-    subject = inferred.get("email_subject") or inferred.get("subject")
-    reference = _extract_reference(subject, allow_generic=allow_generic)
-    source = "email_subject" if reference else None
-    confidence = 0.95 if reference else 0.0
-
-    if not reference:
-        file_name = inferred.get("file_name") or inferred.get("filename")
-        stem = Path(str(file_name or "")).stem
-        reference = _extract_reference(stem, allow_generic=allow_generic)
-        source = "file_name" if reference else None
-        confidence = 0.90 if reference else 0.0
-
-    if not reference:
-        return inferred, {
-            "inferred": False,
-            "reference": None,
-            "source": None,
-            "confidence": 0.0,
-            "excluded_from_sales_order": False,
-            "reason": (
-                "No explicit customer-PO reference was found. Generic purchase-order "
-                "language is not used without resolved customer context."
-            ),
-        }
-
-    extracted_fields = dict(inferred.get("extracted_fields") or {})
-    normalized_fields = dict(inferred.get("normalized_fields") or {})
-
-    extracted_fields.setdefault("customer_po_no", reference)
-    extracted_fields.setdefault("customer_po_number", reference)
-    normalized_fields.setdefault("customer_po", reference)
-
-    inferred["extracted_fields"] = extracted_fields
-    inferred["normalized_fields"] = normalized_fields
-    inferred["customer_po_number"] = reference
-    inferred["order_number_extracted"] = reference
-
-    return inferred, {
-        "inferred": True,
-        "reference": reference,
-        "source": source,
-        "confidence": confidence,
-        "excluded_from_sales_order": False,
     }

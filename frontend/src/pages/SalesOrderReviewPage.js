@@ -77,7 +77,8 @@ export default function SalesOrderReviewPage() {
       setApproveStatus('done');
       await fetchDoc();
     } catch (err) {
-      toast.error(err.message);
+      const detail = err.response?.data?.detail;
+      toast.error(typeof detail === 'object' ? (detail.message || JSON.stringify(detail)) : (detail || err.message));
       setApproveStatus('');
     } finally {
       setActionLoading(false);

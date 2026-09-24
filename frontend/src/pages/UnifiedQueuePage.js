@@ -383,10 +383,21 @@ export default function UnifiedQueuePage() {
 
   // ── Helpers ──
   const getVendorOrCustomer = (doc) => {
+    const ef = doc.extracted_fields || {};
+    const nf = doc.normalized_fields || {};
+    const dt = doc.document_type || doc.doc_type || '';
+    // AP documents: only ever show the vendor. Their "customer" is the
+    // bill-to (Gamer Packaging itself), which must not pose as the vendor.
+    if (AP_TYPES.includes(dt) && !SALES_TYPES.includes(dt)) {
+      return doc.vendor_canonical || ef.vendor_name || ef.vendor || nf.vendor_name || doc.vendor_raw || '';
+    }
+    if (SALES_TYPES.includes(dt) && !AP_TYPES.includes(dt)) {
+      return doc.customer_name || ef.customer_name || ef.customer || nf.customer_name || '';
+    }
     return doc.vendor_canonical || doc.customer_name ||
-      doc.extracted_fields?.vendor_name || doc.extracted_fields?.customer_name ||
-      doc.extracted_fields?.customer || doc.extracted_fields?.vendor ||
-      doc.normalized_fields?.vendor_name || doc.normalized_fields?.customer_name || '';
+      ef.vendor_name || ef.customer_name ||
+      ef.customer || ef.vendor ||
+      nf.vendor_name || nf.customer_name || '';
   };
 
   const getDocStatus = (doc) => {
@@ -834,7 +845,13 @@ export default function UnifiedQueuePage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="text-sm truncate block max-w-[180px]">{entity || "—"}</span>
+                      {entity ? (
+                        <span className="text-sm truncate block max-w-[180px]">{entity}</span>
+                      ) : AP_TYPES.includes(docType) && !SALES_TYPES.includes(docType) ? (
+                        <span className="text-xs italic text-amber-500" data-testid="vendor-unresolved">Vendor unresolved</span>
+                      ) : (
+                        <span className="text-sm truncate block max-w-[180px]">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge className={`${getTypeColor(docType)} text-[10px] px-1.5 py-0`}>

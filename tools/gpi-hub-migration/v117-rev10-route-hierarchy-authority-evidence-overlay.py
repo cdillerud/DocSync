@@ -183,136 +183,7 @@ def patch_ai_primary(path: Path) -> None:
 
     review_anchor = '''async def propose_ap_route_ai_primary(
 '''
-    review_helpers = r'''def _route_family_name(route: str) -> str:
-    normalized = normalize_route_path(route)
-    if not normalized:
-        return ""
-    return normalized.split("/", 1)[0]
-
-
-def _allowed_route_families(contract: Dict[str, Any]) -> List[str]:
-    families = set()
-    for route in contract.get("static_routes") or []:
-        family = _route_family_name(route)
-        if family:
-            families.add(family)
-    for spec in contract.get("dynamic_routes") or []:
-        family = _route_family_name(spec.get("prefix"))
-        if family:
-            families.add(family)
-    return sorted(families)
-
-
-def _contract_for_route_family(
-    contract: Dict[str, Any],
-    family: str,
-) -> Dict[str, Any]:
-    selected = normalize_route_path(family)
-    narrowed = dict(contract)
-    narrowed["static_routes"] = [
-        route
-        for route in (contract.get("static_routes") or [])
-        if _route_family_name(route) == selected
-    ]
-    narrowed["dynamic_routes"] = [
-        dict(spec)
-        for spec in (contract.get("dynamic_routes") or [])
-        if _route_family_name(spec.get("prefix")) == selected
-    ]
-    return narrowed
-
-
-def _family_learning_context(
-    learning_context: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
-    context = learning_context or {}
-
-    def family_counts(key: str) -> List[Dict[str, Any]]:
-        hierarchy = context.get(key) or {}
-        return [
-            dict(row)
-            for row in (hierarchy.get("family_counts") or [])[:12]
-        ]
-
-    return {
-        "purpose": "TRAIN_HUMAN_ROUTE_FAMILY_CONTEXT_ONLY_NOT_ROUTING_AUTHORITY",
-        "current_vendor": context.get("current_vendor") or "",
-        "current_document_type": context.get("current_document_type") or "",
-        "current_reference_family": context.get("current_reference_family") or "",
-        "current_semantic_features": list(
-            context.get("current_semantic_features") or []
-        )[:16],
-        "same_vendor_family_counts": family_counts(
-            "route_hierarchy_same_vendor"
-        ),
-        "same_reference_family_counts": family_counts(
-            "route_hierarchy_same_reference_family"
-        ),
-        "nearest_family_counts": family_counts(
-            "route_hierarchy_nearest"
-        ),
-    }
-
-
-def _build_route_family_prompt(
-    *,
-    document: Dict[str, Any],
-    bc_context: Dict[str, Any],
-    contract: Dict[str, Any],
-    examples: List[Dict[str, Any]],
-    learning_context: Optional[Dict[str, Any]],
-) -> str:
-    allowed = _allowed_route_families(contract)
-    family_examples = []
-    for source in examples[:8]:
-        row = _prompt_learning_example(source)
-        exact_route = normalize_route_path(row.get("route_path"))
-        family_examples.append(
-            {
-                "example_id": (
-                    row.get("fingerprint")
-                    or row.get("document_id")
-                    or row.get("source_item_id")
-                ),
-                "vendor_name": row.get("vendor_name"),
-                "document_type": (
-                    row.get("document_type")
-                    or row.get("suggested_job_type")
-                ),
-                "file_name": row.get("file_name"),
-                "route_family": _route_family_name(exact_route),
-                "exact_route": exact_route,
-                "key_evidence": row.get("key_evidence") or {},
-            }
-        )
-
-    payload = {
-        "document": _document_evidence(document),
-        "bc_context": bc_context or {},
-        "allowed_route_families": allowed,
-        "similar_human_train_examples": family_examples,
-        "train_family_context": _family_learning_context(learning_context),
-    }
-    return (
-        "You are the GPI Accounts Payable route-family classifier.\n\n"
-        "Select only the TOP-LEVEL GPI workflow family for the current document. "
-        "Do not select a child route in this pass. AP folder names are GPI workflow "
-        "labels, not ordinary-English logistics definitions. HUMAN TRAIN examples "
-        "and train_family_context are routing evidence; generic words such as freight, "
-        "warehouse, international, credit, cost, receipt, BOL, inventory, or dunnage "
-        "do not by themselves determine the family.\n\n"
-        "The proposed_route MUST be exactly one value from allowed_route_families. "
-        "Use current Business Central facts and comparable HUMAN TRAIN evidence. "
-        "If evidence is mixed, still choose the best-supported family and lower "
-        "confidence; use unresolved only for a concrete missing or contradictory fact.\n\n"
-        "Return JSON only in the exact routing-prediction shape required by the route "
-        "selector, with proposed_route set to one exact allowed top-level family.\n\n"
-        "INPUT:\n"
-        + json.dumps(payload, ensure_ascii=False, default=str)
-    )
-
-
-def _route_hierarchy_parent_has_children(
+    review_helpers = r'''def _route_hierarchy_parent_has_children(
     route: str,
     learning_context: Optional[Dict[str, Any]],
 ) -> bool:
@@ -413,76 +284,6 @@ def _build_proposal_review_prompt(
     proposed = normalize_route_path(prediction.proposed_route)
 '''
     first_pass_new = '''    sender = llm_send or _default_llm_send
-
-    family_selection_used = True
-    family_selection_error = ""
-    family_prediction = RoutePrediction(
-        proposed_route="",
-        confidence=0.0,
-        evidence=[],
-        reasoning_summary="route-family selection not completed",
-        bc_refs_used=[],
-        unresolved=[],
-        matched_example_ids=[],
-        model=model,
-    )
-    selected_route_family = ""
-    allowed_route_families = _allowed_route_families(contract)
-    try:
-        family_raw = await sender(
-            _build_route_family_prompt(
-                document=document,
-                bc_context=context,
-                contract=contract,
-                examples=prompt_examples,
-                learning_context=learning_context,
-            ),
-            model,
-        )
-        family_prediction = parse_route_prediction(family_raw, model=model)
-        family_candidate = normalize_route_path(
-            family_prediction.proposed_route
-        )
-        if family_candidate not in allowed_route_families:
-            family_candidate = _route_family_name(family_candidate)
-        if family_candidate in allowed_route_families:
-            selected_route_family = family_candidate
-        else:
-            family_selection_error = (
-                "invalid_family:"
-                + normalize_route_path(family_prediction.proposed_route)
-            )[:500]
-    except Exception as exc:
-        family_selection_error = f"{type(exc).__name__}:{exc}"[:500]
-        logger.warning(
-            "AI-primary route-family selection failed; "
-            "falling back to full contract: %s",
-            family_selection_error,
-        )
-
-    proposal_contract = (
-        _contract_for_route_family(contract, selected_route_family)
-        if selected_route_family
-        else contract
-    )
-    proposal_learning_context = dict(learning_context or {})
-    proposal_learning_context["selected_route_family"] = selected_route_family
-    proposal_learning_context[
-        "route_family_prediction"
-    ] = family_prediction.to_dict()
-
-    prompt = build_route_prompt(
-        document,
-        context,
-        prompt_examples,
-        proposal_contract,
-        supervised_support=support,
-    )
-    prompt = _augment_prompt_with_train_context(
-        prompt,
-        proposal_learning_context,
-    )
-
     try:
         raw = await sender(prompt, model)
         prediction = parse_route_prediction(raw, model=model)
@@ -502,15 +303,12 @@ def _build_proposal_review_prompt(
     first_pass_prediction = prediction
     proposal_review_used = False
     proposal_review_error = ""
-    if _proposal_review_needed(
-        first_pass_prediction,
-        proposal_learning_context,
-    ):
+    if _proposal_review_needed(first_pass_prediction, learning_context):
         proposal_review_used = True
         review_prompt = _build_proposal_review_prompt(
             prompt,
             first_pass_prediction,
-            proposal_learning_context,
+            learning_context,
         )
         try:
             reviewed_raw = await sender(review_prompt, model)
@@ -543,11 +341,6 @@ def _build_proposal_review_prompt(
         "proposal_review_used": proposal_review_used,
         "proposal_review_error": proposal_review_error,
         "first_pass_prediction": first_pass_prediction.to_dict(),
-        "family_selection_used": family_selection_used,
-        "family_selection_error": family_selection_error,
-        "selected_route_family": selected_route_family,
-        "family_prediction": family_prediction.to_dict(),
-        "route_family_contract_restricted": bool(selected_route_family),
 '''
     raw = replace_once(
         raw,
@@ -557,9 +350,6 @@ def _build_proposal_review_prompt(
     )
 
     require("_proposal_review_needed" in raw, "REV10 proposal-review helper missing")
-    require("_build_route_family_prompt" in raw, "REV11 route-family prompt missing")
-    require("_contract_for_route_family" in raw, "REV11 family contract restriction missing")
-    require('"selected_route_family": selected_route_family' in raw, "REV11 family audit missing")
     require("SECOND-PASS PROPOSAL REVIEW" in raw, "REV10 second-pass prompt missing")
     require('"proposal_review_used": proposal_review_used' in raw, "REV10 proposal-review audit missing")
 

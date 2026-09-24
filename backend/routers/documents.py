@@ -142,9 +142,20 @@ async def diagnose_document(doc_id: str):
     file_exists = file_path.exists()
     file_size = file_path.stat().st_size if file_exists else 0
     
-    # Check LLM key
-    llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
-    has_llm_key = bool(llm_key and len(llm_key) > 10)
+    # Check LLM configuration for whichever provider is actually active
+    # (2026-09-23: was hardcoded to EMERGENT_LLM_KEY only, which reported
+    # a false "has_llm_key: true" once production moved to GPI_LLM_PROVIDER=
+    # azure - misleading anyone using this endpoint to troubleshoot a
+    # stuck document, since the credential that actually matters wasn't
+    # the one being checked)
+    from services.llm_model_config import get_llm_provider
+    active_provider = get_llm_provider()
+    if active_provider == "azure":
+        from services.azure_openai_classifier import is_azure_configured
+        has_llm_key = is_azure_configured()
+    else:
+        llm_key = os.environ.get("EMERGENT_LLM_KEY", "")
+        has_llm_key = bool(llm_key and len(llm_key) > 10)
     
     ef = doc.get("extracted_fields")
     ef_type = type(ef).__name__ if ef is not None else "None"
@@ -160,6 +171,7 @@ async def diagnose_document(doc_id: str):
         "file_on_disk": file_exists,
         "file_size_bytes": file_size,
         "has_llm_key": has_llm_key,
+        "active_llm_provider": active_provider,
         "email_id": doc.get("email_id"),
         "sender": doc.get("sender"),
         "classification_method": doc.get("classification_method"),

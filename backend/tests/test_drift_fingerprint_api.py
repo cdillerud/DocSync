@@ -68,10 +68,11 @@ class TestDriftScanIdempotency:
                 "actor": "test",
                 "source": "test_drift_fingerprint_api",
             }
-            # Use the learning events endpoint to insert
-            resp = requests.post(f"{BASE_URL}/api/learning/events", json=event)
-            # If no direct insert endpoint, we'll insert via MongoDB directly
-            # For now, we'll use a workaround - insert via feedback endpoint
+            # NOTE 2026-09-24: this used to POST to /api/learning/events to
+            # seed data, but the response was never asserted on and that
+            # endpoint has since been removed (Learning Ops nav-item
+            # removal). Left as a no-op -- drift/scan below is exercised
+            # idempotently regardless of whether seed data landed.
         
         yield
         

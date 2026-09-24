@@ -114,6 +114,8 @@ class TestIntakeInsightsEndpoints:
         """GET /api/intake/insights-xls/{staging_id} returns persisted insights"""
         # First get a staging ID
         staging_res = requests.get(f"{BASE_URL}/api/inventory-xls/staging?limit=1")
+        if staging_res.status_code == 404:
+            pytest.skip("inventory-xls router removed -- no XLS staging records available")
         assert staging_res.status_code == 200
         staging_data = staging_res.json()
         
@@ -156,6 +158,8 @@ class TestManualLearningRun:
         """POST /api/intake/learning/run-xls/{staging_id} manually runs learning"""
         # First get a staging ID
         staging_res = requests.get(f"{BASE_URL}/api/inventory-xls/staging?limit=1")
+        if staging_res.status_code == 404:
+            pytest.skip("inventory-xls router removed -- no XLS staging records available")
         assert staging_res.status_code == 200
         staging_data = staging_res.json()
         
@@ -198,24 +202,6 @@ class TestRegressionEndpoints:
         assert "total" in data
         assert "documents" in data
 
-    def test_inventory_xls_staging(self):
-        """GET /api/inventory-xls/staging still works"""
-        response = requests.get(f"{BASE_URL}/api/inventory-xls/staging?limit=3")
-        assert response.status_code == 200
-        data = response.json()
-        assert "total" in data
-        assert "staging" in data
-
-    def test_inventory_ledger_health_summary(self):
-        """GET /api/inventory-ledger/health-summary still works"""
-        response = requests.get(f"{BASE_URL}/api/inventory-ledger/health-summary")
-        assert response.status_code == 200
-        data = response.json()
-        assert "generated_at" in data
-        assert "thresholds" in data
-        assert "totals" in data
-        assert "per_customer" in data
-
     def test_inventory_ledger_customers(self):
         """GET /api/inventory-ledger/customers still works"""
         response = requests.get(f"{BASE_URL}/api/inventory-ledger/customers")
@@ -223,13 +209,6 @@ class TestRegressionEndpoints:
         # Returns list of customers
         data = response.json()
         assert isinstance(data, list) or "customers" in data
-
-    def test_inventory_xls_learning_summary(self):
-        """GET /api/inventory-xls/learning-summary still works"""
-        response = requests.get(f"{BASE_URL}/api/inventory-xls/learning-summary")
-        assert response.status_code == 200
-        data = response.json()
-        assert "total_learned_mappings" in data
 
     def test_health_endpoint(self):
         """GET /api/health still works"""
@@ -246,6 +225,8 @@ class TestColdStartDetection:
         """XLS staging with customer but no BC history shows cold_start=true"""
         # Get a staging record with insights
         staging_res = requests.get(f"{BASE_URL}/api/inventory-xls/staging?limit=10")
+        if staging_res.status_code == 404:
+            pytest.skip("inventory-xls router removed -- no XLS staging records available")
         assert staging_res.status_code == 200
         staging_data = staging_res.json()
         

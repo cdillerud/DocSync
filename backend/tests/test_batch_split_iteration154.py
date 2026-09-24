@@ -81,34 +81,6 @@ class TestInboxStats:
         print(f"PASS: Inbox stats - Today: {data['ingested_today']}, Auto-rate: {data['auto_validation_rate']}%, AI confidence: {data['avg_ai_confidence']}%")
 
 
-class TestInsightsTrends:
-    """Tests for insights trends API"""
-    
-    def test_insights_trends_endpoint(self):
-        """Test GET /api/dashboard/insights-trends returns daily trend data"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/insights-trends")
-        
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}"
-        
-        data = response.json()
-        
-        # Verify structure
-        assert "daily" in data
-        assert "period_days" in data
-        
-        daily = data.get("daily", [])
-        assert len(daily) > 0, "Expected at least one day of data"
-        
-        # Verify daily entry structure
-        for entry in daily:
-            assert "date" in entry
-            assert "ingested" in entry
-            assert "auto_rate" in entry
-            assert "ai_confidence" in entry
-        
-        print(f"PASS: Insights trends - {len(daily)} days of data, period: {data.get('period_days')} days")
-
-
 class TestDocumentFiltering:
     """Tests for document filtering - batch_parent exclusion"""
     

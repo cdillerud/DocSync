@@ -68,7 +68,6 @@ from routers.email_polling import router as email_polling_router
 from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
 from routers.sales_dashboard import router as sales_dashboard_router
-from routers.salesperson_dashboard import router as salesperson_dashboard_router
 from routers.inventory_ledger import router as inventory_ledger_router, incoming_supply_router
 from routers.inventory_items import router as inventory_items_router
 from routers.stable_vendor import router as stable_vendor_router
@@ -107,7 +106,6 @@ from routers.dev_tools import router as dev_tools_router
 from routers.ap_advisory import router as ap_advisory_router
 from routers.governance import router as governance_router
 from routers.inside_sales_pilot import router as inside_sales_pilot_router
-from routers.inventory_xls import router as inventory_xls_router
 from routers.intake_learning import router as intake_learning_router
 from routers.learning_core import router as learning_core_router
 from routers.workflow_observer import router as workflow_observer_router
@@ -151,7 +149,6 @@ app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")
 app.include_router(sales_dashboard_router, prefix="/api")
-app.include_router(salesperson_dashboard_router, prefix="/api")
 app.include_router(inventory_ledger_router, prefix="/api")
 app.include_router(incoming_supply_router, prefix="/api")
 app.include_router(inventory_items_router, prefix="/api")
@@ -191,7 +188,6 @@ app.include_router(dev_tools_router, prefix="/api")
 app.include_router(ap_advisory_router, prefix="/api")
 app.include_router(governance_router, prefix="/api")
 app.include_router(inside_sales_pilot_router, prefix="/api")
-app.include_router(inventory_xls_router, prefix="/api")
 app.include_router(intake_learning_router, prefix="/api")
 app.include_router(learning_core_router, prefix="/api")
 app.include_router(workflow_observer_router, prefix="/api")

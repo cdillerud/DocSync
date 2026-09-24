@@ -100,10 +100,6 @@ class TestLearningRegression:
         r = client.get(f"{BASE_URL}/api/learning/pattern-health/unified", timeout=30)
         assert r.status_code == 200
 
-    def test_events_summary(self, client):
-        r = client.get(f"{BASE_URL}/api/learning/events/summary", timeout=30)
-        assert r.status_code == 200
-
     def test_drift_summary(self, client):
         r = client.get(f"{BASE_URL}/api/learning/drift/summary", timeout=30)
         assert r.status_code == 200

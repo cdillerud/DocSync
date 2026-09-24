@@ -133,7 +133,6 @@ def test_dashboard_inbox_stats_has_new_kpis():
 
 @pytest.mark.parametrize("path", [
     "/api/learning/pattern-health/unified",
-    "/api/learning/events/summary",
     "/api/learning/digest",
     "/api/intake/learning/pattern-health",
 ])

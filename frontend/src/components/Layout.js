@@ -37,16 +37,11 @@ const navItems = [
 // compete for attention. Nothing here was deleted; it's one click away.
 const moreNavItems = [
   { to: '/governance', icon: Shield, label: 'Governance' },
-  { to: '/inventory/imports', icon: FileSpreadsheet, label: 'Inventory Imports' },
-  { to: '/inventory/health', icon: Activity, label: 'Inventory Health' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
-  { to: '/order-graph', icon: Network, label: 'Order Graph' },
   { to: '/ai-learning', icon: TrendingUp, label: 'AI Learning' },
-  { to: '/learning/ops', icon: Gauge, label: 'Learning Ops' },
   { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
-  { to: '/insights', icon: TrendingUp, label: 'Insights' },
 ];
 
 export default function Layout() {
@@ -114,13 +109,10 @@ export default function Layout() {
     if (path === '/') return 'Inbox';
     if (path === '/documents') return 'Inbox';
     if (path === '/sales-inventory') return 'Sales';
-    if (path === '/insights') return 'Insights';
     if (path === '/intake/learning') return 'Intake Learning';
     if (path === '/posting-intelligence') return 'Posting Intelligence';
     if (path === '/invoice-trace') return 'Invoice Trace';
-    if (path === '/order-graph') return 'Order Graph';
     if (path === '/ai-learning') return 'AI Learning Intelligence';
-    if (path === '/learning/ops') return 'Learning Ops';
     if (path === '/monitor') return 'System Monitor';
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
     if (path === '/decision-queue') return 'Decision Queue';

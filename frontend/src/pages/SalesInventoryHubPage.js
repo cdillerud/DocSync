@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import SalesDashboardPage from './SalesDashboardPage';
-import InventoryLedgerPage from './InventoryLedgerPage';
-import SalespersonDashboardPage from './SalespersonDashboardPage';
 import MyQueuePage from './MyQueuePage';
 import TriageQueuePage from './TriageQueuePage';
 import InsideSalesPilotPage from './InsideSalesPilotPage';
@@ -15,10 +13,8 @@ const TABS = [
   { key: 'my-queue', label: 'My Queue' },
   { key: 'triage', label: 'Triage' },
   { key: 'sales', label: 'Sales Orders' },
-  { key: 'rep-performance', label: 'Rep Performance' },
   { key: 'inside-sales-pilot', label: 'Sales Intake' },
   { key: 'spiro-bc', label: 'Spiro ↔ BC' },
-  { key: 'inventory', label: 'Inventory Ledger' },
 ];
 
 export default function SalesInventoryHubPage() {
@@ -65,10 +61,8 @@ export default function SalesInventoryHubPage() {
       {activeTab === 'my-queue' && <MyQueuePage />}
       {activeTab === 'triage' && <TriageQueuePage />}
       {activeTab === 'sales' && <SalesDashboardPage />}
-      {activeTab === 'rep-performance' && <SalespersonDashboardPage />}
       {activeTab === 'inside-sales-pilot' && <InsideSalesPilotPage />}
       {activeTab === 'spiro-bc' && <SpiroBCCrossRefDashboard />}
-      {activeTab === 'inventory' && <InventoryLedgerPage />}
     </div>
   );
 }

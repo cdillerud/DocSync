@@ -196,21 +196,6 @@ class TestInboxStats:
         
         print(f"PASS: Inbox stats: today={data.get('ingested_today')}, auto_rate={data.get('auto_validation_rate')}%")
 
-class TestInsightsPage:
-    """Tests for Insights page backend"""
-    
-    def test_insights_trends_endpoint(self):
-        """GET /api/dashboard/insights-trends returns trend data"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/insights-trends")
-        assert response.status_code == 200
-        data = response.json()
-        
-        # Should have daily_trend or similar data
-        assert "daily_trend" in data or "trends" in data or len(data) > 0, \
-            "Insights trends should return data"
-        
-        print(f"PASS: Insights trends endpoint returns data")
-
 class TestSalesDashboard:
     """Tests for Sales dashboard endpoints"""
     

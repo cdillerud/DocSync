@@ -6,6 +6,13 @@ Tests:
 - POST /api/ap-review/documents/{doc_id}/post-to-bc - Post to BC validation
 - POST /api/ap-review/documents/{doc_id}/mark-ready - Mark ready for post
 - POST /api/documents/{doc_id}/reprocess-batch - Batch reprocess endpoint
+
+2026-09-24: dropped TestInsightsTrendsEndpoint (insights-trends endpoint
+removed, was Insights-page-only) and TestDashboardStatsEndpoint
+(/dashboard/stats was already removed in the prior contracts/dead-code
+cleanup pass -- this file just hadn't been updated to match yet).
+TestAPMetricsEndpoint is unaffected and stays: /dashboard/ap-metrics is a
+separate, still-live endpoint with no relationship to the Insights page.
 """
 
 import pytest
@@ -113,55 +120,6 @@ class TestBatchReprocessEndpoint:
         response = requests.post(f"{BASE_URL}/api/documents/invalid-doc-id-12345/reprocess-batch")
         assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
         print("PASS: POST /api/documents/{invalid_id}/reprocess-batch returns 404")
-
-
-class TestInsightsTrendsEndpoint:
-    """Test GET /api/dashboard/insights-trends endpoint"""
-    
-    def test_insights_trends_returns_200(self):
-        """Insights trends endpoint should return 200"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/insights-trends")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: GET /api/dashboard/insights-trends returns 200")
-    
-    def test_insights_trends_response_structure(self):
-        """Insights trends should return expected fields"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/insights-trends?days=30")
-        assert response.status_code == 200
-        
-        data = response.json()
-        
-        # Verify required fields
-        assert 'daily' in data, "Response should have 'daily' field"
-        assert 'bakeoff_runs' in data, "Response should have 'bakeoff_runs' field"
-        assert 'period_days' in data, "Response should have 'period_days' field"
-        
-        assert isinstance(data['daily'], list), "daily should be a list"
-        assert isinstance(data['bakeoff_runs'], list), "bakeoff_runs should be a list"
-        assert data['period_days'] == 30, f"period_days should be 30, got {data['period_days']}"
-        
-        print(f"PASS: Insights trends structure valid - {len(data['daily'])} daily entries, {len(data['bakeoff_runs'])} bakeoff runs")
-
-
-class TestDashboardStatsEndpoint:
-    """Test GET /api/dashboard/stats endpoint"""
-    
-    def test_dashboard_stats_returns_200(self):
-        """Dashboard stats endpoint should return 200"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/stats")
-        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
-        print("PASS: GET /api/dashboard/stats returns 200")
-    
-    def test_dashboard_stats_has_demo_mode_field(self):
-        """Dashboard stats should include demo_mode field"""
-        response = requests.get(f"{BASE_URL}/api/dashboard/stats")
-        assert response.status_code == 200
-        
-        data = response.json()
-        assert 'demo_mode' in data, "Response should have 'demo_mode' field"
-        # Per .env, DEMO_MODE=false
-        assert data['demo_mode'] == False, f"demo_mode should be False, got {data['demo_mode']}"
-        print("PASS: Dashboard stats shows demo_mode=False (BC Sandbox is REAL)")
 
 
 class TestHealthEndpoint:

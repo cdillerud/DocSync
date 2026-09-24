@@ -1,10 +1,14 @@
 """
 U5 — Learning Ops API regression.
 Covers:
-  * GET /api/learning/reviewers/leaderboard happy path, days clamp, actor=test exclusion
   * Regression on U3 /pattern-health/unified (domain + combined)
   * Regression on U4 /feedback (customer + vendor shapes)
   * Regression on hygiene/run + drift/scan + drift/summary
+
+2026-09-24: dropped TestLeaderboard (GET /api/learning/reviewers/leaderboard
+removed, was Learning-Ops-page-only) and the events-summary/events-feed
+checks in TestOpsDependencies (GET /api/learning/events and
+/api/learning/events/summary removed, same reason).
 """
 import os
 import requests
@@ -12,44 +16,6 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
 S = requests.Session()
 S.headers.update({"Content-Type": "application/json"})
-
-
-class TestLeaderboard:
-    def test_leaderboard_default_window(self):
-        r = S.get(f"{BASE_URL}/api/learning/reviewers/leaderboard?days=7&limit=10", timeout=30)
-        assert r.status_code == 200, r.text
-        data = r.json()
-        for k in ("window_days", "since", "total_events", "unique_actors", "reviewers"):
-            assert k in data, f"missing {k} in leaderboard response"
-        assert data["window_days"] == 7
-        assert isinstance(data["reviewers"], list)
-        # Seeded data (U5-OPS-SEED) should produce activity; tolerate empty if seeds cleaned
-        if data["reviewers"]:
-            first = data["reviewers"][0]
-            for k in ("actor", "events", "domains", "top_event_type"):
-                assert k in first
-            # sort desc
-            counts = [r["events"] for r in data["reviewers"]]
-            assert counts == sorted(counts, reverse=True)
-            # actor=test must be excluded
-            actors = [r["actor"] for r in data["reviewers"]]
-            assert "test" not in actors
-
-    def test_leaderboard_days_clamped_high(self):
-        r = S.get(f"{BASE_URL}/api/learning/reviewers/leaderboard?days=999", timeout=30)
-        # FastAPI Query(le=90) rejects with 422; clamp is handled in service too.
-        assert r.status_code in (200, 422)
-        if r.status_code == 200:
-            assert r.json()["window_days"] <= 90
-
-    def test_leaderboard_days_clamped_low(self):
-        r = S.get(f"{BASE_URL}/api/learning/reviewers/leaderboard?days=0", timeout=30)
-        assert r.status_code in (200, 422)
-
-    def test_leaderboard_30_days(self):
-        r = S.get(f"{BASE_URL}/api/learning/reviewers/leaderboard?days=30&limit=10", timeout=30)
-        assert r.status_code == 200
-        assert r.json()["window_days"] == 30
 
 
 class TestPatternHealthUnifiedRegression:
@@ -103,16 +69,6 @@ class TestUnifiedFeedbackRegression:
 
 
 class TestOpsDependencies:
-    def test_events_summary(self):
-        r = S.get(f"{BASE_URL}/api/learning/events/summary", timeout=30)
-        assert r.status_code == 200
-        assert "total_events" in r.json()
-
-    def test_events_feed(self):
-        r = S.get(f"{BASE_URL}/api/learning/events?limit=25", timeout=30)
-        assert r.status_code == 200
-        assert "events" in r.json()
-
     def test_drift_summary(self):
         r = S.get(f"{BASE_URL}/api/learning/drift/summary", timeout=30)
         assert r.status_code == 200

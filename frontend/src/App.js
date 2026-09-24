@@ -12,22 +12,16 @@ import OperationsQueuePage from "@/pages/OperationsQueuePage";
 // Hub pages (consolidated)
 import DocumentsHubPage from "@/pages/DocumentsHubPage";
 import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
-import InventoryImportsPage from "@/pages/InventoryImportsPage";
-import InventoryHealthPage from "@/pages/InventoryHealthPage";
 import IntakeLearningPage from "@/pages/IntakeLearningPage";
-import SalespersonDashboardPage from "@/pages/SalespersonDashboardPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
-import InsightsPage from "@/pages/InsightsPage";
 import BakeOffPage from "@/pages/BakeOffPage";
 import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
-import OrderGraphPage from "@/pages/OrderGraphPage";
 import LearningDashboard from "@/pages/LearningDashboard";
-import LearningOpsPage from "@/pages/LearningOpsPage";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
 import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
@@ -51,10 +45,7 @@ function AppRoutes() {
         <Route path="search" element={<SearchPage />} />
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
-        <Route path="inventory/imports" element={<InventoryImportsPage />} />
-        <Route path="inventory/health" element={<InventoryHealthPage />} />
         <Route path="intake/learning" element={<IntakeLearningPage />} />
-        <Route path="insights" element={<InsightsPage />} />
         <Route path="config" element={<SettingsHubPage />} />
         {/* Keep old pages accessible but not in nav */}
         <Route path="intelligence" element={<IntelligenceHubPage />} />
@@ -62,9 +53,7 @@ function AppRoutes() {
         <Route path="integrations" element={<IntegrationsHubPage />} />
         <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
         <Route path="invoice-trace" element={<InvoiceTracePage />} />
-        <Route path="order-graph" element={<OrderGraphPage />} />
         <Route path="ai-learning" element={<LearningDashboard />} />
-        <Route path="learning/ops" element={<LearningOpsPage />} />
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />

@@ -474,7 +474,10 @@ async def process_document_for_auto_post(doc_id: str, db, bc_service) -> AutoPos
 # AUTO-CREATE SALES ORDER (Square9-style)
 # =============================================================================
 
-AUTO_CREATE_SALES_ORDER_ENABLED = os.environ.get("AUTO_CREATE_SALES_ORDER_ENABLED", "true").lower() in ("true", "1", "yes")
+# Off unless explicitly enabled: this path creates BC sales orders on intake with no
+# human in the loop and without the vendor-PO / duplicate / rollback guards that
+# routers/gpi_integration.py applies to rep-initiated creates.
+AUTO_CREATE_SALES_ORDER_ENABLED = os.environ.get("AUTO_CREATE_SALES_ORDER_ENABLED", "false").lower() in ("true", "1", "yes")
 
 
 def check_sales_order_eligibility(doc: Dict[str, Any]) -> tuple[bool, str]:

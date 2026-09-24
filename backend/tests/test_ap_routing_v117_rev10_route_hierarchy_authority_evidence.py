@@ -11,10 +11,7 @@ from services.ap_routing_business_context_expansion_service import (
     build_train_business_context_deficits,
 )
 from services.ap_routing_learned_autonomy_service import evaluate_learned_autonomy
-from services.ap_routing_train_context_service import (
-    _route_balanced_neighborhood,
-    build_train_learning_context,
-)
+from services.ap_routing_train_context_service import build_train_learning_context
 
 
 def _train(
@@ -66,31 +63,6 @@ def _current(*, vendor="Acme", file_name="W119900_current.pdf"):
 
 def _counts(rows, key):
     return {row[key]: row["count"] for row in rows}
-
-
-def test_rev11_nearest_train_context_preserves_repeated_route_density_without_crowdout():
-    ranked = [
-        {"fingerprint": "a1", "route_path": "Route A"},
-        {"fingerprint": "a2", "route_path": "Route A"},
-        {"fingerprint": "a3", "route_path": "Route A"},
-        {"fingerprint": "a4", "route_path": "Route A"},
-        {"fingerprint": "b1", "route_path": "Route B"},
-        {"fingerprint": "c1", "route_path": "Route C"},
-        {"fingerprint": "d1", "route_path": "Route D"},
-    ]
-
-    selected = _route_balanced_neighborhood(
-        ranked,
-        limit=6,
-        max_per_route=3,
-    )
-    routes = [row["route_path"] for row in selected]
-
-    assert routes[:3] == ["Route A", "Route A", "Route A"]
-    assert "Route B" in routes
-    assert "Route C" in routes
-    assert "Route D" in routes
-    assert routes.count("Route A") == 3
 
 
 def test_rev10_route_hierarchy_context_preserves_parent_and_child_counts_train_only():

@@ -16,101 +16,6 @@ def replace_once(raw: str, old: str, new: str, label: str) -> str:
 def patch_train_context(path: Path) -> None:
     raw = path.read_text(encoding="utf-8")
 
-    old_neighborhood = '''def _route_balanced_neighborhood(
-    ranked: Sequence[Dict[str, Any]],
-    *,
-    limit: int,
-) -> List[Dict[str, Any]]:
-    """Bound a relevance-ranked TRAIN neighborhood without route crowd-out.
-
-    The first pass keeps the highest-ranked example for each distinct observed
-    route. The second pass fills any remaining slots in the original relevance
-    order. This changes prompt evidence composition only; it does not create or
-    relax routing authority.
-    """
-    bounded_limit = max(1, int(limit))
-    if len(ranked) <= bounded_limit:
-        return [dict(row) for row in ranked]
-
-    selected_indexes: List[int] = []
-    selected_index_set = set()
-    seen_routes = set()
-
-    for index, row in enumerate(ranked):
-        route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))
-        if not route or route in seen_routes:
-            continue
-        selected_indexes.append(index)
-        selected_index_set.add(index)
-        seen_routes.add(route)
-        if len(selected_indexes) >= bounded_limit:
-            break
-
-    if len(selected_indexes) < bounded_limit:
-        for index in range(len(ranked)):
-            if index in selected_index_set:
-                continue
-            selected_indexes.append(index)
-            selected_index_set.add(index)
-            if len(selected_indexes) >= bounded_limit:
-                break
-
-    return [dict(ranked[index]) for index in selected_indexes]
-'''
-    new_neighborhood = '''def _route_balanced_neighborhood(
-    ranked: Sequence[Dict[str, Any]],
-    *,
-    limit: int,
-    max_per_route: int = 3,
-) -> List[Dict[str, Any]]:
-    """Build a relevance-first HUMAN TRAIN neighborhood with bounded route density.
-
-    The prior implementation forced one example per distinct route before any
-    route could contribute a second example. That made repeated exact-route
-    evidence look artificially sparse in nearest_human_route_observations and
-    route_hierarchy_nearest. Preserve relevance order instead, while capping any
-    single route so one common workflow cannot crowd out nearby alternatives.
-    This changes prompt evidence composition only; it does not create or relax
-    routing authority.
-    """
-    bounded_limit = max(1, int(limit))
-    route_cap = max(1, int(max_per_route))
-    if not ranked:
-        return []
-
-    selected: List[Dict[str, Any]] = []
-    route_counts: Counter[str] = Counter()
-    deferred: List[Dict[str, Any]] = []
-
-    for source in ranked:
-        row = dict(source)
-        route = normalize_route_path(row.get("route_path") or row.get("final_human_route"))
-        if route and route_counts[route] >= route_cap:
-            deferred.append(row)
-            continue
-        selected.append(row)
-        if route:
-            route_counts[route] += 1
-        if len(selected) >= bounded_limit:
-            return selected
-
-    # If TRAIN has fewer distinct usable routes than the requested context size,
-    # fill the remaining prompt-only context from the original relevance order.
-    # The cap is a diversity preference, not a reason to discard available HUMAN
-    # evidence when there is otherwise unused context capacity.
-    for row in deferred:
-        selected.append(row)
-        if len(selected) >= bounded_limit:
-            break
-    return selected
-'''
-    raw = replace_once(
-        raw,
-        old_neighborhood,
-        new_neighborhood,
-        "REV11 density-aware TRAIN neighborhood",
-    )
-
     insert_anchor = '''def _dynamic_route_usage(
 '''
     helper = '''def _route_parent(route: str) -> str:
@@ -228,10 +133,6 @@ def _route_hierarchy_usage(
 
     require("route_hierarchy_same_vendor" in raw, "REV10 same-vendor route hierarchy missing")
     require("route_hierarchy_same_reference_family" in raw, "REV10 reference-family route hierarchy missing")
-    require(
-        "relevance-first HUMAN TRAIN neighborhood with bounded route density" in raw,
-        "REV11 density-aware TRAIN neighborhood missing",
-    )
     compile(raw, str(path), "exec")
     path.write_text(raw, encoding="utf-8", newline="\n")
 

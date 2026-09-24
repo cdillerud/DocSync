@@ -1,7 +1,13 @@
 """
 GPI Document Hub - Invoice Data Extraction Service
 
-This service uses Gemini AI with vision capabilities to extract structured data
+2026-09-23: migrated off the old Gemini/Emergent path (EMERGENT_LLM_KEY's
+shared proxy budget was exhausted) onto the same genuine Azure OpenAI
+route already proven working in document_intel_helpers._call_llm_for_extraction()
+and classification_pipeline.stage_classify_llm() - LlmChat with_model("azure",
+...) against AZURE_OPENAI_ENDPOINT/KEY, no Emergent involvement at all.
+
+This service uses Azure OpenAI (GamerLLM) vision to extract structured data
 from invoice PDFs, including:
 - Invoice number
 - Invoice date
@@ -18,6 +24,7 @@ and potentially auto-posting to Business Central.
 
 import os
 import json
+import base64
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -313,8 +320,8 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
 
     # XML e-invoices (e.g. Mexican CFDI) get a direct, deterministic
     # parse attempt before anything else in this function, including
-    # the EMERGENT_LLM_KEY check below - this path never calls Gemini
-    # at all, so it must not be gated behind an LLM-specific
+    # the Azure-configuration check below - this path never calls an
+    # LLM at all, so it must not be gated behind an LLM-specific
     # precondition. See _try_extract_cfdi_invoice's docstring for why
     # a direct parser is the right tool for this fixed schema.
     if Path(file_path).suffix.lower() == ".xml":
@@ -322,14 +329,15 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
         if cfdi_result is not None:
             return cfdi_result
         # Not a recognizable CFDI document - fall through to the
-        # normal Gemini-based path below, same as any other
+        # normal Azure-based path below, same as any other
         # unsupported extension.
 
-    if not EMERGENT_LLM_KEY:
-        logger.warning("EMERGENT_LLM_KEY not configured, skipping invoice extraction")
+    from services.azure_openai_classifier import is_azure_configured
+    if not is_azure_configured():
+        logger.warning("Azure OpenAI not configured, skipping invoice extraction")
         return InvoiceExtractionResult(
             success=False,
-            error="EMERGENT_LLM_KEY not configured"
+            error="Azure OpenAI not configured"
         )
     
     # Check file extension or detect by magic bytes
@@ -381,30 +389,40 @@ async def extract_invoice_data(file_path: str, vendor_context: str = "") -> Invo
     mime_type = mime_types.get(file_ext, 'application/pdf')
     
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
-        
-        # Create file content object for Gemini
-        file_content = FileContentWithMimeType(
-            file_path=file_path,
-            mime_type=mime_type
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+        from services.document_intel_helpers import _rasterize_pdf_pages
+        from services.azure_openai_classifier import (
+            AZURE_OPENAI_KEY, AZURE_OPENAI_ENDPOINT, AZURE_API_VERSION,
         )
-        
-        # Initialize Gemini chat (must use Gemini for file analysis)
+        from services.llm_model_config import get_llm_model
+
+        model = get_llm_model()
+
+        # Rasterize to base64 image(s) for the vision-capable Azure deployment.
+        if file_ext == ".pdf":
+            image_b64_list, _, _ = _rasterize_pdf_pages(file_path)
+        else:
+            with open(file_path, "rb") as imgf:
+                image_b64_list = [base64.standard_b64encode(imgf.read()).decode("utf-8")]
+
+        # Genuine Azure OpenAI (GamerLLM) chat - replaces the old Gemini/Emergent call
         chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
+            api_key=AZURE_OPENAI_KEY,
             session_id=f"invoice_extract_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}",
             system_message="You are an expert invoice data extraction system. Always respond with valid JSON only."
-        ).with_model("gemini", "gemini-2.5-flash")
+        ).with_model("azure", model).with_params(
+            api_base=AZURE_OPENAI_ENDPOINT, api_version=AZURE_API_VERSION,
+        )
         
         # Build extraction prompt with optional vendor context
         prompt = EXTRACTION_PROMPT
         if vendor_context:
             prompt = vendor_context + "\n\n" + EXTRACTION_PROMPT
         
-        # Send message with file attachment
+        # Send message with image attachment(s)
         user_message = UserMessage(
             text=prompt,
-            file_contents=[file_content]
+            file_contents=[ImageContent(image_base64=b64) for b64 in image_b64_list]
         )
         
         response = await chat.send_message(user_message)

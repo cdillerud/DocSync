@@ -579,85 +579,10 @@ async def get_sh_invoice_queue(
 # Feedback-to-Learning Pipeline
 # =============================================================================
 
-@router.post("/sales-learning/generate-learning-suggestions")
-async def gen_learning_suggestions(
-    background_tasks: BackgroundTasks,
-    customer_no: str = Query(None),
-    limit: int = Query(50, ge=1, le=500),
-    sync: bool = Query(False),
-):
-    """Generate candidate profile-learning suggestions from reviewer feedback."""
-    from deps import get_db
-    from services.unified_learning_service import generate_suggestions, SALES_CONFIG
-    db = get_db()
-    if sync:
-        return await generate_suggestions(db, SALES_CONFIG, limit=limit)
-    async def _run():
-        try:
-            await generate_suggestions(db, SALES_CONFIG, limit=limit)
-        except Exception as exc:
-            logger.error("[FeedbackLearning] Background generation failed: %s", exc)
-    background_tasks.add_task(_run)
-    return {"job_started": True, "customer_no": customer_no, "limit": limit}
-
-
-@router.get("/sales-learning/learning-suggestions")
-async def list_learning_suggestions(
-    customer_no: str = Query(None),
-    suggestion_type: str = Query(None),
-    status: str = Query(None),
-    min_confidence: float = Query(None),
-    date_from: str = Query(None), date_to: str = Query(None),
-    limit: int = Query(50, ge=1, le=500), skip: int = Query(0, ge=0),
-):
-    """Fetch learning suggestions with filters."""
-    from deps import get_db
-    from services.unified_learning_service import get_suggestions, SALES_CONFIG
-    db = get_db()
-    return await get_suggestions(
-        db, SALES_CONFIG, entity_no=customer_no, suggestion_type=suggestion_type,
-        status=status, limit=limit, skip=skip,
-    )
-
 
 # =============================================================================
 # Learning Suggestion Approval / Apply Workflow
 # =============================================================================
-
-@router.post("/sales-learning/learning-suggestions/{suggestion_id}/approve")
-async def approve_learning_suggestion(suggestion_id: str):
-    """Approve a pending learning suggestion."""
-    from deps import get_db
-    from services.unified_learning_service import approve_suggestion, SALES_CONFIG
-    db = get_db()
-    result = await approve_suggestion(db, SALES_CONFIG, suggestion_id, approver="admin")
-    if result.get("error"):
-        raise HTTPException(status_code=422, detail=result["error"])
-    return result
-
-
-@router.post("/sales-learning/learning-suggestions/{suggestion_id}/reject")
-async def reject_learning_suggestion(suggestion_id: str):
-    """Reject a pending or approved suggestion."""
-    from deps import get_db
-    from services.unified_learning_service import reject_suggestion, SALES_CONFIG
-    db = get_db()
-    result = await reject_suggestion(db, SALES_CONFIG, suggestion_id, approver="admin")
-    if result.get("error"):
-        raise HTTPException(status_code=422, detail=result["error"])
-    return result
-
-
-@router.post("/sales-learning/learning-suggestions/{suggestion_id}/apply")
-async def apply_learning_suggestion(suggestion_id: str):
-    """Apply an approved suggestion to the customer profile."""
-    from deps import get_db
-    from services.unified_learning_service import apply_suggestion, SALES_CONFIG
-    db = get_db()
-    result = await apply_suggestion(db, SALES_CONFIG, suggestion_id, applier="admin")
-    if result.get("error"):
-        raise HTTPException(status_code=422, detail=result["error"])
-    return result
 
 
 # =============================================================================

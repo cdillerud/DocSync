@@ -931,9 +931,9 @@ async def get_learning_suggestion(suggestion_id: str):
 async def approve_learning_suggestion(suggestion_id: str):
     """Approve a pending learning suggestion."""
     from deps import get_db
-    from services.sales_order_learning_suggestion_apply_service import approve_suggestion
+    from services.unified_learning_service import approve_suggestion, SALES_CONFIG
     db = get_db()
-    result = await approve_suggestion(db, suggestion_id, approver="admin")
+    result = await approve_suggestion(db, SALES_CONFIG, suggestion_id, approver="admin")
     if result.get("error"):
         raise HTTPException(status_code=422, detail=result["error"])
     return result

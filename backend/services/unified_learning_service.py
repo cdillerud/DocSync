@@ -135,10 +135,31 @@ async def _transition(
         return {"error": f"Cannot transition from '{current}' to '{target}'. Allowed: {allowed}"}
 
     now = datetime.now(timezone.utc).isoformat()
-    update = {"status": target, f"{target}_by": actor, f"{target}_at": now}
+    update = {"status": target, f"{target}_by": actor, f"{target}_at": now, "updated_at": now}
     await coll.update_one({"suggestion_id": suggestion_id}, {"$set": update})
 
     logger.info("[Learning] %s suggestion %s: %s → %s by %s", cfg.label, suggestion_id, current, target, actor)
+
+    # Same learning-log event the old Sales-only transition wrote. Never blocks.
+    if cfg is SALES_CONFIG:
+        try:
+            from workflows.core.learning_core.events_service import record_event
+            await record_event(
+                domain="sales_intake",
+                event_type=f"so_suggestion_{target}",
+                scope_type="customer",
+                scope_value=suggestion.get("customer_no"),
+                target={
+                    "suggestion_id": suggestion_id,
+                    "suggestion_type": suggestion.get("suggestion_type"),
+                },
+                applied={"from_status": current, "to_status": target},
+                actor=actor,
+                source="unified_learning_service",
+                db=db,
+            )
+        except Exception as e:
+            logger.debug("[Learning] event tick failed: %s", e)
     return {"status": target, "suggestion_id": suggestion_id, "previous": current}
 
 

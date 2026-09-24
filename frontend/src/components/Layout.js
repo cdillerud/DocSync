@@ -11,7 +11,7 @@ import {
 import { ScrollArea } from '../components/ui/scroll-area';
 import { Badge } from '../components/ui/badge';
 import {
-  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ChevronDown, ShoppingCart, ClipboardList, FolderTree, ArrowLeftRight, Sparkles, Tag, Wrench, Bug, FlaskConical, ClipboardCheck, Activity, Shield, FileSpreadsheet, Gauge, Network, Search, Plug, MoreHorizontal
+  LayoutDashboard, Files, Settings, Moon, Sun, LogOut, Menu, X, ChevronRight, ChevronDown, ShoppingCart, ClipboardList, FolderTree, Sparkles, Tag, Wrench, Bug, FlaskConical, ClipboardCheck, Activity, FileSpreadsheet, Gauge, Network, Search, Plug, MoreHorizontal
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { APP_VERSION, CHANGELOG } from '../lib/version';
@@ -36,10 +36,7 @@ const navItems = [
 // either active priority right now. Collapsed by default so it doesn't
 // compete for attention. Nothing here was deleted; it's one click away.
 const moreNavItems = [
-  { to: '/governance', icon: Shield, label: 'Governance' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
-  { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
-  { to: '/review-queue', icon: ClipboardCheck, label: 'Review Queue' },
 ];
 
 export default function Layout() {
@@ -48,25 +45,8 @@ export default function Layout() {
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, readEnv: '', writeEnv: '' });
-  const [reviewBadge, setReviewBadge] = useState(0);
   // Auto-expand "More" if the user is already on a deferred page (e.g. a bookmark), so it's never hidden mid-use.
   const [moreOpen, setMoreOpen] = useState(() => moreNavItems.some((item) => location.pathname.startsWith(item.to)));
-
-  // Fetch review queue badge count
-  useEffect(() => {
-    const fetchBadge = async () => {
-      try {
-        const res = await fetch(`${API}/api/posting-patterns/review-queue/badge-count`);
-        if (res.ok) {
-          const data = await res.json();
-          setReviewBadge(data.count || 0);
-        }
-      } catch { /* ignore */ }
-    };
-    fetchBadge();
-    const interval = setInterval(fetchBadge, 60000); // Poll every 60s
-    return () => clearInterval(interval);
-  }, []);
 
   // Fetch BC status on mount
   useEffect(() => {
@@ -108,12 +88,9 @@ export default function Layout() {
     if (path === '/documents') return 'Inbox';
     if (path === '/sales-inventory') return 'Sales';
     if (path === '/intake/learning') return 'Intake Learning';
-    if (path === '/invoice-trace') return 'Invoice Trace';
     if (path === '/monitor') return 'System Monitor';
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
     if (path === '/decision-queue') return 'Decision Queue';
-    if (path === '/governance') return 'Governance';
-    if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';
     if (path === '/integrations') return 'Integrations';
     if (path.startsWith('/documents/')) return 'Document Detail';
@@ -194,11 +171,6 @@ export default function Layout() {
             >
               <Icon className="w-3.5 h-3.5 shrink-0" />
               {label}
-              {label === 'Review Queue' && reviewBadge > 0 && (
-                <span className="ml-auto bg-amber-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1" data-testid="review-badge">
-                  {reviewBadge}
-                </span>
-              )}
             </NavLink>
           ))}
         </nav>

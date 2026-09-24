@@ -1,8 +1,11 @@
 import inspect
 
 from services.ap_routing_ai_primary_service import (
+    _allowed_route_families,
     _augment_prompt_with_train_context,
     _build_proposal_review_prompt,
+    _build_route_family_prompt,
+    _contract_for_route_family,
     _proposal_review_needed,
 )
 from services.ap_routing_decision_service import RoutePrediction
@@ -124,6 +127,80 @@ def test_rev10_prompt_requires_topology_before_workflow_and_parent_before_unsupp
     assert "short paid, underpaid, balance difference" in prompt
     assert "Inventory, warehouse receipt, packing-list, BOL, photo, and transfer semantics" in prompt
     assert "Special top-level queues such as Meg to Process, Rhonda - Issues, and Miscellaneous" in prompt
+
+
+def test_rev11_route_family_contract_restricts_exact_route_stage():
+    contract = {
+        "static_routes": [
+            "Dropship Not International",
+            "Dropship Not International/Freight",
+            "Dropship Not International/Freight/Freight Issues",
+            "Warehouse Not International",
+            "Warehouse Not International/Ball Orders",
+            "Rhonda - Issues",
+        ],
+        "dynamic_routes": [
+            {"prefix": "Dropship International"},
+            {"prefix": "Warehouse International"},
+        ],
+    }
+
+    assert _allowed_route_families(contract) == [
+        "Dropship International",
+        "Dropship Not International",
+        "Rhonda - Issues",
+        "Warehouse International",
+        "Warehouse Not International",
+    ]
+
+    narrowed = _contract_for_route_family(
+        contract,
+        "Dropship Not International",
+    )
+    assert narrowed["static_routes"] == [
+        "Dropship Not International",
+        "Dropship Not International/Freight",
+        "Dropship Not International/Freight/Freight Issues",
+    ]
+    assert narrowed["dynamic_routes"] == []
+
+
+def test_rev11_route_family_prompt_is_ai_primary_and_train_contextual():
+    contract = {
+        "static_routes": [
+            "Dropship Not International",
+            "Warehouse Not International",
+            "Rhonda - Issues",
+        ],
+        "dynamic_routes": [],
+    }
+    prompt = _build_route_family_prompt(
+        document=_current(vendor="Acme"),
+        bc_context={},
+        contract=contract,
+        examples=[
+            _train(
+                "train-one",
+                "Warehouse Not International/Ball Orders",
+                vendor="Acme",
+            )
+        ],
+        learning_context={
+            "current_vendor": "acme",
+            "route_hierarchy_same_vendor": {
+                "family_counts": [
+                    {"route_family": "Warehouse Not International", "count": 3}
+                ]
+            },
+            "route_hierarchy_same_reference_family": {"family_counts": []},
+            "route_hierarchy_nearest": {"family_counts": []},
+        },
+    )
+
+    assert "route-family classifier" in prompt
+    assert "allowed_route_families" in prompt
+    assert "Warehouse Not International" in prompt
+    assert "Do not select a child route in this pass" in prompt
 
 
 def test_rev10_second_pass_review_is_bounded_to_uncertain_or_parent_proposals():

@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from deps import get_db
+from services.document_detail_truth_service import normalize_document_detail_authoritative_truth
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["Documents"])
@@ -512,6 +513,8 @@ async def get_document(doc_id: str, include_events: bool = Query(True)):
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    # GPI-APP-TRUTH-WR-V83: response-only authoritative reconciliation
+    doc = normalize_document_detail_authoritative_truth(doc)
     workflows = await db.hub_workflow_runs.find({"document_id": doc_id}, {"_id": 0}).sort("started_utc", -1).to_list(100)
 
     event_timeline = []

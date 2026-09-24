@@ -217,12 +217,29 @@ function ReadinessPanel({ readiness, docStatus }) {
     effectiveStatus = POSTED_STATUSES.has(docStatus) ? 'posted' : 'completed';
   }
 
-  const cfg = READINESS_CONFIG[effectiveStatus] || READINESS_CONFIG[readiness.status] || READINESS_CONFIG.needs_review;
+  // GPI-TERMINAL-READINESS-DISPLAY-V88-REV2:
+  // terminal workflow state is complete; do not present the engine's
+  // protective ready_auto_link/none contract as a pending operator action.
+  const terminalDisplay = ['completed', 'posted', 'archived', 'linkedtobc']
+    .includes((docStatus || '').toLowerCase());
+
+  const cfg = terminalDisplay
+    ? {
+        label: 'Completed',
+        color: 'bg-emerald-500',
+        textColor: 'text-emerald-500',
+        icon: CheckCircle2,
+      }
+    : (READINESS_CONFIG[effectiveStatus] || READINESS_CONFIG[readiness.status] || READINESS_CONFIG.needs_review);
+
+  const displayRecommendedAction = terminalDisplay
+    ? 'No action required'
+    : (ACTION_LABELS[readiness.recommended_action] || readiness.recommended_action);
   const StatusIcon = cfg.icon;
   const confidencePct = Math.round((readiness.confidence || 0) * 100);
 
   return (
-    <Card className={`border-l-4`} style={{ borderLeftColor: `var(--${readiness.status === 'blocked' ? 'destructive' : readiness.status === 'ready_auto_draft' ? 'primary' : 'warning'})` }} data-testid="readiness-panel">
+    <Card className={`border-l-4`} style={{ borderLeftColor: `var(--${terminalDisplay ? 'primary' : readiness.status === 'blocked' ? 'destructive' : readiness.status === 'ready_auto_draft' ? 'primary' : 'warning'})` }} data-testid="readiness-panel">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -240,7 +257,7 @@ function ReadinessPanel({ readiness, docStatus }) {
         <div className="flex items-center justify-between">
           <div>
             <span className="text-muted-foreground text-xs">Recommended: </span>
-            <span className="font-semibold">{ACTION_LABELS[readiness.recommended_action] || readiness.recommended_action}</span>
+            <span className="font-semibold">{displayRecommendedAction}</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-16 h-2 bg-muted rounded-full overflow-hidden">
@@ -831,7 +848,7 @@ export default function DocumentDetailPage() {
                 {doc.validation_results.match_method && (
                   <div className="border-t border-border pt-3 mt-3">
                     <p className="text-xs font-medium mb-2 flex items-center gap-1.5">
-                      <Building2 className="w-3 h-3" /> Vendor Match Details
+                      <Building2 className="w-3 h-3" /> BC Match Details
                     </p>
                     <div className="bg-muted/50 rounded p-2 text-[11px] space-y-1">
                       <div className="flex justify-between">
@@ -845,11 +862,11 @@ export default function DocumentDetailPage() {
                       {doc.validation_results.bc_record_info && (
                         <>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">BC Vendor No:</span>
+                            <span className="text-muted-foreground">BC Record No:</span>
                             <span className="font-mono">{doc.validation_results.bc_record_info.number}</span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">BC Vendor Name:</span>
+                            <span className="text-muted-foreground">BC Record Name:</span>
                             <span className="font-mono truncate max-w-[150px]">{doc.validation_results.bc_record_info.displayName}</span>
                           </div>
                         </>

@@ -165,6 +165,9 @@ DOC_TYPE_TO_SOURCE_TYPE = {
     "Carrier_Invoice": SourceDocumentType.FREIGHT,
     "BOL": SourceDocumentType.BOL,
     "Shipping_Document": SourceDocumentType.SHIPMENT,
+    # GPI-SQUARE9-WAREHOUSE-RECEIPT-V28: warehouse receipts resolve in purchase domain.
+    "Warehouse_Receipt": SourceDocumentType.PURCHASE_ORDER,
+    "Warehouse Receipt": SourceDocumentType.PURCHASE_ORDER,
     "Packing_List": SourceDocumentType.PACKING_SLIP,
     "Sales_Order": SourceDocumentType.SALES_ORDER,
     "Purchase_Order": SourceDocumentType.PURCHASE_ORDER,
@@ -485,6 +488,7 @@ def extract_references_from_extracted_fields(extracted_fields: Dict[str, Any]) -
     
     field_mappings = [
         ("po_number", ReferenceLabel.PO, 0.95),
+        ("_po_resolution_number", ReferenceLabel.PO, 0.99),  # GPI-SQUARE9-WAREHOUSE-RECEIPT-V28
         ("bol_number", ReferenceLabel.BOL, 0.95),
         ("invoice_number", ReferenceLabel.INVOICE, 0.9),
         ("order_number", ReferenceLabel.ORDER, 0.85),

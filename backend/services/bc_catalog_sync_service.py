@@ -27,17 +27,23 @@ SYNC_META_COLLECTION = "bc_catalog_sync_meta"
 # Standard BC API v2.0 endpoints
 BC_API_VERSION = "v2.0"
 
-# Page size for BC API calls (max 1000)
-PAGE_SIZE = 1000
-
-
 async def _bc_get_paged(environment: str, endpoint: str, select: str = "", filter_str: str = "") -> List[Dict]:
     """Fetch all pages from a BC standard API endpoint."""
     token = await get_bc_token(environment=environment)
     company_id = await get_bc_company_id(environment=environment)
     base_url = f"{BC_API_BASE}/{BC_TENANT_ID}/{environment}/api/{BC_API_VERSION}/companies({company_id})/{endpoint}"
 
-    params = {"$top": str(PAGE_SIZE)}
+    # Do NOT send an explicit $top on the initial request. This BC OData
+    # endpoint treats a client-supplied $top as a cap on the TOTAL result
+    # set, not a per-page hint: when $top is present it returns exactly
+    # that many records and omits @odata.nextLink, silently truncating the
+    # sync (confirmed 2026-09-23: this capped the item sync at exactly
+    # 1000 of 8972 real items, with zero errors logged - the nextLink loop
+    # below never even saw a link to follow). bc_reference_cache_service.py's
+    # _sync_entity() proves the fix: omitting $top lets BC apply its own
+    # default page size while still returning @odata.nextLink correctly,
+    # so the while-loop below then follows every page to completion.
+    params: Dict[str, str] = {}
     if select:
         params["$select"] = select
     if filter_str:

@@ -646,8 +646,17 @@ def _determine_folder_path_core(
         return ("Tooling Invoices", "Tooling invoice detected", routing_details)
 
     # RULE 4: Freight Issues (needing logistics approval)
-    if doc.get("needs_logistics_approval") or doc.get("has_freight_issue"):
-        return ("Freight Issues", "Freight invoice needing logistics approval", routing_details)
+    # Exception disposition must be supported by an explicit issue signal.
+    if (
+        doc.get("needs_logistics_approval")
+        or doc.get("has_freight_issue")
+        or doc.get("freight_issues")
+    ):
+        return (
+            "Dropship Not International/Freight/Freight Issues",
+            "Freight invoice needing logistics approval",
+            routing_details,
+        )
 
     # RULE 5: S&H (Storage & Handling) Invoices
     if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description):
@@ -671,8 +680,53 @@ def _determine_folder_path_core(
             routing_details,
         )
 
+    # GPI-SQUARE9-WAREHOUSE-RECEIPT-V28: warehouse receipts are warehouse-lane documents, not Misc fallback.
+    if doc_type in ("Warehouse_Receipt", "Warehouse Receipt"):
+        _wr_direction = str(freight_direction or extracted.get("freight_direction") or normalized.get("freight_direction") or "").strip().lower()
+        _wr_international = bool(is_international or doc.get("is_international") or extracted.get("is_international") or normalized.get("is_international"))
+        routing_details["freight_direction"] = _wr_direction or None
+        routing_details["is_international"] = _wr_international
+        if _wr_international:
+            return ("Warehouse International", "Warehouse receipt (international)", routing_details)
+        if _wr_direction == "outbound":
+            _wr_subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
+            return (f"Warehouse Not International/{_wr_subfolder}", f"Warehouse receipt outbound domestic -> {_wr_subfolder}", routing_details)
+        return ("Warehouse Not International", "Warehouse receipt (domestic inbound)", routing_details)
+
     # RULE 6: Shipping/Freight documents based on direction & international
     if doc_type in ("Shipping_Document", "Freight_Document", "SHIPMENT", "RECEIPT"):
+        # Hydrate direction from persisted validation context when callers do not
+        # pass freight_direction explicitly. Strong resolved shipment evidence
+        # must outrank carrier identity.
+        if not freight_direction and doc_type == "Shipping_Document":
+            _persisted_routing_details = doc.get("routing_details") or {}
+            if not isinstance(_persisted_routing_details, dict):
+                _persisted_routing_details = {}
+
+            _shipping_validation = (
+                _persisted_routing_details.get("validation_results")
+                or doc.get("validation_results")
+                or {}
+            )
+            if not isinstance(_shipping_validation, dict):
+                _shipping_validation = {}
+
+            _shipping_normalized = (
+                _shipping_validation.get("normalized_fields")
+                or doc.get("normalized_fields")
+                or {}
+            )
+            if not isinstance(_shipping_normalized, dict):
+                _shipping_normalized = {}
+
+            freight_direction = (
+                doc.get("freight_direction")
+                or _persisted_routing_details.get("freight_direction")
+                or _shipping_normalized.get("freight_direction")
+            )
+            if freight_direction:
+                freight_direction = str(freight_direction).strip().casefold()
+
         # S9 Workflow: If PO not in BC → Miscellaneous (applies to shipping docs too)
         bc_po_resolved = doc.get("bc_po_resolved")
         if order_number and bc_po_resolved is False:
@@ -681,9 +735,6 @@ def _determine_folder_path_core(
                 f"PO {order_number} not found as BC purchase order — shipping doc → Misc (S9)",
                 routing_details,
             )
-
-        if _is_freight_vendor(vendor_name) and doc_type == "Freight_Document":
-            return ("Freight Issues", "Freight invoice from carrier", routing_details)
 
         if is_international or doc.get("is_international"):
             if freight_direction == "outbound":
@@ -712,7 +763,11 @@ def _determine_folder_path_core(
         # Unknown direction — default based on vendor
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if vendor_folder == "Freight":
-            return ("Freight Issues", "Freight document (direction unknown)", routing_details)
+            return (
+                "Dropship Not International/Freight",
+                "Freight document (direction unknown; no exception signal)",
+                routing_details,
+            )
         return (
             "Dropship Not International",
             "Shipping document (domestic default)",
@@ -731,11 +786,7 @@ def _determine_folder_path_core(
                 routing_details,
             )
 
-        # Freight vendors (only reached if PO is valid or bc_po_resolved not set)
-        if _is_freight_vendor(vendor_name):
-            return ("Freight Issues", "Freight invoice from carrier", routing_details)
-
-        # International
+        # International disposition outranks carrier identity.
         if is_international or doc.get("is_international"):
             if _is_warehouse_order(doc):
                 path = "Warehouse International"
@@ -743,12 +794,20 @@ def _determine_folder_path_core(
             path = "Dropship International"
             return (path, "International vendor invoice", routing_details)
 
-        # Domestic warehouse
+        # Domestic warehouse disposition outranks carrier identity.
         if _is_warehouse_order(doc):
             subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
             return (
                 f"Warehouse Not International/{subfolder}",
                 f"Domestic warehouse invoice → {subfolder}",
+                routing_details,
+            )
+
+        # A freight carrier is a business-lane signal, not an exception signal.
+        if _is_freight_vendor(vendor_name):
+            return (
+                "Dropship Not International/Freight",
+                "Freight invoice from carrier (normal disposition)",
                 routing_details,
             )
 
@@ -948,6 +1007,10 @@ def _get_credit_vendor_subfolder(vendor_name: str, description: str) -> Optional
 def _get_vendor_subfolder(vendor_name: str) -> str:
     """Get the appropriate subfolder for a vendor."""
     vendor_lower = vendor_name.lower().strip()
+    # GPI-SQUARE9-RL-ROUTING-AUTHORITY-V23: normalize R&L carrier aliases at folder-routing authority.
+    _rl_vendor_alias = " ".join(str(vendor_name or "").strip().casefold().split())
+    if _rl_vendor_alias in ("r & l", "r&l", "r and l", "r+l", "r + l", "r l", "rl"):
+        return "Freight"
     for key, folder in VENDOR_FOLDER_MAPPING.items():
         if key in vendor_lower:
             return folder
@@ -982,6 +1045,10 @@ def _get_warehouse_subfolder(vendor_name: str, order_number: str, doc: Dict) -> 
 
 def _is_freight_vendor(vendor_name: str) -> bool:
     """Check if vendor is a freight carrier."""
+    # GPI-SQUARE9-RL-FREIGHT-ALIAS-V20: normalize R&L carrier naming only.
+    _rl_vendor_alias = " ".join(str(vendor_name or "").strip().casefold().split())
+    if _rl_vendor_alias in ("r & l", "r&l", "r and l", "r+l", "r + l", "r l", "rl"):
+        return True
     vendor_lower = vendor_name.lower()
     freight_keywords = [
         "freight", "trucking", "logistics", "transport", "shipping",
@@ -993,7 +1060,7 @@ def _is_freight_vendor(vendor_name: str) -> bool:
     return any(kw in vendor_lower for kw in freight_keywords)
 
 
-def _is_warehouse_order(doc: Dict) -> bool:
+def _is_warehouse_order_legacy(doc: Dict) -> bool:
     """Check if document is related to a warehouse order."""
     file_name = (doc.get("file_name") or "").lower()
     desc = ((doc.get("extracted_fields") or {}).get("description") or "").lower()
@@ -1010,6 +1077,77 @@ def _is_warehouse_order(doc: Dict) -> bool:
     if "warehouse" in [t.lower() for t in tags]:
         return True
     return False
+
+
+def _is_warehouse_order(doc: dict) -> bool:
+    if not isinstance(doc, dict):
+        return _is_warehouse_order_legacy(doc)
+
+    doc_type = str(
+        doc.get("document_type")
+        or doc.get("suggested_job_type")
+        or doc.get("doc_type")
+        or ""
+    ).strip().casefold()
+
+    mailbox = str(doc.get("mailbox_category") or "").strip().casefold()
+
+    routing_details = doc.get("routing_details") or {}
+    if not isinstance(routing_details, dict):
+        routing_details = {}
+
+    validation = (
+        routing_details.get("validation_results")
+        or doc.get("validation_results")
+        or {}
+    )
+    if not isinstance(validation, dict):
+        validation = {}
+
+    normalized = (
+        validation.get("normalized_fields")
+        or doc.get("normalized_fields")
+        or {}
+    )
+    if not isinstance(normalized, dict):
+        normalized = {}
+
+    direction = str(
+        normalized.get("freight_direction")
+        or doc.get("freight_direction")
+        or routing_details.get("freight_direction")
+        or ""
+    ).strip().casefold()
+
+    is_international = bool(
+        normalized.get("is_international")
+        or doc.get("is_international")
+        or routing_details.get("is_international")
+    )
+
+    match_method = str(validation.get("match_method") or "").strip().casefold()
+
+    checks = validation.get("checks") or []
+    passed_sales_order_match = any(
+        isinstance(check, dict)
+        and str(check.get("check_name") or "").strip().casefold() == "sales_order_match"
+        and bool(check.get("passed"))
+        for check in checks
+    )
+
+    strong_outbound_warehouse_evidence = (
+        doc_type == "shipping_document"
+        and mailbox == "operations"
+        and not is_international
+        and direction == "outbound"
+        and match_method == "sales_order_number"
+        and passed_sales_order_match
+    )
+
+    if strong_outbound_warehouse_evidence:
+        return True
+
+    return _is_warehouse_order_legacy(doc)
 
 
 def _is_dunnage_related(description: str) -> bool:
@@ -1089,18 +1227,39 @@ async def route_with_feedback(
     )
 
     if feedback_folder:
-        routing_details = {
-            "doc_type": doc_type,
-            "vendor": vendor_name.lower(),
-            "order_number": po,
-            "is_international": is_international,
-            "source": "feedback_loop",
+        normalized_feedback = str(feedback_folder).strip("/").casefold()
+        freight_issue_targets = {
+            "freight issues",
+            "dropship not international/freight/freight issues",
         }
-        return (
-            feedback_folder,
-            f"Learned from feedback (vendor={vendor_name}, type={doc_type})",
-            routing_details,
+        has_explicit_freight_issue = bool(
+            doc.get("needs_logistics_approval")
+            or doc.get("has_freight_issue")
+            or doc.get("freight_issues")
         )
+
+        # Learned vendor feedback may identify a useful bucket, but it may not
+        # manufacture an exception state. Unsupported Freight Issues feedback
+        # falls through to the deterministic role/lane rules.
+        if normalized_feedback not in freight_issue_targets or has_explicit_freight_issue:
+            # Canonicalize legacy learned Freight Issues destinations to the
+            # Square9-equivalent nested workflow path when an explicit issue
+            # signal independently justifies the exception disposition.
+            if normalized_feedback in freight_issue_targets and has_explicit_freight_issue:
+                feedback_folder = "Dropship Not International/Freight/Freight Issues"
+
+            routing_details = {
+                "doc_type": doc_type,
+                "vendor": vendor_name.lower(),
+                "order_number": po,
+                "is_international": is_international,
+                "source": "feedback_loop",
+            }
+            return (
+                feedback_folder,
+                f"Learned from feedback (vendor={vendor_name}, type={doc_type})",
+                routing_details,
+            )
 
     # Fall through to rule-based routing
     return determine_folder_path(

@@ -196,6 +196,17 @@ async def resolve_document_intelligence(doc_id: str):
 
 
 async def get_document_reference_intelligence(doc_id: str):
+    # GPI-APP-TRUTH-RI-V85: authoritative response-only reconciliation
+    from deps import get_db as _v85_get_db
+    from services.document_detail_truth_service import normalize_document_detail_authoritative_truth as _v85_normalize
+    _v85_db = _v85_get_db()
+    _v85_doc = await _v85_db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
+    if _v85_doc:
+        _v85_view = _v85_normalize(_v85_doc)
+        _v85_truth = _v85_view.get("operator_truth") or {}
+        if _v85_truth.get("authoritative"):
+            return _v85_view.get("reference_intelligence") or {"status": "not_resolved"}
+
     """
     Get stored reference intelligence data for a document.
     Returns the last resolution result without re-running.

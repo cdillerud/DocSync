@@ -524,9 +524,14 @@ async def resolve_po(
     # Single clear winner
     is_shipment = best.get("bc_entity_type") == "posted_sales_shipment"
     result["status"] = STATUS_RESOLVED_SHIPMENT if is_shipment else STATUS_RESOLVED
-    result["po_number"] = best.get("bc_document_no", best.get("entity_id", ""))
+    # GPI-SQUARE9-WR-POSTED-HISTORY-V67
+    best_entity_type = best.get("bc_entity_type", "purchase_order")
+    if best_entity_type in ("purchase_receipt", "posted_purchase_invoice") and best.get("bc_order_number"):
+        result["po_number"] = best.get("bc_order_number")
+    else:
+        result["po_number"] = best.get("bc_document_no", best.get("entity_id", ""))
     result["bc_record_id"] = best.get("bc_record_id", "")
-    result["bc_entity_type"] = best.get("bc_entity_type", "purchase_order")
+    result["bc_entity_type"] = best_entity_type
     result["confidence"] = best["confidence"]
     result["match_method"] = best.get("match_method", "unknown")
     result["lookup_source"] = best.get("lookup_source", "")
@@ -607,6 +612,40 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
         )
         return link_result
 
+    # GPI-SQUARE9-WR-POSTED-HISTORY-V67
+    if bc_entity_type in ("purchase_receipt", "posted_purchase_invoice"):
+        if lookup_source != "bc_api" or not bc_record_id:
+            link_result["error_code"] = BC_LINK_RECORD_NOT_FOUND
+            link_result["error_message"] = (
+                f"Posted purchase history match is not a live BC API result "
+                f"(entity={bc_entity_type}, source={lookup_source})"
+            )
+            return link_result
+
+        record_type = (
+            "purchaseReceipt"
+            if bc_entity_type == "purchase_receipt"
+            else "postedPurchaseInvoice"
+        )
+        related_no = (
+            (po_resolution.get("best_match") or {}).get("bc_document_no")
+            or ""
+        )
+        link_result["status"] = "linked_history"
+        link_result["bc_record_type"] = record_type
+        link_result["bc_record_id"] = bc_record_id
+        link_result["bc_order_number"] = po_number
+        link_result["bc_document_no"] = related_no
+        link_result["link_method"] = (
+            f"bc_posted_history_live:{po_resolution.get('match_method', 'unknown')}"
+        )
+        logger.info(
+            "[BC_LINK] doc=%s POSTED HISTORY LINK: PO=%s entity=%s doc=%s bc_id=%s",
+            document_id[:12], po_number, bc_entity_type, related_no,
+            bc_record_id[:20],
+        )
+        return link_result
+
     if not bc_record_id:
         # PO resolved via local staging — no real BC record to link to
         if lookup_source == "local_staging":
@@ -625,20 +664,8 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
         logger.warning("[BC_LINK] doc=%s FAIL: No bc_record_id for PO=%s", document_id[:12], po_number)
         return link_result
 
-    # Purchase order with bc_record_id from cache — trust it directly (mirrors shipment path)
-    if bc_record_id:
-        link_result["status"] = "linked"
-        link_result["bc_record_type"] = "purchaseOrder"
-        link_result["bc_record_id"] = bc_record_id
-        link_result["link_method"] = f"bc_cache_match:{po_resolution.get('match_method', 'unknown')}"
-        logger.info(
-            "[BC_LINK] doc=%s CACHE LINK: PO=%s bc_id=%s method=%s",
-            document_id[:12], po_number, bc_record_id[:20],
-            po_resolution.get("match_method", "unknown"),
-        )
-        return link_result
-
-    # No bc_record_id — fallback to live BC verification
+    # GPI-SQUARE9-BC-LINK-LIVE-VERIFY-V65
+    # Cached open purchase orders are volatile and must still exist in live BC.
     try:
         from services.business_central_service import get_bc_service
         svc = get_bc_service()
@@ -654,8 +681,8 @@ async def attempt_bc_link(document_id: str, po_resolution: Dict[str, Any]) -> Di
         # Successfully verified — mark as linked
         link_result["status"] = "linked"
         link_result["bc_record_type"] = "purchaseOrder"
-        link_result["bc_record_id"] = po.get("id", bc_record_id)
-        link_result["link_method"] = f"bc_po_verified:{po_resolution.get('match_method', 'unknown')}"
+        link_result["bc_record_id"] = po.get("id") or bc_record_id
+        link_result["link_method"] = f"bc_po_live_verified:{po_resolution.get('match_method', 'unknown')}"
         logger.info(
             "[BC_LINK] doc=%s SUCCESS: Linked to BC PO %s (bc_id=%s, vendor=%s)",
             document_id[:12], po_number, link_result["bc_record_id"][:20],
@@ -789,27 +816,82 @@ async def _search_bc_cache_shipments(
 # ─── Live BC API Search ───────────────────────────────────────────────────────
 
 async def _search_bc_api(normalized_po: str, document_id: str) -> tuple:
-    """Fallback: search live BC API. Returns (matches_list, error_string_or_None)."""
+    """Fallback: search live BC purchase lifecycle for a PO reference.
+
+    GPI-SQUARE9-WR-POSTED-HISTORY-V67:
+    1. Open purchaseOrders.number
+    2. Posted purchaseReceipts.orderNumber
+    3. Purchase invoices orderNumber
+    """
     try:
         from services.business_central_service import get_bc_service
         svc = get_bc_service()
+
         po = await svc.find_purchase_order_by_number(normalized_po)
         if po:
             logger.info(
-                "[PO_RESOLUTION] doc=%s BC API found PO: %s (vendor=%s)",
+                "[PO_RESOLUTION] doc=%s BC API found OPEN PO: %s (vendor=%s)",
                 document_id[:12], po.get("number", ""), po.get("vendorName", ""),
             )
             return [{
                 "bc_record_id": po.get("id", ""),
                 "bc_document_no": po.get("number", ""),
+                "bc_order_number": po.get("number", ""),
                 "bc_vendor_no": po.get("vendorNumber", ""),
                 "bc_vendor_name": po.get("vendorName", ""),
                 "bc_status": po.get("status", ""),
                 "bc_posting_date": po.get("orderDate", ""),
+                "bc_entity_type": "purchase_order",
                 "confidence": 0.90,
                 "match_method": "bc_api_exact",
             }], None
+
+        from services.bc_reference_resolver import get_reference_resolver
+        import httpx
+
+        resolver = get_reference_resolver()
+        token = await resolver._get_token()
+        if not token:
+            return [], "Could not obtain BC token for posted purchase history"
+        company_id = await resolver._get_company_id(token)
+        if not company_id:
+            return [], "Could not obtain BC company ID for posted purchase history"
+
+        history_checks = [
+            ("purchaseReceipts", "orderNumber", "purchase_receipt", 0.94),
+            ("purchaseInvoices", "orderNumber", "posted_purchase_invoice", 0.92),
+        ]
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for table, field, entity_type, confidence in history_checks:
+                hist = await resolver._check_table(
+                    client, token, company_id,
+                    table, field, normalized_po, entity_type,
+                )
+                if not hist:
+                    continue
+
+                info = hist.bc_record_info or {}
+                related_no = hist.bc_document_no or info.get("number", "")
+                logger.info(
+                    "[PO_RESOLUTION] doc=%s BC API found POSTED HISTORY: PO=%s -> %s %s",
+                    document_id[:12], normalized_po, entity_type, related_no,
+                )
+                return [{
+                    "bc_record_id": hist.bc_record_id or info.get("id", ""),
+                    "bc_document_no": related_no,
+                    "bc_order_number": normalized_po,
+                    "bc_vendor_no": info.get("vendor_number", ""),
+                    "bc_vendor_name": info.get("vendor_name", ""),
+                    "bc_status": info.get("status", "posted") or "posted",
+                    "bc_posting_date": info.get("posting_date", ""),
+                    "bc_entity_type": entity_type,
+                    "confidence": confidence,
+                    "match_method": f"bc_api_{entity_type}_order_exact",
+                }], None
+
         return [], None
+
     except Exception as e:
         logger.warning(
             "[PO_RESOLUTION] doc=%s BC API search failed for PO=%s: %s",
@@ -817,8 +899,6 @@ async def _search_bc_api(normalized_po: str, document_id: str) -> tuple:
         )
         return [], str(e)[:200]
 
-
-# ─── Local Staging Fallback ───────────────────────────────────────────────────
 
 async def _search_local_staging(db, normalized_po: str) -> List[Dict[str, Any]]:
     """Final fallback: search local po_drafts and so_drafts."""

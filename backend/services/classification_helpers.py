@@ -21,6 +21,22 @@ logger = logging.getLogger(__name__)
 AI_CLASSIFICATION_ENABLED = os.environ.get('AI_CLASSIFICATION_ENABLED', 'true').lower() == 'true'
 AI_CLASSIFICATION_THRESHOLD = float(os.environ.get('AI_CLASSIFICATION_THRESHOLD', '0.8'))
 
+# Disabled 2026-09-23: classify_doc_type_with_ai() (services/ai_classifier.py)
+# still calls the old Emergent LLM proxy directly (it imports
+# `emergentintegrations`), which was never migrated when document extraction
+# moved to Azure OpenAI on 2026-09-22 (that migration only covered
+# document_intel_helpers.classify_document_with_ai, the real extraction path).
+# That proxy's budget is exhausted, so every call here was failing with
+# "Budget has been exceeded" and burning a network round-trip for nothing.
+# doc_type is a legacy field the rest of the pipeline already treats as
+# unreliable (document_type / suggested_job_type are authoritative - see the
+# _NON_SALES_ORDER_CLASSIFIED_TYPES exclusion in sales_order_source_inference.py),
+# so rather than repoint this second classifier at Azure too, it is disabled
+# outright: a document deterministic rules can't classify stays doc_type=OTHER,
+# which the AP-lane fallback below already surfaces for human review instead
+# of guessing.
+AI_DOC_TYPE_FALLBACK_ENABLED = False
+
 
 async def classify_document_type(
     document: Dict,
@@ -104,7 +120,7 @@ async def classify_document_type(
         return result
 
     # Step 3: Try AI classification if enabled
-    if AI_CLASSIFICATION_ENABLED and os.environ.get("EMERGENT_LLM_KEY"):
+    if AI_DOC_TYPE_FALLBACK_ENABLED and AI_CLASSIFICATION_ENABLED and os.environ.get("EMERGENT_LLM_KEY"):
         logger.info("Deterministic classification returned OTHER, invoking AI classifier for doc %s", document.get("id"))
         try:
             ai_result = await classify_doc_type_with_ai(

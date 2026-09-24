@@ -567,8 +567,12 @@ class BCReferenceCacheService:
 
         for table_name, config in ENTITY_CONFIGS.items():
             try:
+                # GPI-SQUARE9-BC-CACHE-STALE-V65
+                # Open orders can disappear when posted; incremental modified-date
+                # sync cannot observe deletions. Full-refresh volatile order tables.
+                entity_last_sync = None if table_name in ("purchaseOrders", "salesOrders") else last_sync
                 count = await self._sync_entity(
-                    token, company_id, table_name, config, last_sync
+                    token, company_id, table_name, config, entity_last_sync
                 )
                 results[config["entity_type"]] = count
                 total_records += count
@@ -631,16 +635,19 @@ class BCReferenceCacheService:
         self, token: str, company_id: str,
         table_name: str, config: Dict, last_sync: Optional[str]
     ) -> int:
-        """Fetch records from a single BC entity table and upsert into cache."""
+        # GPI-SQUARE9-BC-CACHE-STALE-V65
+        # Full snapshots reconcile deletions only after a completely successful fetch.
         url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/{table_name}"
 
         params = {"$select": config["select_fields"]}
-
+        is_full_snapshot = last_sync is None
         if last_sync:
             params["$filter"] = f"lastModifiedDateTime gt {last_sync}"
 
         count = 0
         next_url = url
+        seen_record_ids = set()
+        fetch_succeeded = True
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             while next_url:
@@ -650,30 +657,33 @@ class BCReferenceCacheService:
                     resp = await client.get(next_url, headers={"Authorization": f"Bearer {token}"})
 
                 if resp.status_code != 200:
+                    fetch_succeeded = False
                     logger.error("[BC Cache] %s fetch error: %d - %s", table_name, resp.status_code, resp.text[:300])
                     break
 
                 data = resp.json()
                 records = data.get("value", [])
-
                 if records:
                     ops = []
                     for record in records:
                         cache_doc = self._build_cache_document(record, config)
                         if cache_doc and cache_doc.get("bc_record_id"):
+                            seen_record_ids.add(cache_doc["bc_record_id"])
                             from pymongo import ReplaceOne
-                            ops.append(
-                                ReplaceOne(
-                                    {"bc_record_id": cache_doc["bc_record_id"]},
-                                    cache_doc,
-                                    upsert=True
-                                )
-                            )
+                            ops.append(ReplaceOne({"bc_record_id": cache_doc["bc_record_id"]}, cache_doc, upsert=True))
                     if ops:
                         await self.collection.bulk_write(ops, ordered=False)
                         count += len(ops)
 
                 next_url = data.get("@odata.nextLink")
+
+        if is_full_snapshot and fetch_succeeded:
+            stale_query = {"bc_entity_type": config["entity_type"]}
+            if seen_record_ids:
+                stale_query["bc_record_id"] = {"$nin": list(seen_record_ids)}
+            stale_result = await self.collection.delete_many(stale_query)
+            if stale_result.deleted_count:
+                logger.warning("[BC Cache] Reconciled %s: removed %d stale cached records", table_name, stale_result.deleted_count)
 
         return count
 

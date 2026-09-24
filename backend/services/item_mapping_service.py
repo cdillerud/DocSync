@@ -108,6 +108,42 @@ async def map_line_to_item(
         result["catalog_validated"] = cat_check.get("valid", False)
         return result
 
+    # Strategy 1b: Scan the raw description for an embedded BC item code.
+    # Real customer/vendor documents routinely wrap the actual BC item number
+    # inside free text the extractor never structures into extracted_sku -
+    # e.g. "6069963 - HORSESHOENURRICHOCO12KRP2" (leading code), "8oz Flint
+    # Boston Round Bottle (Item # SS8028FLINT-NL)", "4OZ STOCK SQUARE GLASS
+    # JAR (P/N: FG10100B)". Rather than hand-write a regex per vendor
+    # convention, pull every plausible code-like token (contains a digit,
+    # not a bare unit/quantity fragment) and check it directly against the
+    # real BC catalog - a token is only ever accepted if it is a genuine,
+    # exact, unblocked catalog item, so this cannot introduce a false
+    # match that doesn't already exist in Business Central. Confirmed
+    # 2026-09-23 against real pending sales-order candidates (see repo
+    # history around this date for the supporting data).
+    candidate_tokens = re.findall(r'[A-Za-z0-9][A-Za-z0-9\-]{3,19}', description)
+    seen_tokens = set()
+    for token in candidate_tokens:
+        if token in seen_tokens:
+            continue
+        seen_tokens.add(token)
+        if not any(ch.isdigit() for ch in token):
+            continue
+        if not any(ch.isalpha() for ch in token) and len(token) <= 6:
+            if len(token) < 6:
+                continue
+        cat_check = await _validate_target(db, "item", token)
+        if cat_check.get("reason") == "ok":
+            result["matched"] = True
+            result["target_type"] = "item"
+            result["target_no"] = token
+            result["target_description"] = cat_check.get("description", "")
+            result["line_type"] = "Item"
+            result["confidence"] = HIGH_CONFIDENCE
+            result["method"] = "description_embedded_code"
+            result["catalog_validated"] = True
+            return result
+
     # Strategy 2: Configured mapping rules
     mappings = await get_all_mappings(db, customer_no=customer_no)
 
@@ -197,12 +233,21 @@ async def _match_catalog_description(
         return None  # No catalog synced
 
     # Strategy A: Exact normalized description match
+    # NOTE (2026-09-23): do not hardcode a to_list() cap here. The real BC
+    # item catalog is ~9000 records (confirmed after fixing the separate
+    # bc_catalog_sync_service.py pagination bug the same day) - a cap below
+    # that silently drops a large fraction of the catalog from every fuzzy
+    # match attempt, with no error or warning anywhere. to_list(None) reads
+    # the full cursor; at this catalog size that is a trivial amount of
+    # memory for a per-line matching call.
     items = await db[ITEMS_COLLECTION].find(
         {"blocked": {"$ne": True}}, {"_id": 0}
-    ).to_list(5000)
+    ).to_list(None)
 
     best_item = None
     best_score = 0.0
+    substring_item = None
+    substring_len = 0
 
     for item in items:
         item_norm = _normalize(item.get("description", ""))
@@ -224,6 +269,12 @@ async def _match_catalog_description(
                 "original_description": norm_desc,
             }
 
+        if len(item_norm) >= 12 and item_norm in norm_desc:
+            if len(item_norm) > substring_len:
+                substring_item = item
+                substring_len = len(item_norm)
+            continue
+
         # Token overlap scoring
         item_tokens = _tokenize(item.get("description", ""))
         if item_tokens and desc_tokens:
@@ -233,6 +284,20 @@ async def _match_catalog_description(
                 if score > best_score:
                     best_score = score
                     best_item = item
+
+    if substring_item:
+        return {
+            "matched": True,
+            "target_type": "item",
+            "target_no": substring_item["item_no"],
+            "target_description": substring_item.get("description", ""),
+            "line_type": "Item",
+            "confidence": 0.90,
+            "method": "catalog_substring",
+            "mapping_id": None,
+            "catalog_validated": True,
+            "original_description": norm_desc,
+        }
 
     # Only accept catalog matches with high token overlap
     if best_item and best_score >= 0.75:

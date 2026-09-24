@@ -202,6 +202,20 @@ def evaluate_auto_clear(
     
     doc_type = doc.get("doc_type") or doc.get("document_type") or doc.get("suggested_job_type") or "DEFAULT"
 
+    # GPI-SQUARE9-WAREHOUSE-RECEIPT-V28: never auto-clear a warehouse receipt with a PO candidate until BC resolution exists.
+    _canonical_type = doc.get("document_type") or doc.get("suggested_job_type") or doc_type
+    if _canonical_type in ("Warehouse_Receipt", "Warehouse Receipt"):
+        _wr_extracted = doc.get("extracted_fields") or {}
+        _wr_normalized = doc.get("normalized_fields") or {}
+        _wr_po = _wr_extracted.get("_po_resolution_number") or _wr_normalized.get("_po_resolution_number") or _wr_extracted.get("po_number") or _wr_normalized.get("po_number")
+        _wr_bc_link = doc.get("bc_system_id") or doc.get("bc_document_no") or doc.get("bc_record_no") or ((validation_results or {}).get("bc_record_id") if isinstance(validation_results, dict) else None)
+        if _wr_po and not _wr_bc_link:
+            return (
+                AutoClearDecision.NEEDS_REVIEW,
+                f"Warehouse receipt requires BC resolution before auto-clear (PO {_wr_po})",
+                {"checks": [{"check": "warehouse_receipt_bc_resolution", "passed": False, "value": _wr_po, "message": "BC resolution required"}], "all_checks_passed": False},
+            )
+
     # =================================================================
     # HARD GUARDRAIL: Never auto-clear unclassified / junk documents.
     # Protects against split children (`auto_split`) that come back as

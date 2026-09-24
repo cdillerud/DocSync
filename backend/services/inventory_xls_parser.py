@@ -199,21 +199,24 @@ async def _llm_mapping(
     sample_rows: List[Dict[str, Any]],
     classification: str,
 ) -> Optional[ColumnMap]:
-    """Ask Claude Haiku to map ambiguous headers. Returns None if LLM unavailable."""
-    api_key = os.environ.get("EMERGENT_LLM_KEY")
-    if not api_key:
-        logger.warning("[XLSParser] EMERGENT_LLM_KEY not set — skipping LLM fallback")
-        return None
+    """Ask the configured LLM provider to map ambiguous headers. Returns None if unavailable.
+
+    2026-09-23: migrated off a hardcoded EMERGENT_LLM_KEY + Claude-Haiku
+    LlmChat call onto services.llm_router.get_provider("extraction"), so
+    this now respects GPI_LLM_PROVIDER (azure) like the rest of the
+    codebase instead of being permanently stuck on the Emergent proxy's
+    shared budget pool.
+    """
+    from services.llm_router import get_provider
+    from services.providers.base_provider import LLMProviderError
+
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-    except ImportError:
-        logger.warning("[XLSParser] emergentintegrations not installed — skipping LLM fallback")
+        provider = get_provider("extraction")
+    except LLMProviderError as e:
+        logger.warning("[XLSParser] No LLM provider available: %s", e)
         return None
 
     session_id = f"xls-mapping-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-    chat = LlmChat(api_key=api_key, session_id=session_id, system_message=_SYSTEM_PROMPT).with_model(
-        "anthropic", "claude-haiku-4-5-20251001",
-    )
 
     preview = sample_rows[:3] if sample_rows else []
     prompt = json.dumps({
@@ -225,7 +228,12 @@ async def _llm_mapping(
     }, ensure_ascii=False, default=str)
 
     try:
-        response = await chat.send_message(UserMessage(text=prompt))
+        response = await provider.complete(
+            system_prompt=_SYSTEM_PROMPT,
+            user_prompt=prompt,
+            session_id=session_id,
+            expect_json=True,
+        )
     except Exception as e:
         logger.warning("[XLSParser] LLM call failed: %s", e)
         return None

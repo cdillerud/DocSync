@@ -65,7 +65,7 @@ async def test_known_vendor_gets_every_injection(monkeypatch):
     monkeypatch.setattr(deep_learning_engine, "get_extraction_hints_for_vendor", fake_extraction_hints)
 
     async def fake_field_predictions(db, pred_doc):
-        return [{"feature": "has_po", "predicts": "AP_Invoice", "confidence": 0.9, "samples": 10}]
+        return [{"feature": "has_po", "predicted_type": "AP_Invoice", "confidence": 0.9, "samples": 10}]
 
     monkeypatch.setattr(advanced_learning_engine, "get_field_predictions", fake_field_predictions)
     monkeypatch.setattr(deps, "get_db", lambda: "FAKE_DB")

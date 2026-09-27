@@ -275,8 +275,12 @@ async def build_learning_enriched_prompt(
             status["field_correlation"] = "fired"
             corr_text = "\n\n## FIELD CORRELATION PREDICTIONS (learned rules):\n"
             for pred in predictions[:3]:
+                # get_field_predictions returns "predicted_type", not "predicts" --
+                # this KeyError'd on every single call that found a real
+                # correlation (i.e. whenever this signal had anything to say at
+                # all), caught by the health endpoint's first live run.
                 corr_text += (
-                    f"- When '{pred['feature']}' is present -> likely {pred['predicts']} "
+                    f"- When '{pred['feature']}' is present -> likely {pred['predicted_type']} "
                     f"({pred['confidence']:.0%} confidence, {pred['samples']} samples)\n"
                 )
             corr_text += "Consider these patterns when classifying this document.\n"

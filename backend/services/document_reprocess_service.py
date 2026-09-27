@@ -187,6 +187,7 @@ async def reprocess_document_inner(
             classification = await classify_document_with_ai(
                 str(file_path),
                 doc["file_name"],
+                doc=doc,
             )
             await db.hub_documents.update_one(
                 {"id": doc_id},

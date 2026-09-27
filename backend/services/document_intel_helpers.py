@@ -304,7 +304,9 @@ def _check_obvious_bol(file_path: str, file_name: str) -> dict | None:
 
 
 
-async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
+async def classify_document_with_ai(
+    file_path: str, file_name: str, doc: Optional[Dict[str, Any]] = None,
+) -> dict:
     """
     Use Azure OpenAI (GamerLLM) to analyze a document and extract structured data.
     Returns classification and extracted fields.
@@ -312,6 +314,12 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     Heuristics provide fast classification for obvious types, but the LLM
     is ALWAYS called for full field extraction so that documents never end
     up with sparse/empty extracted_fields.
+
+    `doc` is whatever the caller already knows about this document (vendor_no,
+    vendor_canonical, sender/email_sender, prior doc_type, etc.) — passing it
+    lets the learning-context injections (see classification_learning_context)
+    target a known vendor instead of only guessing from the filename. It is
+    optional and defaults to None for callers with nothing yet to offer.
     """
     # Run heuristics first for classification hints
     heuristic_result = (
@@ -332,7 +340,7 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
             "extracted_fields": {},
         }
 
-    llm_result = await _call_llm_for_extraction(file_path, file_name)
+    llm_result = await _call_llm_for_extraction(file_path, file_name, doc=doc)
 
     if heuristic_result:
         heuristic_type = heuristic_result["suggested_job_type"]
@@ -374,7 +382,9 @@ async def classify_document_with_ai(file_path: str, file_name: str) -> dict:
     }
 
 
-async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
+async def _call_llm_for_extraction(
+    file_path: str, file_name: str, doc: Optional[Dict[str, Any]] = None,
+) -> dict:
     """Call Azure OpenAI (GamerLLM) to classify and extract fields from a document."""
     try:
         from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
@@ -388,42 +398,17 @@ async def _call_llm_for_extraction(file_path: str, file_name: str) -> dict:
         }
         mime_type = mime_map.get(ext, "text/plain")
 
-        dynamic_prompt = _CLASSIFY_SYSTEM_PROMPT
-        try:
-            from services.classification_feedback_service import (
-                build_few_shot_prompt_section, build_vendor_hints_prompt_section,
-            )
-            few_shot_section = await build_few_shot_prompt_section()
-            if few_shot_section:
-                dynamic_prompt = dynamic_prompt + "\n" + few_shot_section
-                logger.info("Injected few-shot examples into classification prompt")
-            vendor_for_hint = ""
-            try:
-                from services.vendor_inference_service import infer_vendor
-                inferred, _ = infer_vendor(file_name)
-                if inferred:
-                    vendor_for_hint = inferred
-            except Exception:
-                pass
-            if vendor_for_hint:
-                vendor_hint = await build_vendor_hints_prompt_section(vendor_for_hint)
-                if vendor_hint:
-                    dynamic_prompt = dynamic_prompt + "\n" + vendor_hint
-        except Exception as e:
-            logger.debug("Few-shot injection skipped: %s", e)
-
-        try:
-            from services.feedback_loop_service import build_feedback_context_for_prompt
-            from deps import get_db
-            feedback_db = get_db()
-            feedback_context = await build_feedback_context_for_prompt(
-                feedback_db, vendor_id=vendor_for_hint if 'vendor_for_hint' in dir() else "",
-            )
-            if feedback_context:
-                dynamic_prompt = dynamic_prompt + "\n\n" + feedback_context
-                logger.info("Injected feedback loop context into classification prompt")
-        except Exception as e:
-            logger.debug("Feedback loop injection skipped: %s", e)
+        # Full learning-signal injection — shared with the on-demand pipeline's
+        # stage_classify_llm via classification_learning_context, so both prompt
+        # builders draw on the same vendor extraction profiles, few-shot
+        # corrections, feedback context, BC entity intelligence, deep-learning
+        # extraction hints, amount intelligence, and field-correlation rules.
+        from services.classification_learning_context import build_learning_enriched_prompt
+        merged_doc = dict(doc or {})
+        merged_doc.setdefault("file_name", file_name)
+        dynamic_prompt, _profile_used = await build_learning_enriched_prompt(
+            _CLASSIFY_SYSTEM_PROMPT, doc=merged_doc, log_prefix="EXTRACT:LIVE",
+        )
 
         from services.llm_model_config import get_llm_model
         model = get_llm_model()

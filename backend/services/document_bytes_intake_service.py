@@ -203,7 +203,7 @@ async def intake_document_from_bytes(
     # Run AI extraction (for field extraction, not doc_type classification)
     logger.info("Running AI field extraction for document %s", doc_id)
     try:
-        classification = await classify_document_with_ai(str(file_path), filename)
+        classification = await classify_document_with_ai(str(file_path), filename, doc=doc)
     except Exception as ai_err:
         logger.error("AI classification crashed for %s: %s", doc_id, str(ai_err))
         classification = {"suggested_job_type": "Unknown", "confidence": 0.0, "extracted_fields": {}, "error": str(ai_err)}

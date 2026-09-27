@@ -321,6 +321,11 @@ async def get_unmatched_vendor_gaps():
             "status": {"$nin": DONE_STATUSES},
             "is_duplicate": {"$ne": True},
             "auto_cleared": {"$ne": True},
+            # Exclude leftover test fixtures (e.g. TEST_INVOICE_do_not_process.pdf,
+            # TEST_normalize_001.txt) -- these were never real vendors and were
+            # showing up as reviewable "unmatched vendors" like "ABC Supplies Inc."
+            # and "Test Vendor Corp, Inc." alongside genuine ones.
+            "file_name": {"$not": {"$regex": "^TEST_", "$options": "i"}},
         }},
         {"$group": {
             "_id": {
@@ -427,12 +432,27 @@ async def get_unmatched_vendor_gaps():
             # 3. First word match bonus (important for company names)
             first_word_bonus = 0.15 if vn_words and bc_words and list(sorted(vn_words))[0] == list(sorted(bc_words))[0] else 0
 
-            # 4. Vendor number exact match
-            no_score = 0.95 if vn_lower == bc_no.lower() else (0.85 if bc_no.lower() in vn_lower or vn_lower in bc_no.lower() else 0)
+            # 4. Vendor number exact match -- word-boundary only, not a raw
+            # substring. A raw `bc_no.lower() in vn_lower` check let 2-3 char
+            # vendor numbers match by pure coincidence (e.g. vendor_no "CA"
+            # scored 0.85 against "Hapag-Lloyd (AmeriCA) LLC." because "ca"
+            # sits inside "america" -- same false-positive class already
+            # fixed in vendor_matching.py's identity guard, but this
+            # candidate-suggestion endpoint had its own separate copy of it).
+            bc_no_lower = bc_no.lower()
+            if vn_lower == bc_no_lower:
+                no_score = 0.95
+            elif bc_no_lower and re.search(rf'\b{re.escape(bc_no_lower)}\b', vn_lower):
+                no_score = 0.85
+            elif vn_lower and re.search(rf'\b{re.escape(vn_lower)}\b', bc_no_lower):
+                no_score = 0.85
+            else:
+                no_score = 0
 
-            # 5. Abbreviation handling — check if vendor_no is an abbreviation of the name
+            # 5. Abbreviation handling — check if vendor_no appears as its own
+            # token in the name (same word-boundary fix as above).
             abbrev_score = 0
-            if len(bc_no) >= 3 and bc_no.upper() in vendor_name.upper():
+            if len(bc_no) >= 3 and re.search(rf'\b{re.escape(bc_no.upper())}\b', vendor_name.upper()):
                 abbrev_score = 0.8
 
             best = max(seq_score, jaccard + first_word_bonus, no_score, abbrev_score)

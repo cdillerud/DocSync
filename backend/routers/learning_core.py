@@ -127,6 +127,26 @@ async def pattern_health_unified(
     return await get_health(domain=domain, limit=limit)
 
 
+@router.get("/injection-health")
+async def injection_health(
+    hours: int = Query(24, le=24 * 30, description="lookback window in hours"),
+):
+    """Firing rate for each of the 8 classification-prompt learning signals
+    (VEP, few-shot, vendor hints, feedback loop, BC intelligence, deep
+    learning, amount intelligence, field correlation) across both the live
+    intake path and the on-demand pipeline, over the last `hours`.
+
+    Added 2026-09-28 after the Vendor Extraction Profile signal was found to
+    have silently injected nothing for months (wrong field names, profile
+    lookup still reported "used") with no way to notice short of reading
+    debug logs. A source sitting at fired_rate=0 for vendors that should
+    have data, or a nonzero error_rate, is the shape of that same bug class
+    -- see services/classification_learning_context.get_injection_health_summary.
+    """
+    from services.classification_learning_context import get_injection_health_summary
+    return await get_injection_health_summary(hours=hours)
+
+
 @router.post("/hygiene/run")
 async def hygiene_run(
     domain: str = Query("all", description="sales_intake | ap_posting | all"),

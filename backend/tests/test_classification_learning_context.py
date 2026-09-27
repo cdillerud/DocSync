@@ -124,3 +124,65 @@ async def test_one_source_failing_does_not_block_others(monkeypatch):
 
     assert profile_used is True
     assert "VENDOR EXTRACTION PROFILE" in prompt
+
+
+class _FakeCursor:
+    def __init__(self, docs):
+        self._docs = docs
+
+    async def to_list(self, n):
+        return self._docs[:n]
+
+
+class _FakeEventsCollection:
+    def __init__(self):
+        self.inserted = []
+
+    async def insert_one(self, doc):
+        self.inserted.append(doc)
+
+    def find(self, query, projection=None):
+        return _FakeCursor(list(self.inserted))
+
+
+class _FakeDB:
+    def __init__(self):
+        self.learning_injection_events = _FakeEventsCollection()
+
+
+@pytest.mark.asyncio
+async def test_injection_event_recorded_and_summarized(monkeypatch):
+    """The self-instrumentation added after the VEP bug: every call records
+    which sources fired/were empty/errored, and the summary aggregates it.
+    This is the mechanism meant to catch the next silent-no-op bug in days,
+    not the ~6 months VEP went undetected."""
+    from services import classification_learning_context as ctx
+    from services import vendor_extraction_profile_service, feedback_loop_service
+    import deps
+
+    fake_db = _FakeDB()
+    monkeypatch.setattr(deps, "get_db", lambda: fake_db)
+    monkeypatch.setattr(vendor_extraction_profile_service, "get_vep_service", lambda: None)
+
+    async def boom(*a, **kw):
+        raise RuntimeError("simulated outage")
+
+    monkeypatch.setattr(feedback_loop_service, "build_feedback_context_for_prompt", boom)
+
+    await ctx.build_learning_enriched_prompt(
+        "BASE", doc={"vendor_no": "ACME"}, log_prefix="TESTPATH",
+    )
+
+    assert len(fake_db.learning_injection_events.inserted) == 1
+    event = fake_db.learning_injection_events.inserted[0]
+    assert event["log_prefix"] == "TESTPATH"
+    assert event["vendor"] == "ACME"
+    assert event["sources"]["vep"] == "empty"  # get_vep_service() returned None
+    assert event["sources"]["feedback_loop"] == "error:RuntimeError"
+
+    summary = await ctx.get_injection_health_summary(hours=24)
+    assert summary["total_events"] == 1
+    assert summary["sources"]["vep"]["empty"] == 1
+    assert summary["sources"]["vep"]["fired_rate"] == 0.0
+    assert summary["sources"]["feedback_loop"]["error"] == 1
+    assert summary["sources"]["feedback_loop"]["sample_error"] == "error:RuntimeError"

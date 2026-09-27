@@ -40,7 +40,10 @@ async def test_known_vendor_gets_every_injection(monkeypatch):
         return "== FEW-SHOT EXAMPLES ==" if vendor_no == "ACME" else ""
 
     async def fake_vendor_hints(vendor_name):
-        return f"Vendor '{vendor_name}' hint" if vendor_name else ""
+        # Only the full name has a hint on file, not the short code -- proves
+        # the vendor_id-first-then-vendor_name fallback actually falls back,
+        # not just that some hint happens to fire.
+        return f"Vendor '{vendor_name}' hint" if vendor_name == "Acme Corp" else ""
 
     monkeypatch.setattr(classification_feedback_service, "build_few_shot_prompt_section", fake_few_shot)
     monkeypatch.setattr(classification_feedback_service, "build_vendor_hints_prompt_section", fake_vendor_hints)

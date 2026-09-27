@@ -165,12 +165,23 @@ async def build_learning_enriched_prompt(
             dynamic_prompt += "\n" + few_shot
             logger.info("[%s] Injected %d chars of few-shot examples", log_prefix, len(few_shot))
 
-        if vendor_name:
+        # vendor_type_patterns is written keyed by whatever vendor_canonical
+        # held at correction time -- historically sometimes the short vendor
+        # code ("BERRY"), sometimes the full legal name ("Berry Plastics
+        # Corporation"), inconsistently, across the same real vendor. Try the
+        # short code first (many older corrections used it), then the full
+        # name, instead of only ever trying vendor_name and missing history
+        # recorded under the code -- e.g. BERRY has 21 real corrections on
+        # file that "Berry Plastics Corporation" alone would never find.
+        vendor_hint = ""
+        if vendor_id:
+            vendor_hint = await build_vendor_hints_prompt_section(vendor_id)
+        if not vendor_hint and vendor_name:
             vendor_hint = await build_vendor_hints_prompt_section(vendor_name)
-            if vendor_hint:
-                status["vendor_hint"] = "fired"
-                dynamic_prompt += "\n" + vendor_hint
-                logger.info("[%s] Injected vendor type hint for %s", log_prefix, vendor_name)
+        if vendor_hint:
+            status["vendor_hint"] = "fired"
+            dynamic_prompt += "\n" + vendor_hint
+            logger.info("[%s] Injected vendor type hint for %s", log_prefix, vendor_id or vendor_name)
     except Exception as e:
         err = f"error:{type(e).__name__}"
         if status["few_shot"] == "empty":

@@ -29,9 +29,9 @@ async def test_known_vendor_gets_every_injection(monkeypatch):
             assert vendor == "ACME"
             return {
                 "enabled": True,
-                "reference_priority": ["top-right header"],
-                "doc_type_bias": "AP_Invoice",
-                "label_bias": {"Reference": {"target_label": "PO Number"}},
+                "reference_priority_order": ["top-right header"],
+                "document_type_bias": "AP_Invoice",
+                "reference_label_bias": {"Reference": {"target_label": "PO Number"}},
             }
 
     monkeypatch.setattr(vendor_extraction_profile_service, "get_vep_service", lambda: FakeVEP())
@@ -109,7 +109,7 @@ async def test_one_source_failing_does_not_block_others(monkeypatch):
 
     class FakeVEP:
         async def get_profile(self, vendor):
-            return {"enabled": True, "doc_type_bias": "AP_Invoice"}
+            return {"enabled": True, "document_type_bias": "AP_Invoice"}
 
     monkeypatch.setattr(vendor_extraction_profile_service, "get_vep_service", lambda: FakeVEP())
 

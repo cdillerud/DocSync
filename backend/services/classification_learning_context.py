@@ -88,20 +88,26 @@ async def build_learning_enriched_prompt(
         if vep_svc and effective_vendor:
             profile = await vep_svc.get_profile(effective_vendor)
             if profile and profile.get("enabled"):
-                profile_used = True
                 vep_hints = []
-                ref_pri = profile.get("reference_priority")
+                # NOTE: the profile's actual stored/returned keys are
+                # reference_priority_order / document_type_bias /
+                # reference_label_bias (see vendor_extraction_profile_service
+                # .get_profile / .get_resolver_adjustments) -- this previously
+                # read reference_priority / doc_type_bias / label_bias, which
+                # never existed on any stored profile, so this whole 552-profile
+                # signal was silently a no-op everywhere it was wired in.
+                ref_pri = profile.get("reference_priority_order")
                 if ref_pri:
                     vep_hints.append(
                         f"For vendor '{effective_vendor}', the PO/reference number is typically "
                         f"found in: {', '.join(ref_pri)}."
                     )
-                doc_bias = profile.get("doc_type_bias")
+                doc_bias = profile.get("document_type_bias")
                 if doc_bias and doc_bias != "unknown":
                     vep_hints.append(
                         f"This vendor most commonly sends: {doc_bias}."
                     )
-                label_bias = profile.get("label_bias")
+                label_bias = profile.get("reference_label_bias")
                 if label_bias:
                     for predicted, hint in label_bias.items():
                         target = hint.get("target_label", "")
@@ -111,6 +117,7 @@ async def build_learning_enriched_prompt(
                                 f"it usually refers to: {target}."
                             )
                 if vep_hints:
+                    profile_used = True
                     dynamic_prompt += (
                         "\n\n== VENDOR EXTRACTION PROFILE (learned from historical data) ==\n"
                         + "\n".join(vep_hints)

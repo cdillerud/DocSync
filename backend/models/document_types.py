@@ -446,6 +446,35 @@ DEFAULT_JOB_TYPES = {
         "keywords": ["warehouse receipt", "non-negotiable", "goods received", "stored in warehouse"],
         "enabled": True
     },
+    # Added 2026-09-28: found via a document-type activity audit -- all 10
+    # Packing_Slip documents (2 in the last 30 days, so this is still live)
+    # scored completeness_score 0.0 against AP_Invoice's fallback
+    # vendor/invoice_number/amount requirements, which a packing slip has no
+    # reason to contain. Note Shipping_Document's own keyword list already
+    # includes "packing slip"/"pack list" -- these documents may really be a
+    # classification near-miss rather than a distinct type -- but the real
+    # samples (2 Outlook screenshot PNGs, 1 spreadsheet) extracted almost no
+    # fields either way, so required_extractions is left empty rather than
+    # guessed, same as Statement/Quality_Document/Graphics_Artwork.
+    "Packing_Slip": {
+        "job_type": "Packing_Slip",
+        "display_name": "Packing Slip",
+        "category": "Warehouse",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 0.70,
+        "min_confidence_to_auto_create_draft": 0.90,
+        "po_validation_mode": "PO_IF_PRESENT",
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.70,
+        "vendor_match_strategies": ["exact_name", "normalized"],
+        "sharepoint_folder": "Packing_Slips",
+        "bc_entity": "salesShipments",
+        "required_extractions": [],
+        "optional_extractions": ["po_number", "ship_to", "carrier", "tracking_number", "line_items", "ship_date"],
+        "keywords": ["packing slip", "pack list", "packing list", "contents", "pick list"],
+        "enabled": True
+    },
     # Added 2026-09-28: classify prompt has always offered Inspection_Form as
     # a document_type (trailer inspection forms, QA receiving disposition),
     # and 649 real documents are already classified this way, but no job_type

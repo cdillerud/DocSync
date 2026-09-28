@@ -1987,7 +1987,18 @@ async def get_settings_status():
                 "library": SHAREPOINT_LIBRARY_NAME
             },
             "business_central": {
-                "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
+                # Deliberately decoupled from the blanket DEMO_MODE flag,
+                # unlike sharepoint/entra_id below. business_central_service.py
+                # already computes its own real vs mock decision purely from
+                # whether credentials exist (USE_MOCK = BC_MOCK_MODE or not
+                # BC_CLIENT_ID or not BC_CLIENT_SECRET or not BC_TENANT_ID --
+                # DEMO_MODE isn't part of that calculation, per that file's
+                # own "DEMO_MODE=false now means use real BC" comment), so
+                # this card was reporting "demo" while BC calls were
+                # genuinely live -- confirmed directly: real vendor and
+                # purchase order data flows through /api/ap-review with
+                # these exact credentials regardless of DEMO_MODE's value.
+                "status": "configured" if (BC_CLIENT_ID and BC_CLIENT_SECRET and TENANT_ID) else "not_configured",
                 "environment": BC_ENVIRONMENT or "Not set",
                 "company": BC_COMPANY_NAME or "Not set"
             },

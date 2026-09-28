@@ -210,6 +210,39 @@ async def intake_document(
     ai_classification_audit = classification_result.get("ai_classification")
     classification_method = classification_result.get("classification_method", "unknown")
 
+    # Sync suggested_type with deterministic classification result, mirroring
+    # document_bytes_intake_service.py's intake_document_from_bytes (this
+    # endpoint -- POST /api/documents/intake -- never had this fix, despite
+    # being live and externally reachable: when AI extraction fails
+    # (suggested_type="Unknown") but deterministic classification succeeds
+    # (e.g. mailbox:AP -> AP_INVOICE), suggested_type must be updated so ALL
+    # downstream code (status checks, auto-post routing, job configs) uses
+    # the correct title-case type instead of the legacy all-caps DocType enum
+    # value, which never matches DEFAULT_JOB_TYPES and falls back to
+    # AP_Invoice's validation requirements regardless of the real type.
+    _DOC_TYPE_TO_SUGGESTED = {
+        "AP_INVOICE": "AP_Invoice", "PURCHASE_ORDER": "Purchase_Order",
+        "SALES_INVOICE": "AR_Invoice", "DS_SALES_ORDER": "DS_Sales_Order",
+        "WH_SALES_ORDER": "WH_Sales_Order", "SH_INVOICE": "SH_Invoice",
+        "SALES_CREDIT_MEMO": "Credit_Memo", "PURCHASE_CREDIT_MEMO": "Credit_Memo",
+        "STATEMENT": "Statement", "QUALITY_DOC": "Quality_Document",
+    }
+    if doc_type_value not in ("Other", "Unknown", "OTHER", "Unknown_Document"):
+        new_suggested = _DOC_TYPE_TO_SUGGESTED.get(doc_type_value, doc_type_value)
+        if suggested_type in ("Unknown", "Other", "Unknown_Document") and new_suggested != suggested_type:
+            logger.info(
+                "Syncing suggested_type for %s: %s -> %s (classified via %s)",
+                doc_id, suggested_type, new_suggested, classification_method,
+            )
+            suggested_type = new_suggested
+
+    if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
+        confidence = 0.85  # Deterministic classification gets minimum 85%
+        logger.info(
+            "Bumping confidence for %s to %.2f (classified as %s via %s)",
+            doc_id, confidence, doc_type_value, classification_method,
+        )
+
     logger.info("Document %s classified as %s (category: %s, method: %s)",
                 doc_id, doc_type_value, category, classification_method)
 

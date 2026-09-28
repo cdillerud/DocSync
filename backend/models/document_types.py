@@ -360,6 +360,54 @@ DEFAULT_JOB_TYPES = {
         "keywords": ["quality", "defect", "damage", "complaint", "issue", "problem", "ncr", "claim"],
         "enabled": True
     },
+    # Added 2026-09-28: same gap, found via the legacy-classifier sync fix in
+    # document_intake_service.py -- "STATEMENT" and "QUALITY_DOC" (legacy
+    # all-caps DocType values) map to these two suggested_type strings, and
+    # both are already live (Statement ~7/month, Quality_Document ~2/month
+    # as of this date) with no job_type config anywhere, so every one fell
+    # back to AP_Invoice's vendor/invoice_number/amount requirements. Real
+    # samples were too heterogeneous (AR aging spreadsheets vs Certificates
+    # of Analysis vs Risk Assessments) to commit to specific required
+    # fields with confidence from 3 samples each, so -- same as
+    # Graphics_Artwork -- required_extractions is empty rather than guessed.
+    "Statement": {
+        "job_type": "Statement",
+        "display_name": "Account Statement",
+        "category": "AP",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 0.70,
+        "min_confidence_to_auto_create_draft": 0.90,
+        "po_validation_mode": "PO_NOT_REQUIRED",
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.70,
+        "vendor_match_strategies": ["exact_name", "normalized"],
+        "sharepoint_folder": "Statements",
+        "bc_entity": "purchaseInvoices",
+        "required_extractions": [],
+        "optional_extractions": ["vendor", "customer", "amount", "due_date", "invoice_number"],
+        "keywords": ["statement", "account statement", "aging report", "aging summary"],
+        "enabled": True
+    },
+    "Quality_Document": {
+        "job_type": "Quality_Document",
+        "display_name": "Quality Document (Certificate/Risk Assessment)",
+        "category": "Sales",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 0.60,
+        "min_confidence_to_auto_create_draft": 0.90,
+        "po_validation_mode": "PO_NOT_REQUIRED",
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.60,
+        "vendor_match_strategies": ["normalized"],
+        "sharepoint_folder": "Quality_Documents",
+        "bc_entity": "items",
+        "required_extractions": [],
+        "optional_extractions": ["vendor", "customer", "po_number", "items"],
+        "keywords": ["certificate of analysis", "risk assessment", "coa", "quality document"],
+        "enabled": True
+    },
     "Return_Request": {
         "job_type": "Return_Request",
         "display_name": "Return Request / RMA",

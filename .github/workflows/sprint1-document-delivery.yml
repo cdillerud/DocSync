@@ -7,6 +7,8 @@ on:
       - "backend/routes/zetadocs_mirror.py"
       - "backend/routes/bc_document_events.py"
       - "backend/tests/test_document_delivery_preflight.py"
+      - "backend/tests/test_zetadocs_mirror.py"
+      - "backend/tests/test_bc_document_events.py"
       - "bc-extension/document-delivery/**"
       - "scripts/deploy_sprint1_preflight.sh"
       - "scripts/test_sprint1_preflight.sh"
@@ -20,6 +22,8 @@ on:
       - "backend/routes/zetadocs_mirror.py"
       - "backend/routes/bc_document_events.py"
       - "backend/tests/test_document_delivery_preflight.py"
+      - "backend/tests/test_zetadocs_mirror.py"
+      - "backend/tests/test_bc_document_events.py"
       - "bc-extension/document-delivery/**"
       - "scripts/deploy_sprint1_preflight.sh"
       - "scripts/test_sprint1_preflight.sh"
@@ -59,14 +63,20 @@ jobs:
             routes/document_delivery.py \
             routes/zetadocs_mirror.py \
             routes/bc_document_events.py \
-            tests/test_document_delivery_preflight.py
+            tests/test_document_delivery_preflight.py \
+            tests/test_zetadocs_mirror.py \
+            tests/test_bc_document_events.py
 
       - name: Run Sprint 1 preflight tests
         env:
           BC_DOCUMENT_EVENTS_REQUIRE_API_KEY: "false"
         run: |
           set -o pipefail
-          pytest -vv --tb=short tests/test_document_delivery_preflight.py 2>&1 | tee pytest-output.txt
+          pytest -vv --tb=short \
+            tests/test_document_delivery_preflight.py \
+            tests/test_zetadocs_mirror.py \
+            tests/test_bc_document_events.py \
+            2>&1 | tee pytest-output.txt
 
       - name: Validate AL object IDs
         run: cd .. && python scripts/check_sprint1_al_ids.py

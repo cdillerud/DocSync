@@ -17,6 +17,7 @@ Configuration via environment variables:
 
 import os
 import logging
+import uuid
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -257,27 +258,54 @@ class BusinessCentralService:
             }
     
     async def get_vendor_by_id(self, vendor_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific vendor by ID."""
+        """Get a specific vendor by BC system GUID or vendor number.
+
+        The route's docstring promises "by ID or number", but BC's OData key
+        segment (`vendors({id})`) only accepts the internal system GUID --
+        passing a vendor number there (e.g. "AADVANT", what an AP reviewer
+        would actually type) always 404s even when the vendor exists, since
+        BC just treats it as an unmatched GUID key. Route on whether the
+        input parses as a UUID: GUIDs still use the fast direct key lookup;
+        anything else falls back to an exact $filter=number eq '...' query,
+        the same approach get_vendors() already uses for its own search.
+        """
         if self.use_mock:
             for v in MOCK_VENDORS:
                 if v["id"] == vendor_id or v["number"] == vendor_id:
                     return v
             return None
-        
+
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
-        
+
+        try:
+            uuid.UUID(vendor_id)
+            is_guid = True
+        except ValueError:
+            is_guid = False
+
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            
-            if resp.status_code == 404:
-                return None
+            if is_guid:
+                url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+
+                if resp.status_code == 404:
+                    return None
+                if resp.status_code != 200:
+                    raise Exception(f"Failed to get vendor: {resp.status_code}")
+
+                return resp.json()
+
+            escaped_number = vendor_id.replace("'", "''")
+            url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors"
+            params = {"$filter": f"number eq '{escaped_number}'"}
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+
             if resp.status_code != 200:
                 raise Exception(f"Failed to get vendor: {resp.status_code}")
-            
-            return resp.json()
+
+            results = resp.json().get("value", [])
+            return results[0] if results else None
     
     # =========================================================================
     # PURCHASE ORDER METHODS

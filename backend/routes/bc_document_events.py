@@ -1031,6 +1031,35 @@ async def repair_orphan_events():
     }
 
 
+# -------------------- sandbox UI self-test endpoints --------------------
+#
+# The GPI Hub frontend's own "Send Sample Event" / "Repair Orphans" buttons
+# on the BC Events page call these two actions to demonstrate the bridge
+# without a real BC extension -- but /delivery-sent and /repair-orphans
+# above are deliberately gated by X-GPI-Hub-Api-Key, a secret meant for the
+# external BC AL extension, and the frontend never had it (nor should it:
+# baking that secret into the public JS bundle would defeat the point of
+# having it). Every click failed with 401, which the frontend's axios
+# interceptor treats as "session expired" and force-logs the user out.
+#
+# These wrap the exact same internal functions with no API-key requirement,
+# consistent with every other route in this app (none of which enforce the
+# user's JWT at the API level either -- it's a frontend-only gate here).
+# The real, API-key-gated endpoints above are untouched and still the only
+# way an actual external BC extension can record an event.
+
+@router.post("/sandbox/delivery-sent")
+async def sandbox_send_sample_delivery_event(payload: DeliveryEventPayload):
+    """Frontend-only: record a sample delivery event without the external API key."""
+    return await _record_delivery_event(EventType.DELIVERY_SENT.value, payload)
+
+
+@router.post("/sandbox/repair-orphans")
+async def sandbox_repair_orphan_events():
+    """Frontend-only: same as /repair-orphans, without the external API key."""
+    return await repair_orphan_events()
+
+
 @router.post("/documents/{document_id}/verify-link")
 async def verify_document_link(document_id: str):
     """Verify and store link health for one BC-originated hub document."""

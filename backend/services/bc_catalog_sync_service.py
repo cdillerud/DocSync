@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 # MongoDB collections
 ITEMS_COLLECTION = "bc_catalog_items"
 GL_ACCOUNTS_COLLECTION = "bc_catalog_gl_accounts"
+VENDORS_COLLECTION = "bc_catalog_vendors"
 SYNC_META_COLLECTION = "bc_catalog_sync_meta"
 
 # Standard BC API v2.0 endpoints
@@ -194,11 +195,89 @@ async def sync_gl_accounts(db) -> Dict[str, Any]:
     return meta
 
 
+async def sync_vendors(db) -> Dict[str, Any]:
+    """Sync the BC vendor master (including blocked vendors) from Production
+    into local MongoDB.
+
+    Added 2026-09-28: nothing in this codebase had ever synced BC's actual
+    vendor master list directly. The vendor-review queue
+    (routers/aliases.py get_unmatched_vendor_gaps) and every vendor-matching
+    path only ever drew candidates from bc_reference_cache (itself only
+    populated from posted purchase invoice/order *transactions*, see
+    bc_reference_cache_service.py) and vendor_invoice_profiles (also
+    transaction-derived). A real vendor with no captured transaction history
+    in those narrow syncs -- confirmed in production: XPO Logistics
+    ("XPOLOGI", status Blocked, balance $10,165.93) -- was invisible to
+    every matching/candidate-suggestion path even though it genuinely
+    exists in BC, making it look like a vendor that needed to be created
+    from scratch rather than one that just needs unblocking.
+    """
+    logger.info("Starting BC vendor master sync from %s...", BC_READ_ENVIRONMENT)
+    start = datetime.now(timezone.utc)
+
+    if USE_MOCK:
+        return {"synced": 0, "environment": "mock", "duration_s": 0}
+
+    raw_vendors = await _bc_get_paged(
+        environment=BC_READ_ENVIRONMENT,
+        endpoint="vendors",
+        select="id,number,displayName,blocked,balance,addressLine1,city,state,"
+               "postalCode,country,phoneNumber,email,website,lastModifiedDateTime",
+    )
+
+    logger.info("Fetched %d vendors from BC %s", len(raw_vendors), BC_READ_ENVIRONMENT)
+
+    docs = []
+    for v in raw_vendors:
+        docs.append({
+            "bc_system_id": v.get("id", ""),
+            "vendor_no": v.get("number", ""),
+            "name": v.get("displayName", ""),
+            "blocked": bool(v.get("blocked")) if v.get("blocked") not in (None, "", " ") else False,
+            "balance": v.get("balance", 0),
+            "address_line1": v.get("addressLine1", ""),
+            "city": v.get("city", ""),
+            "state": v.get("state", ""),
+            "postal_code": v.get("postalCode", ""),
+            "country": v.get("country", ""),
+            "phone_number": v.get("phoneNumber", ""),
+            "email": v.get("email", ""),
+            "website": v.get("website", ""),
+            "last_modified": v.get("lastModifiedDateTime", ""),
+            "synced_at": start.isoformat(),
+            "source_environment": BC_READ_ENVIRONMENT,
+        })
+
+    if docs:
+        await db[VENDORS_COLLECTION].delete_many({})
+        await db[VENDORS_COLLECTION].insert_many(docs)
+        await db[VENDORS_COLLECTION].create_index("vendor_no", unique=True)
+        await db[VENDORS_COLLECTION].create_index("name")
+        await db[VENDORS_COLLECTION].create_index("blocked")
+
+    duration = (datetime.now(timezone.utc) - start).total_seconds()
+
+    meta = {
+        "entity": "vendors",
+        "synced_at": start.isoformat(),
+        "source_environment": BC_READ_ENVIRONMENT,
+        "record_count": len(docs),
+        "duration_s": round(duration, 2),
+    }
+    await db[SYNC_META_COLLECTION].update_one(
+        {"entity": "vendors"}, {"$set": meta}, upsert=True
+    )
+
+    logger.info("Vendor master sync complete: %d vendors in %.1fs", len(docs), duration)
+    return meta
+
+
 async def sync_all(db) -> Dict[str, Any]:
-    """Run full catalog sync (items + G/L accounts)."""
+    """Run full catalog sync (items + G/L accounts + vendors)."""
     items_result = await sync_items(db)
     gl_result = await sync_gl_accounts(db)
-    return {"items": items_result, "gl_accounts": gl_result}
+    vendors_result = await sync_vendors(db)
+    return {"items": items_result, "gl_accounts": gl_result, "vendors": vendors_result}
 
 
 # ── Query functions ──
@@ -233,6 +312,34 @@ async def search_gl_accounts(
         ]
     accounts = await db[GL_ACCOUNTS_COLLECTION].find(mongo_filter, {"_id": 0}).limit(limit).to_list(limit)
     return accounts
+
+
+async def search_vendors(
+    db, query: str = "", blocked: Optional[bool] = None, limit: int = 50
+) -> List[Dict]:
+    """Search the synced BC vendor master by number or name.
+
+    Unlike search_items/search_gl_accounts, `blocked` defaults to None (no
+    filter) rather than False -- the whole point of this sync is to surface
+    blocked vendors as real candidates (with their blocked status visible)
+    instead of hiding them the way the transaction-derived caches always
+    have.
+    """
+    mongo_filter: Dict[str, Any] = {}
+    if blocked is not None:
+        mongo_filter["blocked"] = blocked
+    if query:
+        mongo_filter["$or"] = [
+            {"vendor_no": {"$regex": query, "$options": "i"}},
+            {"name": {"$regex": query, "$options": "i"}},
+        ]
+    vendors = await db[VENDORS_COLLECTION].find(mongo_filter, {"_id": 0}).limit(limit).to_list(limit)
+    return vendors
+
+
+async def get_vendor_by_number(db, vendor_no: str) -> Optional[Dict]:
+    """Look up a single vendor by its BC vendor number."""
+    return await db[VENDORS_COLLECTION].find_one({"vendor_no": vendor_no}, {"_id": 0})
 
 
 async def get_item_by_number(db, item_no: str) -> Optional[Dict]:

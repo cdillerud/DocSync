@@ -404,6 +404,31 @@ async def get_unmatched_vendor_gaps():
     except Exception:
         pass
 
+    # Added 2026-09-28: bc_reference_cache and vendor_invoice_profiles above
+    # are BOTH derived only from posted invoice/order transactions, so a
+    # real BC vendor with no captured transaction history -- confirmed in
+    # production: XPO Logistics ("XPOLOGI"), status Blocked, balance
+    # $10,165.93 -- was invisible to this candidate list even though it
+    # genuinely exists in BC, making a human reviewer think it needed to be
+    # created from scratch rather than just unblocked. bc_catalog_vendors
+    # (services.bc_catalog_sync_service.sync_vendors) is the actual BC
+    # vendor master sync, including blocked vendors, so merge it in too.
+    try:
+        catalog_vendors = await db.bc_catalog_vendors.find(
+            {}, {"_id": 0, "vendor_no": 1, "name": 1, "blocked": 1}
+        ).to_list(5000)
+        existing_nos = {v["vendor_no"] for v in bc_vendors}
+        for cv in catalog_vendors:
+            if cv.get("vendor_no") and cv["vendor_no"] not in existing_nos:
+                bc_vendors.append({
+                    "vendor_no": cv["vendor_no"],
+                    "name": cv.get("name", cv["vendor_no"]),
+                    "blocked": bool(cv.get("blocked")),
+                })
+                existing_nos.add(cv["vendor_no"])
+    except Exception:
+        pass
+
     results = []
 
     for norm_key, group in sorted(merged.items(), key=lambda x: x[1]["count"], reverse=True):
@@ -461,6 +486,7 @@ async def get_unmatched_vendor_gaps():
                     "vendor_no": bv["vendor_no"],
                     "vendor_name": bv["name"],
                     "score": round(best, 3),
+                    "blocked": bv.get("blocked", False),
                 })
 
         scored.sort(key=lambda x: x["score"], reverse=True)

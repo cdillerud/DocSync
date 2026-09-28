@@ -1062,6 +1062,18 @@ async def _validate_bc_match_inner(
                     validation_results["customer_candidates"] = customer_result.get("customer_candidates", [])
                 elif not customer_name:
                     # === GAP CLOSER 3b: Customer from vendor history for shipping docs ===
+                    # customer_result must exist regardless of which path below
+                    # runs -- it was previously only assigned inside the nested
+                    # `if vendor_no_for_ship: if suggested:` conditions, so a
+                    # document with no customer name AND no resolvable vendor
+                    # history (the common case for an unresolved-vendor
+                    # shipping doc) crashed with UnboundLocalError on
+                    # customer_result["matched"] just below, silently recorded
+                    # as a generic "bc_error" validation check failure.
+                    customer_result = {
+                        "matched": False, "match_method": None, "score": 0.0,
+                        "selected_customer": None, "customer_candidates": [],
+                    }
                     try:
                         from services.gap_closer_service import get_customer_suggestion
                         vendor_no_for_ship = (

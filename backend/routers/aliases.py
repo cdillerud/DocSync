@@ -16,6 +16,19 @@ from deps import get_db
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/aliases", tags=["Vendor Aliases"])
 
+# Generic/geographic terms that legitimately show up as parenthetical
+# qualifiers in company names ("Hapag-Lloyd (America) LLC.") but happen to
+# also be someone's real BC vendor number ("AMERICA" = American Glass
+# Research, unrelated). A word-boundary match alone isn't enough evidence
+# when the matched word is one of these -- unlike a genuine business name
+# fragment (e.g. "BERRY" inside "BPREX Closures, LLC (Berry Global, Inc.)"),
+# these words carry no identifying information about which vendor is meant.
+_GENERIC_VENDOR_NO_TERMS = {
+    "america", "american", "usa", "us", "north", "south", "east", "west",
+    "international", "global", "group", "holdings", "national", "united",
+    "inc", "llc", "corp", "corporation", "co", "company", "the",
+}
+
 
 class VendorAlias(BaseModel):
     alias_string: str
@@ -475,8 +488,21 @@ async def get_unmatched_vendor_gaps():
             # sits inside "america" -- same false-positive class already
             # fixed in vendor_matching.py's identity guard, but this
             # candidate-suggestion endpoint had its own separate copy of it).
+            #
+            # A second false-positive class in the same family: vendor_no
+            # "AMERICA" (a real BC vendor, American Glass Research) also
+            # scored 0.85 against that same "Hapag-Lloyd (America) LLC.",
+            # this time via a genuine word-boundary match -- "America" is
+            # really a standalone word there, it's just a generic regional
+            # qualifier, not an identifying fragment of the vendor's name.
+            # Exact-code vendor numbers (XPOLOGI, WARDTR) don't collide with
+            # this because they aren't real words; only common English/
+            # geographic/entity-type terms do, so those are excluded from
+            # this signal entirely rather than tuned by length or case.
             bc_no_lower = bc_no.lower()
-            if vn_lower == bc_no_lower:
+            if bc_no_lower in _GENERIC_VENDOR_NO_TERMS:
+                no_score = 0
+            elif vn_lower == bc_no_lower:
                 no_score = 0.95
             elif bc_no_lower and re.search(rf'\b{re.escape(bc_no_lower)}\b', vn_lower):
                 no_score = 0.85
@@ -486,9 +512,12 @@ async def get_unmatched_vendor_gaps():
                 no_score = 0
 
             # 5. Abbreviation handling — check if vendor_no appears as its own
-            # token in the name (same word-boundary fix as above).
+            # token in the name (same word-boundary fix as above, same
+            # generic-term exclusion as #4).
             abbrev_score = 0
-            if len(bc_no) >= 3 and re.search(rf'\b{re.escape(bc_no.upper())}\b', vendor_name.upper()):
+            if (bc_no_lower not in _GENERIC_VENDOR_NO_TERMS
+                    and len(bc_no) >= 3
+                    and re.search(rf'\b{re.escape(bc_no.upper())}\b', vendor_name.upper())):
                 abbrev_score = 0.8
 
             # 6. Domain match — the vendor's real BC email/website domain

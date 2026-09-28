@@ -984,18 +984,55 @@ async def upload_document(
 @api_router.get("/documents")
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
+    doc_type: str = Query(None),
+    exclude_status: str = Query(None),
     category: str = Query(None),
     search: str = Query(None), skip: int = Query(0), limit: int = Query(50)
 ):
+    # Two status vocabularies coexist on hub_documents: older/mainstream
+    # records carry meaningful values on `status` (e.g. "NeedsReview",
+    # "LinkedToBC" -- see tests/test_gpi_document_hub.py), while documents
+    # from the newer bc_document_event pathway carry low-level event
+    # outcomes on `status` (e.g. "sent", "attachment_linked") and put the
+    # meaningful workflow stage on `workflow_status` instead (e.g.
+    # "exported", "captured", "exception" -- exactly what the frontend
+    # queue page actually displays via `doc.workflow_status || doc.status`).
+    # The frontend's Pending/Completed tabs send `exclude_status` and a
+    # comma-joined `status` using that second vocabulary; neither param
+    # was previously read here at all, so every tab silently returned the
+    # same unfiltered list. Checking both fields via $or/$and handles
+    # either document generation correctly and doesn't change behavior for
+    # a single status value that only ever matches one vocabulary (the
+    # $or only adds matches, so exact-match callers like the tests above
+    # are unaffected).
     fq = {}
+    and_conditions = []
+
     if status:
-        fq["status"] = status
-    if document_type:
-        fq["document_type"] = document_type
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            and_conditions.append({"$or": [
+                {"status": {"$in": statuses}},
+                {"workflow_status": {"$in": statuses}},
+            ]})
+
+    if exclude_status:
+        excluded = [s.strip() for s in exclude_status.split(",") if s.strip()]
+        if excluded:
+            and_conditions.append({"status": {"$nin": excluded}})
+            and_conditions.append({"$or": [
+                {"workflow_status": {"$exists": False}},
+                {"workflow_status": {"$nin": excluded}},
+            ]})
+
+    if document_type or doc_type:
+        fq["document_type"] = document_type or doc_type
     if category:
         fq["category"] = category
     if search:
         fq["file_name"] = {"$regex": search, "$options": "i"}
+    if and_conditions:
+        fq["$and"] = and_conditions
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total}

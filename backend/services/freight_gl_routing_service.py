@@ -644,6 +644,48 @@ class FreightGLRoutingService:
             update_fields["freight_gl_classification"]["gl_name"] = result["recommended_gl"]["gl_name"]
             update_fields["freight_gl_classification"]["account_id"] = result["recommended_gl"]["account_id"]
 
+        # Reconcile document_type when it was blindly inherited from a
+        # batch-split parent (batch_po_splitter._inherit_parent_and_reevaluate)
+        # but this freight classification -- which runs independently and
+        # later in the pipeline -- confidently disagrees. Without this, a
+        # split child whose own AI classification came back OTHER (e.g. a
+        # freight/PRO-number page split out of a larger AP invoice bundle)
+        # permanently keeps the parent's document_type (e.g. AP_Invoice) even
+        # when routing/reference-intelligence/freight-GL all independently
+        # determine it's actually a Shipping_Document -- confirmed on a real
+        # document where document_type stayed 'AP_INVOICE' while
+        # reference_intelligence.resolver_strategy and routing_details both
+        # already said 'Shipping_Document' on their own.
+        if (
+            doc.get("parent_inheritance_applied")
+            and result.get("is_freight")
+            and (result.get("confidence") or 0) >= 0.7
+            and doc.get("document_type") not in ("Shipping_Document", "Freight_Document")
+        ):
+            corrected_from = doc.get("document_type")
+            update_fields["document_type"] = "Shipping_Document"
+            update_fields["suggested_job_type"] = "Shipping_Document"
+            update_fields["document_type_corrected_from_freight_gl"] = True
+            update_fields["document_type_corrected_at"] = datetime.now(timezone.utc).isoformat()
+            update_fields["document_type_corrected_from"] = corrected_from
+
+            try:
+                from services.bc_validation_service import validate_bc_match
+                from models.document_types import DEFAULT_JOB_TYPES
+                update_fields["validation_results"] = await validate_bc_match(
+                    "Shipping_Document",
+                    doc.get("extracted_fields") or {},
+                    DEFAULT_JOB_TYPES["Shipping_Document"],
+                )
+            except Exception as e:
+                logger.debug("[FreightGL] Re-validation after type correction failed for %s: %s", doc_id, e)
+
+            logger.info(
+                "[FreightGL] Corrected document_type for %s: %s -> Shipping_Document "
+                "(inherited from split parent, freight_gl_classification confidently disagreed, confidence=%.2f)",
+                doc_id, corrected_from or "None", result.get("confidence", 0),
+            )
+
         await self.db.hub_documents.update_one(
             {"id": doc_id},
             {"$set": update_fields}

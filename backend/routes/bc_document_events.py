@@ -199,6 +199,69 @@ def _infer_category(doc_type: str) -> str:
     return "BC"
 
 
+def _infer_doc_type(payload: BCEventBase) -> str:
+    return _infer_doc_type_from_record_type(payload.bc_record.record_type, payload.document_type)
+
+
+def _document_event_key(payload: BCEventBase) -> str:
+    """Stable key identifying the underlying BC document (not one event).
+
+    Multiple events (delivery_sent, attachment_linked, ...) for the same BC
+    document must resolve to the same hub_documents row, so this is derived
+    only from document-identity fields -- never from event_type or a
+    timestamp.
+    """
+    record = payload.bc_record
+    identity = (
+        record.record_system_id
+        or record.record_no
+        or record.record_id
+        or payload.document_no
+        or ""
+    )
+    canonical = "|".join([
+        record.environment or "",
+        record.company_id or "",
+        record.record_type or "",
+        identity,
+    ])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+def _document_id(payload: BCEventBase) -> str:
+    """Hub document id for this BC document -- stable across repeat events.
+
+    Honors an explicit hub_document_id from the caller (e.g. the document
+    already exists from GPI Hub's own email/file intake and BC is only
+    attaching an event to it); otherwise derives a deterministic id from
+    _document_event_key so repeat events for the same BC document always
+    upsert the same row instead of creating duplicates.
+    """
+    if payload.hub_document_id:
+        return payload.hub_document_id
+    return f"bcdoc_{_document_event_key(payload)[:24]}"
+
+
+def _event_id(event_type: str, payload: BCEventBase) -> str:
+    """Idempotency id for this specific event.
+
+    Same pattern as document_delivery.py's _package_id/_request_hash:
+    prefers an explicit event_id or idempotency_key from the caller (BC
+    extension retries should supply one of these for true idempotency),
+    falls back to correlation_id, and as a last resort derives one from
+    document identity + timestamp when the caller supplies neither.
+    """
+    if payload.event_id:
+        return payload.event_id
+    basis = payload.idempotency_key or payload.correlation_id
+    if basis:
+        canonical = f"{event_type}|{basis}"
+    else:
+        canonical = f"{event_type}|{_document_event_key(payload)}|{payload.event_timestamp or ''}"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    return f"bcevt_{digest}"
+
+
 def _build_bc_source(payload: BCEventBase) -> Dict[str, Any]:
     record = payload.bc_record
     return {

@@ -199,6 +199,69 @@ def _infer_category(doc_type: str) -> str:
     return "BC"
 
 
+def _infer_doc_type(payload: BCEventBase) -> str:
+    return _infer_doc_type_from_record_type(payload.bc_record.record_type, payload.document_type)
+
+
+def _document_event_key(payload: BCEventBase) -> str:
+    """Stable key identifying the underlying BC document (not one event).
+
+    Multiple events (delivery_sent, attachment_linked, ...) for the same BC
+    document must resolve to the same hub_documents row, so this is derived
+    only from document-identity fields -- never from event_type or a
+    timestamp.
+    """
+    record = payload.bc_record
+    identity = (
+        record.record_system_id
+        or record.record_no
+        or record.record_id
+        or payload.document_no
+        or ""
+    )
+    canonical = "|".join([
+        record.environment or "",
+        record.company_id or "",
+        record.record_type or "",
+        identity,
+    ])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+
+
+def _document_id(payload: BCEventBase) -> str:
+    """Hub document id for this BC document -- stable across repeat events.
+
+    Honors an explicit hub_document_id from the caller (e.g. the document
+    already exists from GPI Hub's own email/file intake and BC is only
+    attaching an event to it); otherwise derives a deterministic id from
+    _document_event_key so repeat events for the same BC document always
+    upsert the same row instead of creating duplicates.
+    """
+    if payload.hub_document_id:
+        return payload.hub_document_id
+    return f"bcdoc_{_document_event_key(payload)[:24]}"
+
+
+def _event_id(event_type: str, payload: BCEventBase) -> str:
+    """Idempotency id for this specific event.
+
+    Same pattern as document_delivery.py's _package_id/_request_hash:
+    prefers an explicit event_id or idempotency_key from the caller (BC
+    extension retries should supply one of these for true idempotency),
+    falls back to correlation_id, and as a last resort derives one from
+    document identity + timestamp when the caller supplies neither.
+    """
+    if payload.event_id:
+        return payload.event_id
+    basis = payload.idempotency_key or payload.correlation_id
+    if basis:
+        canonical = f"{event_type}|{basis}"
+    else:
+        canonical = f"{event_type}|{_document_event_key(payload)}|{payload.event_timestamp or ''}"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    return f"bcevt_{digest}"
+
+
 def _build_bc_source(payload: BCEventBase) -> Dict[str, Any]:
     record = payload.bc_record
     return {
@@ -966,6 +1029,35 @@ async def repair_orphan_events():
         "checked_events": checked,
         "repaired_documents": repaired,
     }
+
+
+# -------------------- sandbox UI self-test endpoints --------------------
+#
+# The GPI Hub frontend's own "Send Sample Event" / "Repair Orphans" buttons
+# on the BC Events page call these two actions to demonstrate the bridge
+# without a real BC extension -- but /delivery-sent and /repair-orphans
+# above are deliberately gated by X-GPI-Hub-Api-Key, a secret meant for the
+# external BC AL extension, and the frontend never had it (nor should it:
+# baking that secret into the public JS bundle would defeat the point of
+# having it). Every click failed with 401, which the frontend's axios
+# interceptor treats as "session expired" and force-logs the user out.
+#
+# These wrap the exact same internal functions with no API-key requirement,
+# consistent with every other route in this app (none of which enforce the
+# user's JWT at the API level either -- it's a frontend-only gate here).
+# The real, API-key-gated endpoints above are untouched and still the only
+# way an actual external BC extension can record an event.
+
+@router.post("/sandbox/delivery-sent")
+async def sandbox_send_sample_delivery_event(payload: DeliveryEventPayload):
+    """Frontend-only: record a sample delivery event without the external API key."""
+    return await _record_delivery_event(EventType.DELIVERY_SENT.value, payload)
+
+
+@router.post("/sandbox/repair-orphans")
+async def sandbox_repair_orphan_events():
+    """Frontend-only: same as /repair-orphans, without the external API key."""
+    return await repair_orphan_events()
 
 
 @router.post("/documents/{document_id}/verify-link")

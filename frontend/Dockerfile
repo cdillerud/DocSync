@@ -33,7 +33,12 @@ COPY --from=builder /app/build /usr/share/nginx/html
 EXPOSE 3000
 
 # Health check
+# Uses 127.0.0.1, not localhost: nginx.conf binds only 0.0.0.0 (IPv4), but
+# the container's /etc/hosts resolves "localhost" to ::1 first, so wget
+# against "localhost" always hit a dead IPv6 loopback and refused the
+# connection -- this left the container reporting unhealthy indefinitely
+# even while nginx was correctly serving real traffic on the mapped port.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:3000 || exit 1
+    CMD wget -q --spider http://127.0.0.1:3000 || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

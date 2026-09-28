@@ -984,18 +984,55 @@ async def upload_document(
 @api_router.get("/documents")
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
+    doc_type: str = Query(None),
+    exclude_status: str = Query(None),
     category: str = Query(None),
     search: str = Query(None), skip: int = Query(0), limit: int = Query(50)
 ):
+    # Two status vocabularies coexist on hub_documents: older/mainstream
+    # records carry meaningful values on `status` (e.g. "NeedsReview",
+    # "LinkedToBC" -- see tests/test_gpi_document_hub.py), while documents
+    # from the newer bc_document_event pathway carry low-level event
+    # outcomes on `status` (e.g. "sent", "attachment_linked") and put the
+    # meaningful workflow stage on `workflow_status` instead (e.g.
+    # "exported", "captured", "exception" -- exactly what the frontend
+    # queue page actually displays via `doc.workflow_status || doc.status`).
+    # The frontend's Pending/Completed tabs send `exclude_status` and a
+    # comma-joined `status` using that second vocabulary; neither param
+    # was previously read here at all, so every tab silently returned the
+    # same unfiltered list. Checking both fields via $or/$and handles
+    # either document generation correctly and doesn't change behavior for
+    # a single status value that only ever matches one vocabulary (the
+    # $or only adds matches, so exact-match callers like the tests above
+    # are unaffected).
     fq = {}
+    and_conditions = []
+
     if status:
-        fq["status"] = status
-    if document_type:
-        fq["document_type"] = document_type
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        if statuses:
+            and_conditions.append({"$or": [
+                {"status": {"$in": statuses}},
+                {"workflow_status": {"$in": statuses}},
+            ]})
+
+    if exclude_status:
+        excluded = [s.strip() for s in exclude_status.split(",") if s.strip()]
+        if excluded:
+            and_conditions.append({"status": {"$nin": excluded}})
+            and_conditions.append({"$or": [
+                {"workflow_status": {"$exists": False}},
+                {"workflow_status": {"$nin": excluded}},
+            ]})
+
+    if document_type or doc_type:
+        fq["document_type"] = document_type or doc_type
     if category:
         fq["category"] = category
     if search:
         fq["file_name"] = {"$regex": search, "$options": "i"}
+    if and_conditions:
+        fq["$and"] = and_conditions
     total = await db.hub_documents.count_documents(fq)
     docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total}
@@ -1386,15 +1423,38 @@ async def retry_workflow(wf_id: str):
 
 @api_router.get("/dashboard/stats")
 async def get_dashboard_stats():
+    # by_status/by_type used to count against a hardcoded list of values
+    # ("Received"/"Classified"/"LinkedToBC"/... and "SalesOrder"/
+    # "SalesInvoice"/...) that matched only the older document-intake
+    # convention. Documents from the newer bc_document_event pathway carry
+    # their meaningful stage on workflow_status instead of status (see the
+    # /api/documents fix above for the full explanation), and use a
+    # different, all-caps document_type vocabulary (SALES_INVOICE, not
+    # SalesInvoice) -- so every one of them silently contributed 0 to every
+    # hardcoded bucket, which is why this fed both the Dashboard's
+    # "Documents by Status" chart showing all zeros and the Document
+    # Queue's Pending/Completed count badges reading 0 despite the
+    # (now-fixed) table itself correctly showing 7/4 documents. Aggregating
+    # dynamically over whatever values actually exist -- keyed by
+    # workflow_status when present, falling back to status, matching the
+    # frontend's own `doc.workflow_status || doc.status` display logic --
+    # reports real counts regardless of which pathway created the document,
+    # without needing to guess every vocabulary in advance.
     total = await db.hub_documents.count_documents({})
     by_status = {}
-    for s in ["Received", "Classified", "LinkedToBC", "Exception", "Completed"]:
-        by_status[s] = await db.hub_documents.count_documents({"status": s})
+    async for row in db.hub_documents.aggregate([
+        {"$group": {"_id": {"$ifNull": ["$workflow_status", "$status"]}, "count": {"$sum": 1}}},
+    ]):
+        key = row["_id"]
+        if key:
+            by_status[key] = row["count"]
     by_type = {}
-    for t in ["SalesOrder", "SalesInvoice", "PurchaseInvoice", "PurchaseOrder", "Shipment", "Receipt", "Other"]:
-        count = await db.hub_documents.count_documents({"document_type": t})
-        if count > 0:
-            by_type[t] = count
+    async for row in db.hub_documents.aggregate([
+        {"$group": {"_id": {"$ifNull": ["$document_type", "$doc_type"]}, "count": {"$sum": 1}}},
+    ]):
+        key = row["_id"]
+        if key:
+            by_type[key] = row["count"]
     recent_workflows = await db.hub_workflow_runs.find({}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     failed_workflows = await db.hub_workflow_runs.find({"status": "Failed"}, {"_id": 0}).sort("started_utc", -1).limit(10).to_list(10)
     return {
@@ -1927,7 +1987,18 @@ async def get_settings_status():
                 "library": SHAREPOINT_LIBRARY_NAME
             },
             "business_central": {
-                "status": "configured" if (BC_CLIENT_ID and not DEMO_MODE) else ("demo" if DEMO_MODE else "not_configured"),
+                # Deliberately decoupled from the blanket DEMO_MODE flag,
+                # unlike sharepoint/entra_id below. business_central_service.py
+                # already computes its own real vs mock decision purely from
+                # whether credentials exist (USE_MOCK = BC_MOCK_MODE or not
+                # BC_CLIENT_ID or not BC_CLIENT_SECRET or not BC_TENANT_ID --
+                # DEMO_MODE isn't part of that calculation, per that file's
+                # own "DEMO_MODE=false now means use real BC" comment), so
+                # this card was reporting "demo" while BC calls were
+                # genuinely live -- confirmed directly: real vendor and
+                # purchase order data flows through /api/ap-review with
+                # these exact credentials regardless of DEMO_MODE's value.
+                "status": "configured" if (BC_CLIENT_ID and BC_CLIENT_SECRET and TENANT_ID) else "not_configured",
                 "environment": BC_ENVIRONMENT or "Not set",
                 "company": BC_COMPANY_NAME or "Not set"
             },

@@ -17,6 +17,7 @@ Configuration via environment variables:
 
 import os
 import logging
+import uuid
 import httpx
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
@@ -44,6 +45,17 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'false').lower() == 'true'
 
 # Feature flag for BC link writeback
 BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').lower() == 'true'
+
+# Master kill switch for document-creating BC writes (purchase invoices, sales
+# orders). Unlike USE_MOCK -- which only reflects whether credentials happen
+# to be configured -- this defaults OFF regardless of credentials, mirroring
+# the BC_WRITE_ENABLED pattern already used by the main app's
+# ap_auto_post_service.py. Before this flag existed, create_purchase_invoice/
+# create_sales_order had no independent gate at all: the moment real BC
+# credentials were configured (needed for every read endpoint too), these
+# would post directly to whatever BC_ENVIRONMENT pointed at with zero
+# additional confirmation.
+BC_WRITE_ENABLED = os.environ.get('BC_WRITE_ENABLED', 'false').lower() == 'true'
 
 # Auto-enable mock mode ONLY if explicitly set or credentials are missing
 # Changed: DEMO_MODE=false now means use real BC
@@ -257,27 +269,54 @@ class BusinessCentralService:
             }
     
     async def get_vendor_by_id(self, vendor_id: str) -> Optional[Dict[str, Any]]:
-        """Get a specific vendor by ID."""
+        """Get a specific vendor by BC system GUID or vendor number.
+
+        The route's docstring promises "by ID or number", but BC's OData key
+        segment (`vendors({id})`) only accepts the internal system GUID --
+        passing a vendor number there (e.g. "AADVANT", what an AP reviewer
+        would actually type) always 404s even when the vendor exists, since
+        BC just treats it as an unmatched GUID key. Route on whether the
+        input parses as a UUID: GUIDs still use the fast direct key lookup;
+        anything else falls back to an exact $filter=number eq '...' query,
+        the same approach get_vendors() already uses for its own search.
+        """
         if self.use_mock:
             for v in MOCK_VENDORS:
                 if v["id"] == vendor_id or v["number"] == vendor_id:
                     return v
             return None
-        
+
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
-        
+
+        try:
+            uuid.UUID(vendor_id)
+            is_guid = True
+        except ValueError:
+            is_guid = False
+
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-            
-            if resp.status_code == 404:
-                return None
+            if is_guid:
+                url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors({vendor_id})"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+
+                if resp.status_code == 404:
+                    return None
+                if resp.status_code != 200:
+                    raise Exception(f"Failed to get vendor: {resp.status_code}")
+
+                return resp.json()
+
+            escaped_number = vendor_id.replace("'", "''")
+            url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_ENVIRONMENT}/api/v2.0/companies({company_id})/vendors"
+            params = {"$filter": f"number eq '{escaped_number}'"}
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+
             if resp.status_code != 200:
                 raise Exception(f"Failed to get vendor: {resp.status_code}")
-            
-            return resp.json()
+
+            results = resp.json().get("value", [])
+            return results[0] if results else None
     
     # =========================================================================
     # PURCHASE ORDER METHODS
@@ -379,11 +418,24 @@ class BusinessCentralService:
                 "mock": True,
                 "createdAt": datetime.now(timezone.utc).isoformat()
             }
-        
+
+        if not BC_WRITE_ENABLED:
+            logger.warning(
+                "Blocked purchase invoice creation for vendor %s: BC_WRITE_ENABLED is false",
+                invoice_data.get("vendorNumber") or invoice_data.get("vendor_no"),
+            )
+            return {
+                "success": False,
+                "blocked": True,
+                "error": "BC writes are disabled (BC_WRITE_ENABLED is false)",
+                "message": "Set BC_WRITE_ENABLED=true to allow posting purchase invoices to Business Central",
+                "mock": False,
+            }
+
         # Real BC API call
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
+
         # Build the invoice payload per BC API spec
         # Note: BC API uses 'vendorInvoiceNumber' (not 'externalDocumentNumber') for the vendor's invoice reference
         payload = {
@@ -832,10 +884,23 @@ class BusinessCentralService:
                 "mock": True,
                 "createdAt": datetime.now(timezone.utc).isoformat()
             }
-        
+
+        if not BC_WRITE_ENABLED:
+            logger.warning(
+                "Blocked sales order creation for customer %s: BC_WRITE_ENABLED is false",
+                order_data.get("customerNumber") or order_data.get("customer_no"),
+            )
+            return {
+                "success": False,
+                "blocked": True,
+                "error": "BC writes are disabled (BC_WRITE_ENABLED is false)",
+                "message": "Set BC_WRITE_ENABLED=true to allow creating sales orders in Business Central",
+                "mock": False,
+            }
+
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
+
         # Build the sales order payload per BC API spec
         payload = {
             "customerNumber": order_data.get("customerNumber") or order_data.get("customer_no"),

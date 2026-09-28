@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   mongodb:
     image: mongo:6.0
@@ -17,6 +19,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    command: ["uvicorn", "server_sprint1:app", "--host", "0.0.0.0", "--port", "8001"]
     container_name: gpi-hub-bc-sandbox-backend
     restart: unless-stopped
     depends_on:
@@ -44,7 +47,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - REACT_APP_BACKEND_URL=http://localhost:3010
+        - REACT_APP_BACKEND_URL=
     container_name: gpi-hub-bc-sandbox-frontend
     restart: unless-stopped
     depends_on:

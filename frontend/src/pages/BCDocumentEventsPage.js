@@ -210,7 +210,12 @@ export default function BCDocumentEventsPage() {
   const repairOrphans = async () => {
     setWorking(true);
     try {
-      const res = await api.post('/bc-document-events/repair-orphans');
+      // /repair-orphans requires the X-GPI-Hub-Api-Key meant for the real
+      // BC extension, which this browser session never has; /sandbox/
+      // repair-orphans wraps the same function without that requirement,
+      // since this button is only ever reachable from the authenticated
+      // GPI Hub UI itself.
+      const res = await api.post('/bc-document-events/sandbox/repair-orphans');
       toast.success(`Repair checked ${res.data.checked_events} event(s), repaired ${res.data.repaired_documents} document(s)`);
       await refreshStatus();
       await searchRecord();
@@ -224,7 +229,9 @@ export default function BCDocumentEventsPage() {
   const sendSampleEvent = async () => {
     setWorking(true);
     try {
-      const res = await api.post('/bc-document-events/delivery-sent', SAMPLE_DELIVERY_EVENT);
+      // Same reasoning as repairOrphans above: /sandbox/delivery-sent
+      // wraps the real handler without the external-only API key.
+      const res = await api.post('/bc-document-events/sandbox/delivery-sent', SAMPLE_DELIVERY_EVENT);
       setLastPostResult(res.data);
       toast.success(res.data.duplicate ? 'Sample event was safely treated as duplicate' : 'Sample event recorded');
       await refreshStatus();

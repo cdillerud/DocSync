@@ -1,0 +1,36 @@
+{
+  "correlation_id": "bc-sales-order-114679-order-confirmation-v1",
+  "document": {
+    "document_type": "SALES_ORDER_CONFIRMATION",
+    "record_type": "Sales Order",
+    "record_no": "114679",
+    "system_id": "00000000-0000-0000-0000-000000000001",
+    "report_id": 50020,
+    "requested_action": "PREVIEW"
+  },
+  "customer": {
+    "customer_no": "NATION",
+    "sell_to_customer_no": "NATION",
+    "bill_to_customer_no": "NATION",
+    "ship_to_customer_no": "NATION",
+    "organization": "National Dry",
+    "document_email": "customer@example.com"
+  },
+  "order": {
+    "order_type": "SALES_ORDER",
+    "external_document_no": "BILLY EMAIL",
+    "location_code": "00"
+  },
+  "actors": {
+    "initiated_by": "cheryl@gamerpackaging.com",
+    "sender_email": "cheryl@gamerpackaging.com",
+    "isr_code": "CB",
+    "isr_email": "cheryl@gamerpackaging.com",
+    "osr_code": "DT",
+    "osr_email": "dylan@gamerpackaging.com"
+  },
+  "metadata": {
+    "sprint": "1",
+    "test_payload": true
+  }
+}

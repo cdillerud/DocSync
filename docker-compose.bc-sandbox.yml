@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   mongodb:
     image: mongo:6.0
@@ -45,7 +47,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        - REACT_APP_BACKEND_URL=http://localhost:3010
+        - REACT_APP_BACKEND_URL=
     container_name: gpi-hub-bc-sandbox-frontend
     restart: unless-stopped
     depends_on:

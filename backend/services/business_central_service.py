@@ -46,6 +46,17 @@ DEMO_MODE = os.environ.get('DEMO_MODE', 'false').lower() == 'true'
 # Feature flag for BC link writeback
 BC_WRITEBACK_LINK_ENABLED = os.environ.get('BC_WRITEBACK_LINK_ENABLED', 'true').lower() == 'true'
 
+# Master kill switch for document-creating BC writes (purchase invoices, sales
+# orders). Unlike USE_MOCK -- which only reflects whether credentials happen
+# to be configured -- this defaults OFF regardless of credentials, mirroring
+# the BC_WRITE_ENABLED pattern already used by the main app's
+# ap_auto_post_service.py. Before this flag existed, create_purchase_invoice/
+# create_sales_order had no independent gate at all: the moment real BC
+# credentials were configured (needed for every read endpoint too), these
+# would post directly to whatever BC_ENVIRONMENT pointed at with zero
+# additional confirmation.
+BC_WRITE_ENABLED = os.environ.get('BC_WRITE_ENABLED', 'false').lower() == 'true'
+
 # Auto-enable mock mode ONLY if explicitly set or credentials are missing
 # Changed: DEMO_MODE=false now means use real BC
 USE_MOCK = BC_MOCK_MODE or (not BC_CLIENT_ID) or (not BC_CLIENT_SECRET) or (not BC_TENANT_ID)
@@ -407,11 +418,24 @@ class BusinessCentralService:
                 "mock": True,
                 "createdAt": datetime.now(timezone.utc).isoformat()
             }
-        
+
+        if not BC_WRITE_ENABLED:
+            logger.warning(
+                "Blocked purchase invoice creation for vendor %s: BC_WRITE_ENABLED is false",
+                invoice_data.get("vendorNumber") or invoice_data.get("vendor_no"),
+            )
+            return {
+                "success": False,
+                "blocked": True,
+                "error": "BC writes are disabled (BC_WRITE_ENABLED is false)",
+                "message": "Set BC_WRITE_ENABLED=true to allow posting purchase invoices to Business Central",
+                "mock": False,
+            }
+
         # Real BC API call
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
+
         # Build the invoice payload per BC API spec
         # Note: BC API uses 'vendorInvoiceNumber' (not 'externalDocumentNumber') for the vendor's invoice reference
         payload = {
@@ -860,10 +884,23 @@ class BusinessCentralService:
                 "mock": True,
                 "createdAt": datetime.now(timezone.utc).isoformat()
             }
-        
+
+        if not BC_WRITE_ENABLED:
+            logger.warning(
+                "Blocked sales order creation for customer %s: BC_WRITE_ENABLED is false",
+                order_data.get("customerNumber") or order_data.get("customer_no"),
+            )
+            return {
+                "success": False,
+                "blocked": True,
+                "error": "BC writes are disabled (BC_WRITE_ENABLED is false)",
+                "message": "Set BC_WRITE_ENABLED=true to allow creating sales orders in Business Central",
+                "mock": False,
+            }
+
         token = await get_bc_token()
         company_id = await self._get_company_id()
-        
+
         # Build the sales order payload per BC API spec
         payload = {
             "customerNumber": order_data.get("customerNumber") or order_data.get("customer_no"),

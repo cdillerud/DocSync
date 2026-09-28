@@ -27,6 +27,38 @@ DRAFT_CREATION_CONFIG = {
 
 # Default Job Type configurations - Production Grade
 DEFAULT_JOB_TYPES = {
+    # ================ NON-TRANSACTIONAL (Category: Other) ================
+    # Added 2026-09-28: same gap as Inspection_Form -- Graphics_Artwork has
+    # always been a real classify-prompt document_type (packaging artwork,
+    # dielines, label proofs; the prompt explicitly says "these are NOT
+    # invoices, purchase orders, sales orders... human confirmation is
+    # required before excluding the document"), but had no job_type config
+    # on the live intake path (document_bytes_intake_service.py has no
+    # Graphics_Artwork special case at all, unlike the on-demand pipeline's
+    # stage_validate/stage_route, which hardcode it). All 5 real documents
+    # classified this way fell back to AP_Invoice's required fields and
+    # scored completeness_score 0.0-0.27 for having no vendor/invoice/amount
+    # -- fields a piece of artwork was never going to have.
+    "Graphics_Artwork": {
+        "job_type": "Graphics_Artwork",
+        "display_name": "Graphics / Packaging Artwork",
+        "category": "Other",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 1.01,  # never auto-link -- always needs human confirmation
+        "min_confidence_to_auto_create_draft": 1.01,
+        "po_validation_mode": "PO_NOT_REQUIRED",
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 1.01,
+        "vendor_match_strategies": [],
+        "sharepoint_folder": "Graphics_Artwork",
+        "bc_entity": "items",
+        "required_extractions": [],
+        "optional_extractions": ["vendor", "customer", "items"],
+        "keywords": ["dieline", "print area", "slit width", "cut height", "bleed", "trim line",
+                     "color separation", "nutrition panel", "artwork", "label proof"],
+        "enabled": True
+    },
     # ==================== AP DOCUMENTS (Category: AP) ====================
     "AP_Invoice": {
         "job_type": "AP_Invoice",

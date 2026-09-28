@@ -374,19 +374,54 @@ async def get_unmatched_vendor_gaps():
                 "sample_files": gap.get("sample_files", [])[:3],
             }
 
-    # Load ALL BC vendors from cache + profiles
-    bc_vendors = []
+    # Load ALL BC vendors from the real vendor master plus the two
+    # transaction-derived caches, keyed by vendor_no so a vendor present in
+    # more than one source gets the UNION of what each source knows rather
+    # than whichever source happened to be checked first winning outright.
+    #
+    # Added 2026-09-28: bc_reference_cache and vendor_invoice_profiles are
+    # BOTH derived only from posted invoice/order transactions, so a real BC
+    # vendor with no captured transaction history -- confirmed in
+    # production: XPO Logistics ("XPOLOGI"), status Blocked -- was invisible
+    # here even though it genuinely exists in BC. bc_catalog_vendors
+    # (services.bc_catalog_sync_service.sync_vendors) is the real BC vendor
+    # master sync and is loaded FIRST so its name/blocked/email/website are
+    # authoritative; the other two sources only fill in a vendor_no this
+    # sync doesn't have, never overwrite. Getting this order backwards
+    # previously discarded bc_catalog_vendors' email/website entirely for
+    # any vendor_no vendor_invoice_profiles also happened to know about
+    # (e.g. WARDTR / Ward Trucking, see domain_score below) -- confirmed by
+    # a second real BC vendor card: WARDTR's own BC display name is "Forward
+    # Brokerage", sharing no words with "Ward Trucking, LLC", but its email
+    # (mlbrubaker@wardtrucking.com) plainly identifies the real company.
+    vendors_by_no = {}
+    try:
+        catalog_vendors = await db.bc_catalog_vendors.find(
+            {}, {"_id": 0, "vendor_no": 1, "name": 1, "blocked": 1, "email": 1, "website": 1}
+        ).to_list(5000)
+        for cv in catalog_vendors:
+            if cv.get("vendor_no"):
+                vendors_by_no[cv["vendor_no"]] = {
+                    "vendor_no": cv["vendor_no"],
+                    "name": cv.get("name") or cv["vendor_no"],
+                    "blocked": bool(cv.get("blocked")),
+                    "email": cv.get("email") or "",
+                    "website": cv.get("website") or "",
+                }
+    except Exception:
+        pass
+
     try:
         cached = await db.bc_reference_cache.find(
             {"bc_entity_type": "vendor"},
             {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1}
         ).to_list(1000)
         for v in cached:
-            if v.get("bc_vendor_no"):
-                bc_vendors.append({
+            if v.get("bc_vendor_no") and v["bc_vendor_no"] not in vendors_by_no:
+                vendors_by_no[v["bc_vendor_no"]] = {
                     "vendor_no": v["bc_vendor_no"],
-                    "name": v.get("bc_vendor_name", v["bc_vendor_no"]),
-                })
+                    "name": v.get("bc_vendor_name") or v["bc_vendor_no"],
+                }
     except Exception:
         pass
 
@@ -394,40 +429,16 @@ async def get_unmatched_vendor_gaps():
         profiles = await db.vendor_invoice_profiles.find(
             {}, {"_id": 0, "vendor_no": 1, "vendor_name": 1}
         ).to_list(500)
-        existing_nos = {v["vendor_no"] for v in bc_vendors}
         for p in profiles:
-            if p.get("vendor_no") and p["vendor_no"] not in existing_nos:
-                bc_vendors.append({
+            if p.get("vendor_no") and p["vendor_no"] not in vendors_by_no:
+                vendors_by_no[p["vendor_no"]] = {
                     "vendor_no": p["vendor_no"],
-                    "name": p.get("vendor_name", p["vendor_no"]),
-                })
+                    "name": p.get("vendor_name") or p["vendor_no"],
+                }
     except Exception:
         pass
 
-    # Added 2026-09-28: bc_reference_cache and vendor_invoice_profiles above
-    # are BOTH derived only from posted invoice/order transactions, so a
-    # real BC vendor with no captured transaction history -- confirmed in
-    # production: XPO Logistics ("XPOLOGI"), status Blocked, balance
-    # $10,165.93 -- was invisible to this candidate list even though it
-    # genuinely exists in BC, making a human reviewer think it needed to be
-    # created from scratch rather than just unblocked. bc_catalog_vendors
-    # (services.bc_catalog_sync_service.sync_vendors) is the actual BC
-    # vendor master sync, including blocked vendors, so merge it in too.
-    try:
-        catalog_vendors = await db.bc_catalog_vendors.find(
-            {}, {"_id": 0, "vendor_no": 1, "name": 1, "blocked": 1}
-        ).to_list(5000)
-        existing_nos = {v["vendor_no"] for v in bc_vendors}
-        for cv in catalog_vendors:
-            if cv.get("vendor_no") and cv["vendor_no"] not in existing_nos:
-                bc_vendors.append({
-                    "vendor_no": cv["vendor_no"],
-                    "name": cv.get("name", cv["vendor_no"]),
-                    "blocked": bool(cv.get("blocked")),
-                })
-                existing_nos.add(cv["vendor_no"])
-    except Exception:
-        pass
+    bc_vendors = list(vendors_by_no.values())
 
     results = []
 
@@ -480,7 +491,24 @@ async def get_unmatched_vendor_gaps():
             if len(bc_no) >= 3 and re.search(rf'\b{re.escape(bc_no.upper())}\b', vendor_name.upper()):
                 abbrev_score = 0.8
 
-            best = max(seq_score, jaccard + first_word_bonus, no_score, abbrev_score)
+            # 6. Domain match — the vendor's real BC email/website domain
+            # names the actual company, independent of whatever display
+            # name got typed into BC. Added after WARDTR's BC display name
+            # ("Forward Brokerage") scored only 0.533 against "Ward
+            # Trucking, LLC" by every name-similarity signal above -- zero
+            # shared words -- while its own email
+            # (mlbrubaker@wardtrucking.com) plainly identifies it. Only
+            # bc_catalog_vendors (the real BC sync) carries email/website;
+            # bc_reference_cache/vendor_invoice_profiles entries have none,
+            # so this is naturally 0 for those.
+            domain_score = 0
+            vn_nospace = vn_normalized.replace(" ", "")
+            if len(vn_nospace) >= 5:
+                domain_text = f"{bv.get('email', '')} {bv.get('website', '')}".lower()
+                if vn_nospace in domain_text:
+                    domain_score = 0.9
+
+            best = max(seq_score, jaccard + first_word_bonus, no_score, abbrev_score, domain_score)
             if best >= 0.40:
                 scored.append({
                     "vendor_no": bv["vendor_no"],

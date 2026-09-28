@@ -944,6 +944,7 @@ Quality_Issue: Quality complaints or issues
 
 Inspection_Form: Trailer inspection forms, inbound/outbound inspection checklists, QA disposition forms
 - Extract: inspector, date, trailer_number, seal_number, disposition
+- These forms also reference the shipment being inspected — also extract po_number, carrier, bol_number, driver_name, and ship_date when shown (e.g. "Purchase/Sales Order", "Carrier Name", "BOL Number", "Driver's Name", "Time of Arrival"). Their presence does NOT make this a Shipping_Document — a trailer inspection checklist with A/U/N-A columns, seal verification, and a QA disposition section is still an Inspection_Form
 - Look for "Inspection", "Trailer Inspection", "Inbound Inspection", "Outbound Inspection", "QA Disposition", "Receiving Disposition", "Unacceptable Inspection", "Inspector", "Seal Number", "Temperature"
 - These are NOT Quality_Issue — they are routine inspection checklists/forms, not complaints
 
@@ -991,6 +992,11 @@ Always respond with valid JSON in this exact format:
         "lot_numbers": "...",
         "items": "...",
         "ship_to": "...",
+        "trailer_number": "...",
+        "seal_number": "...",
+        "inspector": "...",
+        "disposition": "Accept Load|Reject Load|QA Hold",
+        "driver_name": "...",
         "is_international": false,
         "is_tooling": false,
         "is_storage_handling": false,

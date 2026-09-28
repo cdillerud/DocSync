@@ -366,6 +366,36 @@ DEFAULT_JOB_TYPES = {
         "keywords": ["warehouse receipt", "non-negotiable", "goods received", "stored in warehouse"],
         "enabled": True
     },
+    # Added 2026-09-28: classify prompt has always offered Inspection_Form as
+    # a document_type (trailer inspection forms, QA receiving disposition),
+    # and 649 real documents are already classified this way, but no job_type
+    # config existed for it anywhere (checked DEFAULT_JOB_TYPES and the
+    # hub_job_types DB override collection -- neither had an entry). Every
+    # one of those 649 documents was silently validated against AP_Invoice's
+    # required fields (vendor/invoice_number/amount), which a trailer
+    # inspection form has no reason to contain, so all of them scored
+    # completeness_score 0.0 / ready_for_draft_candidate False regardless of
+    # how complete the actual inspection data was.
+    "Inspection_Form": {
+        "job_type": "Inspection_Form",
+        "display_name": "Trailer Inspection Form",
+        "category": "Warehouse",
+        "automation_level": 0,
+        "min_confidence_to_auto_link": 0.70,
+        "min_confidence_to_auto_create_draft": 0.90,
+        "po_validation_mode": "PO_IF_PRESENT",
+        "allow_duplicate_check_override": True,
+        "requires_human_review_if_exception": True,
+        "vendor_match_threshold": 0.70,
+        "vendor_match_strategies": ["exact_name", "normalized"],
+        "sharepoint_folder": "Inspection_Forms",
+        "bc_entity": "salesOrders",
+        "required_extractions": ["trailer_number", "seal_number"],
+        "optional_extractions": ["po_number", "carrier", "bol_number", "inspector", "disposition", "ship_date", "driver_name"],
+        "keywords": ["inspection", "trailer inspection", "inbound inspection", "outbound inspection",
+                     "qa disposition", "receiving disposition", "unacceptable inspection", "seal number"],
+        "enabled": True
+    },
     "SH_Invoice": {
         "job_type": "SH_Invoice",
         "display_name": "Storage & Handling Invoice",

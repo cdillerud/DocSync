@@ -61,6 +61,7 @@ def _get_vendor_id(doc):
 async def diagnose_approval_backlog():
     """Analyze the Needs Approval backlog and what's blocking auto-approval."""
     db = get_db()
+    svc = get_stable_vendor_service()
 
     candidates = await _get_approval_candidates(db)
 

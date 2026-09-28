@@ -108,18 +108,31 @@ async def graph_webhook(request_data: dict = None):
     # Handle validation request (Graph sends this when creating subscription)
     if request_data and "validationToken" in request_data:
         return request_data["validationToken"]
-    
+
     # Handle notification
     if request_data and "value" in request_data:
+        db = get_db()
+        # poll_mailbox_for_documents (the same function pilot.py's manual
+        # "poll now" button and the dynamic mailbox worker already use, with
+        # its own duplicate-attachment checking) -- not a dedicated
+        # process_incoming_email, which was called here but never existed
+        # anywhere in the codebase. Every real webhook notification crashed
+        # with NameError before it ingested anything. Re-polling the whole
+        # mailbox rather than fetching just this one email_id is slightly
+        # less surgical, but reuses an already-verified ingestion path
+        # instead of writing new, hard-to-verify logic for a webhook this
+        # deployment has no way to trigger for a live end-to-end test.
+        from routers.pilot import poll_mailbox_for_documents
+
         for notification in request_data.get("value", []):
             # Verify client state
             if notification.get("clientState") != "gpi-document-hub-secret":
                 logger.warning("Invalid client state in webhook notification")
                 continue
-            
+
             resource = notification.get("resource", "")
             change_type = notification.get("changeType", "")
-            
+
             if change_type == "created" and "/messages/" in resource:
                 # Extract email ID and mailbox from resource
                 # Resource format: users/{mailbox}/mailFolders/Inbox/messages/{emailId}
@@ -127,12 +140,21 @@ async def graph_webhook(request_data: dict = None):
                 if len(parts) >= 6:
                     mailbox = parts[1]
                     email_id = parts[-1]
-                    
+
                     # Queue for processing (in production, use a proper queue)
                     logger.info("New email notification: mailbox=%s, email_id=%s", mailbox, email_id)
-                    
-                    # Process the email
-                    await process_incoming_email(email_id, mailbox)
+
+                    source = await db.mailbox_sources.find_one({"email_address": mailbox}, {"_id": 0})
+                    category = (source or {}).get("category", "AP")
+                    source_id = (source or {}).get("mailbox_id")
+                    try:
+                        await poll_mailbox_for_documents(
+                            mailbox_address=mailbox,
+                            default_category=category,
+                            source_id=source_id,
+                        )
+                    except Exception as e:
+                        logger.error("Webhook-triggered poll failed for %s: %s", mailbox, str(e))
     
     return {"status": "ok"}
 

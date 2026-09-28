@@ -347,6 +347,61 @@ async def infer_vendor_from_bc_references(db, filename: str) -> Tuple[Optional[s
     return None, "none", []
 
 
+async def infer_vendor_from_siblings(db, filename: str, batch_id: str) -> Optional[str]:
+    """
+    Strategy 6 helper: find a vendor already resolved on a sibling document.
+
+    Called with `batch_id` as `doc.get("batch_id") or doc.get("email_message_id")`
+    (see classification_pipeline.py) -- in practice, real documents almost
+    never carry a `batch_id` field (confirmed against production data: the
+    field that's actually populated for split-batch children is
+    `batch_parent_id`, a different name), so the value passed in is usually
+    an email_message_id. Rather than guess which convention produced this
+    specific value, match it against all three plausible grouping fields.
+
+    Returns a vendor display name (matching the preference order used by
+    infer_vendor_from_bc_references: name over code), or None if no sibling
+    has a resolved vendor yet.
+    """
+    if not batch_id:
+        return None
+
+    cursor = db.hub_documents.find(
+        {
+            "$or": [
+                {"batch_id": batch_id},
+                {"batch_parent_id": batch_id},
+                {"email_message_id": batch_id},
+            ],
+            "file_name": {"$ne": filename},
+        },
+        {
+            "_id": 0,
+            "file_name": 1,
+            "extracted_fields.vendor": 1,
+            "vendor_normalized": 1,
+            "vendor_canonical": 1,
+            "bc_vendor_number": 1,
+        },
+    ).limit(20)
+
+    async for sibling in cursor:
+        vendor = (
+            (sibling.get("extracted_fields") or {}).get("vendor")
+            or sibling.get("vendor_normalized")
+            or sibling.get("vendor_canonical")
+            or sibling.get("bc_vendor_number")
+        )
+        if vendor:
+            logger.info(
+                "[VendorInfer:Sibling] %s -> found via sibling %s -> vendor=%s",
+                filename[:40], sibling.get("file_name", "?")[:40], vendor,
+            )
+            return vendor
+
+    return None
+
+
 async def infer_vendor_async(
     db, filename: str, extracted_fields: Optional[Dict] = None,
     batch_id: Optional[str] = None,

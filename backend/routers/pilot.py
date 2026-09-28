@@ -5,16 +5,20 @@ All operations are READ-ONLY observation mode.
 """
 
 import asyncio
+import base64
+import copy
 import hashlib
 import logging
 import uuid
+import httpx
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query, Body, BackgroundTasks
 from pydantic import BaseModel
 from typing import Dict, Optional, List
-from deps import get_db
+from deps import get_db, EMAIL_POLLING_ENABLED, SALES_EMAIL_POLLING_ENABLED
+from services.config_service import get_email_token
 from services.pilot_config import PILOT_MODE_ENABLED, CURRENT_PILOT_PHASE, get_pilot_status
-from services.pilot_summary import DAILY_PILOT_EMAIL_ENABLED, PILOT_SUMMARY_RECIPIENTS, PILOT_SUMMARY_CRON_HOUR_UTC
+from services.pilot_summary import DAILY_PILOT_EMAIL_ENABLED, PILOT_SUMMARY_RECIPIENTS, PILOT_SUMMARY_CRON_HOUR_UTC, send_daily_pilot_summary
 from services.vendor_name_helpers import normalize_vendor_name, VENDOR_ALIAS_MAP
 
 logger = logging.getLogger(__name__)
@@ -221,6 +225,7 @@ async def get_pilot_logs(
     
     Returns documents ingested during the pilot with classification details.
     """
+    db = get_db()
     # Build match
     match = {"pilot_phase": phase}
     if doc_type:
@@ -293,6 +298,7 @@ async def get_pilot_accuracy_report(
     - Documents with missing required metadata
     - Time-in-status distribution
     """
+    db = get_db()
     base_match = {"pilot_phase": phase}
     
     # Find manually corrected documents (where doc_type was changed after initial classification)
@@ -392,6 +398,7 @@ async def get_pilot_trend_data(
     
     Returns daily counts by doc_type for charting.
     """
+    db = get_db()
     # Calculate date range
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=days)
@@ -474,10 +481,11 @@ async def trigger_daily_pilot_summary():
         )
     
     from services.email_service import get_email_service
-    
+
+    db = get_db()
     email_service = get_email_service()
     result = await send_daily_pilot_summary(db, email_service)
-    
+
     return result
 
 
@@ -491,6 +499,7 @@ async def get_pilot_email_logs(
     
     Useful for verifying email content during the shadow pilot.
     """
+    db = get_db()
     cursor = db.email_logs.find(
         {"subject": {"$regex": "Pilot Summary", "$options": "i"}},
         {"_id": 0}
@@ -530,7 +539,8 @@ async def _daily_pilot_summary_scheduler():
     Sends at PILOT_SUMMARY_CRON_HOUR_UTC (default: 13:00 UTC = 7 AM CST).
     """
     from services.email_service import get_email_service
-    
+
+    db = get_db()
     last_sent_date = None
     
     while True:
@@ -578,6 +588,8 @@ async def get_ap_workflow_metrics(days: int = Query(30)):
     Get workflow metrics for AP_Invoice documents.
     Includes counts per status and time-in-status averages.
     """
+    from workflows.core.engine import WorkflowEngine
+
     cutoff_date = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
     # Status counts
@@ -639,13 +651,25 @@ async def list_mailbox_sources():
 async def get_mailbox_polling_status():
     db = get_db()
     """Get the status of the dynamic mailbox polling worker."""
-    global _dynamic_mailbox_polling_task, _mailbox_last_poll_times
-    
-    worker_running = _dynamic_mailbox_polling_task is not None and not _dynamic_mailbox_polling_task.done()
-    
+    # `global _dynamic_mailbox_polling_task, _mailbox_last_poll_times` here
+    # was always wrong: Python's `global` only reaches this module's own
+    # namespace, and pilot.py never defines either name at module level, so
+    # every call raised a bare NameError. The two pieces of real state live
+    # in two different places: the worker task handle is only ever set in
+    # server.py's own startup code (imported locally to dodge the circular
+    # import server.py<->pilot.py would otherwise create), and the actual
+    # per-mailbox last-poll times are tracked in email_polling_service.py
+    # (server.py keeps its own same-named dict too, but its own comment
+    # marks that copy "Legacy — real state is in email_polling_svc").
+    import server as _server_module
+    from services.email_polling_service import _mailbox_last_poll_times
+
+    dynamic_task = getattr(_server_module, "_dynamic_mailbox_polling_task", None)
+    worker_running = dynamic_task is not None and not dynamic_task.done()
+
     # Get all mailbox sources with their last poll times
     sources = await db.mailbox_sources.find({}, {"_id": 0}).to_list(100)
-    
+
     mailbox_statuses = []
     for source in sources:
         mailbox_id = source.get("mailbox_id")
@@ -1286,9 +1310,10 @@ async def get_simulation_results(
 ):
     """
     Get simulation results from the pilot.
-    
+
     Filter by doc_type, simulation_type, or success status.
     """
+    db = get_db()
     query = {}
     
     if doc_type:
@@ -1330,6 +1355,7 @@ async def get_simulation_summary(
     
     Shows success rates, failure reasons, and breakdown by type.
     """
+    db = get_db()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     
     query = {"timestamp": {"$gte": cutoff.isoformat()}}
@@ -1368,6 +1394,7 @@ async def run_batch_simulation(
     
     Useful for running simulations on all documents of a type.
     """
+    db = get_db()
     query = {"doc_type": doc_type}
     if status:
         query["workflow_status"] = status
@@ -1443,7 +1470,7 @@ _simulation_metrics_service = None
 def get_simulation_metrics_service():
     global _simulation_metrics_service
     if _simulation_metrics_service is None:
-        _simulation_metrics_service = SimulationMetricsService(db)
+        _simulation_metrics_service = SimulationMetricsService(get_db())
     return _simulation_metrics_service
 
 
@@ -1582,7 +1609,8 @@ async def start_batch_reingest(
     Processes in batches to avoid timeout.
     """
     global _reingest_state
-    
+    db = get_db()
+
     if _reingest_state["running"]:
         raise HTTPException(status_code=409, detail="Re-ingest already in progress")
     

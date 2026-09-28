@@ -1299,6 +1299,7 @@ async def get_extraction_misses(
     
     Returns data needed for debugging extraction during observation mode.
     """
+    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
     # Map field parameter to actual document field
@@ -1400,6 +1401,7 @@ async def get_stable_vendors(
     
     This does NOT enable anything - it only reports candidates for Phase 8.
     """
+    db = get_db()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     query = {"created_utc": {"$gte": cutoff}}
     

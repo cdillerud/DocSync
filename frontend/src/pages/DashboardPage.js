@@ -96,6 +96,16 @@ export default function DashboardPage() {
     ? Object.entries(stats.by_status).map(([name, value]) => ({ name, value }))
     : [];
 
+  // /api/dashboard/stats now aggregates by_status from whatever values are
+  // actually present (workflow_status, e.g. "exception", falling back to
+  // status), rather than a fixed list of capitalized names -- this card
+  // used to look up only the exact key "Exception" and always read 0 for
+  // any document using the lowercase convention, so sum every key that
+  // means "exception" case-insensitively instead of one exact string.
+  const exceptionCount = Object.entries(stats?.by_status || {})
+    .filter(([name]) => name.toLowerCase() === 'exception')
+    .reduce((sum, [, value]) => sum + value, 0);
+
   // Calculate BC readiness percentage
   const bcReadyRate = extractionQuality?.readiness_metrics?.ready_for_draft?.rate || 0;
   const bcReadyCount = extractionQuality?.readiness_metrics?.ready_for_draft?.count || 0;
@@ -105,7 +115,7 @@ export default function DashboardPage() {
   const metricCards = [
     { label: 'Total Documents', value: stats?.total_documents || 0, icon: FileText, color: 'text-blue-500' },
     { label: 'Ready for BC', value: `${bcReadyRate.toFixed(0)}%`, subtext: `${bcReadyCount} docs`, icon: CheckCircle2, color: 'text-emerald-500' },
-    { label: 'Exceptions', value: stats?.by_status?.Exception || 0, icon: AlertCircle, color: 'text-red-500' },
+    { label: 'Exceptions', value: exceptionCount, icon: AlertCircle, color: 'text-red-500' },
     { label: 'Draft Candidates', value: `${draftCandidateRate.toFixed(0)}%`, subtext: `${draftCandidateCount} docs`, icon: Zap, color: 'text-purple-500' },
   ];
 

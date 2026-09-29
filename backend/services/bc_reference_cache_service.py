@@ -208,6 +208,43 @@ ENTITY_CONFIGS = {
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },
+    "vendors": {
+        # FIX (2026-09-29): this entity was missing from ENTITY_CONFIGS
+        # entirely -- bc_reference_cache had ZERO vendor records (vs 2300
+        # customer records) despite dozens of call sites across the backend
+        # (validation_backfill_service.py, aliases.py, posting_patterns.py,
+        # vendor_profile_rebuild.py, po_resolution_service.py, and more)
+        # already reading bc_vendor_no/bc_vendor_name from bc_entity_type
+        # "vendor" cache records. Confirmed live: 12,771 real AP_Invoice
+        # documents, 8,356 (65%) sitting at vendor_resolution.status=
+        # "unresolved" despite having a clean extracted vendor name (e.g.
+        # "Protiviti Inc.", "Averitt Express", "Gartner Services") -- the
+        # live-API bc_search fallback in unified_vendor_matcher.py only
+        # succeeded 8 times total because it makes several sequential
+        # per-document BC API calls instead of a fast local cache lookup.
+        # Same bug class as the "items" entity fix above (2026-07-14) and
+        # the "salespeoplePurchasers" endpoint-name fix on "salespeople"
+        # below -- this is the third time ENTITY_CONFIGS has silently
+        # omitted or mis-pointed an entity that other code already assumed
+        # was being synced.
+        "entity_type": "vendor",
+        "domain": "master",
+        "number_field": "number",
+        "external_ref_field": None,
+        "select_fields": "id,number,displayName,email,phoneNumber,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id", ""),
+            "bc_document_no": r.get("number", ""),
+            "bc_vendor_no": r.get("number", ""),
+            "bc_vendor_name": r.get("displayName", ""),
+            "displayName": r.get("displayName", ""),
+            "email": r.get("email", ""),
+            "phone_number": r.get("phoneNumber", ""),
+            "entity_type": "vendor",
+            "number": r.get("number", ""),
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
     "salespeople": {
         "entity_type": "salesperson",
         "domain": "master",

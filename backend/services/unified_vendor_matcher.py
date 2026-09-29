@@ -376,7 +376,60 @@ class UnifiedVendorMatcher:
         vendor_normalized: str
     ) -> Optional[Dict]:
         """Match against Business Central vendors."""
-        
+
+        # 2026-09-29: check the local bc_reference_cache first. Confirmed
+        # live: this cache had ZERO vendor records until today (the
+        # "vendor" entity was missing from ENTITY_CONFIGS in
+        # bc_reference_cache_service.py entirely, so it was never synced),
+        # meaning every single vendor lookup fell through to the live BC
+        # API search below -- several sequential HTTP round-trips per
+        # document -- which is why it only ever matched 8 of 4,362
+        # "resolved" AP invoices. Now that the cache is populated (902 real
+        # vendors), a fast local query here handles the vast majority of
+        # cases and the live API search below remains as a fallback for
+        # anything not yet cached (new vendors, stale cache window).
+        try:
+            import re
+            escaped = re.escape(vendor_name)
+            cache_hit = await self.db.bc_reference_cache.find_one(
+                {"bc_entity_type": "vendor", "bc_vendor_name": {"$regex": f"^{escaped}$", "$options": "i"}},
+                {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_record_id": 1},
+            )
+            if cache_hit and cache_hit.get("bc_vendor_no"):
+                return {
+                    "name": cache_hit.get("bc_vendor_name"),
+                    "vendor_number": cache_hit.get("bc_vendor_no"),
+                    "vendor_id": cache_hit.get("bc_record_id"),
+                    "score": 1.0,
+                    "method": "bc_cache_exact",
+                }
+
+            if len(vendor_name) >= 4:
+                first_word = vendor_name.split()[0].rstrip(".,;:") if vendor_name else ""
+                if first_word and len(first_word) >= 3:
+                    escaped_word = re.escape(first_word)
+                    candidates = await self.db.bc_reference_cache.find(
+                        {"bc_entity_type": "vendor", "bc_vendor_name": {"$regex": escaped_word, "$options": "i"}},
+                        {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_record_id": 1},
+                    ).to_list(20)
+                    best = None
+                    best_score = 0.0
+                    for c in candidates:
+                        score = self._calculate_similarity(vendor_name, c.get("bc_vendor_name", ""))
+                        if score > best_score:
+                            best_score = score
+                            best = c
+                    if best and best_score >= 0.6 and best.get("bc_vendor_no"):
+                        return {
+                            "name": best.get("bc_vendor_name"),
+                            "vendor_number": best.get("bc_vendor_no"),
+                            "vendor_id": best.get("bc_record_id"),
+                            "score": best_score,
+                            "method": "bc_cache_fuzzy",
+                        }
+        except Exception as e:
+            logger.warning("BC reference cache vendor lookup error: %s", str(e))
+
         try:
             token = await self._get_bc_token()
             if not token:

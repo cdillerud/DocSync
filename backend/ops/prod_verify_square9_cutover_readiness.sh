@@ -244,6 +244,18 @@ run_step ingest_bucket_A_corrections \
     python scripts/ingest_bucket_A_corrections.py \
         --run-label "$(basename "${PROOF_DIR}")"
 
+# --- 12. Hub classification quality report (matched-doc agreement check) ---
+# Answers a different question than the parity report: not "does Hub have
+# a copy of what Square9 has" (coverage) but "for documents both systems
+# have, does Hub actually classify them correctly" (quality). Read-only --
+# reads the parity CSV + hub_documents, writes one JSON report. Findings
+# here are CANDIDATES for review, not confirmed bugs -- verified live
+# 2026-09-28 that the folder-based heuristic can flag freight/BOL
+# paperwork sitting in AP-lane folders as a false disagreement.
+run_step hub_classification_quality_report \
+    "Hub classification quality report (matched-doc agreement, read-only)" \
+    python scripts/hub_classification_quality_report.py
+
 # --- Manifest close ---------------------------------------------------------
 FINISHED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {

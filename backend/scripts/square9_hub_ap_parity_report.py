@@ -42,6 +42,18 @@ from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
+# 2026-09-28: bucket_C_intake_gap_report.py already has a live-tested,
+# business-confirmed list of "this is a reference file/report/internal
+# doc, not a real vendor invoice, and was never capturable by Hub's email
+# intake" patterns (see that file's NOT_HUB_EXPECTED_PATTERNS). It has
+# always been informational-only: bucket_C recommends
+# "exclude_from_parity_denominator" for these documents, but nothing
+# actually removed them from THIS script's own square_count/match_rate_pct
+# -- the number the GO/NO-GO cutover decision is based on. They were
+# silently counted as "no_match" (real gaps) instead. Importing the same
+# pattern list here and excluding matches before scoring fixes that.
+from bucket_C_intake_gap_report import NOT_HUB_EXPECTED_PATTERNS
+
 # Reuse normalization / Graph-pull helpers from the sibling script. This is
 # intentional — we want IDENTICAL filename normalization on both sides so
 # bucket counts are directly comparable to the prior tool.
@@ -538,6 +550,34 @@ def filter_square_docs_by_subpath(
     return kept, len(excluded), excluded
 
 
+def filter_square_docs_by_non_transactional_pattern(
+    docs: List["SquareDoc"],
+) -> Tuple[List["SquareDoc"], int, List["SquareDoc"]]:
+    """Drop Square9 docs that match a known non-transactional pattern
+    (reference spreadsheets, internal reports, customs paperwork, manual
+    accounting-exception queues, etc.) using the same, already
+    business-confirmed patterns bucket_C_intake_gap_report.py uses to
+    recommend "exclude_from_parity_denominator". These were never real
+    vendor invoices and were never capturable by Hub's email intake, so
+    counting them as "no_match" against the cutover match rate
+    mischaracterizes a correct non-event as a gap.
+
+    Returns (kept_docs, excluded_count, excluded_docs).
+    """
+    kept: List[SquareDoc] = []
+    excluded: List[SquareDoc] = []
+    for d in docs:
+        parent_path = ""
+        if isinstance(d.raw, dict):
+            parent_path = d.raw.get("parent_path") or ""
+        blob = f"{d.name} {parent_path}"
+        if any(pat.search(blob) for pat, _label in NOT_HUB_EXPECTED_PATTERNS):
+            excluded.append(d)
+        else:
+            kept.append(d)
+    return kept, len(excluded), excluded
+
+
 # ---------------------------------------------------------------------------
 # Triage CSV — write square9_only (no_match) rows for operator review
 # ---------------------------------------------------------------------------
@@ -987,6 +1027,7 @@ def run_compare(
     invoice_date_tolerance_days: int = 30,
     excluded_subpaths: Optional[List[str]] = None,
     excluded_count: int = 0,
+    excluded_non_transactional_count: int = 0,
     triage_out_csv: Optional[str] = None,
     llm_assist: bool = False,
     check_recycle_bin: bool = True,
@@ -1198,6 +1239,7 @@ def run_compare(
         ),
         "excluded_subpaths": list(excluded_subpaths or []),
         "excluded_count": excluded_count,
+        "excluded_non_transactional_count": excluded_non_transactional_count,
         "triage_out_csv": triage_out_csv if triage_out_csv else None,
         "triage_rows_written": triage_written,
         "llm_assist_enabled": llm_assist,
@@ -1359,6 +1401,9 @@ def main() -> int:
     sq_docs, excluded_count, _excluded_docs = filter_square_docs_by_subpath(
         sq_docs, excluded_subpaths
     )
+    sq_docs, excluded_non_transactional_count, _excluded_nt_docs = (
+        filter_square_docs_by_non_transactional_pattern(sq_docs)
+    )
 
     # Pull Hub side from Mongo
     hub_docs = load_hub_ap_docs(args.since_hours, args.limit)
@@ -1368,7 +1413,8 @@ def main() -> int:
         f"Square9 listing: {sq_docs_unfiltered_count} total, "
         f"{sq_count_before_subpath_exclusion} within last {prod_window_hours}h "
         f"(cutoff={prod_cutoff_iso}); excluded_by_subpath={excluded_count} "
-        f"({excluded_subpaths!r}); kept={len(sq_docs)}.",
+        f"({excluded_subpaths!r}); excluded_non_transactional="
+        f"{excluded_non_transactional_count}; kept={len(sq_docs)}.",
         file=sys.stderr,
     )
     print(
@@ -1391,6 +1437,7 @@ def main() -> int:
         invoice_date_tolerance_days=args.invoice_date_tolerance_days,
         excluded_subpaths=excluded_subpaths,
         excluded_count=excluded_count,
+        excluded_non_transactional_count=excluded_non_transactional_count,
         triage_out_csv=triage_out,
         llm_assist=args.llm_assist,
         check_recycle_bin=not args.no_recycle_bin_check,

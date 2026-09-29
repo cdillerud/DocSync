@@ -943,8 +943,13 @@ async def run_sales_email_poll():
                             stats["errors"].append(f"Error fetching {filename}: {str(e)}")
                             continue
 
-                        content_bytes = base64.b64decode(content_b64)
-                        content_hash = hashlib.sha256(content_bytes).hexdigest()
+                        try:
+                            content_bytes = base64.b64decode(content_b64)
+                            content_hash = hashlib.sha256(content_bytes).hexdigest()
+                        except Exception as e:
+                            stats["attachments_failed"] += 1
+                            stats["errors"].append(f"Failed to decode {filename}: {str(e)}")
+                            continue
 
                         is_dup = await check_sales_duplicate(internet_msg_id, content_hash)
                         if is_dup:

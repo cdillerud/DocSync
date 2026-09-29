@@ -507,8 +507,15 @@ async def _poll_mailbox_for_attachments_unlocked():
         from services.config_service import get_email_token
         token = await get_email_token()
         if not token:
-            stats["errors"].append("Failed to get Email token")
-            return stats
+            # 2026-09-29: was `stats["errors"].append(...); return stats` --
+            # returning early here skipped db.mail_poll_runs.insert_one() at
+            # the end of this function entirely, so a failed run here was
+            # invisible in the database forever (found live while
+            # investigating the identical bug in the sandbox app's sales
+            # poller). Raising instead routes through the existing outer
+            # except-block below, which still returns the same stats shape
+            # but also reaches the persistence call.
+            raise RuntimeError("Failed to get Email token")
 
         # Strict cursor: receivedDateTime gt watermark_time (no 5-min back-buffer).
         # The 5-minute back-buffer combined with $top=25 + asc-order created an
@@ -553,8 +560,10 @@ async def _poll_mailbox_for_attachments_unlocked():
             if messages_resp.status_code != 200:
                 error_msg = f"Graph API error {messages_resp.status_code}: {messages_resp.text[:200]}"
                 logger.error("[EmailPoll:%s] %s", run_id, error_msg)
-                stats["errors"].append(error_msg)
-                return stats
+                # 2026-09-29: same fix as the token-failure branch above --
+                # raise instead of early-return so this failure also gets
+                # persisted to mail_poll_runs instead of vanishing.
+                raise RuntimeError(error_msg)
 
             messages = messages_resp.json().get("value", [])
 
@@ -860,8 +869,10 @@ async def run_sales_email_poll():
         from services.config_service import get_email_token
         token = await get_email_token()
         if not token:
-            stats["errors"].append("Failed to get email access token")
-            return stats
+            # 2026-09-29: same fix as _poll_mailbox_for_attachments_unlocked --
+            # raise instead of early-return so this failure also gets
+            # persisted to sales_mail_poll_runs instead of vanishing.
+            raise RuntimeError("Failed to get email access token")
 
         lookback = EMAIL_POLLING_LOOKBACK_MINUTES
         buffer_time = (datetime.now(timezone.utc) - timedelta(minutes=lookback)).isoformat()
@@ -879,8 +890,10 @@ async def run_sales_email_poll():
                 },
             )
             if messages_resp.status_code != 200:
-                stats["errors"].append(f"Graph API error: {messages_resp.status_code}")
-                return stats
+                # 2026-09-29: same fix as the token-failure branch above --
+                # raise instead of early-return so this failure also gets
+                # persisted to sales_mail_poll_runs instead of vanishing.
+                raise RuntimeError(f"Graph API error: {messages_resp.status_code}")
 
             messages = messages_resp.json().get("value", [])
             stats["messages_detected"] = len(messages)

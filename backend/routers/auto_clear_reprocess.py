@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter
 from deps import get_db
+from routers.queue_constants import TERMINAL_STATUSES
 from services.auto_clear_service import (
     evaluate_auto_clear, get_auto_clear_update, AutoClearDecision
 )
@@ -33,7 +34,7 @@ async def dry_run():
     """Preview how many non-cleared, non-terminal docs would be auto-cleared."""
     db = get_db()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
+    TERMINAL = TERMINAL_STATUSES
     docs = await db.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
@@ -73,7 +74,7 @@ async def run_reprocess():
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
+    TERMINAL = TERMINAL_STATUSES
     docs = await db.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
@@ -162,7 +163,7 @@ async def force_clear_remaining():
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
+    TERMINAL = TERMINAL_STATUSES
     result = await db.hub_documents.update_many(
         {
             "is_duplicate": {"$ne": True},
@@ -248,7 +249,7 @@ def _is_junk(doc):
 async def dry_run_clear_junk():
     """Preview which documents would be classified as junk and cleared."""
     db = get_db()
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate", "FileMissing"]
+    TERMINAL = TERMINAL_STATUSES
 
     # Query both hub_documents AND document_intelligence_results
     # The Doc Intelligence page reads from the intelligence collection

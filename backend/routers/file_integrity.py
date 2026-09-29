@@ -16,6 +16,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from deps import get_db
+from routers.queue_constants import TERMINAL_STATUSES
 
 logger = logging.getLogger("file_integrity")
 router = APIRouter(prefix="/file-integrity", tags=["File Integrity"])
@@ -29,7 +30,7 @@ async def dry_run():
     """Preview which docs have missing files."""
     db = get_db()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
+    TERMINAL = TERMINAL_STATUSES
     docs = await db.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},
@@ -76,7 +77,7 @@ async def scan_and_flag():
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "Duplicate"]
+    TERMINAL = TERMINAL_STATUSES
     docs = await db.hub_documents.find(
         {
             "is_duplicate": {"$ne": True},

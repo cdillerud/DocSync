@@ -74,7 +74,8 @@ _WR_TEXT_PATTERNS = _re.compile(
 # Invoice pattern — catches freight carrier invoices that should be AP_Invoice, not Freight_Document
 _INVOICE_TEXT_PATTERNS = _re.compile(
     r'(invoice\s*#|invoice\s+number|balance\s+due|terms\s*:\s*net\s+\d|'
-    r'please\s+remit|amount\s+due|payment\s+terms|remit\s+to|pay\s+this\s+amount)',
+    r'please\s+remit|amount\s+due|payment\s+terms|remit\s+to|pay\s+this\s+amount|'
+    r'payment\s+due)',
     _re.IGNORECASE,
 )
 
@@ -102,6 +103,11 @@ def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
     try:
         import fitz
         with fitz.open(file_path) as pdf_doc:
+            if len(pdf_doc) == 0:
+                logger.warning(
+                    "[AP-invoice-heuristic] '%s' opened with 0 pages -- cannot "
+                    "check for invoice language", file_name,
+                )
             if len(pdf_doc) > 0:
                 page_text = pdf_doc[0].get_text()[:3000]
 
@@ -128,10 +134,15 @@ def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
                     # Strong invoice signal (at least 2 indicators)
                     # But DON'T override if filename clearly says BOL, packing list, etc.
                     if _PL_FILENAME_PATTERNS.search(fn_lower) or _BOL_FILENAME_PATTERNS.search(fn_lower):
+                        logger.info(
+                            "[AP-invoice-heuristic] '%s' had %d invoice-language "
+                            "matches but filename pattern (packing-list/BOL) "
+                            "blocked the override", file_name, len(invoice_matches),
+                        )
                         return None
                     logger.info("Pre-AI AP invoice detection: %d text indicators in '%s'", len(invoice_matches), file_name)
                     fields = {"ap_invoice_detected_by": "text_pattern"}
-                    inv_m = _re.search(r'invoice\s*#?\s*[:\s]*([A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                    inv_m = _re.search(r'invoice\s*#?\s*[:\s]*((?=[A-Z0-9-]*\d)[A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
                     amt_m = _re.search(r'(?:balance\s+due|amount\s+due|total)[:\s]*\$?([\d,]+\.?\d*)', page_text, _re.IGNORECASE)
                     if inv_m:
                         fields["invoice_number"] = inv_m.group(1).strip()
@@ -143,8 +154,44 @@ def _check_obvious_ap_invoice(file_path: str, file_name: str) -> dict | None:
                         "model": "heuristic-ap-invoice-text",
                         "extracted_fields": fields,
                     }
+
+                if len(invoice_matches) < 2:
+                    filename_says_ap_invoice = (
+                        "invoice" in fn_lower
+                        and "sales" not in fn_lower
+                        and not _PL_FILENAME_PATTERNS.search(fn_lower)
+                        and not _BOL_FILENAME_PATTERNS.search(fn_lower)
+                    )
+                    if len(invoice_matches) == 1 and filename_says_ap_invoice:
+                        logger.info(
+                            "[AP-invoice-heuristic] '%s': only 1/2 invoice-language "
+                            "matches (%s), but filename unambiguously says invoice "
+                            "(and not sales/BOL/packing-list) -- accepting as AP_Invoice",
+                            file_name, invoice_matches,
+                        )
+                        fields = {"ap_invoice_detected_by": "filename+text_pattern"}
+                        inv_m = _re.search(r'invoice\s*#?\s*[:\s]*((?=[A-Z0-9-]*\d)[A-Z0-9-]{2,20})', page_text, _re.IGNORECASE)
+                        amt_m = _re.search(r'(?:balance\s+due|amount\s+due|total)[:\s]*\$?([\d,]+\.?\d*)', page_text, _re.IGNORECASE)
+                        if inv_m:
+                            fields["invoice_number"] = inv_m.group(1).strip()
+                        if amt_m:
+                            fields["amount"] = amt_m.group(1).strip()
+                        return {
+                            "suggested_job_type": "AP_Invoice",
+                            "confidence": 0.88,
+                            "model": "heuristic-ap-invoice-filename-text",
+                            "extracted_fields": fields,
+                        }
+                    logger.info(
+                        "[AP-invoice-heuristic] '%s': %d/2 invoice-language "
+                        "matches, page_text_len=%d, first_200_chars=%r -- "
+                        "heuristic did not fire",
+                        file_name, len(invoice_matches), len(page_text), page_text[:200],
+                    )
     except Exception as e:
-        logger.debug("AP invoice/credit memo text check failed for %s: %s", file_name, e)
+        logger.warning(
+            "[AP-invoice-heuristic] EXCEPTION for '%s': %s", file_name, e, exc_info=True,
+        )
 
     return None
 

@@ -598,12 +598,20 @@ class BCReferenceCacheService:
                 # Open orders can disappear when posted; incremental modified-date
                 # sync cannot observe deletions. Full-refresh volatile order tables.
                 entity_last_sync = None if table_name in ("purchaseOrders", "salesOrders") else last_sync
-                count = await self._sync_entity(
+                count, fetch_succeeded = await self._sync_entity(
                     token, company_id, table_name, config, entity_last_sync
                 )
-                results[config["entity_type"]] = count
-                total_records += count
-                logger.info("[BC Cache] Synced %s: %d records", table_name, count)
+                if fetch_succeeded:
+                    results[config["entity_type"]] = count
+                    total_records += count
+                    logger.info("[BC Cache] Synced %s: %d records", table_name, count)
+                else:
+                    results[config["entity_type"]] = f"error: partial fetch failed after {count} records"
+                    total_records += count
+                    logger.error(
+                        "[BC Cache] %s sync failed partway through (got %d records before a page fetch error) -- "
+                        "cache for this entity type may be incomplete", table_name, count
+                    )
             except Exception as e:
                 logger.error("[BC Cache] Error syncing %s: %s", table_name, str(e))
                 results[config["entity_type"]] = f"error: {str(e)}"
@@ -661,7 +669,7 @@ class BCReferenceCacheService:
     async def _sync_entity(
         self, token: str, company_id: str,
         table_name: str, config: Dict, last_sync: Optional[str]
-    ) -> int:
+    ) -> tuple:
         # GPI-SQUARE9-BC-CACHE-STALE-V65
         # Full snapshots reconcile deletions only after a completely successful fetch.
         endpoint = config.get("endpoint", table_name)
@@ -718,7 +726,7 @@ class BCReferenceCacheService:
             if stale_result.deleted_count:
                 logger.warning("[BC Cache] Reconciled %s: removed %d stale cached records", table_name, stale_result.deleted_count)
 
-        return count
+        return count, fetch_succeeded
 
     def _build_cache_document(self, record: Dict, config: Dict) -> Optional[Dict]:
         """Transform a BC record into a cache document.
@@ -820,8 +828,15 @@ class BCReferenceCacheService:
                 results[name] = "unknown_entity"
                 continue
             try:
-                count = await self._sync_entity(token, company_id, name, config, last_sync)
-                results[config["entity_type"]] = count
+                count, fetch_succeeded = await self._sync_entity(token, company_id, name, config, last_sync)
+                if fetch_succeeded:
+                    results[config["entity_type"]] = count
+                else:
+                    results[config["entity_type"]] = f"error: partial fetch failed after {count} records"
+                    logger.error(
+                        "[BC Cache] %s sync failed partway through (got %d records before a page fetch error) -- "
+                        "cache for this entity type may be incomplete", name, count
+                    )
                 total += count
             except Exception as e:
                 logger.error("[BC Cache] Error syncing %s: %s", name, e)

@@ -132,7 +132,7 @@ async def run_reprocess():
 
         if decision == AutoClearDecision.CLEARED:
             update = get_auto_clear_update(decision, details)
-            update["workflow_status"] = "completed"
+            # 2026-09-28: removed the "completed" override here -- get_auto_clear_update() above already sets the correct non-AP-housekeeping workflow_status ("archived_from_queue"), and overwriting it back to "completed" was colliding with genuine AP-invoice completion (see documents.py 2026-09-24 comment: this collision already hid a stale, actively-failing AP invoice from the active queue).
             update["auto_clear_reason"] = reason
             await db.hub_documents.update_one(
                 {"id": doc["id"]},

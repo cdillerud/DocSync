@@ -655,8 +655,32 @@ class DerivedStateService:
             "Archived": WorkflowState.COMPLETED.value,
             "Failed": WorkflowState.FAILED.value,
         }
+
+        if status == "batch_parent":
+            # batch_parent is a structural marker (this document is a batch
+            # container), not a lifecycle stage -- it's written once at
+            # intake time and never updated again, so `status` itself never
+            # reflects this document's real progress. workflow_status keeps
+            # advancing normally underneath it and is the real signal.
+            # Without this branch every batch-parent document (1,377 of them)
+            # silently fell through the status_mapping.get() default below
+            # and showed as PROCESSING regardless of its actual stage.
+            batch_parent_status_mapping = {
+                "approved": WorkflowState.READY.value,
+                "ready_for_post": WorkflowState.READY.value,
+                "exported": WorkflowState.COMPLETED.value,  # legacy value, pre-2026-09-28 migration
+                "archived_from_queue": WorkflowState.COMPLETED.value,
+                "needs_review": WorkflowState.REVIEWING.value,
+                "po_pending": WorkflowState.REVIEWING.value,
+                "pilot_review": WorkflowState.REVIEWING.value,
+                "data_correction_pending": WorkflowState.REVIEWING.value,
+            }
+            workflow_state = batch_parent_status_mapping.get(
+                workflow_status, WorkflowState.PROCESSING.value
+            )
         
-        workflow_state = status_mapping.get(status, WorkflowState.PROCESSING.value)
+        else:
+            workflow_state = status_mapping.get(status, WorkflowState.PROCESSING.value)
         
         # Check for specific review queues from workflow_status
         if workflow_status == "vendor_pending":

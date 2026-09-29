@@ -28,7 +28,7 @@ TERMINAL_STATUSES = [
 
 DONE_WORKFLOW_STATUSES = [
     "completed", "validation_passed", "processed", "ready_for_approval",
-    "exported", "file_missing", "exception_review",
+    "exported", "file_missing", "exception_review", "archived_from_queue", "shipping_filed", "excluded",
 ]
 
 # A document with an active, unresolved failure must never be treated as

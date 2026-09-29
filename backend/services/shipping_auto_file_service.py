@@ -115,7 +115,7 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
             "auto_clear_decision": "Cleared",
             "auto_clear_reason": f"Shipping auto-filed: {reason}",
             "status": "Completed",
-            "workflow_status": "completed",
+            "workflow_status": "shipping_filed",  # 2026-09-28: renamed from "completed" -- reserved for genuine AP invoice completion (readiness.py); this is a shipping doc auto-filed to SharePoint, not an invoice.
             "sharepoint_folder_suggestion": folder_path,
             "sharepoint_folder_reason": reason,
             "filed_at": now,

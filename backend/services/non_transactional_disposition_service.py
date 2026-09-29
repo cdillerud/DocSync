@@ -139,7 +139,7 @@ def build_disposition_update(
             f"non_transactional_{disposition}"
         ],
         "status": "Archived",
-        "workflow_status": "completed",
+        "workflow_status": "excluded",  # 2026-09-28: renamed from "completed" -- reserved for genuine AP invoice completion (readiness.py); this document was excluded as non-transactional (graphics/artwork, spam, duplicate, etc.), never processed.
         "auto_cleared": True,
         "auto_clear_reason": (
             f"non_transactional_{disposition}"

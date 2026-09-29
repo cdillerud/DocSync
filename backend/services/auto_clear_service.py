@@ -666,7 +666,7 @@ def get_auto_clear_update(
         return {
             "status": AUTO_CLEAR_CONFIG["cleared_status"],
             "square9_stage": AUTO_CLEAR_CONFIG["cleared_stage"],
-            "workflow_status": "exported",
+            "workflow_status": "archived_from_queue",  # 2026-09-28: renamed from "exported" -- that value is reserved for real Business Central posting success (auto_post_service.py); this auto-clear path never wrote BC, it was colliding with the real meaning.
             "auto_cleared": True,
             "auto_cleared_at": now,
             "auto_clear_details": details,

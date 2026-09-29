@@ -561,6 +561,22 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
     
     logger.info("Document %s eligible for auto-create sales order, attempting...", doc_id)
     
+    # Sales rep must be confidently assigned (via BC customer->rep mapping,
+    # manual override, or fuzzy/domain match -- see sales_auto_assign.py)
+    # before we attempt SO creation. "pending_rep_review" and "triage" both
+    # mean a human still needs to resolve the rep; don't create the SO out
+    # from under that review.
+    review_status = doc.get("sales_review_status")
+    if review_status in ("pending_rep_review", "triage"):
+        logger.info(
+            "AUTO-CREATE: Document %s held for sales-rep assignment review "
+            "(sales_review_status=%s) before SO creation", doc_id, review_status,
+        )
+        return AutoPostResult(
+            eligible=True, attempted=False, success=False,
+            reason=f"Sales rep assignment not yet confirmed (status={review_status})",
+        )
+
     # Extract customer and order data
     extracted = doc.get("extracted_fields", {})
     normalized = doc.get("normalized_fields", {})
@@ -584,8 +600,12 @@ async def attempt_auto_create_sales_order(doc_id: str, doc: Dict[str, Any], db, 
         datetime.now(timezone.utc).strftime("%Y-%m-%d")
     )
     
-    # Look up customer in BC (returns customer_number and salesperson_code)
-    customer_number, salesperson_code = await _lookup_bc_customer(customer_name, bc_service)
+    # Look up customer in BC (returns customer_number and salesperson_code).
+    # Prefer the salesperson already resolved by sales_auto_assign.py (has
+    # manual-override support and ran with full customer-name/domain fuzzy
+    # matching) over this function's own simpler direct-lookup fallback.
+    customer_number, _looked_up_salesperson_code = await _lookup_bc_customer(customer_name, bc_service)
+    salesperson_code = doc.get("assigned_salesperson_code") or _looked_up_salesperson_code
     
     if not customer_number:
         logger.warning("AUTO-CREATE: Customer '%s' not found in BC for doc %s", customer_name, doc_id)

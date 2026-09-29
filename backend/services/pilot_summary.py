@@ -274,8 +274,8 @@ async def generate_daily_pilot_summary(db) -> PilotDailySummary:
     misclass_results = await db.hub_documents.aggregate(misclass_pipeline).to_list(10)
     top_misclassifications = [
         {
-            "original": r["_id"]["original"],
-            "corrected": r["_id"]["corrected"],
+            "original": r["_id"].get("original"),
+            "corrected": r["_id"].get("corrected"),
             "count": r["count"]
         }
         for r in misclass_results

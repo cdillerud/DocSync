@@ -1608,12 +1608,14 @@ async def compare_draft_vs_production(
 
 
 @router.get("/vendor-summary")
-async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
+async def get_vendor_posting_summary(limit: int = Query(50, le=2000)):
     """
     Get a summary of all analyzed vendors with their posting profiles,
     document counts, and auto-post readiness.
     """
     db = get_db()
+
+    total_analyzed = await db.posting_pattern_analysis.count_documents({"status": "analyzed"})
 
     # All analyzed profiles
     profiles = await db.posting_pattern_analysis.find(
@@ -1675,6 +1677,7 @@ async def get_vendor_posting_summary(limit: int = Query(50, le=200)):
 
     return {
         "count": len(vendors),
+        "total_analyzed": total_analyzed,
         "vendors": vendors,
         "settings": {
             "auto_post_enabled": settings.get("auto_post_enabled", False),

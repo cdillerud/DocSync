@@ -301,6 +301,7 @@ def evaluate_cache_health(
     now: Optional[datetime] = None,
     sync_interval_minutes: int = CACHE_SYNC_INTERVAL,
     item_min_count: int = ITEM_CATALOG_MIN_COUNT,
+    entity_results: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Evaluate local BC cache health without contacting or writing to BC."""
     now_utc = now or datetime.now(timezone.utc)
@@ -370,6 +371,23 @@ def evaluate_cache_health(
             "message": "BC item catalog cache is below its configured minimum.",
             "actual": item_total,
             "minimum": item_min_count,
+        })
+
+    failing_entities = {
+        name: result for name, result in (entity_results or {}).items()
+        if isinstance(result, str) and result.lower().startswith("error")
+    }
+    if failing_entities:
+        alerts.append({
+            "code": "entity_sync_failing",
+            "severity": "critical",
+            "message": (
+                "BC reference cache sync is failing for "
+                f"{len(failing_entities)} entity type(s) even though the "
+                "overall sync cycle completes -- these entities are not "
+                "being refreshed."
+            ),
+            "entities": failing_entities,
         })
 
     alert_codes = {alert["code"] for alert in alerts}
@@ -1009,6 +1027,7 @@ class BCReferenceCacheService:
             entity_counts,
             last_sync,
             item_numbered_count=item_numbered_count,
+            entity_results=meta.get("results") if meta else None,
         )
 
         return {

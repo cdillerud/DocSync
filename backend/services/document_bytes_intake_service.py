@@ -15,6 +15,66 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
+async def ensure_hub_documents_dedup_index():
+    """Create the sha256_hash dedup backstop index. Safe to call repeatedly.
+
+    Same unique-partial-index + DuplicateKeyError-catch pattern already
+    established for mail_intake_log by email_polling_service's
+    ensure_mail_intake_indexes(). Found live 2026-09-29: the application-
+    level check-then-insert dedup gate below has a real race window, already
+    hit in production (a Phoenix Packaging quote, a Tumalo Creek invoice, and
+    a Progressive Logistics bill each got inserted twice by concurrent
+    mailbox-poller calls -- two of the three pairs share IDENTICAL
+    microsecond-precision created_utc timestamps, the unmistakable
+    fingerprint of the race rather than coincidence).
+
+    Scoped to created_utc >= this process's startup time specifically so it
+    can be created safely without touching or deciding about the ~9
+    pre-existing hash-collision groups already in production (a mix of real
+    documents and old TEST_* fixtures) -- remediating those requires a human
+    judgment call per group (which copy is authoritative, whether either was
+    already posted to BC) that's out of scope for an index migration. This
+    only prevents the exact same race from creating NEW collisions from now
+    on; it does not (and is not intended to) clean up history.
+
+    Partial filter expressions only support $eq/$exists(true)/$gt/$gte/$lt/
+    $lte/$type/$and -- NOT $ne/$nin/$exists:false (confirmed live both via
+    mail_intake_log's own index, see ensure_mail_intake_indexes, and via a
+    failed first attempt here that tried $exists:False and got "Expression
+    not supported in partial index: $not"). No is_duplicate condition is
+    needed here at all: intake_document_from_bytes() never sets is_duplicate
+    on the document it inserts (that field is only ever set later, via a
+    separate update_one, by other code) -- so created_utc >= cutoff alone
+    correctly scopes this to "fresh primary insert attempts" without
+    touching historical data.
+    """
+    from database import db
+    existing = await db.hub_documents.index_information()
+    if "uniq_sha256_hash_primary_recent" in existing:
+        logger.info(
+            "[Intake] hub_documents dedup backstop index already exists "
+            "(created on a prior startup) -- not recreating with a new cutoff"
+        )
+        return
+    cutoff = datetime.now(timezone.utc).isoformat()
+    try:
+        await db.hub_documents.create_index(
+            "sha256_hash",
+            unique=True,
+            partialFilterExpression={
+                "sha256_hash": {"$type": "string", "$gt": ""},
+                "created_utc": {"$gte": cutoff},
+            },
+            name="uniq_sha256_hash_primary_recent",
+        )
+        logger.info(
+            "[Intake] Created hub_documents dedup backstop index "
+            "(enforced for documents created from %s onward)", cutoff,
+        )
+    except Exception as e:  # noqa: BLE001 — non-fatal, app must still start
+        logger.warning("ensure_hub_documents_dedup_index failed: %s", e)
+
+
 # =============================================================================
 # Phase 3 Step 4b — authoritative raw-bytes intake implementation
 # =============================================================================
@@ -107,7 +167,9 @@ async def intake_document_from_bytes(
 
     computed_hash = hashlib.sha256(file_content).hexdigest()
 
-    # ---- Content-hash dedup gate ----
+    # ---- Content-hash dedup gate (application-level; see
+    # ensure_hub_documents_dedup_index() below for the DB-level backstop
+    # that catches the race window between this check and insert_one) ----
     existing_by_hash = await db.hub_documents.find_one(
         {"sha256_hash": computed_hash, "is_duplicate": {"$ne": True}},
         {"_id": 0, "id": 1, "file_name": 1}
@@ -189,7 +251,34 @@ async def intake_document_from_bytes(
         # Pilot metadata (added if pilot mode enabled)
         **get_pilot_metadata()
     }
-    await db.hub_documents.insert_one(doc)
+    try:
+        await db.hub_documents.insert_one(doc)
+    except Exception as e:  # noqa: BLE001
+        # DuplicateKeyError from uniq_sha256_hash_primary_recent -- another
+        # concurrent intake call already inserted this exact content between
+        # our find_one check above and this insert. Clean up the file we
+        # already wrote to disk for this losing attempt and report it the
+        # same way the earlier (non-racy) duplicate-detection path does.
+        if "DuplicateKey" in type(e).__name__ or "E11000" in str(e):
+            logger.info(
+                "[Intake] Lost duplicate race on hash %s for %s (doc_id=%s) "
+                "-- another concurrent intake already inserted this content",
+                computed_hash[:12], filename, doc_id,
+            )
+            try:
+                file_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            winner = await db.hub_documents.find_one(
+                {"sha256_hash": computed_hash, "is_duplicate": {"$ne": True}},
+                {"_id": 0, "id": 1},
+            )
+            return {
+                "document_id": (winner or {}).get("id", doc_id),
+                "skipped_duplicate": True,
+                "message": "Duplicate of concurrently-inserted document (race detected)",
+            }
+        raise
 
     # Emit document.received event (Phase 1)
     event_service = get_event_service()
@@ -649,6 +738,32 @@ async def intake_document_from_bytes(
 
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
 
+    # ── Sales Rep Auto-Assignment ──
+    # Runs BEFORE workflow-status update / SO auto-create so that
+    # attempt_auto_create_sales_order() (triggered from within
+    # _update_standard_workflow_status() below) can gate on, and use, the
+    # rep this determines -- see the sales_review_status check added there.
+    # For sales-eligible documents (Sales_Order, PurchaseOrder, etc.),
+    # look up the customer → rep mapping and route to My Queue or Triage.
+    sales_assign_result = None
+    try:
+        from services.sales_auto_assign import auto_assign_sales_rep
+        # Build a minimal doc dict with all available data
+        assign_doc = {
+            "document_type": suggested_type,
+            "suggested_job_type": suggested_type,
+            "ai_confidence": confidence,
+            "extracted_fields": extracted_fields,
+            "normalized_fields": validation_results.get("normalized_fields", {}),
+            "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
+            "email_sender": sender,
+        }
+        sales_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
+        if sales_assign_result:
+            logger.info("[INTAKE] Sales auto-assign for %s: %s", doc_id[:8], sales_assign_result)
+    except Exception as sa_err:
+        logger.warning("[INTAKE] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
+
     # Update workflow status based on processing results and doc_type
     if doc_type_value == DocType.AP_INVOICE.value:
         # Full AP workflow with vendor matching, BC validation, etc.
@@ -677,28 +792,6 @@ async def intake_document_from_bytes(
             confidence, 
             normalized_fields
         )
-
-    # ── Sales Rep Auto-Assignment ──
-    # For sales-eligible documents (Sales_Order, PurchaseOrder, etc.),
-    # look up the customer → rep mapping and route to My Queue or Triage.
-    sales_assign_result = None
-    try:
-        from services.sales_auto_assign import auto_assign_sales_rep
-        # Build a minimal doc dict with all available data
-        assign_doc = {
-            "document_type": suggested_type,
-            "suggested_job_type": suggested_type,
-            "ai_confidence": confidence,
-            "extracted_fields": extracted_fields,
-            "normalized_fields": validation_results.get("normalized_fields", {}),
-            "vendor_name": vendor_alias_result.get("vendor_canonical") or normalized_fields.get("vendor_raw"),
-            "email_sender": sender,
-        }
-        sales_assign_result = await auto_assign_sales_rep(db, doc_id, assign_doc)
-        if sales_assign_result:
-            logger.info("[INTAKE] Sales auto-assign for %s: %s", doc_id[:8], sales_assign_result)
-    except Exception as sa_err:
-        logger.warning("[INTAKE] Sales auto-assign error for %s: %s", doc_id[:8], str(sa_err))
 
     # ── Batch Document Detection (all types) ──
     # If this is a multi-page document, detect boundaries and flag for splitting

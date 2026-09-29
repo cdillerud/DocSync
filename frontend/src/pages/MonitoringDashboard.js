@@ -141,7 +141,11 @@ export default function MonitoringDashboard() {
     setAcceptingAlias(null);
   };
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 60000); // Poll every 60s so a transient fetch failure self-heals
+    return () => clearInterval(interval);
+  }, [fetchAll]);
 
   // Compute the 5 metrics
   const metrics = computeMetrics(data);

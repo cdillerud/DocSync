@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -129,6 +129,9 @@ export default function UnifiedQueuePage() {
   const [reprocessing, setReprocessing] = useState(null);
   const [metrics, setMetrics] = useState(null);
   const [metricsOpen, setMetricsOpen] = useState(false);
+  const requestIdRef = useRef(0);
+  const [pageLimit, setPageLimit] = useState(500);
+  const [hasMore, setHasMore] = useState(false);
 
   // ── Fetch Inbox Stats ──
   useEffect(() => {
@@ -161,6 +164,8 @@ export default function UnifiedQueuePage() {
 
   // ── Fetch Documents ──
   const fetchDocuments = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
+    const isStale = () => requestIdRef.current !== requestId;
     setLoading(true);
     try {
       const isProcessedTab = activeTab === "processed";
@@ -170,33 +175,39 @@ export default function UnifiedQueuePage() {
       const isArchivedTab = activeTab === "archived";
       const params = new URLSearchParams();
       if (searchQuery) params.append("search", searchQuery);
-      params.append("limit", "500");
+      params.append("limit", String(pageLimit));
 
       if (isArchivedTab) {
         params.append("queue_view", "false");
         params.append("include_cleared", "true");
-        params.append("status_filter", "Archived");
+        params.append("status", "Archived");
         const response = await api.get(`/documents?${params.toString()}`);
-        const docs = (response.data.documents || []).filter(d => d.status === "Archived" || d.workflow_status === "archived");
+        if (isStale()) return;
+        const docs = response.data.documents || [];
         setDocuments(docs);
-        setCounts(prev => ({ ...prev, archived: docs.length }));
+        setCounts(prev => ({ ...prev, archived: response.data.total ?? docs.length }));
         setSelectedDocs(new Set());
+        setHasMore(false);
         setLoading(false);
         return;
       }
 
       if (isExceptionsTab) {
         const exRes = await api.get(`/readiness/exception-queue?limit=500`);
+        if (isStale()) return;
         setDocuments(exRes.data.documents || []);
         setSelectedDocs(new Set());
+        setHasMore(false);
         setLoading(false);
         return;
       }
 
       if (isPoPendingTab) {
         const poRes = await api.get(`/readiness/po-pending?limit=500`);
+        if (isStale()) return;
         setDocuments(poRes.data.documents || []);
         setSelectedDocs(new Set());
+        setHasMore(false);
         setLoading(false);
         return;
       }
@@ -207,10 +218,12 @@ export default function UnifiedQueuePage() {
         params.append("include_cleared", "true");
         params.append("status", "ReadyForPost");
         const response = await api.get(`/documents?${params.toString()}`);
+        if (isStale()) return;
         const docs = response.data.documents || [];
         setDocuments(docs);
         setCounts(prev => ({ ...prev, ready_to_post: docs.length }));
         setSelectedDocs(new Set());
+        setHasMore(false);
         setLoading(false);
         return;
       }
@@ -233,7 +246,9 @@ export default function UnifiedQueuePage() {
       }
 
       const response = await api.get(`/documents?${params.toString()}`);
+      if (isStale()) return;
       let docs = response.data.documents || [];
+      const rawFetchedCount = docs.length;
 
       // Filter out non-postable doc types from active work tabs
       const NON_POSTABLE = new Set([
@@ -264,6 +279,7 @@ export default function UnifiedQueuePage() {
 
       setDocuments(docs);
       setSelectedDocs(new Set());
+      setHasMore(rawFetchedCount >= pageLimit);
 
       // Fetch counts for all tabs (only when on "all" tab to avoid excessive calls)
       if (activeTab === "all") {
@@ -277,7 +293,7 @@ export default function UnifiedQueuePage() {
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=batch_parent'),
             api.get('/readiness/exception-queue?limit=1'),
             api.get('/readiness/po-pending?limit=1'),
-            api.get('/documents?limit=0&queue_view=false&include_cleared=true&status_filter=Archived'),
+            api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=Archived'),
             api.get('/documents?limit=0&queue_view=false&include_cleared=true&status=ReadyForPost'),
           ]);
           setCounts({
@@ -297,7 +313,7 @@ export default function UnifiedQueuePage() {
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, activeTab]);
+  }, [searchQuery, activeTab, pageLimit]);
 
   useEffect(() => { fetchDocuments(); }, [fetchDocuments]);
 
@@ -610,7 +626,7 @@ export default function UnifiedQueuePage() {
             <>
               <div className="w-px h-4 bg-border/40" />
               <button
-                onClick={() => setActiveTab("ready_to_post")}
+                onClick={() => { setPageLimit(500); setActiveTab("ready_to_post"); }}
                 className="flex items-center gap-1.5 hover:opacity-80 transition-opacity cursor-pointer"
                 data-testid="stat-ready-post"
                 title="Click to view Ready to Post documents"
@@ -731,7 +747,7 @@ export default function UnifiedQueuePage() {
         ].map(({ key, label, icon: Icon, count, accent }) => (
           <button
             key={key}
-            onClick={() => setActiveTab(key)}
+            onClick={() => { setPageLimit(500); setActiveTab(key); }}
             data-testid={`tab-${key}`}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
               activeTab === key
@@ -898,6 +914,18 @@ export default function UnifiedQueuePage() {
               })}
             </TableBody>
           </Table>
+        )}
+        {hasMore && !loading && (
+          <div className="flex justify-center py-4">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="load-more-documents"
+              onClick={() => setPageLimit(prev => prev + 500)}
+            >
+              Load 500 more
+            </Button>
+          </div>
         )}
       </div>
     </div>

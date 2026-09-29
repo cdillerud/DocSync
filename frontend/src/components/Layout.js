@@ -100,6 +100,8 @@ export default function Layout() {
       }
     };
     fetchBCStatus();
+    const bcInterval = setInterval(fetchBCStatus, 60000); // Poll every 60s so a transient fetch failure self-heals
+    return () => clearInterval(bcInterval);
   }, []);
 
   const getPageTitle = () => {

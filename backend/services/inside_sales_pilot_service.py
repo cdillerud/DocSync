@@ -236,7 +236,7 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
         token = await get_email_token()
         if not token:
             stats["errors"].append("Failed to get email token")
-            return stats
+            raise RuntimeError("Failed to get email token")
 
         lookback = datetime.now(timezone.utc) - timedelta(
             minutes=INSIDE_SALES_PILOT_LOOKBACK_MINUTES
@@ -258,7 +258,7 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
                 err = f"Graph API error {msg_resp.status_code}: {msg_resp.text[:300]}"
                 logger.error("[InsideSalesPilot:%s] %s", run_id, err)
                 stats["errors"].append(err)
-                return stats
+                raise RuntimeError(err)
 
             messages = msg_resp.json().get("value", [])
             stats["messages_scanned"] = len(messages)

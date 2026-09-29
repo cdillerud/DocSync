@@ -797,11 +797,14 @@ BC_SHIPMENT_SYNC_COLL = "bc_shipment_sync"
 _SYNC_STATUS_KEY = "bc_shipment_sync_status"
 
 
-async def _fetch_bc_shipment_lines(since_iso: str) -> list:
+async def _fetch_bc_shipment_lines(since_iso: str) -> Optional[list]:
     """Query BC Sales Shipment Lines API for shipments since a given ISO timestamp.
 
     Uses the standard BC v2.0 OData API (read-only, Production environment).
-    Returns a list of shipment line dicts, or [] if BC is unavailable.
+    Returns a list of shipment line dicts, [] if BC returned zero matching
+    shipments, or None if the fetch itself could not be completed (missing
+    credentials, token failure, or an HTTP/network error) -- callers must
+    distinguish None (fetch failed) from [] (fetch succeeded, nothing found).
     """
     from services.gpi_integration_service import (
         _get_token, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT,
@@ -810,13 +813,13 @@ async def _fetch_bc_shipment_lines(since_iso: str) -> list:
 
     if not HAS_CREDENTIALS:
         logger.warning("[ShipmentSync] BC credentials not configured — skipping fetch")
-        return []
+        return None
 
     try:
         token = await _get_token()
     except Exception as e:
         logger.warning("[ShipmentSync] BC token acquisition failed: %s", e)
-        return []
+        return None
 
     # Standard BC OData v2.0 endpoint for posted sales shipment lines
     base = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/{BC_STANDARD_API}"
@@ -840,7 +843,7 @@ async def _fetch_bc_shipment_lines(since_iso: str) -> list:
             return data.get("value", [])
     except Exception as e:
         logger.warning("[ShipmentSync] BC shipment lines fetch failed: %s", e)
-        return []
+        return None
 
 
 async def _is_shipment_already_synced(db, shipment_key: str) -> bool:
@@ -935,10 +938,13 @@ async def sync_bc_shipments(db, lookback_hours: int = 24) -> dict:
 
     since = (datetime.now(timezone.utc) - timedelta(hours=lookback_hours)).isoformat()
     lines = await _fetch_bc_shipment_lines(since)
-    result["total_fetched"] = len(lines)
+    result["total_fetched"] = len(lines) if lines is not None else 0
 
     if not lines:
-        await _update_sync_status(db, error="" if lines is not None else "No shipment data returned")
+        if lines is None:
+            await _update_sync_status(db, error="BC shipment fetch failed (see logs)")
+        else:
+            await _update_sync_status(db, error="")
         return result
 
     for line in lines:

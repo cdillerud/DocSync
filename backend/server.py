@@ -1317,6 +1317,11 @@ async def startup():
         logger.info("mail_intake_log indexes ensured")
     except Exception as _e:
         logger.warning("ensure_mail_intake_indexes failed (non-fatal): %s", _e)
+    try:
+        from services.document_bytes_intake_service import ensure_hub_documents_dedup_index
+        await ensure_hub_documents_dedup_index()
+    except Exception as _e:
+        logger.warning("ensure_hub_documents_dedup_index failed (non-fatal): %s", _e)
     from services.lifecycle_scheduler_service import start_email_polling_tasks
     polling_tasks = start_email_polling_tasks(
         logger=logger, register_background_task=register_background_task,

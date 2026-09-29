@@ -151,7 +151,7 @@ async def search_company(name: str) -> List[Dict[str, Any]]:
         "per_page": 10,
     })
     if "error" in data:
-        return []
+        return None
 
     results = []
     for c in data.get("data", []):
@@ -185,7 +185,7 @@ async def search_company_by_email_domain(email: str) -> List[Dict[str, Any]]:
         "per_page": 5,
     })
     if "error" in data:
-        return []
+        return None
 
     results = []
     for c in data.get("data", []):
@@ -318,13 +318,36 @@ async def match_document_to_spiro(doc_id: str) -> Dict[str, Any]:
 
     # Step 1: Find company
     companies = []
+    company_search_success = False
+    company_search_failure = False
     if customer_name:
         # Skip "Gamer Packaging" — that's us
         if "gamer" not in customer_name.lower():
-            companies = await search_company(customer_name)
+            r = await search_company(customer_name)
+            if r is None:
+                company_search_failure = True
+            else:
+                companies = r
+                company_search_success = True
 
     if not companies and sender_email:
-        companies = await search_company_by_email_domain(sender_email)
+        r = await search_company_by_email_domain(sender_email)
+        if r is None:
+            company_search_failure = True
+        else:
+            companies = r
+            company_search_success = True
+
+    if company_search_failure and not company_search_success:
+        # Every company-search attempt hit a real Spiro API error -- don't
+        # persist a definitive (and wrong) "not found" result. Leaving
+        # spiro_match unset keeps this document eligible for
+        # match_all_pilot_documents' existing retry query next run.
+        logger.warning(
+            "[Spiro] doc=%s company search failed (API error) — "
+            "skipping persist so it retries next run", doc_id[:8],
+        )
+        return {"error": "Spiro API error during company search", "retryable": True}
 
     if companies:
         best = companies[0]

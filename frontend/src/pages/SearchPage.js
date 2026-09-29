@@ -126,7 +126,9 @@ export default function SearchPage() {
   const [statusOpts, setStatusOpts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [hasMore, setHasMore] = useState(false);
   const initialLoadDone = useRef(false);
+  const pageLimitRef = useRef(100);
 
   const filtersActive =
     (docType !== 'all') || (statusFilter !== 'all') ||
@@ -149,7 +151,9 @@ export default function SearchPage() {
   //  - text query present  → /api/documents/search (relevance-ranked)
   //  - filters only        → /api/documents (browse + filter)
   //  - nothing             → /api/documents (recent 50, default browse)
-  const runQuery = useCallback(async () => {
+  const runQuery = useCallback(async (opts = {}) => {
+    const { loadMore = false } = opts;
+    if (!loadMore) pageLimitRef.current = 100;
     setError('');
     setLoading(true);
     try {
@@ -162,7 +166,7 @@ export default function SearchPage() {
         url = `${API}/api/documents/search?q=${encodeURIComponent(trimmedQuery)}&limit=200`;
       } else {
         const params = new URLSearchParams();
-        params.set('limit', '100');
+        params.set('limit', String(pageLimitRef.current));
         params.set('queue_view', 'false');
         params.set('include_cleared', 'true');
         if (docType !== 'all') {
@@ -251,6 +255,7 @@ export default function SearchPage() {
       setResults(rows);
       setTotalAvailable(total);
       setSearchMethod(method);
+      setHasMore(!useTextSearch && rawRows.length >= pageLimitRef.current);
 
       // Capture filter options from list endpoint when available
       if (!useTextSearch && data.filter_options) {
@@ -264,10 +269,16 @@ export default function SearchPage() {
     } catch (e) {
       setError(e.message || 'Request failed');
       setResults([]);
+      setHasMore(false);
     } finally {
       setLoading(false);
     }
   }, [query, docType, statusFilter, vendor, customer, dateFrom, dateTo, bcNo, docTypeGroup, updateUrl]);
+
+  const handleLoadMore = () => {
+    pageLimitRef.current += 100;
+    runQuery({ loadMore: true });
+  };
 
   // Initial load — populate filter options + show recent docs by default.
   useEffect(() => {
@@ -573,6 +584,18 @@ export default function SearchPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {hasMore && !loading && (
+            <div className="flex justify-center py-4">
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="search-load-more"
+                onClick={handleLoadMore}
+              >
+                Load 100 more
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

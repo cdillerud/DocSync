@@ -322,7 +322,7 @@ export default function PostingPatternsDashboard() {
     setLoading(true);
     try {
       const [summaryRes, queueRes, settingsRes, statusRes] = await Promise.all([
-        fetch(`${API}/api/posting-patterns/vendor-summary?limit=100`),
+        fetch(`${API}/api/posting-patterns/vendor-summary?limit=1000`),
         fetch(`${API}/api/posting-patterns/ready-queue?limit=50`),
         fetch(`${API}/api/posting-patterns/settings`),
         fetch(`${API}/api/posting-patterns/analyze-top/status`),
@@ -397,6 +397,7 @@ export default function PostingPatternsDashboard() {
   };
 
   const vendors = vendorSummary?.vendors || [];
+  const totalAnalyzed = vendorSummary?.total_analyzed ?? vendors.length;
   const readyDocs = readyQueue?.documents || [];
   const highConf = vendors.filter(v => v.confidence === 'high').length;
   const medConf = vendors.filter(v => v.confidence === 'medium').length;
@@ -419,7 +420,7 @@ export default function PostingPatternsDashboard() {
             <Brain className="w-6 h-6" />BC Posting Intelligence
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Learned posting patterns from {vendors.length} vendors ({vendorSummary?.ready_total || 0} documents ready)
+            Learned posting patterns from {vendors.length}{vendors.length < totalAnalyzed ? ` of ${totalAnalyzed}` : ''} vendors ({vendorSummary?.ready_total || 0} documents ready)
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -456,7 +457,7 @@ export default function PostingPatternsDashboard() {
 
       {/* Stats Row */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        <StatCard label="Vendors Analyzed" value={vendors.length} icon={Brain} />
+        <StatCard label="Vendors Analyzed" value={vendors.length} sub={vendors.length < totalAnalyzed ? `of ${totalAnalyzed} total` : undefined} icon={Brain} />
         <StatCard label="High Confidence" value={highConf} sub={`${medConf} medium`} icon={CheckCircle2} />
         <StatCard label="Ready to Post" value={vendorSummary?.ready_total || 0} icon={FileText} />
         <StatCard label="Auto-Post Eligible" value={autoEligible} icon={Shield} />

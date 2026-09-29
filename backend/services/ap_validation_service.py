@@ -468,18 +468,22 @@ class APValidationService:
             if not invoice_amount:
                 return  # Already flagged in check 4
 
-            diff_pct = abs(float(invoice_amount) - float(po_amount)) / float(po_amount) if float(po_amount) else 0
+            diff_abs = abs(float(invoice_amount) - float(po_amount))
+            diff_pct = diff_abs / float(po_amount) if float(po_amount) else 0
             TOLERANCE = 0.10  # 10%
+            ABS_DOLLAR_CAP = 1000.00  # catches large-invoice discrepancies that clear 10% alone
 
-            if diff_pct > TOLERANCE:
+            if diff_pct > TOLERANCE or diff_abs > ABS_DOLLAR_CAP:
                 result.add_required_check(
                     "po_amount_validation",
                     False,
                     f"Amount mismatch: invoice ${float(invoice_amount):,.2f} vs PO ${float(po_amount):,.2f} "
-                    f"({diff_pct*100:.1f}% diff, tolerance={TOLERANCE*100:.0f}%)",
+                    f"({diff_pct*100:.1f}% diff / ${diff_abs:,.2f}, tolerance={TOLERANCE*100:.0f}% "
+                    f"or ${ABS_DOLLAR_CAP:,.0f})",
                     invoice_amount=float(invoice_amount),
                     po_amount=float(po_amount),
                     diff_pct=round(diff_pct * 100, 1),
+                    diff_abs=round(diff_abs, 2),
                 )
             else:
                 result.add_required_check(

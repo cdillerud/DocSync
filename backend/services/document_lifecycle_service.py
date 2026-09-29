@@ -469,14 +469,12 @@ async def get_lifecycle_issues(
         ("validated_at", -1),
     ]).skip(offset).limit(limit).to_list(limit)
 
-    # Status counts
-    all_validations = await db[VALIDATIONS_COLLECTION].find(
-        {}, {"_id": 0, "validation_status": 1}
-    ).to_list(1000)
+    # Status counts (real aggregation across the full collection, not capped)
     status_counts = {}
-    for v in all_validations:
-        s = v.get("validation_status", "unknown")
-        status_counts[s] = status_counts.get(s, 0) + 1
+    async for row in db[VALIDATIONS_COLLECTION].aggregate([
+        {"$group": {"_id": "$validation_status", "count": {"$sum": 1}}}
+    ]):
+        status_counts[row["_id"] or "unknown"] = row["count"]
 
     return {
         "total": total,

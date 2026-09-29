@@ -929,6 +929,18 @@ async def run_sales_email_poll():
                             stats["attachments_skipped_inline"] += 1
                             continue
 
+                        # 2026-09-29: whole per-attachment body runs under one
+                        # try/except so a failure anywhere (fetch, decode, the
+                        # dedup DB lookup, or ingestion) only fails THIS
+                        # attachment -- matches the sibling AP/dynamic mailbox
+                        # poller's (poll_mailbox_for_documents, below in this
+                        # same file) full-coverage pattern. Previously
+                        # check_sales_duplicate() sat between two separate try
+                        # blocks, unprotected: an exception there propagated
+                        # past this attachment loop entirely (caught only by
+                        # the outer per-message handler), silently dropping
+                        # every remaining attachment in the same email.
+                        content_hash = None
                         try:
                             att_content_resp = await client.get(
                                 f"https://graph.microsoft.com/v1.0/users/{SALES_EMAIL_POLLING_USER}/messages/{msg_id}/attachments/{att_id}",
@@ -938,25 +950,15 @@ async def run_sales_email_poll():
                                 stats["attachments_failed"] += 1
                                 continue
                             content_b64 = att_content_resp.json().get("contentBytes", "")
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Error fetching {filename}: {str(e)}")
-                            continue
 
-                        try:
                             content_bytes = base64.b64decode(content_b64)
                             content_hash = hashlib.sha256(content_bytes).hexdigest()
-                        except Exception as e:
-                            stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Failed to decode {filename}: {str(e)}")
-                            continue
 
-                        is_dup = await check_sales_duplicate(internet_msg_id, content_hash)
-                        if is_dup:
-                            stats["attachments_skipped_dup"] += 1
-                            continue
+                            is_dup = await check_sales_duplicate(internet_msg_id, content_hash)
+                            if is_dup:
+                                stats["attachments_skipped_dup"] += 1
+                                continue
 
-                        try:
                             # Lazy import to avoid circular dependency (matches the
                             # AP mailbox poller's pattern above in this same file).
                             from services.document_bytes_intake_service import intake_document_from_bytes
@@ -980,12 +982,13 @@ async def run_sales_email_poll():
                             logger.info("[SalesPoll:%s] Ingested via unified intake: %s -> hub_documents/%s", run_id, filename, doc_id)
                         except Exception as e:
                             stats["attachments_failed"] += 1
-                            stats["errors"].append(f"Ingestion failed for {filename}: {str(e)}")
-                            await record_sales_mail_log(
-                                message_id=msg_id, internet_message_id=internet_msg_id,
-                                attachment_id=att_id, attachment_hash=content_hash,
-                                filename=filename, status="Failed", error=str(e),
-                            )
+                            stats["errors"].append(f"Failed to process {filename}: {str(e)}")
+                            if content_hash:
+                                await record_sales_mail_log(
+                                    message_id=msg_id, internet_message_id=internet_msg_id,
+                                    attachment_id=att_id, attachment_hash=content_hash,
+                                    filename=filename, status="Failed", error=str(e),
+                                )
                 except Exception as e:
                     stats["errors"].append(f"Error processing message {msg_id}: {str(e)}")
 

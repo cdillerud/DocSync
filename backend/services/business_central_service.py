@@ -705,12 +705,16 @@ class BusinessCentralService:
         company_id = await self._get_company_id(environment=BC_READ_ENVIRONMENT)
         headers = {"Authorization": f"Bearer {token}"}
 
-        # Try multiple endpoint names — BC versions vary
-        endpoints = [
-            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/postedPurchaseInvoices",
-            f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseCreditMemos",
-        ]
+        # This tenant's standard API v2.0 has no separate "postedPurchaseInvoices"
+        # entity (confirmed via $metadata -- it always 404'd), and purchaseCreditMemos
+        # is a different document type, not a valid substitute (it also 404'd here,
+        # but even when it exists it isn't posted-invoice data). This always silently
+        # returned zero historical records. Posted invoices actually live in
+        # purchaseInvoices with status="Paid", and that entity already holds
+        # multi-year history in this tenant (verified: records back to 2018).
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})/purchaseInvoices"
 
+        status_filter = "status eq 'Paid'"
         params = {
             "$select": "id,number,vendorNumber,vendorName,vendorInvoiceNumber,"
                        "invoiceDate,dueDate,currencyCode,totalAmountExcludingTax,"
@@ -718,33 +722,23 @@ class BusinessCentralService:
             "$orderby": "invoiceDate desc",
             "$top": str(limit),
             "$skip": str(skip),
+            "$filter": f"({status_filter}) and (vendorNumber eq '{vendor_id}')" if vendor_id else status_filter,
         }
-        if vendor_id:
-            params["$filter"] = f"vendorNumber eq '{vendor_id}'"
 
         async with httpx.AsyncClient(timeout=BC_REQUEST_TIMEOUT) as client:
-            for url in endpoints:
-                try:
-                    resp = await client.get(url, headers=headers, params=params)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        invoices = data.get("value", [])
-                        entity_name = url.split("/")[-1]
-                        logger.info("Historical PI query via %s: got %d invoices (skip=%d)",
-                                    entity_name, len(invoices), skip)
-                        return {"invoices": invoices, "total": len(invoices), "mock": False,
-                                "source": entity_name}
-                    elif resp.status_code == 404:
-                        logger.debug("Endpoint %s not available (404), trying next", url.split("/")[-1])
-                        continue
-                    else:
-                        logger.debug("Endpoint %s returned %s, trying next", url.split("/")[-1], resp.status_code)
-                        continue
-                except Exception as e:
-                    logger.debug("Endpoint %s failed: %s, trying next", url.split("/")[-1], str(e))
-                    continue
+            try:
+                resp = await client.get(url, headers=headers, params=params)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    invoices = data.get("value", [])
+                    logger.info("Historical PI query via purchaseInvoices (status=Paid): got %d invoices (skip=%d)",
+                                len(invoices), skip)
+                    return {"invoices": invoices, "total": len(invoices), "mock": False,
+                            "source": "purchaseInvoices"}
+                logger.warning("Historical PI query failed: %s - %s", resp.status_code, resp.text[:300])
+            except Exception as e:
+                logger.warning("Historical PI query failed: %s", str(e))
 
-        logger.info("No historical posted PI endpoints available — standard purchaseInvoices will be sole data source")
         return {"invoices": [], "total": 0, "mock": False, "source": "none_available"}
 
     async def get_historical_invoice_lines(self, invoice_id: str, source: str = "postedPurchaseInvoices") -> List[Dict[str, Any]]:

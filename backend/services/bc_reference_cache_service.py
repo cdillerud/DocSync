@@ -106,6 +106,11 @@ ENTITY_CONFIGS = {
         "domain": "purchase",
         "number_field": "number",
         "external_ref_field": "vendorInvoiceNumber",
+        # This tenant's standard API v2.0 has no separate "postedPurchaseInvoices"
+        # entity set (confirmed via $metadata) -- it 404'd on every sync. Posted
+        # invoices actually live in "purchaseInvoices" with status="Paid".
+        "endpoint": "purchaseInvoices",
+        "query_filter": "status eq 'Paid'",
         "select_fields": "id,number,vendorInvoiceNumber,vendorName,vendorNumber,postingDate,totalAmountIncludingTax,orderNumber,lastModifiedDateTime",
         "extract_fields": lambda r: {
             "bc_record_id": r.get("id"),
@@ -208,12 +213,16 @@ ENTITY_CONFIGS = {
         "domain": "master",
         "number_field": "code",
         "external_ref_field": None,
-        "select_fields": "code,name,email,lastModifiedDateTime",
+        # BC's standard API v2.0 entity set is "salespeoplePurchasers", not
+        # "salespeople", and its display-name field is "displayName", not
+        # "name" -- this 404'd on every sync before this fix.
+        "endpoint": "salespeoplePurchasers",
+        "select_fields": "code,displayName,email,lastModifiedDateTime",
         "extract_fields": lambda r: {
             "bc_record_id": r.get("code", ""),
             "bc_document_no": r.get("code", ""),
             "code": r.get("code", ""),
-            "name": r.get("name", ""),
+            "name": r.get("displayName", ""),
             "email": r.get("email", ""),
             "entity_type": "salesperson",
             "bc_last_modified": r.get("lastModifiedDateTime"),
@@ -637,12 +646,18 @@ class BCReferenceCacheService:
     ) -> int:
         # GPI-SQUARE9-BC-CACHE-STALE-V65
         # Full snapshots reconcile deletions only after a completely successful fetch.
-        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/{table_name}"
+        endpoint = config.get("endpoint", table_name)
+        url = f"{BC_API_BASE}/{BC_TENANT_ID}/{BC_PROD_ENVIRONMENT}/api/v2.0/companies({company_id})/{endpoint}"
 
         params = {"$select": config["select_fields"]}
         is_full_snapshot = last_sync is None
+        filters = []
         if last_sync:
-            params["$filter"] = f"lastModifiedDateTime gt {last_sync}"
+            filters.append(f"lastModifiedDateTime gt {last_sync}")
+        if config.get("query_filter"):
+            filters.append(config["query_filter"])
+        if filters:
+            params["$filter"] = " and ".join(f"({f})" for f in filters)
 
         count = 0
         next_url = url

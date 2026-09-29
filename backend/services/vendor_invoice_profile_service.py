@@ -189,9 +189,14 @@ async def fetch_vendor_posted_invoices_from_bc(
         return []
 
     env = environment or BC_READ_ENVIRONMENT
+    # This tenant's standard API v2.0 has no separate "postedPurchaseInvoices"
+    # entity (confirmed via $metadata -- it always 404'd, hence the graceful
+    # fallback below). Posted invoices actually live in purchaseInvoices with
+    # status="Paid", including the purchaseInvoiceLines $expand navigation
+    # property this function needs (verified live).
     base = (
         f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/"
-        f"companies({company_id})/postedPurchaseInvoices"
+        f"companies({company_id})/purchaseInvoices"
     )
     select = (
         "id,number,vendorInvoiceNumber,vendorNumber,vendorName,"
@@ -203,9 +208,9 @@ async def fetch_vendor_posted_invoices_from_bc(
         "amountExcludingTax"
     )
     params = {
-        "$filter": f"vendorNumber eq '{vendor_no}'",
+        "$filter": f"(status eq 'Paid') and (vendorNumber eq '{vendor_no}')",
         "$select": select,
-        "$expand": f"postedPurchaseInvoiceLines($select={line_select})",
+        "$expand": f"purchaseInvoiceLines($select={line_select})",
         "$top": str(max_invoices),
         "$orderby": "postingDate desc",
     }
@@ -221,7 +226,7 @@ async def fetch_vendor_posted_invoices_from_bc(
                 for inv in raw:
                     # Normalize line shape: `postedPurchaseInvoiceLines` ->
                     # `purchaseInvoiceLines` (consumer expects the latter).
-                    lines = inv.get("postedPurchaseInvoiceLines", [])
+                    lines = inv.get("purchaseInvoiceLines", [])
                     normalized = []
                     for line in lines:
                         normalized.append({
@@ -289,10 +294,10 @@ async def _fetch_posted_invoices_lines_fallback(
     cap = max(5, max_invoices // 2)
     base = (
         f"{BC_API_BASE}/{adapter.tenant_id}/{env}/api/v2.0/"
-        f"companies({company_id})/postedPurchaseInvoices"
+        f"companies({company_id})/purchaseInvoices"
     )
     params = {
-        "$filter": f"vendorNumber eq '{vendor_no}'",
+        "$filter": f"(status eq 'Paid') and (vendorNumber eq '{vendor_no}')",
         "$select": "id,number,totalAmountIncludingTax,postingDate,vendorNumber",
         "$top": str(cap),
         "$orderby": "postingDate desc",
@@ -307,7 +312,7 @@ async def _fetch_posted_invoices_lines_fallback(
                 return []
             headers_only = resp.json().get("value", [])
             for inv in headers_only:
-                line_url = f"{base}({inv['id']})/postedPurchaseInvoiceLines"
+                line_url = f"{base}({inv['id']})/purchaseInvoiceLines"
                 try:
                     line_resp = await client.get(
                         line_url, headers={"Authorization": f"Bearer {token}"}

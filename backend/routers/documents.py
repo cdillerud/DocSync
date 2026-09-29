@@ -336,8 +336,84 @@ async def list_documents(
         else:
             fq["$and"] = [not_cleared, not_terminal, not_done_wf]
 
-    total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    # 2026-09-29: this endpoint used to await 8 independent Mongo round-trips
+    # (count+find for the page, then 4 more count_documents calls and 2
+    # $group aggregations for tab badges / filter dropdowns) one after
+    # another. None of them depend on each other's results, but sequential
+    # awaiting still paid the full round-trip latency of all 8 in series.
+    # Against the real 24,760-doc hub_documents collection this measured
+    # ~4.5s standalone and 20s+ (client timeout) under concurrent load from
+    # the background document-processing pipeline sharing the same single
+    # uvicorn event loop -- directly causing the Inbox page to hang on
+    # "Loading..." indefinitely. Fixed by issuing all 8 as coroutines and
+    # awaiting them together via asyncio.gather, so they run concurrently
+    # against Mongo's connection pool instead of one after another. No
+    # query logic changed, only the sequencing.
+    import asyncio
+
+    not_dup = {"is_duplicate": {"$ne": True}}
+    DONE_WF = DONE_WORKFLOW_STATUSES
+    # 2026-09-24: same active-failure carve-out as the main queue filter
+    # above, applied to the tab-count badges so "Pending"/"Completed" stay
+    # consistent with what the queue actually shows.
+    has_unresolved_failure = {"$or": [
+        {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
+        {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
+    ]}
+    pending_count_fq = {
+        "$and": [
+            not_dup,
+            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
+            {"$or": [{"status": {"$nin": TERMINAL_STATUSES}}, has_unresolved_failure]},
+            {"$or": [
+                {"workflow_status": {"$nin": DONE_WF}},
+                {"workflow_status": {"$exists": False}},
+            ]},
+        ]
+    }
+    # Exclude batch_parent from completed count (they are containers, not processed work)
+    completed_count_fq = {
+        "$and": [
+            not_dup,
+            {"status": {"$ne": "batch_parent"}},  # Exclude batch_parent containers
+            {"$nor": [has_unresolved_failure]},
+            {"$or": [
+                {"status": {"$in": TERMINAL_STATUSES}},
+                {"auto_cleared": True},
+                {"workflow_status": {"$in": DONE_WF}},
+            ]},
+        ]
+    }
+
+    (
+        total,
+        docs,
+        total_all,
+        cleared_count,
+        pending_count,
+        completed_count,
+        distinct_types_raw,
+        distinct_statuses_raw,
+    ) = await asyncio.gather(
+        db.hub_documents.count_documents(fq),
+        db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit),
+        db.hub_documents.count_documents(not_dup),
+        db.hub_documents.count_documents({"auto_cleared": True, **not_dup}),
+        db.hub_documents.count_documents(pending_count_fq),
+        db.hub_documents.count_documents(completed_count_fq),
+        db.hub_documents.aggregate([
+            {"$match": {"is_duplicate": {"$ne": True}}},
+            {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
+            {"$match": {"_id": {"$ne": None}}},
+            {"$sort": {"count": -1}},
+        ]).to_list(50),
+        db.hub_documents.aggregate([
+            {"$match": {"is_duplicate": {"$ne": True}}},
+            {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+            {"$match": {"_id": {"$ne": None}}},
+            {"$sort": {"count": -1}},
+        ]).to_list(50),
+    )
 
     # 2026-09-24: attach the same canonical derived_state model the detail
     # endpoint already computes, so the queue/list view can render status
@@ -363,59 +439,6 @@ async def list_documents(
                     _doc["derived_state"] = None
     except Exception:
         pass
-
-    # Compute global counts (excluding duplicates)
-    not_dup = {"is_duplicate": {"$ne": True}}
-    total_all = await db.hub_documents.count_documents(not_dup)
-    cleared_count = await db.hub_documents.count_documents({"auto_cleared": True, **not_dup})
-
-    DONE_WF = DONE_WORKFLOW_STATUSES
-    # 2026-09-24: same active-failure carve-out as the main queue filter
-    # above, applied to the tab-count badges so "Pending"/"Completed" stay
-    # consistent with what the queue actually shows.
-    has_unresolved_failure = {"$or": [
-        {"bc_posting_status": {"$in": ["failed", "pending_retry"]}},
-        {"$and": [{"auto_file_failed": True}, {"auto_filed": {"$ne": True}}]},
-    ]}
-
-    pending_count = await db.hub_documents.count_documents({
-        "$and": [
-            not_dup,
-            {"$or": [{"auto_cleared": {"$ne": True}}, {"auto_cleared": {"$exists": False}}]},
-            {"$or": [{"status": {"$nin": TERMINAL_STATUSES}}, has_unresolved_failure]},
-            {"$or": [
-                {"workflow_status": {"$nin": DONE_WF}},
-                {"workflow_status": {"$exists": False}},
-            ]},
-        ]
-    })
-    # Exclude batch_parent from completed count (they are containers, not processed work)
-    completed_count = await db.hub_documents.count_documents({
-        "$and": [
-            not_dup,
-            {"status": {"$ne": "batch_parent"}},  # Exclude batch_parent containers
-            {"$nor": [has_unresolved_failure]},
-            {"$or": [
-                {"status": {"$in": TERMINAL_STATUSES}},
-                {"auto_cleared": True},
-                {"workflow_status": {"$in": DONE_WF}},
-            ]},
-        ]
-    })
-
-    # Distinct types and statuses for dynamic filter dropdowns
-    distinct_types_raw = await db.hub_documents.aggregate([
-        {"$match": {"is_duplicate": {"$ne": True}}},
-        {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
-        {"$match": {"_id": {"$ne": None}}},
-        {"$sort": {"count": -1}},
-    ]).to_list(50)
-    distinct_statuses_raw = await db.hub_documents.aggregate([
-        {"$match": {"is_duplicate": {"$ne": True}}},
-        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
-        {"$match": {"_id": {"$ne": None}}},
-        {"$sort": {"count": -1}},
-    ]).to_list(50)
 
     return {
         "documents": docs,

@@ -63,7 +63,7 @@ SALES_EMAIL_POLLING_INTERVAL_MINUTES = int(os.environ.get("SALES_EMAIL_POLLING_I
 # ---------------------------------------------------------------------------
 # SharePoint
 # ---------------------------------------------------------------------------
-SHAREPOINT_SITE_HOSTNAME = os.environ.get("SHAREPOINT_SITE_HOSTNAME", "gamerpackaging.sharepoint.com")
+SHAREPOINT_SITE_HOSTNAME = os.environ.get("SHAREPOINT_SITE_HOSTNAME", "gamerpackaging1.sharepoint.com")
 SHAREPOINT_SITE_PATH = os.environ.get("SHAREPOINT_SITE_PATH", "/sites/GPI-DocumentHub-Test")
 SHAREPOINT_LIBRARY_NAME = os.environ.get("SHAREPOINT_LIBRARY_NAME", "Documents")
 

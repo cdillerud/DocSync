@@ -34,7 +34,7 @@ Reuses the same env vars the backend already consumes for Graph API:
     TENANT_ID
     GRAPH_CLIENT_ID
     GRAPH_CLIENT_SECRET
-    SHAREPOINT_SITE_HOSTNAME      (e.g. gamerpackaging.sharepoint.com)
+    SHAREPOINT_SITE_HOSTNAME      (e.g. gamerpackaging1.sharepoint.com)
 
 Defaults are anchored on the locked production AP destination:
     site path:    /sites/GamerAccounting
@@ -726,7 +726,7 @@ def run_graph(prod_site_path: str, prod_library: str, prod_folder_path: str,
     tenant = os.environ.get("TENANT_ID", "")
     client_id = os.environ.get("GRAPH_CLIENT_ID", "")
     client_secret = os.environ.get("GRAPH_CLIENT_SECRET", "")
-    host = os.environ.get("SHAREPOINT_SITE_HOSTNAME", "gamerpackaging.sharepoint.com")
+    host = os.environ.get("SHAREPOINT_SITE_HOSTNAME", "gamerpackaging1.sharepoint.com")
 
     if os.environ.get("DEMO_MODE", "true").lower() == "true":
         raise SystemExit(

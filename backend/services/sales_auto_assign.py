@@ -19,7 +19,11 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from services.rep_assignment_service import get_rep_for_customer, get_rep_for_customer_name
+from services.rep_assignment_service import (
+    get_rep_for_customer,
+    get_rep_for_customer_name,
+    get_rep_from_document_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +106,19 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
         rep_result = await get_rep_for_customer_name(db, customer_name, fuzzy=False)
         if rep_result:
             rep_result = {**rep_result, "source": "bc_cache_name_match"}
+
+    # 2026-09-29: before falling to weaker fuzzy matching, check whether
+    # ANOTHER document with this exact customer name already got a
+    # confirmed rep assignment (pending_rep_review/auto_approved). This is
+    # the "learning" counterpart to the BC-cache exact match above — it's
+    # what lets today's resolutions compound forward: once a customer name
+    # resolves once, every future document with that same name resolves
+    # instantly without re-running fuzzy matching, mirroring the pattern
+    # unified_vendor_matcher.py already used for vendor resolution. Guarded
+    # by vendor_identity_agrees so a loose/wrong prior assignment can't
+    # propagate.
+    if not rep_result and customer_name:
+        rep_result = await get_rep_from_document_history(db, customer_name)
 
     # If still no rep, try partial/fuzzy name match against overrides
     if not rep_result and customer_name and len(customer_name) >= 4:

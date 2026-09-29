@@ -173,6 +173,67 @@ async def get_rep_for_customer_name(db, customer_name: str, fuzzy: bool = False)
     }
 
 
+async def get_rep_from_document_history(db, customer_name: str) -> Optional[Dict[str, Any]]:
+    """Look up a rep by finding another document with the same customer
+    name that already has a confirmed assignment.
+
+    2026-09-29: mirrors unified_vendor_matcher.py's
+    _match_from_document_history -- the same self-reinforcing pattern that
+    let the AP vendor backfill's 7,380 newly-resolved invoices become live
+    matching evidence for future documents with zero extra wiring, no
+    separate index to rebuild. Before this, get_rep_for_customer_name()
+    only had two sources: the 2300-customer BC cache and a 12-entry manual
+    override table with no feedback loop -- a real asymmetry with the
+    vendor side, which already had this history path. Only trusts a match
+    when the historical document's customer name still agrees with the
+    input (via vendor_identity_agrees, reused as-is since its matching
+    logic is generic name-identity comparison, not vendor-specific) to
+    avoid propagating a wrong prior assignment.
+
+    Returns {rep_email, rep_name, salesperson_code, source} or None.
+    """
+    customer_name = (customer_name or "").strip()
+    if not customer_name:
+        return None
+
+    from services.vendor_name_helpers import vendor_identity_agrees
+
+    escaped = re.escape(customer_name)
+    exact_regex = {"$regex": f"^{escaped}$", "$options": "i"}
+    doc = await db.hub_documents.find_one(
+        {
+            "$or": [
+                {"extracted_fields.customer": exact_regex},
+                {"normalized_fields.customer_name": exact_regex},
+            ],
+            "sales_review_status": {"$in": ["pending_rep_review", "auto_approved"]},
+            "assigned_rep_email": {"$exists": True, "$nin": [None, ""]},
+        },
+        {
+            "_id": 0, "assigned_rep_email": 1, "assigned_rep_name": 1,
+            "assigned_salesperson_code": 1,
+            "extracted_fields.customer": 1, "normalized_fields.customer_name": 1,
+        },
+    )
+    if not doc:
+        return None
+
+    resolved_name = (
+        (doc.get("normalized_fields") or {}).get("customer_name")
+        or (doc.get("extracted_fields") or {}).get("customer")
+        or ""
+    )
+    if not resolved_name or not vendor_identity_agrees(customer_name, resolved_name):
+        return None
+
+    return {
+        "rep_email": doc.get("assigned_rep_email", ""),
+        "rep_name": doc.get("assigned_rep_name", ""),
+        "salesperson_code": doc.get("assigned_salesperson_code", ""),
+        "source": "document_history_customer_match",
+    }
+
+
 # =========================================================================
 # Sync
 # =========================================================================

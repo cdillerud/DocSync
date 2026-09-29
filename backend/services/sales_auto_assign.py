@@ -19,12 +19,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from services.rep_assignment_service import get_rep_for_customer
+from services.rep_assignment_service import get_rep_for_customer, get_rep_for_customer_name
 
 logger = logging.getLogger(__name__)
 
 SALES_ELIGIBLE_TYPES = {
     "Sales_Order", "SalesOrder", "Order_Confirmation", "PurchaseOrder", "Purchase_Order",
+    "AR_Invoice", "Sales_Quote", "PURCHASE_ORDER", "Purchase Order",
 }
 
 # High-confidence threshold for auto-approval (skip rep review)
@@ -62,6 +63,7 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
     customer_name = (
         normalized.get("customer_name")
         or extracted.get("customer_name")
+        or extracted.get("customer")
         or extracted.get("company_name")
         or extracted.get("bill_to_name")
         or extracted.get("ship_to_name")
@@ -90,6 +92,17 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
                 "source": "override_name_match",
             }
 
+    # Manual overrides are a tiny curated list (~12 entries). Most real pilot
+    # documents only ever extract a free-text customer name (never a
+    # bc_customer_no), so the richer path is an exact name match against the
+    # full BC reference cache (2300 customers, ~2298 with a salesperson_code)
+    # rather than the override table. Tried before override fuzzy matching
+    # since an exact BC match is more reliable than a first-word guess.
+    if not rep_result and customer_name:
+        rep_result = await get_rep_for_customer_name(db, customer_name, fuzzy=False)
+        if rep_result:
+            rep_result = {**rep_result, "source": "bc_cache_name_match"}
+
     # If still no rep, try partial/fuzzy name match against overrides
     if not rep_result and customer_name and len(customer_name) >= 4:
         import re
@@ -108,6 +121,15 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
                     "salesperson_code": override.get("salesperson_code", ""),
                     "source": "override_partial_match",
                 }
+
+    # Fuzzy (first-word substring) name match against the full BC cache —
+    # same technique as above but against the 2300-customer cache instead
+    # of the 12-entry override table. Tried after the override fuzzy match
+    # since a curated manual override should still win when both exist.
+    if not rep_result and customer_name and len(customer_name) >= 4:
+        rep_result = await get_rep_for_customer_name(db, customer_name, fuzzy=True)
+        if rep_result:
+            rep_result = {**rep_result, "source": "bc_cache_name_fuzzy_match"}
 
     # Last resort: try sender email domain → known customer mapping
     if not rep_result:

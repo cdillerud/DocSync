@@ -12,6 +12,7 @@ Also provides:
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
@@ -101,6 +102,74 @@ async def get_rep_for_customer(db, customer_no: str) -> Optional[Dict[str, Any]]
         "rep_name": sp_rec.get("name", ""),
         "salesperson_code": sp_code,
         "source": "bc_cache",
+    }
+
+
+async def get_rep_for_customer_name(db, customer_name: str, fuzzy: bool = False) -> Optional[Dict[str, Any]]:
+    """Look up a sales rep by customer NAME against the rich BC reference cache.
+
+    Pilot sales documents (AR_Invoice/Sales_Quote) almost never have a
+    bc_customer_no extracted — only a free-text customer name, if that.
+    get_rep_for_customer() can't help in that case since its BC-cache lookup
+    is keyed by customer number. This does the same salesperson resolution
+    but keyed by bc_customer_name instead, against the same 2300-customer
+    cache (vs. the 12-entry customer_rep_overrides table used elsewhere for
+    name fallback), which is what actually has salesperson_code populated
+    for ~2298 of 2300 real customers.
+
+    With fuzzy=False: exact (case-insensitive) name match only.
+    With fuzzy=True: falls back to a substring match on the name's first
+    significant word (same technique already used for override fuzzy
+    matching) when no exact match is found.
+
+    Returns {rep_email, rep_name, salesperson_code, source} or None.
+    """
+    customer_name = (customer_name or "").strip()
+    if not customer_name:
+        return None
+
+    escaped = re.escape(customer_name)
+    customer_rec = await db.bc_reference_cache.find_one(
+        {
+            "bc_entity_type": "customer",
+            "bc_customer_name": {"$regex": f"^{escaped}$", "$options": "i"},
+        },
+        {"_id": 0},
+    )
+
+    if not customer_rec and fuzzy and len(customer_name) >= 4:
+        first_word = customer_name.split()[0] if customer_name.split() else ""
+        if first_word and len(first_word) >= 3:
+            escaped_word = re.escape(first_word)
+            customer_rec = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": "customer",
+                    "bc_customer_name": {"$regex": escaped_word, "$options": "i"},
+                },
+                {"_id": 0},
+            )
+
+    if not customer_rec:
+        return None
+
+    sp_code = customer_rec.get("salesperson_code", "")
+    if not sp_code:
+        return None
+
+    sp_rec = await db.bc_reference_cache.find_one(
+        {"bc_entity_type": "salesperson", "code": sp_code},
+        {"_id": 0},
+    )
+    if not sp_rec or not sp_rec.get("email"):
+        return None
+
+    return {
+        "rep_email": sp_rec.get("email", ""),
+        "rep_name": sp_rec.get("name", ""),
+        "salesperson_code": sp_code,
+        "customer_no": customer_rec.get("bc_customer_no", ""),
+        "matched_customer_name": customer_rec.get("bc_customer_name", ""),
+        "source": "bc_cache_name_match" if not fuzzy else "bc_cache_name_fuzzy_match",
     }
 
 

@@ -577,11 +577,44 @@ async def _extract_sales_fields(
             or (sender_domain.replace("-", " ").replace("_", " ").title() if sender_domain and sender_domain.lower() not in ("gamerpackaging", "gamer", "gmail", "outlook", "hotmail", "yahoo") else None)
         )
     else:
+        # 2026-09-29: raw_vendor comes from the main pipeline's AP-oriented
+        # vendor matcher (unified_vendor_matcher.py), which resolves entities
+        # against BC's VENDOR list -- not customers. The original assumption
+        # here ("if it's not Gamer, it must be the customer") is wrong
+        # whenever a document that's genuinely about a vendor relationship
+        # (a vendor certificate, quality doc, or Gamer's own outbound PO to
+        # a supplier) flows through a sales-team mailbox that also receives
+        # vendor mail. Confirmed live: 867 of 1794 (48%) of all Inside Sales
+        # Pilot documents had customer_name == vendor_canonical; checking
+        # the 20 most frequent such values against bc_reference_cache found
+        # ZERO that matched as a real BC customer -- the ones that matched
+        # at all (386 of the 752 docs covered by that top-20) matched ONLY
+        # as vendors, e.g. "OMEGAPA" (Omega Packaging, a real supplier/
+        # co-packer) was being reported as the "customer" on quality
+        # certificates, vendor correspondence, and Gamer's own outbound POs
+        # to that same vendor. Fixed by preferring genuinely-extracted
+        # customer fields (same priority the is_gamer_resolved branch above
+        # already uses) and only falling back to raw_vendor as a last
+        # resort -- and never when raw_vendor is a confirmed BC vendor,
+        # since a confirmed vendor can never simultaneously be the customer
+        # on the same document.
         customer_name = (
-            raw_vendor  # Main pipeline's resolved entity (correct when not Gamer)
-            or ef.get("customer") or ef.get("customer_name")
+            ef.get("customer") or ef.get("customer_name") or ef.get("bill_to")
             or nf.get("customer")
         )
+        if not customer_name and raw_vendor:
+            is_known_vendor = await db.bc_reference_cache.find_one(
+                {
+                    "bc_entity_type": "vendor",
+                    "$or": [
+                        {"bc_vendor_no": raw_vendor},
+                        {"bc_vendor_name": {"$regex": f"^{re.escape(raw_vendor)}$", "$options": "i"}},
+                    ],
+                },
+                {"_id": 1},
+            )
+            if not is_known_vendor:
+                customer_name = raw_vendor
 
     customer_no = (
         doc.get("matched_customer_no") or doc.get("customer_no")

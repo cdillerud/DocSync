@@ -23,6 +23,8 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 import uuid
 
+from routers.queue_constants import TERMINAL_STATUSES, DONE_WORKFLOW_STATUSES
+
 router = APIRouter(prefix="/readiness", tags=["Readiness"])
 
 
@@ -100,13 +102,19 @@ async def sync_readiness_to_status(limit: int = Query(5000, le=10000)):
     db = get_db()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Terminal statuses that already remove docs from the queue view
+    # 2026-09-29: removed ReadyForPost/ready_for_post -- Rule 6 below
+    # explicitly targets status=="ReadyForPost" and was structurally unable
+    # to ever match while this same list excluded that status up front.
+    # Exception/AutoFiled deliberately left in place: no rule here
+    # contradicts itself over them, and broadening this scheduled bulk job's
+    # auto-complete eligibility to flagged/exception docs is a product
+    # decision, not a pure bug fix.
     TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
                 "archived", "FileMissing", "batch_parent", "Validated", "validated",
-                "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
+                "ValidationPassed", "AutoFiled",
                 "auto_filed", "LinkedToBC", "Exception", "exception"]
-    DONE_WF = ["completed", "validation_passed", "processed",
-               "ready_for_approval", "exported", "file_missing", "exception_review"]
+    # Read-only "remaining stuck" count below uses the shared, audited list.
+    DONE_WF = DONE_WORKFLOW_STATUSES
 
     # Base conditions (used with $and to avoid $or key collisions)
     not_dup = {"is_duplicate": {"$ne": True}}
@@ -693,12 +701,12 @@ async def inbox_diagnostic():
     from deps import get_db
     db = get_db()
 
-    TERMINAL = ["Completed", "Posted", "Archived", "completed", "posted",
-                "archived", "FileMissing", "batch_parent", "Validated", "validated",
-                "ValidationPassed", "ReadyForPost", "ready_for_post", "AutoFiled",
-                "auto_filed", "LinkedToBC", "Exception", "exception"]
-    DONE_WF = ["completed", "validation_passed", "processed",
-               "ready_for_approval", "exported", "file_missing", "exception_review"]
+    # 2026-09-29: was a drifted local copy (see queue_constants.py's own
+    # 2026-09-24 audit note) that hid ReadyForPost/Exception docs from this
+    # diagnostic's own "why is this stuck" analysis and over-counted
+    # duplicate/archived workflow-status docs as still stuck.
+    TERMINAL = TERMINAL_STATUSES
+    DONE_WF = DONE_WORKFLOW_STATUSES
 
     # Count all docs in the inbox view
     stuck_filter = {

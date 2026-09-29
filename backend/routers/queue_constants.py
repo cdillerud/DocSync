@@ -23,12 +23,13 @@ Single source of truth — imported by documents.py, dashboard.py, readiness.py.
 TERMINAL_STATUSES = [
     "Completed", "Posted", "Archived", "completed", "posted", "archived",
     "FileMissing", "batch_parent", "Validated", "validated", "ValidationPassed",
-    "LinkedToBC",
+    "LinkedToBC", "Duplicate",
 ]
 
 DONE_WORKFLOW_STATUSES = [
     "completed", "validation_passed", "processed", "ready_for_approval",
     "exported", "file_missing", "exception_review", "archived_from_queue", "shipping_filed", "excluded",
+    "duplicate", "archived",
 ]
 
 # A document with an active, unresolved failure must never be treated as

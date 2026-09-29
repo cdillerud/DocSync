@@ -144,10 +144,7 @@ export default function LoginPage() {
             </form>
             <div className="mt-4 pt-4 border-t border-border">
               <p className="text-xs text-muted-foreground text-center">
-                Staging credentials: <span className="font-mono text-foreground">hub-admin@gamerpackaging.com</span> / <span className="font-mono text-foreground">ChangeMeOnFirstDeploy-K8p2q</span>
-              </p>
-              <p className="text-xs text-muted-foreground text-center mt-1.5">
-                Rotate via <span className="font-mono">docker-compose.yml</span> before production
+                Contact your administrator for access credentials.
               </p>
             </div>
           </CardContent>

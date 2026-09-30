@@ -76,6 +76,22 @@ async def auto_assign_sales_rep(db, doc_id: str, doc: dict) -> Optional[dict]:
         or ""
     )
 
+    # 2026-09-29: Gamer can never be its own customer. Confirmed live: 137
+    # real sales-eligible documents had a "customer" field that literally
+    # resolved to Gamer Packaging itself (typically a vendor's order
+    # acknowledgment of Gamer's OWN outbound PO, where Gamer is the
+    # ship-to/bill-to party, not a third-party buyer) -- 121 of them
+    # (89%) were actively assigned to a real rep as a result, one whose
+    # first bad match then got amplified by get_rep_from_document_history()
+    # (added earlier today) propagating the same wrong assignment to every
+    # subsequent Gamer-labeled document. Clearing customer_name here (same
+    # as if none had ever been extracted) makes every downstream lookup
+    # correctly fall through to weaker signals or triage instead of
+    # resolving Gamer against itself.
+    import re as _re
+    if customer_name and _re.match(r"^gamer\s*pack(?:aging)?", customer_name.strip(), _re.IGNORECASE):
+        customer_name = ""
+
     rep_result = None
     if customer_no:
         rep_result = await get_rep_for_customer(db, customer_no)

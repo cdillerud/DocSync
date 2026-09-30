@@ -566,6 +566,24 @@ async def _call_llm_for_extraction(
             if not extracted.get("customer") and cfdi_fields.get("customer"):
                 extracted["customer"] = cfdi_fields["customer"]
 
+        # 2026-09-29: U.S. Customs Form 7501 "Entry Summary" pages have no
+        # vendor/billing concept at all -- confirmed live: 9 real
+        # unresolved AP_Invoice documents are this exact form (filer code,
+        # HTSUS classification, importer-of-record fields), correctly left
+        # with no vendor extracted by the LLM since there genuinely is none
+        # on this page, yet the pipeline still counted them as "unresolved,
+        # needs a vendor" gaps in AP resolution stats/dashboards. This is
+        # distinct from a genuine customs-BROKER invoice (e.g. "MKC Customs
+        # Brokers", "Edward J Zarach & Associates") which DOES have a real
+        # billable vendor and must keep going through normal resolution --
+        # only mark the flag when the LLM found no vendor at all AND the
+        # form markers are present, so a real invoice with a broker name is
+        # never affected.
+        if ext == "pdf" and not extracted.get("vendor"):
+            if _is_cbp_entry_summary_form(file_path):
+                extracted["vendor_not_applicable"] = True
+                extracted["vendor_not_applicable_reason"] = "cbp_entry_summary_form_no_vendor"
+
         return {
             "suggested_job_type": result.get("document_type", "Unknown"),
             "confidence": float(result.get("confidence", 0.0)),
@@ -628,6 +646,34 @@ def _try_parse_cfdi_emisor_receptor(file_path: str, ext: str) -> Optional[dict]:
     except Exception:
         return None
 
+
+
+def _is_cbp_entry_summary_form(file_path: str) -> bool:
+    """Detect a U.S. Customs Form 7501 "Entry Summary" page.
+
+    A government-standardized customs form with no vendor/billing concept
+    at all (filer code, HTSUS classification, importer-of-record fields --
+    not a bill from anyone). Distinct from a genuine customs-broker invoice,
+    which has its own real vendor name and is left alone. Returns False
+    (never raises) on any read/parse failure so callers can use this as a
+    pure best-effort check.
+    """
+    try:
+        import pymupdf
+        with pymupdf.open(file_path) as pdf:
+            text = ""
+            for page in pdf:
+                text += page.get_text()
+                if len(text) > 3000:
+                    break
+        markers = (
+            "entry summary", "u.s. customs and border protection",
+            "importer of record", "filer code", "entry number",
+        )
+        hits = sum(1 for m in markers if m in text.lower())
+        return hits >= 3
+    except Exception:
+        return False
 
 def _rasterize_pdf_pages(file_path: str, max_pages: int = None):
     """

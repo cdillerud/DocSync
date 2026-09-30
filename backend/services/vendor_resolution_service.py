@@ -450,11 +450,24 @@ async def get_resolution_metrics() -> Dict[str, Any]:
         "Purchase_Invoice",
         "PURCHASE_INVOICE",
     ]
+    # 2026-09-29: exclude documents confirmed to have no vendor/billing
+    # concept at all (e.g. a U.S. Customs Form 7501 "Entry Summary" page --
+    # filer code, HTSUS classification, importer-of-record fields, not a
+    # bill from anyone) from the applicable population entirely, rather
+    # than counting them as a permanent "unresolved" gap in this dashboard.
+    # Set by document_intel_helpers.py's _is_cbp_entry_summary_form check;
+    # only ever set when the LLM found no vendor to extract in the first
+    # place, so a genuine customs-broker invoice (which DOES have a real
+    # vendor name) is never excluded by this.
+    vendor_not_applicable_filter = {"extracted_fields.vendor_not_applicable": True}
     vendor_applicable_filter = {
-        "$or": [
-            {"doc_type": {"$in": vendor_applicable_types}},
-            {"suggested_job_type": {"$in": vendor_applicable_types}},
-            {"vendor_resolution.status": {"$exists": True}},
+        "$and": [
+            {"$or": [
+                {"doc_type": {"$in": vendor_applicable_types}},
+                {"suggested_job_type": {"$in": vendor_applicable_types}},
+                {"vendor_resolution.status": {"$exists": True}},
+            ]},
+            {"extracted_fields.vendor_not_applicable": {"$ne": True}},
         ]
     }
     vendor_applicable_total = await db.hub_documents.count_documents(

@@ -9,6 +9,7 @@ Simple CRUD routes are implemented directly using deps.get_db().
 import io
 import logging
 import hashlib
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -258,7 +259,11 @@ async def list_documents(
             pass
 
         # Build multi-field regex conditions (always available, no index needed)
-        regex_cond = {"$regex": search_term, "$options": "i"}
+        # 2026-09-30: search_term is raw user-typed input from the search box --
+        # escape it before use in $regex so someone typing regex metacharacters
+        # (or a pathological pattern) can't cause an unintended broad match or a
+        # ReDoS against MongoDB's server-side regex engine.
+        regex_cond = {"$regex": re.escape(search_term), "$options": "i"}
         text_conditions = {"$or": [
             {"file_name": regex_cond},
             {"vendor_canonical": regex_cond},

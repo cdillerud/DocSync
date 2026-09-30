@@ -209,7 +209,9 @@ async def backfill_sales_mailbox(
 
 
 @router.post("/migrate-sales-to-unified")
-async def migrate_sales_documents_to_unified():
+async def migrate_sales_documents_to_unified(
+    _user: dict = Depends(require_admin),
+):
     """
     One-time migration to move sales_documents into the main hub_documents collection.
     Documents from sales_documents will be copied to hub_documents with category='Sales'.
@@ -283,7 +285,9 @@ async def migrate_sales_documents_to_unified():
 
 
 @router.post("/square9-cutover")
-async def execute_square9_cutover():
+async def execute_square9_cutover(
+    _user: dict = Depends(require_admin),
+):
     """Decommission Square9 — GPI Hub becomes the authoritative document system.
 
     Sets square9_active=false in hub_config, records timestamp,
@@ -334,6 +338,7 @@ async def execute_square9_cutover():
 async def recompute_derived_states(
     background_tasks: BackgroundTasks,
     dry_run: bool = Query(False),
+    _user: dict = Depends(require_admin),
 ):
     """Batch recompute derived states for all documents.
     
@@ -354,7 +359,10 @@ async def recompute_derived_states(
 
 
 @router.get("/recompute-status/{run_id}")
-async def get_recompute_status(run_id: str):
+async def get_recompute_status(
+    run_id: str,
+    _user: dict = Depends(require_admin),
+):
     """Check status of a recompute job."""
     db = get_db()
     job = await db.admin_jobs.find_one({"run_id": run_id}, {"_id": 0})
@@ -456,7 +464,11 @@ async def _recompute_states_task(run_id: str, dry_run: bool):
 # =========================================================================
 
 @router.post("/sh-invoice/{doc_id}/assign-processor")
-async def assign_sh_processor(doc_id: str, payload: dict = Body(...)):
+async def assign_sh_processor(
+    doc_id: str,
+    payload: dict = Body(...),
+    _user: dict = Depends(require_admin),
+):
     """Assign a processor (Andy or Ellie) to an SH_Invoice document.
 
     Body: {"processor": "Andy" | "Ellie"}
@@ -508,6 +520,7 @@ async def get_sh_invoice_queue(
     processor: str = Query(None, description="Filter by assigned processor"),
     limit: int = Query(100, ge=1, le=500),
     skip: int = Query(0, ge=0),
+    _user: dict = Depends(require_admin),
 ):
     """Return SH_Invoice documents in the approval queue.
 
@@ -617,6 +630,7 @@ async def unknown_doc_reclaim_preview(
     limit: int = Query(50, ge=1, le=500),
     smart: bool = Query(False, description="If true, surface how many candidates could inherit parent metadata"),
     skip_noise: bool = Query(False, description="If true, surface how many candidates match the noise filter"),
+    _user: dict = Depends(require_admin),
 ):
     """Dry-run the reclaim sweep. With `smart=true` + `skip_noise=true` the
     sample_breakdown includes `smart_inheritable` and `filtered_as_noise`
@@ -640,6 +654,7 @@ async def unknown_doc_reclaim_run(
         "tracking pixels) are marked noise_filtered and kept OUT of "
         "NeedsReview"
     )),
+    _user: dict = Depends(require_admin),
 ):
     """Execute the reclaim. Defaults to `execute=false` (dry-run). Mode
     flags `smart` + `skip_noise` can be combined freely. Per-run audit
@@ -652,7 +667,10 @@ async def unknown_doc_reclaim_run(
 
 
 @router.get("/unknown-doc-reclaim/runs")
-async def unknown_doc_reclaim_runs(limit: int = Query(20, ge=1, le=100)):
+async def unknown_doc_reclaim_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_admin),
+):
     """Recent reclaim run history — audit trail for the sweep."""
     from services.admin.unknown_doc_reclaim_service import recent_runs
     runs = await recent_runs(limit=limit)
@@ -672,6 +690,7 @@ async def unknown_doc_reclaim_post_process(
         "Retroactively revert filename-noise docs out of NeedsReview "
         "into noise_filtered=true"
     )),
+    _user: dict = Depends(require_admin),
 ):
     """Retroactively apply smart + skip_noise modes to docs that were
     already reclaimed by an earlier plain v2.5.5 run. Dry-run by default.
@@ -684,7 +703,10 @@ async def unknown_doc_reclaim_post_process(
 
 
 @router.get("/unknown-doc-reclaim/post-process/runs")
-async def unknown_doc_reclaim_post_process_runs(limit: int = Query(20, ge=1, le=100)):
+async def unknown_doc_reclaim_post_process_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_admin),
+):
     """Recent retro post-process run history."""
     from services.admin.unknown_doc_reclaim_service import recent_post_process_runs
     runs = await recent_post_process_runs(limit=limit)
@@ -694,7 +716,9 @@ async def unknown_doc_reclaim_post_process_runs(limit: int = Query(20, ge=1, le=
 # ─────────────── Filename Heuristics (v2.5.8) ───────────────
 
 @router.get("/filename-heuristics/rules")
-async def filename_heuristics_rules():
+async def filename_heuristics_rules(
+    _user: dict = Depends(require_admin),
+):
     """Expose the current rule set so operators can see what patterns will match."""
     from services.admin.filename_heuristics_service import list_rules
     rules = list_rules()
@@ -704,6 +728,7 @@ async def filename_heuristics_rules():
 @router.get("/filename-heuristics/preview")
 async def filename_heuristics_preview(
     limit: int = Query(2000, ge=1, le=10000),
+    _user: dict = Depends(require_admin),
 ):
     """Dry-run the heuristic classifier across candidate docs. Returns
     match counts by rule + by target doc_type + a 30-doc sample showing
@@ -723,6 +748,7 @@ async def filename_heuristics_apply(
         "NeedsReview) but gets enriched with doc_type + vendor. Never "
         "auto-clears — always requires human signoff."
     )),
+    _user: dict = Depends(require_admin),
 ):
     """Apply filename-heuristic classifications. Dry-run by default."""
     from services.admin.filename_heuristics_service import apply
@@ -733,7 +759,10 @@ async def filename_heuristics_apply(
 
 
 @router.get("/filename-heuristics/runs")
-async def filename_heuristics_runs(limit: int = Query(20, ge=1, le=100)):
+async def filename_heuristics_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_admin),
+):
     """Audit trail for heuristic runs."""
     from services.admin.filename_heuristics_service import recent_runs
     runs = await recent_runs(limit=limit)
@@ -750,6 +779,7 @@ async def filename_heuristics_unmatched_sample(
                        description="Top N groups returned"),
     min_group_size: int = Query(2, ge=1, le=50,
                                 description="Skip groups smaller than this"),
+    _user: dict = Depends(require_admin),
 ):
     """Groups currently-unmatched filenames by (vendor, shape-signature)
     to surface next-wave rule candidates. Shape collapses digit runs to
@@ -772,6 +802,7 @@ async def duplicate_docs_scan(
         1000, ge=1, le=10000,
         description="Cap on the returned groups array (response size). "
                     "`groups_total` always reflects the true count."),
+    _user: dict = Depends(require_admin),
 ):
     """Find groups of docs with identical (file_name + vendor_canonical
     [+ ingestion day]). Catches email-poller dedup misses — e.g. the
@@ -790,6 +821,7 @@ async def duplicate_docs_resolve(
     same_day: bool = Query(True),
     limit: int = Query(20000, ge=1, le=100000),
     actor: str = Query("admin"),
+    _user: dict = Depends(require_admin),
 ):
     """Mark all-but-one doc per duplicate group as `duplicate_of=<keeper>`,
     status=Completed, queue_visible=false. Dry-run by default. One call
@@ -804,7 +836,10 @@ async def duplicate_docs_resolve(
 
 
 @router.get("/duplicate-docs/runs")
-async def duplicate_docs_runs(limit: int = Query(20, ge=1, le=100)):
+async def duplicate_docs_runs(
+    limit: int = Query(20, ge=1, le=100),
+    _user: dict = Depends(require_admin),
+):
     """Audit trail for duplicate-resolve runs."""
     from services.admin.triage_tools_service import recent_duplicate_runs
     runs = await recent_duplicate_runs(limit=limit)
@@ -825,6 +860,7 @@ async def filename_heuristics_auto_propose(
     min_majority_pct: float = Query(70.0, ge=50.0, le=100.0,
                                     description="Minimum %% the winning doc_type "
                                                 "needs to carry"),
+    _user: dict = Depends(require_admin),
 ):
     """Derive rule proposals by mining each vendor's own classified
     history. Returns `proposals` (ready to execute) + `deferred` (need
@@ -845,6 +881,7 @@ async def filename_heuristics_auto_apply(
     min_unmatched_count: int = Query(3, ge=1, le=500),
     min_confidence: float = Query(0.70, ge=0.5, le=1.0),
     limit: int = Query(3000, ge=100, le=20000),
+    _user: dict = Depends(require_admin),
 ):
     """Persist every high-confidence auto-proposed rule into
     `filename_heuristic_custom_rules`. Dry-run by default."""
@@ -859,6 +896,7 @@ async def filename_heuristics_auto_apply(
 @router.get("/filename-heuristics/custom-rules")
 async def filename_heuristics_custom_rules(
     only_enabled: bool = Query(False),
+    _user: dict = Depends(require_admin),
 ):
     """List all custom (auto-proposed) rules currently in Mongo."""
     from services.admin.filename_heuristics_auto_service import list_custom_rules
@@ -870,6 +908,7 @@ async def filename_heuristics_custom_rules(
 async def filename_heuristics_custom_rule_toggle(
     rule_id: str,
     enabled: bool = Query(...),
+    _user: dict = Depends(require_admin),
 ):
     """Enable or disable a single custom rule."""
     from services.admin.filename_heuristics_auto_service import (
@@ -892,6 +931,7 @@ async def filename_heuristics_vendor_history(
                     "filename-heuristic run (normally excluded to avoid feedback loops).",
     ),
     limit: int = Query(2000, ge=100, le=20000),
+    _user: dict = Depends(require_admin),
 ):
     """Diagnostic: show a vendor's full classified doc_type distribution.
 

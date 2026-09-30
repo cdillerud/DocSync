@@ -5,17 +5,19 @@ This is the authoritative route-facing implementation for enqueueing
 documents through the auto-resolution service.
 """
 
-from fastapi import HTTPException, Query
+from fastapi import HTTPException, Query, Depends
 
 from database import db
 from services.auto_resolution_service import (
     get_auto_resolve_service,
 )
+from services.auth_deps import require_admin
 
 
 async def batch_auto_resolve(
     limit: int = Query(50, le=500),
     status_filter: str = Query("NeedsReview"),
+    _user: dict = Depends(require_admin),
 ):
     """Batch enqueue pending documents for full auto-resolution (ref intel + PO resolution)."""
     svc = get_auto_resolve_service()

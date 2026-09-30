@@ -220,6 +220,10 @@ export default function MyQueuePage() {
               <div className="py-16 text-center text-muted-foreground">
                 <Inbox className="w-10 h-10 mx-auto mb-3 opacity-20" />
                 <p className="text-sm">No documents in {selectedRepName}'s queue{statusFilter !== 'all' ? ` with status "${statusFilter}"` : ''}</p>
+                {/* 2026-09-30: an all-zero queue with no explanation reads as
+                    broken rather than empty on first glance -- this is the
+                    normal state whenever nothing is currently assigned. */}
+                <p className="text-xs mt-1.5 opacity-70">Nothing assigned right now — switch reps above, or check Triage for unassigned items.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">

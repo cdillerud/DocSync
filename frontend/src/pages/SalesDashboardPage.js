@@ -73,6 +73,18 @@ export default function SalesDashboardPage() {
 
   const activeFilter = statusFilter !== 'all' || createdFilter !== 'all' || search;
 
+  // 2026-09-30: this tab can show all-zero stat tiles with no explanation --
+  // that's expected today (SO auto-creation is gated off pending order-match
+  // accuracy), but reads as "broken" without context. Pull the real live
+  // order-match rate to make the banner concrete rather than generic.
+  const [orderMatchPct, setOrderMatchPct] = useState(null);
+  useEffect(() => {
+    fetch(`${API}/api/inside-sales-pilot/status`)
+      .then(r => r.json())
+      .then(d => setOrderMatchPct(d?.bc_validation?.order_match_rate ?? null))
+      .catch(() => {});
+  }, []);
+
   return (
     <div className="max-w-[1400px] mx-auto space-y-6" data-testid="sales-dashboard-page">
       {/* Header */}
@@ -112,6 +124,12 @@ export default function SalesDashboardPage() {
             Clear Queue
           </Button>
         </div>
+      </div>
+
+      <div className="rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20 px-3 py-2 text-xs text-blue-800 dark:text-blue-300" data-testid="so-autocreate-status-note">
+        <span className="font-medium">Auto-creation is currently disabled</span> pending order-match accuracy improvements
+        {orderMatchPct && <> — live order match rate is <span className="font-mono">{orderMatchPct}</span></>}.
+        {' '}This tab reflects the manual review path; zeros below are expected, not an error.
       </div>
 
       {/* Summary Cards */}

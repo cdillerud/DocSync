@@ -16,8 +16,15 @@ function StatCard({ label, value, sub, icon: Icon, color = "text-primary" }) {
   );
 }
 
-function ProgressBar({ label, value, max, color = "bg-primary" }) {
+function ProgressBar({ label, value, max, color = "bg-primary", verified = null }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  // 2026-09-30: `verified` is an optional {value, max, label} for a second,
+  // narrower bar underneath -- e.g. "extracted" (present) vs "verified"
+  // (matched against a real BC record). A field can show 100% extracted
+  // and still be wrong (found today: a vendor name landing in the customer
+  // field, invisible behind a 100% presence number) -- this makes that gap
+  // visible instead of burying the real signal in a different card.
+  const vPct = verified && verified.max > 0 ? Math.round((verified.value / verified.max) * 100) : null;
   return (
     <div className="space-y-1">
       <div className="flex justify-between text-xs">
@@ -27,6 +34,17 @@ function ProgressBar({ label, value, max, color = "bg-primary" }) {
       <div className="h-2 bg-muted rounded-full overflow-hidden">
         <div className={`h-full ${color} rounded-full transition-all`} style={{ width: `${pct}%` }} />
       </div>
+      {verified && (
+        <>
+          <div className="flex justify-between text-[10px] pt-0.5">
+            <span className="text-muted-foreground/70">↳ verified against BC ({verified.label || 'match'})</span>
+            <span className="font-medium text-muted-foreground/90">{verified.value}/{verified.max} ({vPct}%)</span>
+          </div>
+          <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
+            <div className="h-full bg-amber-500/80 rounded-full transition-all" style={{ width: `${vPct}%` }} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -44,13 +62,22 @@ function ScoreBadge({ score }) {
  * Avoids adding a charting dependency.
  */
 function MatchTierDonut({ tiers }) {
+  // 2026-09-30: no_match and no_ref are now genuinely distinct signals from
+  // the backend (a real "reason" field, not a guess) -- no_ref means no
+  // PO/order number was ever extracted (an extraction problem), no_match
+  // means a real reference was extracted and searched but not found in BC
+  // (a matching problem). not_validated is a third, different thing:
+  // validation hasn't reached this document yet, which is a pending state,
+  // not a data-quality signal, so it's visually separated (dashed/muted)
+  // rather than implying a failure.
   const TIER_CONFIG = [
     { key: 'exact',    label: 'Exact',     color: '#22c55e' },  // emerald
     { key: 'scoped',   label: 'Cust-scoped', color: '#0ea5e9' }, // sky
     { key: 'fuzzy',    label: 'Fuzzy',     color: '#eab308' },  // amber
     { key: 'live',     label: 'Live BC',   color: '#a855f7' },  // violet
-    { key: 'no_match', label: 'No match',  color: '#ef4444' },  // red
-    { key: 'no_ref',   label: 'No ref',    color: '#475569' },  // slate
+    { key: 'no_match', label: 'No match (ref extracted, not found in BC)',  color: '#ef4444' },  // red
+    { key: 'no_ref',   label: 'No ref extracted (extraction gap)', color: '#f97316' },  // orange — distinct from no_match red
+    { key: 'not_validated', label: 'Not yet validated', color: '#64748b' },  // slate — pending, not a failure
   ];
 
   const buckets = tiers?.buckets || {};
@@ -126,7 +153,7 @@ function MatchTierDonut({ tiers }) {
             {tiers?.match_rate_pct ?? 0}%
           </text>
           <text x="80" y="96" textAnchor="middle" className="fill-muted-foreground" fontSize="10">
-            {tiers?.matched_docs ?? 0} / {tiers?.total_docs ?? 0}
+            {tiers?.matched_docs ?? 0} / {tiers?.validated_docs ?? tiers?.total_docs ?? 0}
           </text>
         </svg>
         <div className="flex-1 space-y-1.5">
@@ -275,7 +302,14 @@ export default function InsideSalesPilotPage() {
               {Object.entries(fieldRates).map(([field, rate]) => {
                 const [val, max] = parseRate(rate);
                 const label = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-                return <ProgressBar key={field} label={label} value={val} max={max} />;
+                // customer_name has a real "verified against BC" signal
+                // available (bc.customer_match_rate, from the same status
+                // payload) -- surface it right here so the contrast with
+                // the 100%-presence number above is visible at a glance.
+                const verified = field === 'customer_name' && bc.customer_match_rate
+                  ? (() => { const [cv, cm] = parseRate(bc.customer_match_rate); return { value: cv, max: cm, label: 'BC customer match' }; })()
+                  : null;
+                return <ProgressBar key={field} label={label} value={val} max={max} verified={verified} />;
               })}
             </>
           ) : (

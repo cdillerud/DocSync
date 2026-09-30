@@ -305,12 +305,23 @@ async def match_tier_distribution():
             "_id": 0,
             "match_method": "$bc_prod_validation.order_lookup.match_method",
             "found": "$bc_prod_validation.order_lookup.found",
+            "reason": "$bc_prod_validation.order_lookup.reason",
             "validated": {"$ifNull": ["$bc_prod_validation.order_lookup", None]},
             "entity_type": "$bc_prod_validation.order_lookup.bc_entity_type",
         }},
     ]
     rows = await db.hub_documents.aggregate(pipeline).to_list(None)
 
+    # 2026-09-30: this used to fold "validation never ran" and "ran, found
+    # nothing" into the same no_ref/no_match buckets, and within
+    # found=False it never distinguished WHY -- services/bc_prod_validator.py
+    # already records a real reason string per document ("No PO or order
+    # number extracted" for a genuine extraction gap vs "No matching order
+    # found in BC cache or API" for a genuine matching gap), it just wasn't
+    # being read here. These are different problems needing different fixes
+    # (extraction vs matching), so they now get separate buckets, plus a
+    # distinct not_validated bucket for documents validation hasn't reached
+    # yet at all (a pending state, not a data-quality signal).
     buckets = {
         "exact": 0,
         "scoped": 0,
@@ -318,15 +329,21 @@ async def match_tier_distribution():
         "live": 0,
         "no_match": 0,
         "no_ref": 0,
+        "not_validated": 0,
     }
     by_entity = {"sales_order": 0, "posted_sales_invoice": 0, "posted_sales_shipment": 0, "unknown": 0}
 
+    NO_REF_REASON = "No PO or order number extracted"
+
     for r in rows:
         if r.get("validated") is None:
-            buckets["no_ref"] += 1
+            buckets["not_validated"] += 1
             continue
         if not r.get("found"):
-            buckets["no_match"] += 1
+            if r.get("reason") == NO_REF_REASON:
+                buckets["no_ref"] += 1
+            else:
+                buckets["no_match"] += 1
             continue
         mm = r.get("match_method") or ""
         if mm.startswith(("cache_multi_search", "direct_cache_search")):
@@ -347,11 +364,17 @@ async def match_tier_distribution():
             by_entity["unknown"] += 1
 
     total = sum(buckets.values())
-    matched = total - buckets["no_match"] - buckets["no_ref"]
+    validated_total = total - buckets["not_validated"]
+    matched = validated_total - buckets["no_match"] - buckets["no_ref"]
     return {
         "total_docs": total,
+        # 2026-09-30: match_rate_pct is now computed over documents
+        # validation has actually reached, not the raw total -- folding
+        # not-yet-validated docs into the denominator made the rate look
+        # artificially worse without saying why.
+        "validated_docs": validated_total,
         "matched_docs": matched,
-        "match_rate_pct": round(matched / total * 100, 1) if total else 0.0,
+        "match_rate_pct": round(matched / validated_total * 100, 1) if validated_total else 0.0,
         "buckets": buckets,
         "by_entity_type": by_entity,
     }

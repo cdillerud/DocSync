@@ -72,36 +72,16 @@ async def _compute_snapshot(db) -> Dict[str, Any]:
     customer_match_pct = round(customer_found / total_validated * 100, 1) if total_validated else 0.0
     order_match_pct = round(order_found / total_validated * 100, 1) if total_validated else 0.0
 
-    # ---- Tier distribution (mirrors match_tier_distribution()) ----
-    tier_pipeline = [
-        {"$match": base_q},
-        {"$project": {
-            "_id": 0,
-            "match_method": "$bc_prod_validation.order_lookup.match_method",
-            "found": "$bc_prod_validation.order_lookup.found",
-            "validated": {"$ifNull": ["$bc_prod_validation.order_lookup", None]},
-        }},
-    ]
-    rows = await db.hub_documents.aggregate(tier_pipeline).to_list(None)
-    buckets = {"exact": 0, "scoped": 0, "fuzzy": 0, "live": 0, "no_match": 0, "no_ref": 0}
-    for r in rows:
-        if r.get("validated") is None:
-            buckets["no_ref"] += 1
-            continue
-        if not r.get("found"):
-            buckets["no_match"] += 1
-            continue
-        mm = r.get("match_method") or ""
-        if mm.startswith(("cache_multi_search", "direct_cache_search")):
-            buckets["exact"] += 1
-        elif mm.startswith("customer_scoped_search"):
-            buckets["scoped"] += 1
-        elif mm.startswith("fuzzy_normalized_search"):
-            buckets["fuzzy"] += 1
-        elif mm.startswith("live_bc_api"):
-            buckets["live"] += 1
-        else:
-            buckets["exact"] += 1
+    # 2026-09-30: this previously hand-copied match_tier_distribution()'s
+    # pipeline (a drifted-local-copy bug -- the exact same class already
+    # found and fixed 3+ times elsewhere in this codebase today) and had
+    # gone stale the moment the real function was fixed to split no_match
+    # from no_ref by reason and add a not_validated bucket. Now calls the
+    # real function directly so this dashboard can never again disagree
+    # with the Sales Intake dashboard showing the same underlying data.
+    from routers.inside_sales_pilot import match_tier_distribution as _real_tier_distribution
+    tier_result = await _real_tier_distribution()
+    buckets = tier_result["buckets"]
 
     # ---- Rep-assignment rate ----
     review_pipeline = [

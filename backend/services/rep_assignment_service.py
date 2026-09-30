@@ -63,7 +63,11 @@ async def get_rep_for_customer(db, customer_no: str) -> Optional[Dict[str, Any]]
         customer_rec = await db.bc_reference_cache.find_one(
             {
                 "bc_entity_type": "customer",
-                "bc_document_no": {"$regex": f"^{customer_no}$", "$options": "i"},
+                # 2026-09-29: customer_no here can originate from AI-extracted
+                # document text (untrusted input) -- escape before building a
+                # $regex so malformed/malicious extracted text can never be
+                # interpreted as regex syntax by MongoDB's server-side engine.
+                "bc_document_no": {"$regex": f"^{re.escape(customer_no)}$", "$options": "i"},
             },
             {"_id": 0},
         )

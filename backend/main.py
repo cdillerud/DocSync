@@ -54,6 +54,7 @@ from routers.dashboard import router as dashboard_router
 from routers.inbox_today import router as inbox_today_router
 from routers.sharepoint import router as sharepoint_admin_router
 from routers.square9 import router as square9_router
+from routers.sales_readiness import router as sales_readiness_router
 from routers.email_polling import router as email_polling_router
 from routers.vendors import router as vendors_router
 from routers.migration_routes import router as migration_routes_router
@@ -132,6 +133,7 @@ app.include_router(dashboard_router, prefix="/api")
 app.include_router(inbox_today_router, prefix="/api")
 app.include_router(sharepoint_admin_router, prefix="/api")
 app.include_router(square9_router, prefix="/api")
+app.include_router(sales_readiness_router, prefix="/api")
 app.include_router(email_polling_router, prefix="/api")
 app.include_router(vendors_router, prefix="/api")
 app.include_router(migration_routes_router, prefix="/api")

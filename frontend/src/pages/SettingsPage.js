@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getSettingsStatus, getSettingsConfig, updateSettingsConfig, testConnection } from '../lib/api';
+import { getSettingsStatus, getSettingsConfig, updateSettingsConfig, testConnection, recomputeDerivedStates, getRecomputeStatus } from '../lib/api';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -76,15 +76,13 @@ function MaintenanceSection() {
     setRunning(true);
     setResult(null);
     try {
-      const res = await fetch(`${API}/api/admin/recompute-derived-states?dry_run=${dryRun}`, { method: 'POST' });
-      const data = await res.json();
+      const { data } = await recomputeDerivedStates(dryRun);
       toast.success(`Recompute ${dryRun ? '(dry run) ' : ''}started`);
       // Poll for completion
       setPolling(true);
       const pollId = setInterval(async () => {
         try {
-          const statusRes = await fetch(`${API}/api/admin/recompute-status/${data.run_id}`);
-          const statusData = await statusRes.json();
+          const { data: statusData } = await getRecomputeStatus(data.run_id);
           setResult(statusData);
           if (statusData.status === 'completed' || statusData.status === 'failed') {
             clearInterval(pollId);

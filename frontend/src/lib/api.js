@@ -184,6 +184,12 @@ export const getSettingsConfig = () => api.get('/settings/config');
 export const updateSettingsConfig = (data) => api.put('/settings/config', data);
 export const testConnection = (service) => api.post(`/settings/test-connection?service=${service}`);
 
+// Admin — authenticated via the shared `api` instance's interceptor (see
+// admin.py: these routes require Depends(require_admin), so a raw fetch()
+// without the Authorization header would 401).
+export const recomputeDerivedStates = (dryRun = false) => api.post(`/admin/recompute-derived-states?dry_run=${dryRun}`);
+export const getRecomputeStatus = (runId) => api.get(`/admin/recompute-status/${runId}`);
+
 // Job Types (Email Parser Config)
 export const getJobTypes = () => api.get('/settings/job-types');
 export const getJobType = (jobType) => api.get(`/settings/job-types/${jobType}`);

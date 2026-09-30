@@ -545,6 +545,27 @@ async def _call_llm_for_extraction(
             len(extracted), pages_sent, page_count,
         )
 
+        # 2026-09-29: Mexican SAT CFDI e-invoice XMLs (ext == "xml", root
+        # element cfdi:Comprobante) were confirmed live to be a 100%
+        # systematic vendor/customer extraction miss -- 66/66 sampled
+        # unresolved AP_Invoice XML docs are this exact format, all with a
+        # clear, unambiguous vendor name sitting in the standardized
+        # <cfdi:Emisor Nombre="..."/> attribute (buyer is <cfdi:Receptor
+        # Nombre="..."/>), well within the 15000-char text window already
+        # sent to the LLM (real sample: 5027 chars total, Emisor at offset
+        # 2984) -- not a truncation issue, the LLM just doesn't reliably
+        # read this Spanish-language, attribute-based government schema.
+        # Since the schema is fixed and government-standardized, a
+        # deterministic parse is strictly more reliable than asking the
+        # LLM, so it only fills in a field the LLM left blank -- never
+        # overrides an LLM-extracted value.
+        cfdi_fields = _try_parse_cfdi_emisor_receptor(file_path, ext)
+        if cfdi_fields:
+            if not extracted.get("vendor") and cfdi_fields.get("vendor"):
+                extracted["vendor"] = cfdi_fields["vendor"]
+            if not extracted.get("customer") and cfdi_fields.get("customer"):
+                extracted["customer"] = cfdi_fields["customer"]
+
         return {
             "suggested_job_type": result.get("document_type", "Unknown"),
             "confidence": float(result.get("confidence", 0.0)),
@@ -558,13 +579,54 @@ async def _call_llm_for_extraction(
 
     except Exception as e:
         logger.error("LLM extraction failed for '%s': %s", file_name, str(e))
+        # Even when the LLM call itself fails outright, a CFDI XML's vendor/
+        # customer names are still deterministically recoverable -- see the
+        # comment on the success path above for why.
+        fallback_fields = {}
+        try:
+            cfdi_fields = _try_parse_cfdi_emisor_receptor(file_path, ext if "ext" in dir() else "")
+            if cfdi_fields:
+                fallback_fields = cfdi_fields
+        except Exception:
+            pass
         return {
             "error": str(e),
             "suggested_job_type": "Unknown",
             "confidence": 0.0,
-            "extracted_fields": {},
+            "extracted_fields": fallback_fields,
             "reasoning": f"Extraction failed: {str(e)}",
         }
+
+
+def _try_parse_cfdi_emisor_receptor(file_path: str, ext: str) -> Optional[dict]:
+    """Best-effort deterministic parse of a Mexican SAT CFDI e-invoice XML.
+
+    CFDI (Comprobante Fiscal Digital por Internet) is a government-mandated,
+    fixed XML schema -- the vendor ("Emisor"/issuer) and customer
+    ("Receptor") names are always plain attributes on predictable elements,
+    so a regex parse is both simpler and more reliable here than relying on
+    an LLM to read Spanish-language tax-document XML. Returns None (never
+    raises) for any non-CFDI or unreadable file so callers can use this as
+    a pure best-effort supplement.
+    """
+    if ext != "xml":
+        return None
+    try:
+        with open(file_path, "r", errors="ignore") as f:
+            text = f.read(20000)
+        if "cfdi:Comprobante" not in text and "cfdi:Emisor" not in text:
+            return None
+        import re
+        emisor_match = re.search(r'<cfdi:Emisor\b[^>]*?\bNombre="([^"]*)"', text)
+        receptor_match = re.search(r'<cfdi:Receptor\b[^>]*?\bNombre="([^"]*)"', text)
+        out = {}
+        if emisor_match and emisor_match.group(1).strip():
+            out["vendor"] = emisor_match.group(1).strip()
+        if receptor_match and receptor_match.group(1).strip():
+            out["customer"] = receptor_match.group(1).strip()
+        return out or None
+    except Exception:
+        return None
 
 
 def _rasterize_pdf_pages(file_path: str, max_pages: int = None):

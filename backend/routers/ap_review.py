@@ -579,7 +579,13 @@ async def post_document_to_bc(
     review_status = doc.get("review_status", "")
     queue_status = doc.get("status", "")
 
-    if review_status not in ("ready_for_post", "data_correction_pending"):
+    # 2026-09-30: "data_correction_pending" removed from this tuple -- confirmed
+    # via a full-codebase audit that review_status (this field) is NEVER
+    # assigned that value anywhere; it only ever exists on the separate
+    # workflow_status field (~20 real references there). This was dead,
+    # unreachable field-name confusion, not a deliberate second ready-state,
+    # so dropping it is pure cleanup with zero behavior change.
+    if review_status not in ("ready_for_post",):
         # Safety valve: queue-status-says-ready but review_status is stale.
         # A known workflow gap where status="ReadyForPost" ≠ review_status.
         if auto_mark_ready and queue_status == "ReadyForPost":

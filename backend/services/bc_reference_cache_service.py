@@ -147,6 +147,33 @@ ENTITY_CONFIGS = {
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },
+    "salesQuotes": {
+        # 2026-09-30: missing entirely -- bc_reference_cache had ZERO
+        # sales_quote records (not even in the entity-type list), same bug
+        # class as the missing "vendors" entity fixed earlier today
+        # (d707c5dc). Confirmed live: 30 real Inside Sales Pilot documents
+        # extract a quote-shaped reference ("QUO-2026-21922" style) that
+        # _check_order() in bc_prod_validator.py can never match without
+        # this entity existing, regardless of how good its search logic is.
+        "entity_type": "sales_quote",
+        "domain": "sales",
+        "number_field": "number",
+        "external_ref_field": "externalDocumentNumber",
+        "select_fields": "id,number,externalDocumentNumber,customerName,customerNumber,postingDate,status,totalAmountIncludingTax,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id"),
+            "bc_document_no": r.get("number", ""),
+            "bc_external_document_no": r.get("externalDocumentNumber", ""),
+            "bc_vendor_no": None,
+            "bc_vendor_name": None,
+            "bc_customer_no": r.get("customerNumber", ""),
+            "bc_customer_name": r.get("customerName", ""),
+            "bc_posting_date": r.get("postingDate"),
+            "bc_status": r.get("status", ""),
+            "bc_amount": r.get("totalAmountIncludingTax"),
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+        }
+    },
     "salesInvoices": {
         "entity_type": "posted_sales_invoice",
         "domain": "sales",
@@ -634,7 +661,13 @@ class BCReferenceCacheService:
                 # GPI-SQUARE9-BC-CACHE-STALE-V65
                 # Open orders can disappear when posted; incremental modified-date
                 # sync cannot observe deletions. Full-refresh volatile order tables.
-                entity_last_sync = None if table_name in ("purchaseOrders", "salesOrders") else last_sync
+                # 2026-09-30: added "salesQuotes" -- its first-ever sync attempt
+                # (this same commit) still picked up a stale filter from the
+                # shared last_sync meta timestamp instead of doing a true full
+                # fetch, returning 0 records for a brand-new entity with no
+                # prior data. Forcing a full refresh here, same as the other
+                # volatile order-type tables.
+                entity_last_sync = None if table_name in ("purchaseOrders", "salesOrders", "salesQuotes") else last_sync
                 count, fetch_succeeded = await self._sync_entity(
                     token, company_id, table_name, config, entity_last_sync
                 )

@@ -324,8 +324,13 @@ async def _check_order(
     # Search priority: open sales_order first (preferred),
     # then posted_sales_invoice / posted_sales_shipment (catches 6-digit
     # order numbers for posted docs and shipment/BOL refs).
+    # 2026-09-30: added "sales_quote" -- confirmed live 30 real pilot docs
+    # extract a quote-shaped reference ("QUO-2026-21922") that could never
+    # match here since sales_quote wasn't a synced cache entity at all
+    # (see bc_reference_cache_service.py ENTITY_CONFIGS fix, same commit).
     SALES_ENTITY_PRIORITY = [
         ["sales_order"],
+        ["sales_quote"],
         ["posted_sales_invoice", "posted_sales_shipment"],
     ]
 
@@ -401,6 +406,7 @@ async def _check_order(
                 {
                     "bc_entity_type": {"$in": [
                         "sales_order",
+                        "sales_quote",
                         "posted_sales_invoice",
                         "posted_sales_shipment",
                     ]},
@@ -450,6 +456,7 @@ async def _check_order(
                 {
                     "bc_entity_type": {"$in": [
                         "sales_order",
+                        "sales_quote",
                         "posted_sales_invoice",
                         "posted_sales_shipment",
                     ]},

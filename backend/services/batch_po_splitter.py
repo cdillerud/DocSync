@@ -334,6 +334,11 @@ async def split_and_ingest_batch(
 
     errors = [c for c in children if c["status"] == "error"]
 
+    try:
+        await mark_split_continuations(db, [c.get("child_doc_id") for c in children])
+    except Exception as e:
+        logger.warning("[BatchSplit] continuation marking failed for %s: %r", parent_doc_id[:8], e)
+
     # Update parent doc with split metadata
     await db.hub_documents.update_one(
         {"id": parent_doc_id},
@@ -365,6 +370,70 @@ async def split_and_ingest_batch(
         "children": children,
     }
 
+
+
+
+_INVOICE_TYPES = {"AP_Invoice", "AP_INVOICE", "Freight_Invoice", "Invoice"}
+
+
+def _continuation_key(d: dict):
+    """Identity of an invoice piece: vendor, invoice number, amount."""
+    nf, ef = d.get("normalized_fields") or {}, d.get("extracted_fields") or {}
+    vendor = d.get("bc_vendor_number") or d.get("vendor_canonical")
+    inv = d.get("invoice_number_clean") or nf.get("invoice_number") or ef.get("invoice_number")
+    amt = d.get("amount_float")
+    if not (vendor and inv and amt is not None) or d.get("document_type") not in _INVOICE_TYPES:
+        return None
+    return (str(vendor).upper(), str(inv).strip().upper(), round(float(amt), 2))
+
+
+async def mark_split_continuations(db, child_ids: list, apply: bool = True) -> int:
+    """Mark split children that are continuation pages of a sibling invoice.
+
+    A multi-page invoice could be split one document per page, each piece
+    extracted with the full invoice amount (333+ invoices since 2026-06).
+    Siblings from the same batch file that are both invoice-typed with the
+    same vendor, invoice number and amount are the same invoice: keep the
+    first piece and mark the others is_duplicate (reason split_continuation)
+    so queues, posting and reports count the invoice once. Pieces already
+    posted or linked to a BC invoice are never marked.
+    """
+    ids = [c for c in child_ids if c]
+    if len(ids) < 2:
+        return 0
+    groups: dict = {}
+    async for d in db.hub_documents.find(
+            {"id": {"$in": ids}, "is_duplicate": {"$ne": True}},
+            {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_canonical": 1, "invoice_number_clean": 1,
+             "normalized_fields.invoice_number": 1, "extracted_fields.invoice_number": 1,
+             "amount_float": 1, "document_type": 1, "batch_group_num": 1, "status": 1,
+             "bc_purchase_invoice": 1}):
+        key = _continuation_key(d)
+        if key:
+            groups.setdefault(key, []).append(d)
+    marked = 0
+    now = datetime.now(timezone.utc).isoformat()
+    for pieces in groups.values():
+        if len(pieces) < 2:
+            continue
+        # Keep a posted/linked piece if there is one, else the earliest page group.
+        pieces.sort(key=lambda d: (not (d.get("bc_purchase_invoice") or d.get("status") == "Posted"),
+                                   d.get("batch_group_num") or 0))
+        primary = pieces[0]
+        for d in pieces[1:]:
+            if d.get("bc_purchase_invoice") or d.get("status") == "Posted":
+                continue
+            marked += 1
+            if apply:
+                await db.hub_documents.update_one(
+                    {"id": d["id"]},
+                    {"$set": {"is_duplicate": True, "duplicate_reason": "split_continuation",
+                              "duplicate_of_document_id": primary["id"], "updated_utc": now}})
+                await db.hub_documents.update_one(
+                    {"id": primary["id"]}, {"$addToSet": {"split_continuation_doc_ids": d["id"]}})
+    if marked and apply:
+        logger.info("[BatchSplit] marked %d split continuation(s) as duplicates", marked)
+    return marked
 
 
 # Doc-type values that indicate the AI could not classify the split child.

@@ -38,6 +38,32 @@ SPIRO_RETRY_DELAY = 1.0  # seconds
 SPIRO_TOKEN_FILE = os.environ.get("SPIRO_TOKEN_FILE", "/app/backend/data/spiro_token.json")
 
 
+async def _load_shared_refresh_token() -> Optional[str]:
+    """Current Spiro refresh token from spiro_config (shared with spiro_service)."""
+    try:
+        from deps import get_db
+        saved = await get_db().spiro_config.find_one({"key": "refresh_token"})
+        return saved.get("value") if saved else None
+    except Exception as e:
+        logger.warning("Could not read shared Spiro refresh token: %r", e)
+        return None
+
+
+async def _save_shared_refresh_token(token: Optional[str]) -> None:
+    """Persist a rotated/new refresh token to spiro_config for both Spiro clients."""
+    if not token:
+        return
+    try:
+        from deps import get_db
+        await get_db().spiro_config.update_one(
+            {"key": "refresh_token"},
+            {"$set": {"value": token, "updated_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning("Could not save shared Spiro refresh token: %r", e)
+
+
 # =============================================================================
 # FEATURE FLAG
 # =============================================================================
@@ -168,7 +194,7 @@ class SpiroClient:
     
     async def _refresh_token(self) -> bool:
         """Refresh the access token using refresh_token grant."""
-        refresh_token = self.token_manager.get_refresh_token()
+        refresh_token = await _load_shared_refresh_token() or self.token_manager.get_refresh_token()
         if not refresh_token:
             logger.error("No refresh token available for Spiro")
             return False
@@ -192,6 +218,7 @@ class SpiroClient:
                 if resp.status_code == 200:
                     token_data = resp.json()
                     self.token_manager.update_token(token_data)
+                    await _save_shared_refresh_token(token_data.get("refresh_token"))
                     logger.info("Spiro token refreshed successfully")
                     return True
                 else:
@@ -227,6 +254,7 @@ class SpiroClient:
                 if resp.status_code == 200:
                     token_data = resp.json()
                     self.token_manager.update_token(token_data)
+                    await _save_shared_refresh_token(token_data.get("refresh_token"))
                     logger.info("Spiro authorization code exchanged successfully")
                     return True
                 else:

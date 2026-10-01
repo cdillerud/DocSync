@@ -13,6 +13,7 @@ Key routing rules:
 """
 
 import logging
+import re
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
@@ -165,6 +166,7 @@ FOLDER_STRUCTURE = {
             "GT's": "GT's inbound paperwork",
             "Sort and Stack": "Sort and Stack inbound/assembly",
             "Assembly Kent": "Assembly Kent inbound paperwork, freight, invoices",
+            "Assembly GT B&B": "B&B warehouse-assembly paperwork (WA#### files)",
             "Ball Orders": "Ball inbound/outbound paperwork and freight",
             "GT's Orders": "GT's outbound paperwork from Sort and Stack",
             "Transfer Orders": "Transfer orders outbound paperwork",
@@ -499,6 +501,15 @@ def determine_ap_routing_decision(
     }
 
 
+# B&B sends warehouse-assembly paperwork as WA####*.pdf. Staff file all of it in
+# Square9 under "Warehouse Not International/Assembly GT B&B"; Hub was treating
+# it as inbound shipping and filing it under Dropship Not International.
+# Approved 2026-10-01.
+BB_ASSEMBLY_SENDERS = {"justin_bandb@yahoo.com", "bandbwarehouse@yahoo.com"}
+BB_ASSEMBLY_FOLDER = "Warehouse Not International/Assembly GT B&B"
+_WA_ASSEMBLY_FILE = re.compile(r"^WA\d{4}", re.I)
+
+
 def _determine_folder_path_core(
     doc: Dict[str, Any],
     freight_direction: Optional[str] = None,
@@ -592,6 +603,15 @@ def _determine_folder_path_core(
         return (
             "Miscellaneous/Misc Invoices - need approval",
             f"LocationCode=MSC → Miscellaneous (vendor={vendor_name})",
+            routing_details,
+        )
+
+    # RULE -0.5: B&B warehouse-assembly paperwork (see BB_ASSEMBLY_SENDERS).
+    sender = (doc.get("email_sender") or "").strip().lower()
+    if sender in BB_ASSEMBLY_SENDERS and _WA_ASSEMBLY_FILE.match(doc.get("file_name") or ""):
+        return (
+            BB_ASSEMBLY_FOLDER,
+            f"B&B warehouse-assembly paperwork ({doc.get('file_name')}) -> Assembly GT B&B",
             routing_details,
         )
 

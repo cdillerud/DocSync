@@ -165,6 +165,12 @@ _INVOICE_PO_PATTERNS = [
     # catch this shape, plus the common single-letter "W" prefix used
     # throughout the system's own PO/document numbers (e.g. "W118314").
     re.compile(r"\b([a-z]{1,4}-?\d{4,})\b", re.I),  # vendor-prefixed alphanumeric
+    # Same shape with a glued short letter suffix, e.g. B&B's "WA2326IBG.pdf"
+    # for document WA2326 (Square9 stores it as "WA2326_B&B_9252026_.pdf").
+    # Found 2026-10-01: the trailing letters defeated the \b above, so these
+    # files produced no invoice token at all and every such document counted
+    # as missing from Hub although Hub had received and processed it.
+    re.compile(r"\b([a-z]{1,4}-?\d{4,})(?=[a-z]{1,4}\b)", re.I),
     # Reverse shape: digits-then-short-letters, e.g. H3Plastics' "8028-UT".
     # Found live 2026-07-16: the hyphen-stripping normalization below (which
     # runs before any pattern sees the string) turns "8028-UT" into

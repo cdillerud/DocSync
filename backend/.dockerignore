@@ -1,0 +1,13 @@
+# Secrets: the container gets its environment from docker-compose env_file,
+# so .env (and its backups) must never be baked into the image.
+.env
+.env.*
+
+# Runtime data: /app/uploads is a named volume at runtime.
+uploads/
+
+# Local backups and caches
+*.bak
+*.before_*
+*.save
+**/__pycache__/

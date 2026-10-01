@@ -169,6 +169,27 @@ def _resolve_so_routing_fields(doc: dict, so_type: str) -> dict:
     return routing
 
 
+def _pi_lines_total_mismatch(doc: dict, bc_lines: list):
+    """Return (planned_total, invoice_total) when the planned PI lines disagree
+    with the invoice's extracted total beyond tolerance, else None.
+
+    BC derives the invoice amount from the lines, so a mismatch would post the
+    wrong amount. Same rule and tolerance as the "total_mismatch" deviation in
+    vendor_invoice_profile_service (max $1 or 0.5%), but enforced.
+    """
+    from services.vendor_invoice_profile_service import _extract_total_amount
+    invoice_total = _extract_total_amount(doc)
+    if invoice_total <= 0 or not bc_lines:
+        return None
+    planned_total = sum(
+        float(line.get("quantity", 1) or 1) * float(line.get("unitCost", 0) or 0)
+        for line in bc_lines
+    )
+    if abs(planned_total - invoice_total) > max(1.0, invoice_total * 0.005):
+        return round(planned_total, 2), round(invoice_total, 2)
+    return None
+
+
 async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> list:
     """Build BC Purchase Invoice lines with intelligent vendor profile-based mapping.
     
@@ -232,6 +253,10 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
 
                 if template_item_no and template_line_type:
                     for line in bc_lines:
+                        # An item/GL number extracted from the invoice itself wins
+                        # over the vendor template (rule 4 above).
+                        if line.get("source") in ("extracted_item", "extracted_gl"):
+                            continue
                         # Override the line type and item/account code with the template's learned values
                         line["lineType"] = template_line_type
                         line["lineObjectNumber"] = template_item_no
@@ -1926,6 +1951,15 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         idempotency_key = _build_pi_idempotency_key(doc_id)
         transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
+        # Build and check the lines before touching BC (see _pi_lines_total_mismatch).
+        planned_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+        mismatch = _pi_lines_total_mismatch(doc, planned_lines)
+        if mismatch:
+            logger.warning("[AutoPI] Line total %.2f != invoice total %.2f for doc %s; not creating PI",
+                           mismatch[0], mismatch[1], doc_id)
+            return {"success": False, "reason": "line_total_mismatch",
+                    "planned_total": mismatch[0], "invoice_total": mismatch[1]}
+
         # Step 1: Create PI header
         result = await create_purchase_invoice(
             vendor_no=vendor_no,
@@ -1944,7 +1978,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         # Step 2: Add line items using AI-driven item mapping
         line_results = None
         if result.get("bc_system_id"):
-            bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+            bc_lines = planned_lines
 
             if bc_lines:
                 try:
@@ -2306,6 +2340,21 @@ async def create_purchase_invoice_from_document(
     idempotency_key = _build_pi_idempotency_key(doc_id)
     transaction_id = f"TXN_{uuid.uuid4().hex[:12]}"
 
+    # Build the lines before touching BC so an amount mismatch blocks the post
+    # instead of leaving a wrong-amount invoice in BC.
+    planned_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+    mismatch = _pi_lines_total_mismatch(doc, planned_lines)
+    if mismatch:
+        raise HTTPException(status_code=422, detail={
+            "error": "line_total_mismatch",
+            "message": (
+                f"Invoice lines total ${mismatch[0]:,.2f} but the invoice total is "
+                f"${mismatch[1]:,.2f}. Review the extracted lines before posting."
+            ),
+            "planned_total": mismatch[0],
+            "invoice_total": mismatch[1],
+        })
+
     # Step 1: Create the Purchase Invoice header
     try:
         result = await create_purchase_invoice(
@@ -2325,7 +2374,7 @@ async def create_purchase_invoice_from_document(
     line_results = None
     bc_lines = []
     if result.get("success") and result.get("bc_system_id"):
-        bc_lines = await _build_pi_lines_with_mapping(doc, db, vendor_no=vendor_no)
+        bc_lines = planned_lines
 
         if bc_lines:
             try:

@@ -44,6 +44,7 @@ export default function Square9ReadinessPage() {
   const [latest, setLatest] = useState(null);
   const [history, setHistory] = useState([]);
   const [trend, setTrend] = useState(null);
+  const [daily, setDaily] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -59,12 +60,14 @@ export default function Square9ReadinessPage() {
     setLoading(true);
     setError(null);
     try {
-      const [latestRes, historyRes, trendRes] = await Promise.all([
+      const [latestRes, historyRes, trendRes, dailyRes] = await Promise.all([
         fetch(`${API}/api/square9/readiness/latest`),
         fetch(`${API}/api/square9/readiness/history`),
         fetch(`${API}/api/square9/readiness/trend`).catch(() => null),
+        fetch(`${API}/api/square9/readiness/daily`).catch(() => null),
       ]);
       setTrend(trendRes && trendRes.ok ? await trendRes.json() : null);
+      setDaily(dailyRes && dailyRes.ok ? await dailyRes.json() : null);
       if (!latestRes.ok) {
         if (latestRes.status === 404) {
           setError('No readiness snapshots recorded yet.');
@@ -365,6 +368,62 @@ export default function Square9ReadinessPage() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Daily efficacy: each business day scored on its own */}
+      {daily && daily.days && daily.days.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Daily efficacy</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Each business day on its own, separate from the 7-day cutover rate: of the Square9 AP documents
+              filed that day, how many the Hub caught through its own intake. Recycle-bin recoveries are shown
+              separately (documents staff already processed and removed from Square9; the cutover gate counts
+              them, so the adjusted rate is the comparable one). Safety net = documents that never arrived by
+              email. The day is when the file was filed or last touched in Square9 (Central time). Partial = day
+              cut by the 7-day window, or still in progress.
+            </p>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground text-left border-b">
+                  <th className="py-2 pr-3">Date</th>
+                  <th className="py-2 pr-3 text-right">Square9 docs</th>
+                  <th className="py-2 pr-3 text-right">Caught</th>
+                  <th className="py-2 pr-3 text-right">Missed</th>
+                  <th className="py-2 pr-3 text-right">Raw rate</th>
+                  <th className="py-2 pr-3 text-right">Recycle bin</th>
+                  <th className="py-2 pr-3 text-right">Adjusted rate</th>
+                  <th className="py-2 pr-3 text-right">Safety net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {daily.days.map(d => {
+                  const net = Object.values(d.safety_net || {}).reduce((a, b) => a + b, 0);
+                  const rate = d.raw_rate_pct;
+                  const adj = d.adjusted_rate_pct;
+                  return (
+                    <tr key={d.date} className="border-b last:border-0">
+                      <td className="py-2 pr-3 whitespace-nowrap">
+                        {d.date}{d.partial && <span className="ml-1 text-xs text-muted-foreground">(partial)</span>}
+                      </td>
+                      <td className="py-2 pr-3 text-right">{d.square9_docs}</td>
+                      <td className="py-2 pr-3 text-right">{d.caught}</td>
+                      <td className="py-2 pr-3 text-right">{d.missed}</td>
+                      <td className="py-2 pr-3 text-right">{rate == null ? '—' : `${rate}%`}</td>
+                      <td className="py-2 pr-3 text-right">{d.recycle_bin_recovered || 0}</td>
+                      <td className={`py-2 pr-3 text-right font-medium ${adj == null ? '' : adj >= 85 ? 'text-emerald-500' : 'text-red-500'}`}>
+                        {adj == null ? '—' : `${adj}%`}
+                      </td>
+                      <td className="py-2 pr-3 text-right">{net}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </CardContent>
         </Card>
       )}

@@ -1286,6 +1286,99 @@ def run_compare(
 # CLI
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Daily efficacy (separate from the rolling cutover rate)
+# ---------------------------------------------------------------------------
+_CAUGHT_BUCKETS = {"exact_match", "strong_evidence_match", "likely_match",
+                   "possible_match", "llm_assisted_match"}
+
+
+def _business_day(iso_ts: str) -> Optional[str]:
+    """Calendar date of a timestamp in US Central time (Gamer's business day)."""
+    if not iso_ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    try:
+        from zoneinfo import ZoneInfo
+        return dt.astimezone(ZoneInfo("America/Chicago")).date().isoformat()
+    except Exception:
+        return (dt - timedelta(hours=5)).date().isoformat()
+
+
+def record_daily_efficacy(rows: List[Dict[str, Any]], since_hours: int) -> Dict[str, Any]:
+    """Score each business day on its own and store it in square9_daily_efficacy.
+
+    A day's cohort is the Square9 AP documents filed that day. Caught = the
+    Hub matched them through its own intake; missed = no match; recycle-bin
+    recovered is reported separately. Each run refreshes the days still in
+    its window, so late matches are picked up. The oldest day (cut by the
+    window) and today are marked partial. Never raises.
+    """
+    try:
+        days: Dict[str, Dict[str, Any]] = {}
+
+        def day(d):
+            return days.setdefault(d, {"square9_docs": 0, "caught": 0, "missed": 0,
+                                       "recycle_bin_recovered": 0, "hub_only": 0})
+
+        for r in rows:
+            bucket = r.get("match_bucket")
+            if bucket == "hub_only":
+                d = _business_day(r.get("hub_created_utc", ""))
+                if d:
+                    day(d)["hub_only"] += 1
+                continue
+            d = _business_day(r.get("square9_modified", ""))
+            if not d:
+                continue
+            rec = day(d)
+            if bucket in _CAUGHT_BUCKETS:
+                rec["caught"] += 1
+                rec["square9_docs"] += 1
+            elif bucket == "no_match":
+                rec["missed"] += 1
+                rec["square9_docs"] += 1
+            elif bucket == "recently_deleted_match" and float(r.get("match_score") or 0) >= 1.0:
+                rec["recycle_bin_recovered"] += 1
+
+        from pymongo import MongoClient
+        db = MongoClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        now = datetime.now(timezone.utc)
+        today = _business_day(now.isoformat())
+        oldest = _business_day((now - timedelta(hours=since_hours)).isoformat())
+
+        backfills: Dict[str, Dict[str, int]] = {}
+        for e in db.missed_document_intake_log.find(
+                {"status": "ingested", "ingested_at": {"$gte": (now - timedelta(hours=since_hours + 24)).isoformat()}},
+                {"_id": 0, "ingested_at": 1, "source": 1}):
+            d = _business_day(e.get("ingested_at", ""))
+            if d:
+                b = backfills.setdefault(d, {})
+                b[e.get("source", "?")] = b.get(e.get("source", "?"), 0) + 1
+
+        for d, rec in days.items():
+            judged = rec["caught"] + rec["missed"]
+            rec["raw_rate_pct"] = round(100 * rec["caught"] / judged, 1) if judged else None
+            adj = judged + rec["recycle_bin_recovered"]
+            rec["adjusted_rate_pct"] = (round(100 * (rec["caught"] + rec["recycle_bin_recovered"]) / adj, 1)
+                                        if adj else None)
+            rec["safety_net"] = backfills.get(d, {})
+            rec["partial"] = d in (today, oldest)
+            db.square9_daily_efficacy.update_one(
+                {"_id": d},
+                {"$set": {**rec, "date": d, "computed_at": now.isoformat(), "window_hours": since_hours},
+                 "$inc": {"runs": 1}},
+                upsert=True)
+        return {"days_recorded": len(days)}
+    except Exception as e:
+        print(f"WARNING: daily efficacy not recorded: {e!r}", file=sys.stderr)
+        return {"error": repr(e)}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Square9 vs GPI Hub AP-lane parity proof (read-only)."
@@ -1471,6 +1564,7 @@ def main() -> int:
         recycle_bin_since_hours=prod_window_hours,
         recycle_bin_site_path=args.recycle_bin_site_path,
     )
+    record_daily_efficacy(result["rows"], prod_window_hours)
 
     if args.json:
         # Strip rows; CSV is the row store.

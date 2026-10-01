@@ -536,3 +536,14 @@ async def get_readiness_trend(days: int = Query(14, ge=1, le=90)):
         },
         "consecutive_go_days": streak,
     }
+
+
+@router.get("/readiness/daily")
+async def get_daily_efficacy(days: int = Query(21, ge=1, le=120)):
+    """Per-business-day efficacy, separate from the rolling cutover rate: for
+    the Square9 AP documents filed each day, how many Hub caught on its own,
+    missed, or that were recovered from the recycle bin; plus safety-net
+    backfills. Written by every readiness run (square9_daily_efficacy)."""
+    db = get_db()
+    rows = await db.square9_daily_efficacy.find({}, {"_id": 0}).sort("date", -1).limit(days).to_list(days)
+    return {"count": len(rows), "days": rows}

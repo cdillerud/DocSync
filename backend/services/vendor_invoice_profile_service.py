@@ -726,6 +726,26 @@ async def get_or_build_profile(db, vendor_no: str) -> Dict[str, Any]:
     return await build_vendor_profile(db, vendor_no)
 
 
+def coding_consistency(profile: Dict) -> Tuple[float, str]:
+    """Share of the vendor's postable BC lines that use its single most common
+    G/L account or item, plus that code.
+
+    build_smart_pi_lines applies one default code to every line, so it only
+    codes an invoice correctly when the vendor's history is dominated by one
+    code. 0.0 means there is no usable coding history (lines would fall back
+    to BC_PI_FALLBACK_GL_ACCOUNT).
+    """
+    lp = (profile or {}).get("line_patterns") or {}
+    lt = (profile or {}).get("default_line_type")
+    ranked = lp.get("common_gl_accounts") if lt == "Account" else lp.get("common_items")
+    if not ranked:
+        return 0.0, ""
+    dist = lp.get("line_type_distribution") or {}
+    postable = sum(c for t, c in dist.items() if t in ("Account", "Item")) or 1
+    top = ranked[0]
+    return round(top.get("count", 0) / postable, 3), str(top.get("account") or top.get("item_no") or "")
+
+
 def build_smart_pi_lines(
     doc: Dict, profile: Dict, po_reference: str = ""
 ) -> List[Dict]:

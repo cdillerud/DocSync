@@ -125,6 +125,12 @@ def check_ap_ready_to_post(doc: dict, vendor_profile: dict = None, source: str =
     return True, "All conditions met — ready for auto-post", []
 
 
+# Automated posting/drafting only for vendors whose BC history is dominated by
+# one G/L account or item: the line builder applies a single code to every
+# line. Measured 2026-10-01: only ~25% of the postable queue meets 85%.
+MIN_CODING_SHARE = float(os.environ.get("AUTO_POST_MIN_CODING_SHARE", "0.85"))
+
+
 async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     """Attempt to auto-post an AP invoice to BC.
     
@@ -256,6 +262,19 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
             "success": True, "posted": False, "reason": "BC writes disabled", "status": "ReadyForPost",
             "auto_draft": auto_draft_result,
         }
+
+    # Coding gate: leave inconsistent-coding vendors for a person to code.
+    from services.vendor_invoice_profile_service import coding_consistency
+    coding_share, coding_code = coding_consistency(vendor_profile or {})
+    if coding_share < MIN_CODING_SHARE:
+        reason = (f"Vendor coding not consistent enough to post automatically "
+                  f"({coding_code or 'no history'} on {coding_share:.0%} of past lines, "
+                  f"need {MIN_CODING_SHARE:.0%}); code and post manually")
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {
+            "auto_post_reason": reason, "updated_utc": datetime.now(timezone.utc).isoformat(),
+        }})
+        logger.info("[AP Auto-Post] %s not auto-posted: %s", doc_id[:8], reason)
+        return {"success": True, "posted": False, "reason": reason, "status": "ReadyForPost"}
 
     # Actually post to BC
     # A1: bookkeeping for the posting-attempts audit trail. Every invocation
@@ -646,6 +665,12 @@ async def check_auto_draft_eligibility(doc: dict, db) -> Dict:
     # Gate 8: Minimum invoices analyzed
     if invoices_analyzed < settings["min_invoices_analyzed"]:
         return {"eligible": False, "reason": f"Only {invoices_analyzed} invoices analyzed (need {settings['min_invoices_analyzed']})", "vendor_no": vendor_no, "template_confidence": confidence, "invoices_analyzed": invoices_analyzed}
+
+    # Gate 9: Vendor coding consistent enough for a single default code
+    from services.vendor_invoice_profile_service import get_or_build_profile, coding_consistency
+    coding_share, coding_code = coding_consistency(await get_or_build_profile(db, vendor_no))
+    if coding_share < MIN_CODING_SHARE:
+        return {"eligible": False, "reason": f"Coding too mixed ({coding_code or 'no history'} on {coding_share:.0%} of past lines, need {MIN_CODING_SHARE:.0%})", "vendor_no": vendor_no, "template_confidence": confidence, "invoices_analyzed": invoices_analyzed}
 
     return {
         "eligible": True,

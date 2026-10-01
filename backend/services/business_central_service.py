@@ -334,6 +334,34 @@ def get_environment_status() -> Dict[str, Any]:
     }
 
 
+def _pick_company(companies: list, env: str, read_env: str) -> dict:
+    """Choose the configured company from a BC companies list.
+
+    BC environments hold several companies (sandboxes copied from Production
+    also carry test companies), so taking the first one can silently target
+    the wrong company. Match on the configured name for the environment;
+    only fall back to the sole company when no name is configured.
+    """
+    if env == read_env:
+        name = os.environ.get("BC_COMPANY_NAME", "")
+    else:
+        name = os.environ.get("BC_SANDBOX_COMPANY_NAME") or os.environ.get("BC_COMPANY_NAME", "")
+    if name:
+        for c in companies:
+            if name.strip().lower() in ((c.get("name") or "").strip().lower(), (c.get("displayName") or "").strip().lower()):
+                return c
+        raise ValueError(
+            f"BC company '{name}' not found in environment {env}; available: "
+            + ", ".join(c.get("name", "?") for c in companies)
+        )
+    if len(companies) == 1:
+        return companies[0]
+    raise ValueError(
+        f"Environment {env} has {len(companies)} BC companies and no company name is configured "
+        "(set BC_COMPANY_NAME / BC_SANDBOX_COMPANY_NAME)"
+    )
+
+
 async def get_bc_company_id(environment: str = None) -> str:
     """Get the BC company ID for a given environment. Uses configured value or auto-detects."""
     if BC_COMPANY_ID and (environment is None or environment == BC_READ_ENVIRONMENT):
@@ -353,7 +381,7 @@ async def get_bc_company_id(environment: str = None) -> str:
         if not companies:
             raise Exception("No BC companies found")
         
-        return companies[0]["id"]
+        return _pick_company(companies, env, BC_READ_ENVIRONMENT)["id"]
 
 
 # =============================================================================

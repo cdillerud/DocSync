@@ -655,6 +655,10 @@ class BCReferenceCacheService:
 
         results = {}
         total_records = 0
+        # New last_sync = when this run started, so records modified while the
+        # run was in progress are picked up next time.
+        sync_started_iso = datetime.now(timezone.utc).isoformat()
+        incremental_failed = []
 
         for table_name, config in ENTITY_CONFIGS.items():
             try:
@@ -678,6 +682,8 @@ class BCReferenceCacheService:
                 else:
                     results[config["entity_type"]] = f"error: partial fetch failed after {count} records"
                     total_records += count
+                    if entity_last_sync:
+                        incremental_failed.append(table_name)
                     logger.error(
                         "[BC Cache] %s sync failed partway through (got %d records before a page fetch error) -- "
                         "cache for this entity type may be incomplete", table_name, count
@@ -685,12 +691,23 @@ class BCReferenceCacheService:
             except Exception as e:
                 logger.error("[BC Cache] Error syncing %s: %r", table_name, e)
                 results[config["entity_type"]] = f"error: {str(e)}"
+                if last_sync and table_name not in ("purchaseOrders", "salesOrders", "salesQuotes"):
+                    incremental_failed.append(table_name)
 
-        # Update last sync time
-        now = datetime.now(timezone.utc).isoformat()
+        # Update last sync time. If an incremental entity failed, keep the old
+        # timestamp: advancing it would permanently skip the records that
+        # entity failed to fetch.
+        meta_update = {"records_synced": total_records, "results": results}
+        if incremental_failed:
+            logger.warning(
+                "[BC Cache] Not advancing last_sync: incremental sync failed for %s",
+                ", ".join(incremental_failed),
+            )
+        else:
+            meta_update["timestamp"] = sync_started_iso
         await self.meta_collection.update_one(
             {"_id": "last_sync"},
-            {"$set": {"timestamp": now, "records_synced": total_records, "results": results}},
+            {"$set": meta_update},
             upsert=True
         )
 
@@ -736,6 +753,32 @@ class BCReferenceCacheService:
             "synced_at": now
         }
 
+    # BC returns these for deadlocks, throttling and gateway hiccups; a short
+    # wait and retry almost always succeeds.
+    _TRANSIENT_STATUSES = (429, 500, 502, 503, 504)
+    _PAGE_ATTEMPTS = 3
+
+    async def _get_page_with_retry(self, client, url, token, params, table_name):
+        """GET one page, retrying transient BC errors. Returns None on network failure."""
+        import asyncio
+        for attempt in range(1, self._PAGE_ATTEMPTS + 1):
+            try:
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            except httpx.TransportError as e:
+                if attempt == self._PAGE_ATTEMPTS:
+                    logger.error("[BC Cache] %s page fetch network error: %r", table_name, e)
+                    return None
+                resp = None
+            if resp is not None and (resp.status_code not in self._TRANSIENT_STATUSES or attempt == self._PAGE_ATTEMPTS):
+                return resp
+            wait = 5 * attempt
+            logger.warning(
+                "[BC Cache] %s page fetch transient failure (%s), retry %d/%d in %ds",
+                table_name, resp.status_code if resp is not None else "network",
+                attempt, self._PAGE_ATTEMPTS - 1, wait,
+            )
+            await asyncio.sleep(wait)
+
     async def _sync_entity(
         self, token: str, company_id: str,
         table_name: str, config: Dict, last_sync: Optional[str]
@@ -762,14 +805,14 @@ class BCReferenceCacheService:
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             while next_url:
-                if next_url == url:
-                    resp = await client.get(next_url, headers={"Authorization": f"Bearer {token}"}, params=params)
-                else:
-                    resp = await client.get(next_url, headers={"Authorization": f"Bearer {token}"})
+                resp = await self._get_page_with_retry(
+                    client, next_url, token, params if next_url == url else None, table_name
+                )
 
-                if resp.status_code != 200:
+                if resp is None or resp.status_code != 200:
                     fetch_succeeded = False
-                    logger.error("[BC Cache] %s fetch error: %d - %s", table_name, resp.status_code, resp.text[:300])
+                    if resp is not None:
+                        logger.error("[BC Cache] %s fetch error: %d - %s", table_name, resp.status_code, resp.text[:300])
                     break
 
                 data = resp.json()

@@ -138,8 +138,7 @@ async def diagnose_document(doc_id: str):
     if not doc:
         return {"error": "Document not found"}
     
-    upload_dir = Path(os.environ.get("ROOT_DIR", "/app/backend")) / "uploads"
-    file_path = upload_dir / doc_id
+    file_path = UPLOAD_DIR / doc_id
     file_exists = file_path.exists()
     file_size = file_path.stat().st_size if file_exists else 0
     

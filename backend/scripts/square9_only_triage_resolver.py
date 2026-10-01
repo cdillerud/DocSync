@@ -370,8 +370,13 @@ def load_hub_corpus() -> List[HubDocLite]:
     from pymongo import MongoClient  # local import keeps unit tests dep-free
     client = MongoClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
+    # Safety-net copies (and their split children) are Square9 files copied
+    # into Hub after the fact; matching them made genuine intake misses look
+    # like "Hub has it, matcher missed" (Bucket D). Exclude them so a miss is
+    # labelled what it is: never received by email (Bucket C).
+    backfill_ids = db.hub_documents.distinct("id", {"source": "square9_backfill"})
     cursor = db.hub_documents.find(
-        {},
+        {"source": {"$ne": "square9_backfill"}, "batch_parent_id": {"$nin": backfill_ids}},
         {"_id": 0, "id": 1, "file_name": 1, "invoice_number_clean": 1,
          "vendor_canonical": 1, "mailbox_category": 1, "doc_type": 1,
          "suggested_job_type": 1, "sharepoint_folder_path": 1,

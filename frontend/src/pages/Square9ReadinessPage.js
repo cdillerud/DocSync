@@ -43,6 +43,7 @@ function StatBlock({ label, value, sublabel }) {
 export default function Square9ReadinessPage() {
   const [latest, setLatest] = useState(null);
   const [history, setHistory] = useState([]);
+  const [trend, setTrend] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -58,10 +59,12 @@ export default function Square9ReadinessPage() {
     setLoading(true);
     setError(null);
     try {
-      const [latestRes, historyRes] = await Promise.all([
+      const [latestRes, historyRes, trendRes] = await Promise.all([
         fetch(`${API}/api/square9/readiness/latest`),
         fetch(`${API}/api/square9/readiness/history`),
+        fetch(`${API}/api/square9/readiness/trend`).catch(() => null),
       ]);
+      setTrend(trendRes && trendRes.ok ? await trendRes.json() : null);
       if (!latestRes.ok) {
         if (latestRes.status === 404) {
           setError('No readiness snapshots recorded yet.');
@@ -316,6 +319,55 @@ export default function Square9ReadinessPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Cutover stability: daily decisions since the 2026-10-01 measurement fix */}
+      {trend && trend.days && trend.days.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Cutover stability</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              One check per day since {trend.measurement_fixed_date} (earlier snapshots used a truncated
+              comparison window and are not comparable). Safety-net backfills are excluded from the rate.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">GO days (last 7)</p>
+                <p className="text-2xl font-bold">{trend.last7.go_days} / {trend.last7.days_measured}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Consecutive GO days</p>
+                <p className="text-2xl font-bold">{trend.consecutive_go_days}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Lowest rate (last 7)</p>
+                <p className="text-2xl font-bold">{trend.last7.min_rate_pct != null ? `${trend.last7.min_rate_pct}%` : '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">Caught by safety net</p>
+                <p className="text-2xl font-bold">
+                  {trend.days.slice(-7).reduce((n, d) => n + d.square9_backfilled + d.drop_folder_ingested, 0)}
+                </p>
+                <p className="text-xs text-muted-foreground">docs that never arrived by email</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {trend.days.map(d => (
+                <div key={d.date}
+                     className={`rounded border px-2 py-1 text-xs ${d.decision === 'GO'
+                       ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'}`}>
+                  <div className="font-medium">{d.date.slice(5)} · {d.decision}</div>
+                  <div className="text-muted-foreground">
+                    {d.match_rate_pct}%{(d.square9_backfilled + d.drop_folder_ingested) > 0
+                      ? ` · ${d.square9_backfilled + d.drop_folder_ingested} backfilled` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Trend chart */}
       {history.length > 1 && (

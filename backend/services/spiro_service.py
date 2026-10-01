@@ -54,6 +54,15 @@ async def _refresh_token() -> str:
         if _token_cache["access_token"] and _token_cache["expires_at"] > datetime.now(timezone.utc).timestamp() + 60:
             return _token_cache["access_token"]
 
+        if not _token_cache.get("db_checked"):
+            # Spiro rotates refresh tokens, and the rotated one is persisted to
+            # spiro_config below. Prefer it over SPIRO_REFRESH_TOKEN, which stops
+            # working after the first rotation (so every restart broke Spiro).
+            _token_cache["db_checked"] = True
+            saved = await get_db().spiro_config.find_one({"key": "refresh_token"})
+            if saved and saved.get("value"):
+                _token_cache["refresh_token"] = saved["value"]
+
         refresh = _token_cache.get("refresh_token") or SPIRO_REFRESH_TOKEN
         if not refresh:
             raise ValueError("No Spiro refresh token configured")

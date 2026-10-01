@@ -568,6 +568,13 @@ async def build_vendor_profile(
         cached = await db.vendor_invoice_profiles.find_one(
             {"vendor_no": vendor_no}, {"_id": 0}
         )
+        # Knowledge-seed stubs (source=bc_cache_seed) carry an invoice count but
+        # no line analysis; serving them as fresh left 541 vendors coded to the
+        # fallback GL forever. Rebuild them on first use instead.
+        if cached and cached.get("source") == "bc_cache_seed" and not (
+            (cached.get("line_patterns") or {}).get("line_type_distribution")
+        ):
+            cached = None
         if cached:
             updated = cached.get("last_updated", "")
             if updated:
@@ -704,7 +711,9 @@ async def build_vendor_profile(
     # Persist to MongoDB
     await db.vendor_invoice_profiles.update_one(
         {"vendor_no": vendor_no},
-        {"$set": profile},
+        # source marks this as a real build, so a seed stub is rebuilt once
+        # (see the cache check above), not on every call.
+        {"$set": {**profile, "source": "bc_history"}},
         upsert=True,
     )
     logger.info(

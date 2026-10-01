@@ -103,6 +103,47 @@ from routers.admin_eod import router as admin_eod_router
 
 app = FastAPI(title="GPI Document Hub API")
 
+# -- API authentication gate ---------------------------------------------------
+# Every /api route requires a valid login (Bearer header or access_token cookie)
+# except the paths in _AUTH_EXEMPT_PATHS. API_AUTH_MODE selects the behavior:
+#   enforce (default) -- reject unauthenticated calls with 401
+#   log               -- allow them but log each one (for finding callers)
+#   off               -- no check
+# Registered before CORSMiddleware so CORS stays the outermost layer.
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
+
+API_AUTH_MODE = os.environ.get("API_AUTH_MODE", "enforce").strip().lower()
+_AUTH_EXEMPT_PATHS = {
+    "/api/health",
+    "/api/auth/login",
+    "/api/graph/webhook",     # Microsoft Graph change notifications
+    "/api/spiro/callback",    # Spiro OAuth redirect
+}
+
+
+@app.middleware("http")
+async def require_api_auth(request: Request, call_next):
+    path = request.url.path.rstrip("/")
+    if (
+        API_AUTH_MODE == "off"
+        or request.method == "OPTIONS"
+        or not (path == "/api" or path.startswith("/api/"))
+        or path in _AUTH_EXEMPT_PATHS
+    ):
+        return await call_next(request)
+
+    from services.auth_deps import get_current_user
+    try:
+        request.state.user = await get_current_user(request)
+    except HTTPException as e:
+        if API_AUTH_MODE != "log":
+            return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+        logger.warning("[Auth] unauthenticated %s %s allowed (API_AUTH_MODE=log)", request.method, path)
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

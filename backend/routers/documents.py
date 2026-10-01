@@ -561,7 +561,6 @@ async def search_documents(
         docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit).to_list(limit)
 
     # Compute match_fields for each result
-    import re
     pattern = re.compile(re.escape(search_term), re.IGNORECASE)
 
     def _get_nested(doc, path):
@@ -2134,7 +2133,6 @@ async def sweep_reclassify_bols(dry_run: bool = False, limit: int = 1000):
     
     Checks filenames for BOL patterns. For PDFs on disk, also checks page 1 text.
     """
-    import re
     from services.document_intel_helpers import _BOL_FILENAME_PATTERNS
     from services.folder_routing_service import determine_folder_path
 

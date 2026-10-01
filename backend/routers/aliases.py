@@ -180,7 +180,6 @@ async def search_bc_vendors(q: str = Query(..., min_length=2)):
     Search BC vendors by name or vendor number.
     Used by the UI for manual vendor resolution when auto-suggestions are wrong.
     """
-    import re
     from difflib import SequenceMatcher
     db = get_db()
 
@@ -318,7 +317,6 @@ async def get_unmatched_vendor_gaps():
     Normalizes vendor names to merge duplicates (e.g., "SC Warehouses, LLC" = "SC Warehouses, LLC.").
     Uses improved fuzzy matching with word overlap and abbreviation handling.
     """
-    import re
     from difflib import SequenceMatcher
 
     db = get_db()

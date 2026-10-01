@@ -252,6 +252,9 @@ async def startup():
 
     from services.missed_document_intake_service import start_missed_intake_tasks
     start_missed_intake_tasks()
+    from routers.square9 import daily_readiness_scheduler
+    import asyncio as _asyncio
+    _asyncio.create_task(daily_readiness_scheduler())
 
     register_doc_routes(app)
     register_wf_routes(app)

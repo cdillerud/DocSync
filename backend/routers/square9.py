@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, HTTPException, Query, Body
 from typing import Dict
 from deps import get_db
@@ -444,3 +444,95 @@ async def get_readiness_run_status():
 
 
 
+
+
+
+# ---------------------------------------------------------------------------
+# Daily scheduled readiness run + cutover trend
+# ---------------------------------------------------------------------------
+# A single GO snapshot is not a cutover decision; the rate has to hold day
+# after day. Until 2026-10-01 runs were manual and irregular, and every
+# snapshot before that date was computed with the parity --limit truncation
+# bug (Hub docs older than the newest 500 were dropped), so earlier values
+# understate the rate and are not comparable. The trend starts there.
+READINESS_DAILY_HOUR_UTC = int(os.environ.get("SQUARE9_READINESS_DAILY_HOUR_UTC", "11"))  # 6 AM Central
+MEASUREMENT_FIXED_DATE = "2026-10-01"
+_SCHEDULE_META_ID = "daily_schedule"
+
+
+async def daily_readiness_scheduler() -> None:
+    """Run the readiness check once per day after READINESS_DAILY_HOUR_UTC.
+
+    Checks hourly instead of sleeping 24h so frequent backend restarts can
+    neither skip a day nor run it twice (the last run date is stored).
+    """
+    await asyncio.sleep(300)
+    while True:
+        try:
+            db = get_db()
+            now = datetime.now(timezone.utc)
+            today = now.date().isoformat()
+            meta = await db.square9_readiness_meta.find_one({"_id": _SCHEDULE_META_ID}) or {}
+            current = await _get_run_status_doc(db)
+            busy = current.get("status") == "running" and not _run_is_stale(current)
+            if now.hour >= READINESS_DAILY_HOUR_UTC and meta.get("last_run_date") != today and not busy:
+                await db.square9_readiness_meta.update_one(
+                    {"_id": _SCHEDULE_META_ID}, {"$set": {"last_run_date": today}}, upsert=True)
+                await _set_run_status(db, status="running", started_at=now.isoformat(),
+                                      finished_at=None, error=None)
+                logger.info("[readiness-check] daily scheduled run starting")
+                await _execute_readiness_check(db, triggered_by="daily_schedule")
+        except Exception as e:
+            logger.warning("[readiness-check] daily scheduler error: %r", e)
+        await asyncio.sleep(3600)
+
+
+@router.get("/readiness/trend")
+async def get_readiness_trend(days: int = Query(14, ge=1, le=90)):
+    """Daily cutover trend since the measurement fix: latest decision per day,
+    GO count over the last 7 days, and what the safety net had to backfill."""
+    db = get_db()
+    since = max(MEASUREMENT_FIXED_DATE,
+                (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat())
+    rows = await db.square9_readiness_history.find(
+        {"recorded_utc": {"$gte": since}},
+        {"_id": 0, "recorded_utc": 1, "decision": 1, "match_rate_pct": 1,
+         "square_count": 1, "matched_count": 1},
+    ).sort("recorded_utc", 1).to_list(5000)
+    daily = {}
+    for r in rows:
+        daily[r["recorded_utc"][:10]] = r  # latest snapshot of each day wins
+
+    backfills = {}
+    async for e in db.missed_document_intake_log.find(
+            {"status": "ingested", "ingested_at": {"$gte": since}}, {"_id": 0, "ingested_at": 1, "source": 1}):
+        key = (e["ingested_at"][:10], e.get("source", "?"))
+        backfills[key] = backfills.get(key, 0) + 1
+
+    out = []
+    for day, r in daily.items():
+        out.append({
+            "date": day, "decision": r.get("decision"),
+            "match_rate_pct": round(r.get("match_rate_pct") or 0, 1),
+            "square_count": r.get("square_count"), "matched_count": r.get("matched_count"),
+            "square9_backfilled": backfills.get((day, "square9_backfill"), 0),
+            "drop_folder_ingested": backfills.get((day, "drop_folder"), 0),
+        })
+    last7 = out[-7:]
+    rates = [d["match_rate_pct"] for d in last7]
+    streak = 0
+    for d in reversed(out):
+        if d["decision"] != "GO":
+            break
+        streak += 1
+    return {
+        "measurement_fixed_date": MEASUREMENT_FIXED_DATE,
+        "days": out,
+        "last7": {
+            "days_measured": len(last7),
+            "go_days": sum(1 for d in last7 if d["decision"] == "GO"),
+            "min_rate_pct": min(rates) if rates else None,
+            "avg_rate_pct": round(sum(rates) / len(rates), 1) if rates else None,
+        },
+        "consecutive_go_days": streak,
+    }

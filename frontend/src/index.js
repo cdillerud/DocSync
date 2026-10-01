@@ -5,6 +5,9 @@ import "@/index.css";
 import App from "@/App";
 import TodayIntakeDrilldown from "@/components/TodayIntakeDrilldown";
 import { getMsalInstance } from "@/lib/msalConfig";
+import { installFetchAuthGuard } from "@/lib/fetchAuthGuard";
+
+installFetchAuthGuard();
 
 // Lazy-init: only construct MsalProvider when the environment can safely
 // host MSAL (HTTPS or loopback + flag on). On insecure HTTP origins or with

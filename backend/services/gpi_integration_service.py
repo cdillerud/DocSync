@@ -19,7 +19,7 @@ import os
 import uuid
 import logging
 import httpx
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any, List
 
 logger = logging.getLogger(__name__)
@@ -676,6 +676,70 @@ async def add_purchase_invoice_lines(
     return {"added": added, "total": len(lines), "errors": errors}
 
 
+# -- Purchase invoice duplicate protection -------------------------------------
+# Neither BC nor the idempotency key prevents a second purchase invoice for the
+# same document: two callers can race (auto-post vs. a user click), and a header
+# created in BC whose response was lost leaves nothing on the document, so a
+# retry would create it again. Guard both before every create.
+_PI_CLAIM_MINUTES = 10
+
+
+async def _claim_pi_creation(source_doc_id: str) -> bool:
+    """Atomically claim a document for PI creation. Returns True if claimed."""
+    if not source_doc_id:
+        return False
+    from deps import get_db
+    now = datetime.now(timezone.utc)
+    stale = (now - timedelta(minutes=_PI_CLAIM_MINUTES)).isoformat()
+    res = await get_db().hub_documents.update_one(
+        {
+            "id": source_doc_id,
+            "$or": [
+                {"pi_creation_claimed_at": {"$exists": False}},
+                {"pi_creation_claimed_at": None},
+                {"pi_creation_claimed_at": {"$lt": stale}},
+            ],
+        },
+        {"$set": {"pi_creation_claimed_at": now.isoformat()}},
+    )
+    if res.matched_count == 0:
+        raise ValueError(
+            f"BLOCKED: purchase invoice creation for document {source_doc_id} already started "
+            f"in the last {_PI_CLAIM_MINUTES} minutes; check BC before retrying."
+        )
+    return True
+
+
+async def _release_pi_claim(source_doc_id: str) -> None:
+    from deps import get_db
+    await get_db().hub_documents.update_one(
+        {"id": source_doc_id}, {"$unset": {"pi_creation_claimed_at": ""}}
+    )
+
+
+async def _find_existing_purchase_invoice(client, url: str, headers: Dict[str, str],
+                                          vendor_no: str, vendor_invoice_no: str) -> Optional[Dict]:
+    """Look for a draft or posted PI with this vendor + vendor invoice number.
+
+    Fails closed: if the lookup itself fails we refuse to create rather than risk
+    a duplicate.
+    """
+    if not vendor_invoice_no:
+        return None
+    q = lambda v: v.replace("'", "''")
+    resp = await client.get(url, headers=headers, params={
+        "$filter": f"vendorNumber eq '{q(vendor_no)}' and vendorInvoiceNumber eq '{q(vendor_invoice_no)}'",
+        "$select": "id,number,status",
+        "$top": "1",
+    })
+    if resp.status_code != 200:
+        raise ValueError(
+            f"BLOCKED: BC duplicate check failed ({resp.status_code}); refusing to create the purchase invoice."
+        )
+    found = resp.json().get("value", [])
+    return found[0] if found else None
+
+
 async def create_purchase_invoice(
     vendor_no: str,
     vendor_invoice_no: str = "",
@@ -708,16 +772,31 @@ async def create_purchase_invoice(
         "Content-Type": "application/json",
         "Accept": "application/json",
     }
-    async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        resp = await client.post(url, json=payload, headers=headers)
-        if resp.status_code >= 400:
-            try:
-                err_body = resp.json()
-                err_msg = err_body.get("error", {}).get("message", resp.text[:500])
-            except Exception:
-                err_msg = resp.text[:500]
-            raise ValueError(f"BC API {resp.status_code}: {err_msg}")
-        result = resp.json()
+    claimed = await _claim_pi_creation(source_doc_id)
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            existing = await _find_existing_purchase_invoice(client, url, headers, vendor_no, vendor_invoice_no)
+            if existing:
+                raise ValueError(
+                    f"BLOCKED: vendor {vendor_no} invoice {vendor_invoice_no} already exists in BC as "
+                    f"purchase invoice {existing.get('number')} ({existing.get('status')}); not creating a duplicate."
+                )
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code >= 400:
+                try:
+                    err_body = resp.json()
+                    err_msg = err_body.get("error", {}).get("message", resp.text[:500])
+                except Exception:
+                    err_msg = resp.text[:500]
+                raise ValueError(f"BC API {resp.status_code}: {err_msg}")
+            result = resp.json()
+    except Exception:
+        # Nothing was created (or BC rejected it): let a retry proceed. On
+        # success the claim is kept for _PI_CLAIM_MINUTES so a concurrent
+        # caller cannot slip in before the result is written to the document.
+        if claimed:
+            await _release_pi_claim(source_doc_id)
+        raise
 
     return {
         "success": True,

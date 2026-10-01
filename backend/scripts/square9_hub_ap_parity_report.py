@@ -481,10 +481,15 @@ def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
     # Safety-net backfills are copies of Square9's own files; counting them would
     # make the cutover match rate measure nothing. They are reported separately.
+    # Split children of a backfilled batch file carry source=auto_split, so they
+    # are excluded through batch_parent_id.
+    backfill_ids = db.hub_documents.distinct("id", {"source": "square9_backfill"})
     query = {"mailbox_category": "AP", "created_utc": {"$gte": cutoff},
-             "source": {"$ne": "square9_backfill"}}
+             "source": {"$ne": "square9_backfill"},
+             "batch_parent_id": {"$nin": backfill_ids}}
     backfilled = db.hub_documents.count_documents(
-        {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}, "source": "square9_backfill"})
+        {"mailbox_category": "AP", "created_utc": {"$gte": cutoff},
+         "$or": [{"source": "square9_backfill"}, {"batch_parent_id": {"$in": backfill_ids}}]})
     if backfilled:
         print(f"Safety net: {backfilled} Square9-backfilled doc(s) in window, excluded from parity.",
               file=sys.stderr)

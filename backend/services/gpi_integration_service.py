@@ -97,9 +97,10 @@ async def _resolve_company_id(environment: str = None) -> str:
     Args:
         environment: which BC environment to auto-detect against (falls through to
             BC_WRITE_ENVIRONMENT if not given, preserving prior default behavior).
-            Ignored if BC_COMPANY_ID is set, since that's environment-agnostic override.
+            BC_COMPANY_ID is only honored when the target is BC_READ_ENVIRONMENT; company
+            GUIDs differ per environment, so the write/sandbox env is always auto-detected.
     """
-    if BC_COMPANY_ID:
+    if BC_COMPANY_ID and (environment or BC_WRITE_ENVIRONMENT) == BC_READ_ENVIRONMENT:
         return BC_COMPANY_ID
     env = environment or BC_WRITE_ENVIRONMENT
     if env in _company_id_cache:
@@ -115,7 +116,7 @@ def _build_url(entity_set: str, environment: str = None, company_id: str = None)
     Always includes companies({companyId}) when a company_id is available.
     """
     env = environment or BC_WRITE_ENVIRONMENT
-    cid = company_id or BC_COMPANY_ID
+    cid = company_id or (BC_COMPANY_ID if env == BC_READ_ENVIRONMENT else '')
     if cid:
         return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/companies({cid})/{entity_set}"
     return f"{GPI_API_BASE}/{BC_TENANT_ID}/{env}/api/{GPI_API_GROUP}/{entity_set}"

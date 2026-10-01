@@ -336,7 +336,7 @@ def get_environment_status() -> Dict[str, Any]:
 
 async def get_bc_company_id(environment: str = None) -> str:
     """Get the BC company ID for a given environment. Uses configured value or auto-detects."""
-    if BC_COMPANY_ID:
+    if BC_COMPANY_ID and (environment is None or environment == BC_READ_ENVIRONMENT):
         return BC_COMPANY_ID
     
     env = environment or BC_READ_ENVIRONMENT

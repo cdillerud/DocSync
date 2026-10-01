@@ -247,15 +247,10 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         # Auto-confirm: Record successful automation as positive feedback
         await _record_success_feedback(db, doc_id, "ReadyForPost", source)
 
-        # Phase 2: Try auto-drafting if confidence gate passes
-        auto_draft_result = None
-        try:
-            auto_draft_result = await attempt_auto_draft_pi(doc_id, db, source="pipeline_auto_draft")
-            if auto_draft_result.get("drafted"):
-                logger.info("[AP Auto-Post] Auto-drafted PI %s for %s",
-                            auto_draft_result.get("bc_record_no", "?"), doc_id[:8])
-        except Exception as ad_err:
-            logger.debug("[AP Auto-Post] Auto-draft check failed (non-blocking): %s", ad_err)
+        # Phase 2 auto-drafting creates a draft PI in BC, which is a BC write, so
+        # it is skipped while BC_WRITE_ENABLED is false (we are in this branch
+        # only when it is). It resumes automatically once writes are enabled.
+        auto_draft_result = {"drafted": False, "reason": "BC writes disabled"}
 
         return {
             "success": True, "posted": False, "reason": "BC writes disabled", "status": "ReadyForPost",
@@ -677,6 +672,10 @@ async def attempt_auto_draft_pi(doc_id: str, db, source: str = "confidence_gate"
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
     if not doc:
         return {"success": False, "drafted": False, "reason": "Document not found"}
+
+    if os.environ.get("BC_WRITE_ENABLED", "false").lower() != "true":
+        # A draft PI is a BC write; nothing to do while the kill switch is off.
+        return {"success": True, "drafted": False, "reason": "BC writes disabled"}
 
     # Check eligibility
     eligibility = await check_auto_draft_eligibility(doc, db)

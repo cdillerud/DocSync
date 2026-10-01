@@ -80,7 +80,13 @@ async def _get_token() -> str:
 
 
 def _check_write_protection(operation: str):
-    """Hard guard: refuse writes to Production."""
+    """Hard guard: refuse all writes unless BC_WRITE_ENABLED, and never write to Production."""
+    # BC_WRITE_ENABLED is the master kill switch and blocks every BC write,
+    # sandbox included (drafts, sales orders, links...). Read at call time.
+    if os.environ.get("BC_WRITE_ENABLED", "false").lower() != "true":
+        raise ValueError(
+            f"BLOCKED: Write operation '{operation}' refused -- BC_WRITE_ENABLED is false."
+        )
     if not BC_BLOCK_PRODUCTION_WRITES:
         return
     target = BC_WRITE_ENVIRONMENT.lower()

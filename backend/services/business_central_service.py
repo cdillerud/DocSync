@@ -78,6 +78,13 @@ _token_cache = {"access_token": None, "expires_at": 0}
 _prod_token_cache = {"access_token": None, "expires_at": 0}
 
 
+class BCWritesDisabledError(Exception):
+    """Raised when any BC write is attempted while BC_WRITE_ENABLED is false."""
+    def __init__(self, operation: str):
+        self.operation = operation
+        super().__init__(f"BLOCKED: Write operation '{operation}' refused -- BC_WRITE_ENABLED is false.")
+
+
 class ProductionWriteBlockedError(Exception):
     """Raised when a write operation targets Production and BC_BLOCK_PRODUCTION_WRITES is true."""
     def __init__(self, operation: str):
@@ -90,7 +97,12 @@ class ProductionWriteBlockedError(Exception):
 
 
 def _check_write_protection(operation: str):
-    """Hard guard: refuse writes to Production unless explicitly overridden."""
+    """Hard guard: refuse all writes unless BC_WRITE_ENABLED, and refuse
+    Production writes unless explicitly overridden."""
+    # BC_WRITE_ENABLED is the master kill switch and blocks every BC write,
+    # sandbox included (drafts, sales orders, links...). Read at call time.
+    if os.environ.get("BC_WRITE_ENABLED", "false").lower() != "true":
+        raise BCWritesDisabledError(operation)
     if not BC_BLOCK_PRODUCTION_WRITES:
         return
     target = BC_WRITE_ENVIRONMENT.lower()

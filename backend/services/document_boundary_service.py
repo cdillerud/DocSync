@@ -258,6 +258,16 @@ def detect_boundaries(fingerprints: List[Dict]) -> List[int]:
             boundary_score += 2
             reasons.append("doc_type_changed")
 
+        # Same invoice number on consecutive pages (same vendor) means the same
+        # document, whatever the weaker signals say: page 2 of a freight bill
+        # lists different PO/BOL lines and has no "INVOICE" header, which used
+        # to split one invoice into one document per page (333 invoices since
+        # 2026-06, each page carrying the full invoice amount).
+        prev_inv = prev["ref_numbers"].get("invoice_no", "")
+        curr_inv = curr["ref_numbers"].get("invoice_no", "")
+        if prev_inv and prev_inv == curr_inv and "vendor_changed" not in reasons:
+            boundary_score = 0
+
         # Threshold: score >= 2 means this is likely a new document
         if boundary_score >= 2:
             boundaries.append(curr["page_num"])

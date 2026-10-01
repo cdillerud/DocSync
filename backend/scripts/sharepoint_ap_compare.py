@@ -171,6 +171,9 @@ _INVOICE_PO_PATTERNS = [
     # files produced no invoice token at all and every such document counted
     # as missing from Hub although Hub had received and processed it.
     re.compile(r"\b([a-z]{1,4}-?\d{4,})(?=[a-z]{1,4}\b)", re.I),
+    # Bare number with a glued short letter suffix, e.g. B&B's "119925OBG.pdf"
+    # (Square9: "119925_B&B_1012026_.pdf"). Found 2026-10-01.
+    re.compile(r"\b(?!20[2-3]\d[01]\d[0-3]\d)(\d{5,})(?=[a-z]{1,4}\b)", re.I),  # not YYYYMMDD dates
     # Reverse shape: digits-then-short-letters, e.g. H3Plastics' "8028-UT".
     # Found live 2026-07-16: the hyphen-stripping normalization below (which
     # runs before any pattern sees the string) turns "8028-UT" into

@@ -821,7 +821,10 @@ def coding_consistency(profile: Dict) -> Tuple[float, str]:
     if not ranked:
         return 0.0, ""
     dist = lp.get("line_type_distribution") or {}
-    postable = sum(c for t, c in dist.items() if t in ("Account", "Item")) or 1
+    # Charge (item charge) lines count against consistency: staff use them to
+    # assign PO freight to receipts (landed cost), which Hub cannot create via
+    # the standard API. 31% of FREIGHT lines since 2026-08-15 were item charges.
+    postable = sum(c for t, c in dist.items() if t in ("Account", "Item", "Charge")) or 1
     top = ranked[0]
     return round(top.get("count", 0) / postable, 3), str(top.get("account") or top.get("item_no") or "")
 

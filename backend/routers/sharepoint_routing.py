@@ -434,8 +434,12 @@ async def move_document_to_sharepoint(doc_id: str):
             # If the document has a SharePoint item ID, move it
             sp_item_id = doc.get("sharepoint_item_id") or doc.get("graph_item_id")
             if sp_item_id:
+                # conflictBehavior=rename: if the target folder already holds a file
+                # with this name (e.g. the same invoice sent twice), keep both
+                # instead of failing the move with nameAlreadyExists.
                 move_resp = await client.patch(
                     f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/items/{sp_item_id}",
+                    params={"@microsoft.graph.conflictBehavior": "rename"},
                     headers={
                         "Authorization": f"Bearer {token}",
                         "Content-Type": "application/json",
@@ -450,14 +454,19 @@ async def move_document_to_sharepoint(doc_id: str):
                 if move_resp.status_code not in (200, 201):
                     raise HTTPException(500, f"SharePoint move failed: {move_resp.text}")
 
-                await db.hub_documents.update_one(
-                    {"id": doc_id},
-                    {"$set": {
-                        "sharepoint_folder": folder_path,
-                        "sharepoint_status": "moved",
-                        "sharepoint_moved_at": datetime.now(timezone.utc).isoformat(),
-                    }}
-                )
+                moved = move_resp.json()
+                update = {
+                    "sharepoint_folder": folder_path,
+                    "sharepoint_status": "moved",
+                    "sharepoint_moved_at": datetime.now(timezone.utc).isoformat(),
+                }
+                # The item's URL (and its name, after a rename) changes on move;
+                # keep the stored link pointing at the file's new location.
+                if moved.get("webUrl"):
+                    update["sharepoint_web_url"] = moved["webUrl"]
+                if moved.get("name"):
+                    update["sharepoint_file_name"] = moved["name"]
+                await db.hub_documents.update_one({"id": doc_id}, {"$set": update})
                 return {
                     "message": f"Document moved to: {folder_path}",
                     "document_id": doc_id,

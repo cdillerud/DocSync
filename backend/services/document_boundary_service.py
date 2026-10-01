@@ -265,7 +265,9 @@ def detect_boundaries(fingerprints: List[Dict]) -> List[int]:
         # 2026-06, each page carrying the full invoice amount).
         prev_inv = prev["ref_numbers"].get("invoice_no", "")
         curr_inv = curr["ref_numbers"].get("invoice_no", "")
-        if prev_inv and prev_inv == curr_inv and "vendor_changed" not in reasons:
+        # Vendor hints come from noisy top-of-page text ("MBL 118142", "SQ# ..."),
+        # so they do not veto a matching invoice number.
+        if prev_inv and prev_inv == curr_inv:
             boundary_score = 0
 
         # Threshold: score >= 2 means this is likely a new document

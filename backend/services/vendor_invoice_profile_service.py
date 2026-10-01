@@ -556,6 +556,75 @@ def _detect_description_pattern(descriptions: List[str]) -> str:
     return max(counts, key=counts.get)
 
 
+
+_ITEM_USABLE: Dict[str, Optional[bool]] = {}
+
+
+async def _item_usable(client, base_url: str, headers: Dict[str, str], item_no: str) -> Optional[bool]:
+    """True if the item exists and is not blocked in BC, False if not, None if unknown."""
+    if item_no in _ITEM_USABLE:
+        return _ITEM_USABLE[item_no]
+    try:
+        resp = await client.get(f"{base_url}/items", headers=headers, params={
+            "$filter": "number eq '" + item_no.replace("'", "''") + "'", "$select": "number,blocked"})
+        if resp.status_code != 200:
+            return None
+        found = resp.json().get("value", [])
+        result = bool(found) and not found[0].get("blocked")
+    except Exception:
+        return None
+    _ITEM_USABLE[item_no] = result
+    return result
+
+
+async def _remap_unusable_items(line_patterns: Dict) -> Dict:
+    """Fold blocked or retired items in a vendor's history into usable ones.
+
+    Gamer consolidated warehouse/dropship item variants in mid-2025:
+    FREIGHT-WH and CUSTOMS-WH are blocked (FREIGHT-WH since 2025-07-15) and
+    the -DS variants no longer exist, while FREIGHT / CUSTOMS are active. A
+    profile built from older history therefore picked an item BC rejects
+    (STRTRAN: FREIGHT-WH on 87% of past lines). Blocked -WH/-DS items count
+    toward their active base item; other unusable items are dropped. Items
+    whose status cannot be checked are kept as they are.
+    """
+    items = line_patterns.get("common_items") or []
+    if not items:
+        return line_patterns
+    import httpx
+    from services.gpi_integration_service import (
+        _get_token, _resolve_company_id, GPI_API_BASE, BC_TENANT_ID, BC_READ_ENVIRONMENT,
+    )
+    try:
+        token = await _get_token()
+        company_id = await _resolve_company_id(BC_READ_ENVIRONMENT)
+    except Exception as e:
+        logger.warning("[VendorProfile] item check skipped: %r", e)
+        return line_patterns
+    base_url = f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_READ_ENVIRONMENT}/api/v2.0/companies({company_id})"
+    headers = {"Authorization": f"Bearer {token}"}
+    merged: Counter = Counter()
+    remaps: Dict[str, Optional[str]] = {}
+    async with httpx.AsyncClient(timeout=30) as client:
+        for it in items:
+            item_no = it.get("item_no", "")
+            target: Optional[str] = item_no
+            if await _item_usable(client, base_url, headers, item_no) is False:
+                base = re.sub(r"-(WH|DS)$", "", item_no, flags=re.I)
+                target = base if base != item_no and await _item_usable(client, base_url, headers, base) else None
+                remaps[item_no] = target
+            if target:
+                merged[target] += it.get("count", 0)
+    if not remaps:
+        return line_patterns
+    total_lines = sum((line_patterns.get("line_type_distribution") or {}).values()) or 1
+    out = dict(line_patterns)
+    out["common_items"] = [{"item_no": k, "count": c, "frequency": round(c / total_lines, 2)}
+                           for k, c in merged.most_common(10)]
+    out["item_remaps"] = remaps
+    return out
+
+
 async def build_vendor_profile(
     db, vendor_no: str, force_refresh: bool = False
 ) -> Dict[str, Any]:
@@ -637,6 +706,8 @@ async def build_vendor_profile(
 
     # Analyze BC invoice patterns
     line_patterns = _analyze_line_patterns(bc_invoices) if bc_invoices else {}
+    if line_patterns:
+        line_patterns = await _remap_unusable_items(line_patterns)
 
     # Amount statistics — from BC invoices first, fallback to cache
     amounts = []

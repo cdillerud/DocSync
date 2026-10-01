@@ -17,6 +17,7 @@ Endpoints:
   GET  /gpi-integration/logs            - Integration audit logs
 """
 
+import re
 import hashlib
 import logging
 import os
@@ -1825,7 +1826,7 @@ async def _resolve_vendor_no(doc: dict) -> dict:
     if not vendor_no and vendor_name:
         db = get_db()
         cached = await db.bc_reference_cache.find_one(
-            {"displayName": {"$regex": vendor_name[:30], "$options": "i"}, "entity_type": {"$in": ["vendor", "Vendor"]}},
+            {"displayName": {"$regex": re.escape(vendor_name[:30]), "$options": "i"}, "entity_type": {"$in": ["vendor", "Vendor"]}},
             {"_id": 0, "number": 1, "displayName": 1, "entity_type": 1}
         )
         if cached:

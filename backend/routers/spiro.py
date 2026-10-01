@@ -8,6 +8,7 @@ Admin and debug endpoints for Spiro integration:
 - Document SpiroContext debugging
 """
 
+import re
 import os
 import logging
 from datetime import datetime, timezone
@@ -243,7 +244,7 @@ async def list_spiro_companies(
     
     query = {}
     if search:
-        query["name"] = {"$regex": search, "$options": "i"}
+        query["name"] = {"$regex": re.escape(search), "$options": "i"}
     
     cursor = db.spiro_companies.find(query, {"_id": 0}).limit(limit)
     companies = await cursor.to_list(length=limit)
@@ -273,8 +274,8 @@ async def list_spiro_contacts(
     query = {}
     if search:
         query["$or"] = [
-            {"full_name": {"$regex": search, "$options": "i"}},
-            {"email": {"$regex": search, "$options": "i"}}
+            {"full_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"email": {"$regex": re.escape(search), "$options": "i"}}
         ]
     if company_id:
         query["company_id"] = company_id

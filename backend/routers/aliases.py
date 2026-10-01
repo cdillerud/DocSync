@@ -3,6 +3,7 @@
 Extracted from server.py. Manages vendor alias CRUD operations.
 """
 
+import re
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -719,10 +720,10 @@ async def batch_resolve_vendor_aliases(body: dict):
         doc_query = {
             "status": {"$nin": ["Completed", "Posted", "Deleted", "Archived"]},
             "$or": [
-                {"extracted_fields.vendor": {"$regex": f"^{alias_string}$", "$options": "i"}},
-                {"extracted_fields.vendor_name": {"$regex": f"^{alias_string}$", "$options": "i"}},
-                {"normalized_fields.vendor": {"$regex": f"^{alias_string}$", "$options": "i"}},
-                {"vendor_canonical": {"$regex": f"^{alias_string}$", "$options": "i"}},
+                {"extracted_fields.vendor": {"$regex": f"^{re.escape(alias_string)}$", "$options": "i"}},
+                {"extracted_fields.vendor_name": {"$regex": f"^{re.escape(alias_string)}$", "$options": "i"}},
+                {"normalized_fields.vendor": {"$regex": f"^{re.escape(alias_string)}$", "$options": "i"}},
+                {"vendor_canonical": {"$regex": f"^{re.escape(alias_string)}$", "$options": "i"}},
             ],
         }
         gap_docs = await db.hub_documents.find(

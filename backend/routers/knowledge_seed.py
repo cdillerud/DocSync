@@ -5,6 +5,7 @@ Endpoints to trigger bulk knowledge seeding from BC Cache, Spiro, and
 historical documents.  Safe to call multiple times (idempotent upserts).
 """
 
+import re
 import logging
 from fastapi import APIRouter
 from deps import get_db
@@ -245,8 +246,8 @@ async def show_learning_proof(vendor_id: str, doc_type: str = "AP_Invoice"):
     # 5. Classification corrections for this vendor
     corrections = await db.classification_corrections.find(
         {"$or": [
-            {"vendor_canonical": {"$regex": f"^{vendor_id}$", "$options": "i"}},
-            {"vendor_no": {"$regex": f"^{vendor_id}$", "$options": "i"}},
+            {"vendor_canonical": {"$regex": f"^{re.escape(vendor_id)}$", "$options": "i"}},
+            {"vendor_no": {"$regex": f"^{re.escape(vendor_id)}$", "$options": "i"}},
         ]},
         {"_id": 0, "original_type": 1, "corrected_type": 1, "file_name": 1, "text_snippet": 1}
     ).sort("corrected_at", -1).limit(10).to_list(10)

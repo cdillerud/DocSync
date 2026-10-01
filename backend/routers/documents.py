@@ -215,13 +215,13 @@ async def list_documents(
 
     # Status filter: check both status and workflow_status fields (case-insensitive)
     if status:
-        status_regex = {"$regex": f"^{status}$", "$options": "i"}
+        status_regex = {"$regex": f"^{re.escape(status)}$", "$options": "i"}
         fq["$or"] = [{"status": status_regex}, {"workflow_status": status_regex}]
 
     # Type filter: search across doc_type, document_type, and suggested_job_type
     # Single type (from dropdown)
     if document_type:
-        type_regex = {"$regex": f"^{document_type}$", "$options": "i"}
+        type_regex = {"$regex": f"^{re.escape(document_type)}$", "$options": "i"}
         type_conditions = [
             {"doc_type": type_regex},
             {"document_type": type_regex},
@@ -237,7 +237,7 @@ async def list_documents(
         if type_list:
             type_conditions = []
             for t in type_list:
-                tr = {"$regex": f"^{t}$", "$options": "i"}
+                tr = {"$regex": f"^{re.escape(t)}$", "$options": "i"}
                 type_conditions.extend([{"doc_type": tr}, {"document_type": tr}, {"suggested_job_type": tr}])
             if "$or" in fq:
                 fq = {"$and": [{"$or": fq.pop("$or")}, {"$or": type_conditions}]}
@@ -553,7 +553,7 @@ async def search_documents(
 
     # Fallback to regex if $text failed or returned nothing
     if not docs:
-        regex_cond = {"$regex": search_term, "$options": "i"}
+        regex_cond = {"$regex": re.escape(search_term), "$options": "i"}
         or_clauses = [{f: regex_cond} for f in SEARCH_FIELDS]
         if amount_match is not None:
             or_clauses.append({"amount_float": amount_match})

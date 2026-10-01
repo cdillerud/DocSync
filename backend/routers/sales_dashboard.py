@@ -13,6 +13,7 @@ Provides a lightweight, role-oriented API for the Sales dashboard:
   POST /sales-dashboard/seed-review-data   — seed test data for dev
 """
 
+import re
 import logging
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -151,15 +152,15 @@ async def sales_queue(
     # Text search
     if search:
         query["$or"] = [
-            {"file_name": {"$regex": search, "$options": "i"}},
-            {"extracted_fields.po_number": {"$regex": search, "$options": "i"}},
-            {"normalized_fields.customer_name": {"$regex": search, "$options": "i"}},
-            {"extracted_fields.customer_name": {"$regex": search, "$options": "i"}},
-            {"vendor_name": {"$regex": search, "$options": "i"}},
+            {"file_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"extracted_fields.po_number": {"$regex": re.escape(search), "$options": "i"}},
+            {"normalized_fields.customer_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"extracted_fields.customer_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"vendor_name": {"$regex": re.escape(search), "$options": "i"}},
         ]
 
     if customer:
-        cust_filter = {"$regex": customer, "$options": "i"}
+        cust_filter = {"$regex": re.escape(customer), "$options": "i"}
         if "$or" in query:
             existing_or = query.pop("$or")
             query["$and"] = [
@@ -363,11 +364,11 @@ async def my_queue(
 
     if search:
         query["$or"] = [
-            {"file_name": {"$regex": search, "$options": "i"}},
-            {"extracted_fields.po_number": {"$regex": search, "$options": "i"}},
-            {"normalized_fields.customer_name": {"$regex": search, "$options": "i"}},
-            {"extracted_fields.customer_name": {"$regex": search, "$options": "i"}},
-            {"vendor_name": {"$regex": search, "$options": "i"}},
+            {"file_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"extracted_fields.po_number": {"$regex": re.escape(search), "$options": "i"}},
+            {"normalized_fields.customer_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"extracted_fields.customer_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"vendor_name": {"$regex": re.escape(search), "$options": "i"}},
         ]
 
     sort_map = {
@@ -451,9 +452,9 @@ async def triage_queue(
             "$and": [
                 combined_query,
                 {"$or": [
-                    {"file_name": {"$regex": search, "$options": "i"}},
-                    {"extracted_fields.po_number": {"$regex": search, "$options": "i"}},
-                    {"vendor_name": {"$regex": search, "$options": "i"}},
+                    {"file_name": {"$regex": re.escape(search), "$options": "i"}},
+                    {"extracted_fields.po_number": {"$regex": re.escape(search), "$options": "i"}},
+                    {"vendor_name": {"$regex": re.escape(search), "$options": "i"}},
                 ]},
             ]
         }

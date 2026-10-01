@@ -1,5 +1,6 @@
 """GPI Document Hub - Freight G/L Routing Router"""
 
+import re
 from fastapi import APIRouter, HTTPException, Query, Body
 from typing import Dict
 from services.freight_gl_routing_service import get_freight_gl_service, DEFAULT_GL_ACCOUNTS
@@ -221,7 +222,7 @@ async def verify_business_rules(
     if vendor_filter:
         query["$or"] = [
             {"bc_vendor_number": vendor_filter.upper()},
-            {"vendor_canonical": {"$regex": vendor_filter, "$options": "i"}},
+            {"vendor_canonical": {"$regex": re.escape(vendor_filter), "$options": "i"}},
         ]
 
     docs = await db.hub_documents.find(

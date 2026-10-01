@@ -8,6 +8,7 @@ This is the Phase 2 "context-rich LLM calls" — the LLM sees real
 historical data before processing each document.
 """
 
+import re
 import logging
 import statistics
 from typing import Dict, Any, List, Optional
@@ -154,7 +155,7 @@ async def _get_vendor_profile(db, vendor_no: str, vendor_name: str) -> Optional[
         query_parts.append({"vendor_no": vendor_no})
         query_parts.append({"vendor_no": vendor_no.upper()})
     if vendor_name:
-        query_parts.append({"vendor_name": {"$regex": f"^{vendor_name}$", "$options": "i"}})
+        query_parts.append({"vendor_name": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"}})
 
     if not query_parts:
         return None
@@ -205,7 +206,7 @@ async def _resolve_vendor_no(db, vendor_name: str) -> str:
     alias = await db.vendor_aliases.find_one(
         {"$or": [
             {"normalized_alias": vendor_name.lower().strip()},
-            {"alias_string": {"$regex": f"^{vendor_name}$", "$options": "i"}},
+            {"alias_string": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"}},
         ]},
         {"_id": 0, "vendor_no": 1, "canonical_vendor_id": 1}
     )
@@ -247,7 +248,7 @@ async def _get_historical_doc_types(db, vendor_no: str, vendor_name: str) -> str
         query_parts.append({"bc_vendor_number": vendor_no})
         query_parts.append({"matched_vendor_no": vendor_no})
     if vendor_name:
-        query_parts.append({"vendor_canonical": {"$regex": f"^{vendor_name}$", "$options": "i"}})
+        query_parts.append({"vendor_canonical": {"$regex": f"^{re.escape(vendor_name)}$", "$options": "i"}})
 
     if not query_parts:
         return ""

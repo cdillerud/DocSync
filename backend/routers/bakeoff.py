@@ -417,9 +417,9 @@ async def list_documents(
             {"s9_why_wrong_tags": why_wrong},
         ]
     if doc_type:
-        query["doc_type_truth"] = {"$regex": doc_type, "$options": "i"}
+        query["doc_type_truth"] = {"$regex": re.escape(doc_type), "$options": "i"}
     if vendor:
-        query["vendor_truth"] = {"$regex": vendor, "$options": "i"}
+        query["vendor_truth"] = {"$regex": re.escape(vendor), "$options": "i"}
     if has_gpi_link is True:
         query["gpi_auto_linked"] = True
     elif has_gpi_link is False:
@@ -430,9 +430,9 @@ async def list_documents(
         query["s9_ingested"] = {"$ne": True}
     if search:
         query["$or"] = [
-            {"file_name": {"$regex": search, "$options": "i"}},
-            {"document_id": {"$regex": search, "$options": "i"}},
-            {"vendor_truth": {"$regex": search, "$options": "i"}},
+            {"file_name": {"$regex": re.escape(search), "$options": "i"}},
+            {"document_id": {"$regex": re.escape(search), "$options": "i"}},
+            {"vendor_truth": {"$regex": re.escape(search), "$options": "i"}},
         ]
 
     total = await db[DOCS_COLL].count_documents(query)

@@ -11,6 +11,7 @@ were removed in Phase 4 (2026-04-23) after production metrics confirmed
 zero callers across a 7-day UTC window.
 """
 
+import re
 import logging
 from typing import Optional, Dict
 
@@ -161,7 +162,7 @@ async def get_vendor_pending_queue(
         "workflow_status": WorkflowStatus.VENDOR_PENDING.value
     }
     if vendor_raw:
-        fq["vendor_raw"] = {"$regex": vendor_raw, "$options": "i"}
+        fq["vendor_raw"] = {"$regex": re.escape(vendor_raw), "$options": "i"}
     if min_amount is not None:
         fq["amount_float"] = {"$gte": min_amount}
     if max_amount is not None:

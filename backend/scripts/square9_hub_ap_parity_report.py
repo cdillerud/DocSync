@@ -479,7 +479,15 @@ def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
     client = MongoClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
-    query = {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}}
+    # Safety-net backfills are copies of Square9's own files; counting them would
+    # make the cutover match rate measure nothing. They are reported separately.
+    query = {"mailbox_category": "AP", "created_utc": {"$gte": cutoff},
+             "source": {"$ne": "square9_backfill"}}
+    backfilled = db.hub_documents.count_documents(
+        {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}, "source": "square9_backfill"})
+    if backfilled:
+        print(f"Safety net: {backfilled} Square9-backfilled doc(s) in window, excluded from parity.",
+              file=sys.stderr)
     # The limit must never cut the window short: the Square9 side covers the
     # whole window, so dropping Hub's oldest docs made every Square9 doc from
     # those days look "missing from Hub". Found 2026-10-01 with 649 AP docs in

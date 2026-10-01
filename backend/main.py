@@ -100,6 +100,7 @@ from routers.workflow_observer import router as workflow_observer_router
 from routers.cp_item_registry import router as cp_item_registry_router
 from routers.consigned_item_registry import router as consigned_item_registry_router
 from routers.admin_eod import router as admin_eod_router
+from routers.missed_intake import router as missed_intake_router
 
 app = FastAPI(title="GPI Document Hub API")
 
@@ -221,6 +222,7 @@ app.include_router(workflow_observer_router, prefix="/api")
 app.include_router(cp_item_registry_router, prefix="/api")
 app.include_router(consigned_item_registry_router, prefix="/api")
 app.include_router(admin_eod_router, prefix="/api")
+app.include_router(missed_intake_router, prefix="/api")
 
 
 app.include_router(sales_router)
@@ -247,6 +249,9 @@ async def startup():
     except Exception as e:
         logger.error("[Auth] Admin seed FAILED: %s", e)
         raise
+
+    from services.missed_document_intake_service import start_missed_intake_tasks
+    start_missed_intake_tasks()
 
     register_doc_routes(app)
     register_wf_routes(app)

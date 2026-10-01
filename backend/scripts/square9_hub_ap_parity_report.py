@@ -479,10 +479,24 @@ def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
     client = MongoClient(os.environ["MONGO_URL"])
     db = client[os.environ["DB_NAME"]]
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=since_hours)).isoformat()
+    query = {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}}
+    # The limit must never cut the window short: the Square9 side covers the
+    # whole window, so dropping Hub's oldest docs made every Square9 doc from
+    # those days look "missing from Hub". Found 2026-10-01 with 649 AP docs in
+    # a 168h window and --limit 500 (everything before the last ~5 days of the
+    # window was silently dropped, depressing the cutover match rate).
+    in_window = db.hub_documents.count_documents(query)
+    if in_window > limit:
+        print(
+            f"WARNING: --limit {limit} would truncate the comparison window "
+            f"({in_window} Hub AP docs since {cutoff}); loading all {in_window}.",
+            file=sys.stderr,
+        )
+        limit = in_window
     cursor = (
         db.hub_documents
         .find(
-            {"mailbox_category": "AP", "created_utc": {"$gte": cutoff}},
+            query,
             {"_id": 0,
              "id": 1, "file_name": 1, "sharepoint_web_url": 1,
              "sharepoint_folder_path": 1, "routing_status": 1,

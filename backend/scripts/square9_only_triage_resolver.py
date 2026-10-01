@@ -230,7 +230,11 @@ def score_match(sq: Square9Row, hub: HubDocLite,
     if ratio >= 0.85:
         return ratio, "filename_fuzzy_mid"
 
-    if len(vendor_overlap) >= 2:
+    # Weakest evidence: require the dates to be at least loosely close. Without
+    # this, shared vendor words alone (e.g. HWA + HSIA) paired 18 September
+    # invoices Hub never received with an unrelated April document, so the
+    # report filed a real intake gap as "Hub has it, reclassify" (2026-10-01).
+    if len(vendor_overlap) >= 2 and _date_close(sq.inferred_date, hub_inv_date, date_tol * 3):
         return 0.42, "vendor_token_multi"
 
     return 0.0, "no_evidence"

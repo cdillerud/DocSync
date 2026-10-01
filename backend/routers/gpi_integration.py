@@ -3855,6 +3855,25 @@ async def create_cost_only_so_from_document(doc_id: str):
             "doc_id": doc_id,
         }
 
+    # Refuse when BC already has an order for this reference, as the other
+    # sales-order paths do. Fail closed: no lookup, no create.
+    external_doc_no = ef.get("invoice_number") or ef.get("po_number") or ""
+    if external_doc_no:
+        try:
+            bc_duplicate = await find_existing_bc_sales_order(
+                get_bc_service(), customer_number=customer_no, external_document_number=external_doc_no,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail={
+                "error": "cost_only_duplicate_lookup_failed",
+                "message": f"Could not check BC for an existing order for '{external_doc_no}': {e}",
+            })
+        if bc_duplicate:
+            raise HTTPException(status_code=409, detail={
+                "error": "bc_sales_order_exists",
+                "message": f"'{external_doc_no}' already exists in BC as sales order {bc_duplicate.get('number')}.",
+            })
+
     # ── Live BC creation ──
     try:
         from services.gpi_integration_service import create_sales_order, add_sales_order_lines
@@ -3862,7 +3881,7 @@ async def create_cost_only_so_from_document(doc_id: str):
         # Step 1: Create SO header
         so_result = await create_sales_order(
             customer_no=customer_no,
-            external_doc_no=ef.get("invoice_number") or ef.get("po_number") or "",
+            external_doc_no=external_doc_no,
             source_doc_id=doc_id,
             idempotency_key=idempotency_key,
         )
@@ -3895,6 +3914,29 @@ async def create_cost_only_so_from_document(doc_id: str):
             "gl_account_used": gl_account_number,
             "cost_only": True,
         }
+
+        lines_added = lines_result.get("added", 0)
+        lines_total = lines_result.get("total", len(so_lines))
+        if lines_added < lines_total:
+            # Keep the record (so a retry does not create a second header) but
+            # do not mark the document exported or move its file: the order in
+            # BC is incomplete and needs finishing by hand.
+            so_record["partial"] = True
+            await db.hub_documents.update_one(
+                {"id": doc_id},
+                {"$set": {"bc_sales_order": so_record, "updated_utc": now}},
+            )
+            logger.error("[SH-SO] SO %s for doc %s got only %d/%d lines: %s",
+                         bc_so_no, doc_id[:8], lines_added, lines_total, lines_result.get("errors"))
+            raise HTTPException(status_code=502, detail={
+                "error": "partial_sales_order",
+                "message": (
+                    f"Sales order {bc_so_no} was created in BC but only {lines_added} of "
+                    f"{lines_total} lines were added. Complete it in BC; the document was "
+                    f"not marked exported."
+                ),
+                "bc_so_number": bc_so_no,
+            })
 
         await db.hub_documents.update_one(
             {"id": doc_id},

@@ -503,8 +503,16 @@ def _analyze_line_patterns(invoices: List[Dict]) -> Dict:
         for item, cnt in item_counter.most_common(10)
     ]
 
-    # Dominant line type
-    dominant_line_type = line_type_counter.most_common(1)[0][0] if line_type_counter else "Account"
+    # Dominant line type, among the types build_smart_pi_lines can actually post.
+    # Counting every line let text-only Comment lines (27 vendors) or legacy
+    # Charge lines (STRAITL: recent invoices use Item CUSTOMS) win, which sent
+    # those vendors' lines to the generic fallback GL account. Found in the
+    # 2026-10-01 sandbox posting trial.
+    postable = {lt: n for lt, n in line_type_counter.items() if lt in ("Account", "Item")}
+    if postable:
+        dominant_line_type = max(postable, key=postable.get)
+    else:
+        dominant_line_type = line_type_counter.most_common(1)[0][0] if line_type_counter else "Account"
 
     # Typical description pattern
     desc_pattern = _detect_description_pattern(description_samples)

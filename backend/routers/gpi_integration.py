@@ -169,6 +169,61 @@ def _resolve_so_routing_fields(doc: dict, so_type: str) -> dict:
     return routing
 
 
+_ITEM_USABLE_CACHE: dict = {}
+
+
+async def _bc_item_usable(item_no: str) -> bool:
+    """True if the item exists and is not blocked in the BC write environment.
+
+    Posting templates learned from older history can name items that were
+    since renamed or blocked (found in the 2026-10-01 sandbox trial: STRAITL's
+    template said CUSTOMS-DS, which does not exist; current invoices use
+    CUSTOMS). Cached per process. Unknown (lookup failed) counts as usable so
+    a BC hiccup does not change routing; BC itself still rejects bad lines.
+    """
+    if item_no in _ITEM_USABLE_CACHE:
+        return _ITEM_USABLE_CACHE[item_no]
+    try:
+        import httpx
+        from services.gpi_integration_service import (
+            _get_token, _resolve_company_id, GPI_API_BASE, BC_TENANT_ID,
+            BC_WRITE_ENVIRONMENT, BC_STANDARD_API,
+        )
+        token = await _get_token()
+        company_id = await _resolve_company_id()
+        url = (f"{GPI_API_BASE}/{BC_TENANT_ID}/{BC_WRITE_ENVIRONMENT}/api/"
+               f"{BC_STANDARD_API}/companies({company_id})/items")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {token}"}, params={
+                "$filter": "number eq '" + item_no.replace("'", "''") + "'",
+                "$select": "number,blocked",
+            })
+        if resp.status_code != 200:
+            return True
+        found = resp.json().get("value", [])
+        usable = bool(found) and not found[0].get("blocked")
+    except Exception as e:
+        logger.warning("[PI Lines] item check failed for %s: %s", item_no, e)
+        return True
+    _ITEM_USABLE_CACHE[item_no] = usable
+    return usable
+
+
+async def _delete_orphan_pi_header(system_id: str) -> str:
+    """Best-effort delete of a draft PI header whose lines were rejected."""
+    try:
+        from services.business_central_service import (
+            get_bc_service, BC_WRITE_ENVIRONMENT, get_bc_token,
+        )
+        bc_svc = get_bc_service()
+        token = await get_bc_token(environment=BC_WRITE_ENVIRONMENT)
+        company_id = await bc_svc._get_company_id(environment=BC_WRITE_ENVIRONMENT)
+        return await bc_svc._try_delete_draft_invoice(system_id, token, company_id)
+    except Exception as e:
+        logger.warning("[PI-PartialPost] orphan delete failed for %s: %s", system_id, e)
+        return f"exception: {e}"
+
+
 def _pi_lines_total_mismatch(doc: dict, bc_lines: list):
     """Return (planned_total, invoice_total) when the planned PI lines disagree
     with the invoice's extracted total beyond tolerance, else None.
@@ -251,6 +306,13 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
                 template_line_type = primary.get("type", "")
                 template_desc_pattern = primary.get("common_description", "")
 
+                if (template_item_no and template_line_type == "Item"
+                        and not await _bc_item_usable(template_item_no)):
+                    logger.warning(
+                        "[PI Lines] Template item %s for %s is missing or blocked in BC; "
+                        "keeping the vendor profile's lines", template_item_no, vendor_no,
+                    )
+                    template_item_no = ""
                 if template_item_no and template_line_type:
                     for line in bc_lines:
                         # An item/GL number extracted from the invoice itself wins
@@ -1884,6 +1946,9 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         if not doc:
             return {"success": False, "reason": "document_not_found"}
 
+        if doc.get("status") == "batch_parent":
+            return {"success": False, "reason": "batch_parent", "skipped": True}
+
         # Only AP_Invoice eligible
         doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
         if doc_type not in PURCHASE_INVOICE_ELIGIBLE_TYPES:
@@ -1989,6 +2054,27 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
                 except Exception as e:
                     logger.error("[AutoPI] Failed to add lines for doc %s: %s", doc_id, str(e))
                     line_results = {"added": 0, "total": len(bc_lines), "errors": [{"error": str(e)}]}
+
+        # A header whose lines were rejected is an empty draft: delete it and
+        # report failure instead of recording a PI that does not exist.
+        if line_results and line_results.get("added", 0) < line_results.get("total", 0):
+            orphan_status = await _delete_orphan_pi_header(result["bc_system_id"])
+            failure = {
+                "bc_record_no": result.get("bc_record_no", ""),
+                "error": "partial_post",
+                "lines_added": line_results.get("added", 0),
+                "lines_total": line_results.get("total", 0),
+                "line_errors": line_results.get("errors", []),
+                "orphan_header_deletion": orphan_status,
+                "failed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await db.hub_documents.update_one(
+                {"id": doc_id}, {"$set": {"bc_purchase_invoice_last_failure": failure}}
+            )
+            logger.error("[AutoPI] Partial post for doc %s: %d/%d lines; header %s deletion: %s",
+                         doc_id, failure["lines_added"], failure["lines_total"],
+                         failure["bc_record_no"], orphan_status)
+            return {"success": False, "reason": "partial_post", **failure}
 
         # Step 3: Create GPI Document Link
         link_result = None
@@ -2316,6 +2402,12 @@ async def create_purchase_invoice_from_document(
         )
         doc.pop("bc_purchase_invoice", None)
 
+    if doc.get("status") == "batch_parent":
+        raise HTTPException(status_code=422, detail=(
+            "This is a batch parent (a combined file that was split); post its split "
+            "documents instead so the invoice is not created twice."
+        ))
+
     # Check eligibility
     doc_type = doc.get("document_type", "")
     if doc_type not in PURCHASE_INVOICE_ELIGIBLE_TYPES:
@@ -2488,14 +2580,23 @@ async def create_purchase_invoice_from_document(
         "document_link_method": link_result.get("method", "") if link_result else "",
     }
 
-    await db.hub_documents.update_one(
-        {"id": doc_id},
-        {"$set": {
-            "bc_purchase_invoice": bc_purchase_invoice,
-            "bc_purchase_invoice_no": result.get("bc_record_no", ""),
-            "updated_utc": now,
-        }}
-    )
+    if result.get("success"):
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {
+                "bc_purchase_invoice": bc_purchase_invoice,
+                "bc_purchase_invoice_no": result.get("bc_record_no", ""),
+                "updated_utc": now,
+            }}
+        )
+    else:
+        # A failed attempt (e.g. partial post, header deleted) must not look like
+        # an existing PI: every "already exists" check keys on bc_purchase_invoice.
+        await db.hub_documents.update_one(
+            {"id": doc_id},
+            {"$set": {"bc_purchase_invoice_last_failure": bc_purchase_invoice, "updated_utc": now},
+             "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": ""}}
+        )
 
     # Emit event
     try:

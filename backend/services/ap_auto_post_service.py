@@ -774,6 +774,7 @@ async def process_auto_draft_queue(db, limit: int = 50) -> Dict:
                 {"workflow_status": "ready_for_post"},
             ],
             "bc_purchase_invoice": {"$exists": False},
+            "status": {"$ne": "batch_parent"},
         },
         {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_no": 1}
     ).limit(limit).to_list(limit)

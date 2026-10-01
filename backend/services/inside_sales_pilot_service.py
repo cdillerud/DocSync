@@ -505,7 +505,7 @@ async def poll_inside_sales_pilot_mailbox(mailbox_address: str) -> Dict[str, Any
 
     except Exception as e:
         stats["errors"].append(f"Poll run failed: {e}")
-        logger.error("[InsideSalesPilot:%s] Run failed: %s", run_id, e)
+        logger.error("[InsideSalesPilot:%s] Run failed: %r", run_id, e)
 
     stats["completed_at"] = datetime.now(timezone.utc).isoformat()
 

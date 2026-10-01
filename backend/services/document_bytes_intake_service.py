@@ -570,7 +570,7 @@ async def intake_document_from_bytes(
         logger.info("Document %s stored in SharePoint: %s (folder: %s, reason: %s)", 
                    doc_id, sp_result.get("web_url"), folder_path, routing_reason)
     except Exception as e:
-        sp_error = str(e)
+        sp_error = f"{type(e).__name__}: {e}"
         logger.error("SharePoint upload failed for document %s: %s", doc_id, sp_error)
 
     # Phase 7: Determine status for AP_Invoice using new logic

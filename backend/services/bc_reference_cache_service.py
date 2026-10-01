@@ -683,7 +683,7 @@ class BCReferenceCacheService:
                         "cache for this entity type may be incomplete", table_name, count
                     )
             except Exception as e:
-                logger.error("[BC Cache] Error syncing %s: %s", table_name, str(e))
+                logger.error("[BC Cache] Error syncing %s: %r", table_name, e)
                 results[config["entity_type"]] = f"error: {str(e)}"
 
         # Update last sync time
@@ -909,7 +909,7 @@ class BCReferenceCacheService:
                     )
                 total += count
             except Exception as e:
-                logger.error("[BC Cache] Error syncing %s: %s", name, e)
+                logger.error("[BC Cache] Error syncing %s: %r", name, e)
                 results[config["entity_type"]] = f"error: {e}"
 
         return {"status": "completed", "total_records": total, "entity_counts": results}

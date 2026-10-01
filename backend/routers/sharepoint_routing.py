@@ -508,8 +508,8 @@ async def move_document_to_sharepoint(doc_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("SharePoint move failed for %s: %s", doc_id, e)
-        raise HTTPException(500, f"SharePoint move failed: {str(e)}")
+        logger.error("SharePoint move failed for %s: %r", doc_id, e)
+        raise HTTPException(500, f"SharePoint move failed: {e!r}")
 
 
 @router.post("/batch-move")

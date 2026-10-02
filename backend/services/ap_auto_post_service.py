@@ -475,8 +475,10 @@ async def _write_event(db, doc_id: str, event_type: str, payload: dict):
             if not dss:
                 dss = DerivedStateService(db)
             await dss.update_document_derived_state(doc_id)
-        except Exception:
-            pass
+        except Exception as e:
+            # Non-blocking, but a silent failure leaves the UI showing the
+            # pre-post state for this document.
+            logger.warning("[AP-AutoPost] Derived-state refresh failed for %s: %r", doc_id, e)
     except Exception as e:
         logger.warning("[AP Auto-Post] Event write error: %s", e)
 

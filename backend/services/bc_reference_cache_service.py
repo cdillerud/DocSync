@@ -750,7 +750,7 @@ class BCReferenceCacheService:
             "total_records": total_records,
             "entity_counts": results,
             "duration_ms": duration_ms,
-            "synced_at": now
+            "synced_at": sync_started_iso
         }
 
     # BC returns these for deadlocks, throttling and gateway hiccups; a short

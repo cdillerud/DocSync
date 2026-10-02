@@ -476,12 +476,15 @@ async def daily_readiness_scheduler() -> None:
             current = await _get_run_status_doc(db)
             busy = current.get("status") == "running" and not _run_is_stale(current)
             if now.hour >= READINESS_DAILY_HOUR_UTC and meta.get("last_run_date") != today and not busy:
-                await db.square9_readiness_meta.update_one(
-                    {"_id": _SCHEDULE_META_ID}, {"$set": {"last_run_date": today}}, upsert=True)
                 await _set_run_status(db, status="running", started_at=now.isoformat(),
                                       finished_at=None, error=None)
                 logger.info("[readiness-check] daily scheduled run starting")
                 await _execute_readiness_check(db, triggered_by="daily_schedule")
+                # Mark the day done only after the run returns. A restart
+                # mid-run cancels this task before here, so the next process
+                # retries today instead of skipping it.
+                await db.square9_readiness_meta.update_one(
+                    {"_id": _SCHEDULE_META_ID}, {"$set": {"last_run_date": today}}, upsert=True)
         except Exception as e:
             logger.warning("[readiness-check] daily scheduler error: %r", e)
         await asyncio.sleep(3600)

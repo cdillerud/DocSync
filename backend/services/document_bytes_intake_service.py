@@ -14,6 +14,9 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# Largest base64 file copy kept inside a hub_documents record.
+MAX_INLINE_B64_BYTES = 12 * 1024 * 1024
+
 
 async def ensure_hub_documents_dedup_index():
     """Create the sha256_hash dedup backstop index. Safe to call repeatedly.
@@ -191,9 +194,17 @@ async def intake_document_from_bytes(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
 
-    # Also store file content in MongoDB as backup (survives container restarts)
+    # Also store file content in MongoDB as backup (survives container restarts).
+    # Skip it for large files: base64 adds a third, and a PDF over ~12 MB would
+    # push the record past the 16 MB MongoDB document limit and fail the whole
+    # intake. The copy on the uploads volume stays the primary source.
     import base64 as b64mod
-    file_content_b64 = b64mod.b64encode(file_content).decode("ascii")
+    file_content_b64 = None
+    if (len(file_content) + 2) // 3 * 4 <= MAX_INLINE_B64_BYTES:
+        file_content_b64 = b64mod.b64encode(file_content).decode("ascii")
+    else:
+        logger.info("[Intake] %s is %d bytes; not storing the base64 backup in MongoDB",
+                    filename, len(file_content))
 
     # Apply pilot capture channel if pilot mode is enabled
     base_capture_channel = CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value

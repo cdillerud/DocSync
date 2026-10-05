@@ -72,6 +72,10 @@ _REF_NUMBER_PATTERNS = [
     ("bol_no", re.compile(r"(?:BOL|B/L|BILL\s+OF\s+LADING)[\s#.:]*([A-Z0-9][\w-]{2,20})", re.IGNORECASE)),
 ]
 
+# "Invoice Number  Invoice Date ..." header row with the values on the next
+# line (Amcor): the first token under the header is the invoice number.
+_TABLE_INVOICE_NO = re.compile(r"INVOICE\s+(?:NUMBER|NO\.?|#)[^\n]*\n\s*([A-Z0-9][\w-]{3,20})", re.IGNORECASE)
+
 # Date patterns
 _DATE_PATTERN = re.compile(
     r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2}|"
@@ -110,10 +114,20 @@ def fingerprint_page(page: Dict[str, Any]) -> Dict[str, Any]:
             fp["doc_type_hints"].append(m.group(0).strip())
 
     # Reference numbers
+    # A reference value must contain a digit: header labels were captured
+    # as values ("Invoice Number" -> "Number", "BOL Date" -> "Date"), so two
+    # different invoices on consecutive pages looked like the same invoice
+    # and were merged (Amcor 96531884 + 96531885, 2026-09).
     for ref_type, pattern in _REF_NUMBER_PATTERNS:
-        m = pattern.search(text)
-        if m:
-            fp["ref_numbers"][ref_type] = m.group(1).strip()
+        for m in pattern.finditer(text):
+            value = m.group(1).strip()
+            if re.search(r"\d", value):
+                fp["ref_numbers"][ref_type] = value
+                break
+    if "invoice_no" not in fp["ref_numbers"]:
+        m = _TABLE_INVOICE_NO.search(text)
+        if m and re.search(r"\d", m.group(1)):
+            fp["ref_numbers"]["invoice_no"] = m.group(1).strip()
 
     # Dates (first 3 found)
     dates = _DATE_PATTERN.findall(text[:800])

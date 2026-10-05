@@ -231,6 +231,15 @@ async def _emit_sender_disagreed(
 
 EXCLUDED_SENDER_DOMAINS = {"gamerpackaging.com"}
 
+# Domains many unrelated senders share: never learn a domain-level vendor
+# from them (quickbooks@notification.intuit.com mapped the whole domain to
+# Lone Star; B&B mails from yahoo.com).
+SHARED_SENDER_DOMAINS = {
+    "notification.intuit.com", "intuit.com", "bill.com", "billtrust.com", "quickbooks.com",
+    "invoicecloud.net", "gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "aol.com",
+    "icloud.com", "msn.com", "live.com",
+}
+
 
 async def _get_excluded_sender_domains() -> set:
     """Return the set of internal domains whose senders should never be learned."""
@@ -257,6 +266,22 @@ async def learn_sender_vendor(sender_email: str, vendor_canonical: str,
     if domain in excluded_domains:
         logger.info(f"[VendorLearn] Skipping {email_lower} — domain {domain} is excluded (internal)")
         return
+
+    # GUARD: learn BC vendor numbers only. 85 of 119 sender mappings held a
+    # vendor *name* (some "Gamer Packaging, Inc.", the bill-to party) found
+    # 2026-10-05; a name is resolved to its BC number when exactly one BC
+    # vendor has that name, otherwise nothing is learned.
+    if "gamer" in str(vendor_canonical).lower() or "gamer" in str(vendor_name).lower():
+        logger.info(f"[VendorLearn] Skipping {email_lower} — vendor is Gamer's own name")
+        return
+    if not await db.hub_bc_vendors.find_one({"number": vendor_canonical}, {"_id": 1}):
+        from services.vendor_name_helpers import normalize_vendor_name as _nvn
+        rows = await db.hub_bc_vendors.find(
+            {"name_normalized": _nvn(vendor_name or vendor_canonical)}, {"_id": 0, "number": 1}).to_list(3)
+        if len(rows) != 1:
+            logger.info(f"[VendorLearn] Skipping {email_lower} — {vendor_canonical!r} is not a BC vendor number")
+            return
+        vendor_canonical = vendor_no = rows[0]["number"]
 
     # Upsert exact sender mapping
     existing = await db.sender_vendor_map.find_one(
@@ -297,7 +322,7 @@ async def learn_sender_vendor(sender_email: str, vendor_canonical: str,
         })
 
     # Also track domain-level mapping
-    if domain:
+    if domain and domain not in SHARED_SENDER_DOMAINS:
         domain_existing = await db.sender_vendor_map.find_one(
             {"sender_domain": domain, "sender_email": {"$exists": False}},
             {"_id": 0}

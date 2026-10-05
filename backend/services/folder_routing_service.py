@@ -18,6 +18,11 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# Legacy all-caps DocType values stored on some auto-split pages.
+_LEGACY_DOC_TYPES = {"AP_INVOICE": "AP_Invoice", "SALES_INVOICE": "AR_Invoice",
+                     "PURCHASE_ORDER": "Purchase_Order", "SALES_CREDIT_MEMO": "Credit_Memo",
+                     "PURCHASE_CREDIT_MEMO": "Credit_Memo", "STATEMENT": "Statement"}
 # =============================================================================
 # VENDOR ROUTING RULES
 # =============================================================================
@@ -224,6 +229,7 @@ _AP_INVOICE_DOC_TYPES = {"AP_INVOICE", "AP_Invoice", "AP Invoice"}
 
 def _is_ap_lane_doc(doc: Dict[str, Any]) -> bool:
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
+    doc_type = _LEGACY_DOC_TYPES.get(doc_type, doc_type)
     if doc_type in _AP_INVOICE_DOC_TYPES:
         return True
     if (doc.get("doc_type") or "") in _AP_INVOICE_DOC_TYPES:
@@ -523,6 +529,7 @@ def _determine_folder_path_core(
         Tuple of (folder_path, routing_reason, routing_details)
     """
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
+    doc_type = _LEGACY_DOC_TYPES.get(doc_type, doc_type)
     extracted = doc.get("extracted_fields") or {}
     normalized = doc.get("normalized_fields", {})
     ai_extraction = doc.get("ai_extraction", {})
@@ -1346,6 +1353,7 @@ async def route_with_feedback(
     from services.routing_feedback_service import lookup_feedback
 
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
+    doc_type = _LEGACY_DOC_TYPES.get(doc_type, doc_type)
     vendor_name = (
         doc.get("vendor_canonical") or
         (doc.get("normalized_fields") or {}).get("vendor") or

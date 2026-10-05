@@ -355,6 +355,9 @@ async def intake_document_from_bytes(
                 doc_id, suggested_type, new_suggested, classification_method
             )
             suggested_type = new_suggested
+    # The AI sometimes returns the legacy all-caps value itself (auto-split
+    # pages: 63 AP_INVOICE/SALES_INVOICE since 2026-08), which no rule matches.
+    suggested_type = _DOC_TYPE_TO_SUGGESTED.get(suggested_type, suggested_type)
 
     # FIX: If deterministic classification succeeded but AI extraction returned 0.0 confidence,
     # bump confidence so downstream workflow/auto-resolution don't treat this as a failure.

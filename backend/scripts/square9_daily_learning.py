@@ -72,14 +72,15 @@ async def main() -> int:
         r["_seen_id"] = seen_id
         hub = await db.hub_documents.find_one(
             {"id": r.get("hub_doc_id")},
-            {"_id": 0, "vendor_canonical": 1, "doc_type": 1, "po_number_clean": 1, "is_international": 1, "file_name": 1})
+            {"_id": 0, "vendor_canonical": 1, "document_type": 1, "doc_type": 1, "po_number_clean": 1, "is_international": 1, "file_name": 1})
         vendor = ((hub or {}).get("vendor_canonical") or "").strip()
         folder = _folder_root(r.get("square9_parent_path", ""))
         if (not hub or len(vendor) < 3 or vendor.lower() in JUNK_VENDORS or not folder
                 or folder.lower() in NON_FINAL_FOLDERS or not _is_working_folder(folder)):
             skipped += 1
             continue
-        doc_type = (hub.get("doc_type") or "Unknown").strip()
+        # document_type is what routing looks rules up by (doc_type is the legacy enum)
+        doc_type = (hub.get("document_type") or hub.get("doc_type") or "Unknown").strip()
         has_po = bool(hub.get("po_number_clean"))
         intl = bool(hub.get("is_international"))
         key = _make_routing_key(vendor, doc_type, has_po, intl)

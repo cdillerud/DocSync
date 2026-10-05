@@ -41,10 +41,19 @@ def _normalize_vendor(value: Any) -> str:
     return re.sub(r"\s+", " ", raw).strip().lower()
 
 
+# hub_documents.doc_type holds the legacy all-caps enum while routing looks
+# rules up by document_type; rules learned from doc_type ("AP_INVOICE") were
+# never found for an "AP_Invoice" document. Keys use the document_type form.
+_LEGACY_DOC_TYPES = {"AP_INVOICE": "AP_Invoice", "SALES_INVOICE": "AR_Invoice",
+                     "PURCHASE_ORDER": "Purchase_Order", "SALES_CREDIT_MEMO": "Credit_Memo",
+                     "PURCHASE_CREDIT_MEMO": "Credit_Memo", "STATEMENT": "Statement"}
+
+
 def _make_routing_key(vendor: str, doc_type: str, has_po: bool, is_international: bool) -> str:
     """Create a lookup key for feedback matching."""
     v = _normalize_vendor(vendor)
     d = str(doc_type or "").strip()
+    d = _LEGACY_DOC_TYPES.get(d, d)
     return f"{v}|{d}|{'po' if has_po else 'no_po'}|{'intl' if is_international else 'domestic'}"
 
 
@@ -183,13 +192,27 @@ async def _vendor_candidates(vendor: str) -> List[Dict[str, Any]]:
                 "extracted_fields.vendor": 1,
                 "normalized_fields.vendor": 1,
             },
-        ).limit(100).to_list(100)
+        ).limit(100).max_time_ms(5000).to_list(100)
     except Exception:
         doc_rows = []
+    # Only bridge to an ID most of this vendor's documents carry. Taking every
+    # ID on any matching document let one mis-tagged invoice weld vendors
+    # together (2026-10-05: OWENS->ALAMEDA, VIDRALA->CARGOMO,
+    # ARDAGHM->FEVISA/BAY/HUB), so one vendor's learned rule routed another's.
+    id_keys = ("vendor_canonical", "bc_vendor_number", "vendor_id", "vendor_no")
+    id_counts: Dict[str, int] = {}
     for row in doc_rows:
+        for value in {str(row.get(k)).strip().upper() for k in id_keys if row.get(k)}:
+            id_counts[value] = id_counts.get(value, 0) + 1
+    floor = max(3, (len(doc_rows) + 1) // 2)
+    dominant_ids = {value for value, n in id_counts.items() if n >= floor}
+    for row in doc_rows:
+        row_ids = {str(row.get(k)).strip().upper() for k in id_keys if row.get(k)}
+        if not row_ids or not row_ids <= dominant_ids:
+            continue
         extracted = row.get("extracted_fields") or {}
         normalized = row.get("normalized_fields") or {}
-        for key in ("vendor_canonical", "bc_vendor_number", "vendor_id", "vendor_no"):
+        for key in id_keys:
             _append_candidate(candidates, seen, row.get(key), source=f"hub_documents.{key}", stable=True)
         for value, source in (
             (row.get("vendor_raw"), "hub_documents.vendor_raw"),

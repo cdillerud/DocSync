@@ -235,6 +235,9 @@ async def intake_document(
                 doc_id, suggested_type, new_suggested, classification_method,
             )
             suggested_type = new_suggested
+    # The AI sometimes returns the legacy all-caps value itself (auto-split
+    # pages: 63 AP_INVOICE/SALES_INVOICE since 2026-08), which no rule matches.
+    suggested_type = _DOC_TYPE_TO_SUGGESTED.get(suggested_type, suggested_type)
 
     if doc_type_value not in ("Other", "Unknown", "Unknown_Document") and confidence < 0.5:
         confidence = 0.85  # Deterministic classification gets minimum 85%

@@ -64,6 +64,19 @@ async def m():
             docs_fixed += 1; per[(d.get("vendor_canonical"), vno)] += 1
             if APPLY:
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": vno, "vendor_canonical_backfill": {"at": now, "previous": d.get("vendor_canonical"), "from": "bc_ground_truth", "alias": key}}})
+    # align_conflicting: other alias rows with the same normalized name that
+    # point at a different vendor lose to BC evidence (MRP Solutions: a
+    # bc_ground_truth row said MOL from 19 exact pairs, an older
+    # auto_confirm row said WEA, and lookups picked the older one).
+    aligned = 0
+    for key, vno in learned.items():
+        async for other in db.vendor_aliases.find({"normalized_alias": key, "vendor_no": {"$ne": vno}, "source": {"$ne": "bc_ground_truth"}}):
+            aligned += 1
+            print(f"  ALIGN {other.get('alias_string')!r} ({other.get('source')}): {other.get('vendor_no')} -> {vno}")
+            if APPLY:
+                await db.vendor_aliases_fix_backup.insert_one({k: v for k, v in other.items() if k != "_id"} | {"orig_id": other["_id"], "backed_up_at": now, "reason": "bc_ground_truth_align"})
+                await db.vendor_aliases.update_one({"_id": other["_id"]}, {"$set": {"vendor_no": vno, "canonical_vendor_id": vno, "vendor_name": names.get(vno), "aligned_to_bc_at": now}})
+    print(f"conflicting alias rows aligned to BC: {aligned}")
     print(("APPLIED" if APPLY else "DRY RUN") + f": learned {len(learned)}, aliases created/updated {alias_new}, documents corrected {docs_fixed}")
     for k, v in per.most_common(20): print("  ", v, k)
 asyncio.run(m())

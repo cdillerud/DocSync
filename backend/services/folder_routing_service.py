@@ -956,6 +956,28 @@ def _is_canpack_vendor(vendor_name: str) -> bool:
 
 
 
+
+# Square9's live working folders (Accounts Payable/Temp Folder, read from
+# SharePoint 2026-10-01). Learned routing feedback may only point here: older
+# rules learned from Square9's archive ("Paid Invoices - by Check Date",
+# "Dropship Not International Documents/<PO>", "Miscellaneous Documents/...")
+# sent every later invoice from a vendor into a payment archive or one old
+# PO's folder.
+SQUARE9_WORKING_ROOTS = {
+    "do not pay", "dropship international", "dropship not international",
+    "meg to process", "miscellaneous", "rhonda - issues",
+    "s&h invoices approved", "s&h invoices waiting for approval",
+    "tooling invoices", "vendor credit memos",
+    "warehouse international", "warehouse not international",
+}
+
+
+def _is_working_folder(path: Optional[str]) -> bool:
+    p = (path or "").strip("/")
+    if p.lower().startswith("temp folder/"):
+        p = p[12:]
+    return p.split("/")[0].strip().lower() in SQUARE9_WORKING_ROOTS
+
 def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
     """A document that is unambiguously a vendor credit: typed Credit_Memo, or
     a negative total. Staff file these under Vendor Credit Memos whatever the
@@ -1192,7 +1214,27 @@ def _is_warehouse_order(doc: dict) -> bool:
     if strong_outbound_warehouse_evidence:
         return True
 
+    # Gamer order numbers carry the disposition in their prefix. In staff
+    # Square9 filings (2026-09-28..10-05): WA (warehouse/assembly) 11/11 and
+    # WR (warehouse receipt) 4/4 filed under Warehouse, plain W purchase
+    # orders 50/68 Warehouse, while plain numeric orders were 46/60 Dropship.
+    order = _order_number_of(doc, normalized, routing_details)
+    if order and _WAREHOUSE_ORDER_PREFIX.match(order):
+        return True
+
     return _is_warehouse_order_legacy(doc)
+
+
+_WAREHOUSE_ORDER_PREFIX = re.compile(r"^(?:WA|WR|WTR|W)-?\d{4,}", re.I)
+
+
+def _order_number_of(doc: dict, normalized: dict, routing_details: dict) -> str:
+    ef = doc.get("extracted_fields") or {}
+    for v in (doc.get("po_number_clean"), doc.get("po_number_extracted"), normalized.get("po_number"),
+              ef.get("po_number"), ef.get("order_number"), routing_details.get("order_number")):
+        if v and str(v).strip():
+            return str(v).strip().upper()
+    return ""
 
 
 def _is_dunnage_related(description: str) -> bool:
@@ -1272,6 +1314,10 @@ async def route_with_feedback(
         has_po=bool(po),
         is_international=is_international,
     )
+
+    if feedback_folder and not _is_working_folder(feedback_folder):
+        logger.info("[Routing] ignoring learned folder outside Square9 working folders: %r", feedback_folder)
+        feedback_folder = None
 
     if feedback_folder:
         normalized_feedback = str(feedback_folder).strip("/").casefold()

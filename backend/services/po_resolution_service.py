@@ -266,6 +266,9 @@ def normalize_po(raw: str) -> str:
     s = re.sub(r"^(?:Purchase\s*Order|P\.?O\.?)\s*[:#]?\s*", "", s, flags=re.IGNORECASE)
     s = re.sub(r"^#\s*", "", s)
     s = s.strip()
+    # A list of POs ("W118254/55/56", "115089, 115090, 115091") is the first
+    # PO; stripping the separators glued them into one number BC never knows.
+    s = re.split(r"\s*(?:[,;/&]|\band\b)\s*", s, maxsplit=1, flags=re.IGNORECASE)[0]
     s = re.sub(r"[^\w\-.]", "", s)
     s = s.upper()
     if s.isdigit():

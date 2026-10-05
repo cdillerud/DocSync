@@ -1229,8 +1229,7 @@ def _is_warehouse_order(doc: dict) -> bool:
     # Square9 filings (2026-09-28..10-05): WA (warehouse/assembly) 11/11 and
     # WR (warehouse receipt) 4/4 filed under Warehouse, plain W purchase
     # orders 50/68 Warehouse, while plain numeric orders were 46/60 Dropship.
-    order = _order_number_of(doc, normalized, routing_details)
-    if order and _WAREHOUSE_ORDER_PREFIX.match(order):
+    if any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in _order_numbers_of(doc, normalized, routing_details)):
         return True
 
     return _is_warehouse_order_legacy(doc)
@@ -1239,13 +1238,22 @@ def _is_warehouse_order(doc: dict) -> bool:
 _WAREHOUSE_ORDER_PREFIX = re.compile(r"^(?:WA|WR|WTR|W)-?\d{4,}", re.I)
 
 
-def _order_number_of(doc: dict, normalized: dict, routing_details: dict) -> str:
+def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> list:
+    """Every order/PO value on the document, first PO of any list, uppercased."""
+    from services.po_resolution_service import normalize_po
     ef = doc.get("extracted_fields") or {}
+    out = []
     for v in (doc.get("po_number_clean"), doc.get("po_number_extracted"), normalized.get("po_number"),
               ef.get("po_number"), ef.get("order_number"), routing_details.get("order_number")):
-        if v and str(v).strip():
-            return str(v).strip().upper()
-    return ""
+        n = normalize_po(str(v)) if v and str(v).strip() else ""
+        if n and n not in out:
+            out.append(n)
+    return out
+
+
+def _order_number_of(doc: dict, normalized: dict, routing_details: dict) -> str:
+    found = _order_numbers_of(doc, normalized, routing_details)
+    return found[0] if found else ""
 
 
 def _is_dunnage_related(description: str) -> bool:

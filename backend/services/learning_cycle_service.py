@@ -48,6 +48,11 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["bc_reconciliation"] = await reconcile_recent(db)
     except Exception as e:
         summary["bc_reconciliation"] = {"error": repr(e)}
+    try:
+        from services.invoice_number_rules_service import learn_and_apply
+        summary["invoice_number_rules"] = await learn_and_apply(db)
+    except Exception as e:
+        summary["invoice_number_rules"] = {"error": repr(e)}
     for key, args in (
         ("bc_vendor_learning", ("scripts/bc_vendor_learning.py", "--apply")),
         ("invoice_duplicates", ("scripts/mark_invoice_duplicates.py", "--since",

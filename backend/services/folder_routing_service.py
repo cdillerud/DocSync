@@ -1586,6 +1586,27 @@ async def route_with_feedback(
                 doc["_vendor_lane_profile"] = prof
         except Exception:
             pass
+    if (doc.get("batch_parent_id") and "_text_order_refs" not in doc
+            and not _order_numbers_of(doc, {}, doc.get("routing_details") or {})
+            and not doc.get("gamer_order_refs")):
+        # A split piece with no order of its own (an invoice's second page)
+        # takes the W-orders of its sibling pieces and parent: Evergreen
+        # _doc2 pieces of W-order invoices went to Dropship.
+        try:
+            from deps import get_db
+            refs = set()
+            pid = doc["batch_parent_id"]
+            async for sib in get_db().hub_documents.find(
+                    {"$or": [{"batch_parent_id": pid}, {"id": pid}], "id": {"$ne": doc.get("id")}},
+                    {"_id": 0, "po_number_clean": 1, "po_number_extracted": 1, "extracted_fields.po_number": 1,
+                     "extracted_fields.order_number": 1, "gamer_order_refs": 1, "bc_link.bc_order_number": 1}).limit(50):
+                for o in _order_numbers_of(sib, {}, {}) + list(sib.get("gamer_order_refs") or []):
+                    if _WAREHOUSE_ORDER_PREFIX.match(str(o)):
+                        refs.add(str(o).upper())
+            if refs:
+                doc["_text_order_refs"] = sorted(refs)
+        except Exception:
+            pass
     if "_order_lane_votes" not in doc:
         try:
             from deps import get_db

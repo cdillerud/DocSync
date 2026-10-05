@@ -45,7 +45,7 @@ async def m():
     learned = {}
     for key, c in maps.items():
         n = sum(c.values()); top, cnt = c.most_common(1)[0]
-        if n >= 5 and cnt / n >= 0.9:
+        if (n >= 5 and cnt / n >= 0.9) or (n >= 3 and cnt == n):
             learned[key] = top
     now = datetime.now(timezone.utc).isoformat()
     alias_new = docs_fixed = 0; per = collections.Counter()

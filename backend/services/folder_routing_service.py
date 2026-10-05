@@ -1641,6 +1641,25 @@ async def route_with_feedback(
         # (Ball ships both ways); with an order number the rules decide it.
         logger.info("[Routing] order number present; ignoring vendor-level lane rule %r", feedback_folder)
         feedback_folder = None
+    if feedback_folder and _lane_root(feedback_folder) in _LANE_ROOTS:
+        # A learned vendor-level lane loses to BC (this invoice's location
+        # code, its order's other invoices) and to the vendor's staff-filing
+        # profile when they point the other way (O-I: a feedback rule said
+        # Warehouse; staff file O-I 88% dropship).
+        fb_wh = str(feedback_folder).strip("/").lower().startswith("warehouse")
+        bl = doc.get("bc_link") if isinstance(doc.get("bc_link"), dict) else {}
+        votes = doc.get("_order_lane_votes") or {}
+        prof = _lane_profile(doc)
+        other = None
+        if bl.get("bc_location_lane"):
+            other = bl["bc_location_lane"] == "warehouse"
+        elif votes and len(votes) == 1:
+            other = "warehouse" in votes
+        elif prof and abs(prof.get("warehouse_share", 0.5) - 0.5) >= 0.25:
+            other = prof["warehouse_share"] > 0.5
+        if other is not None and other != fb_wh:
+            logger.info("[Routing] BC/staff lane evidence contradicts learned lane rule %r; ignoring it", feedback_folder)
+            feedback_folder = None
 
     if feedback_folder:
         normalized_feedback = str(feedback_folder).strip("/").casefold()

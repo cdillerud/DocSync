@@ -20,6 +20,14 @@ MAX_ATTEMPTS = 2
 STOP_AFTER_CONSECUTIVE_EMPTY = 5
 
 
+def _has_extraction(fields) -> bool:
+    """Any AI-extracted value. Keys starting with "_" are added later by PO
+    resolution (_po_all_candidates), so they do not count: 162 of the 205
+    outage documents carried only those."""
+    return any(v not in (None, "", [], {}, False)
+               for k, v in (fields or {}).items() if not str(k).startswith("_"))
+
+
 async def retry_failed_extractions(db, days: int = 7, limit: int = 60, delay_seconds: float = 2.0) -> Dict[str, Any]:
     from services.document_reprocess_service import reprocess_document
 
@@ -30,12 +38,16 @@ async def retry_failed_extractions(db, days: int = 7, limit: int = 60, delay_sec
         "status": {"$nin": ["batch_parent", "Posted"]},
         "is_duplicate": {"$ne": True},
         "file_content_b64": {"$exists": True, "$ne": None},
-        "$and": [
-            {"$or": [{"extracted_fields": {}}, {"extracted_fields": None}, {"extracted_fields": {"$exists": False}}]},
-            {"$or": [{"extraction_retry_count": {"$exists": False}}, {"extraction_retry_count": {"$lt": MAX_ATTEMPTS}}]},
-        ],
+        "amount_float": None,
+        "invoice_number_clean": {"$in": [None, ""]},
+        "$or": [{"extraction_retry_count": {"$exists": False}}, {"extraction_retry_count": {"$lt": MAX_ATTEMPTS}}],
     }
-    ids = [d["id"] async for d in db.hub_documents.find(query, {"_id": 0, "id": 1}).limit(limit)]
+    ids = []
+    async for d in db.hub_documents.find(query, {"_id": 0, "id": 1, "extracted_fields": 1}):
+        if not _has_extraction(d.get("extracted_fields")):
+            ids.append(d["id"])
+            if len(ids) >= limit:
+                break
     stats = {"candidates": len(ids), "recovered": 0, "still_empty": 0, "errors": 0, "stopped_early": False}
     empty_streak = 0
     for doc_id in ids:
@@ -45,7 +57,7 @@ async def retry_failed_extractions(db, days: int = 7, limit: int = 60, delay_sec
             stats["errors"] += 1
             logger.warning("[ExtractionRetry] %s failed: %r", doc_id[:8], exc)
         doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "extracted_fields": 1})
-        recovered = any((doc or {}).get("extracted_fields", {}) and (doc or {}).get("extracted_fields", {}).values())
+        recovered = _has_extraction((doc or {}).get("extracted_fields"))
         await db.hub_documents.update_one(
             {"id": doc_id},
             {"$inc": {"extraction_retry_count": 1},

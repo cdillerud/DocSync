@@ -1398,8 +1398,14 @@ def record_bc_entry_coverage(days_back: int = 14) -> Dict[str, Any]:
             keys = {_bc_norm(h.get("invoice_number_clean")),
                     _bc_norm((h.get("extracted_fields") or {}).get("invoice_number"))}
             for src in (h.get("file_name"), h.get("email_subject")):
-                for tok in re.findall(r"[A-Za-z]*\d[\dA-Za-z\-]{3,}", str(src or "")):
-                    keys.add(_bc_norm(tok))
+                # Whole hyphenated tokens too: "PS-INV261136" (Evergreen).
+                for tok in re.findall(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*", str(src or "")):
+                    if re.search(r"\d", tok):
+                        keys.add(_bc_norm(tok))
+            for k in list(keys):
+                tail = re.sub(r"\D", "", k)
+                if len(tail) >= 8:
+                    keys.add("D:" + tail[-8:])
             for k in keys:
                 if len(k) >= 4:
                     index.setdefault(k, []).append(h)
@@ -1414,6 +1420,14 @@ def record_bc_entry_coverage(days_back: int = 14) -> Dict[str, Any]:
             m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", inv)
             if m:
                 variants.add(m.group(1))
+            # BC suffixes like "14333_DIGI" (Canworks): the leading number.
+            m = re.match(r"(\d{4,})[_\-][A-Za-z]+$", str(d.get("bc_external_document_no") or "").strip())
+            if m:
+                variants.add(_bc_norm(m.group(1)))
+            # OCR reads R+L's leading "I"/"D" as "1": same 8-digit tail.
+            tail = re.sub(r"\D", "", inv)
+            if len(tail) >= 8:
+                variants.add("D:" + tail[-8:])
             found = False
             for v in (x for x in variants if len(x) >= 4):
                 for h in index.get(v, []):

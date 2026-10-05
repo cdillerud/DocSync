@@ -208,6 +208,25 @@ async def reprocess_document_inner(
                     }
                 },
             )
+            # refresh_flat_fields: intake derives amount_float,
+            # invoice_number_clean, po_number_clean, vendor_canonical, ... from
+            # the extraction; reprocess re-extracted but never re-derived them,
+            # so a document whose first extraction failed (205 on 2026-09-21/22,
+            # AI budget errors) kept empty fields after a successful reprocess.
+            try:
+                flat = compute_ap_normalized_fields(classification.get("extracted_fields") or {}, file_name=doc.get("file_name"))
+                if flat:
+                    refresh = {k: v for k, v in flat.items() if v not in (None, "", [])}
+                    refresh["normalized_fields"] = flat
+                    if not doc.get("vendor_canonical") and flat.get("vendor_normalized"):
+                        from services.vendor_matching import lookup_vendor_alias
+                        alias = await lookup_vendor_alias(flat["vendor_normalized"]) or {}
+                        if alias.get("vendor_canonical"):
+                            refresh["vendor_canonical"] = alias["vendor_canonical"]
+                            refresh["vendor_match_method"] = alias.get("vendor_match_method")
+                    await db.hub_documents.update_one({"id": doc_id}, {"$set": refresh})
+            except Exception as exc:
+                logger.warning("[REPROCESS] flat-field refresh failed for %s: %r", doc_id[:8], exc)
             doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
         except Exception as exc:
             logger.error(

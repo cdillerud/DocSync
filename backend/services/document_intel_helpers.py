@@ -788,7 +788,23 @@ def normalize_extracted_fields(fields: dict) -> dict:
     return normalized
 
 
-def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
+def invoice_number_from_name(name):
+    """Invoice number carried by a file name/subject when extraction missed
+    it. Only two unambiguous shapes: the whole name is one number
+    ("0313384.pdf", Tumalo), or the name says "invoice" and has exactly one
+    7+ digit run that is not a date ("Gamer - Giovanni 0051587525 O-I
+    Invoice.PDF", O-I)."""
+    base = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", str(name or "")).strip()
+    if re.fullmatch(r"\d{6,12}", base):
+        return base
+    if not re.search(r"invoice", base, re.I):
+        return None
+    runs = [r for r in re.findall(r"(?<![0-9A-Za-z])(\d{7,12})(?![0-9])", base)
+            if not re.fullmatch(r"(?:19|20)\d{6}|\d{2}\d{2}20\d{2}|\d{1,2}\d{2}20\d{2}", r)]
+    return runs[0] if len(runs) == 1 else None
+
+
+def compute_ap_normalized_fields(extracted_fields: dict, file_name: str = None) -> dict:
     """
     Compute normalized fields for AP_Invoice documents.
 
@@ -819,10 +835,18 @@ def compute_ap_normalized_fields(extracted_fields: dict) -> dict:
         inv_str = str(invoice_num).strip()
         result["invoice_number_raw"] = inv_str
         clean = re.sub(r"[\s,]+", "", inv_str).upper()
-        result["invoice_number_clean"] = clean
+        # A label the extractor captured instead of the value ("Invoice",
+        # "AND", "DATE": ~125 docs since 2026-08, Tumalo and O-I mostly) is not
+        # an invoice number; a real one always has a digit.
+        result["invoice_number_clean"] = clean if re.search(r"\d", clean) else None
     else:
         result["invoice_number_raw"] = None
         result["invoice_number_clean"] = None
+    if not result.get("invoice_number_clean") and file_name:
+        from_name = invoice_number_from_name(file_name)
+        if from_name:
+            result["invoice_number_clean"] = from_name.upper()
+            result["invoice_number_source"] = "file_name"
 
     # Amount parsing to float
     amount = extracted_fields.get("amount")

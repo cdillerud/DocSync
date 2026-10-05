@@ -375,6 +375,12 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
         )
         if triggered_by == "daily_schedule" and ROUTING_LEARNING_ENABLED:
             await _run_routing_learning()
+        if triggered_by == "daily_schedule":
+            try:
+                from services.extraction_retry_service import retry_failed_extractions
+                await retry_failed_extractions(db)
+            except Exception as e:
+                logger.warning("[extraction-retry] failed: %r", e)
     except Exception as e:
         logger.exception("[readiness-check] unexpected failure")
         await _set_run_status(

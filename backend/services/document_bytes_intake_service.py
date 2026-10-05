@@ -376,7 +376,7 @@ async def intake_document_from_bytes(
 
     # Phase 7: Compute normalized fields (flat, stored on document)
     try:
-        normalized_fields = compute_ap_normalized_fields(extracted_fields)
+        normalized_fields = compute_ap_normalized_fields(extracted_fields, file_name=filename)
     except Exception as norm_err:
         logger.warning("Normalized fields computation failed for %s: %s", doc_id, str(norm_err))
         normalized_fields = {}
@@ -736,6 +736,10 @@ async def intake_document_from_bytes(
     # Add AI classification audit trail if AI was invoked
     if ai_classification_audit:
         update_data["ai_classification"] = ai_classification_audit
+    # Keep the extraction error: without it a failed extraction looked like
+    # an empty document (2026-09-21/22 AI budget outage).
+    if classification.get("error"):
+        update_data["extraction_error"] = str(classification.get("error"))[:500]
 
     # Phase 8: Save Spiro context to document (Shadow Mode)
     if spiro_context_dict:

@@ -228,6 +228,18 @@ async def _vendor_candidates_uncached(vendor: str) -> List[Dict[str, Any]]:
             id_counts[value] = id_counts.get(value, 0) + 1
     floor = max(3, (len(doc_rows) + 1) // 2)
     dominant_ids = {value for value, n in id_counts.items() if n >= floor}
+    # Name variants need the same support: a forwarder invoice tagged VIDRALA
+    # but extracted as "SGC Solutions" made SGC an alias of Vidrala.
+    def _row_names(row):
+        ex = row.get("extracted_fields") or {}
+        nf = row.get("normalized_fields") or {}
+        return {_normalize_vendor(str(v)) for v in (row.get("vendor_raw"), row.get("vendor_normalized"),
+                                                     ex.get("vendor"), nf.get("vendor")) if v}
+    name_counts: Dict[str, int] = {}
+    for row in doc_rows:
+        for name in _row_names(row):
+            name_counts[name] = name_counts.get(name, 0) + 1
+    name_floor = max(2, len(doc_rows) // 5)
     for row in doc_rows:
         row_ids = {str(row.get(k)).strip().upper() for k in id_keys if row.get(k)}
         if not row_ids or not row_ids <= dominant_ids:
@@ -242,7 +254,8 @@ async def _vendor_candidates_uncached(vendor: str) -> List[Dict[str, Any]]:
             (extracted.get("vendor"), "hub_documents.extracted_fields.vendor"),
             (normalized.get("vendor"), "hub_documents.normalized_fields.vendor"),
         ):
-            _append_candidate(candidates, seen, value, source=source)
+            if value and name_counts.get(_normalize_vendor(str(value)), 0) >= name_floor:
+                _append_candidate(candidates, seen, value, source=source)
 
     # Stable IDs first for new records; exact input remains available for legacy
     # key matching and is preferred when equally confident rules exist.

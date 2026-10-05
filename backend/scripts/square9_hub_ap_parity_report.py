@@ -186,6 +186,8 @@ def _invoice_dates_close(a: Optional[datetime], b: Optional[datetime],
 # Hub-side document model
 # ---------------------------------------------------------------------------
 
+
+
 @dataclass
 class HubDoc:
     raw: Dict[str, Any]
@@ -433,8 +435,12 @@ def score_pair(sq: SquareDoc, hub: HubDoc,
         )
 
     if (sq_vendors & hub_vendors) and _date_close_days(sq.modified, hub.created_utc, 7):
+        # Same vendor in the same week is not evidence of the same document:
+        # on 2026-10-05, 12 of 13 such pairings were wrong (a Rotondo receipt
+        # vs an activity report, an inventory sheet vs a freight invoice).
+        # Reported for diagnosis but not counted as caught.
         return MatchResult(
-            "possible_match", 0.50, "vendor_token+close_date_7d", bd
+            "no_match", 0.50, "weak_candidate:vendor_token+close_date_7d", bd
         )
 
     # 5. Fuzzy filename ratio fallback
@@ -446,7 +452,7 @@ def score_pair(sq: SquareDoc, hub: HubDoc,
         sq.modified, hub.created_utc, 14
     ):
         return MatchResult(
-            "possible_match", 0.45, "multi_vendor_token+close_date_14d", bd
+            "no_match", 0.45, "weak_candidate:multi_vendor_token+close_date_14d", bd
         )
 
     return MatchResult("no_match", 0.0, "no_evidence", bd)
@@ -466,6 +472,43 @@ def best_match(sq: SquareDoc, hubs: List[HubDoc],
         if best_res.bucket == "exact_match":
             break
     return best_doc, best_res
+
+
+
+def _assign_one_to_one(square_docs: List["SquareDoc"], hub_docs: List["HubDoc"],
+                       invoice_date_tolerance_days: Optional[int] = None):
+    """Match each Square9 doc to at most one Hub doc and vice versa.
+
+    best_match() scored every Square9 doc against every Hub doc
+    independently, so one Hub doc could "catch" several Square9 docs (found
+    2026-10-05: a single "GAMER product listing" file claimed 7 Rotondo
+    receipts on vendor + date alone; 14 of 127 catches were such repeat
+    claims). Pairs are now assigned greedily, strongest bucket and score
+    first; a Square9 doc whose best Hub doc is taken falls back to its next
+    best free candidate, or no_match. Mirrors the one-to-one rule the LLM
+    assist pass already applies.
+    """
+    pairs = []
+    for i, sq in enumerate(square_docs):
+        for h in hub_docs:
+            r = score_pair(sq, h, invoice_date_tolerance_days=invoice_date_tolerance_days)
+            if r.bucket != "no_match":
+                pairs.append((BUCKET_ORDER[r.bucket], r.score, i, h, r))
+    pairs.sort(key=lambda t: (t[0], t[1]), reverse=True)
+    assigned: Dict[int, Tuple["HubDoc", MatchResult]] = {}
+    claimed: set = set()
+    for _, _, i, h, r in pairs:
+        if i in assigned or h.doc_id in claimed:
+            continue
+        assigned[i] = (h, r)
+        claimed.add(h.doc_id)
+    out = []
+    for i, sq in enumerate(square_docs):
+        if i in assigned:
+            out.append((sq,) + assigned[i])
+        else:
+            out.append((sq, None, MatchResult("no_match", 0.0, "no_evidence", {})))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1075,8 +1118,7 @@ def run_compare(
     # (square_doc, index into `rows`) for every row the deterministic
     # matcher left as no_match — candidates for the optional LLM pass.
     no_match_entries: List[Tuple[SquareDoc, int]] = []
-    for sq in square_docs:
-        hub, res = best_match(sq, hub_docs, invoice_date_tolerance_days=inv_tol)
+    for sq, hub, res in _assign_one_to_one(square_docs, hub_docs, invoice_date_tolerance_days=inv_tol):
         rows.append(_row_for(sq, hub if res.bucket != "no_match" else None, res))
         bucket_counts[res.bucket] = bucket_counts.get(res.bucket, 0) + 1
         if hub is not None and res.bucket != "no_match":

@@ -456,7 +456,7 @@ async def get_readiness_run_status():
 # bug (Hub docs older than the newest 500 were dropped), so earlier values
 # understate the rate and are not comparable. The trend starts there.
 READINESS_DAILY_HOUR_UTC = int(os.environ.get("SQUARE9_READINESS_DAILY_HOUR_UTC", "11"))  # 6 AM Central
-MEASUREMENT_FIXED_DATE = "2026-10-01"
+MEASUREMENT_FIXED_DATE = "2026-10-05"  # 10-05: one-to-one matching, vendor+date no longer counts
 _SCHEDULE_META_ID = "daily_schedule"
 
 

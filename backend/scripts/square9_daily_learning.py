@@ -29,8 +29,8 @@ sys.path.insert(0, "scripts")
 
 TRUSTED = {"exact_match", "strong_evidence_match"}
 NON_FINAL_FOLDERS = {"temp folder"}
-MIN_AGREEING = 2
-SUPERSEDE_MARGIN = 2   # votes needed beyond a rule's own support to replace it            # a new rule needs this many agreeing filings in the run
+MIN_AGREEING = 2            # a new rule needs this many agreeing filings in the run
+SUPERSEDE_MARGIN = 2   # votes needed beyond a rule's own support to replace it
 JUNK_VENDORS = {"account", "unknown", "vendor", "n/a", "none"}
 
 

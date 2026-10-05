@@ -972,6 +972,17 @@ SQUARE9_WORKING_ROOTS = {
 }
 
 
+_LANE_ROOTS = {"dropship international", "dropship not international",
+               "warehouse international", "warehouse not international"}
+
+
+def _lane_root(path: Optional[str]) -> str:
+    p = (path or "").strip("/")
+    if p.lower().startswith("temp folder/"):
+        p = p[12:]
+    return p.split("/")[0].strip().lower()
+
+
 def _is_working_folder(path: Optional[str]) -> bool:
     p = (path or "").strip("/")
     if p.lower().startswith("temp folder/"):
@@ -1317,6 +1328,11 @@ async def route_with_feedback(
 
     if feedback_folder and not _is_working_folder(feedback_folder):
         logger.info("[Routing] ignoring learned folder outside Square9 working folders: %r", feedback_folder)
+        feedback_folder = None
+    if feedback_folder and _lane_root(feedback_folder) in _LANE_ROOTS and _order_number_of(doc, {}, doc.get("routing_details") or {}):
+        # Warehouse vs dropship is a property of the order, not the vendor
+        # (Ball ships both ways); with an order number the rules decide it.
+        logger.info("[Routing] order number present; ignoring vendor-level lane rule %r", feedback_folder)
         feedback_folder = None
 
     if feedback_folder:

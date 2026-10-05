@@ -29,6 +29,8 @@ sys.path.insert(0, "scripts")
 
 TRUSTED = {"exact_match", "strong_evidence_match"}
 NON_FINAL_FOLDERS = {"temp folder"}
+MIN_AGREEING = 2            # a new rule needs this many agreeing filings in the run
+JUNK_VENDORS = {"account", "unknown", "vendor", "n/a", "none"}
 
 
 def _folder_root(parent_path: str) -> str:
@@ -47,33 +49,47 @@ async def main() -> int:
     import deps
     db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
     deps.set_db(db)
-    from services.routing_feedback_service import record_correction, _make_routing_key  # noqa
+    from services.routing_feedback_service import record_correction, _make_routing_key, init_feedback_db  # noqa
+    init_feedback_db(db)
+
+    from services.folder_routing_service import _is_working_folder
 
     rows = [r for r in csv.DictReader(open(args.csv)) if r.get("match_bucket") in TRUSTED]
     created = strengthened = skipped = 0
     conflicts, proposed = [], {}
     now = datetime.now(timezone.utc).isoformat()
 
+    # Pass 1: collect every trusted observation per routing key.
+    observations = {}
     for r in rows:
         hub = await db.hub_documents.find_one(
             {"id": r.get("hub_doc_id")},
             {"_id": 0, "vendor_canonical": 1, "doc_type": 1, "po_number_clean": 1, "is_international": 1, "file_name": 1})
         vendor = ((hub or {}).get("vendor_canonical") or "").strip()
         folder = _folder_root(r.get("square9_parent_path", ""))
-        if not hub or not vendor or not folder or folder.lower() in NON_FINAL_FOLDERS:
+        if (not hub or len(vendor) < 3 or vendor.lower() in JUNK_VENDORS or not folder
+                or folder.lower() in NON_FINAL_FOLDERS or not _is_working_folder(folder)):
             skipped += 1
             continue
         doc_type = (hub.get("doc_type") or "Unknown").strip()
         has_po = bool(hub.get("po_number_clean"))
         intl = bool(hub.get("is_international"))
         key = _make_routing_key(vendor, doc_type, has_po, intl)
+        observations.setdefault(key, []).append((folder, vendor, doc_type, has_po, intl, hub, r))
+
+    # Pass 2: decide per key. Disagreement in the run -> conflict; a new rule
+    # needs MIN_AGREEING agreeing filings.
+    for key, obs in observations.items():
+        folders = {o[0].lower() for o in obs}
+        folder, vendor, doc_type, has_po, intl, hub, r = obs[0]
+        if len(folders) > 1:
+            conflicts.append((key, sorted(folders), "(mixed within run)", r.get("square9_name", "")))
+            continue
 
         existing = await db.routing_feedback.find_one({"routing_key": key})
         clash = None
         if existing and (existing.get("correct_folder") or "").lower() != folder.lower():
             clash = existing.get("correct_folder")
-        elif key in proposed and proposed[key].lower() != folder.lower():
-            clash = f"{proposed[key]} (another pair this run)"
         if clash:
             conflicts.append((key, clash, folder, r.get("square9_name", "")))
             if apply:
@@ -85,11 +101,17 @@ async def main() -> int:
                      "$inc": {"seen": 1}},
                     upsert=True)
             continue
-        proposed[key] = folder
+        if not existing and len(obs) < MIN_AGREEING:
+            skipped += 1
+            continue
         if apply:
-            await record_correction(vendor=vendor, doc_type=doc_type, has_po=has_po, is_international=intl,
-                                    correct_folder=folder, file_name=hub.get("file_name", ""),
-                                    source="square9_daily_learning")
+            res = await record_correction(vendor=vendor, doc_type=doc_type, has_po=has_po, is_international=intl,
+                                          correct_folder=folder, file_name=hub.get("file_name", ""),
+                                          source="square9_daily_learning")
+            if res.get("status") not in ("created", "strengthened"):
+                print(f"  NOT APPLIED {key}: {res}")
+                skipped += 1
+                continue
         if existing:
             strengthened += 1
         else:

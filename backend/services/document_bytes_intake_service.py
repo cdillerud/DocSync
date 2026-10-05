@@ -355,6 +355,18 @@ async def intake_document_from_bytes(
                 doc_id, suggested_type, new_suggested, classification_method
             )
             suggested_type = new_suggested
+    if suggested_type in ("AP_Invoice", "AP_INVOICE"):
+        try:
+            import io as _io
+            from pypdf import PdfReader as _PdfReader
+            from services.document_intel_helpers import looks_like_statement
+            _text = " ".join((pg.extract_text() or "") for pg in _PdfReader(_io.BytesIO(file_content)).pages[:2])                 if filename.lower().endswith(".pdf") else ""
+            _subject = (doc or {}).get("email_subject") or ""
+            if looks_like_statement(filename, _subject, _text):
+                logger.info("Document %s is a vendor statement, not an invoice", doc_id)
+                suggested_type = "Statement"
+        except Exception as _stmt_err:
+            logger.debug("Statement check skipped for %s: %r", doc_id, _stmt_err)
     # The AI sometimes returns the legacy all-caps value itself (auto-split
     # pages: 63 AP_INVOICE/SALES_INVOICE since 2026-08), which no rule matches.
     suggested_type = _DOC_TYPE_TO_SUGGESTED.get(suggested_type, suggested_type)

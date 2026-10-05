@@ -804,6 +804,22 @@ def invoice_number_from_name(name):
     return runs[0] if len(runs) == 1 else None
 
 
+
+_STATEMENT_NAME = re.compile(r"statement", re.I)
+_STATEMENT_TEXT = re.compile(r"statement of account|account statement|customer statement|aging (?:summary|report)"
+                             r"|balance forward|amount due by age|current\s+1-30|0-30\s+31-60", re.I)
+
+
+def looks_like_statement(file_name: str, subject: str, text: str) -> bool:
+    """A vendor account statement, not an invoice: the file name or subject
+    says "statement" AND the document text has statement markers (aging
+    buckets, balance forward). Either alone is not enough: Straitlink
+    invoices carry a statement section, and many invoice subjects mention
+    statements. Found 2026-10-05: 20 statements typed AP_Invoice, e.g. an
+    APTAR account statement of 330,657.94, which would look payable."""
+    return bool(_STATEMENT_NAME.search(f"{file_name or ''} {subject or ''}")) and bool(_STATEMENT_TEXT.search(text or ""))
+
+
 def compute_ap_normalized_fields(extracted_fields: dict, file_name: str = None) -> dict:
     """
     Compute normalized fields for AP_Invoice documents.

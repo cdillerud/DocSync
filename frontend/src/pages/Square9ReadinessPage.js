@@ -434,6 +434,7 @@ export default function Square9ReadinessPage() {
                       <th className="py-1 pr-3 text-right">Invoices in BC</th>
                       <th className="py-1 pr-3 text-right">Invoice # right</th>
                       <th className="py-1 pr-3 text-right">Vendor right</th>
+                      <th className="py-1 pr-3 text-right">PO right</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -443,6 +444,7 @@ export default function Square9ReadinessPage() {
                         <td className="py-1 pr-3 text-right">{r.documents}</td>
                         <td className="py-1 pr-3 text-right">{r.invoice_number_pct}%</td>
                         <td className="py-1 pr-3 text-right">{r.vendor_pct}%</td>
+                        <td className="py-1 pr-3 text-right">{r.po_pct == null ? '—' : `${r.po_pct}%`}</td>
                       </tr>
                     ))}
                   </tbody>

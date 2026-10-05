@@ -623,11 +623,14 @@ async def get_learning_summary():
             {"$match": {"created_utc": {"$gte": fp_since}, "bc_link.first_pass": {"$exists": True}}},
             {"$group": {"_id": {"$substr": ["$created_utc", 0, 10]}, "n": {"$sum": 1},
                         "inv": {"$sum": {"$cond": ["$bc_link.first_pass.invoice_number_ok", 1, 0]}},
-                        "vend": {"$sum": {"$cond": ["$bc_link.first_pass.vendor_ok", 1, 0]}}}},
+                        "vend": {"$sum": {"$cond": ["$bc_link.first_pass.vendor_ok", 1, 0]}},
+                        "po_n": {"$sum": {"$cond": [{"$ne": [{"$ifNull": ["$bc_link.first_pass.po_ok", None]}, None]}, 1, 0]}},
+                        "po": {"$sum": {"$cond": [{"$eq": ["$bc_link.first_pass.po_ok", True]}, 1, 0]}}}},
             {"$sort": {"_id": 1}}]):
         first_pass.append({"date": row["_id"], "documents": row["n"],
                            "invoice_number_pct": round(100 * row["inv"] / row["n"], 1),
-                           "vendor_pct": round(100 * row["vend"] / row["n"], 1)})
+                           "vendor_pct": round(100 * row["vend"] / row["n"], 1),
+                           "po_pct": round(100 * row["po"] / row["po_n"], 1) if row["po_n"] else None})
     return {"last_cycle": last, "bc_reconciliation": recon, "corrections_7d": corrections,
             "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud, "first_pass_by_day": first_pass}
 

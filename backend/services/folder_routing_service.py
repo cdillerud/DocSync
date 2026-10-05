@@ -732,8 +732,20 @@ def _determine_folder_path_core(
             routing_details,
         )
 
-    # RULE 5.5: Inspection Forms → Vendor Credit Memos / Sent to Quality
+    # RULE 5.5: Inspection Forms → Vendor Credit Memos / Sent to Quality,
+    # unless the vendor has a decisive lane: staff filed 0 of 10 inspection
+    # forms (Citi Cargo shipping/dunnage reports) in Sent to Quality and 9
+    # under Warehouse Not International (45 days to 2026-10-05).
     if doc_type == "Inspection_Form":
+        _ilane = _lane_profile(doc)
+        if _ilane and _ilane.get("warehouse_share", 0.5) >= 1 - LANE_PROFILE_MINORITY:
+            _intl = _ilane.get("intl_share", 0.0) >= 1 - LANE_PROFILE_MINORITY
+            return (
+                "Warehouse International" if _intl else
+                f"Warehouse Not International/{_get_warehouse_subfolder(vendor_name, order_number, doc)}",
+                "Inspection form from a warehouse-lane vendor (staff file these in the lane)",
+                routing_details,
+            )
         return (
             "Vendor Credit Memos/Sent to Quality",
             "Inspection form → Sent to Quality",
@@ -800,6 +812,8 @@ def _determine_folder_path_core(
             if freight_direction == "outbound":
                 path = "Warehouse International"
                 return (path, "Outbound international shipment", routing_details)
+            if _is_warehouse_order(doc):
+                return ("Warehouse International", "International warehouse shipment document", routing_details)
             path = "Dropship International"
             return (path, "International shipment document", routing_details)
 

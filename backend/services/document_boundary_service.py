@@ -67,7 +67,9 @@ _DOCUMENT_START_PATTERNS = [
 
 # Extract invoice/PO/BOL numbers
 _REF_NUMBER_PATTERNS = [
-    ("invoice_no", re.compile(r"(?:INVOICE|INV)[\s#.:]*([A-Z0-9][\w-]{2,20})", re.IGNORECASE)),
+    # Skip the label word after INVOICE ("Invoice No: 1101621810", "Invoice Number #"),
+    # otherwise "No"/"Number" was taken as the value.
+    ("invoice_no", re.compile(r"(?:INVOICE|INV)(?:\s*(?:NUMBER|NUM\.?|NO\.?|#))?[\s#.:]*([A-Z0-9][\w-]{2,20})", re.IGNORECASE)),
     ("po_no", re.compile(r"(?:P\.?\s*O\.?\s*#|PURCHASE\s+ORDER\s*#?)\s*:?\s*([A-Z0-9][\w-]{2,20})", re.IGNORECASE)),
     ("bol_no", re.compile(r"(?:BOL|B/L|BILL\s+OF\s+LADING)[\s#.:]*([A-Z0-9][\w-]{2,20})", re.IGNORECASE)),
 ]

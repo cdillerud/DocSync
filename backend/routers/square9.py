@@ -390,6 +390,16 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
                 logger.info("[bc-vendor-learning] %s", out.decode("utf-8", "replace").splitlines()[:1])
             except Exception as e:
                 logger.warning("[bc-vendor-learning] failed: %r", e)
+            try:
+                since = (datetime.now(timezone.utc) - timedelta(days=14)).date().isoformat()
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", "scripts/mark_invoice_duplicates.py", "--since", since, "--apply",
+                    cwd=READINESS_APP_DIR, env={**os.environ, "PYTHONPATH": READINESS_APP_DIR},
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
+                logger.info("[invoice-duplicates] %s", out.decode("utf-8", "replace").splitlines()[-1:])
+            except Exception as e:
+                logger.warning("[invoice-duplicates] failed: %r", e)
     except Exception as e:
         logger.exception("[readiness-check] unexpected failure")
         await _set_run_status(

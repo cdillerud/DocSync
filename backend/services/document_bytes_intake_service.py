@@ -748,6 +748,25 @@ async def intake_document_from_bytes(
     # Add AI classification audit trail if AI was invoked
     if ai_classification_audit:
         update_data["ai_classification"] = ai_classification_audit
+    # Gamer order numbers (W/WA/WR/WTR) printed in the file name or PDF:
+    # extraction often keeps a vendor/customer reference instead (P0028560
+    # on "P0028560-3 - W118881 ..."), leaving shipping documents unlinked
+    # to their order (70 of 100 unlinked Operations docs, 2026-09).
+    try:
+        import io as _io
+        from pypdf import PdfReader as _PdfReader
+        from services.folder_routing_service import _TEXT_ORDER_REF
+        _txt = filename.upper()
+        if filename.lower().endswith(".pdf"):
+            _txt += " " + " ".join((pg.extract_text() or "") for pg in _PdfReader(_io.BytesIO(file_content)).pages[:3]).upper()
+        _refs = sorted({m.replace("-", "") for m in _TEXT_ORDER_REF.findall(_txt)})
+        update_data["gamer_order_refs"] = _refs
+        if _refs:
+            _known = await db.bc_reference_cache.distinct("bc_document_no", {
+                "bc_entity_type": {"$in": ["purchase_order", "sales_order"]}, "bc_document_no": {"$in": _refs}})
+            update_data["bc_order_refs"] = sorted(_known)
+    except Exception as _ref_err:
+        logger.debug("Order ref scan skipped for %s: %r", doc_id, _ref_err)
     try:
         from services.fraud_signal_service import assess_fraud_risk
         update_data["fraud_risk"] = await assess_fraud_risk(db, {**(existing_doc or {}), **update_data,

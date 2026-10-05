@@ -1397,7 +1397,7 @@ def _pdf_text(doc: dict) -> str:
 
 _TEXT_CREDIT_DOC = re.compile(r"\bcredit\s+(?:memo|note|invoice)\b", re.I)
 _TEXT_GAMER_NUMERIC_ORDER = re.compile(r"(?<![0-9])1[0-2]\d{4}(?![0-9])")
-LANE_PROFILE_MIN_FILINGS = 5
+LANE_PROFILE_MIN_FILINGS = 3
 LANE_PROFILE_MINORITY = 0.05
 
 

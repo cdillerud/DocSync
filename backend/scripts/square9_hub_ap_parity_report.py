@@ -1383,7 +1383,7 @@ def record_bc_entry_coverage(days_back: int = 14) -> Dict[str, Any]:
         bc: Dict[Any, Dict[str, Any]] = {}
         for t in ("posted_purchase_invoice", "draft_purchase_invoice"):
             for d in db.bc_reference_cache.find(
-                    {"bc_entity_type": t, "bc_posting_date": {"$gte": since}},
+                    {"bc_entity_type": t, "bc_posting_date": {"$gte": since}, "bc_status": {"$ne": "Canceled"}},
                     {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_external_document_no": 1,
                      "bc_amount": 1, "bc_posting_date": 1}):
                 key = (d.get("bc_vendor_no"), _bc_norm(d.get("bc_external_document_no")))

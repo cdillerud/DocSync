@@ -138,6 +138,8 @@ async def main() -> int:
                 # rule's own support by SUPERSEDE_MARGIN.
                 votes = int(((conflict or {}).get("votes") or {}).get(folder.replace(".", "_"), 0))
                 support = int(existing.get("confidence", 1)) if existing else 0
+                if existing and not _is_working_folder(existing.get("correct_folder")):
+                    support = 0  # a dead (archive-folder) rule routes nothing; votes alone decide
                 if existing and votes >= support + SUPERSEDE_MARGIN:
                     await db.routing_feedback_rekey_backup.insert_one(
                         {k: v for k, v in existing.items() if k != "_id"}

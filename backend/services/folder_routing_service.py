@@ -1342,8 +1342,11 @@ def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> lis
     from services.po_resolution_service import normalize_po
     ef = doc.get("extracted_fields") or {}
     out = []
+    # The Gamer order on the BC purchase invoice this document became
+    # (bc_reconciliation_service) is ground truth when extraction missed it.
+    bc_order = (doc.get("bc_link") or {}).get("bc_order_number") if isinstance(doc.get("bc_link"), dict) else None
     for v in (doc.get("po_number_clean"), doc.get("po_number_extracted"), normalized.get("po_number"),
-              ef.get("po_number"), ef.get("order_number"), routing_details.get("order_number")):
+              ef.get("po_number"), ef.get("order_number"), routing_details.get("order_number"), bc_order):
         n = normalize_po(str(v)) if v and str(v).strip() else ""
         if n and n not in out:
             out.append(n)

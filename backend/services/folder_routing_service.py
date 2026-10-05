@@ -1314,7 +1314,13 @@ def _is_warehouse_order(doc: dict) -> bool:
     if lane and lane["warehouse_share"] >= 1 - LANE_PROFILE_MINORITY:
         return True
 
-    if any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in _order_numbers_of(doc, normalized, routing_details)):
+    orders = _order_numbers_of(doc, normalized, routing_details)
+    numeric = {o for o in orders if re.fullmatch(r"1\d{5}", o)}
+    # The same order in both forms ("118078" and "W118078") is a dropship
+    # order in staff filings 18 of 22 times: the numeric form wins.
+    if any(re.fullmatch(r"W(1\d{5})", o) and o[1:] in numeric for o in orders):
+        return _is_warehouse_order_legacy(doc)
+    if any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in orders):
         return True
     # Extraction often leaves the Gamer order out of the PO field even when it
     # is printed on the invoice (a reference line, the bill-to block); in the

@@ -121,7 +121,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         stats["documents"] += 1
         hub_amt = d.get("amount_float")
         hub_vendor = str(d.get("vendor_canonical") or "").upper()
-        best, how, credit_of = None, None, None
+        best, how, credit_of, via_loose = None, None, None, False
         for k in _keys(d.get("invoice_number_clean")):
             loose = k.startswith(("L:", "D:"))
             for b in index.get(k, []):
@@ -131,6 +131,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 vend_ok = bool(hub_vendor) and hub_vendor == str(b.get("bc_vendor_no") or "").upper()
                 if amt_ok:
                     best, how = b, "number+amount"
+                    via_loose = loose
                     break
                 if loose:
                     sfx = re.fullmatch(r"\d{5,}([A-Z]{1,2})", _norm(d.get("invoice_number_clean")) or "")
@@ -173,6 +174,15 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             update["vendor_canonical_backfill"] = {"at": stamp, "previous": d.get("vendor_canonical"),
                                                    "from": "bc_reconciliation"}
             events.append({"kind": "vendor", "from": d.get("vendor_canonical"), "to": bc_vendor})
+        # Matched only on a loose key (OCR "1848946897" for R+L "I848946897",
+        # formatting suffix "4898677RI") but to the cent: BC's number is the
+        # invoice number.
+        bc_ext = str(best.get("bc_external_document_no") or "").strip()
+        if (how == "number+amount" and via_loose and bc_ext and "/" not in bc_ext
+                and _norm(bc_ext) != _norm(d.get("invoice_number_clean"))):
+            update["invoice_number_clean"] = bc_ext.upper()
+            update["invoice_number_extracted_previous"] = d.get("invoice_number_clean")
+            events.append({"kind": "invoice_number", "from": d.get("invoice_number_clean"), "to": bc_ext.upper()})
         if how in ("number+amount", "number+vendor") and d.get("document_type") in RETYPE_FROM:
             new_type = "Credit_Memo" if float(best.get("bc_amount") or 0) < 0 else "AP_Invoice"
             update.update({"document_type": new_type, "suggested_job_type": new_type,

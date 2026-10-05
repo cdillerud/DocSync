@@ -639,6 +639,14 @@ def _determine_folder_path_core(
         elif lane["intl_share"] >= 1 - LANE_PROFILE_MINORITY:
             is_international = True
 
+    # An ocean bill of lading / container number (Evergreen EGLV..., MSC
+    # MEDU..., Yang Ming YMJA...) on the invoice is an import: staff filed
+    # 15 of 16 such invoices (mostly Tumalo drayage) as International, the
+    # extraction and vendor profile had all 16 domestic.
+    if _is_ocean_import(doc):
+        is_international = True
+        doc["_ocean_import"] = True
+
     # =================================================================
     # ROUTING RULES (in priority order per accounting document)
     # =================================================================
@@ -1326,6 +1334,12 @@ def _is_warehouse_order(doc: dict) -> bool:
     if votes and len(votes) == 1:
         return "warehouse" in votes
 
+    # Ocean imports land at a Gamer warehouse (staff: 12 of 15 Warehouse
+    # International) unless a Gamer order says otherwise.
+    if doc.get("_ocean_import") and not any(_WAREHOUSE_ORDER_PREFIX.match(o) or re.fullmatch(r"1\d{5}", o)
+                                            for o in _order_numbers_of(doc, {}, doc.get("routing_details") or {})):
+        return True
+
     # Learned vendor lane profile: freight carriers that bill W-orders but
     # that staff file under Dropship/Freight 90%+ of the time stay dropship.
     lane = _lane_profile(doc)
@@ -1411,6 +1425,21 @@ def _lane_profile(doc: dict):
 
 
 _GAMER_PO_SHAPE = re.compile(r"^(?:WA\d{4}[A-Z]?|(?:WR|WTR|W|PR)?-?1?\d{5}[A-Z]?)$")
+
+_OCEAN_BL = re.compile(
+    r"\b(?:EGLV|MEDU|MSCU|MAEU|MAEI|COSU|YMJA|YMLU|OOLU|HLCU|HLXU|CMDU|ONEY|ZIMU|SUDU|HDMU|EVER|APLU|WHLC"
+    r"|SMLM|TGHU|TCNU|MRKU|MSKU|CSNU|TEMU|FCIU|SEGU|BEAU|TRHU|GESU|CAIU|DFSU|TLLU|EMCU|EISU|MATS|SEAU|BMOU)"
+    r"[A-Z]?\d{6,}\b")
+
+
+def _is_ocean_import(doc: dict) -> bool:
+    import json
+    for k in ("extracted_fields", "normalized_fields", "po_number_extracted", "po_number_clean"):
+        v = doc.get(k)
+        if v and _OCEAN_BL.search(json.dumps(v, default=str).upper()):
+            return True
+    return False
+
 
 def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:
     """"PO not found as an internal BC purchase order" sends an invoice to

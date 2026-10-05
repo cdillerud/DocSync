@@ -736,6 +736,12 @@ async def intake_document_from_bytes(
     # Add AI classification audit trail if AI was invoked
     if ai_classification_audit:
         update_data["ai_classification"] = ai_classification_audit
+    try:
+        from services.fraud_signal_service import assess_fraud_risk
+        update_data["fraud_risk"] = await assess_fraud_risk(db, {**(existing_doc or {}), **update_data,
+                                                                  "file_name": filename})
+    except Exception as fraud_err:
+        logger.warning("Fraud assessment failed for %s: %r", doc_id, fraud_err)
     # Keep the extraction error: without it a failed extraction looked like
     # an empty document (2026-09-21/22 AI budget outage).
     if classification.get("error"):

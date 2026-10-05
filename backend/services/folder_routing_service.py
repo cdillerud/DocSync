@@ -279,6 +279,7 @@ def _is_weak_fallback_routing(path: str, reason: str) -> bool:
         "LocationCode=",
         "Document marked Do Not Pay",
         "No order number on domestic invoice",
+        "Suspected payment fraud",
     )
     if any(r.startswith(prefix) for prefix in strong_prefixes):
         return False
@@ -630,6 +631,16 @@ def _determine_folder_path_core(
     # =================================================================
     # ROUTING RULES (in priority order per accounting document)
     # =================================================================
+
+    # RULE -0.5f: suspected payment fraud (see fraud_signal_service) goes to
+    # DO NOT PAY for a person to check, before any vendor or invoice rule.
+    fraud = doc.get("fraud_risk") or {}
+    if isinstance(fraud, dict) and fraud.get("flagged"):
+        return (
+            f"DO NOT PAY/{datetime.now().year}",
+            "Suspected payment fraud: " + "; ".join(fraud.get("reasons") or []),
+            routing_details,
+        )
 
     # RULE -0.25: definite credits (Credit_Memo type or negative total) go to
     # Vendor Credit Memos before any vendor-specific rule (see _is_definite_credit).
@@ -1445,6 +1456,13 @@ async def route_with_feedback(
 
     doc = dict(doc)
     doc["_non_trade_vendor"] = await _is_non_trade_vendor(doc.get("vendor_canonical"))
+    if "fraud_risk" not in doc:
+        try:
+            from deps import get_db
+            from services.fraud_signal_service import assess_fraud_risk
+            doc["fraud_risk"] = await assess_fraud_risk(get_db(), doc)
+        except Exception:
+            pass
 
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
     doc_type = _LEGACY_DOC_TYPES.get(doc_type, doc_type)

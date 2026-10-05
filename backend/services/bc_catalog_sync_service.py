@@ -233,7 +233,10 @@ async def sync_vendors(db) -> Dict[str, Any]:
             "bc_system_id": v.get("id", ""),
             "vendor_no": v.get("number", ""),
             "name": v.get("displayName", ""),
-            "blocked": bool(v.get("blocked")) if v.get("blocked") not in (None, "", " ") else False,
+            # BC returns blocked as text: blank (OData "_x0020_"), "Payment" or
+            # "All"; bool() of the blank marker made all 902 vendors blocked.
+            "blocked": str(v.get("blocked") or "").strip() not in ("", "_x0020_"),
+            "blocked_reason": str(v.get("blocked") or "").strip().replace("_x0020_", ""),
             "balance": v.get("balance", 0),
             "address_line1": v.get("addressLine1", ""),
             "city": v.get("city", ""),
@@ -254,6 +257,7 @@ async def sync_vendors(db) -> Dict[str, Any]:
         await db[VENDORS_COLLECTION].create_index("vendor_no", unique=True)
         await db[VENDORS_COLLECTION].create_index("name")
         await db[VENDORS_COLLECTION].create_index("blocked")
+        await mirror_vendors_to_hub_cache(db)
 
     duration = (datetime.now(timezone.utc) - start).total_seconds()
 
@@ -270,6 +274,36 @@ async def sync_vendors(db) -> Dict[str, Any]:
 
     logger.info("Vendor master sync complete: %d vendors in %.1fs", len(docs), duration)
     return meta
+
+
+async def mirror_vendors_to_hub_cache(db) -> int:
+    """Copy the synced BC vendor list into hub_bc_vendors, the collection
+    vendor resolution, entity resolution and routing read (number,
+    displayName, name_normalized). Nothing had written it, so it was empty
+    (found 2026-10-05) and every "cached BC vendors" lookup returned nothing
+    while bc_catalog_vendors held 902 current vendors."""
+    from services.vendor_name_helpers import normalize_vendor_name
+    now = datetime.now(timezone.utc).isoformat()
+    docs = []
+    async for v in db[VENDORS_COLLECTION].find({}, {"_id": 0}):
+        number = str(v.get("vendor_no") or "").strip()
+        if not number:
+            continue
+        name = str(v.get("name") or "").strip()
+        docs.append({
+            "number": number, "id": v.get("bc_system_id"), "displayName": name,
+            "name_normalized": normalize_vendor_name(name) if name else "",
+            "blocked": bool(v.get("blocked")), "email": v.get("email") or "",
+            "source": VENDORS_COLLECTION, "mirrored_at": now,
+        })
+    if not docs:
+        return 0
+    await db.hub_bc_vendors.delete_many({})
+    await db.hub_bc_vendors.insert_many(docs)
+    await db.hub_bc_vendors.create_index("number")
+    await db.hub_bc_vendors.create_index("name_normalized")
+    logger.info("[BCCatalog] mirrored %d vendors into hub_bc_vendors", len(docs))
+    return len(docs)
 
 
 async def sync_all(db) -> Dict[str, Any]:

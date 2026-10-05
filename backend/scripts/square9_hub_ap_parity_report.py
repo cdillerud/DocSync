@@ -1229,6 +1229,10 @@ def run_compare(
                     ),
                     "square9_name": info["deleted_item_name"],
                     "square9_modified": info["deleted_at"] or "",
+                    # Folder staff filed it in before deleting it, relative to the
+                    # Temp Folder like live items: routing truth for processed docs.
+                    "square9_parent_path": (info.get("deleted_from") or "").split("/Temp Folder/", 1)[-1]
+                    if "/Temp Folder/" in (info.get("deleted_from") or "") else "",
                 })
                 bucket_counts["recently_deleted_match"] += 1
                 matched_hub_ids.add(doc_id)

@@ -55,7 +55,12 @@ async def main() -> int:
 
     from services.folder_routing_service import _is_working_folder
 
-    rows = [r for r in csv.DictReader(open(args.csv)) if r.get("match_bucket") in TRUSTED]
+    # Recycle-bin matches carry the folder staff filed the item in before
+    # deleting it (deletedFromLocation): full-score ones are routing truth too.
+    rows = [r for r in csv.DictReader(open(args.csv))
+            if r.get("match_bucket") in TRUSTED
+            or (r.get("match_bucket") == "recently_deleted_match" and float(r.get("match_score") or 0) >= 1.0
+                and r.get("square9_parent_path"))]
     created = strengthened = skipped = 0
     conflicts, proposed = [], {}
     now = datetime.now(timezone.utc).isoformat()

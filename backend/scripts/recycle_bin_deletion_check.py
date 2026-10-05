@@ -99,7 +99,10 @@ def pull_recycle_bin_items(
 
         url = f"https://graph.microsoft.com/beta/sites/{site_id}/recycleBin/items"
         params = {"$top": 200}
-        while url and pages_scanned < 25:  # hard safety cap - never loop forever
+        # Safety cap 100 pages (20,000 items). It was 25 (5,000): the recycle
+        # bin holds more than that and returns items in no date order, so
+        # in-window deletions beyond item 5,000 were never seen (2026-10-05).
+        while url and pages_scanned < 100:  # hard safety cap - never loop forever
             pages_scanned += 1
             resp = c.get(url, headers=headers, params=params if pages_scanned == 1 else None)
             resp.raise_for_status()
@@ -201,6 +204,8 @@ def find_strong_matches_for_hub_docs(
             results[hub.doc_id] = {
                 "deleted_item_name": item_name,
                 "deleted_at": item.get("deletedDateTime"),
+                # Where staff had filed it before deleting (routing truth).
+                "deleted_from": item.get("deletedFromLocation") or "",
                 "shared_tokens": sorted(overlap),
                 "counted_toward_rate": first_claim,
             }
@@ -230,6 +235,8 @@ def find_recycle_bin_evidence(
                 best_match = {
                     "deleted_item_name": item.get("name"),
                     "deleted_at": item.get("deletedDateTime"),
+                # Where staff had filed it before deleting (routing truth).
+                "deleted_from": item.get("deletedFromLocation") or "",
                     "match_reason": "invoice_token_overlap",
                     "shared_tokens": sorted(invoice_overlap),
                 }
@@ -245,6 +252,8 @@ def find_recycle_bin_evidence(
                     best_match = {
                         "deleted_item_name": item.get("name"),
                         "deleted_at": item.get("deletedDateTime"),
+                # Where staff had filed it before deleting (routing truth).
+                "deleted_from": item.get("deletedFromLocation") or "",
                         "match_reason": "vendor_token_overlap_only",
                         "shared_tokens": sorted(vendor_overlap),
                     }

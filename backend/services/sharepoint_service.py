@@ -367,6 +367,37 @@ def _structured_po_number(doc: Dict[str, Any]) -> str:
     return ""
 
 
+_KNOWN_ORDER_DOC_TYPES = ["purchase_order", "sales_order"]
+_LEADING_ORDER = re.compile(r"(?:WA|WR|WTR|W)?\d{5,6}(?=[A-Z]?(?:$|-))")
+_KNOWN_ORDER_REF_TYPES = ["posted_sales_shipment", "posted_purchase_invoice", "draft_purchase_invoice"]
+
+
+async def _is_known_gamer_order(db, po: Any) -> bool:
+    """True when BC knows this number as a Gamer order even though it is not
+    an open purchase order: the reference cache holds only open/draft POs,
+    so a received or closed order (119560, 116414 on 2026-10-05) looked
+    "not internal" and the invoice was parked in Miscellaneous."""
+    po = str(po or "").strip().upper()
+    if db is None or not po:
+        return False
+    # Also the leading order token: "W118513-P26040272", "W118254-W118256",
+    # "119591A" (a suffixed shipment of order 119591).
+    lead = _LEADING_ORDER.match(po)
+    values = list(dict.fromkeys([po] + ([lead.group(0)] if lead else [])))
+    try:
+        hit = await db.bc_reference_cache.find_one(
+            {"$or": [
+                {"normalized_document_no": {"$in": values}, "bc_entity_type": {"$in": _KNOWN_ORDER_DOC_TYPES}},
+                {"bc_order_number": {"$in": values}, "bc_entity_type": {"$in": _KNOWN_ORDER_REF_TYPES}},
+            ]},
+            {"_id": 1},
+        )
+        return hit is not None
+    except Exception as error:
+        logger.warning("[PreUpload] known-order lookup failed for %s: %s", po, error)
+        return False
+
+
 async def _prepare_routing_document(doc: Dict[str, Any]):
     """Refresh evidence and resolve a structured PO before a file is routed."""
     routing_doc = dict(doc or {})
@@ -424,7 +455,13 @@ async def _prepare_routing_document(doc: Dict[str, Any]):
                         routing_doc.setdefault("location_code", value)
                         break
             elif status == "not_found" and miss_reason != "bc_lookup_error":
-                routing_doc["bc_po_resolved"] = False
+                if await _is_known_gamer_order(db, routing_doc.get("po_number_clean") or structured_po):
+                    # A real Gamer order that is no longer an open PO; not
+                    # evidence of a non-internal PO, so no Misc redirect.
+                    routing_doc["bc_po_resolved"] = None
+                    routing_doc["bc_order_known"] = True
+                else:
+                    routing_doc["bc_po_resolved"] = False
 
             if db is not None and routing_doc.get("id"):
                 update = {
@@ -436,6 +473,8 @@ async def _prepare_routing_document(doc: Dict[str, Any]):
                 }
                 if "bc_po_resolved" in routing_doc:
                     update["bc_po_resolved"] = routing_doc["bc_po_resolved"]
+                if routing_doc.get("bc_order_known"):
+                    update["bc_order_known"] = True
                 if routing_doc.get("resolved_location_code"):
                     update["resolved_location_code"] = routing_doc["resolved_location_code"]
                     update["location_code"] = routing_doc.get("location_code")

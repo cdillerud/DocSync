@@ -44,13 +44,28 @@ def _norm(x: Any) -> str:
 
 
 def _keys(number: Any) -> List[str]:
+    """Exact key first; then loose keys (suffix stripped, 8-digit tail) that
+    only count when the amount agrees: Tumalo 0311459A is a separate invoice
+    from 0311459, and an unentered A-invoice must not link to its base."""
     n = _norm(number)
     if len(n) < 4:
         return []
     keys = [n]
     m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", n)
-    if m:
-        keys.append(m.group(1))
+    keys.append("L:" + (m.group(1) if m else n))
+    digits = re.sub(r"\D", "", n)
+    if len(digits) >= 8:
+        keys.append("D:" + digits[-8:])
+    return keys
+
+
+def _index_keys(number: Any) -> List[str]:
+    n = _norm(number)
+    if len(n) < 4:
+        return []
+    keys = [n]
+    m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", n)
+    keys.append("L:" + (m.group(1) if m else n))
     digits = re.sub(r"\D", "", n)
     if len(digits) >= 8:
         keys.append("D:" + digits[-8:])
@@ -67,7 +82,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 {"bc_entity_type": entity, "bc_posting_date": {"$gte": bc_since}, "bc_status": {"$ne": "Canceled"}},
                 {"_id": 0, "bc_entity_type": 1, "bc_document_no": 1, "bc_external_document_no": 1, "bc_vendor_no": 1,
                  "bc_vendor_name": 1, "bc_amount": 1, "bc_status": 1, "bc_order_number": 1, "bc_posting_date": 1}):
-            for k in _keys(b.get("bc_external_document_no")):
+            for k in _index_keys(b.get("bc_external_document_no")):
                 index[k].append(b)
 
     stats: Counter = Counter()
@@ -77,27 +92,44 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
          "status": {"$nin": ["batch_parent"]}, "document_type": {"$in": sorted(LINKABLE_TYPES)},
          "fraud_risk.flagged": {"$ne": True}},
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1,
-         "vendor_canonical": 1, "file_name": 1})
+         "vendor_canonical": 1, "file_name": 1, "bc_link": 1})
     async for d in cursor:
         stats["documents"] += 1
         hub_amt = d.get("amount_float")
         hub_vendor = str(d.get("vendor_canonical") or "").upper()
-        best, how = None, None
+        best, how, credit_of = None, None, None
         for k in _keys(d.get("invoice_number_clean")):
+            loose = k.startswith(("L:", "D:"))
             for b in index.get(k, []):
-                amt_ok = (hub_amt is not None and b.get("bc_amount") is not None
-                          and abs(abs(float(hub_amt)) - abs(float(b["bc_amount"]))) < 0.02)
+                bc_amt = b.get("bc_amount")
+                amt_ok = (hub_amt is not None and bc_amt is not None
+                          and abs(abs(float(hub_amt)) - abs(float(bc_amt))) < 0.02)
                 vend_ok = bool(hub_vendor) and hub_vendor == str(b.get("bc_vendor_no") or "").upper()
                 if amt_ok:
                     best, how = b, "number+amount"
                     break
+                if loose:
+                    continue
+                # A credit memo cites the invoice it credits (Ball -1,670
+                # against invoice 6437590 of 22,414.18): not that invoice.
+                if hub_amt is not None and bc_amt is not None and float(hub_amt) < 0 < float(bc_amt):
+                    credit_of = b
+                    continue
                 if vend_ok and how != "number+vendor":
                     best, how = b, "number+vendor"
-                elif best is None and len(k.replace("D:", "")) >= 7:
+                elif best is None and len(k) >= 7:
                     best, how = b, "number"
             if how == "number+amount":
                 break
         if best is None:
+            if apply and (d.get("bc_link") or credit_of):
+                upd = {"$unset": {"bc_link": "", "bc_amount_mismatch": ""}}
+                if credit_of:
+                    upd["$set"] = {"bc_credit_of": {"bc_document_no": credit_of.get("bc_document_no"),
+                                                    "bc_external_document_no": credit_of.get("bc_external_document_no"),
+                                                    "bc_vendor_no": credit_of.get("bc_vendor_no"), "at": stamp}}
+                await db.hub_documents.update_one({"_id": d["_id"]}, upd)
+            stats["credit_of_invoice" if credit_of else "unlinked"] += 1
             continue
         stats["linked:" + how] += 1
         link = {"bc_document_no": best.get("bc_document_no"), "bc_entity": best.get("bc_entity_type"),
@@ -119,17 +151,21 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                            "document_type_previous": d.get("document_type"),
                            "document_type_corrected": {"at": stamp, "reason": "BC has this invoice"}})
             events.append({"kind": "doc_type", "from": d.get("document_type"), "to": new_type})
+        unset = {}
         if how == "number+vendor" and hub_amt is not None and best.get("bc_amount") is not None:
             update["bc_amount_mismatch"] = {"hub": hub_amt, "bc": best.get("bc_amount"), "at": stamp}
             stats["amount_mismatch"] += 1
+        else:
+            unset["bc_amount_mismatch"] = ""
         for e in events:
             stats["corrected:" + e["kind"]] += 1
         if apply:
-            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": update})
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": update, **({"$unset": unset} if unset else {})})
             for e in events:
                 await db.bc_learning_events.insert_one({**e, "document_id": d.get("id"), "file_name": d.get("file_name"),
                                                         "bc_document_no": link["bc_document_no"], "match": how, "at": stamp})
     linked = sum(v for k, v in stats.items() if k.startswith("linked:"))
+    stats.pop("unlinked", None)
     result = {"at": stamp, "documents": stats["documents"], "linked": linked,
               "link_rate_pct": round(100 * linked / stats["documents"], 1) if stats["documents"] else None}
     result.update({k: v for k, v in stats.items() if k != "documents"})

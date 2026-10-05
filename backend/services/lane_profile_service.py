@@ -71,3 +71,22 @@ async def rebuild_profiles(db) -> int:
             upsert=True)
         n += 1
     return n
+
+
+async def rebuild_order_lanes(db) -> Dict[str, Any]:
+    """order -> {hub doc id: lane} from documents whose BC invoice lines carry
+    a location code (bc_link.bc_location_lane). Routing votes with the other
+    documents of the same order (a freight bill follows its product invoice:
+    staff agreed 253 of 270 freight and 321 of 327 product filings)."""
+    from services.folder_routing_service import _order_numbers_of
+    lanes: Dict[str, Dict[str, str]] = {}
+    async for d in db.hub_documents.find(
+            {"bc_link.bc_location_lane": {"$in": ["warehouse", "dropship"]}},
+            {"_id": 0, "id": 1, "bc_link": 1, "po_number_clean": 1, "po_number_extracted": 1, "extracted_fields": 1}):
+        for o in _order_numbers_of(d, {}, {}):
+            lanes.setdefault(o, {})[d["id"]] = d["bc_link"]["bc_location_lane"]
+    now = datetime.now(timezone.utc).isoformat()
+    for o, docs in lanes.items():
+        await db.order_lanes.update_one({"order": o}, {"$set": {"docs": docs, "updated_at": now}}, upsert=True)
+    await db.order_lanes.create_index("order", unique=True)
+    return {"orders": len(lanes)}

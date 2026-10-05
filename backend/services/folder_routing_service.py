@@ -1320,6 +1320,12 @@ def _is_warehouse_order(doc: dict) -> bool:
     if bc_lane == "dropship":
         return False
 
+    # Other documents of the same order that AP entered in BC (their line
+    # location codes), excluding this document: majority lane decides.
+    votes = doc.get("_order_lane_votes") or {}
+    if votes and len(votes) == 1:
+        return "warehouse" in votes
+
     # Learned vendor lane profile: freight carriers that bill W-orders but
     # that staff file under Dropship/Freight 90%+ of the time stay dropship.
     lane = _lane_profile(doc)
@@ -1549,6 +1555,19 @@ async def route_with_feedback(
                 {"vendor": str(doc["vendor_canonical"]).upper()}, {"_id": 0})
             if prof:
                 doc["_vendor_lane_profile"] = prof
+        except Exception:
+            pass
+    if "_order_lane_votes" not in doc:
+        try:
+            from deps import get_db
+            orders = _order_numbers_of(doc, {}, doc.get("routing_details") or {})
+            votes: Dict[str, int] = {}
+            if orders:
+                async for ol in get_db().order_lanes.find({"order": {"$in": orders}}, {"_id": 0, "docs": 1}):
+                    for did, ln in (ol.get("docs") or {}).items():
+                        if did != doc.get("id"):
+                            votes[ln] = votes.get(ln, 0) + 1
+            doc["_order_lane_votes"] = votes
         except Exception:
             pass
     if "fraud_risk" not in doc:

@@ -19,6 +19,7 @@ Flow:
 """
 
 import io
+import re
 import logging
 import uuid
 import hashlib
@@ -440,6 +441,41 @@ async def mark_split_continuations(db, child_ids: list, apply: bool = True) -> i
         return str(v).strip().upper() if v else ""
 
     with_amount = [d for d in all_pieces if d.get("amount_float") is not None and d.get("document_type") in _INVOICE_TYPES]
+
+    # Same vendor and invoice number but different amounts: one invoice whose
+    # extra page (freight, surcharge) was extracted with its own subtotal
+    # (Canpack "Invoice 1101620146": doc1 23,330.67, doc2 3,001.00; BC has one
+    # invoice). Keep the largest amount as the invoice total; the different
+    # subtotals are continuations of it.
+    by_invoice: dict = {}
+    for d in with_amount:
+        inv, vend = _inv(d), _vend(d)
+        if inv and vend and not d.get("is_duplicate"):
+            by_invoice.setdefault((vend, inv), []).append(d)
+    for pieces in by_invoice.values():
+        if len(pieces) < 2 or len({round(abs(float(p["amount_float"])), 2) for p in pieces}) < 2:
+            continue
+        # When AP already entered the invoice in BC, its amount says which
+        # piece is the total (largest-amount alone picked wrong 6 of 239).
+        bc_amount = None
+        try:
+            ref = re.sub(r"[^A-Z0-9]", "", _inv(pieces[0]).upper()).lstrip("0")
+            bc = await db.bc_reference_cache.find_one(
+                {"bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
+                 "normalized_external_ref": ref}, {"_id": 0, "bc_amount": 1})
+            bc_amount = abs(float(bc["bc_amount"])) if bc and bc.get("bc_amount") is not None else None
+        except Exception:
+            bc_amount = None
+        pieces.sort(key=lambda p: (not (p.get("bc_purchase_invoice") or p.get("status") == "Posted"),
+                                   not (bc_amount is not None and abs(abs(float(p["amount_float"])) - bc_amount) < 0.02),
+                                   -abs(float(p["amount_float"]))))
+        primary = pieces[0]
+        for d in pieces[1:]:
+            if d.get("bc_purchase_invoice") or d.get("status") == "Posted":
+                continue
+            marked += 1
+            d["is_duplicate"] = True
+            await _mark(d, primary)
     for d in all_pieces:
         if (d.get("amount_float") is not None or d.get("document_type") not in _INVOICE_TYPES
                 or d.get("bc_purchase_invoice") or d.get("status") == "Posted"):

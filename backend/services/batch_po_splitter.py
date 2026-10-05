@@ -402,17 +402,60 @@ async def mark_split_continuations(db, child_ids: list, apply: bool = True) -> i
     if len(ids) < 2:
         return 0
     groups: dict = {}
+    all_pieces: list = []
     async for d in db.hub_documents.find(
             {"id": {"$in": ids}, "is_duplicate": {"$ne": True}},
             {"_id": 0, "id": 1, "bc_vendor_number": 1, "vendor_canonical": 1, "invoice_number_clean": 1,
              "normalized_fields.invoice_number": 1, "extracted_fields.invoice_number": 1,
              "amount_float": 1, "document_type": 1, "batch_group_num": 1, "status": 1,
              "bc_purchase_invoice": 1}):
+        all_pieces.append(d)
         key = _continuation_key(d)
         if key:
             groups.setdefault(key, []).append(d)
     marked = 0
     now = datetime.now(timezone.utc).isoformat()
+
+    async def _mark(d, primary):
+        if apply:
+            await db.hub_documents.update_one(
+                {"id": d["id"]},
+                {"$set": {"is_duplicate": True, "duplicate_reason": "split_continuation",
+                          "duplicate_of_document_id": primary["id"], "updated_utc": now}})
+            await db.hub_documents.update_one(
+                {"id": primary["id"]}, {"$addToSet": {"split_continuation_doc_ids": d["id"]}})
+
+    # Amountless invoice-typed pieces (page 2 of an invoice, its terms or
+    # remittance page): 49 of 264 split AP invoices 2026-09-21..10-05. Same
+    # invoice number as a sibling with an amount -> that invoice; no invoice
+    # number -> the invoice in the page group just before it, when the
+    # vendor agrees or is missing.
+    def _inv(d):
+        nf, ef = d.get("normalized_fields") or {}, d.get("extracted_fields") or {}
+        v = d.get("invoice_number_clean") or nf.get("invoice_number") or ef.get("invoice_number")
+        return str(v).strip().upper() if v else ""
+
+    def _vend(d):
+        v = d.get("bc_vendor_number") or d.get("vendor_canonical")
+        return str(v).strip().upper() if v else ""
+
+    with_amount = [d for d in all_pieces if d.get("amount_float") is not None and d.get("document_type") in _INVOICE_TYPES]
+    for d in all_pieces:
+        if (d.get("amount_float") is not None or d.get("document_type") not in _INVOICE_TYPES
+                or d.get("bc_purchase_invoice") or d.get("status") == "Posted"):
+            continue
+        inv, vend, primary = _inv(d), _vend(d), None
+        if inv:
+            same = [p for p in with_amount if _inv(p) == inv and (not vend or not _vend(p) or _vend(p) == vend)]
+            primary = same[0] if same else None
+        else:
+            g = d.get("batch_group_num")
+            prev = [p for p in with_amount if g is not None and p.get("batch_group_num") == g - 1]
+            if prev and (not vend or not _vend(prev[0]) or _vend(prev[0]) == vend):
+                primary = prev[0]
+        if primary:
+            marked += 1
+            await _mark(d, primary)
     for pieces in groups.values():
         if len(pieces) < 2:
             continue

@@ -97,6 +97,25 @@ async def main() -> int:
 
         existing = await db.routing_feedback.find_one({"routing_key": key})
         clash = None
+        if (existing and not _is_working_folder(existing.get("correct_folder"))
+                and len(obs) >= MIN_AGREEING):
+            # A rule pointing outside Square9's working folders is ignored by
+            # routing; agreeing staff filings replace it instead of being
+            # blocked by it.
+            print(f"  SUPERSEDE {key}: {existing.get('correct_folder')!r} -> {folder!r} ({len(obs)} filings)")
+            if apply:
+                await db.routing_feedback_rekey_backup.insert_one(
+                    {k: v for k, v in existing.items() if k != "_id"}
+                    | {"orig_id": existing["_id"], "backed_up_at": now, "reason": "superseded"})
+                await db.routing_feedback.update_one(
+                    {"_id": existing["_id"]},
+                    {"$set": {"correct_folder": folder, "confidence": len(obs), "source": "square9_daily_learning",
+                              "superseded_folder": existing.get("correct_folder"), "updated_at": now}})
+                for o in obs:
+                    await db.routing_learning_seen.update_one(
+                        {"_id": o[6]["_seen_id"]}, {"$set": {"routing_key": key, "learned_at": now}}, upsert=True)
+            strengthened += 1
+            continue
         if existing and (existing.get("correct_folder") or "").lower() != folder.lower():
             clash = existing.get("correct_folder")
         if clash:

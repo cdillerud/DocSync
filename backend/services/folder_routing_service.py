@@ -701,9 +701,11 @@ def _determine_folder_path_core(
                 "Approved S&H invoice",
                 routing_details,
             )
+        # Unapproved S&H invoices wait for approval (staff filings: 17 waiting
+        # vs 2 approved, week of 2026-09-28); this branch used to say Approved.
         return (
-            "S&H Invoices Approved",
-            "S&H invoice",
+            "S&H Invoices waiting for approval",
+            "S&H invoice awaiting approval",
             routing_details,
         )
 

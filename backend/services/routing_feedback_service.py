@@ -9,8 +9,9 @@ to a BC vendor number or canonical vendor code.
 
 import logging
 import re
+import time
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,28 @@ def _append_candidate(
     })
 
 
+_CANDIDATE_CACHE: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+_CANDIDATE_TTL_SECONDS = 600
+_CANDIDATE_CACHE_MAX = 2000
+
+
 async def _vendor_candidates(vendor: str) -> List[Dict[str, Any]]:
+    """Cached _vendor_candidates_uncached: alias expansion scans hub_documents
+    (0.2-0.5 s) and every routing call for the same vendor repeated it."""
+    key = str(vendor or "").strip().casefold()
+    now = time.monotonic()
+    hit = _CANDIDATE_CACHE.get(key)
+    if hit and now - hit[0] < _CANDIDATE_TTL_SECONDS:
+        return [dict(c) for c in hit[1]]
+    result = await _vendor_candidates_uncached(vendor)
+    if _db is not None:
+        if len(_CANDIDATE_CACHE) >= _CANDIDATE_CACHE_MAX:
+            _CANDIDATE_CACHE.clear()
+        _CANDIDATE_CACHE[key] = (now, [dict(c) for c in result])
+    return result
+
+
+async def _vendor_candidates_uncached(vendor: str) -> List[Dict[str, Any]]:
     """Resolve canonical IDs, names, and historical aliases for a vendor value.
 
     Sources are intentionally redundant because production records span several

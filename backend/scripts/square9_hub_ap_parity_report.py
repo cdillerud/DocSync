@@ -1444,6 +1444,8 @@ def main() -> int:
                     help="Extra days of Hub docs considered when matching (Hub may receive a "
                          "document before staff file it in Square9). Hub-side counts stay in-window.")
     ap.add_argument("--top", type=int, default=25)
+    ap.add_argument("--no-record-efficacy", action="store_true",
+                    help="Analysis runs: do not write square9_daily_efficacy")
     ap.add_argument(
         "--min-match-rate", type=float, default=0.85,
         help="Match rate threshold (0..1). Below this is a blocker. Default 0.85.",
@@ -1618,7 +1620,8 @@ def main() -> int:
         recycle_bin_site_path=args.recycle_bin_site_path,
         hub_window_start=hub_window_start,
     )
-    record_daily_efficacy(result["rows"], prod_window_hours)
+    if not args.no_record_efficacy:
+        record_daily_efficacy(result["rows"], prod_window_hours)
 
     if args.json:
         # Strip rows; CSV is the row store.

@@ -111,12 +111,17 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             if b.get("bc_amount") is not None and abs(abs(float(d["amount_float"])) - abs(float(b["bc_amount"]))) < 0.02:
                 suffix_hits[(str(b.get("bc_vendor_no") or "").upper(), m.group(2))] += 1
     format_suffix = {k for k, v in suffix_hits.items() if v >= 3}
+    # Learned knowledge must persist: once numbers are corrected the
+    # evidence above disappears, so stored vendor rules count too.
+    async for r in db.vendor_invoice_number_rules.find({"rule": {"$regex": "^strip_suffix:"}}, {"_id": 0, "vendor": 1, "rule": 1}):
+        format_suffix.add((str(r["vendor"]).upper(), r["rule"].split(":", 1)[1]))
     cursor = db.hub_documents.find(
         {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
          "status": {"$nin": ["batch_parent"]}, "document_type": {"$in": sorted(LINKABLE_TYPES)},
          "fraud_risk.flagged": {"$ne": True}},
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1,
-         "vendor_canonical": 1, "file_name": 1, "bc_link": 1})
+         "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
+         "vendor_canonical_backfill": 1})
     async for d in cursor:
         stats["documents"] += 1
         hub_amt = d.get("amount_float")
@@ -166,6 +171,22 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 "bc_vendor_name": best.get("bc_vendor_name"), "bc_amount": best.get("bc_amount"),
                 "bc_order_number": best.get("bc_order_number") or "", "bc_posting_date": best.get("bc_posting_date"),
                 "match": how, "linked_at": stamp}
+        # First-pass accuracy: were the values intake produced already what BC
+        # says, before any correction? Measured once, at the first link, so the
+        # trend shows whether extraction itself is learning.
+        prev_link = d.get("bc_link") or {}
+        if prev_link.get("first_pass"):
+            link["first_pass"] = prev_link["first_pass"]
+        elif how == "number+amount":
+            raw_inv = d.get("invoice_number_extracted_previous") or d.get("invoice_number_clean")
+            vb = d.get("vendor_canonical_backfill") or {}
+            raw_vendor = vb.get("previous") if str(vb.get("from", "")).startswith("bc_") else d.get("vendor_canonical")
+            link["first_pass"] = {
+                "invoice_number_ok": _norm(raw_inv) == _norm(best.get("bc_external_document_no")),
+                "vendor_ok": str(raw_vendor or "").upper() == str(best.get("bc_vendor_no") or "").upper(),
+                "amount_ok": True,
+                "measured_at": stamp,
+            }
         update: Dict[str, Any] = {"bc_link": link}
         events = []
         bc_vendor = str(best.get("bc_vendor_no") or "")

@@ -421,6 +421,34 @@ export default function Square9ReadinessPage() {
                 </div>
               </div>
             </div>
+            {(learningSummary.first_pass_by_day || []).length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <div className="text-xs text-muted-foreground mb-1">
+                  First-pass accuracy by intake day: how often extraction already matched BC before any correction
+                  (measured when the invoice reaches BC). This is the trend the learning should push up.
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground text-left border-b">
+                      <th className="py-1 pr-3">Intake day</th>
+                      <th className="py-1 pr-3 text-right">Invoices in BC</th>
+                      <th className="py-1 pr-3 text-right">Invoice # right</th>
+                      <th className="py-1 pr-3 text-right">Vendor right</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {learningSummary.first_pass_by_day.slice(-10).reverse().map(r => (
+                      <tr key={r.date} className="border-b last:border-0">
+                        <td className="py-1 pr-3">{r.date}</td>
+                        <td className="py-1 pr-3 text-right">{r.documents}</td>
+                        <td className="py-1 pr-3 text-right">{r.invoice_number_pct}%</td>
+                        <td className="py-1 pr-3 text-right">{r.vendor_pct}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

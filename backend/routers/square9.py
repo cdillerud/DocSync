@@ -615,8 +615,21 @@ async def get_learning_summary():
             {"$group": {"_id": "$duplicate_reason", "n": {"$sum": 1}}}]):
         dup[e["_id"] or "other"] = e["n"]
     fraud = await db.hub_documents.count_documents({"fraud_risk.flagged": True, "created_utc": {"$gte": since}})
+    # First-pass accuracy by intake day: how often extraction was already
+    # right (vs BC) before any learning correction.
+    first_pass = []
+    fp_since = (datetime.now(timezone.utc) - timedelta(days=21)).isoformat()
+    async for row in db.hub_documents.aggregate([
+            {"$match": {"created_utc": {"$gte": fp_since}, "bc_link.first_pass": {"$exists": True}}},
+            {"$group": {"_id": {"$substr": ["$created_utc", 0, 10]}, "n": {"$sum": 1},
+                        "inv": {"$sum": {"$cond": ["$bc_link.first_pass.invoice_number_ok", 1, 0]}},
+                        "vend": {"$sum": {"$cond": ["$bc_link.first_pass.vendor_ok", 1, 0]}}}},
+            {"$sort": {"_id": 1}}]):
+        first_pass.append({"date": row["_id"], "documents": row["n"],
+                           "invoice_number_pct": round(100 * row["inv"] / row["n"], 1),
+                           "vendor_pct": round(100 * row["vend"] / row["n"], 1)})
     return {"last_cycle": last, "bc_reconciliation": recon, "corrections_7d": corrections,
-            "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud}
+            "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud, "first_pass_by_day": first_pass}
 
 
 @router.get("/readiness/daily")

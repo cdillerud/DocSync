@@ -51,7 +51,7 @@ def _keys(number: Any) -> List[str]:
     if len(n) < 4:
         return []
     keys = [n]
-    m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", n)
+    m = re.fullmatch(r"(?:[A-Z]{1,3})?(\d{5,})[A-Z]{0,2}", n)
     keys.append("L:" + (m.group(1) if m else n))
     digits = re.sub(r"\D", "", n)
     if len(digits) >= 8:
@@ -60,15 +60,20 @@ def _keys(number: Any) -> List[str]:
 
 
 def _index_keys(number: Any) -> List[str]:
-    n = _norm(number)
-    if len(n) < 4:
-        return []
-    keys = [n]
-    m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", n)
-    keys.append("L:" + (m.group(1) if m else n))
-    digits = re.sub(r"\D", "", n)
-    if len(digits) >= 8:
-        keys.append("D:" + digits[-8:])
+    """Keys for a BC external document number. A combined entry
+    ("9406216478/9406216480", G3) is indexed under each number; a BC
+    letter prefix ("CI154790", Shorr) is stripped for the loose key."""
+    keys: List[str] = []
+    for part in re.split(r"[/,;&]", str(number or "")):
+        n = _norm(part)
+        if len(n) < 4:
+            continue
+        keys.append(n)
+        m = re.fullmatch(r"(?:[A-Z]{1,3})?(\d{5,})[A-Z]{0,2}", n)
+        keys.append("L:" + (m.group(1) if m else n))
+        digits = re.sub(r"\D", "", n)
+        if len(digits) >= 8:
+            keys.append("D:" + digits[-8:])
     return keys
 
 
@@ -87,6 +92,25 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
 
     stats: Counter = Counter()
     since = (now - timedelta(days=days)).isoformat()
+
+    # Learn which vendors print a formatting suffix BC does not store
+    # (Anchor "4902167RI" = BC "4902167"): 3+ amount-exact matches that only
+    # work with the suffix stripped. For those vendors a suffix-stripped
+    # number plus the same vendor is a match even when AP adjusted the
+    # amount; elsewhere (Tumalo "0311459A" is its own invoice) it is not.
+    suffix_hits: Counter = Counter()
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
+             "amount_float": {"$ne": None}, "invoice_number_clean": {"$regex": "[0-9][A-Za-z]{1,2}$"}},
+            {"_id": 0, "invoice_number_clean": 1, "amount_float": 1, "vendor_canonical": 1}):
+        n = _norm(d.get("invoice_number_clean"))
+        m = re.fullmatch(r"(\d{5,})([A-Z]{1,2})", n)
+        if not m or index.get(n):
+            continue
+        for b in index.get("L:" + m.group(1), []):
+            if b.get("bc_amount") is not None and abs(abs(float(d["amount_float"])) - abs(float(b["bc_amount"]))) < 0.02:
+                suffix_hits[(str(b.get("bc_vendor_no") or "").upper(), m.group(2))] += 1
+    format_suffix = {k for k, v in suffix_hits.items() if v >= 3}
     cursor = db.hub_documents.find(
         {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
          "status": {"$nin": ["batch_parent"]}, "document_type": {"$in": sorted(LINKABLE_TYPES)},
@@ -109,6 +133,10 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     best, how = b, "number+amount"
                     break
                 if loose:
+                    sfx = re.fullmatch(r"\d{5,}([A-Z]{1,2})", _norm(d.get("invoice_number_clean")) or "")
+                    if (k.startswith("L:") and vend_ok and sfx
+                            and (hub_vendor, sfx.group(1)) in format_suffix and how != "number+vendor"):
+                        best, how = b, "number+vendor"
                     continue
                 # A credit memo cites the invoice it credits (Ball -1,670
                 # against invoice 6437590 of 22,414.18): not that invoice.
@@ -169,6 +197,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
     result = {"at": stamp, "documents": stats["documents"], "linked": linked,
               "link_rate_pct": round(100 * linked / stats["documents"], 1) if stats["documents"] else None}
     result.update({k: v for k, v in stats.items() if k != "documents"})
+    result["format_suffixes"] = sorted(f"{v}:{x}" for v, x in format_suffix)
     if apply:
         await db.bc_reconciliation_runs.insert_one(dict(result))
     logger.info("[BCReconcile] %s", result)

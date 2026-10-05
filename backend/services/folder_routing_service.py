@@ -1231,11 +1231,47 @@ def _is_warehouse_order(doc: dict) -> bool:
     # orders 50/68 Warehouse, while plain numeric orders were 46/60 Dropship.
     if any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in _order_numbers_of(doc, normalized, routing_details)):
         return True
+    # Extraction often leaves the Gamer order out of the PO field even when it
+    # is printed on the invoice (a reference line, the bill-to block); in the
+    # week of 2026-09-28 that hid 10 of 17 warehouse misroutes.
+    if _text_order_refs(doc):
+        return True
 
     return _is_warehouse_order_legacy(doc)
 
 
 _WAREHOUSE_ORDER_PREFIX = re.compile(r"^(?:WA|WR|WTR|W)-?\d{4,}", re.I)
+
+
+_TEXT_ORDER_REF = re.compile(r"(?<![A-Z0-9])(?:WA|WR|WTR|W)-?\d{4,6}(?![0-9])")
+_TEXT_REF_MAX_B64 = 8_000_000
+
+
+def _text_order_refs(doc: dict) -> list:
+    """Gamer warehouse order numbers (W/WA/WR/WTR + digits) printed in the
+    first pages of the PDF. Read once per routing call and cached on the
+    dict; any failure means no evidence, never an error."""
+    if "_text_order_refs" in doc:
+        return doc["_text_order_refs"]
+    refs = []
+    stored = doc.get("gamer_order_refs")
+    if isinstance(stored, list):
+        refs = stored
+    else:
+        b64 = doc.get("file_content_b64")
+        name = str(doc.get("file_name") or "").lower()
+        if isinstance(b64, str) and b64 and len(b64) <= _TEXT_REF_MAX_B64 and (name.endswith(".pdf") or b64.startswith("JVBER")):
+            try:
+                import base64
+                import io
+                from pypdf import PdfReader
+                reader = PdfReader(io.BytesIO(base64.b64decode(b64)))
+                text = " ".join((pg.extract_text() or "") for pg in reader.pages[:3])
+                refs = sorted(set(m.upper().replace("-", "") for m in _TEXT_ORDER_REF.findall(text.upper())))
+            except Exception:
+                refs = []
+    doc["_text_order_refs"] = refs
+    return refs
 
 
 def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> list:

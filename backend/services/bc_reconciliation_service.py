@@ -121,7 +121,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
          "fraud_risk.flagged": {"$ne": True}},
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
-         "vendor_canonical_backfill": 1})
+         "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1})
     async for d in cursor:
         stats["documents"] += 1
         hub_amt = d.get("amount_float")
@@ -185,6 +185,8 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 "invoice_number_ok": _norm(raw_inv) == _norm(best.get("bc_external_document_no")),
                 "vendor_ok": str(raw_vendor or "").upper() == str(best.get("bc_vendor_no") or "").upper(),
                 "amount_ok": True,
+                "po_ok": (_norm(d.get("po_number_previous") or d.get("po_number_clean")) == _norm(best.get("bc_order_number"))
+                          if best.get("bc_order_number") else None),
                 "measured_at": stamp,
             }
         update: Dict[str, Any] = {"bc_link": link}
@@ -204,6 +206,15 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             update["invoice_number_clean"] = bc_ext.upper()
             update["invoice_number_extracted_previous"] = d.get("invoice_number_clean")
             events.append({"kind": "invoice_number", "from": d.get("invoice_number_clean"), "to": bc_ext.upper()})
+        # The Gamer order on the BC invoice is the PO: glued lists
+        # ("117751/42221" stored as 11775142221), the order in second place
+        # ("P0028017-40/116355"), labels ("Multi-Trucks").
+        bc_order = str(best.get("bc_order_number") or "").strip()
+        if how == "number+amount" and bc_order and _norm(bc_order) != _norm(d.get("po_number_clean")):
+            update["po_number_clean"] = bc_order.upper()
+            update["po_number_previous"] = d.get("po_number_previous") or d.get("po_number_clean")
+            update["po_number_source"] = "bc_order_number"
+            events.append({"kind": "po", "from": d.get("po_number_clean"), "to": bc_order.upper()})
         if how in ("number+amount", "number+vendor") and d.get("document_type") in RETYPE_FROM:
             new_type = "Credit_Memo" if float(best.get("bc_amount") or 0) < 0 else "AP_Invoice"
             update.update({"document_type": new_type, "suggested_job_type": new_type,

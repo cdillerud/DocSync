@@ -628,6 +628,17 @@ def _determine_folder_path_core(
     if not is_international:
         is_international = _detect_international_vendor(vendor_name, extracted, doc)
 
+    # Learned vendor lane profile (staff filings): a vendor staff file as
+    # domestic 90%+ of the time is domestic, whatever the extraction said
+    # (US carriers and US branches of foreign vendors: Anchor, Quarterback,
+    # Swift, Massilly ... were flagged international by extraction).
+    lane = _lane_profile(doc)
+    if lane:
+        if lane["intl_share"] <= LANE_PROFILE_MINORITY:
+            is_international = False
+        elif lane["intl_share"] >= 1 - LANE_PROFILE_MINORITY:
+            is_international = True
+
     # =================================================================
     # ROUTING RULES (in priority order per accounting document)
     # =================================================================
@@ -778,7 +789,7 @@ def _determine_folder_path_core(
 
         # S9 Workflow: If PO not in BC → Miscellaneous (applies to shipping docs too)
         bc_po_resolved = doc.get("bc_po_resolved")
-        if order_number and bc_po_resolved is False:
+        if order_number and bc_po_resolved is False and not _po_not_found_is_moot(doc, order_number):
             return (
                 "Miscellaneous/Misc Invoices - need approval",
                 f"PO {order_number} not found as BC purchase order — shipping doc → Misc (S9)",
@@ -828,7 +839,7 @@ def _determine_folder_path_core(
         # S9 Workflow: If PO is NOT a valid internal BC purchase order → Miscellaneous
         # This check comes FIRST, before vendor-specific routing (mirrors S9)
         bc_po_resolved = doc.get("bc_po_resolved")
-        if order_number and bc_po_resolved is False:
+        if order_number and bc_po_resolved is False and not _po_not_found_is_moot(doc, order_number):
             return (
                 "Miscellaneous/Misc Invoices - need approval",
                 f"PO {order_number} not found as internal BC purchase order (S9 workflow)",
@@ -1039,10 +1050,16 @@ def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
     went to the vendors' invoice folders). Narrower than _is_credit_memo, whose
     keyword scan also matches remittances and stray "cm" substrings.
     """
+    # BC is the truth: a document AP booked as a positive purchase invoice
+    # is not a credit (Canpack 1111600287/88: credit series, BC +18,519.01,
+    # staff filed under dropship).
+    bc_link = doc.get("bc_link") if isinstance(doc.get("bc_link"), dict) else {}
+    if bc_link.get("bc_amount") is not None and float(bc_link["bc_amount"]) > 0:
+        return False
     if doc_type in ("Credit_Memo", "credit_memo"):
         return True
-    if doc_type in ("AP_Invoice", "AP Invoice") and _TEXT_CREDIT_DOC.search(_pdf_text(doc)[:3000]):
-        return True
+    # (A "credit memo/note" wording trigger was removed 2026-10-05: on 2,077
+    # staff filings it was right 0 of 1 times.)
     vendor = str(doc.get("vendor_canonical") or "").upper()
     series = _VENDOR_CREDIT_SERIES.get(vendor)
     if series:
@@ -1280,6 +1297,14 @@ def _is_warehouse_order(doc: dict) -> bool:
     # Square9 filings (2026-09-28..10-05): WA (warehouse/assembly) 11/11 and
     # WR (warehouse receipt) 4/4 filed under Warehouse, plain W purchase
     # orders 50/68 Warehouse, while plain numeric orders were 46/60 Dropship.
+    # Learned vendor lane profile: freight carriers that bill W-orders but
+    # that staff file under Dropship/Freight 90%+ of the time stay dropship.
+    lane = _lane_profile(doc)
+    if lane and lane["warehouse_share"] <= LANE_PROFILE_MINORITY:
+        return False
+    if lane and lane["warehouse_share"] >= 1 - LANE_PROFILE_MINORITY:
+        return True
+
     if any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in _order_numbers_of(doc, normalized, routing_details)):
         return True
     # Extraction often leaves the Gamer order out of the PO field even when it
@@ -1337,6 +1362,30 @@ def _pdf_text(doc: dict) -> str:
 
 _TEXT_CREDIT_DOC = re.compile(r"\bcredit\s+(?:memo|note|invoice)\b", re.I)
 _TEXT_GAMER_NUMERIC_ORDER = re.compile(r"(?<![0-9])1[0-2]\d{4}(?![0-9])")
+LANE_PROFILE_MIN_FILINGS = 5
+LANE_PROFILE_MINORITY = 0.05
+
+
+def _lane_profile(doc: dict):
+    """The vendor lane profile attached by route_with_feedback (None when the
+    vendor has fewer than LANE_PROFILE_MIN_FILINGS lane filings)."""
+    prof = doc.get("_vendor_lane_profile")
+    if isinstance(prof, dict) and int(prof.get("n") or 0) >= LANE_PROFILE_MIN_FILINGS:
+        return prof
+    return None
+
+
+def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:
+    """"PO not found as an internal BC purchase order" sends an invoice to
+    Misc/AP staging. It is no evidence when AP has entered the invoice in BC
+    (bc_link from bc_reconciliation_service) or when the "PO" is a label
+    with no digit ("MULTI-TRUCKS"): 56 of 2,077 staff filings in 45 days
+    were dropship invoices parked this way."""
+    if isinstance(doc.get("bc_link"), dict) and doc["bc_link"].get("bc_document_no"):
+        return True
+    return not re.search(r"\d", str(order_number or ""))
+
+
 def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> list:
     """Every order/PO value on the document, first PO of any list, uppercased."""
     from services.po_resolution_service import normalize_po
@@ -1459,6 +1508,15 @@ async def route_with_feedback(
 
     doc = dict(doc)
     doc["_non_trade_vendor"] = await _is_non_trade_vendor(doc.get("vendor_canonical"))
+    if "_vendor_lane_profile" not in doc and doc.get("vendor_canonical"):
+        try:
+            from deps import get_db
+            prof = await get_db().vendor_lane_profiles.find_one(
+                {"vendor": str(doc["vendor_canonical"]).upper()}, {"_id": 0})
+            if prof:
+                doc["_vendor_lane_profile"] = prof
+        except Exception:
+            pass
     if "fraud_risk" not in doc:
         try:
             from deps import get_db

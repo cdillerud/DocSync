@@ -80,6 +80,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
             "--limit", "20000", "--no-record-efficacy", "--out-csv", "prod_reports/parity_hourly.csv", timeout=1200)
         summary["routing_learning"] = await _script(
             "scripts/square9_daily_learning.py", "--csv", "prod_reports/parity_hourly.csv", "--confirm", "APPLY")
+        from services.lane_profile_service import learn_from_csv
+        summary["lane_profiles"] = await learn_from_csv(db, "/app/prod_reports/parity_hourly.csv")
     except Exception as e:
         summary["routing_learning"] = f"error: {e!r}"
     try:

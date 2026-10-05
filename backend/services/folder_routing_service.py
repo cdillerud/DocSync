@@ -1384,6 +1384,8 @@ def _lane_profile(doc: dict):
     return None
 
 
+_GAMER_PO_SHAPE = re.compile(r"^(?:WA\d{4}[A-Z]?|(?:WR|WTR|W|PR)?-?1?\d{5}[A-Z]?)$")
+
 def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:
     """"PO not found as an internal BC purchase order" sends an invoice to
     Misc/AP staging. It is no evidence when AP has entered the invoice in BC
@@ -1392,7 +1394,10 @@ def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:
     were dropship invoices parked this way."""
     if isinstance(doc.get("bc_link"), dict) and doc["bc_link"].get("bc_document_no"):
         return True
-    return not re.search(r"\d", str(order_number or ""))
+    # Only a value shaped like a Gamer PO (1xxxxx, W/WA/WR/WTR/PR + digits)
+    # can be "not found" meaningfully; a customer PO (P0028017-40) or a
+    # vendor reference (45034416) is no evidence (29 parked filings / 45d).
+    return not _GAMER_PO_SHAPE.match(str(order_number or "").strip().upper())
 
 
 def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> list:

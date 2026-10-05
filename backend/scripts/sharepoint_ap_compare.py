@@ -155,6 +155,11 @@ _INVOICE_PO_PATTERNS = [
     # Keyword + reference where reference contains at least one digit and >=4 chars total.
     re.compile(r"\b(?:invoice|inv|order|ref|bol|po|so)\b[\s\-#:]*([a-z0-9](?=[a-z0-9\-]*\d)[a-z0-9\-]{3,})", re.I),
     re.compile(r"\b(\d{5,})\b"),                 # bare numeric refs >=5 digits
+    # Carrier PRO numbers with a terminal prefix, e.g. XPO PRO "112-622366"
+    # (stored whole as invoice_number_clean; the bare pattern above only
+    # caught "622366", so 7 XPO invoices of 2026-09-14..10-05 never matched).
+    # Separators are spaces by the time patterns run; the token is re-hyphenated.
+    re.compile(r"\b(\d{2,4} \d{5,})\b"),
     # Vendor-prefixed alphanumeric. Was {2,4} letters - found live 2026-07-16:
     # this missed real invoice numbers with a single-letter prefix, like
     # Celtic's "L546467" format (confirmed: none of the three patterns

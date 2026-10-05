@@ -1012,6 +1012,12 @@ def _is_working_folder(path: Optional[str]) -> bool:
         p = p[12:]
     return p.split("/")[0].strip().lower() in SQUARE9_WORKING_ROOTS
 
+# Vendors whose credit memos have their own number series and print no
+# "credit" wording. Canpack: invoices 1101/1102xxxxxx (787 since 2026-07),
+# credits 1111/1112xxxxxx (staff filed 6 of 6 under Vendor Credit Memos).
+_VENDOR_CREDIT_SERIES = {"CANPACK": re.compile(r"^11[1-2][1-9]\d{6}$")}
+
+
 def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
     """A document that is unambiguously a vendor credit: typed Credit_Memo, or
     a negative total. Staff file these under Vendor Credit Memos whatever the
@@ -1024,6 +1030,13 @@ def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
         return True
     if doc_type in ("AP_Invoice", "AP Invoice") and _TEXT_CREDIT_DOC.search(_pdf_text(doc)[:3000]):
         return True
+    vendor = str(doc.get("vendor_canonical") or "").upper()
+    series = _VENDOR_CREDIT_SERIES.get(vendor)
+    if series:
+        nf, ef = doc.get("normalized_fields") or {}, doc.get("extracted_fields") or {}
+        inv = str(doc.get("invoice_number_clean") or nf.get("invoice_number") or ef.get("invoice_number") or "").strip()
+        if series.match(inv):
+            return True
     amount = doc.get("amount_float")
     try:
         return amount is not None and float(amount) < 0

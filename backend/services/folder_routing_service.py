@@ -695,7 +695,7 @@ def _determine_folder_path_core(
         )
 
     # RULE 5: S&H (Storage & Handling) Invoices
-    if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description):
+    if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description)             or (doc_type in ("AP_Invoice", "AP Invoice") and _is_sh_invoice_evidence(doc, order_number)):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
                 "S&H Invoices Approved",
@@ -1345,6 +1345,23 @@ def _order_number_of(doc: dict, normalized: dict, routing_details: dict) -> str:
 def _is_dunnage_related(description: str) -> bool:
     """Check if document is dunnage-related."""
     return any(indicator in description.lower() for indicator in DUNNAGE_INDICATORS)
+
+
+_TEXT_SH = re.compile(r"storage.{0,40}handling|handling.{0,40}storage|storage (?:charge|fee)s?|pallet storage"
+                      r"|handling (?:in|out)\b|in/out handling|inbound handling|outbound handling")
+_SH_VENDOR_WORDS = re.compile(r"\b(?:warehous\w*|storage)\b", re.I)
+
+
+def _is_sh_invoice_evidence(doc: dict, order_number: str) -> bool:
+    """Storage & handling evidence beyond the description: S&H wording on the
+    PDF (no false positives on 3 weeks of staff filings), or a 3PL warehouse
+    vendor (Rotondo Warehouse, Valley Distributing and Storage) billing with
+    no order number; with an order it is freight/warehouse work, not S&H."""
+    if _TEXT_SH.search(_pdf_text(doc)[:4000].lower()):
+        return True
+    ef = doc.get("extracted_fields") or {}
+    raw = " ".join(str(v) for v in (doc.get("vendor_raw"), ef.get("vendor")) if v)
+    return bool(_SH_VENDOR_WORDS.search(raw)) and not order_number and not _text_order_refs(doc)
 
 
 def _is_storage_handling(description: str) -> bool:

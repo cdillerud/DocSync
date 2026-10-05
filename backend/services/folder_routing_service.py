@@ -1015,7 +1015,9 @@ def _is_working_folder(path: Optional[str]) -> bool:
 # Vendors whose credit memos have their own number series and print no
 # "credit" wording. Canpack: invoices 1101/1102xxxxxx (787 since 2026-07),
 # credits 1111/1112xxxxxx (staff filed 6 of 6 under Vendor Credit Memos).
-_VENDOR_CREDIT_SERIES = {"CANPACK": re.compile(r"^11[1-2][1-9]\d{6}$")}
+_CANPACK_CREDIT = re.compile(r"^11[1-2][1-9]\d{6}$")
+# CANPUSA is the BC vendor for CanPack US (Olyphant/Muncie); CANPACK the older code.
+_VENDOR_CREDIT_SERIES = {"CANPACK": _CANPACK_CREDIT, "CANPUSA": _CANPACK_CREDIT}
 
 
 def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:

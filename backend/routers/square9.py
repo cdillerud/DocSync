@@ -381,6 +381,15 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
                 await retry_failed_extractions(db)
             except Exception as e:
                 logger.warning("[extraction-retry] failed: %r", e)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "python3", "scripts/bc_vendor_learning.py", "--apply",
+                    cwd=READINESS_APP_DIR, env={**os.environ, "PYTHONPATH": READINESS_APP_DIR},
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=900)
+                logger.info("[bc-vendor-learning] %s", out.decode("utf-8", "replace").splitlines()[:1])
+            except Exception as e:
+                logger.warning("[bc-vendor-learning] failed: %r", e)
     except Exception as e:
         logger.exception("[readiness-check] unexpected failure")
         await _set_run_status(

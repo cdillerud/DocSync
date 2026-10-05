@@ -485,8 +485,12 @@ async def mark_split_continuations(db, child_ids: list, apply: bool = True) -> i
             same = [p for p in with_amount if _inv(p) == inv and (not vend or not _vend(p) or _vend(p) == vend)]
             primary = same[0] if same else None
         else:
+            # Nearest earlier invoice in the same file (supporting pages -
+            # BOL, POD, packing list - follow their invoice, sometimes after
+            # other supporting pages), vendor agreeing or missing.
             g = d.get("batch_group_num")
-            prev = [p for p in with_amount if g is not None and p.get("batch_group_num") == g - 1]
+            prev = sorted((p for p in with_amount if g is not None and (p.get("batch_group_num") or 0) < g),
+                          key=lambda p: -(p.get("batch_group_num") or 0))
             if prev and (not vend or not _vend(prev[0]) or _vend(prev[0]) == vend):
                 primary = prev[0]
         if primary:

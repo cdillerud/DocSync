@@ -13,8 +13,8 @@ Each cycle (LEARNING_CYCLE_MINUTES, default 60):
      (last 30 days): split pages that continue an invoice marked.
   5. extraction_retry_service: recent AP documents with nothing extracted
      are re-extracted.
-Routing learning from staff Square9 filings stays in the daily readiness
-run (it needs that run's parity comparison). Each step is isolated: a
+Routing learning from staff Square9 filings also runs hourly on a 72-hour
+parity window (in addition to the daily readiness run). Each step is isolated: a
 failure is logged and the cycle continues. Cycle summaries are stored in
 learning_cycle_runs. LEARNING_CYCLE_ENABLED=false turns it off.
 """
@@ -66,6 +66,17 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
             summary[key] = await _script(*args)
         except Exception as e:
             summary[key] = f"error: {e!r}"
+    # Routing learning from staff Square9 filings, hourly: a short parity
+    # window (72h, about 2 min, no efficacy writes) feeds the routing
+    # learner, which counts each staff filing once (routing_learning_seen).
+    try:
+        summary["parity_72h"] = await _script(
+            "scripts/square9_hub_ap_parity_report.py", "--since-hours", "72", "--hub-lookback-days", "14",
+            "--limit", "20000", "--no-record-efficacy", "--out-csv", "prod_reports/parity_hourly.csv", timeout=1200)
+        summary["routing_learning"] = await _script(
+            "scripts/square9_daily_learning.py", "--csv", "prod_reports/parity_hourly.csv", "--confirm", "APPLY")
+    except Exception as e:
+        summary["routing_learning"] = f"error: {e!r}"
     try:
         from services.extraction_retry_service import retry_failed_extractions
         summary["extraction_retry"] = await retry_failed_extractions(db, limit=20)

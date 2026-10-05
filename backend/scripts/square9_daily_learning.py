@@ -29,7 +29,8 @@ sys.path.insert(0, "scripts")
 
 TRUSTED = {"exact_match", "strong_evidence_match"}
 NON_FINAL_FOLDERS = {"temp folder"}
-MIN_AGREEING = 2            # a new rule needs this many agreeing filings in the run
+MIN_AGREEING = 2
+SUPERSEDE_MARGIN = 2   # votes needed beyond a rule's own support to replace it            # a new rule needs this many agreeing filings in the run
 JUNK_VENDORS = {"account", "unknown", "vendor", "n/a", "none"}
 
 
@@ -121,13 +122,32 @@ async def main() -> int:
         if clash:
             conflicts.append((key, clash, folder, r.get("square9_name", "")))
             if apply:
-                await db.routing_learning_conflicts.update_one(
+                vote_field = "votes." + folder.replace(".", "_")
+                conflict = await db.routing_learning_conflicts.find_one_and_update(
                     {"routing_key": key},
                     {"$set": {"routing_key": key, "existing_folder": clash, "square9_folder": folder,
                               "square9_file": r.get("square9_name"), "hub_file": hub.get("file_name"),
                               "updated_at": now},
-                     "$inc": {"seen": 1}},
-                    upsert=True)
+                     "$inc": {"seen": len(obs), vote_field: len(obs)}},
+                    upsert=True, return_document=True)
+                for o in obs:
+                    await db.routing_learning_seen.update_one(
+                        {"_id": o[6]["_seen_id"]}, {"$set": {"routing_key": key, "learned_at": now}}, upsert=True)
+                # Self-correction: when staff keep filing this profile in another
+                # folder, the rule follows them once that folder out-votes the
+                # rule's own support by SUPERSEDE_MARGIN.
+                votes = int(((conflict or {}).get("votes") or {}).get(folder.replace(".", "_"), 0))
+                support = int(existing.get("confidence", 1)) if existing else 0
+                if existing and votes >= support + SUPERSEDE_MARGIN:
+                    await db.routing_feedback_rekey_backup.insert_one(
+                        {k: v for k, v in existing.items() if k != "_id"}
+                        | {"orig_id": existing["_id"], "backed_up_at": now, "reason": "outvoted"})
+                    await db.routing_feedback.update_one(
+                        {"_id": existing["_id"]},
+                        {"$set": {"correct_folder": folder, "confidence": votes, "source": "square9_daily_learning",
+                                  "superseded_folder": existing.get("correct_folder"), "updated_at": now}})
+                    await db.routing_learning_conflicts.update_one({"routing_key": key}, {"$set": {"resolved": "outvoted", "resolved_at": now}, "$unset": {"votes": ""}})
+                    print(f"  OUTVOTED {key}: {existing.get('correct_folder')!r} -> {folder!r} ({votes} vs {support})")
             continue
         if not existing and len(obs) < MIN_AGREEING:
             skipped += 1

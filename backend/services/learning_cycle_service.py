@@ -46,6 +46,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         from services.bc_reconciliation_service import reconcile_recent
         summary["bc_reconciliation"] = await reconcile_recent(db)
+        from services.bc_reconciliation_service import fetch_ship_to
+        summary["bc_location"] = await fetch_ship_to(db)
     except Exception as e:
         summary["bc_reconciliation"] = {"error": repr(e)}
     try:

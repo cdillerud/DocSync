@@ -175,6 +175,10 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         # says, before any correction? Measured once, at the first link, so the
         # trend shows whether extraction itself is learning.
         prev_link = d.get("bc_link") or {}
+        if prev_link.get("bc_document_no") == best.get("bc_document_no"):
+            for k in ("bc_ship_to", "bc_ship_to_city", "bc_ship_to_lane", "bc_location_codes", "bc_location_lane"):
+                if k in prev_link:
+                    link[k] = prev_link[k]
         if prev_link.get("first_pass"):
             link["first_pass"] = prev_link["first_pass"]
         elif how == "number+amount":
@@ -244,3 +248,76 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         await db.bc_reconciliation_runs.insert_one(dict(result))
     logger.info("[BCReconcile] %s", result)
     return result
+
+
+SHIP_TO_BATCH = 15
+SHIP_TO_PER_RUN = 600
+
+
+def location_lane(codes: List[str]) -> str:
+    """BC location code on the invoice lines decides the lane (per AP):
+    "00" is dropship, any other location is a warehouse; no location (freight
+    and charge lines) says nothing."""
+    codes = [c for c in codes if c]
+    if not codes:
+        return ""
+    return "dropship" if all(c == "00" for c in codes) else "warehouse"
+
+
+def ship_to_lane(name: Any) -> str:
+    """Lane implied by the BC invoice ship-to: a Gamer warehouse or
+    consignment stock -> warehouse; Gamer head office -> unknown (freight
+    carriers bill to it); anyone else (the customer) -> dropship."""
+    n = str(name or "").strip().lower()
+    if not n:
+        return ""
+    if "warehouse" in n or "consignment" in n or "c/o" in n or " wh " in f" {n} ":
+        return "warehouse"
+    if "gamer" in n:
+        return ""
+    return "dropship"
+
+
+async def fetch_ship_to(db, limit: int = SHIP_TO_PER_RUN) -> Dict[str, Any]:
+    """Fill bc_link.bc_ship_to for linked documents (read-only BC GET,
+    SHIP_TO_BATCH invoice numbers per request)."""
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    todo = []
+    async for d in db.hub_documents.find(
+            {"bc_link.bc_document_no": {"$exists": True}, "bc_link.bc_location_lane": {"$exists": False}},
+            {"_id": 1, "bc_link.bc_document_no": 1}).limit(limit):
+        todo.append((d["_id"], d["bc_link"]["bc_document_no"]))
+    if not todo:
+        return {"fetched": 0}
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    url = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})/purchaseInvoices"
+    got = 0
+    async with httpx.AsyncClient(timeout=60) as c:
+        lr = await c.get(f"{url.rsplit('/', 1)[0]}/locations", headers={"Authorization": f"Bearer {token}"},
+                         params={"$select": "id,code"})
+        loc_code = {l["id"]: l["code"] for l in lr.json().get("value", [])} if lr.status_code == 200 else {}
+        for i in range(0, len(todo), SHIP_TO_BATCH):
+            chunk = todo[i:i + SHIP_TO_BATCH]
+            nums = sorted({str(n) for _, n in chunk if n})
+            flt = " or ".join(f"number eq '{n}'" for n in nums)
+            r = await c.get(url, headers={"Authorization": f"Bearer {token}"},
+                            params={"$filter": flt, "$select": "number,shipToName,shipToCity,shipToState",
+                                    "$expand": "purchaseInvoiceLines($select=locationId)"})
+            if r.status_code != 200:
+                continue
+            by_no = {v["number"]: v for v in r.json().get("value", [])}
+            for oid, n in chunk:
+                v = by_no.get(str(n))
+                ship = (v or {}).get("shipToName") or ""
+                codes = sorted({loc_code.get(l.get("locationId"), "") for l in (v or {}).get("purchaseInvoiceLines") or []
+                                if l.get("locationId") and not str(l["locationId"]).startswith("00000000")} - {""})
+                await db.hub_documents.update_one({"_id": oid}, {"$set": {
+                    "bc_link.bc_ship_to": ship,
+                    "bc_link.bc_ship_to_city": (v or {}).get("shipToCity") or "",
+                    "bc_link.bc_ship_to_lane": ship_to_lane(ship),
+                    "bc_link.bc_location_codes": codes,
+                    "bc_link.bc_location_lane": location_lane(codes)}})
+                got += 1
+    return {"fetched": got}

@@ -1297,6 +1297,15 @@ def _is_warehouse_order(doc: dict) -> bool:
     # Square9 filings (2026-09-28..10-05): WA (warehouse/assembly) 11/11 and
     # WR (warehouse receipt) 4/4 filed under Warehouse, plain W purchase
     # orders 50/68 Warehouse, while plain numeric orders were 46/60 Dropship.
+    # BC location code on the invoice lines is the lane (AP: "00" = dropship,
+    # any other location = warehouse); filled by bc_reconciliation_service
+    # once AP enters the invoice. Agreed with staff on 708 of 712 filings.
+    bc_lane = (doc.get("bc_link") or {}).get("bc_location_lane") if isinstance(doc.get("bc_link"), dict) else ""
+    if bc_lane == "warehouse":
+        return True
+    if bc_lane == "dropship":
+        return False
+
     # Learned vendor lane profile: freight carriers that bill W-orders but
     # that staff file under Dropship/Freight 90%+ of the time stay dropship.
     lane = _lane_profile(doc)

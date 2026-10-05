@@ -28,7 +28,7 @@ def _has_extraction(fields) -> bool:
                for k, v in (fields or {}).items() if not str(k).startswith("_"))
 
 
-async def retry_failed_extractions(db, days: int = 7, limit: int = 60, delay_seconds: float = 2.0) -> Dict[str, Any]:
+async def retry_failed_extractions(db, days: int = 30, limit: int = 60, delay_seconds: float = 2.0) -> Dict[str, Any]:
     from services.document_reprocess_service import reprocess_document
 
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()

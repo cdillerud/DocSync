@@ -77,6 +77,40 @@ async def m():
                 await db.vendor_aliases_fix_backup.insert_one({k: v for k, v in other.items() if k != "_id"} | {"orig_id": other["_id"], "backed_up_at": now, "reason": "bc_ground_truth_align"})
                 await db.vendor_aliases.update_one({"_id": other["_id"]}, {"$set": {"vendor_no": vno, "canonical_vendor_id": vno, "vendor_name": names.get(vno), "aligned_to_bc_at": now}})
     print(f"conflicting alias rows aligned to BC: {aligned}")
+    # align_sender: sender-email mappings checked against the BC vendor of the
+    # invoices each sender sent. >=3 linked invoices and >=90% one vendor ->
+    # that vendor (o-i.com had no vendor, BC: OWENS 118/118); >=3 vendors and
+    # none above 60% -> a shared platform sender (QuickBooks notifications
+    # mapped to LSIDIST, BC: Child, Bullanfair, ...) is disabled.
+    by_sender = collections.defaultdict(collections.Counter)
+    async for d in db.hub_documents.find({"bc_link.bc_vendor_no": {"$exists": True}, "email_sender": {"$nin": [None, ""]}},
+                                         {"_id": 0, "email_sender": 1, "bc_link.bc_vendor_no": 1}):
+        by_sender[str(d["email_sender"]).strip().lower()][d["bc_link"]["bc_vendor_no"]] += 1
+    s_fixed = s_generic = 0
+    async for row in db.sender_vendor_map.find({"sender_email": {"$exists": True}}):
+        c = by_sender.get(str(row["sender_email"]).lower())
+        if not c or sum(c.values()) < 3:
+            continue
+        top, n = c.most_common(1)[0]; tot = sum(c.values())
+        if n / tot >= 0.9 and (row.get("vendor_canonical") != top or row.get("generic_sender")):
+            s_fixed += 1
+            print(f"  SENDER {row['sender_email']}: {row.get('vendor_canonical')} -> {top} ({n}/{tot})")
+            if APPLY:
+                await db.sender_vendor_map.update_one({"_id": row["_id"]}, {"$set": {
+                    "vendor_canonical": top, "vendor_no": top, "vendor_name": names.get(top) or row.get("vendor_name"),
+                    "vendor_canonical_before_bc": row.get("vendor_canonical"), "aligned_to_bc_at": now,
+                    "bc_evidence": dict(c), "generic_sender": False}})
+        elif len(c) >= 3 and n / tot < 0.6 and row.get("vendor_canonical"):
+            s_generic += 1
+            print(f"  GENERIC SENDER {row['sender_email']}: {row.get('vendor_canonical')} disabled, BC {dict(c.most_common(4))}")
+            if APPLY:
+                await db.sender_vendor_map.update_one({"_id": row["_id"]}, {"$set": {
+                    "vendor_canonical": None, "vendor_canonical_before_bc": row.get("vendor_canonical"),
+                    "generic_sender": True, "aligned_to_bc_at": now, "bc_evidence": dict(c)}})
+                dom = str(row["sender_email"]).split("@")[-1]
+                await db.sender_vendor_map.update_many({"sender_domain": dom, "sender_email": {"$exists": False}}, {"$set": {
+                    "vendor_canonical": None, "generic_sender": True, "aligned_to_bc_at": now}})
+    print(f"sender mappings aligned to BC: {s_fixed}, shared senders disabled: {s_generic}")
     print(("APPLIED" if APPLY else "DRY RUN") + f": learned {len(learned)}, aliases created/updated {alias_new}, documents corrected {docs_fixed}")
     for k, v in per.most_common(20): print("  ", v, k)
 asyncio.run(m())

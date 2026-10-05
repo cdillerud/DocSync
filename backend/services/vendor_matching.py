@@ -287,6 +287,10 @@ async def learn_sender_vendor(sender_email: str, vendor_canonical: str,
     existing = await db.sender_vendor_map.find_one(
         {"sender_email": email_lower}, {"_id": 0}
     )
+    if existing and existing.get("generic_sender"):
+        # Shared platform sender (bc_vendor_learning align_sender): its
+        # invoices come from many BC vendors, so never learn one for it.
+        return
     if existing:
         if existing.get("vendor_canonical") == vendor_canonical:
             # Same vendor — strengthen confidence

@@ -61,7 +61,15 @@ async def main() -> int:
 
     # Pass 1: collect every trusted observation per routing key.
     observations = {}
+    already = 0
     for r in rows:
+        # Daily parity windows overlap; learn from each staff filing once so
+        # re-reading the same pair does not keep strengthening a rule.
+        seen_id = f"{r.get('square9_parent_path', '')}/{r.get('square9_name', '')}|{r.get('hub_doc_id', '')}"
+        if await db.routing_learning_seen.find_one({"_id": seen_id}, {"_id": 1}):
+            already += 1
+            continue
+        r["_seen_id"] = seen_id
         hub = await db.hub_documents.find_one(
             {"id": r.get("hub_doc_id")},
             {"_id": 0, "vendor_canonical": 1, "doc_type": 1, "po_number_clean": 1, "is_international": 1, "file_name": 1})
@@ -112,6 +120,9 @@ async def main() -> int:
                 print(f"  NOT APPLIED {key}: {res}")
                 skipped += 1
                 continue
+            for o in obs:
+                await db.routing_learning_seen.update_one(
+                    {"_id": o[6]["_seen_id"]}, {"$set": {"routing_key": key, "learned_at": now}}, upsert=True)
         if existing:
             strengthened += 1
         else:
@@ -119,7 +130,7 @@ async def main() -> int:
             print(f"  CREATE {key} -> {folder!r}  ({r.get('square9_name', '')[:50]})")
 
     print(f"\n{'APPLIED' if apply else 'DRY RUN'}: trusted pairs {len(rows)}, new rules {created}, "
-          f"strengthened {strengthened}, conflicts {len(conflicts)}, skipped {skipped}")
+          f"strengthened {strengthened}, conflicts {len(conflicts)}, skipped {skipped}, already learned {already}")
     for key, existing, new, sqname in conflicts[:20]:
         print(f"  CONFLICT {key}: rule says {existing!r}, staff filed {new!r} ({sqname[:40]})")
     return 0

@@ -23,6 +23,8 @@ router = APIRouter(prefix="/square9", tags=["Square9"])
 READINESS_APP_DIR = "/app"
 READINESS_SCRIPT = "ops/prod_verify_square9_cutover_readiness.sh"
 READINESS_SNAPSHOT_SCRIPT = "scripts/record_square9_readiness_snapshot.py"
+ROUTING_LEARNING_SCRIPT = "scripts/square9_daily_learning.py"
+ROUTING_LEARNING_ENABLED = os.environ.get("SQUARE9_ROUTING_LEARNING_ENABLED", "true").lower() == "true"
 READINESS_RUN_STATUS_KEY = "readiness_run_status"
 
 # A run stuck at "running" past this age is treated as crashed/
@@ -371,6 +373,8 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
             error=None,
             last_result=latest or {},
         )
+        if triggered_by == "daily_schedule" and ROUTING_LEARNING_ENABLED:
+            await _run_routing_learning()
     except Exception as e:
         logger.exception("[readiness-check] unexpected failure")
         await _set_run_status(
@@ -385,6 +389,22 @@ async def _execute_readiness_check(db, triggered_by: str) -> None:
         current = await _get_run_status_doc(db)
         if not current.get("started_at"):
             await _set_run_status(db, started_at=started_at)
+
+
+async def _run_routing_learning() -> None:
+    """Learn folder routing from today's staff filings (exact/strong parity
+    pairs). Failure is logged and never fails the readiness run."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "python3", ROUTING_LEARNING_SCRIPT, "--confirm", "APPLY",
+            cwd=READINESS_APP_DIR, env={**os.environ, "PYTHONPATH": READINESS_APP_DIR},
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=300)
+        summary = [l for l in out.decode("utf-8", errors="replace").splitlines() if l.startswith("APPLIED")]
+        logger.info("[routing-learning] rc=%s %s", proc.returncode, summary[-1] if summary else "(no summary)")
+    except Exception as e:
+        logger.warning("[routing-learning] failed: %r", e)
 
 
 @router.post("/readiness/run")

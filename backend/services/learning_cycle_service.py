@@ -9,7 +9,8 @@ Each cycle (LEARNING_CYCLE_MINUTES, default 60):
   3. scripts/mark_invoice_duplicates.py (last 14 days): repeated copies of
      one invoice (same vendor, number, amount) marked duplicate.
   4. scripts/link_sales_docs_to_bc.py (last 30 days): sales documents
-     linked to their BC order and customer.
+     linked to their BC order and customer; scripts/mark_split_continuations.py
+     (last 30 days): split pages that continue an invoice marked.
   5. extraction_retry_service: recent AP documents with nothing extracted
      are re-extracted.
 Routing learning from staff Square9 filings stays in the daily readiness
@@ -53,6 +54,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
                                 (started - timedelta(days=14)).date().isoformat(), "--apply")),
         ("sales_bc_link", ("scripts/link_sales_docs_to_bc.py", "--since",
                            (started - timedelta(days=30)).date().isoformat(), "--apply")),
+        ("split_continuations", ("scripts/mark_split_continuations.py", "services/batch_po_splitter.py",
+                                 "--since=" + (started - timedelta(days=30)).date().isoformat(), "--apply")),
     ):
         try:
             summary[key] = await _script(*args)

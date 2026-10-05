@@ -8,6 +8,7 @@ logging.disable(logging.CRITICAL)
 from motor.motor_asyncio import AsyncIOMotorClient
 
 APPLY = "--apply" in sys.argv
+SINCE = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--since=")), "2026-06-01")
 db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
 spec = importlib.util.spec_from_file_location("bps", sys.argv[1])
 bps = importlib.util.module_from_spec(spec)
@@ -18,7 +19,7 @@ spec.loader.exec_module(bps)
 async def main():
     children = collections.defaultdict(list)
     async for d in db.hub_documents.find(
-            {"batch_parent_id": {"$exists": True, "$ne": None}, "created_utc": {"$gte": "2026-06-01"}},
+            {"batch_parent_id": {"$exists": True, "$ne": None}, "created_utc": {"$gte": SINCE}},
             {"_id": 0, "id": 1, "batch_parent_id": 1}):
         children[d["batch_parent_id"]].append(d["id"])
     total = parents_hit = 0

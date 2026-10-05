@@ -177,7 +177,7 @@ async def _get_bc_invoice_examples(db, vendor_no: str, limit: int = 3) -> List[D
             "bc_vendor_no": vendor_no,
             "bc_amount": {"$gt": 0},
         },
-        {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1,
+        {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "bc_order_number": 1,
          "bc_amount": 1, "bc_posting_date": 1, "bc_vendor_name": 1, "bc_status": 1}
     ).sort("bc_posting_date", -1).limit(limit)
 
@@ -321,9 +321,12 @@ def _format_invoice_examples(examples: List[Dict]) -> str:
         doc_no = ex.get("bc_document_no", "")
         status = ex.get("bc_status", "")
 
-        line = f"  Example {i}: Invoice #{doc_no}"
-        if ext_ref:
-            line += f", PO/Ref: {ext_ref}"
+        # The vendor's invoice number is BC's external document number; BC's
+        # own entry number means nothing on the document. They were labeled
+        # the other way round ("Invoice #<BC entry>, PO/Ref: <invoice no>").
+        line = f"  Example {i}: Vendor invoice number {ext_ref or '?'}"
+        if ex.get("bc_order_number"):
+            line += f", Gamer PO {ex['bc_order_number']}"
         if amount:
             line += f", Amount: ${amount:,.2f}"
         if date:
@@ -368,3 +371,38 @@ def _format_entity_distribution(dist: Dict[str, int], vendor_no: str) -> str:
             parts.append("  → Documents from this vendor are very likely AP_Invoice type.")
 
     return "\n".join(parts)
+
+
+_RULE_TEXT = {
+    "strip_suffix": "has no {arg} suffix in BC: read {{number}}{arg} as {{number}}",
+    "prefix": "starts with \"{to}\", never \"{frm}\" (OCR often reads \"{to}\" as \"{frm}\")",
+}
+
+
+async def build_invoice_number_context(db, vendor_no: str) -> str:
+    """How this vendor's invoice numbers really look, from BC: the last few
+    vendor invoice numbers AP entered, plus rules learned from BC
+    corrections (invoice_number_rules_service)."""
+    if not vendor_no:
+        return ""
+    refs = [r.get("bc_external_document_no") async for r in db.bc_reference_cache.find(
+        {"bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice"]}, "bc_vendor_no": vendor_no,
+         "bc_external_document_no": {"$nin": [None, ""]}, "bc_status": {"$ne": "Canceled"}},
+        {"_id": 0, "bc_external_document_no": 1}).sort("bc_posting_date", -1).limit(5)]
+    rule = await db.vendor_invoice_number_rules.find_one({"vendor": vendor_no.upper()}, {"_id": 0, "rule": 1})
+    if not refs and not rule:
+        return ""
+    lines = [f"INVOICE NUMBER FORMAT for vendor '{vendor_no}' (from Business Central):"]
+    if refs:
+        lines.append("  - Recent vendor invoice numbers as entered in BC: " + ", ".join(str(r) for r in refs))
+    if rule:
+        kind, _, arg = rule["rule"].partition(":")
+        if kind == "strip_suffix":
+            lines.append(f"  - This vendor's invoice number has no '{arg}' suffix in BC; report the number without it.")
+        elif kind == "prefix" and "->" in arg:
+            frm, to = arg.split("->")
+            firsts = sorted({str(r)[:1] for r in refs if r and not str(r)[:1].isdigit()} | {to})
+            lines.append(f"  - This vendor's invoice numbers start with a letter ({'/'.join(firsts)}), never '{frm}'; "
+                         f"OCR misreads the letter as '{frm}'.")
+    lines.append("  - Report invoice_number in this format; it is the vendor's number, not a PO or BOL.")
+    return "\n".join(lines)

@@ -45,7 +45,7 @@ logger = logging.getLogger("classification_learning_context")
 SOURCES = (
     "vep", "few_shot", "vendor_hint", "feedback_loop",
     "bc_intelligence", "deep_learning", "amount_intelligence",
-    "field_correlation",
+    "field_correlation", "invoice_number_format",
 )
 
 
@@ -274,6 +274,19 @@ async def build_learning_enriched_prompt(
     except Exception as e:
         status["amount_intelligence"] = f"error:{type(e).__name__}"
         logger.debug("[%s] Amount intelligence injection failed: %s", log_prefix, e)
+
+    # 5b. Invoice-number format learned from BC (recent numbers + rules)
+    try:
+        from services.vendor_context_builder import build_invoice_number_context
+        from deps import get_db
+        if effective_vendor:
+            inv_context = await build_invoice_number_context(get_db(), effective_vendor)
+            if inv_context:
+                status["invoice_number_format"] = "fired"
+                dynamic_prompt += "\n\n" + inv_context
+    except Exception as e:
+        status["invoice_number_format"] = f"error:{type(e).__name__}"
+        logger.debug("[%s] Invoice number context failed: %s", log_prefix, e)
 
     # 6. Field Correlation Predictions — learned field->doc_type rules
     try:

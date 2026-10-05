@@ -271,22 +271,12 @@ async def learn_amount_pattern(db, doc: Dict):
 
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or ""
 
-    # Store individual amount
+    # Patterns come from BC (bc_amount_patterns_service, hourly). Appending
+    # every learning pass repeated amounts on reprocess and mixed document
+    # types; here the document is only compared with the BC statistics.
     await db[AMOUNT_PATTERNS_COL].update_one(
         {"vendor_no": vendor_no},
-        {
-            "$push": {"amounts": {"$each": [amount], "$slice": -200}},
-            "$inc": {"count": 1, "sum": amount},
-            "$min": {"min_amount": amount},
-            "$max": {"max_amount": amount},
-            "$set": {
-                "vendor_no": vendor_no,
-                "doc_type": doc_type,
-                "last_amount": amount,
-                "updated_at": _now(),
-            },
-        },
-        upsert=True,
+        {"$set": {"last_amount": amount, "last_doc_type": doc_type, "last_seen_at": _now()}},
     )
 
     # Recompute stats
@@ -294,12 +284,10 @@ async def learn_amount_pattern(db, doc: Dict):
         {"vendor_no": vendor_no}, {"_id": 0}
     )
     if record:
-        amounts = record.get("amounts", [])
-        count = len(amounts)
+        count = int(record.get("count") or 0)
         if count >= 3:
-            avg = sum(amounts) / count
-            variance = sum((a - avg) ** 2 for a in amounts) / count
-            stddev = math.sqrt(variance) if variance > 0 else 0
+            avg = float(record.get("avg_amount") or 0)
+            stddev = float(record.get("stddev") or 0)
 
             # Detect if current amount is anomalous (>2 stddev from mean)
             is_anomaly = abs(amount - avg) > (2 * stddev) if stddev > 0 else False

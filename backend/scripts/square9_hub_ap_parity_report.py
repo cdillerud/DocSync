@@ -1103,9 +1103,16 @@ def run_compare(
     check_recycle_bin: bool = True,
     recycle_bin_since_hours: int = 168,
     recycle_bin_site_path: Optional[str] = None,
+    hub_window_start: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     """Pure function — accepts loaded inputs, returns summary + rows."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
+    # hub_docs may include a lookback before the comparison window so a
+    # Square9 doc can pair with a Hub copy received earlier (Hub caught it
+    # before staff filed it). Only in-window Hub docs count as Hub-side
+    # volume: hub_only rows, hub_count and recycle-bin matching.
+    def _in_window(h: "HubDoc") -> bool:
+        return hub_window_start is None or (h.created_utc is not None and h.created_utc >= hub_window_start)
     rows: List[Dict[str, Any]] = []
     bucket_counts: Dict[str, int] = {b: 0 for b in BUCKET_ORDER}
     bucket_counts["hub_only"] = 0
@@ -1202,7 +1209,7 @@ def run_compare(
             )
             site_path = recycle_bin_site_path or PROD_SITE_PATH
 
-            remaining_unmatched = [h for h in hub_docs if h.doc_id not in matched_hub_ids]
+            remaining_unmatched = [h for h in hub_docs if h.doc_id not in matched_hub_ids and _in_window(h)]
             deleted_items = pull_recycle_bin_items(
                 token, host, site_path, recycle_bin_since_hours,
             )
@@ -1236,7 +1243,7 @@ def run_compare(
             recycle_bin_error = str(e)
 
     for h in hub_docs:
-        if h.doc_id in matched_hub_ids:
+        if h.doc_id in matched_hub_ids or not _in_window(h):
             continue
         rows.append(_row_hub_only(h))
         bucket_counts["hub_only"] += 1
@@ -1297,7 +1304,7 @@ def run_compare(
         "matched_count": matched,
         "findings": findings,
         "square_count": len(square_docs),
-        "hub_count": len(hub_docs),
+        "hub_count": sum(1 for h in hub_docs if _in_window(h)),
         "poll_health": poll_health,
         "top_n": top_n,
         "proof_mode": (
@@ -1433,6 +1440,9 @@ def main() -> int:
     )
     ap.add_argument("--limit", type=int, default=500)
     ap.add_argument("--out-csv", default="prod_reports/square9_hub_ap_parity.csv")
+    ap.add_argument("--hub-lookback-days", type=int, default=14,
+                    help="Extra days of Hub docs considered when matching (Hub may receive a "
+                         "document before staff file it in Square9). Hub-side counts stay in-window.")
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument(
         "--min-match-rate", type=float, default=0.85,
@@ -1568,7 +1578,8 @@ def main() -> int:
     )
 
     # Pull Hub side from Mongo
-    hub_docs = load_hub_ap_docs(args.since_hours, args.limit)
+    hub_docs = load_hub_ap_docs(args.since_hours + args.hub_lookback_days * 24, args.limit)
+    hub_window_start = datetime.now(timezone.utc) - timedelta(hours=args.since_hours)
     poll_health = load_recent_poll_health(args.since_hours)
 
     print(
@@ -1605,6 +1616,7 @@ def main() -> int:
         check_recycle_bin=not args.no_recycle_bin_check,
         recycle_bin_since_hours=prod_window_hours,
         recycle_bin_site_path=args.recycle_bin_site_path,
+        hub_window_start=hub_window_start,
     )
     record_daily_efficacy(result["rows"], prod_window_hours)
 

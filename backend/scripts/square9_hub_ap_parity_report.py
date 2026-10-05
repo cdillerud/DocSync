@@ -1358,6 +1358,100 @@ def _business_day(iso_ts: str) -> Optional[str]:
         return (dt - timedelta(hours=5)).date().isoformat()
 
 
+def _bc_norm(x: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(x or "").upper()).lstrip("0")
+
+
+def record_bc_entry_coverage(days_back: int = 14) -> Dict[str, Any]:
+    """BC as ground truth: of the purchase invoices AP entered into BC (draft
+    or posted, by posting date), how many did the Hub receive? Staff remove a
+    Square9 item once it is entered in BC (2026-10-05: 72% of items deleted
+    from the Temp Folder were BC drafts/posted invoices vs 7% of items still
+    there), so this measures intake against what AP actually processed,
+    independent of folder housekeeping.
+
+    A BC invoice counts as received when a Hub document carries its vendor
+    invoice number (extracted field, file name or email subject; a 1-2 letter
+    suffix like 1101621742A also matches the base) and the vendor or amount
+    agrees, or the number is 6+ characters. Written per posting day into
+    square9_daily_efficacy (bc_* fields). Never raises.
+    """
+    try:
+        from pymongo import MongoClient
+        db = MongoClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        since = (datetime.now(timezone.utc) - timedelta(days=days_back)).date().isoformat()
+        bc: Dict[Any, Dict[str, Any]] = {}
+        for t in ("posted_purchase_invoice", "draft_purchase_invoice"):
+            for d in db.bc_reference_cache.find(
+                    {"bc_entity_type": t, "bc_posting_date": {"$gte": since}},
+                    {"_id": 0, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_external_document_no": 1,
+                     "bc_amount": 1, "bc_posting_date": 1}):
+                key = (d.get("bc_vendor_no"), _bc_norm(d.get("bc_external_document_no")))
+                if key[1]:
+                    bc.setdefault(key, d)
+        hub_since = (datetime.now(timezone.utc) - timedelta(days=days_back + 45)).isoformat()
+        index: Dict[str, List[Dict[str, Any]]] = {}
+        for h in db.hub_documents.find(
+                {"created_utc": {"$gte": hub_since}, "source": {"$ne": "square9_backfill"}},
+                {"_id": 0, "invoice_number_clean": 1, "extracted_fields.invoice_number": 1,
+                 "vendor_canonical": 1, "amount_float": 1, "file_name": 1, "email_subject": 1}):
+            keys = {_bc_norm(h.get("invoice_number_clean")),
+                    _bc_norm((h.get("extracted_fields") or {}).get("invoice_number"))}
+            for src in (h.get("file_name"), h.get("email_subject")):
+                for tok in re.findall(r"[A-Za-z]*\d[\dA-Za-z\-]{3,}", str(src or "")):
+                    keys.add(_bc_norm(tok))
+            for k in keys:
+                if len(k) >= 4:
+                    index.setdefault(k, []).append(h)
+
+        per_day: Dict[str, Dict[str, Any]] = {}
+        for (vno, inv), d in bc.items():
+            day = str(d.get("bc_posting_date") or "")[:10]
+            rec = per_day.setdefault(day, {"bc_entered": 0, "bc_caught": 0, "missing": {}})
+            rec["bc_entered"] += 1
+            amt = d.get("bc_amount")
+            variants = {inv}
+            m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", inv)
+            if m:
+                variants.add(m.group(1))
+            found = False
+            for v in (x for x in variants if len(x) >= 4):
+                for h in index.get(v, []):
+                    agree = (str(h.get("vendor_canonical") or "").upper() == str(vno or "").upper()
+                             or (amt is not None and h.get("amount_float") is not None
+                                 and abs(abs(h["amount_float"]) - abs(amt)) < 0.02))
+                    if agree or len(v) >= 6:
+                        found = True
+                        break
+                if found:
+                    break
+            if found:
+                rec["bc_caught"] += 1
+            else:
+                name = d.get("bc_vendor_name") or vno or "?"
+                rec["missing"][name] = rec["missing"].get(name, 0) + 1
+
+        total = sum(r["bc_entered"] for r in per_day.values())
+        caught = sum(r["bc_caught"] for r in per_day.values())
+        for day, rec in per_day.items():
+            top = sorted(rec["missing"].items(), key=lambda kv: -kv[1])[:5]
+            db.square9_daily_efficacy.update_one(
+                {"_id": day},
+                {"$set": {"date": day, "bc_entered": rec["bc_entered"], "bc_caught": rec["bc_caught"],
+                          "bc_rate_pct": round(100 * rec["bc_caught"] / rec["bc_entered"], 1),
+                          "bc_missing_top": [{"vendor": k, "count": v} for k, v in top],
+                          "bc_updated_at": datetime.now(timezone.utc).isoformat()}},
+                upsert=True)
+        summary = {"since": since, "bc_entered": total, "hub_received": caught,
+                   "rate_pct": round(100 * caught / total, 1) if total else None}
+        print(f"BC-entered coverage since {since}: {caught}/{total} "
+              f"({summary['rate_pct']}%) of AP invoices entered in BC were received by the Hub")
+        return summary
+    except Exception as e:  # never break the readiness run
+        print(f"WARNING: BC-entered coverage failed: {e!r}", file=sys.stderr)
+        return {}
+
+
 def record_daily_efficacy(rows: List[Dict[str, Any]], since_hours: int) -> Dict[str, Any]:
     """Score each business day on its own and store it in square9_daily_efficacy.
 
@@ -1622,6 +1716,7 @@ def main() -> int:
     )
     if not args.no_record_efficacy:
         record_daily_efficacy(result["rows"], prod_window_hours)
+        result["bc_entry_coverage"] = record_bc_entry_coverage()
 
     if args.json:
         # Strip rows; CSV is the row store.

@@ -385,6 +385,12 @@ export default function Square9ReadinessPage() {
               email. The day is when the file was filed or last touched in Square9 (Central time). Partial = day
               cut by the 7-day window, or still in progress.
             </p>
+            <p className="text-xs text-muted-foreground">
+              BC entered = purchase invoices AP entered in Business Central (drafts and posted, by posting date)
+              and how many of them the Hub received. Staff remove a Square9 item once it is entered in BC, so this
+              measures intake against what AP actually processed, independent of folder housekeeping. Hover a
+              rate to see the vendors not received.
+            </p>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -398,6 +404,8 @@ export default function Square9ReadinessPage() {
                   <th className="py-2 pr-3 text-right">Recycle bin</th>
                   <th className="py-2 pr-3 text-right">Adjusted rate</th>
                   <th className="py-2 pr-3 text-right">Safety net</th>
+                  <th className="py-2 pr-3 text-right">BC entered → Hub</th>
+                  <th className="py-2 pr-3 text-right">BC rate</th>
                 </tr>
               </thead>
               <tbody>
@@ -419,6 +427,15 @@ export default function Square9ReadinessPage() {
                         {adj == null ? '—' : `${adj}%`}
                       </td>
                       <td className="py-2 pr-3 text-right">{net}</td>
+                      <td className="py-2 pr-3 text-right">
+                        {d.bc_entered == null ? '—' : `${d.bc_caught}/${d.bc_entered}`}
+                      </td>
+                      <td
+                        className={`py-2 pr-3 text-right font-medium ${d.bc_rate_pct == null ? '' : d.bc_rate_pct >= 85 ? 'text-emerald-500' : 'text-red-500'}`}
+                        title={(d.bc_missing_top || []).map(m => `${m.vendor}: ${m.count}`).join(', ')}
+                      >
+                        {d.bc_rate_pct == null ? '—' : `${d.bc_rate_pct}%`}
+                      </td>
                     </tr>
                   );
                 })}

@@ -76,6 +76,7 @@ _REF_NUMBER_PATTERNS = [
 
 # "Invoice Number  Invoice Date ..." header row with the values on the next
 # line (Amcor): the first token under the header is the invoice number.
+_HEADER_REF = re.compile(r"\b[A-Z]{1,3}(\d{7,10})\b")
 _TABLE_INVOICE_NO = re.compile(r"INVOICE\s+(?:NUMBER|NO\.?|#)[^\n]*\n\s*([A-Z0-9][\w-]{3,20})", re.IGNORECASE)
 
 # Date patterns
@@ -126,6 +127,12 @@ def fingerprint_page(page: Dict[str, Any]) -> Dict[str, Any]:
             if re.search(r"\d", value):
                 fp["ref_numbers"][ref_type] = value
                 break
+    # Carrier PRO-style number heading every page ("GAM330 09/03/26
+    # I848946834 ..." on R+L batch PDFs). Compared by digits so I/D
+    # variants of one PRO stay together.
+    m = _HEADER_REF.search(text[:120])
+    if m:
+        fp["ref_numbers"]["header_ref"] = m.group(1)
     if "invoice_no" not in fp["ref_numbers"]:
         m = _TABLE_INVOICE_NO.search(text)
         if m and re.search(r"\d", m.group(1)):
@@ -285,6 +292,16 @@ def detect_boundaries(fingerprints: List[Dict]) -> List[int]:
         # so they do not veto a matching invoice number.
         if prev_inv and prev_inv == curr_inv:
             boundary_score = 0
+
+        # A different PRO-style header reference starts a new document even
+        # when the (noisier) invoice capture matched: R+L batches read the
+        # same glued "8489468342601" on every page, so 3-6 invoices stayed
+        # in one document and only the first reached the Hub.
+        prev_hdr = prev["ref_numbers"].get("header_ref", "")
+        curr_hdr = curr["ref_numbers"].get("header_ref", "")
+        if prev_hdr and curr_hdr and prev_hdr != curr_hdr:
+            boundary_score = max(boundary_score, 3)
+            reasons.append("header_ref_changed")
 
         # Threshold: score >= 2 means this is likely a new document
         if boundary_score >= 2:

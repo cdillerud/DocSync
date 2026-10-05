@@ -278,6 +278,7 @@ def _is_weak_fallback_routing(path: str, reason: str) -> bool:
     strong_prefixes = (
         "LocationCode=",
         "Document marked Do Not Pay",
+        "No order number on domestic invoice",
     )
     if any(r.startswith(prefix) for prefix in strong_prefixes):
         return False
@@ -848,6 +849,19 @@ def _determine_folder_path_core(
                 routing_details,
             )
 
+        # No Gamer order anywhere (fields, PO list, PDF text) from a vendor
+        # that rarely bills against orders (set by route_with_feedback): a
+        # non-trade invoice (awards, printing, rent) that staff file under
+        # Misc for approval, not a dropship order.
+        if (doc.get("_non_trade_vendor") is True
+                and not order_number and not _order_numbers_of(doc, {}, doc.get("routing_details") or {})
+                and not _text_order_refs(doc) and not _TEXT_GAMER_NUMERIC_ORDER.search(_pdf_text(doc))):
+            return (
+                "Miscellaneous/Misc Invoices - need approval",
+                "No order number on domestic invoice (non-trade, needs approval)",
+                routing_details,
+            )
+
         # Regular domestic invoice → Dropship Not International by order
         vendor_folder = _get_vendor_subfolder(vendor_name)
         if order_number:
@@ -1007,6 +1021,8 @@ def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
     keyword scan also matches remittances and stray "cm" substrings.
     """
     if doc_type in ("Credit_Memo", "credit_memo"):
+        return True
+    if doc_type in ("AP_Invoice", "AP Invoice") and _TEXT_CREDIT_DOC.search(_pdf_text(doc)[:3000]):
         return True
     amount = doc.get("amount_float")
     try:
@@ -1262,27 +1278,39 @@ def _text_order_refs(doc: dict) -> list:
     dict; any failure means no evidence, never an error."""
     if "_text_order_refs" in doc:
         return doc["_text_order_refs"]
-    refs = []
     stored = doc.get("gamer_order_refs")
     if isinstance(stored, list):
         refs = stored
     else:
-        b64 = doc.get("file_content_b64")
-        name = str(doc.get("file_name") or "").lower()
-        if isinstance(b64, str) and b64 and len(b64) <= _TEXT_REF_MAX_B64 and (name.endswith(".pdf") or b64.startswith("JVBER")):
-            try:
-                import base64
-                import io
-                from pypdf import PdfReader
-                reader = PdfReader(io.BytesIO(base64.b64decode(b64)))
-                text = " ".join((pg.extract_text() or "") for pg in reader.pages[:3])
-                refs = sorted(set(m.upper().replace("-", "") for m in _TEXT_ORDER_REF.findall(text.upper())))
-            except Exception:
-                refs = []
+        text = _pdf_text(doc).upper()
+        refs = sorted(set(m.replace("-", "") for m in _TEXT_ORDER_REF.findall(text)))
     doc["_text_order_refs"] = refs
     return refs
 
 
+def _pdf_text(doc: dict) -> str:
+    """Text of the first three pages of the stored PDF, cached on the dict;
+    empty when unavailable (no bytes, not a PDF, too large, unreadable)."""
+    if "_pdf_text" in doc:
+        return doc["_pdf_text"]
+    text = ""
+    b64 = doc.get("file_content_b64")
+    name = str(doc.get("file_name") or "").lower()
+    if isinstance(b64, str) and b64 and len(b64) <= _TEXT_REF_MAX_B64 and (name.endswith(".pdf") or b64.startswith("JVBER")):
+        try:
+            import base64
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(base64.b64decode(b64)))
+            text = " ".join((pg.extract_text() or "") for pg in reader.pages[:3])
+        except Exception:
+            text = ""
+    doc["_pdf_text"] = text
+    return text
+
+
+_TEXT_CREDIT_DOC = re.compile(r"\bcredit\s+(?:memo|note|invoice)\b", re.I)
+_TEXT_GAMER_NUMERIC_ORDER = re.compile(r"(?<![0-9])1[0-2]\d{4}(?![0-9])")
 def _order_numbers_of(doc: dict, normalized: dict, routing_details: dict) -> list:
     """Every order/PO value on the document, first PO of any list, uppercased."""
     from services.po_resolution_service import normalize_po
@@ -1339,6 +1367,35 @@ def get_folder_structure_summary() -> Dict[str, Any]:
     }
 
 
+_TRADE_HISTORY_MIN_PO_DOCS = 10
+_TRADE_CACHE: Dict[str, Tuple[float, bool]] = {}
+
+
+async def _is_non_trade_vendor(vendor: Any) -> bool:
+    """True when the vendor has fewer than 10 Hub documents carrying a PO:
+    trade vendors had 28-219 (Rotondo, Berry, Ardagh), the Misc vendors staff
+    approve by hand 0-5 (Boyer, Broadway Awards, Contemporary Images)."""
+    import time
+    key = str(vendor or "").strip()
+    if not key:
+        return True
+    hit = _TRADE_CACHE.get(key)
+    if hit and time.monotonic() - hit[0] < 3600:
+        return hit[1]
+    try:
+        from deps import get_db
+        n = await get_db().hub_documents.count_documents(
+            {"vendor_canonical": key, "po_number_clean": {"$nin": [None, ""]}},
+            limit=_TRADE_HISTORY_MIN_PO_DOCS, maxTimeMS=3000)
+    except Exception:
+        return False
+    result = n < _TRADE_HISTORY_MIN_PO_DOCS
+    if len(_TRADE_CACHE) > 5000:
+        _TRADE_CACHE.clear()
+    _TRADE_CACHE[key] = (time.monotonic(), result)
+    return result
+
+
 async def route_with_feedback(
     doc: Dict[str, Any],
     is_international: bool = False,
@@ -1353,6 +1410,9 @@ async def route_with_feedback(
     to get the benefit of learned routing corrections.
     """
     from services.routing_feedback_service import lookup_feedback
+
+    doc = dict(doc)
+    doc["_non_trade_vendor"] = await _is_non_trade_vendor(doc.get("vendor_canonical"))
 
     doc_type = doc.get("document_type") or doc.get("suggested_job_type") or "Unknown"
     doc_type = _LEGACY_DOC_TYPES.get(doc_type, doc_type)

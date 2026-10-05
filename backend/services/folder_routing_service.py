@@ -623,6 +623,14 @@ def _determine_folder_path_core(
     # ROUTING RULES (in priority order per accounting document)
     # =================================================================
 
+    # RULE -0.25: definite credits (Credit_Memo type or negative total) go to
+    # Vendor Credit Memos before any vendor-specific rule (see _is_definite_credit).
+    if _is_definite_credit(doc, doc_type):
+        vendor_folder = _get_credit_vendor_subfolder(vendor_name, invoice_description)
+        if vendor_folder:
+            return (f"Vendor Credit Memos/{vendor_folder}", f"Credit memo → {vendor_folder}", routing_details)
+        return ("Vendor Credit Memos", "Vendor credit memo (credit type or negative total)", routing_details)
+
     # RULE 0: All Canpack documents → Dropship Not International → Canpack
     # This is a high-level directive that overrides other paths for Canpack
     if _is_canpack_vendor(vendor_name):
@@ -947,6 +955,23 @@ def _is_canpack_vendor(vendor_name: str) -> bool:
     return "canpack" in vendor_name.lower()
 
 
+
+def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
+    """A document that is unambiguously a vendor credit: typed Credit_Memo, or
+    a negative total. Staff file these under Vendor Credit Memos whatever the
+    vendor, so this outranks vendor-specific rules and learned feedback (found
+    2026-10-05: Ball credits of -5,020/-1,905/-1,670 and Canpack credit memos
+    went to the vendors' invoice folders). Narrower than _is_credit_memo, whose
+    keyword scan also matches remittances and stray "cm" substrings.
+    """
+    if doc_type in ("Credit_Memo", "credit_memo"):
+        return True
+    amount = doc.get("amount_float")
+    try:
+        return amount is not None and float(amount) < 0
+    except (TypeError, ValueError):
+        return False
+
 def _is_credit_memo(doc_type: str, description: str) -> bool:
     """Check if document is a credit memo."""
     if doc_type in ("Return_Request", "Remittance", "Credit_Memo", "credit_memo"):
@@ -1238,8 +1263,10 @@ async def route_with_feedback(
         ""
     ).strip()
 
-    # Check learned feedback
-    feedback_folder = await lookup_feedback(
+    # Check learned feedback (not for definite credits: vendor feedback was
+    # learned from invoices and would send a credit to the invoice folder).
+    _doc_type_for_credit = doc.get("document_type") or doc.get("suggested_job_type") or ""
+    feedback_folder = None if _is_definite_credit(doc, _doc_type_for_credit) else await lookup_feedback(
         vendor=vendor_name,
         doc_type=doc_type,
         has_po=bool(po),

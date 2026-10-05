@@ -219,11 +219,33 @@ def vendor_identity_agrees(a: str, b: str) -> bool:
     score = calculate_fuzzy_score(a, b)
 
     if anchors_a and anchors_b:
+        # Substring agreement only for tokens of 4+ characters: short anchors
+        # ("st" from "Ardagh - ST", "ct" from "CT Corporation") sat inside
+        # unrelated names ("Bluecrest Storage", "Select ...", "Pactiv") and
+        # made those vendors attractors for learned aliases.
+        code_a = " " not in normalized_a.strip()
+        code_b = " " not in normalized_b.strip()
+
+        def _initials(anchors):
+            return "".join(t[0] for t in sorted(anchors, key=lambda t: normalized_a.find(t) if t in normalized_a else normalized_b.find(t))) if len(anchors) >= 2 else ""
+
+        def _tokens_agree(left, right):
+            if left == right:
+                return True
+            short, long_ = sorted((left, right), key=len)
+            if len(short) >= 4 and short in long_:
+                return True
+            # A BC vendor code ("H3PLAST", "XPOLOGI", "VNGRAPH") starts with
+            # the brand; only for one-word code names, not "Ardagh - ST".
+            long_is_code = (long_ == left and code_a) or (long_ == right and code_b)
+            return len(short) >= 2 and long_is_code and long_.startswith(short)
+
+        initials_a, initials_b = _initials(anchors_a), _initials(anchors_b)
         anchor_agreement = any(
-            left in right or right in left
+            _tokens_agree(left, right)
             for left in anchors_a
             for right in anchors_b
-        )
+        ) or bool(initials_b and initials_b in anchors_a) or bool(initials_a and initials_a in anchors_b)
         return anchor_agreement and score >= 0.55
 
     # With no distinctive brand tokens, require near-identical full names.

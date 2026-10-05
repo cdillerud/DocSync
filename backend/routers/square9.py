@@ -596,6 +596,29 @@ async def get_readiness_trend(days: int = Query(14, ge=1, le=90)):
     }
 
 
+@router.get("/learning/summary")
+async def get_learning_summary():
+    """Hourly AP learning cycle at a glance: last cycle, BC reconciliation
+    (link rate, exact matches, mismatches), corrections learned from BC in
+    the last 7 days, and duplicates / continuations marked."""
+    db = get_db()
+    last = await db.learning_cycle_runs.find_one({}, {"_id": 0}, sort=[("started_at", -1)])
+    recon = await db.bc_reconciliation_runs.find_one({}, {"_id": 0}, sort=[("at", -1)])
+    since = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    corrections = {}
+    async for e in db.bc_learning_events.aggregate([
+            {"$match": {"at": {"$gte": since}}}, {"$group": {"_id": "$kind", "n": {"$sum": 1}}}]):
+        corrections[e["_id"]] = e["n"]
+    dup = {}
+    async for e in db.hub_documents.aggregate([
+            {"$match": {"is_duplicate": True, "updated_utc": {"$gte": since}}},
+            {"$group": {"_id": "$duplicate_reason", "n": {"$sum": 1}}}]):
+        dup[e["_id"] or "other"] = e["n"]
+    fraud = await db.hub_documents.count_documents({"fraud_risk.flagged": True, "created_utc": {"$gte": since}})
+    return {"last_cycle": last, "bc_reconciliation": recon, "corrections_7d": corrections,
+            "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud}
+
+
 @router.get("/readiness/daily")
 async def get_daily_efficacy(days: int = Query(21, ge=1, le=120)):
     """Per-business-day efficacy, separate from the rolling cutover rate: for

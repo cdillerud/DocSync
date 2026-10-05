@@ -45,6 +45,7 @@ export default function Square9ReadinessPage() {
   const [history, setHistory] = useState([]);
   const [trend, setTrend] = useState(null);
   const [daily, setDaily] = useState(null);
+  const [learningSummary, setLearningSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -60,14 +61,16 @@ export default function Square9ReadinessPage() {
     setLoading(true);
     setError(null);
     try {
-      const [latestRes, historyRes, trendRes, dailyRes] = await Promise.all([
+      const [latestRes, historyRes, trendRes, dailyRes, learnRes] = await Promise.all([
         fetch(`${API}/api/square9/readiness/latest`),
         fetch(`${API}/api/square9/readiness/history`),
         fetch(`${API}/api/square9/readiness/trend`).catch(() => null),
         fetch(`${API}/api/square9/readiness/daily`).catch(() => null),
+        fetch(`${API}/api/square9/learning/summary`).catch(() => null),
       ]);
       setTrend(trendRes && trendRes.ok ? await trendRes.json() : null);
       setDaily(dailyRes && dailyRes.ok ? await dailyRes.json() : null);
+      setLearningSummary(learnRes && learnRes.ok ? await learnRes.json() : null);
       if (!latestRes.ok) {
         if (latestRes.status === 404) {
           setError('No readiness snapshots recorded yet.');
@@ -367,6 +370,56 @@ export default function Square9ReadinessPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Learning from BC: hourly cycle */}
+      {learningSummary && learningSummary.bc_reconciliation && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Learning from Business Central</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Every hour the Hub links recent AP documents to the BC purchase invoice they became and learns from
+              it: vendor and document type corrected from BC, amount mismatches flagged, BC order numbers used for
+              routing, repeated copies and split supporting pages marked. Last cycle:{' '}
+              {learningSummary.last_cycle?.finished_at
+                ? new Date(learningSummary.last_cycle.finished_at).toLocaleString()
+                : 'not yet run'}.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground">Linked to BC (45 days)</div>
+                <div className="text-lg font-semibold">
+                  {learningSummary.bc_reconciliation.linked} / {learningSummary.bc_reconciliation.documents}
+                  <span className="ml-1 text-xs text-muted-foreground">({learningSummary.bc_reconciliation.link_rate_pct}%)</span>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Exact (number + amount)</div>
+                <div className="text-lg font-semibold">{learningSummary.bc_reconciliation['linked:number+amount'] || 0}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Corrected from BC (7 days)</div>
+                <div className="text-lg font-semibold">
+                  {Object.values(learningSummary.corrections_7d || {}).reduce((a, b) => a + b, 0)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {Object.entries(learningSummary.corrections_7d || {}).map(([k, v]) => `${k.replace('_', ' ')} ${v}`).join(' · ') || '—'}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">Amount mismatches / suspected fraud</div>
+                <div className="text-lg font-semibold">
+                  {learningSummary.bc_reconciliation.amount_mismatch || 0} / {learningSummary.fraud_flagged_7d || 0}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  duplicates marked (7d): {Object.values(learningSummary.duplicates_marked_7d || {}).reduce((a, b) => a + b, 0)}
+                </div>
+              </div>
             </div>
           </CardContent>
         </Card>

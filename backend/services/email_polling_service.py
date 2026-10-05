@@ -753,8 +753,8 @@ async def _poll_mailbox_for_attachments_unlocked():
                         stats.get("boundary_dedup_dropped", 0),
                     )
     except Exception as e:
-        stats["errors"].append(f"Poll run failed: {str(e)}")
-        logger.error("[EmailPoll:%s] Run failed: %s", run_id, str(e))
+        stats["errors"].append(f"Poll run failed: {e!r}")
+        logger.error("[EmailPoll:%s] Run failed: %r", run_id, e, exc_info=True)
 
     stats["ended_at"] = datetime.now(timezone.utc).isoformat()
     stats_to_store = stats.copy()
@@ -993,8 +993,8 @@ async def run_sales_email_poll():
                     stats["errors"].append(f"Error processing message {msg_id}: {str(e)}")
 
     except Exception as e:
-        stats["errors"].append(f"Poll run failed: {str(e)}")
-        logger.error("[SalesPoll:%s] Run failed: %s", run_id, str(e))
+        stats["errors"].append(f"Poll run failed: {e!r}")
+        logger.error("[SalesPoll:%s] Run failed: %r", run_id, e, exc_info=True)
 
     stats["completed_at"] = datetime.now(timezone.utc).isoformat()
     stats_to_store = {**stats}

@@ -62,7 +62,7 @@ function learningMessage(result) {
   return 'The destination folder was assigned.';
 }
 
-export default function HumanRoutingBrowserDialog({ open, onOpenChange, document }) {
+export default function HumanRoutingBrowserDialog({ open, onOpenChange, document, notes = '', onAssigned }) {
   const [routingInfo, setRoutingInfo] = useState(null);
   const [browser, setBrowser] = useState(null);
   const [selectedFolder, setSelectedFolder] = useState('');
@@ -158,7 +158,7 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
     try {
       const { data } = await api.post(
         `/human-routing-review/document/${encodeURIComponent(document.doc_id)}/assign`,
-        { folder_path: selectedFolder, source: 'human_decision_queue_folder_browser' }
+        { folder_path: selectedFolder, source: 'human_decision_queue_folder_browser', notes }
       );
       setResult(data);
       setRoutingInfo(previous => ({
@@ -173,6 +173,7 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
       } else {
         toast.success('Destination assigned and routing feedback recorded');
       }
+      if (onAssigned) onAssigned(data);
     } catch (requestError) {
       const message = requestError.response?.data?.detail || 'The routing decision did not save';
       toast.error(message);

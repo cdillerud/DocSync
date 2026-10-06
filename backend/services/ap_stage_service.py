@@ -125,6 +125,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         return {"ap_stage": "container"}
     if d.get("is_duplicate"):
         return {"ap_stage": "no_action", "no_action_reason": d.get("duplicate_reason") or "duplicate"}
+    if d.get("non_transactional") or d.get("excluded_from_processing"):
+        return {"ap_stage": "no_action", "no_action_reason": "excluded_by_staff:" + str(d.get("non_transactional_reason") or d.get("non_transactional_disposition") or "")}
     if d.get("non_ap_kind") or d.get("document_type") in NO_ACTION_TYPES:
         return {"ap_stage": "no_action", "no_action_reason": d.get("non_ap_kind") or "not_ap:" + str(d.get("document_type"))}
     bl = d.get("bc_link") if isinstance(d.get("bc_link"), dict) else None
@@ -135,6 +137,9 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "in_bc_check",
                     "check_reason": "number_differs" if d.get("bc_number_typo_suspect") else "amount_differs"}
         return {"ap_stage": "in_bc"}
+    sd = d.get("staff_decision") if isinstance(d.get("staff_decision"), dict) else None
+    if sd and sd.get("folder"):
+        return {"ap_stage": "ready", "suggested_folder": sd["folder"], "staff_decided": True}
     if (d.get("fraud_risk") or {}).get("flagged"):
         return {"ap_stage": "needs_staff", "staff_reason": "suspected_fraud"}
     if d.get("vendor_canonical") not in bc_vendors:
@@ -179,7 +184,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 uncertain[reason_key(res.get("routing_reason"))] += 1
         if apply:
             unset = {k: "" for k in ("staff_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
-                                     "no_action_reason", "check_reason") if k not in res}
+                                     "no_action_reason", "check_reason", "staff_decided") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}

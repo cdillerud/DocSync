@@ -29,13 +29,23 @@ import NonTransactionalDispositionDialog from '@/components/NonTransactionalDisp
 import DecisionQueueClassificationDialog from '@/components/DecisionQueueClassificationDialog';
 
 const ISSUE_TYPE_META = {
+  ap_needs_staff: { label: 'AP: staff decision', icon: FolderOpen, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   isolated_misroute: { label: 'Wrong routing lane', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   ambiguous_classification: { label: 'Needs a type picked', icon: HelpCircle, cls: 'bg-sky-500/15 text-sky-400 border-sky-500/30' },
   ambiguous_match: { label: 'Match unclear', icon: HelpCircle, cls: 'bg-muted text-muted-foreground border-border' },
   square9_side_issue: { label: 'Square9-side', icon: Info, cls: 'bg-muted text-muted-foreground border-border' },
 };
 
-const TAB_ORDER = ['all', 'isolated_misroute', 'ambiguous_classification', 'ambiguous_match', 'square9_side_issue'];
+const TAB_ORDER = ['all', 'ap_needs_staff', 'isolated_misroute', 'ambiguous_classification', 'ambiguous_match', 'square9_side_issue'];
+
+const AP_REASON_LABELS = {
+  suspected_fraud: 'Suspected fraud',
+  vendor_unknown: 'Vendor unknown',
+  number_or_amount_missing: 'Invoice number or amount missing',
+  po_not_in_bc: 'PO not found in BC',
+  routing_uncertain: 'Folder uncertain',
+  routing_error: 'Routing error',
+};
 
 function groupItems(items) {
   const byKey = new Map();
@@ -218,6 +228,15 @@ export default function HumanDecisionQueuePage() {
     }
   };
 
+  const markResolved = (group) => {
+    const primary = group[0];
+    setResolvedKeys(previous => {
+      const next = new Set(previous);
+      next.add(`${primary.doc_id}|${primary.issue_type}`);
+      return next;
+    });
+  };
+
   const handleDiscard = async (
     group,
     reason,
@@ -349,6 +368,7 @@ export default function HumanDecisionQueuePage() {
               onDecide={handleDecision}
               onConfirmCurrent={handleConfirmCurrent}
               onDiscard={handleDiscard}
+              onResolved={markResolved}
             />
           ))}
         </div>
@@ -363,6 +383,7 @@ function DecisionCard({
   onDecide,
   onConfirmCurrent,
   onDiscard,
+  onResolved,
 }) {
   const primary = group[0];
   const meta = ISSUE_TYPE_META[primary.issue_type];
@@ -390,9 +411,11 @@ function DecisionCard({
     primary.issue_type === 'ambiguous_match';
 
   const confidenceLabel =
-    primary.source === 'bucket_A_root_cause'
-      ? 'Match confidence'
-      : 'AI confidence';
+    primary.source === 'ap_stage'
+      ? 'Past agreement with staff'
+      : primary.source === 'bucket_A_root_cause'
+        ? 'Match confidence'
+        : 'AI confidence';
 
   const validCurrentType =
     Boolean(currentDocType) &&
@@ -413,6 +436,27 @@ function DecisionCard({
   const [routingOpen, setRoutingOpen] = useState(false);
   const [dispositionOpen, setDispositionOpen] = useState(false);
   const [classificationOpen, setClassificationOpen] = useState(false);
+  const isApItem = primary.issue_type === 'ap_needs_staff';
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [applyingSuggestion, setApplyingSuggestion] = useState(false);
+
+  const useSuggestedFolder = async () => {
+    const folder = primary.context?.suggested_folder;
+    if (!folder) return;
+    setApplyingSuggestion(true);
+    try {
+      await api.post(
+        `/human-routing-review/document/${encodeURIComponent(primary.doc_id)}/assign`,
+        { folder_path: folder, source: 'decision_queue_accept_suggestion', notes: decisionNotes }
+      );
+      toast.success(`Filed to ${folder} — the Hub will learn from this`);
+      if (onResolved) onResolved(group);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'The decision did not save');
+    } finally {
+      setApplyingSuggestion(false);
+    }
+  };
 
   useEffect(() => {
     return () => {
@@ -673,7 +717,7 @@ function DecisionCard({
           </p>
         )}
 
-        {isActionable && (
+        {isActionable && !isApItem && (
           <div className="flex flex-wrap gap-2">
             {confirmableIssue && (
               <Button
@@ -815,6 +859,66 @@ function DecisionCard({
           </div>
         )}
 
+        {isApItem && (
+          <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-3" data-testid={`ap-decision-${primary.doc_id}`}>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Badge variant="outline" className="border-amber-500/40 text-amber-400">
+                {AP_REASON_LABELS[primary.context?.staff_reason] || primary.context?.staff_reason || 'Needs a decision'}
+              </Badge>
+              {primary.context?.received && <span className="text-muted-foreground">Received {primary.context.received}</span>}
+              {primary.context?.invoice_number && <span className="text-muted-foreground">Invoice {primary.context.invoice_number}</span>}
+              {primary.context?.amount != null && (
+                <span className="text-muted-foreground">
+                  Amount {Number(primary.context.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              )}
+              {primary.context?.po_number && <span className="text-muted-foreground">PO {primary.context.po_number}</span>}
+            </div>
+            {primary.context?.suggested_folder && (
+              <p className="text-xs text-muted-foreground">
+                Hub suggests <span className="font-mono text-foreground">{primary.context.suggested_folder}</span>
+                {primary.context?.routing_reason ? ` (${primary.context.routing_reason})` : ''}
+              </p>
+            )}
+            <label className="block text-xs text-muted-foreground">
+              Why? (optional, kept with your decision and used to improve the Hub)
+              <textarea
+                value={decisionNotes}
+                onChange={event => setDecisionNotes(event.target.value)}
+                rows={2}
+                maxLength={1000}
+                placeholder="e.g. Tumalo freight for a customer delivery, so Dropship/Freight"
+                className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
+                data-testid={`ap-decision-notes-${primary.doc_id}`}
+              />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {primary.context?.suggested_folder && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={submitting || applyingSuggestion}
+                  onClick={useSuggestedFolder}
+                  data-testid={`ap-accept-suggestion-${primary.doc_id}`}
+                >
+                  {applyingSuggestion ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />}
+                  Use suggested folder
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setRoutingOpen(true)}
+                data-testid={`ap-choose-folder-${primary.doc_id}`}
+              >
+                <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
+                Choose a different folder
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="mt-3">
           <Button
             type="button"
@@ -867,6 +971,13 @@ function DecisionCard({
           open={routingOpen}
           onOpenChange={setRoutingOpen}
           document={primary}
+          notes={decisionNotes}
+          onAssigned={() => {
+            if (isApItem && onResolved) {
+              setRoutingOpen(false);
+              onResolved(group);
+            }
+          }}
         />
       </CardContent>
     </Card>

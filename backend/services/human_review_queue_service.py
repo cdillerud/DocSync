@@ -9,6 +9,7 @@ is requested through a separate explicit workflow.
 from __future__ import annotations
 
 import csv
+import logging
 import os
 import re
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,8 @@ from services.decision_queue_confirmation_service import (
     confirmation_matches_current_state,
     current_document_state,
 )
+
+logger = logging.getLogger(__name__)
 
 BUCKET_A_CSV = "prod_reports/bucket_A_root_cause.csv"
 AMBIGUOUS_LABELS_CSV = "prod_reports/manual_folder_labels_ambiguous.csv"
@@ -417,6 +420,72 @@ def filter_dispositioned_items(
     ]
 
 
+AP_REASON_ORDER = ["suspected_fraud", "vendor_unknown", "number_or_amount_missing", "po_not_in_bc",
+                   "routing_uncertain", "routing_error"]
+
+
+def _ap_question(d: Dict[str, Any]) -> str:
+    reason = d.get("staff_reason")
+    sugg = d.get("suggested_folder") or "no folder"
+    acc = d.get("routing_path_accuracy") or {}
+    if reason == "suspected_fraud":
+        flags = ", ".join((d.get("fraud_risk") or {}).get("reasons") or []) or "fraud signals"
+        return f"Possible fraud ({flags}). Verify with the vendor by phone before anything is paid."
+    if reason == "vendor_unknown":
+        return (f"Which vendor is this? The Hub could not match \"{d.get('vendor_raw') or 'no name'}\" to a BC vendor. "
+                "File it to the right folder, or exclude it if it is not an AP document.")
+    if reason == "number_or_amount_missing":
+        missing = [x for x, v in (("invoice number", d.get("invoice_number_clean")), ("amount", d.get("amount_float"))) if not v]
+        return f"The {' and '.join(missing) or 'invoice details'} could not be read. Check the document, then file or exclude it."
+    if reason == "po_not_in_bc":
+        return "The PO on this invoice is not a Gamer PO in BC. Where should it go?"
+    if acc.get("n"):
+        return (f"Which folder? The Hub suggests {sugg}, but decisions of this kind matched staff "
+                f"{acc.get('pct')}% of {acc.get('n')} times.")
+    return f"Which folder? The Hub suggests {sugg}, but has too little history for this kind of document."
+
+
+async def _ap_stage_items(db, days: int = 30) -> List[Dict[str, Any]]:
+    """Live: every AP document whose stage is needs_staff (ap_stage_service),
+    newest first within the most important reason first."""
+    from datetime import datetime, timedelta, timezone
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    items = []
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": "needs_staff",
+             "non_transactional": {"$ne": True}, "excluded_from_processing": {"$ne": True}},
+            {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "mailbox_category": 1, "vendor_canonical": 1,
+             "vendor_raw": 1, "email_sender": 1, "staff_reason": 1, "suggested_folder": 1, "routing_reason": 1,
+             "routing_path_accuracy": 1, "invoice_number_clean": 1, "amount_float": 1, "created_utc": 1,
+             "fraud_risk": 1, "po_number_clean": 1}).sort([("created_utc", -1)]).limit(500):
+        acc = d.get("routing_path_accuracy") or {}
+        items.append({
+            "doc_id": d["id"],
+            "file_name": d.get("file_name") or "",
+            "issue_type": "ap_needs_staff",
+            "question": _ap_question(d),
+            "ai_confidence": (acc.get("pct") / 100.0) if acc.get("pct") is not None else None,
+            "current_state": {"doc_type": d.get("document_type") or "", "mailbox_category": d.get("mailbox_category") or ""},
+            "candidates": [d["suggested_folder"]] if d.get("suggested_folder") else None,
+            "context": {
+                "vendor_or_sender": d.get("vendor_canonical") or d.get("vendor_raw") or d.get("email_sender") or "",
+                "staff_reason": d.get("staff_reason"),
+                "suggested_folder": d.get("suggested_folder"),
+                "routing_reason": d.get("routing_reason"),
+                "path_accuracy": acc,
+                "invoice_number": d.get("invoice_number_clean"),
+                "amount": d.get("amount_float"),
+                "po_number": d.get("po_number_clean"),
+                "received": (d.get("created_utc") or "")[:10],
+            },
+            "submit_via": "assign-folder",
+            "source": "ap_stage",
+        })
+    order = {r: i for i, r in enumerate(AP_REASON_ORDER)}
+    items.sort(key=lambda it: order.get(it["context"]["staff_reason"], 99))
+    return items
+
+
 async def get_human_review_queue() -> Dict[str, Any]:
     """Return unresolved decisions, excluding dispositioned documents."""
     items = _bucket_a_items() + _ambiguous_folder_label_items()
@@ -510,6 +579,12 @@ async def get_human_review_queue() -> Dict[str, Any]:
             hydrated_items.append(item)
 
         items = hydrated_items
+
+    # Live AP stage items (not from the offline CSVs) come first.
+    try:
+        items = await _ap_stage_items(get_db()) + items
+    except Exception as exc:
+        logger.warning("AP stage items unavailable: %r", exc)
 
     by_type: Dict[str, int] = {}
     actionable_count = 0

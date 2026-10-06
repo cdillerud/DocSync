@@ -21,6 +21,7 @@ router = APIRouter(prefix="/human-routing-review", tags=["Human Routing Review"]
 class HumanRoutingAssignment(BaseModel):
     folder_path: str = Field(..., min_length=1, description="Relative SharePoint folder path")
     source: str = Field(default="human_decision_queue", max_length=100)
+    notes: str = Field(default="", max_length=1000, description="Why this folder (optional; kept with the decision)")
 
 
 def _is_truthy(value: Any) -> bool:
@@ -234,6 +235,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
         "has_po": profile["has_po"],
         "is_international": profile["is_international"],
         "source": assignment.source,
+        "notes": assignment.notes,
         "learning_result": learning_result,
         "created_at": now,
     }
@@ -247,9 +249,31 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
                 "sharepoint_folder_assigned_at": now,
                 "sharepoint_folder_assigned_by": assignment.source,
                 "human_routing_decision": decision_record,
-            }
+                # A staff decision settles the document: it leaves the staff
+                # queue and is ready for AP (ap_stage_service keeps it there).
+                "staff_decision": {"folder": selected_folder, "notes": assignment.notes,
+                                   "source": assignment.source, "at": now,
+                                   "hub_suggested": doc.get("suggested_folder") or suggested_folder,
+                                   "staff_reason": doc.get("staff_reason")},
+                "ap_stage": "ready",
+                "suggested_folder": selected_folder,
+                "ap_stage_updated_at": now,
+            },
+            "$unset": {"staff_reason": ""},
         },
     )
+    # The decision is ground truth for how reliable this routing path is.
+    try:
+        from services.ap_stage_service import reason_key, _root
+        hub_folder = doc.get("suggested_folder") or suggested_folder
+        hub_reason = doc.get("routing_reason") or suggested_reason
+        await db.routing_outcomes.update_one({"hub_doc_id": doc_id}, {"$set": {
+            "hub_doc_id": doc_id, "reason_key": reason_key(hub_reason),
+            "agreed": _root(hub_folder) == _root(selected_folder), "hub_folder": hub_folder,
+            "staff_folder": selected_folder, "filed_at": doc.get("created_utc"), "measured_at": now,
+            "source": "staff_decision"}}, upsert=True)
+    except Exception:
+        pass
     await db.human_routing_decisions.insert_one(decision_record)
     decision_record.pop("_id", None)
 

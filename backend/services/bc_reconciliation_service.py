@@ -82,7 +82,10 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
     stamp = now.isoformat()
     bc_since = (now - timedelta(days=bc_days)).date().isoformat()
     index: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-    for entity in ("posted_purchase_invoice", "draft_purchase_invoice"):
+    # Purchase credit memos are readable since 2026-10-06 (API Data Upgrade):
+    # a document that is a BC credit memo links to it (BC stores the credit
+    # total as a positive amount).
+    for entity in ("posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"):
         async for b in db.bc_reference_cache.find(
                 {"bc_entity_type": entity, "bc_posting_date": {"$gte": bc_since}, "bc_status": {"$ne": "Canceled"}},
                 {"_id": 0, "bc_entity_type": 1, "bc_document_no": 1, "bc_external_document_no": 1, "bc_vendor_no": 1,
@@ -146,7 +149,8 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     continue
                 # A credit memo cites the invoice it credits (Ball -1,670
                 # against invoice 6437590 of 22,414.18): not that invoice.
-                if hub_amt is not None and bc_amt is not None and float(hub_amt) < 0 < float(bc_amt):
+                if (b.get("bc_entity_type") != "purchase_credit_memo"
+                        and hub_amt is not None and bc_amt is not None and float(hub_amt) < 0 < float(bc_amt)):
                     credit_of = b
                     continue
                 if vend_ok and how != "number+vendor":
@@ -219,7 +223,18 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             update["po_number_previous"] = d.get("po_number_previous") or d.get("po_number_clean")
             update["po_number_source"] = "bc_order_number"
             events.append({"kind": "po", "from": d.get("po_number_clean"), "to": bc_order.upper()})
-        if how in ("number+amount", "number+vendor") and d.get("document_type") in RETYPE_FROM:
+        is_bc_credit = best.get("bc_entity_type") == "purchase_credit_memo"
+        if how == "number+amount" and (
+                (is_bc_credit and d.get("document_type") != "Credit_Memo")
+                or (not is_bc_credit and d.get("document_type") == "Credit_Memo" and float(best.get("bc_amount") or 0) > 0)):
+            # BC says which it is: a credit memo, or an invoice the Hub typed
+            # as a credit (Canpack 1111600287/88).
+            new_type = "Credit_Memo" if is_bc_credit else "AP_Invoice"
+            update.update({"document_type": new_type, "suggested_job_type": new_type,
+                           "document_type_previous": d.get("document_type"),
+                           "document_type_corrected": {"at": stamp, "reason": "BC document type"}})
+            events.append({"kind": "doc_type", "from": d.get("document_type"), "to": new_type})
+        elif how in ("number+amount", "number+vendor") and d.get("document_type") in RETYPE_FROM:
             new_type = "Credit_Memo" if float(best.get("bc_amount") or 0) < 0 else "AP_Invoice"
             update.update({"document_type": new_type, "suggested_job_type": new_type,
                            "document_type_previous": d.get("document_type"),

@@ -127,6 +127,32 @@ ENTITY_CONFIGS = {
             "bc_last_modified": r.get("lastModifiedDateTime"),
         }
     },
+    # Purchase credit memos (vendor credits). Readable since the BC admin ran
+    # the API Data Upgrade for this page on 2026-10-06 (it returned 400
+    # "You must run the data upgrade" before).
+    "purchaseCreditMemos": {
+        "entity_type": "purchase_credit_memo",
+        "domain": "purchase",
+        "number_field": "number",
+        "external_ref_field": "vendorCreditMemoNumber",
+        "select_fields": "id,number,vendorCreditMemoNumber,vendorName,vendorNumber,postingDate,creditMemoDate,totalAmountIncludingTax,status,invoiceNumber,lastModifiedDateTime",
+        "extract_fields": lambda r: {
+            "bc_record_id": r.get("id"),
+            "bc_document_no": r.get("number", ""),
+            "bc_external_document_no": r.get("vendorCreditMemoNumber", ""),
+            "bc_vendor_no": r.get("vendorNumber", ""),
+            "bc_vendor_name": r.get("vendorName", ""),
+            "bc_customer_no": None,
+            "bc_customer_name": None,
+            "bc_posting_date": r.get("postingDate"),
+            "bc_status": r.get("status", ""),
+            "bc_amount": r.get("totalAmountIncludingTax"),
+            "bc_order_number": "",
+            "bc_last_modified": r.get("lastModifiedDateTime"),
+            "bc_applies_to_invoice": r.get("invoiceNumber") or "",
+            "bc_credit_memo_date": r.get("creditMemoDate"),
+        }
+    },
     "salesOrders": {
         "entity_type": "sales_order",
         "domain": "sales",

@@ -1076,6 +1076,8 @@ def _is_definite_credit(doc: Dict[str, Any], doc_type: str) -> bool:
     # is not a credit (Canpack 1111600287/88: credit series, BC +18,519.01,
     # staff filed under dropship).
     bc_link = doc.get("bc_link") if isinstance(doc.get("bc_link"), dict) else {}
+    if bc_link.get("bc_entity") == "purchase_credit_memo":
+        return True
     if bc_link.get("bc_amount") is not None and float(bc_link["bc_amount"]) > 0:
         return False
     if doc_type in ("Credit_Memo", "credit_memo"):

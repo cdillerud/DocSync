@@ -103,6 +103,14 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["non_ap_reclassified"] = {"error": repr(e)}
     try:
+        # Routing path accuracy from the newest staff filings, then one stage
+        # (and, when staff must act, one reason) per AP document.
+        from services.ap_stage_service import measure_reason_accuracy, refresh_stages
+        summary["routing_outcomes"] = await measure_reason_accuracy(db, "/app/prod_reports/parity_hourly.csv", "hourly")
+        summary["ap_stages"] = await refresh_stages(db)
+    except Exception as e:
+        summary["ap_stages"] = {"error": repr(e)}
+    try:
         # Once a day: replay current intake logic against staff filings and BC.
         from services.learning_metrics_service import record_daily
         summary["learning_metrics"] = await record_daily(db)

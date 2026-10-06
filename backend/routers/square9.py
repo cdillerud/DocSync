@@ -657,3 +657,32 @@ async def get_daily_efficacy(days: int = Query(21, ge=1, le=120)):
     db = get_db()
     rows = await db.square9_daily_efficacy.find({}, {"_id": 0}).sort("date", -1).limit(days).to_list(days)
     return {"count": len(rows), "days": rows}
+
+
+@router.get("/ap-stages")
+async def get_ap_stages(days: int = 30):
+    """One stage per AP document (ap_stage_service): counts, the staff queue
+    grouped by reason, and how reliable each routing path is."""
+    from services.ap_stage_service import load_reliability, RELIABLE_PCT, RELIABLE_MIN_N
+    db = get_db()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    base = {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$exists": True}}
+    stages, reasons = {}, {}
+    async for g in db.hub_documents.aggregate([{"$match": base}, {"$group": {"_id": "$ap_stage", "n": {"$sum": 1}}}]):
+        stages[g["_id"]] = g["n"]
+    async for g in db.hub_documents.aggregate([{"$match": {**base, "ap_stage": "needs_staff"}},
+                                               {"$group": {"_id": "$staff_reason", "n": {"$sum": 1}}}]):
+        reasons[g["_id"] or "other"] = g["n"]
+    queue = []
+    async for d in db.hub_documents.find({**base, "ap_stage": "needs_staff"},
+                                         {"_id": 0, "id": 1, "file_name": 1, "vendor_canonical": 1, "vendor_raw": 1,
+                                          "staff_reason": 1, "suggested_folder": 1, "routing_reason": 1,
+                                          "routing_path_accuracy": 1, "created_utc": 1, "document_type": 1}
+                                         ).sort([("created_utc", -1)]).limit(100):
+        queue.append(d)
+    rel = await load_reliability(db)
+    paths = sorted(({"path": k, **v} for k, v in rel.items()), key=lambda x: -x["n"])[:25]
+    last = await db.hub_documents.find_one(base, {"_id": 0, "ap_stage_updated_at": 1}, sort=[("ap_stage_updated_at", -1)])
+    return {"days": days, "stages": stages, "staff_reasons": reasons, "staff_queue": queue,
+            "routing_paths": paths, "reliable_pct": RELIABLE_PCT, "reliable_min_n": RELIABLE_MIN_N,
+            "updated_at": (last or {}).get("ap_stage_updated_at")}

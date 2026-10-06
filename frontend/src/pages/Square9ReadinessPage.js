@@ -46,6 +46,7 @@ export default function Square9ReadinessPage() {
   const [trend, setTrend] = useState(null);
   const [daily, setDaily] = useState(null);
   const [learningSummary, setLearningSummary] = useState(null);
+  const [apStages, setApStages] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -61,13 +62,15 @@ export default function Square9ReadinessPage() {
     setLoading(true);
     setError(null);
     try {
-      const [latestRes, historyRes, trendRes, dailyRes, learnRes] = await Promise.all([
+      const [latestRes, historyRes, trendRes, dailyRes, learnRes, stagesRes] = await Promise.all([
         fetch(`${API}/api/square9/readiness/latest`),
         fetch(`${API}/api/square9/readiness/history`),
         fetch(`${API}/api/square9/readiness/trend`).catch(() => null),
         fetch(`${API}/api/square9/readiness/daily`).catch(() => null),
         fetch(`${API}/api/square9/learning/summary`).catch(() => null),
+        fetch(`${API}/api/square9/ap-stages`).catch(() => null),
       ]);
+      setApStages(stagesRes && stagesRes.ok ? await stagesRes.json() : null);
       setTrend(trendRes && trendRes.ok ? await trendRes.json() : null);
       setDaily(dailyRes && dailyRes.ok ? await dailyRes.json() : null);
       setLearningSummary(learnRes && learnRes.ok ? await learnRes.json() : null);
@@ -371,6 +374,114 @@ export default function Square9ReadinessPage() {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AP work stages: one stage per document, one reason when staff must act */}
+      {apStages && apStages.stages && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">AP work stages (last {apStages.days} days)</CardTitle>
+            <div className="text-xs text-muted-foreground">
+              Every AP document is in exactly one stage. Only &quot;Needs staff&quot; needs a person, and it always says why.
+              {apStages.updated_at ? ` Updated ${new Date(apStages.updated_at).toLocaleString()}.` : ''}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+              {[
+                ['needs_staff', 'Needs staff', 'A person must decide; reason shown below'],
+                ['ready', 'Ready for AP', 'Vendor, number, amount and folder known; waiting for AP to enter in BC'],
+                ['in_bc', 'In BC', 'Entered by AP; BC is now the truth'],
+                ['in_bc_check', 'In BC, check', 'Entered, but BC amount or invoice number differs'],
+                ['paid', 'Paid', 'BC shows it paid'],
+                ['no_action', 'No action', 'Duplicate, companion copy, continuation page, or not an AP document'],
+              ].map(([key, label, help]) => (
+                <div key={key} className={`rounded border p-2 ${key === 'needs_staff' ? 'border-amber-500' : ''}`} title={help}>
+                  <div className="text-xs text-muted-foreground">{label}</div>
+                  <div className="text-lg font-semibold">{apStages.stages[key] || 0}</div>
+                  <div className="text-[11px] text-muted-foreground leading-tight">{help}</div>
+                </div>
+              ))}
+            </div>
+            {Object.keys(apStages.staff_reasons || {}).length > 0 && (
+              <div className="mt-4">
+                <div className="text-xs text-muted-foreground mb-1">Why staff is needed</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(apStages.staff_reasons).sort((a, b) => b[1] - a[1]).map(([k, v]) => (
+                    <Badge key={k} variant="outline">{({
+                      suspected_fraud: 'Suspected fraud',
+                      vendor_unknown: 'Vendor unknown',
+                      number_or_amount_missing: 'Invoice number or amount missing',
+                      po_not_in_bc: 'Gamer PO not found in BC',
+                      routing_uncertain: 'Folder uncertain (Hub suggests one)',
+                      routing_error: 'Routing error',
+                    })[k] || k}: {v}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(apStages.staff_queue || []).length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <div className="text-xs text-muted-foreground mb-1">Staff queue (newest first, up to 100)</div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground text-left border-b">
+                      <th className="py-1 pr-3">Received</th>
+                      <th className="py-1 pr-3">Document</th>
+                      <th className="py-1 pr-3">Vendor</th>
+                      <th className="py-1 pr-3">Reason</th>
+                      <th className="py-1 pr-3">Hub suggests</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apStages.staff_queue.map(d => (
+                      <tr key={d.id} className="border-b last:border-0 align-top">
+                        <td className="py-1 pr-3 whitespace-nowrap">{(d.created_utc || '').slice(0, 10)}</td>
+                        <td className="py-1 pr-3">{d.file_name}</td>
+                        <td className="py-1 pr-3">{d.vendor_canonical || d.vendor_raw || '—'}</td>
+                        <td className="py-1 pr-3">{(d.staff_reason || '').replace(/_/g, ' ')}
+                          {d.routing_path_accuracy && d.routing_path_accuracy.n > 0 && (
+                            <div className="text-[11px] text-muted-foreground">
+                              this path matched staff {d.routing_path_accuracy.pct}% of {d.routing_path_accuracy.n}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-1 pr-3">{d.suggested_folder || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {(apStages.routing_paths || []).length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <div className="text-xs text-muted-foreground mb-1">
+                  Routing decision paths: automatic at {apStages.reliable_pct}%+ agreement with staff over {apStages.reliable_min_n}+ filings, otherwise sent to staff with a suggestion.
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground text-left border-b">
+                      <th className="py-1 pr-3">Decision path</th>
+                      <th className="py-1 pr-3 text-right">Filings</th>
+                      <th className="py-1 pr-3 text-right">Matched staff</th>
+                      <th className="py-1 pr-3">Handling</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {apStages.routing_paths.map(p => (
+                      <tr key={p.path} className="border-b last:border-0">
+                        <td className="py-1 pr-3">{p.path}</td>
+                        <td className="py-1 pr-3 text-right">{p.n}</td>
+                        <td className="py-1 pr-3 text-right">{p.pct}%</td>
+                        <td className="py-1 pr-3">{p.reliable ? 'Automatic' : 'Staff decides'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

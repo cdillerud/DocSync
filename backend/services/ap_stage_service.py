@@ -183,6 +183,11 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "needs_staff", "staff_reason": "po_not_in_bc", "suggested_folder": folder, "routing_reason": why}
         if _root(folder) == "s&h" and not approved:
             return {"ap_stage": "awaiting_approval", "suggested_folder": folder, "routing_reason": why}
+        # Non-trade invoices (no Gamer order; Square9 "Misc Invoices - need
+        # approval") wait for an approver rather than a folder decision.
+        if "need approval" in (folder or "").lower() and not approved:
+            return {"ap_stage": "awaiting_approval", "suggested_folder": folder, "routing_reason": why,
+                    "approval_kind": "non_trade"}
         rel = reliability.get(reason_key(why)) or {"n": 0, "pct": None, "reliable": False}
         if not rel["reliable"]:
             return {"ap_stage": "needs_staff", "staff_reason": "routing_uncertain", "suggested_folder": folder,
@@ -224,7 +229,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 uncertain[reason_key(res.get("routing_reason"))] += 1
         if apply:
             unset = {k: "" for k in ("staff_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
-                                     "no_action_reason", "check_reason", "staff_decided", "suggested_approver") if k not in res}
+                                     "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}

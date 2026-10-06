@@ -111,6 +111,74 @@ async def m():
                 await db.sender_vendor_map.update_many({"sender_domain": dom, "sender_email": {"$exists": False}}, {"$set": {
                     "vendor_canonical": None, "generic_sender": True, "aligned_to_bc_at": now}})
     print(f"sender mappings aligned to BC: {s_fixed}, shared senders disabled: {s_generic}")
+    # canonicalize_names: documents whose vendor_canonical is a vendor NAME
+    # rather than a BC vendor number ("CITICARGO & STORAGE" 942 documents,
+    # "Ball Metal Beverage Container Corp." 2,538, "Valley Distributing and
+    # Storage Company") split one vendor's history in two. Resolve each name
+    # to one BC number: exact BC name, a BC name inside it ("Citi-Cargo",
+    # "Brown Warehouse"), an alias row, or BC links (3+, 90%). Gamer's own
+    # names are never mapped. The resolution is saved as an alias.
+    def _nm(x): return re.sub(r"[^a-z0-9]", "", str(x or "").lower())
+    _SUFFIX = re.compile(r"(incorporated|inc|llc|ltd|corporation|corp|company|co|lp|usa)+$")
+    def _stem(x):
+        n = _nm(x)
+        prev = None
+        while prev != n:
+            prev, n = n, _SUFFIX.sub("", n)
+        return n
+    bc_nums, bc_byname, bc_bystem, bc_name_of = set(), collections.defaultdict(set), [], {}
+    async for v in db.bc_catalog_vendors.find({"blocked": {"$ne": True}}, {"_id": 0, "vendor_no": 1, "name": 1}):
+        bc_nums.add(v["vendor_no"]); bc_byname[_nm(v["name"])].add(v["vendor_no"]); bc_name_of[v["vendor_no"]] = v["name"]
+        if len(_stem(v["name"])) >= 7:
+            bc_bystem.append((_stem(v["name"]), v["vendor_no"]))
+    alias_map, gt_alias = collections.defaultdict(set), collections.defaultdict(set)
+    async for a in db.vendor_aliases.find({}, {"_id": 0, "alias_string": 1, "normalized_alias": 1, "vendor_no": 1, "canonical_vendor_id": 1, "source": 1}):
+        vn = a.get("vendor_no") or a.get("canonical_vendor_id")
+        if vn in bc_nums:
+            alias_map[_nm(a.get("alias_string") or a.get("normalized_alias"))].add(vn)
+            if a.get("source") == "bc_ground_truth":
+                gt_alias[_nm(a.get("alias_string") or a.get("normalized_alias"))].add(vn)
+    names = collections.Counter()
+    async for d in db.hub_documents.find({"vendor_canonical": {"$nin": [None, ""]}}, {"_id": 0, "vendor_canonical": 1}):
+        if d["vendor_canonical"] not in bc_nums:
+            names[d["vendor_canonical"]] += 1
+    c_names = c_docs = 0
+    for name, n in names.most_common():
+        if "gamer" in name.lower() or len(_nm(name)) < 4:
+            continue
+        to, how = None, None
+        ev = collections.Counter()
+        async for d in db.hub_documents.find({"vendor_canonical": name, "bc_link.match": {"$in": ["number+amount", "filename+vendor"]}},
+                                             {"_id": 0, "bc_link.bc_vendor_no": 1}):
+            ev[d["bc_link"]["bc_vendor_no"]] += 1
+        top, k = ev.most_common(1)[0] if ev else (None, 0)
+        stem_hits = {vn for st, vn in bc_bystem if _stem(name).startswith(st) or (st.startswith(_stem(name)) and len(_stem(name)) >= 7)}
+        words = {w for w in re.findall(r"[a-z]{4,}", name.lower())} - {"company", "corp", "corporation", "inc", "llc", "services", "service", "international", "united", "states"}
+        alias_hits = {vn for vn in alias_map.get(_nm(name), ())
+                      if words & set(re.findall(r"[a-z]{4,}", str(bc_name_of.get(vn, "")).lower()))}
+        if len(bc_byname.get(_nm(name), ())) == 1:
+            to, how = next(iter(bc_byname[_nm(name)])), "bc_name"
+        elif k >= 3 and k / sum(ev.values()) >= 0.9:
+            to, how = top, "bc_evidence"
+        elif len(gt_alias.get(_nm(name), ())) == 1:
+            to, how = next(iter(gt_alias[_nm(name)])), "bc_ground_truth_alias"
+        elif len(stem_hits) == 1:
+            to, how = stem_hits.pop(), "bc_name_stem"
+        elif len(alias_hits) == 1:
+            to, how = alias_hits.pop(), "alias"
+        if not to:
+            continue
+        c_names += 1; c_docs += n
+        print(f"  CANON {name!r} -> {to} ({how}, {n} docs)")
+        if APPLY:
+            async for d in db.hub_documents.find({"vendor_canonical": name}, {"_id": 1}):
+                await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": to, "vendor_canonical_backfill": {
+                    "at": now, "previous": name, "from": "bc_name_canonical", "how": how}}})
+            await db.vendor_aliases.update_one({"normalized_alias": normalize_vendor_name(name)}, {"$set": {
+                "alias_string": name, "alias": name.upper(), "normalized_alias": normalize_vendor_name(name),
+                "vendor_no": to, "canonical_vendor_id": to, "vendor_name": bc_name_of.get(to), "source": "bc_name_canonical",
+                "learned_at": now}, "$setOnInsert": {"alias_id": str(uuid.uuid4()), "created_at": now}}, upsert=True)
+    print(f"vendor names canonicalized to BC numbers: {c_names} names, {c_docs} documents")
     print(("APPLIED" if APPLY else "DRY RUN") + f": learned {len(learned)}, aliases created/updated {alias_new}, documents corrected {docs_fixed}")
     for k, v in per.most_common(20): print("  ", v, k)
 asyncio.run(m())

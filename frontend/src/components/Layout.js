@@ -27,6 +27,7 @@ const navItems = [
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
+  { to: '/ap-workflow', icon: ClipboardList, label: 'AP Workflow' },
   { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
   { to: '/integrations', icon: Plug, label: 'Integrations' },
   { to: '/config', icon: Settings, label: 'Settings' },
@@ -115,6 +116,7 @@ export default function Layout() {
     if (path === '/monitor') return 'System Monitor';
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
     if (path === '/decision-queue') return 'Decision Queue';
+    if (path === '/ap-workflow') return 'AP Workflow';
     if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';
     if (path === '/integrations') return 'Integrations';

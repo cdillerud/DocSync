@@ -392,6 +392,8 @@ export default function Square9ReadinessPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
               {[
                 ['needs_staff', 'Needs staff', 'A person must decide; reason shown below'],
+                ['awaiting_approval', 'Awaiting approval', 'Waiting for a named approver (AP Workflow page)'],
+                ['on_hold', 'On hold', 'Put on hold by staff, with a reason'],
                 ['ready', 'Ready for AP', 'Vendor, number, amount and folder known; waiting for AP to enter in BC'],
                 ['in_bc', 'In BC', 'Entered by AP; BC is now the truth'],
                 ['in_bc_check', 'In BC, check', 'Entered, but BC amount or invoice number differs'],

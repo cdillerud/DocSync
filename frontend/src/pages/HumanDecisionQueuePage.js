@@ -491,6 +491,48 @@ function DecisionCard({
   const [dispositionOpen, setDispositionOpen] = useState(false);
   const [classificationOpen, setClassificationOpen] = useState(false);
   const isApItem = primary.issue_type === 'ap_needs_staff';
+  const [workflowMode, setWorkflowMode] = useState(null);
+  const [holdReason, setHoldReason] = useState('');
+  const [holdUntil, setHoldUntil] = useState('');
+  const [approverChoice, setApproverChoice] = useState('');
+  const [people, setPeople] = useState([]);
+
+  const openWorkflow = async (mode) => {
+    setWorkflowMode(mode);
+    if (mode === 'approval' && people.length === 0) {
+      try {
+        const [{ data: peopleData }, { data: suggestion }] = await Promise.all([
+          api.get('/ap-workflow/people'),
+          api.get(`/ap-workflow/document/${encodeURIComponent(primary.doc_id)}/suggested-approver`),
+        ]);
+        setPeople((peopleData.people || []).filter(p => p.active !== false && (p.roles || []).includes('approver')));
+        if (suggestion?.approver) setApproverChoice(suggestion.approver);
+      } catch (error) {
+        toast.error('Could not load approvers');
+      }
+    }
+  };
+
+  const submitWorkflow = async () => {
+    const actorName = (() => { try { return localStorage.getItem('gpi.apActor') || ''; } catch (e) { return ''; } })();
+    try {
+      if (workflowMode === 'hold') {
+        if (holdReason.trim().length < 2) { toast.error('Say why it is on hold'); return; }
+        await api.post(`/ap-workflow/document/${encodeURIComponent(primary.doc_id)}/hold`,
+          { reason: holdReason.trim(), until: holdUntil || null, by: actorName });
+        toast.success(`On hold — ${primary.file_name}`);
+      } else {
+        if (!approverChoice) { toast.error('Choose an approver'); return; }
+        await api.post(`/ap-workflow/document/${encodeURIComponent(primary.doc_id)}/request-approval`,
+          { approver: approverChoice, by: actorName, notes: decisionNotes });
+        toast.success(`Sent to ${approverChoice} for approval`);
+      }
+      setWorkflowMode(null);
+      if (onResolved) onResolved(group);
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'The action did not save');
+    }
+  };
   const [decisionNotes, setDecisionNotes] = useState('');
   const [applyingSuggestion, setApplyingSuggestion] = useState(false);
 
@@ -971,7 +1013,43 @@ function DecisionCard({
                   ? 'Verified legitimate: choose folder'
                   : primary.context?.suggested_folder ? 'Choose a different folder' : 'Choose a folder'}
               </Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => openWorkflow('approval')} data-testid={`ap-send-approval-${primary.doc_id}`}>
+                Send for approval
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => openWorkflow('hold')} data-testid={`ap-hold-${primary.doc_id}`}>
+                Put on hold
+              </Button>
             </div>
+            {workflowMode && (
+              <div className="flex flex-wrap items-end gap-2 rounded-md border border-border p-2">
+                {workflowMode === 'hold' ? (
+                  <>
+                    <label className="text-xs text-muted-foreground">
+                      Why on hold
+                      <input value={holdReason} onChange={event => setHoldReason(event.target.value)} maxLength={500}
+                        placeholder="e.g. Waiting for ship dates from Canworks"
+                        className="mt-1 block w-72 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground" />
+                    </label>
+                    <label className="text-xs text-muted-foreground">
+                      Review on (optional)
+                      <input type="date" value={holdUntil} onChange={event => setHoldUntil(event.target.value)}
+                        className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground" />
+                    </label>
+                  </>
+                ) : (
+                  <label className="text-xs text-muted-foreground">
+                    Approver
+                    <select value={approverChoice} onChange={event => setApproverChoice(event.target.value)}
+                      className="mt-1 block rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground">
+                      <option value="">Choose…</option>
+                      {people.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
+                    </select>
+                  </label>
+                )}
+                <Button type="button" size="sm" onClick={submitWorkflow}>{workflowMode === 'hold' ? 'Put on hold' : 'Send'}</Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setWorkflowMode(null)}>Cancel</Button>
+              </div>
+            )}
           </div>
         )}
 

@@ -15,6 +15,7 @@ import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
 import IntakeLearningPage from "@/pages/IntakeLearningPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
+import APWorkflowPage from "@/pages/APWorkflowPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
 import BakeOffPage from "@/pages/BakeOffPage";
@@ -54,6 +55,7 @@ function AppRoutes() {
         <Route path="monitor" element={<MonitoringDashboard />} />
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
+        <Route path="ap-workflow" element={<APWorkflowPage />} />
         <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}

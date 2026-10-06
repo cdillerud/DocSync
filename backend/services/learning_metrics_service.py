@@ -111,7 +111,7 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
              "bc_amount": 1, "bc_order_number": 1}):
         bc[(b["bc_entity_type"] == "purchase_credit_memo", b["bc_document_no"])] = b
     out = {"bc_documents": len(bc), "received": 0, "vendor_ok": 0, "number_ok": 0, "amount_ok": 0, "type_ok": 0,
-           "draft_exact": 0, "po_checked": 0, "po_ok": 0}
+           "draft_exact": 0, "po_checked": 0, "po_ok": 0, "amount_ap_adjusted": 0, "draft_exact_or_ap_adjusted": 0}
     seen = set()
     async for d in db.hub_documents.find(
             {"bc_link.bc_document_no": {"$exists": True}, "is_duplicate": {"$ne": True}},
@@ -145,6 +145,14 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
         hub_type = d.get("document_type_previous") or d.get("document_type")
         t_ok = (hub_type == "Credit_Memo") == key[0]
         out["vendor_ok"] += v_ok; out["number_ok"] += n_ok; out["amount_ok"] += a_ok; out["type_ok"] += t_ok
+        # AP entered a different amount than the document (short-pay,
+        # deduction, two invoices combined): the draft would carry the
+        # document's amount and AP adjusts it, as today.
+        ap_adjusted = (not a_ok and bl.get("match") == "number+vendor" and d.get("amount_float") is not None
+                       and not d.get("amount_from_bc"))
+        out["amount_ap_adjusted"] += ap_adjusted
+        if v_ok and n_ok and t_ok and (a_ok or ap_adjusted):
+            out["draft_exact_or_ap_adjusted"] += 1
         if v_ok and n_ok and a_ok and t_ok:
             out["draft_exact"] += 1
             if b.get("bc_order_number"):
@@ -155,6 +163,7 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
     out["received_pct"] = round(100 * out["received"] / t, 1)
     out["draft_exact_pct"] = round(100 * out["draft_exact"] / t, 1)
     out["draft_exact_of_received_pct"] = round(100 * out["draft_exact"] / max(out["received"], 1), 1)
+    out["draft_right_of_received_pct"] = round(100 * out["draft_exact_or_ap_adjusted"] / max(out["received"], 1), 1)
     return out
 
 

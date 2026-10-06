@@ -17,6 +17,9 @@ ap_stage (exactly one):
   in_bc_check    entered, but BC's amount or invoice number differs
   paid           BC shows it paid
   container      the original PDF that was split into pieces (never work)
+  on_hold        a person put it on hold (ap_hold: reason, until)
+  awaiting_approval  waiting for a named approver (ap_approval), or an S&H
+                 invoice not yet approved (as Square9 "waiting for approval")
   filed_by_staff staff already filed it in Square9 (their filing is the
                  decision; it feeds routing_outcomes)
   file_only      supporting paperwork (shipping documents, BOLs, receipts,
@@ -146,6 +149,15 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "in_bc_check",
                     "check_reason": "number_differs" if d.get("bc_number_typo_suspect") else "amount_differs"}
         return {"ap_stage": "in_bc"}
+    # Holds and approvals (ap_workflow_service), before AP enters the invoice.
+    if isinstance(d.get("ap_hold"), dict):
+        return {"ap_stage": "on_hold"}
+    appr = d.get("ap_approval") if isinstance(d.get("ap_approval"), dict) else None
+    if appr and appr.get("status") == "pending":
+        return {"ap_stage": "awaiting_approval"}
+    if appr and appr.get("status") == "rejected":
+        return {"ap_stage": "needs_staff", "staff_reason": "approval_rejected"}
+    approved = bool(appr and appr.get("status") == "approved")
     sd = d.get("staff_decision") if isinstance(d.get("staff_decision"), dict) else None
     if sd and sd.get("folder"):
         return {"ap_stage": "ready", "suggested_folder": sd["folder"], "staff_decided": True}
@@ -169,6 +181,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         folder, why = route
         if not (folder or "").strip("/") or "not found as" in (why or ""):
             return {"ap_stage": "needs_staff", "staff_reason": "po_not_in_bc", "suggested_folder": folder, "routing_reason": why}
+        if _root(folder) == "s&h" and not approved:
+            return {"ap_stage": "awaiting_approval", "suggested_folder": folder, "routing_reason": why}
         rel = reliability.get(reason_key(why)) or {"n": 0, "pct": None, "reliable": False}
         if not rel["reliable"]:
             return {"ap_stage": "needs_staff", "staff_reason": "routing_uncertain", "suggested_folder": folder,
@@ -200,6 +214,9 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 res = stage_of(d, bc_vendors, (folder, why), reliability, sf)
             except Exception as e:
                 res = {"ap_stage": "needs_staff", "staff_reason": "routing_error", "routing_reason": repr(e)[:120]}
+        if res["ap_stage"] == "awaiting_approval" and not (d.get("ap_approval") or {}).get("approver"):
+            from services.ap_workflow_service import suggest_approver
+            res["suggested_approver"] = await suggest_approver(db, d)
         counts[res["ap_stage"]] += 1
         if res.get("staff_reason"):
             reasons[res["staff_reason"]] += 1
@@ -207,7 +224,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 uncertain[reason_key(res.get("routing_reason"))] += 1
         if apply:
             unset = {k: "" for k in ("staff_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
-                                     "no_action_reason", "check_reason", "staff_decided") if k not in res}
+                                     "no_action_reason", "check_reason", "staff_decided", "suggested_approver") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}

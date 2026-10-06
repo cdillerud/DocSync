@@ -112,6 +112,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         # Routing path accuracy from the newest staff filings, then one stage
         # (and, when staff must act, one reason) per AP document.
+        from services.ap_workflow_service import learn_people_and_approvers
+        summary["ap_people"] = await learn_people_and_approvers(db, ["/app/prod_reports/parity_hourly.csv"])
         from services.ap_stage_service import measure_reason_accuracy, refresh_stages
         summary["routing_outcomes"] = await measure_reason_accuracy(db, "/app/prod_reports/parity_hourly.csv", "hourly")
         summary["ap_stages"] = await refresh_stages(db)

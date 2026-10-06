@@ -644,7 +644,8 @@ async def get_learning_summary():
                       "file_supports_hub": t.get("file_supports_hub"), "file_name": d.get("file_name")})
     return {"last_cycle": last, "bc_reconciliation": recon, "corrections_7d": corrections,
             "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud, "first_pass_by_day": first_pass,
-            "bc_number_typo_suspects": typos}
+            "bc_number_typo_suspects": typos,
+            "daily_replay": [r async for r in db.learning_metrics.find({}, {"_id": 0}).sort([("date", -1)]).limit(30)]}
 
 
 @router.get("/readiness/daily")

@@ -96,6 +96,12 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["routing_learning"] = f"error: {e!r}"
     try:
+        # Once a day: replay current intake logic against staff filings and BC.
+        from services.learning_metrics_service import record_daily
+        summary["learning_metrics"] = await record_daily(db)
+    except Exception as e:
+        summary["learning_metrics"] = {"error": repr(e)}
+    try:
         from services.extraction_retry_service import retry_failed_extractions
         summary["extraction_retry"] = await retry_failed_extractions(db, limit=20)
     except Exception as e:

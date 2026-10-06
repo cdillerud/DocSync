@@ -51,6 +51,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["cfdi"] = {"error": repr(e)}
     try:
+        # The Gamer order when the PO field holds something else (glued
+        # text, a vendor reference), confirmed against BC's known orders.
+        from services.po_correction_service import correct_recent as po_correct
+        summary["po_correction"] = await po_correct(db)
+    except Exception as e:
+        summary["po_correction"] = {"error": repr(e)}
+    try:
         from services.bc_reconciliation_service import reconcile_recent
         summary["bc_reconciliation"] = await reconcile_recent(db)
         from services.bc_reconciliation_service import fetch_ship_to

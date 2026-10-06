@@ -118,7 +118,7 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
             {"_id": 0, "bc_link": 1, "email_sender": 1, "vendor_raw": 1, "extracted_fields.vendor": 1,
              "normalized_fields.vendor_normalized": 1, "invoice_number_clean": 1, "invoice_number_extracted_previous": 1,
              "amount_float": 1, "amount_from_bc": 1, "document_type": 1, "document_type_previous": 1,
-             "po_number_clean": 1, "po_number_previous": 1}):
+             "po_number_clean": 1, "po_number_previous": 1, "po_from_text": 1}):
         bl = d["bc_link"]
         key = (bl.get("bc_entity") == "purchase_credit_memo", bl.get("bc_document_no"))
         b = bc.get(key)
@@ -149,7 +149,8 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
             out["draft_exact"] += 1
             if b.get("bc_order_number"):
                 out["po_checked"] += 1
-                out["po_ok"] += _n(d.get("po_number_previous") or d.get("po_number_clean")) == _n(b["bc_order_number"])
+                hub_po = (d.get("po_from_text") or {}).get("value") or d.get("po_number_previous") or d.get("po_number_clean")
+                out["po_ok"] += _n(hub_po) == _n(b["bc_order_number"])
     t = out["bc_documents"] or 1
     out["received_pct"] = round(100 * out["received"] / t, 1)
     out["draft_exact_pct"] = round(100 * out["draft_exact"] / t, 1)

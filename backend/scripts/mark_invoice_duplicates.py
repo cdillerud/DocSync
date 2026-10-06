@@ -35,7 +35,9 @@ async def main() -> int:
     groups = defaultdict(list)
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": args.since}, "is_duplicate": {"$ne": True}, "status": {"$ne": "batch_parent"},
-             "invoice_number_clean": {"$nin": [None, ""]}, "vendor_canonical": {"$nin": [None, ""]},
+             # an identity needs a real number: label words ("AND", "INVOICE")
+             # merged distinct invoices of the same amount
+             "invoice_number_clean": {"$nin": [None, ""], "$regex": "[0-9]"}, "vendor_canonical": {"$nin": [None, ""]},
              "amount_float": {"$ne": None},
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo", "Freight_Invoice"]}},
             {"_id": 0, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1, "created_utc": 1,

@@ -66,6 +66,10 @@ NUMBER_IN_TEXT = re.compile(
 
 
 def number_from_text(file_name: str, subject: str):
+    # A file named just by its number ("0313645.pdf", "3039489.pdf").
+    stem = re.sub(r"\.[A-Za-z0-9]{2,4}$", "", (file_name or "").strip())
+    if re.fullmatch(r"[A-Z]{0,4}\d{5,12}", stem, re.I):
+        return stem.upper()
     for text in (subject or "", file_name or ""):
         m = NUMBER_IN_TEXT.search(text)
         if m:
@@ -123,6 +127,25 @@ async def reclassify_recent(db, days: int = 120, apply: bool = True) -> Dict[str
                 "document_type": new_type, "suggested_job_type": new_type,
                 "document_type_previous": d.get("document_type"), "non_ap_kind": kind,
                 "document_type_corrected": {"at": now, "reason": f"non-AP document (file/subject): {kind}"}}})
+    # A label word read as the invoice number ("AND", "INVOICE", "DATE": 133
+    # documents, 2026-10-06) is no number: kept for audit, cleared, and the
+    # false invoice-identity duplicates it caused are restored (Tumalo
+    # 0313644 / 0313645 both "AND" at 1,970.00 were merged into one).
+    rejected = restored = 0
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "invoice_number_clean": {"$nin": [None, ""], "$not": {"$regex": "[0-9]"}}},
+            {"_id": 1, "invoice_number_clean": 1, "is_duplicate": 1, "duplicate_reason": 1}):
+        rejected += 1
+        upd = {"$set": {"invoice_number_rejected": {"value": d["invoice_number_clean"], "at": now, "reason": "no digit (label word)"}},
+               "$unset": {"invoice_number_clean": ""}}
+        if d.get("is_duplicate") and d.get("duplicate_reason") == "invoice_identity":
+            restored += 1
+            upd["$set"].update({"is_duplicate": False, "duplicate_unmarked": {"at": now, "reason": "identity used a label word as the invoice number"}})
+            upd["$unset"].update({"duplicate_reason": "", "duplicate_of_document_id": ""})
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, upd)
+    stats["label_word_numbers_cleared"] = rejected
+    stats["false_duplicates_restored"] = restored
     # Invoice numbers stated in the subject / file name.
     filled = 0
     async for d in db.hub_documents.find(

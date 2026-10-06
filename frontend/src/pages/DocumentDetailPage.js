@@ -1049,8 +1049,9 @@ export default function DocumentDetailPage() {
             <Card className="border border-border" data-testid="derived-state-card">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  Document Status
+                  Intake checks (when it arrived)
                 </CardTitle>
+                <p className="text-[11px] text-muted-foreground">How the document looked to the Hub on arrival. The current stage is in AP history above.</p>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-3 gap-4 mb-4">

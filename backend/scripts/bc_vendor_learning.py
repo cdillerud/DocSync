@@ -174,7 +174,11 @@ async def m():
             async for d in db.hub_documents.find({"vendor_canonical": name}, {"_id": 1}):
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": to, "vendor_canonical_backfill": {
                     "at": now, "previous": name, "from": "bc_name_canonical", "how": how}}})
-            await db.vendor_aliases.update_one({"normalized_alias": normalize_vendor_name(name)}, {"$set": {
+            ex_alias = await db.vendor_aliases.find_one({"alias_string": name}, {"_id": 0, "vendor_no": 1, "canonical_vendor_id": 1})
+            if ex_alias and (ex_alias.get("vendor_no") or ex_alias.get("canonical_vendor_id")) not in (None, "", to):
+                print(f"    alias {name!r} already points at {ex_alias.get('vendor_no') or ex_alias.get('canonical_vendor_id')}; left as is")
+                continue
+            await db.vendor_aliases.update_one({"alias_string": name}, {"$set": {
                 "alias_string": name, "alias": name.upper(), "normalized_alias": normalize_vendor_name(name),
                 "vendor_no": to, "canonical_vendor_id": to, "vendor_name": bc_name_of.get(to), "source": "bc_name_canonical",
                 "learned_at": now}, "$setOnInsert": {"alias_id": str(uuid.uuid4()), "created_at": now}}, upsert=True)

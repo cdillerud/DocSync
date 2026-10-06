@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
+import APHistoryPanel from '../components/APHistoryPanel';
 import OwnershipEvidencePanel from '../components/OwnershipEvidencePanel';
 import { labelForBlocker, labelForWarning } from '../lib/blockerLabels';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
@@ -1041,6 +1042,8 @@ export default function DocumentDetailPage() {
 
         {/* Right: Document Preview + AP Review (if AP_Invoice) + Event Timeline */}
         <div className="lg:col-span-2 space-y-4">
+          {/* AP history: stage, BC link, corrections and every staff action */}
+          <APHistoryPanel documentId={id} />
           {/* Derived State Summary Card - Always show */}
           {derivedState && (
             <Card className="border border-border" data-testid="derived-state-card">

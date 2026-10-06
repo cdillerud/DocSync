@@ -119,3 +119,76 @@ async def suggested_approver(doc_id: str):
     d = await _doc(doc_id)
     return {"approver": await wf.suggest_approver(get_db(), d)}
 
+
+STAGE_LABELS = {
+    "needs_staff": "Needs staff", "ready": "Ready for AP", "in_bc": "In BC", "in_bc_check": "In BC, check",
+    "paid": "Paid", "no_action": "No action", "container": "Split into pieces", "filed_by_staff": "Filed by staff",
+    "file_only": "File only", "on_hold": "On hold", "awaiting_approval": "Awaiting approval",
+}
+
+
+@router.get("/document/{doc_id}/ap-summary")
+async def ap_summary(doc_id: str):
+    """Everything that explains how the Hub handled one AP document: stage,
+    BC link, each automatic correction with its source, and every person's
+    decision, hold and approval (audit view)."""
+    db = get_db()
+    d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    corrections = []
+
+    def add(when, what, detail, source):
+        corrections.append({"at": when, "what": what, "detail": detail, "source": source})
+
+    vb = d.get("vendor_canonical_backfill") or {}
+    if vb:
+        add(vb.get("at"), "Vendor", f"{vb.get('previous') or 'none'} -> {d.get('vendor_canonical')}", vb.get("from") or "learning")
+    if d.get("invoice_number_rejected"):
+        r = d["invoice_number_rejected"]
+        add(r.get("at"), "Invoice number", f"rejected '{r.get('value')}' ({r.get('reason')})", "validation")
+    if d.get("invoice_number_source"):
+        add(d.get("invoice_number_filled_at"), "Invoice number", f"{d.get('invoice_number_clean')} read from the {d['invoice_number_source'].replace('_', ' ')}", "intake correction")
+    if d.get("invoice_number_extracted_previous"):
+        add(None, "Invoice number", f"{d.get('invoice_number_extracted_previous')} -> {d.get('invoice_number_clean')}", "BC")
+    if d.get("po_from_text"):
+        pf = d["po_from_text"]
+        add(pf.get("at"), "PO", f"{pf.get('raw') or 'none'} -> {pf.get('value')} (found in {pf.get('source', '').replace('_', ' ')}, confirmed by BC orders)", "PO correction")
+    if d.get("po_number_previous") and d.get("po_number_source") == "bc_order_number":
+        add(None, "PO", f"{d.get('po_number_previous')} -> {d.get('po_number_clean')}", "BC")
+    if d.get("document_type_corrected"):
+        dc = d["document_type_corrected"]
+        add(dc.get("at"), "Document type", f"{d.get('document_type_previous')} -> {d.get('document_type')} ({dc.get('reason')})", "classification")
+    if d.get("mailbox_from_bc"):
+        mb = d["mailbox_from_bc"]
+        add(mb.get("at"), "Lane", f"{mb.get('previous')} -> AP (matches BC document {mb.get('bc_document_no')})", "BC")
+    for k, label in (("amount_from_cfdi", "CFDI e-invoice"), ("amount_from_bc", "BC")):
+        if d.get(k):
+            add(d[k].get("at"), "Amount", f"{d[k].get('previous')} -> {d.get('amount_float')}", label)
+    if d.get("duplicate_unmarked"):
+        add(d["duplicate_unmarked"].get("at"), "Duplicate", "restored: " + str(d["duplicate_unmarked"].get("reason")), "validation")
+    async for e in db.bc_learning_events.find({"document_id": doc_id}, {"_id": 0}):
+        add(e.get("at"), str(e.get("kind", "")).replace("_", " ").title(), f"{e.get('from')} -> {e.get('to')} (BC {e.get('bc_document_no')}, {e.get('match')})", "BC")
+    events = [e async for e in db.ap_workflow_events.find({"document_id": doc_id}, {"_id": 0}).sort("at", 1)]
+    for r in [r async for r in db.human_routing_decisions.find({"document_id": doc_id}, {"_id": 0}).sort("created_at", 1)]:
+        events.append({"at": r.get("created_at"), "action": "folder_decision", "by": r.get("source"),
+                       "folder": r.get("selected_folder"), "hub_suggested": r.get("suggested_folder"), "notes": r.get("notes")})
+    if d.get("non_transactional"):
+        events.append({"at": d.get("non_transactional_at") or d.get("updated_utc"), "action": "excluded",
+                       "by": d.get("non_transactional_by"), "notes": d.get("non_transactional_notes")})
+    events.sort(key=lambda e: str(e.get("at") or ""))
+    bl = d.get("bc_link") or {}
+    return {
+        "stage": d.get("ap_stage"), "stage_label": STAGE_LABELS.get(d.get("ap_stage"), d.get("ap_stage")),
+        "staff_reason": d.get("staff_reason"), "no_action_reason": d.get("no_action_reason") or d.get("non_ap_kind"),
+        "suggested_folder": d.get("suggested_folder"), "routing_reason": d.get("routing_reason"),
+        "routing_path_accuracy": d.get("routing_path_accuracy"), "suggested_approver": d.get("suggested_approver"),
+        "staff_decision": d.get("staff_decision"), "hold": d.get("ap_hold"), "approval": d.get("ap_approval"),
+        "bc": {k: bl.get(k) for k in ("bc_document_no", "bc_entity", "bc_status", "bc_vendor_no", "bc_amount",
+                                      "bc_order_number", "match", "bc_location_lane", "linked_at")} if bl else None,
+        "bc_number_typo_suspect": d.get("bc_number_typo_suspect"), "bc_amount_mismatch": d.get("bc_amount_mismatch"),
+        "duplicate_of": d.get("duplicate_of_document_id") if d.get("is_duplicate") else None,
+        "corrections": sorted(corrections, key=lambda c: str(c.get("at") or "")),
+        "events": events,
+        "updated_at": d.get("ap_stage_updated_at"),
+    }

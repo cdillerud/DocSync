@@ -1333,7 +1333,8 @@ def _is_warehouse_order(doc: dict) -> bool:
     # Other documents of the same order that AP entered in BC (their line
     # location codes), excluding this document: majority lane decides.
     votes = doc.get("_order_lane_votes") or {}
-    if votes and len(votes) == 1:
+    if votes and len(votes) == 1 and not any(_WAREHOUSE_ORDER_PREFIX.match(o)
+                                              for o in _order_numbers_of(doc, {}, doc.get("routing_details") or {})):
         return "warehouse" in votes
 
     # A freight bill delivered to a customer (consignee is neither Gamer nor

@@ -22,7 +22,8 @@ const API = process.env.REACT_APP_BACKEND_URL;
 // (Inbox/Search/Square9 Readiness/Decision Queue/Monitor) and Sales PO→SO
 // ingestion (Sales), plus the shared infra both depend on (Integrations, Settings).
 const navItems = [
-  { to: '/', icon: Files, label: 'Inbox', exact: true },
+  { to: '/ap', icon: ClipboardList, label: 'AP Inbox' },
+  { to: '/', icon: Files, label: 'All documents', exact: true },
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/monitor', icon: Activity, label: 'Monitor' },
   { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
@@ -117,6 +118,7 @@ export default function Layout() {
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
     if (path === '/decision-queue') return 'Decision Queue';
     if (path === '/ap-workflow') return 'AP Workflow';
+    if (path === '/ap') return 'AP Inbox';
     if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';
     if (path === '/integrations') return 'Integrations';

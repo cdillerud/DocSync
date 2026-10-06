@@ -192,3 +192,33 @@ async def ap_summary(doc_id: str):
         "events": events,
         "updated_at": d.get("ap_stage_updated_at"),
     }
+
+
+@router.get("/worklist")
+async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip: int = 0, limit: int = 50):
+    """AP Inbox: documents by ap_stage with counts per stage and search over
+    vendor, invoice number, PO and file name."""
+    import re as _re
+    from datetime import datetime, timedelta, timezone
+    db = get_db()
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
+    base = {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$exists": True}}
+    counts = {}
+    async for g in db.hub_documents.aggregate([{"$match": base}, {"$group": {"_id": "$ap_stage", "n": {"$sum": 1}}}]):
+        counts[g["_id"]] = g["n"]
+    query = dict(base)
+    if stage and stage != "all":
+        query["ap_stage"] = stage
+    if q.strip():
+        rx = {"$regex": _re.escape(q.strip()), "$options": "i"}
+        query["$or"] = [{"vendor_canonical": rx}, {"vendor_raw": rx}, {"invoice_number_clean": rx},
+                        {"po_number_clean": rx}, {"file_name": rx}, {"bc_link.bc_document_no": rx}]
+    total = await db.hub_documents.count_documents(query)
+    fields = {"_id": 0, "id": 1, "file_name": 1, "created_utc": 1, "vendor_canonical": 1, "vendor_raw": 1,
+              "invoice_number_clean": 1, "amount_float": 1, "currency": 1, "po_number_clean": 1, "document_type": 1,
+              "ap_stage": 1, "staff_reason": 1, "suggested_folder": 1, "suggested_approver": 1, "ap_hold": 1,
+              "ap_approval": 1, "no_action_reason": 1, "check_reason": 1, "bc_link.bc_document_no": 1,
+              "bc_link.bc_status": 1, "staff_decided": 1}
+    items = [d async for d in db.hub_documents.find(query, fields).sort([("created_utc", -1)])
+             .skip(max(0, skip)).limit(max(1, min(limit, 200)))]
+    return {"stage": stage, "q": q, "days": days, "total": total, "counts": counts, "items": items}

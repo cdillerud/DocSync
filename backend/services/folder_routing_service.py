@@ -834,6 +834,16 @@ def _determine_folder_path_core(
                 routing_details,
             )
 
+        # A shipping document for a warehouse order (Rotondo inbound
+        # receipt for W118811) belongs to the warehouse lane.
+        if _is_warehouse_order(doc):
+            subfolder = _get_warehouse_subfolder(vendor_name, order_number, doc)
+            return (
+                f"Warehouse Not International/{subfolder}",
+                f"Domestic shipping document for a warehouse order → {subfolder}",
+                routing_details,
+            )
+
         if freight_direction == "inbound":
             vendor_folder = _get_vendor_subfolder(vendor_name)
             return (

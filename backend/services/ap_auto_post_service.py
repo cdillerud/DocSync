@@ -222,10 +222,11 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
         return {"success": True, "posted": False, "reason": reason, "status": "NeedsReview" if is_ap_type else "skipped", "failures": failures}
 
     # All conditions met — attempt to post to BC
-    bc_write_enabled = os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+    bc_write_enabled = (os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+                        and os.environ.get("BC_AUTO_DRAFT_ENABLED", "false").strip().lower() == "true")
 
     if not bc_write_enabled:
-        # BC writes disabled — mark as ready but don't post
+        # BC writes or automatic drafting disabled — mark as ready but don't draft
         now = datetime.now(timezone.utc).isoformat()
         update_data = {
             "status": "ReadyForPost",

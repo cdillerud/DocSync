@@ -1967,6 +1967,9 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
         write_ok = await check_bc_write_allowed(doc_id, "auto_create_purchase_invoice")
         if not write_ok:
             return {"success": False, "reason": "bc_writes_disabled"}
+        import os as _os
+        if _os.environ.get("BC_AUTO_DRAFT_ENABLED", "false").strip().lower() != "true":
+            return {"success": False, "reason": "auto_draft_disabled"}
 
         # ---- AP Validation (duplicate check, PO amount within 10%, required fields) ----
         from services.ap_validation_service import APValidationService
@@ -2425,7 +2428,9 @@ async def create_purchase_invoice_from_document(
             "message": "Cannot create Purchase Invoice: no BC vendor number resolved. Provide vendor_no_override or map the vendor first.",
         })
 
-    vendor_invoice_no = ef.get("invoice_number") or nf.get("invoice_number") or ""
+    # The Hub's corrected number (learned format rules, label words rejected,
+    # number from subject / file name) before the raw extraction.
+    vendor_invoice_no = doc.get("invoice_number_clean") or ef.get("invoice_number") or nf.get("invoice_number") or ""
     document_date = ef.get("invoice_date") or nf.get("invoice_date") or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     posting_date = document_date
 
@@ -2579,6 +2584,12 @@ async def create_purchase_invoice_from_document(
         "document_linked": link_result.get("success", False) if link_result else False,
         "document_link_method": link_result.get("method", "") if link_result else "",
     }
+    try:
+        from services.gpi_integration_service import BC_WRITE_ENVIRONMENT as _wenv
+        bc_purchase_invoice["environment"] = _wenv
+    except Exception:
+        pass
+    bc_purchase_invoice["status"] = "Draft"
 
     if result.get("success"):
         await db.hub_documents.update_one(

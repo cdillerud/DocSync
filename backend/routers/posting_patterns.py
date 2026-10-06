@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from fastapi import APIRouter, Query, BackgroundTasks, Body
+from fastapi import APIRouter, Query, BackgroundTasks, Body, HTTPException
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -1294,6 +1294,12 @@ async def sync_item_to_sandbox(
     """
     import httpx
     import os
+    # Writes to BC need the same switch as every other write (it had none).
+    if os.environ.get("BC_WRITE_ENABLED", "false").strip().lower() != "true":
+        raise HTTPException(status_code=409, detail="BC writes are disabled (BC_WRITE_ENABLED is not true)")
+    _wenv = (os.environ.get("BC_WRITE_ENVIRONMENT") or os.environ.get("BC_SANDBOX_ENVIRONMENT") or "").lower()
+    if not _wenv or _wenv.startswith("prod") or "production" in _wenv:
+        raise HTTPException(status_code=409, detail="Item sync never writes to Production")
 
     BC_API_BASE = "https://api.businesscentral.dynamics.com/v2.0"
     BC_TENANT_ID = os.environ.get("TENANT_ID", "")

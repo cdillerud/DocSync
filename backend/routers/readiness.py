@@ -1285,6 +1285,9 @@ async def retry_ready_to_post(
     Manual trigger: attempt to post all ReadyForPost documents to BC.
     Picks up docs that passed all validation but haven't been posted yet.
     """
+    import os as _os
+    if _os.environ.get("BC_AUTO_DRAFT_ENABLED", "false").strip().lower() != "true":
+        raise HTTPException(status_code=409, detail="Bulk drafting is off (BC_AUTO_DRAFT_ENABLED is not true); draft one document at a time.")
     import os
     from deps import get_db
     from datetime import datetime, timezone

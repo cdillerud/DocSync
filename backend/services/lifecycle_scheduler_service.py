@@ -868,9 +868,12 @@ async def ready_to_post_scheduler(
     while True:
         try:
             import os as _os
-            bc_write_enabled = _os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+            # Automatic drafting needs its own switch: BC_WRITE_ENABLED alone
+            # only allows deliberate single-document drafts (2026-10-06).
+            bc_write_enabled = (_os.environ.get("BC_WRITE_ENABLED", "false").lower() == "true"
+                                and _os.environ.get("BC_AUTO_DRAFT_ENABLED", "false").strip().lower() == "true")
             if not bc_write_enabled:
-                logger.debug("[ReadyToPost] BC_WRITE_ENABLED=false, skipping cycle")
+                logger.debug("[ReadyToPost] BC_WRITE_ENABLED / BC_AUTO_DRAFT_ENABLED off, skipping cycle")
                 await asyncio.sleep(READY_POST_INTERVAL_SECONDS)
                 continue
 

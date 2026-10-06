@@ -23,6 +23,20 @@ BC_ENVIRONMENT = os.environ.get('BC_ENVIRONMENT', '')
 BC_CLIENT_ID = os.environ.get('BC_CLIENT_ID', '')
 
 
+
+def _write_blocked_reason():
+    """Same rule as the guarded write paths (gpi_integration_service):
+    writes need BC_WRITE_ENABLED=true and a non-Production target. This
+    module targets BC_ENVIRONMENT, which is Production on this server, so
+    it stays blocked even when sandbox drafting is enabled (found
+    2026-10-06: this path had no write guard at all)."""
+    if os.environ.get("BC_WRITE_ENABLED", "false").strip().lower() != "true":
+        return "BC writes are disabled (BC_WRITE_ENABLED is not true)"
+    env = (BC_ENVIRONMENT or "").strip().lower()
+    if not env or env.startswith("prod") or "production" in env:
+        return f"BC writes to '{BC_ENVIRONMENT or 'unset'}' are blocked (Production is never written by this path)"
+    return None
+
 async def _get_bc_token():
     from services.config_service import get_bc_token
     return await get_bc_token()
@@ -57,6 +71,10 @@ async def link_document_to_bc(
     """
     if DEMO_MODE or not BC_CLIENT_ID:
         return {"success": True, "method": "mock", "note": f"In production: file will be attached to BC {bc_entity} via documentAttachments API"}
+
+    blocked = _write_blocked_reason()
+    if blocked:
+        return {"success": False, "method": "api", "error": blocked, "blocked_by": "bc_write_guard"}
 
     if not file_content:
         return {"success": False, "method": "api", "error": "No file content provided for attachment"}

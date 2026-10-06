@@ -145,17 +145,29 @@ async def m():
     async for d in db.hub_documents.find({"vendor_canonical": {"$nin": [None, ""]}}, {"_id": 0, "vendor_canonical": 1}):
         if d["vendor_canonical"] not in all_bc_nums:
             names[d["vendor_canonical"]] += 1
+    # Documents with no vendor at all but an extracted raw name (Berry
+    # subsidiaries "BPRex Closures, LLC", "Setco, LLC" via CertCapture: 142
+    # AP documents since 2026-08-20) resolve by the same rules.
+    raw_unresolved = collections.Counter()
+    async for d in db.hub_documents.find({"vendor_canonical": {"$in": [None, ""]}, "vendor_raw": {"$nin": [None, ""]}},
+                                         {"_id": 0, "vendor_raw": 1}):
+        raw_unresolved[str(d["vendor_raw"]).strip()] += 1
     c_names = c_docs = 0
-    for name, n in names.most_common():
-        if "gamer" in name.lower() or len(_nm(name)) < 4:
+    work = [(nm_, n_, "vendor_canonical") for nm_, n_ in names.most_common()] +            [(nm_, n_, "vendor_raw") for nm_, n_ in raw_unresolved.most_common()]
+    for name, n, field in work:
+        if "gamer" in name.lower() or "test vendor" in name.lower() or len(_nm(name)) < 4:
             continue
         to, how = None, None
         ev = collections.Counter()
-        async for d in db.hub_documents.find({"vendor_canonical": name, "bc_link.match": {"$in": ["number+amount", "filename+vendor"]}},
+        async for d in db.hub_documents.find({"$or": [{"vendor_canonical": name}, {"vendor_raw": name}],
+                                              "bc_link.match": {"$in": ["number+amount", "filename+vendor"]}},
                                              {"_id": 0, "bc_link.bc_vendor_no": 1}):
             ev[d["bc_link"]["bc_vendor_no"]] += 1
         top, k = ev.most_common(1)[0] if ev else (None, 0)
-        stem_hits = {vn for st, vn in bc_bystem if _stem(name).startswith(st) or (st.startswith(_stem(name)) and len(_stem(name)) >= 7)}
+        # Only a BC name contained in ours ("CITICARGO & STORAGE" has
+        # "Citi-Cargo"); the reverse ("Berry Global" inside BC "Berry Global
+        # (ZEL)") picked ZEL where BC books Berry Global as BERRY.
+        stem_hits = {vn for st, vn in bc_bystem if _stem(name).startswith(st)}
         words = {w for w in re.findall(r"[a-z]{4,}", name.lower())} - {"company", "corp", "corporation", "inc", "llc", "services", "service", "international", "united", "states"}
         alias_hits = {vn for vn in alias_map.get(_nm(name), ())
                       if words & set(re.findall(r"[a-z]{4,}", str(bc_name_of.get(vn, "")).lower()))}
@@ -172,9 +184,10 @@ async def m():
         if not to:
             continue
         c_names += 1; c_docs += n
-        print(f"  CANON {name!r} -> {to} ({how}, {n} docs)")
+        print(f"  CANON {'raw ' if field == 'vendor_raw' else ''}{name!r} -> {to} ({how}, {n} docs)")
         if APPLY:
-            async for d in db.hub_documents.find({"vendor_canonical": name}, {"_id": 1}):
+            sel = {"vendor_canonical": name} if field == "vendor_canonical" else                 {"vendor_canonical": {"$in": [None, ""]}, "vendor_raw": name}
+            async for d in db.hub_documents.find(sel, {"_id": 1}):
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": to, "vendor_canonical_backfill": {
                     "at": now, "previous": name, "from": "bc_name_canonical", "how": how}}})
             ex_alias = await db.vendor_aliases.find_one({"alias_string": name}, {"_id": 0, "vendor_no": 1, "canonical_vendor_id": 1})

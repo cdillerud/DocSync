@@ -383,6 +383,17 @@ def _alias_key_variants(vendor_normalized: str) -> list:
     return keys
 
 
+def _vendor_name_heads(name: str) -> list:
+    """Leading parts of a compound vendor name, longest first."""
+    heads = []
+    for sep in (" (", " / ", "/", " - ", " dba ", " c/o "):
+        if sep in name.lower():
+            head = name[:name.lower().index(sep)].strip(" ,.-")
+            if len(head) >= 4 and head not in heads:
+                heads.append(head)
+    return sorted(heads, key=len, reverse=True)
+
+
 async def _find_vendor_alias(db, vendor_normalized: str):
     """Return the best usable alias document for a vendor name, or None.
 
@@ -450,6 +461,15 @@ async def lookup_vendor_alias(vendor_normalized: str) -> dict:
     # Intake passes a lowercased name ("o-i packaging solutions llc") while many
     # aliases are keyed by the stripped form ("oi packaging solutions"), so try both.
     alias_doc = await _find_vendor_alias(db, vendor_normalized)
+    if not alias_doc:
+        # "Berry Global, Inc. (Kerr Group, LLC)", "Ardagh Glass Packaging /
+        # Ardagh Group": the leading name carries the vendor; fuzzy matching
+        # on the whole string picked the wrong vendor 8 of 8 times (BC replay
+        # 2026-10-06).
+        for head in _vendor_name_heads(vendor_normalized):
+            alias_doc = await _find_vendor_alias(db, head)
+            if alias_doc:
+                break
 
     if alias_doc:
         canonical_id = (

@@ -96,3 +96,72 @@ async def rebuild_order_lanes(db) -> Dict[str, Any]:
         await db.order_lanes.update_one({"order": o}, {"$set": {"docs": docs, "updated_at": now}}, upsert=True)
     await db.order_lanes.create_index("order", unique=True)
     return {"orders": len(lanes)}
+
+
+import re as _re
+
+_EXCEPTION_SUB = _re.compile(r"hold|issue|missing|not posted|previous month|return|quality", _re.I)
+
+
+def _path_parts(p: str):
+    x = [t.strip() for t in (p or "").strip("/").split("/") if t.strip()]
+    if x and x[0].lower().startswith("temp folder"):
+        x = x[1:]
+    return x
+
+
+def _clean_subpath(parts) -> str:
+    """Levels 2-3 of a staff folder, stopping at workflow exceptions (holds,
+    issues, quality, returns): those are states the Hub models separately."""
+    out = []
+    for t in parts[1:3]:
+        if _EXCEPTION_SUB.search(t):
+            break
+        out.append(t)
+    return "/".join(out)
+
+
+async def learn_folders_from_csv(db, path: str) -> Dict[str, Any]:
+    """Every staff filing's folder (any top folder), per vendor: where in the
+    real Square9 tree staff put this vendor's documents."""
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        rows = list(csv.DictReader(open(path)))
+    except FileNotFoundError:
+        return {"error": f"missing {path}"}
+    n = 0
+    for r in rows:
+        bucket = r.get("match_bucket")
+        ok = bucket in FULL_MATCH or (bucket == "recently_deleted_match" and float(r.get("match_score") or 0) >= 1.0)
+        parts = _path_parts(r.get("square9_parent_path"))
+        if not ok or not parts or not r.get("hub_doc_id"):
+            continue
+        hub = await db.hub_documents.find_one({"id": r["hub_doc_id"]}, {"_id": 0, "vendor_canonical": 1})
+        key = f"{r.get('square9_parent_path', '')}/{r.get('square9_name', '')}"
+        await db.folder_filings.update_one({"_id": key}, {"$set": {
+            "vendor": str((hub or {}).get("vendor_canonical") or "").upper(), "top": parts[0],
+            "top_l": parts[0].lower(), "subpath": _clean_subpath(parts), "hub_doc_id": r["hub_doc_id"],
+            "updated_at": now}, "$setOnInsert": {"created_at": now}}, upsert=True)
+        n += 1
+    return {"filings": n, **(await rebuild_folder_profiles(db))}
+
+
+async def rebuild_folder_profiles(db) -> Dict[str, Any]:
+    now = datetime.now(timezone.utc).isoformat()
+    vend, tops = {}, {}
+    async for f in db.folder_filings.find({}, {"_id": 0, "vendor": 1, "top": 1, "top_l": 1, "subpath": 1}):
+        tops.setdefault(f["top_l"], {"top": f["top"], "counts": {}})
+        tc = tops[f["top_l"]]["counts"]
+        tc[f["subpath"]] = tc.get(f["subpath"], 0) + 1
+        if f.get("vendor"):
+            k = (f["vendor"], f["top_l"])
+            vend.setdefault(k, {"top": f["top"], "counts": {}})
+            vc = vend[k]["counts"]
+            vc[f["subpath"]] = vc.get(f["subpath"], 0) + 1
+    for (v, tl), x in vend.items():
+        await db.vendor_subfolder_profiles.update_one({"vendor": v, "top_l": tl}, {"$set": {
+            "vendor": v, "top_l": tl, "top": x["top"], "counts": x["counts"], "updated_at": now}}, upsert=True)
+    for tl, x in tops.items():
+        await db.top_subfolder_defaults.update_one({"top_l": tl}, {"$set": {
+            "top_l": tl, "top": x["top"], "counts": x["counts"], "updated_at": now}}, upsert=True)
+    return {"vendor_profiles": len(vend), "top_folders": len(tops)}

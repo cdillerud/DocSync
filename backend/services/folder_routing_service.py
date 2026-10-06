@@ -1605,7 +1605,7 @@ async def _is_non_trade_vendor(vendor: Any) -> bool:
     return result
 
 
-async def route_with_feedback(
+async def _route_with_feedback_core(
     doc: Dict[str, Any],
     is_international: bool = False,
     location_code: Optional[str] = None,
@@ -1769,3 +1769,86 @@ async def route_with_feedback(
         location_code=location_code,
         freight_direction=freight_direction,
     )
+
+
+# ---------------------------------------------------------------------------
+# Real Square9 subfolders (learned from staff filings)
+# ---------------------------------------------------------------------------
+# The rule chain decides the top folder well (93% vs staff) but stopped at
+# "Dropship Not International" or used folders that do not exist in
+# Square9: the full folder matched staff only ~26% of the time (45 days,
+# 2026-10-06). AP folders are part of AP's workflow, so the subfolder is
+# filled from where staff file this vendor's documents (vendor_subfolder_
+# profiles, top_subfolder_defaults; lane_profile_service). Leave-one-out:
+# top + second level 26% -> 75.6%.
+
+_SUBFOLDER_DEFAULTS: Dict[str, Any] = {"at": 0.0, "tops": {}}
+_EXCEPTION_SUBFOLDER = re.compile(r"hold|issue|quality|missing|not posted|return", re.I)
+_DUNNAGE_TEXT = re.compile(r"dunnage|pallet|tier ?sheet|top ?frame|slip ?sheet|divider|layer pad", re.I)
+
+
+async def _top_defaults(db) -> Dict[str, Any]:
+    import time
+    if time.monotonic() - _SUBFOLDER_DEFAULTS["at"] > 600:
+        tops = {}
+        async for t in db.top_subfolder_defaults.find({}, {"_id": 0}):
+            tops[t["top_l"]] = t
+        _SUBFOLDER_DEFAULTS.update({"at": time.monotonic(), "tops": tops})
+    return _SUBFOLDER_DEFAULTS["tops"]
+
+
+def _pick_subfolder(doc: dict, hub_sub: str, vendor_counts: Dict[str, int], top_counts: Dict[str, int]) -> Optional[str]:
+    if hub_sub and _EXCEPTION_SUBFOLDER.search(hub_sub):
+        return None  # a deliberate exception folder (Freight Issues, Sent to Quality) stays
+    vc = {k: n for k, n in (vendor_counts or {}).items() if n > 0}
+    tot = sum(vc.values())
+    if tot >= 2:
+        ranked = sorted(vc.items(), key=lambda kv: -kv[1])
+        s1, n1 = ranked[0]
+        s2 = ranked[1][0] if len(ranked) > 1 else None
+        dunn = [k for k in vc if "dunnage" in k.lower()]
+        if dunn and s2 is not None and n1 / tot < 0.8 and ({s1, s2} & set(dunn)):
+            text = " ".join(str(l.get("description") or "") for l in ((doc.get("extracted_fields") or {}).get("line_items") or []))
+            text += " " + _pdf_text(doc)[:3000]
+            return dunn[0] if _DUNNAGE_TEXT.search(text) else next((k for k in (s1, s2) if k not in dunn), s1)
+        if n1 / tot >= 0.6:
+            return s1
+    real = {k for k, n in (top_counts or {}).items() if n > 0}
+    if hub_sub and hub_sub in real:
+        return None
+    if real:
+        # No vendor history: stay in the family the rules chose (a carrier's
+        # bill -> the most used Freight folder; anything else -> the most used
+        # non-freight folder, e.g. "Drop Ship All Others").
+        freight = (hub_sub or "").lower().startswith("freight")
+        pool = [(k, n) for k, n in top_counts.items() if n > 0 and k.lower().startswith("freight") == freight]
+        if pool:
+            return max(pool, key=lambda kv: kv[1])[0]
+    return None
+
+
+async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, **kwargs):
+    path, reason, details = await _route_with_feedback_core(doc, is_international=is_international, **kwargs)
+    try:
+        parts = [p for p in (path or "").strip("/").split("/") if p]
+        if not parts:
+            return path, reason, details
+        from deps import get_db
+        db = get_db()
+        tops = await _top_defaults(db)
+        t = tops.get(parts[0].lower())
+        if not t:
+            return path, reason, details
+        vendor = str(doc.get("vendor_canonical") or "").upper()
+        prof = await db.vendor_subfolder_profiles.find_one({"vendor": vendor, "top_l": parts[0].lower()}, {"_id": 0, "counts": 1}) if vendor else None
+        hub_sub = "/".join(parts[1:])
+        sub = _pick_subfolder(doc, hub_sub, (prof or {}).get("counts") or {}, t.get("counts") or {})
+        if sub is None or sub == hub_sub:
+            return path, reason, details
+        new_path = t["top"] + ("/" + sub if sub else "")
+        details = dict(details or {})
+        details["subfolder_from"] = "vendor_profile" if prof else "folder_default"
+        details["rule_path"] = path
+        return new_path, reason, details
+    except Exception:
+        return path, reason, details

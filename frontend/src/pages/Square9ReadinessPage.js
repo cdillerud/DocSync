@@ -567,8 +567,10 @@ export default function Square9ReadinessPage() {
             {(learningSummary.daily_replay || []).length > 0 && (
               <div className="mt-4 overflow-x-auto">
                 <div className="text-xs text-muted-foreground mb-1">
-                  Daily replay of today&apos;s logic: routing vs staff filings (last 72 hours, as at intake) and
-                  vendor identification vs the vendor AP chose in BC (last 14 days).
+                  Daily replay of today&apos;s logic: routing vs staff filings (last 72 hours, as at intake),
+                  vendor identification vs the vendor AP chose in BC (last 14 days), and for every invoice AP entered in BC
+                  (last 30 days) whether the Hub received it and whether its own reading would have drafted the same vendor,
+                  invoice number, amount and type. That last number is the go-live gate for drafting invoices in BC.
                 </div>
                 <table className="w-full text-sm">
                   <thead>
@@ -578,6 +580,8 @@ export default function Square9ReadinessPage() {
                       <th className="py-1 pr-3 text-right">Filings</th>
                       <th className="py-1 pr-3 text-right">Vendor right</th>
                       <th className="py-1 pr-3 text-right">Invoices</th>
+                      <th className="py-1 pr-3 text-right" title="Of invoices AP entered in BC (30 days): the Hub received it">Received</th>
+                      <th className="py-1 pr-3 text-right" title="Of invoices AP entered in BC (30 days): the Hub's own reading would have drafted the same vendor, number, amount and type">Draft would match BC</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -588,6 +592,11 @@ export default function Square9ReadinessPage() {
                         <td className="py-1 pr-3 text-right">{(r.routing && r.routing.n) || 0}</td>
                         <td className="py-1 pr-3 text-right">{r.vendor && r.vendor.pct != null ? `${r.vendor.pct}%` : '—'}</td>
                         <td className="py-1 pr-3 text-right">{(r.vendor && r.vendor.n) || 0}</td>
+                        <td className="py-1 pr-3 text-right">{r.draft ? `${r.draft.received_pct}%` : '—'}</td>
+                        <td className="py-1 pr-3 text-right">
+                          {r.draft ? `${r.draft.draft_exact_of_received_pct}%` : '—'}
+                          {r.draft && <span className="ml-1 text-[11px] text-muted-foreground">of {r.draft.received}</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

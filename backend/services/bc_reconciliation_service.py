@@ -173,16 +173,20 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
     # evidence above disappears, so stored vendor rules count too.
     async for r in db.vendor_invoice_number_rules.find({"rule": {"$regex": "^strip_suffix:"}}, {"_id": 0, "vendor": 1, "rule": 1}):
         format_suffix.add((str(r["vendor"]).upper(), r["rule"].split(":", 1)[1]))
+    # Every mailbox: AP invoices also reach Operations / Sales (LSI,
+    # Progressive, Rotondo, Happyann ...); only an exact BC match counts there,
+    # and it moves the document to the AP lane.
     cursor = db.hub_documents.find(
-        {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
+        {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True},
          "status": {"$nin": ["batch_parent"]}, "document_type": {"$in": sorted(LINKABLE_TYPES)},
          "fraud_risk.flagged": {"$ne": True}},
-        {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1,
+        {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1, "mailbox_category": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
          "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1,
          "created_utc": 1})
     async for d in cursor:
-        stats["documents"] += 1
+        is_ap = d.get("mailbox_category") == "AP"
+        stats["documents" if is_ap else "non_ap_documents"] += 1
         hub_amt = d.get("amount_float")
         hub_vendor = str(d.get("vendor_canonical") or "").upper()
         best, how, credit_of, via_loose = None, None, None, False
@@ -264,7 +268,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                                                     "bc_external_document_no": credit_of.get("bc_external_document_no"),
                                                     "bc_vendor_no": credit_of.get("bc_vendor_no"), "at": stamp}}
                 await db.hub_documents.update_one({"_id": d["_id"]}, upd)
-            stats["credit_of_invoice" if credit_of else "unlinked"] += 1
+            stats["credit_of_invoice" if credit_of else ("unlinked" if is_ap else "non_ap_unlinked")] += 1
             continue
         parts = []
         if how != "number+amount" and hub_amt is not None:
@@ -373,6 +377,13 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                            "document_type_previous": d.get("document_type"),
                            "document_type_corrected": {"at": stamp, "reason": "BC has this invoice"}})
             events.append({"kind": "doc_type", "from": d.get("document_type"), "to": new_type})
+        if d.get("mailbox_category") != "AP":
+            if how != "number+amount":
+                stats["non_ap_mailbox_not_exact"] += 1
+                continue
+            update.update({"mailbox_category": "AP", "mailbox_from_bc": {
+                "at": stamp, "previous": d.get("mailbox_category"), "bc_document_no": best.get("bc_document_no")}})
+            events.append({"kind": "mailbox", "from": d.get("mailbox_category"), "to": "AP"})
         unset = {}
         if how == "number+vendor" and hub_amt is not None and best.get("bc_amount") is not None:
             update["bc_amount_mismatch"] = {"hub": hub_amt, "bc": best.get("bc_amount"), "at": stamp}

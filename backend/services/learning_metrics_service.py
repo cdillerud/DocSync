@@ -34,11 +34,21 @@ def _root(p: str) -> str:
     return "s&h" if r.startswith("s&h") else r
 
 
+def _second(p: str) -> str:
+    """Top folder + first subfolder, lower case (S&H stages merged)."""
+    x = [t.strip().lower() for t in (p or "").strip("/").split("/") if t.strip()]
+    if x and x[0].startswith("temp folder"):
+        x = x[1:]
+    if x and x[0].startswith("s&h"):
+        return "s&h"
+    return "/".join(x[:2])
+
+
 async def _routing_replay(db) -> Dict[str, Any]:
     from services.folder_routing_service import route_with_feedback
     if not os.path.exists(PARITY_CSV):
         return {"n": 0}
-    seen, n, agree = set(), 0, 0
+    seen, n, agree, agree_sub = set(), 0, 0, 0
     for r in csv.DictReader(open(PARITY_CSV)):
         ok = r.get("match_bucket") in CAUGHT or (
             r.get("match_bucket") == "recently_deleted_match" and float(r.get("match_score") or 0) >= 1
@@ -56,8 +66,12 @@ async def _routing_replay(db) -> Dict[str, Any]:
         except Exception:
             continue
         n += 1
-        agree += _root(path) == _root(r.get("square9_parent_path"))
-    return {"n": n, "agree": agree, "pct": round(100 * agree / n, 1) if n else None}
+        top_ok = _root(path) == _root(r.get("square9_parent_path"))
+        agree += top_ok
+        if top_ok and _second(path) == _second(r.get("square9_parent_path")):
+            agree_sub += 1
+    return {"n": n, "agree": agree, "pct": round(100 * agree / n, 1) if n else None,
+            "agree_subfolder": agree_sub, "subfolder_pct": round(100 * agree_sub / n, 1) if n else None}
 
 
 async def _vendor_replay(db) -> Dict[str, Any]:

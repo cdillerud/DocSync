@@ -580,6 +580,7 @@ export default function Square9ReadinessPage() {
                     <tr className="text-xs text-muted-foreground text-left border-b">
                       <th className="py-1 pr-3">Day</th>
                       <th className="py-1 pr-3 text-right">Routing agrees</th>
+                      <th className="py-1 pr-3 text-right" title="Top folder and first subfolder both match the staff filing">Subfolder too</th>
                       <th className="py-1 pr-3 text-right">Filings</th>
                       <th className="py-1 pr-3 text-right">Vendor right</th>
                       <th className="py-1 pr-3 text-right">Invoices</th>
@@ -592,6 +593,7 @@ export default function Square9ReadinessPage() {
                       <tr key={r.date} className="border-b last:border-0">
                         <td className="py-1 pr-3">{r.date}</td>
                         <td className="py-1 pr-3 text-right">{r.routing && r.routing.pct != null ? `${r.routing.pct}%` : '—'}</td>
+                        <td className="py-1 pr-3 text-right">{r.routing && r.routing.subfolder_pct != null ? `${r.routing.subfolder_pct}%` : '—'}</td>
                         <td className="py-1 pr-3 text-right">{(r.routing && r.routing.n) || 0}</td>
                         <td className="py-1 pr-3 text-right">{r.vendor && r.vendor.pct != null ? `${r.vendor.pct}%` : '—'}</td>
                         <td className="py-1 pr-3 text-right">{(r.vendor && r.vendor.n) || 0}</td>

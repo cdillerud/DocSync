@@ -631,8 +631,20 @@ async def get_learning_summary():
                            "invoice_number_pct": round(100 * row["inv"] / row["n"], 1),
                            "vendor_pct": round(100 * row["vend"] / row["n"], 1),
                            "po_pct": round(100 * row["po"] / row["po_n"], 1) if row["po_n"] else None})
+    # Invoice numbers AP probably mistyped in BC: same vendor and amount,
+    # number off by one slip, and the vendor's file carries the Hub number.
+    typos = []
+    async for d in db.hub_documents.find(
+            {"bc_number_typo_suspect": {"$exists": True}, "is_duplicate": {"$ne": True}},
+            {"_id": 0, "id": 1, "vendor_canonical": 1, "amount_float": 1, "file_name": 1, "bc_number_typo_suspect": 1}
+    ).sort([("bc_number_typo_suspect.at", -1)]).limit(25):
+        t = d["bc_number_typo_suspect"]
+        typos.append({"document_id": d.get("id"), "vendor": d.get("vendor_canonical"), "amount": d.get("amount_float"),
+                      "invoice_number": t.get("hub"), "bc_number": t.get("bc"), "bc_document_no": t.get("bc_document_no"),
+                      "file_supports_hub": t.get("file_supports_hub"), "file_name": d.get("file_name")})
     return {"last_cycle": last, "bc_reconciliation": recon, "corrections_7d": corrections,
-            "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud, "first_pass_by_day": first_pass}
+            "duplicates_marked_7d": dup, "fraud_flagged_7d": fraud, "first_pass_by_day": first_pass,
+            "bc_number_typo_suspects": typos}
 
 
 @router.get("/readiness/daily")

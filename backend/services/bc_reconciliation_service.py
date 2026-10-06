@@ -77,6 +77,35 @@ def _index_keys(number: Any) -> List[str]:
     return keys
 
 
+
+def _osa(a: str, b: str) -> int:
+    """Edit distance with adjacent transpositions (optimal string alignment)."""
+    d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) + 1):
+        d[i][0] = i
+    for j in range(len(b) + 1):
+        d[0][j] = j
+    for i in range(1, len(a) + 1):
+        for j in range(1, len(b) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len(a)][len(b)]
+
+
+def near_number(hub: Any, bc: Any) -> bool:
+    """Same invoice number up to one OCR/typing slip: one edit or adjacent
+    transposition (Priority 19608487 / 19068487, TD Lines 19428 / 119428),
+    or one number inside the other (Boyer SINV0021272 / 21272)."""
+    a, b = _norm(hub), _norm(bc)
+    if not a or not b or a == b:
+        return False
+    short, long_ = sorted((a, b), key=len)
+    if len(short) >= 5 and short in long_:
+        return True
+    return min(len(a), len(b)) >= 5 and _osa(a, b) <= 1
+
 async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool = True) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     stamp = now.isoformat()
@@ -106,6 +135,11 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             base = re.sub(r"-\d{1,2}$", "", str(b.get("bc_external_document_no") or "").strip().upper())
             if base:
                 parts_by_base[(str(b.get("bc_vendor_no") or "").upper(), _norm(base))].append(b)
+    invoice_by_amount: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+    for rows in parts_by_base.values():
+        for b in rows:
+            if b.get("bc_amount") is not None:
+                invoice_by_amount[(str(b.get("bc_vendor_no") or "").upper(), round(abs(float(b["bc_amount"])) * 100))].append(b)
     credit_by_amount: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
     for rows in index.values():
         for b in rows:
@@ -211,6 +245,17 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     {"bc_link.bc_document_no": cands[0].get("bc_document_no"), "bc_link.bc_entity": "purchase_credit_memo",
                      "_id": {"$ne": d["_id"]}}, limit=1):
                 best, how = cands[0], "amount+vendor(credit)"
+        if (best is None and hub_vendor and hub_amt not in (None, 0, 0.0) and d.get("invoice_number_clean")
+                and not d.get("batch_parent_id")):
+            # Same vendor and amount, number off by one slip: an extraction
+            # error BC corrects (and invoice_number_rules learns from).
+            cands = [b for b in invoice_by_amount.get((hub_vendor, round(abs(float(hub_amt)) * 100)), [])
+                     if near_number(d.get("invoice_number_clean"), b.get("bc_external_document_no"))
+                     and abs((datetime.fromisoformat(str(b.get("bc_posting_date"))[:10])
+                              - datetime.fromisoformat(str(d.get("created_utc") or stamp)[:10])).days) <= 60]
+            if len(cands) == 1 and not await db.hub_documents.count_documents(
+                    {"bc_link.bc_document_no": cands[0].get("bc_document_no"), "_id": {"$ne": d["_id"]}}, limit=1):
+                best, how = cands[0], "near-number+amount"
         if best is None:
             if apply and (d.get("bc_link") or credit_of):
                 upd = {"$unset": {"bc_link": "", "bc_amount_mismatch": ""}}
@@ -273,7 +318,22 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         # formatting suffix "4898677RI") but to the cent: BC's number is the
         # invoice number.
         bc_ext = str(best.get("bc_external_document_no") or "").strip()
-        if how in ("filename+vendor", "amount+vendor(credit)") and bc_ext:
+        keep_hub_number = False
+        if how == "near-number+amount" and bc_ext:
+            # Which side slipped? A formatting difference (one number inside
+            # the other: Boyer SINV0021272 / 21272) -> BC's form. Otherwise
+            # the vendor's file name decides: when it carries the Hub number
+            # and not BC's, AP mistyped it in BC (Ball 6328664 entered as
+            # 60328664, ATS 10606122 as 1060122) -> keep ours, flag for AP.
+            hn, bn, fn = _norm(d.get("invoice_number_clean")), _norm(bc_ext), _norm(d.get("file_name"))
+            short, long_ = sorted((hn, bn), key=len)
+            if not (len(short) >= 5 and short in long_) and not (bn and bn in fn):
+                keep_hub_number = True
+                update["bc_number_typo_suspect"] = {"hub": d.get("invoice_number_clean"), "bc": bc_ext,
+                                                    "bc_document_no": best.get("bc_document_no"),
+                                                    "file_supports_hub": bool(hn and hn in fn), "at": stamp}
+                stats["bc_number_typo_suspect"] += 1
+        if how in ("filename+vendor", "amount+vendor(credit)", "near-number+amount") and bc_ext and not keep_hub_number:
             update["invoice_number_clean"] = bc_ext.upper()
             update["invoice_number_extracted_previous"] = d.get("invoice_number_clean")
             events.append({"kind": "invoice_number", "from": d.get("invoice_number_clean"), "to": bc_ext.upper()})

@@ -451,6 +451,36 @@ export default function Square9ReadinessPage() {
                 </table>
               </div>
             )}
+            {(learningSummary.bc_number_typo_suspects || []).length > 0 && (
+              <div className="mt-4 overflow-x-auto">
+                <div className="text-xs text-muted-foreground mb-1">
+                  Possible invoice number typos in BC: same vendor and amount, number off by one digit or a swap,
+                  and the vendor&apos;s document shows the Hub&apos;s number. Worth a look by AP (duplicate-payment checks use this number).
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-muted-foreground text-left border-b">
+                      <th className="py-1 pr-3">Vendor</th>
+                      <th className="py-1 pr-3">On the invoice</th>
+                      <th className="py-1 pr-3">In BC</th>
+                      <th className="py-1 pr-3">BC document</th>
+                      <th className="py-1 pr-3 text-right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {learningSummary.bc_number_typo_suspects.map(t => (
+                      <tr key={t.document_id} className="border-b last:border-0">
+                        <td className="py-1 pr-3">{t.vendor}</td>
+                        <td className="py-1 pr-3 font-mono">{t.invoice_number}{t.file_supports_hub ? '' : ' ?'}</td>
+                        <td className="py-1 pr-3 font-mono">{t.bc_number}</td>
+                        <td className="py-1 pr-3 font-mono">{t.bc_document_no}</td>
+                        <td className="py-1 pr-3 text-right">{t.amount == null ? '—' : Number(t.amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

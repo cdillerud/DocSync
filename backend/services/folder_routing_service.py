@@ -1434,7 +1434,7 @@ def _lane_profile(doc: dict):
     return None
 
 
-_GAMER_PO_SHAPE = re.compile(r"^(?:WA\d{4}[A-Z]?|(?:WR|WTR|W|PR)?-?1?\d{5}[A-Z]?)$")
+_GAMER_PO_SHAPE = re.compile(r"^(?:1\d{5}|(?:W|WR|WTR)-?1?\d{5}|PR\d{5}|WA\d{4})[A-Z]?$")
 
 _OCEAN_BL = re.compile(
     r"\b(?:EGLV|MEDU|MSCU|MAEU|MAEI|COSU|YMJA|YMLU|OOLU|HLCU|HLXU|CMDU|ONEY|ZIMU|SUDU|HDMU|EVER|APLU|WHLC"

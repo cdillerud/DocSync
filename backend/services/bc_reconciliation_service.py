@@ -93,6 +93,19 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             for k in _index_keys(b.get("bc_external_document_no")):
                 index[k].append(b)
 
+    # AP splits one vendor invoice into one BC invoice per PO ("HH-150605B"
+    # and "HH-150605B-1", Hwa Hsia): group BC rows by vendor and base number.
+    parts_by_base: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
+    seen_rows = set()
+    for rows in index.values():
+        for b in rows:
+            rid = (b.get("bc_entity_type"), b.get("bc_document_no"))
+            if rid in seen_rows or b.get("bc_entity_type") == "purchase_credit_memo":
+                continue
+            seen_rows.add(rid)
+            base = re.sub(r"-\d{1,2}$", "", str(b.get("bc_external_document_no") or "").strip().upper())
+            if base:
+                parts_by_base[(str(b.get("bc_vendor_no") or "").upper(), _norm(base))].append(b)
     credit_by_amount: Dict[Any, List[Dict[str, Any]]] = defaultdict(list)
     for rows in index.values():
         for b in rows:
@@ -208,12 +221,24 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 await db.hub_documents.update_one({"_id": d["_id"]}, upd)
             stats["credit_of_invoice" if credit_of else "unlinked"] += 1
             continue
+        parts = []
+        if how != "number+amount" and hub_amt is not None:
+            group = parts_by_base.get((str(best.get("bc_vendor_no") or "").upper(),
+                                       _norm(re.sub(r"-\d{1,2}$", "", str(best.get("bc_external_document_no") or "").strip().upper()))), [])
+            if len(group) > 1 and abs(abs(float(hub_amt)) - sum(abs(float(g.get("bc_amount") or 0)) for g in group)) < 0.05:
+                parts = sorted(group, key=lambda g: str(g.get("bc_external_document_no")))
+                best, how = parts[0], "number+amount(parts)"
         stats["linked:" + how] += 1
         link = {"bc_document_no": best.get("bc_document_no"), "bc_entity": best.get("bc_entity_type"),
                 "bc_status": best.get("bc_status"), "bc_vendor_no": best.get("bc_vendor_no"),
                 "bc_vendor_name": best.get("bc_vendor_name"), "bc_amount": best.get("bc_amount"),
                 "bc_order_number": best.get("bc_order_number") or "", "bc_posting_date": best.get("bc_posting_date"),
                 "match": how, "linked_at": stamp}
+        if parts:
+            link["bc_parts"] = [{"bc_document_no": g.get("bc_document_no"), "bc_external_document_no": g.get("bc_external_document_no"),
+                                 "bc_amount": g.get("bc_amount"), "bc_order_number": g.get("bc_order_number") or ""} for g in parts]
+            link["bc_amount"] = round(sum(float(g.get("bc_amount") or 0) for g in parts), 2)
+            link["bc_order_numbers"] = [g.get("bc_order_number") for g in parts if g.get("bc_order_number")]
         # First-pass accuracy: were the values intake produced already what BC
         # says, before any correction? Measured once, at the first link, so the
         # trend shows whether extraction itself is learning.

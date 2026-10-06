@@ -17,6 +17,7 @@ ap_stage (exactly one):
   in_bc_check    entered, but BC's amount or invoice number differs
   paid           BC shows it paid
   container      the original PDF that was split into pieces (never work)
+  drafted        the Hub drafted it in the BC sandbox (PRE); AP reviews the draft
   on_hold        a person put it on hold (ap_hold: reason, until)
   awaiting_approval  waiting for a named approver (ap_approval), or an S&H
                  invoice not yet approved (as Square9 "waiting for approval")
@@ -149,6 +150,11 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "in_bc_check",
                     "check_reason": "number_differs" if d.get("bc_number_typo_suspect") else "amount_differs"}
         return {"ap_stage": "in_bc"}
+    # Drafted by the Hub in the BC sandbox (sandbox_draft_service): waiting
+    # for AP to review the draft.
+    bpi = d.get("bc_purchase_invoice") if isinstance(d.get("bc_purchase_invoice"), dict) else None
+    if bpi and bpi.get("environment") and bpi.get("status") == "Draft":
+        return {"ap_stage": "drafted", "bc_draft_no": bpi.get("bc_record_no"), "bc_draft_environment": bpi.get("environment")}
     # Holds and approvals (ap_workflow_service), before AP enters the invoice.
     if isinstance(d.get("ap_hold"), dict):
         return {"ap_stage": "on_hold"}
@@ -229,7 +235,8 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 uncertain[reason_key(res.get("routing_reason"))] += 1
         if apply:
             unset = {k: "" for k in ("staff_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
-                                     "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind") if k not in res}
+                                     "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind",
+                                     "bc_draft_no", "bc_draft_environment") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}

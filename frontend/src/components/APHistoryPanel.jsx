@@ -74,6 +74,9 @@ export default function APHistoryPanel({ documentId }) {
             <div><span className="text-muted-foreground">Business Central</span> {data.bc.bc_entity === 'purchase_credit_memo' ? 'credit memo' : 'invoice'} {data.bc.bc_document_no}
               {' '}({data.bc.bc_status}), vendor {data.bc.bc_vendor_no}, {money(data.bc.bc_amount)}{data.bc.bc_order_number ? `, order ${data.bc.bc_order_number}` : ''}</div>
           )}
+          {data.bc_draft && (
+            <div><span className="text-muted-foreground">Hub draft</span> purchase invoice {data.bc_draft.bc_record_no} in {data.bc_draft.environment} ({data.bc_draft.status}, {data.bc_draft.lines_added}/{data.bc_draft.lines_total} lines)</div>
+          )}
           {data.approval && (
             <div><span className="text-muted-foreground">Approval</span> {data.approval.approver}: {data.approval.status}
               {data.approval.decided_by ? ` by ${data.approval.decided_by}` : ''}</div>

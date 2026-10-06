@@ -124,6 +124,7 @@ STAGE_LABELS = {
     "needs_staff": "Needs staff", "ready": "Ready for AP", "in_bc": "In BC", "in_bc_check": "In BC, check",
     "paid": "Paid", "no_action": "No action", "container": "Split into pieces", "filed_by_staff": "Filed by staff",
     "file_only": "File only", "on_hold": "On hold", "awaiting_approval": "Awaiting approval",
+    "drafted": "Drafted in BC (sandbox)",
 }
 
 
@@ -187,6 +188,8 @@ async def ap_summary(doc_id: str):
         "bc": {k: bl.get(k) for k in ("bc_document_no", "bc_entity", "bc_status", "bc_vendor_no", "bc_amount",
                                       "bc_order_number", "match", "bc_location_lane", "linked_at")} if bl else None,
         "bc_number_typo_suspect": d.get("bc_number_typo_suspect"), "bc_amount_mismatch": d.get("bc_amount_mismatch"),
+        "bc_draft": ({k: (d.get("bc_purchase_invoice") or {}).get(k) for k in ("bc_record_no", "environment", "status", "created_at", "lines_added", "lines_total")}
+                     if (d.get("bc_purchase_invoice") or {}).get("environment") else None),
         "duplicate_of": d.get("duplicate_of_document_id") if d.get("is_duplicate") else None,
         "corrections": sorted(corrections, key=lambda c: str(c.get("at") or "")),
         "events": events,
@@ -218,7 +221,7 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
               "invoice_number_clean": 1, "amount_float": 1, "currency": 1, "po_number_clean": 1, "document_type": 1,
               "ap_stage": 1, "staff_reason": 1, "suggested_folder": 1, "suggested_approver": 1, "ap_hold": 1,
               "ap_approval": 1, "no_action_reason": 1, "check_reason": 1, "bc_link.bc_document_no": 1,
-              "bc_link.bc_status": 1, "staff_decided": 1}
+              "bc_link.bc_status": 1, "staff_decided": 1, "bc_draft_no": 1, "bc_draft_environment": 1}
     items = [d async for d in db.hub_documents.find(query, fields).sort([("created_utc", -1)])
              .skip(max(0, skip)).limit(max(1, min(limit, 200)))]
     return {"stage": stage, "q": q, "days": days, "total": total, "counts": counts, "items": items}

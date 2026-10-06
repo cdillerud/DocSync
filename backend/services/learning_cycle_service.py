@@ -120,6 +120,15 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["ap_stages"] = {"error": repr(e)}
     try:
+        # Draft (never post) up to 10 ready AP invoices per hour in the PRE
+        # sandbox; refuses unless writes are on and the target is PRE.
+        from services.sandbox_draft_service import draft as sandbox_draft
+        summary["sandbox_drafts"] = await sandbox_draft(db, limit=10)
+        if summary["sandbox_drafts"].get("drafted"):
+            summary["ap_stages_after_drafts"] = (await refresh_stages(db)).get("stages")
+    except Exception as e:
+        summary["sandbox_drafts"] = {"error": repr(e)}
+    try:
         # Once a day: replay current intake logic against staff filings and BC.
         from services.learning_metrics_service import record_daily
         summary["learning_metrics"] = await record_daily(db)

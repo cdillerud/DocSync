@@ -12,6 +12,7 @@ const STAGES = [
   { key: 'needs_staff', label: 'Needs staff', help: 'A person must decide; the reason is shown', action: { to: '/decision-queue', label: 'Open decision queue' }, tone: 'amber' },
   { key: 'awaiting_approval', label: 'Awaiting approval', help: 'Waiting for a named approver', action: { to: '/ap-workflow', label: 'Open approvals' }, tone: 'sky' },
   { key: 'on_hold', label: 'On hold', help: 'Held by staff with a reason', action: { to: '/ap-workflow', label: 'Open holds' }, tone: 'sky' },
+  { key: 'drafted', label: 'Drafted in BC', help: 'The Hub drafted it in the BC sandbox (PRE); AP reviews and posts the draft in BC', tone: 'emerald' },
   { key: 'ready', label: 'Ready for AP', help: 'Vendor, number, amount and folder known; waiting for AP to enter it in BC', tone: 'emerald' },
   { key: 'in_bc_check', label: 'In BC, check', help: "Entered in BC, but BC's amount or invoice number differs from the document", tone: 'amber' },
   { key: 'in_bc', label: 'In BC', help: 'Entered by AP; BC is now the record', tone: 'muted' },
@@ -52,6 +53,7 @@ function why(doc) {
   if (doc.ap_approval) return `${doc.ap_approval.approver} to approve`;
   if (doc.suggested_approver) return `${doc.suggested_approver} to approve (suggested)`;
   if (doc.no_action_reason) return String(doc.no_action_reason).replace(/_/g, ' ').replace(/^excluded by staff:/, 'excluded by staff ');
+  if (doc.bc_draft_no) return `Draft ${doc.bc_draft_no} (${doc.bc_draft_environment && doc.bc_draft_environment.startsWith('PRE') ? 'PRE sandbox' : doc.bc_draft_environment})`;
   if (doc.bc_link?.bc_document_no) return `BC ${doc.bc_link.bc_document_no}${doc.bc_link.bc_status ? ` (${doc.bc_link.bc_status})` : ''}`;
   if (doc.staff_decided) return 'Folder decided by staff';
   return '';
@@ -112,7 +114,7 @@ export default function APInboxPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-10 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-11 gap-2">
         {STAGES.map(s => (
           <button
             key={s.key}

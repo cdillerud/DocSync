@@ -44,6 +44,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     started = datetime.now(timezone.utc)
     summary: Dict[str, Any] = {"started_at": started.isoformat()}
     try:
+        # CFDI XML (Mexican e-invoices) first: exact numbers/amounts for the
+        # companion PDFs, so they can link to BC in this same cycle.
+        from services.cfdi_service import process_recent as cfdi_process
+        summary["cfdi"] = await cfdi_process(db)
+    except Exception as e:
+        summary["cfdi"] = {"error": repr(e)}
+    try:
         from services.bc_reconciliation_service import reconcile_recent
         summary["bc_reconciliation"] = await reconcile_recent(db)
         from services.bc_reconciliation_service import fetch_ship_to

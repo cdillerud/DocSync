@@ -124,7 +124,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
          "fraud_risk.flagged": {"$ne": True}},
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
-         "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1})
+         "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1})
     async for d in cursor:
         stats["documents"] += 1
         hub_amt = d.get("amount_float")
@@ -159,6 +159,24 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     best, how = b, "number"
             if how == "number+amount":
                 break
+        if best is None and not d.get("invoice_number_clean") and hub_vendor and not d.get("batch_parent_id"):
+            # No invoice number extracted (Canpack credit memos "Invoice
+            # 1111600262.PDF"): the number in the file name, when BC has it
+            # for the same vendor and the amount agrees or was not read.
+            for num in re.findall(r"(?<![0-9])[0-9]{6,12}(?![0-9])", str(d.get("file_name") or "")):
+                for b in index.get(_norm(num), []):
+                    if str(b.get("bc_vendor_no") or "").upper() != hub_vendor:
+                        continue
+                    if await db.hub_documents.count_documents({"bc_link.bc_document_no": b.get("bc_document_no"),
+                                                                "bc_link.bc_entity": b.get("bc_entity_type"),
+                                                                "_id": {"$ne": d["_id"]}}, limit=1):
+                        continue
+                    bc_amt = b.get("bc_amount")
+                    if hub_amt in (None, 0, 0.0) or (bc_amt is not None and abs(abs(float(hub_amt)) - abs(float(bc_amt))) < 0.02):
+                        best, how = b, "filename+vendor"
+                        break
+                if best is not None:
+                    break
         if best is None:
             if apply and (d.get("bc_link") or credit_of):
                 upd = {"$unset": {"bc_link": "", "bc_amount_mismatch": ""}}
@@ -209,6 +227,15 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         # formatting suffix "4898677RI") but to the cent: BC's number is the
         # invoice number.
         bc_ext = str(best.get("bc_external_document_no") or "").strip()
+        if how == "filename+vendor" and bc_ext:
+            update["invoice_number_clean"] = bc_ext.upper()
+            update["invoice_number_extracted_previous"] = d.get("invoice_number_clean")
+            events.append({"kind": "invoice_number", "from": d.get("invoice_number_clean"), "to": bc_ext.upper()})
+            if hub_amt in (None, 0, 0.0) and best.get("bc_amount") is not None:
+                sign = -1 if best.get("bc_entity_type") == "purchase_credit_memo" else 1
+                update["amount_float"] = sign * abs(float(best["bc_amount"]))
+                update["amount_from_bc"] = {"at": stamp, "previous": hub_amt}
+                events.append({"kind": "amount", "from": hub_amt, "to": update["amount_float"]})
         if (how == "number+amount" and via_loose and bc_ext and "/" not in bc_ext
                 and _norm(bc_ext) != _norm(d.get("invoice_number_clean"))):
             update["invoice_number_clean"] = bc_ext.upper()
@@ -224,7 +251,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             update["po_number_source"] = "bc_order_number"
             events.append({"kind": "po", "from": d.get("po_number_clean"), "to": bc_order.upper()})
         is_bc_credit = best.get("bc_entity_type") == "purchase_credit_memo"
-        if how == "number+amount" and (
+        if how in ("number+amount", "filename+vendor") and (
                 (is_bc_credit and d.get("document_type") != "Credit_Memo")
                 or (not is_bc_credit and d.get("document_type") == "Credit_Memo" and float(best.get("bc_amount") or 0) > 0)):
             # BC says which it is: a credit memo, or an invoice the Hub typed

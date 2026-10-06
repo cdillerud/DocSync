@@ -155,6 +155,7 @@ async def m():
     c_names = c_docs = 0
     work = [(nm_, n_, "vendor_canonical") for nm_, n_ in names.most_common()] +            [(nm_, n_, "vendor_raw") for nm_, n_ in raw_unresolved.most_common()]
     for name, n, field in work:
+        lookup_name = re.sub(r"^(?:beneficiary|vendor|supplier|remit to|from)\s*:\s*", "", name, flags=re.I).strip()
         if "gamer" in name.lower() or "test vendor" in name.lower() or len(_nm(name)) < 4:
             continue
         to, how = None, None
@@ -223,6 +224,58 @@ async def m():
                 await db.vendor_aliases_quarantine.insert_one({k: v for k, v in a.items() if k != "_id"} | {"orig_id": a["_id"], "quarantined_at": now, "reason": "target_not_bc_vendor"})
                 await db.vendor_aliases.delete_one({"_id": a["_id"]})
     print(f"aliases with a non-BC target: repointed {rep}, quarantined {quar}")
+    # learn_senders: a sender with no mapping whose BC-linked invoices are
+    # 90%+ one vendor (3+) gets that vendor (bc_ground_truth). Gamer's own
+    # domain never maps (internal forwards).
+    # Billing platforms send for many vendors: never learned as one vendor.
+    PLATFORM = re.compile(r"bill[.]com|intuit|quickbooks|quotefactory|accountservicing|avalara|certcapture|docusign|paypal|stripe|coupa|ariba|tungsten|sap[.]com|billtrust|invoicecloud", re.I)
+    mapped = {str(r.get("sender_email") or "").lower() async for r in db.sender_vendor_map.find({"sender_email": {"$exists": True}}, {"sender_email": 1})}
+    new_senders = 0
+    for snd, c in by_sender.items():
+        if snd in mapped or not snd or "gamerpackaging" in snd or sum(c.values()) < 3 or PLATFORM.search(snd):
+            continue
+        top, k = c.most_common(1)[0]
+        if k / sum(c.values()) < 0.9 or top not in all_bc_nums:
+            continue
+        new_senders += 1
+        print(f"  NEW SENDER {snd} -> {top} ({k}/{sum(c.values())})")
+        if APPLY:
+            await db.sender_vendor_map.update_one({"sender_email": snd}, {"$set": {
+                "sender_email": snd, "sender_domain": snd.split("@")[-1], "vendor_canonical": top, "vendor_no": top,
+                "vendor_name": bc_name_of.get(top) or names.get(top), "source": "bc_ground_truth", "bc_evidence": dict(c),
+                "confirmation_count": k, "created_at": now, "updated_at": now}}, upsert=True)
+    print(f"sender mappings learned from BC: {new_senders}")
+    # fill_from_sender: documents with no vendor or a label for a vendor
+    # ("ACCOUNT NO.", "Signature", "Consignee):", "19 CFR 142.3 ...") take
+    # their sender's mapped vendor; "Beneficiary: X" is resolved as X.
+    JUNK = re.compile(r"^(?:account|signature|consignee|shipper|bill to|ship to|remit|invoice|page|date|total|\d|19 cfr|hbl|mbl)", re.I)
+    smap = {}
+    async for r in db.sender_vendor_map.find({"sender_email": {"$exists": True}, "vendor_canonical": {"$nin": [None, ""]},
+                                              "generic_sender": {"$ne": True}},
+                                             {"_id": 0, "sender_email": 1, "vendor_canonical": 1, "source": 1, "bc_evidence": 1, "aligned_to_bc_at": 1}):
+        # Only BC-confirmed mappings fill a missing vendor (old unconfirmed
+        # rows mapped buske.com -> CROWN C, a customer -> BALLCOR).
+        ev = r.get("bc_evidence") or {}
+        confirmed = r.get("source") == "bc_ground_truth" or r.get("aligned_to_bc_at") or (
+            sum(ev.values()) >= 3 and ev.get(r["vendor_canonical"], 0) / max(sum(ev.values()), 1) >= 0.9)
+        if r["vendor_canonical"] in all_bc_nums and confirmed:
+            smap[str(r["sender_email"]).lower()] = r["vendor_canonical"]
+    filled = collections.Counter()
+    async for d in db.hub_documents.find({"email_sender": {"$nin": [None, ""]}, "$or": [
+            {"vendor_canonical": {"$in": [None, ""]}}, {"vendor_canonical": {"$regex": JUNK.pattern, "$options": "i"}}]},
+            {"_id": 1, "email_sender": 1, "vendor_canonical": 1}):
+        if d.get("vendor_canonical") in all_bc_nums:
+            continue
+        to = smap.get(str(d["email_sender"]).lower())
+        if not to:
+            continue
+        filled[(str(d["email_sender"]).lower()[:40], to)] += 1
+        if APPLY:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": to, "vendor_canonical_backfill": {
+                "at": now, "previous": d.get("vendor_canonical"), "from": "bc_sender_fill"}}})
+    for k, v in filled.most_common(10):
+        print(f"  FILL {k[0]} -> {k[1]}: {v}")
+    print(f"documents given their sender's vendor: {sum(filled.values())}")
     print(("APPLIED" if APPLY else "DRY RUN") + f": learned {len(learned)}, aliases created/updated {alias_new}, documents corrected {docs_fixed}")
     for k, v in per.most_common(20): print("  ", v, k)
 asyncio.run(m())

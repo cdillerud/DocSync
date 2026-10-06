@@ -96,6 +96,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["routing_learning"] = f"error: {e!r}"
     try:
+        # Correspondence intake typed AP_Invoice (tax-exemption requests,
+        # statements, price notices) -> its real type.
+        from services.non_ap_reclassifier import reclassify_recent
+        summary["non_ap_reclassified"] = await reclassify_recent(db)
+    except Exception as e:
+        summary["non_ap_reclassified"] = {"error": repr(e)}
+    try:
         # Once a day: replay current intake logic against staff filings and BC.
         from services.learning_metrics_service import record_daily
         summary["learning_metrics"] = await record_daily(db)

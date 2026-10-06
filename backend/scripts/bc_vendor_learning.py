@@ -126,6 +126,9 @@ async def m():
         while prev != n:
             prev, n = n, _SUFFIX.sub("", n)
         return n
+    # Every BC vendor number is a valid identity (blocked vendors included);
+    # only new resolutions are restricted to active vendors.
+    all_bc_nums = set(await db.bc_catalog_vendors.distinct("vendor_no"))
     bc_nums, bc_byname, bc_bystem, bc_name_of = set(), collections.defaultdict(set), [], {}
     async for v in db.bc_catalog_vendors.find({"blocked": {"$ne": True}}, {"_id": 0, "vendor_no": 1, "name": 1}):
         bc_nums.add(v["vendor_no"]); bc_byname[_nm(v["name"])].add(v["vendor_no"]); bc_name_of[v["vendor_no"]] = v["name"]
@@ -140,7 +143,7 @@ async def m():
                 gt_alias[_nm(a.get("alias_string") or a.get("normalized_alias"))].add(vn)
     names = collections.Counter()
     async for d in db.hub_documents.find({"vendor_canonical": {"$nin": [None, ""]}}, {"_id": 0, "vendor_canonical": 1}):
-        if d["vendor_canonical"] not in bc_nums:
+        if d["vendor_canonical"] not in all_bc_nums:
             names[d["vendor_canonical"]] += 1
     c_names = c_docs = 0
     for name, n in names.most_common():
@@ -175,7 +178,7 @@ async def m():
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": to, "vendor_canonical_backfill": {
                     "at": now, "previous": name, "from": "bc_name_canonical", "how": how}}})
             ex_alias = await db.vendor_aliases.find_one({"alias_string": name}, {"_id": 0, "vendor_no": 1, "canonical_vendor_id": 1})
-            if ex_alias and (ex_alias.get("vendor_no") or ex_alias.get("canonical_vendor_id")) in bc_nums - {to}:
+            if ex_alias and (ex_alias.get("vendor_no") or ex_alias.get("canonical_vendor_id")) in all_bc_nums - {to}:
                 print(f"    alias {name!r} already points at {ex_alias.get('vendor_no') or ex_alias.get('canonical_vendor_id')}; left as is")
                 continue
             await db.vendor_aliases.update_one({"alias_string": name}, {"$set": {
@@ -183,6 +186,30 @@ async def m():
                 "vendor_no": to, "canonical_vendor_id": to, "vendor_name": bc_name_of.get(to), "source": "bc_name_canonical",
                 "learned_at": now}, "$setOnInsert": {"alias_id": str(uuid.uuid4()), "created_at": now}}, upsert=True)
     print(f"vendor names canonicalized to BC numbers: {c_names} names, {c_docs} documents")
+    # repair_aliases: alias rows whose target is not a BC vendor number
+    # ("R & L", "C&MFORW", or a PO number like "112522") resolve new
+    # documents to non-vendors. Repoint to the one BC vendor whose name
+    # matches (exact or BC name inside it); otherwise quarantine the row.
+    rep = quar = 0
+    async for a in db.vendor_aliases.find({}):
+        tgt = a.get("vendor_no") or a.get("canonical_vendor_id")
+        if tgt in all_bc_nums:
+            continue
+        nm_ = a.get("alias_string") or a.get("normalized_alias") or ""
+        hits = set(bc_byname.get(_nm(nm_), ())) or {vn for st, vn in bc_bystem if _stem(nm_).startswith(st)}
+        if "gamer" not in nm_.lower() and len(hits) == 1:
+            to = hits.pop(); rep += 1
+            print(f"  ALIAS REPOINT {nm_!r}: {tgt} -> {to}")
+            if APPLY:
+                await db.vendor_aliases_fix_backup.insert_one({k: v for k, v in a.items() if k != "_id"} | {"orig_id": a["_id"], "backed_up_at": now, "reason": "target_not_bc_vendor"})
+                await db.vendor_aliases.update_one({"_id": a["_id"]}, {"$set": {"vendor_no": to, "canonical_vendor_id": to, "vendor_name": bc_name_of.get(to), "aligned_to_bc_at": now}})
+        else:
+            quar += 1
+            print(f"  ALIAS QUARANTINE {nm_!r} -> {tgt} (no single BC vendor)")
+            if APPLY:
+                await db.vendor_aliases_quarantine.insert_one({k: v for k, v in a.items() if k != "_id"} | {"orig_id": a["_id"], "quarantined_at": now, "reason": "target_not_bc_vendor"})
+                await db.vendor_aliases.delete_one({"_id": a["_id"]})
+    print(f"aliases with a non-BC target: repointed {rep}, quarantined {quar}")
     print(("APPLIED" if APPLY else "DRY RUN") + f": learned {len(learned)}, aliases created/updated {alias_new}, documents corrected {docs_fixed}")
     for k, v in per.most_common(20): print("  ", v, k)
 asyncio.run(m())

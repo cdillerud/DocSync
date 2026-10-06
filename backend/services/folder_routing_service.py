@@ -1439,7 +1439,7 @@ _GAMER_PO_SHAPE = re.compile(r"^(?:WA\d{4}[A-Z]?|(?:WR|WTR|W|PR)?-?1?\d{5}[A-Z]?
 _OCEAN_BL = re.compile(
     r"\b(?:EGLV|MEDU|MSCU|MAEU|MAEI|COSU|YMJA|YMLU|OOLU|HLCU|HLXU|CMDU|ONEY|ZIMU|SUDU|HDMU|EVER|APLU|WHLC"
     r"|SMLM|TGHU|TCNU|MRKU|MSKU|CSNU|TEMU|FCIU|SEGU|BEAU|TRHU|GESU|CAIU|DFSU|TLLU|EMCU|EISU|MATS|SEAU|BMOU)"
-    r"[A-Z]?\d{6,}\b")
+    r"(?=[A-Z0-9]*(?:\d[A-Z]*){4})[A-Z0-9]{6,14}\b")
 
 
 def _is_ocean_import(doc: dict) -> bool:

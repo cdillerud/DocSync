@@ -29,6 +29,51 @@ RULES = [
     ("test_message", "Unknown_Document", None, r"^\s*test\s*\d*\s*$"),
 ]
 
+# Rules on the file name (and subject) for documents that DO carry an amount
+# but no invoice number: statements of account list a balance; vendor forms.
+# 2026-10-06: Fast Track / Triumbari / Phoenix / Pano statements and W-9s,
+# ACH instructions, an SOP were AP_Invoice in the staff queue.
+FILE_RULES = [
+    ("account_statement", "Statement",
+     # word-bounded: "aging" inside "packaging" retyped Citi Cargo invoices
+     r"statement|^cs [a-z0-9]+ \d|customer statement|account summary|\bar aging\b|\baging (?:report|detail)"),
+    ("vendor_form", "Unknown_Document",
+     r"(?<![a-z])w-?9(?![0-9])|ach[ _-]?(?:instruction|form|authori|payment set ?up)|bank (?:letter|details)|\bsop\b|credit application|certificate of insurance|\bcoi\b"),
+]
+
+
+def classify_file(file_name: str, subject: str):
+    text = f"{file_name or ''} | {subject or ''}".lower()
+    for kind, new_type, rx in FILE_RULES:
+        # "Your Account Statement & Invoices" carries real invoices: a
+        # statement needs the file itself to say so when the subject
+        # mentions invoices.
+        if (kind == "account_statement" and "invoice" in (subject or "").lower()
+                and not re.search(rx, (file_name or "").lower())):
+            continue
+        if re.search(rx, text):
+            return kind, new_type
+    return None
+
+
+# Invoice / credit number stated in the e-mail subject or file name when
+# extraction found none ("MRP Credit Memo #3039489-10", "Inv00026759",
+# "Sales Credit Memo SCMP0001007.pdf").
+NUMBER_IN_TEXT = re.compile(
+    # whole words only: "XPOLogisticsinvoices09012026" is a date, not a number
+    r"(?:\binvoice\b|\binv(?=[\s#:.]|\d)|\bcredit memo\b|\bcredit note\b|\bcm\b|\bbill\b)\s*(?:no\.?|number|#)?\s*[:#]?\s*([A-Z]{0,6}\d[A-Z0-9-]{3,20})"
+    r"|\b((?:SINV|SCMP|INV|CM)\d{4,12})\b", re.I)
+
+
+def number_from_text(file_name: str, subject: str):
+    for text in (subject or "", file_name or ""):
+        m = NUMBER_IN_TEXT.search(text)
+        if m:
+            num = (m.group(1) or m.group(2) or "").strip("-").upper()
+            if len(re.sub(r"\D", "", num)) >= 4:
+                return num
+    return None
+
 
 def classify(sender: str, subject: str):
     sender, subject = (sender or "").lower(), (subject or "").lower()
@@ -62,5 +107,37 @@ async def reclassify_recent(db, days: int = 120, apply: bool = True) -> Dict[str
                 "document_type_previous": d.get("document_type"),
                 "non_ap_kind": kind,
                 "document_type_corrected": {"at": now, "reason": f"non-AP correspondence: {kind}"}}})
+    # Statements / vendor forms with an amount but no invoice number.
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "document_type": {"$in": ["AP_Invoice", "AP_INVOICE"]},
+             "bc_link": {"$exists": False}, "invoice_number_clean": {"$in": [None, ""]},
+             "status": {"$ne": "Posted"}},
+            {"_id": 1, "file_name": 1, "email_subject": 1, "document_type": 1}):
+        hit = classify_file(d.get("file_name"), d.get("email_subject"))
+        if not hit:
+            continue
+        kind, new_type = hit
+        stats[kind] = stats.get(kind, 0) + 1
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "document_type": new_type, "suggested_job_type": new_type,
+                "document_type_previous": d.get("document_type"), "non_ap_kind": kind,
+                "document_type_corrected": {"at": now, "reason": f"non-AP document (file/subject): {kind}"}}})
+    # Invoice numbers stated in the subject / file name.
+    filled = 0
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "document_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Credit_Memo"]},
+             "bc_link": {"$exists": False}, "invoice_number_clean": {"$in": [None, ""]},
+             "batch_parent_id": {"$exists": False}, "non_ap_kind": {"$exists": False}},
+            {"_id": 1, "file_name": 1, "email_subject": 1}):
+        num = number_from_text(d.get("file_name"), d.get("email_subject"))
+        if not num:
+            continue
+        filled += 1
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "invoice_number_clean": num, "invoice_number_source": "subject_or_file_name",
+                "invoice_number_filled_at": now}})
+    stats["invoice_number_from_text"] = filled
     logger.info("[NonAP] %s", stats)
     return stats

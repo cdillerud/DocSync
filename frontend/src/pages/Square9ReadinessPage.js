@@ -389,13 +389,15 @@ export default function Square9ReadinessPage() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
               {[
                 ['needs_staff', 'Needs staff', 'A person must decide; reason shown below'],
                 ['ready', 'Ready for AP', 'Vendor, number, amount and folder known; waiting for AP to enter in BC'],
                 ['in_bc', 'In BC', 'Entered by AP; BC is now the truth'],
                 ['in_bc_check', 'In BC, check', 'Entered, but BC amount or invoice number differs'],
                 ['paid', 'Paid', 'BC shows it paid'],
+                ['filed_by_staff', 'Filed by staff', 'Staff already filed it in Square9; their choice teaches the Hub'],
+                ['file_only', 'File only', 'Supporting paperwork (BOLs, packing lists, receipts); filed to the best folder, no AP decision'],
                 ['no_action', 'No action', 'Duplicate, companion copy, continuation page, or not an AP document'],
               ].map(([key, label, help]) => (
                 <div key={key} className={`rounded border p-2 ${key === 'needs_staff' ? 'border-amber-500' : ''}`} title={help}>

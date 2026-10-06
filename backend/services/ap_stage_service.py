@@ -17,6 +17,11 @@ ap_stage (exactly one):
   in_bc_check    entered, but BC's amount or invoice number differs
   paid           BC shows it paid
   container      the original PDF that was split into pieces (never work)
+  filed_by_staff staff already filed it in Square9 (their filing is the
+                 decision; it feeds routing_outcomes)
+  file_only      supporting paperwork (shipping documents, BOLs, receipts,
+                 inspection forms): filed to the Hub's best folder, no AP
+                 decision to make; staff can still correct it
 
 staff_reason (only for needs_staff), most important first:
   suspected_fraud, vendor_unknown, number_or_amount_missing,
@@ -117,8 +122,12 @@ async def load_reliability(db) -> Dict[str, Dict[str, Any]]:
         out[g["_id"]] = {"n": n, "pct": pct, "reliable": n >= RELIABLE_MIN_N and pct >= RELIABLE_PCT}
     return out
 
+SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document", "Inspection_Form",
+                    "Warehouse_Document", "Packing_Slip"}
+
+
 def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]],
-             reliability: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+             reliability: Dict[str, Dict[str, Any]], staff_filed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The stage of one document. route = (folder, reason) at intake view, or
     None when routing is not needed for the decision."""
     if d.get("status") == "batch_parent":
@@ -140,8 +149,18 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
     sd = d.get("staff_decision") if isinstance(d.get("staff_decision"), dict) else None
     if sd and sd.get("folder"):
         return {"ap_stage": "ready", "suggested_folder": sd["folder"], "staff_decided": True}
+    if staff_filed:
+        return {"ap_stage": "filed_by_staff", "suggested_folder": staff_filed.get("staff_folder")}
     if (d.get("fraud_risk") or {}).get("flagged"):
         return {"ap_stage": "needs_staff", "staff_reason": "suspected_fraud"}
+    # A piece of a split PDF with no number or amount of its own is a
+    # continuation page (the invoice total is on another piece).
+    if d.get("batch_parent_id") and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):
+        return {"ap_stage": "no_action", "no_action_reason": "split_piece_without_invoice_data"}
+    if d.get("document_type") in SUPPORTING_TYPES:
+        if route and (route[0] or "").strip("/"):
+            return {"ap_stage": "file_only", "suggested_folder": route[0], "routing_reason": route[1]}
+        return {"ap_stage": "file_only"}
     if d.get("vendor_canonical") not in bc_vendors:
         return {"ap_stage": "needs_staff", "staff_reason": "vendor_unknown"}
     if d.get("document_type") in INVOICE_TYPES and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):
@@ -162,19 +181,23 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
     from services.folder_routing_service import route_with_feedback
     bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no"))
     reliability = await load_reliability(db)
+    staff_filed = {}
+    async for o in db.routing_outcomes.find({"source": {"$ne": "staff_decision"}}, {"_id": 0, "hub_doc_id": 1, "staff_folder": 1}):
+        staff_filed[o["hub_doc_id"]] = o
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     counts, reasons, uncertain = Counter(), Counter(), Counter()
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": "AP"}, {"file_content_b64": 0}):
-        pre = stage_of(d, bc_vendors, None, reliability)
+        sf = staff_filed.get(d.get("id"))
+        pre = stage_of(d, bc_vendors, None, reliability, sf)
         res = pre
-        if pre["ap_stage"] == "ready":
+        if pre["ap_stage"] in ("ready", "file_only") and not pre.get("staff_decided"):
             x = {k: v for k, v in d.items() if k != "_id"}
             x.pop("bc_link", None)
             try:
                 folder, why, _ = await route_with_feedback(x, is_international=bool(d.get("is_international")))
-                res = stage_of(d, bc_vendors, (folder, why), reliability)
+                res = stage_of(d, bc_vendors, (folder, why), reliability, sf)
             except Exception as e:
                 res = {"ap_stage": "needs_staff", "staff_reason": "routing_error", "routing_reason": repr(e)[:120]}
         counts[res["ap_stage"]] += 1

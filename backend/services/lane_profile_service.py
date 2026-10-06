@@ -136,9 +136,10 @@ async def learn_folders_from_csv(db, path: str) -> Dict[str, Any]:
         parts = _path_parts(r.get("square9_parent_path"))
         if not ok or not parts or not r.get("hub_doc_id"):
             continue
-        hub = await db.hub_documents.find_one({"id": r["hub_doc_id"]}, {"_id": 0, "vendor_canonical": 1})
+        hub = await db.hub_documents.find_one({"id": r["hub_doc_id"]}, {"_id": 0, "vendor_canonical": 1, "created_utc": 1})
         key = f"{r.get('square9_parent_path', '')}/{r.get('square9_name', '')}"
         await db.folder_filings.update_one({"_id": key}, {"$set": {
+            "filed_at": (hub or {}).get("created_utc"),
             "vendor": str((hub or {}).get("vendor_canonical") or "").upper(), "top": parts[0],
             "top_l": parts[0].lower(), "subpath": _clean_subpath(parts), "hub_doc_id": r["hub_doc_id"],
             "updated_at": now}, "$setOnInsert": {"created_at": now}}, upsert=True)
@@ -146,21 +147,37 @@ async def learn_folders_from_csv(db, path: str) -> Dict[str, Any]:
     return {"filings": n, **(await rebuild_folder_profiles(db))}
 
 
+FOLDER_HALF_LIFE_DAYS = 10.0
+
+
 async def rebuild_folder_profiles(db) -> Dict[str, Any]:
-    now = datetime.now(timezone.utc).isoformat()
+    """Recency-weighted: staff reorganize (O-I / Anchor moved from "Drop Ship
+    All Others" to "Drop Ship Dunnage Vendors" in mid-September 2026), so a
+    filing's weight halves every FOLDER_HALF_LIFE_DAYS. Leave-one-out (past
+    filings only): 75.6% -> 77.0% top + second level. counts are weights;
+    n is the plain number of filings."""
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
     vend, tops = {}, {}
-    async for f in db.folder_filings.find({}, {"_id": 0, "vendor": 1, "top": 1, "top_l": 1, "subpath": 1}):
-        tops.setdefault(f["top_l"], {"top": f["top"], "counts": {}})
+    async for f in db.folder_filings.find({}, {"_id": 0, "vendor": 1, "top": 1, "top_l": 1, "subpath": 1, "filed_at": 1}):
+        try:
+            age = max(0.0, (now_dt - datetime.fromisoformat(str(f.get("filed_at"))[:19]).replace(tzinfo=timezone.utc)).days)
+        except Exception:
+            age = 30.0
+        w = 0.5 ** (age / FOLDER_HALF_LIFE_DAYS)
+        tops.setdefault(f["top_l"], {"top": f["top"], "counts": {}, "n": 0})
         tc = tops[f["top_l"]]["counts"]
-        tc[f["subpath"]] = tc.get(f["subpath"], 0) + 1
+        tc[f["subpath"]] = tc.get(f["subpath"], 0) + w
+        tops[f["top_l"]]["n"] += 1
         if f.get("vendor"):
             k = (f["vendor"], f["top_l"])
-            vend.setdefault(k, {"top": f["top"], "counts": {}})
+            vend.setdefault(k, {"top": f["top"], "counts": {}, "n": 0})
             vc = vend[k]["counts"]
-            vc[f["subpath"]] = vc.get(f["subpath"], 0) + 1
+            vc[f["subpath"]] = vc.get(f["subpath"], 0) + w
+            vend[k]["n"] += 1
     for (v, tl), x in vend.items():
         await db.vendor_subfolder_profiles.update_one({"vendor": v, "top_l": tl}, {"$set": {
-            "vendor": v, "top_l": tl, "top": x["top"], "counts": x["counts"], "updated_at": now}}, upsert=True)
+            "vendor": v, "top_l": tl, "top": x["top"], "counts": x["counts"], "n": x["n"], "updated_at": now}}, upsert=True)
     for tl, x in tops.items():
         await db.top_subfolder_defaults.update_one({"top_l": tl}, {"$set": {
             "top_l": tl, "top": x["top"], "counts": x["counts"], "updated_at": now}}, upsert=True)

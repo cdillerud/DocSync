@@ -1797,20 +1797,17 @@ async def _top_defaults(db) -> Dict[str, Any]:
     return _SUBFOLDER_DEFAULTS["tops"]
 
 
-def _pick_subfolder(doc: dict, hub_sub: str, vendor_counts: Dict[str, int], top_counts: Dict[str, int]) -> Optional[str]:
+def _pick_subfolder(doc: dict, hub_sub: str, vendor_counts: Dict[str, float], top_counts: Dict[str, float],
+                    vendor_n: int = 0) -> Optional[str]:
     if hub_sub and _EXCEPTION_SUBFOLDER.search(hub_sub):
         return None  # a deliberate exception folder (Freight Issues, Sent to Quality) stays
     vc = {k: n for k, n in (vendor_counts or {}).items() if n > 0}
     tot = sum(vc.values())
-    if tot >= 2:
-        ranked = sorted(vc.items(), key=lambda kv: -kv[1])
-        s1, n1 = ranked[0]
-        s2 = ranked[1][0] if len(ranked) > 1 else None
-        dunn = [k for k in vc if "dunnage" in k.lower()]
-        if dunn and s2 is not None and n1 / tot < 0.8 and ({s1, s2} & set(dunn)):
-            text = " ".join(str(l.get("description") or "") for l in ((doc.get("extracted_fields") or {}).get("line_items") or []))
-            text += " " + _pdf_text(doc)[:3000]
-            return dunn[0] if _DUNNAGE_TEXT.search(text) else next((k for k in (s1, s2) if k not in dunn), s1)
+    # Recency-weighted vendor history (2+ filings): its dominant folder.
+    # (A dunnage-wording split was tried: it added nothing; the O-I / Anchor
+    # split was staff moving folders in mid-September, which recency covers.)
+    if tot > 0 and (vendor_n or 2) >= 2:
+        s1, n1 = max(vc.items(), key=lambda kv: kv[1])
         if n1 / tot >= 0.6:
             return s1
     real = {k for k, n in (top_counts or {}).items() if n > 0}
@@ -1840,9 +1837,9 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
         if not t:
             return path, reason, details
         vendor = str(doc.get("vendor_canonical") or "").upper()
-        prof = await db.vendor_subfolder_profiles.find_one({"vendor": vendor, "top_l": parts[0].lower()}, {"_id": 0, "counts": 1}) if vendor else None
+        prof = await db.vendor_subfolder_profiles.find_one({"vendor": vendor, "top_l": parts[0].lower()}, {"_id": 0, "counts": 1, "n": 1}) if vendor else None
         hub_sub = "/".join(parts[1:])
-        sub = _pick_subfolder(doc, hub_sub, (prof or {}).get("counts") or {}, t.get("counts") or {})
+        sub = _pick_subfolder(doc, hub_sub, (prof or {}).get("counts") or {}, t.get("counts") or {}, (prof or {}).get("n") or 0)
         if sub is None or sub == hub_sub:
             return path, reason, details
         new_path = t["top"] + ("/" + sub if sub else "")

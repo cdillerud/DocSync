@@ -725,7 +725,7 @@ def _determine_folder_path_core(
         )
 
     # RULE 5: S&H (Storage & Handling) Invoices
-    if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description)             or (doc_type in ("AP_Invoice", "AP Invoice") and _is_sh_invoice_evidence(doc, order_number)):
+    if doc_type in ("S&H_Invoice", "SH_Invoice") or _is_storage_handling(invoice_description)             or (doc_type in ("AP_Invoice", "AP Invoice", "Warehouse_Receipt", "Inspection_Form") and _vendor_files_sh(doc))             or (doc_type in ("AP_Invoice", "AP Invoice") and _is_sh_invoice_evidence(doc, order_number)):
         if doc.get("approved") or doc.get("status") == "Approved":
             return (
                 "S&H Invoices Approved",
@@ -1472,6 +1472,18 @@ def _consignee_is_customer(doc: dict) -> bool:
     if not con or _WH_PARTY.search(con):
         return False
     return _is_freight_vendor(str(doc.get("vendor_canonical") or ef.get("vendor") or doc.get("vendor_raw") or ""))
+
+
+SH_PROFILE_MIN_FILINGS = 3
+SH_PROFILE_SHARE = 0.8
+
+
+def _vendor_files_sh(doc: dict) -> bool:
+    """A 3PL warehouse whose invoices staff file under S&H 80%+ of the time
+    (Valley Distributing, Citi Cargo allocations; learned from filings)."""
+    prof = doc.get("_vendor_lane_profile")
+    return (isinstance(prof, dict) and int(prof.get("n_all") or 0) >= SH_PROFILE_MIN_FILINGS
+            and float(prof.get("sh_share") or 0) >= SH_PROFILE_SHARE)
 
 
 def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:

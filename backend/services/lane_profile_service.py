@@ -40,7 +40,9 @@ async def learn_from_csv(db, path: str) -> Dict[str, Any]:
         bucket = r.get("match_bucket")
         ok = bucket in FULL_MATCH or (bucket == "recently_deleted_match" and float(r.get("match_score") or 0) >= 1.0)
         lane = _root(r.get("square9_parent_path"))
-        if not ok or lane not in LANES or not r.get("hub_doc_id"):
+        if lane.startswith("s&h"):
+            lane = "s&h"  # waiting / approved are stages of one destination
+        if not ok or (lane not in LANES and lane != "s&h") or not r.get("hub_doc_id"):
             continue
         hub = await db.hub_documents.find_one({"id": r["hub_doc_id"]}, {"_id": 0, "vendor_canonical": 1})
         vendor = str((hub or {}).get("vendor_canonical") or "").upper()
@@ -61,13 +63,17 @@ async def rebuild_profiles(db) -> int:
     now = datetime.now(timezone.utc).isoformat()
     n = 0
     async for g in db.vendor_lane_filings.aggregate([
-            {"$group": {"_id": "$vendor", "n": {"$sum": 1},
+            {"$group": {"_id": "$vendor", "n_all": {"$sum": 1},
+                        "sh": {"$sum": {"$cond": [{"$eq": ["$lane", "s&h"]}, 1, 0]}},
+                        "n": {"$sum": {"$cond": [{"$eq": ["$lane", "s&h"]}, 0, 1]}},
                         "intl": {"$sum": {"$cond": [{"$in": ["$lane", ["dropship international", "warehouse international"]]}, 1, 0]}},
                         "wh": {"$sum": {"$cond": [{"$in": ["$lane", ["warehouse international", "warehouse not international"]]}, 1, 0]}}}}]):
         await db.vendor_lane_profiles.update_one(
             {"vendor": g["_id"]},
-            {"$set": {"vendor": g["_id"], "n": g["n"], "intl_share": round(g["intl"] / g["n"], 4),
-                      "warehouse_share": round(g["wh"] / g["n"], 4), "updated_at": now}},
+            {"$set": {"vendor": g["_id"], "n": g["n"],
+                      "intl_share": round(g["intl"] / g["n"], 4) if g["n"] else 0.5,
+                      "warehouse_share": round(g["wh"] / g["n"], 4) if g["n"] else 0.5,
+                      "n_all": g["n_all"], "sh_share": round(g["sh"] / g["n_all"], 4), "updated_at": now}},
             upsert=True)
         n += 1
     return n

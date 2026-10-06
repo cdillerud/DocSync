@@ -38,6 +38,16 @@ const ISSUE_TYPE_META = {
 
 const TAB_ORDER = ['all', 'ap_needs_staff', 'isolated_misroute', 'ambiguous_classification', 'ambiguous_match', 'square9_side_issue'];
 
+const AP_REASON_ORDER = ['suspected_fraud', 'vendor_unknown', 'number_or_amount_missing', 'po_not_in_bc', 'routing_uncertain', 'routing_error'];
+
+const AP_REASON_PLACEHOLDERS = {
+  suspected_fraud: 'e.g. Called the vendor at the number on file; bank details confirmed',
+  vendor_unknown: 'e.g. This is Berry Global (BC vendor BERRY), billed via a subsidiary',
+  number_or_amount_missing: 'e.g. Second page of invoice 6437327; the amount is on page 1',
+  po_not_in_bc: 'e.g. Customer PO, not ours; the Gamer order is 118440',
+  routing_uncertain: 'e.g. Tumalo freight for a customer delivery, so Dropship/Freight',
+};
+
 const AP_REASON_LABELS = {
   suspected_fraud: 'Suspected fraud',
   vendor_unknown: 'Vendor unknown',
@@ -101,6 +111,8 @@ export default function HumanDecisionQueuePage() {
   const [activeTab, setActiveTab] = useState('all');
   const [resolvedKeys, setResolvedKeys] = useState(new Set());
   const [submittingKey, setSubmittingKey] = useState(null);
+  const [apReason, setApReason] = useState('all');
+  const [pageSize, setPageSize] = useState(25);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -124,8 +136,23 @@ export default function HumanDecisionQueuePage() {
     const filtered = activeTab === 'all'
       ? groups
       : groups.filter(group => group[0].issue_type === activeTab);
-    return filtered.filter(group => !resolvedKeys.has(`${group[0].doc_id}|${group[0].issue_type}`));
-  }, [groups, activeTab, resolvedKeys]);
+    return filtered
+      .filter(group => !resolvedKeys.has(`${group[0].doc_id}|${group[0].issue_type}`))
+      .filter(group => apReason === 'all'
+        || (group[0].issue_type === 'ap_needs_staff' && group[0].context?.staff_reason === apReason));
+  }, [groups, activeTab, resolvedKeys, apReason]);
+
+  const apReasonCounts = useMemo(() => {
+    const counts = {};
+    for (const group of groups) {
+      const primary = group[0];
+      if (primary.issue_type !== 'ap_needs_staff') continue;
+      if (resolvedKeys.has(`${primary.doc_id}|${primary.issue_type}`)) continue;
+      const reason = primary.context?.staff_reason || 'other';
+      counts[reason] = (counts[reason] || 0) + 1;
+    }
+    return counts;
+  }, [groups, resolvedKeys]);
 
   const tabCounts = useMemo(() => {
     const counts = { all: 0 };
@@ -296,7 +323,7 @@ export default function HumanDecisionQueuePage() {
               Decision Queue
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Review the document, correct its type or routing lane, and browse the actual SharePoint destination folders. Classification corrections may inform AI learning; routing changes apply only to the current document.
+              Documents the Hub will not decide on its own. Each one says why. Review the document, then use the Hub&apos;s suggestion, choose a folder, correct the type, or exclude it. Every decision is recorded with your reason and teaches the Hub, so the same question comes up less often.
             </p>
           </div>
         </div>
@@ -334,7 +361,7 @@ export default function HumanDecisionQueuePage() {
         {TAB_ORDER.filter(key => key === 'all' || tabCounts[key] > 0).map(key => (
           <button
             key={key}
-            onClick={() => setActiveTab(key)}
+            onClick={() => { setActiveTab(key); setApReason('all'); setPageSize(25); }}
             data-testid={`decision-tab-${key}`}
             className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
               activeTab === key
@@ -360,7 +387,26 @@ export default function HumanDecisionQueuePage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {visibleGroups.map(group => (
+          {(activeTab === 'ap_needs_staff' || activeTab === 'all') && Object.keys(apReasonCounts).length > 0 && (
+            <div className="flex flex-wrap items-center gap-2" data-testid="ap-reason-filter">
+              <span className="text-xs text-muted-foreground mr-1">Show:</span>
+              {[['all', 'Everything'], ...AP_REASON_ORDER.filter(r => apReasonCounts[r]).map(r => [r, AP_REASON_LABELS[r] || r])].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setApReason(key); setPageSize(25); }}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    apReason === key
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {label}{key !== 'all' ? ` ${apReasonCounts[key]}` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+          {visibleGroups.slice(0, pageSize).map(group => (
             <DecisionCard
               key={`${group[0].doc_id}|${group[0].issue_type}`}
               group={group}
@@ -371,6 +417,14 @@ export default function HumanDecisionQueuePage() {
               onResolved={markResolved}
             />
           ))}
+          {visibleGroups.length > pageSize && (
+            <div className="flex items-center justify-center gap-3 py-2 text-xs text-muted-foreground">
+              Showing {pageSize} of {visibleGroups.length}
+              <Button type="button" size="sm" variant="outline" onClick={() => setPageSize(size => size + 25)}>
+                Show 25 more
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -887,7 +941,7 @@ function DecisionCard({
                 onChange={event => setDecisionNotes(event.target.value)}
                 rows={2}
                 maxLength={1000}
-                placeholder="e.g. Tumalo freight for a customer delivery, so Dropship/Freight"
+                placeholder={AP_REASON_PLACEHOLDERS[primary.context?.staff_reason] || 'Why this decision?'}
                 className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
                 data-testid={`ap-decision-notes-${primary.doc_id}`}
               />
@@ -913,7 +967,9 @@ function DecisionCard({
                 data-testid={`ap-choose-folder-${primary.doc_id}`}
               >
                 <FolderOpen className="w-3.5 h-3.5 mr-1.5" />
-                Choose a different folder
+                {primary.context?.staff_reason === 'suspected_fraud'
+                  ? 'Verified legitimate: choose folder'
+                  : primary.context?.suggested_folder ? 'Choose a different folder' : 'Choose a folder'}
               </Button>
             </div>
           </div>

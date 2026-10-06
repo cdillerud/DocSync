@@ -1334,6 +1334,13 @@ def _is_warehouse_order(doc: dict) -> bool:
     if votes and len(votes) == 1:
         return "warehouse" in votes
 
+    # A freight bill delivered to a customer (consignee is neither Gamer nor
+    # a warehouse) is dropship freight, whatever the order prefix: staff
+    # agreed on 195 of 202 carrier invoices (Tumalo hauling Canpack cans
+    # to a customer on a W-order went to Warehouse).
+    if not doc.get("_ocean_import") and _consignee_is_customer(doc):
+        return False
+
     # Ocean imports land at a Gamer warehouse (staff: 12 of 15 Warehouse
     # International) unless a Gamer order says otherwise.
     if doc.get("_ocean_import") and not any(_WAREHOUSE_ORDER_PREFIX.match(o) or re.fullmatch(r"1\d{5}", o)
@@ -1440,6 +1447,18 @@ def _is_ocean_import(doc: dict) -> bool:
         if v and _OCEAN_BL.search(json.dumps(v, default=str).upper()):
             return True
     return False
+
+
+_WH_PARTY = re.compile(r"gamer|warehouse|whse|consign|buske|rotondo|horseshoe|strategic"
+                       r"|valley dist|citi.?cargo|yandell|group wa|alpha wh", re.I)
+
+
+def _consignee_is_customer(doc: dict) -> bool:
+    ef = doc.get("extracted_fields") or {}
+    con = str(ef.get("consignee") or ef.get("ship_to") or "").strip()
+    if not con or _WH_PARTY.search(con):
+        return False
+    return _is_freight_vendor(str(doc.get("vendor_canonical") or ef.get("vendor") or doc.get("vendor_raw") or ""))
 
 
 def _po_not_found_is_moot(doc: dict, order_number: str) -> bool:

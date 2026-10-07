@@ -10,10 +10,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from deps import get_db
+from services.auth_deps import get_current_user
 
 router = APIRouter(prefix="/human-routing-review", tags=["Human Routing Review"])
 
@@ -181,7 +182,7 @@ async def get_routing_suggestion(doc_id: str):
 
 
 @router.post("/document/{doc_id}/assign")
-async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment):
+async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment, user=Depends(get_current_user)):
     """Save a human folder decision and immediately teach the live routing learner."""
     db = get_db()
     doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
@@ -222,6 +223,11 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
             "reason": "No vendor or sender signal was available for a safe reusable rule",
         }
 
+    # Who decided: the signed-in person (Microsoft sign-in), else the login.
+    import services.ap_workflow_service as _wf
+    _actor = await _wf.actor_for(db, user)
+    decided_by = {"name": _actor.get("name") or (user or {}).get("display_name") or (user or {}).get("email"),
+                  "email": (user or {}).get("email"), "sso": _actor.get("sso", False)}
     decision_record = {
         "document_id": doc_id,
         "file_name": doc.get("file_name", ""),
@@ -236,6 +242,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
         "is_international": profile["is_international"],
         "source": assignment.source,
         "notes": assignment.notes,
+        "decided_by": decided_by,
         "learning_result": learning_result,
         "created_at": now,
     }
@@ -252,7 +259,8 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
                 # A staff decision settles the document: it leaves the staff
                 # queue and is ready for AP (ap_stage_service keeps it there).
                 "staff_decision": {"folder": selected_folder, "notes": assignment.notes,
-                                   "source": assignment.source, "at": now,
+                                   "source": assignment.source, "at": now, "by": decided_by.get("name"),
+                                   "by_email": decided_by.get("email"),
                                    "hub_suggested": doc.get("suggested_folder") or suggested_folder,
                                    "staff_reason": doc.get("staff_reason")},
                 "ap_stage": "ready",

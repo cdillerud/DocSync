@@ -184,7 +184,7 @@ async def ap_summary(doc_id: str):
         add(e.get("at"), str(e.get("kind", "")).replace("_", " ").title(), f"{e.get('from')} -> {e.get('to')} (BC {e.get('bc_document_no')}, {e.get('match')})", "BC")
     events = [e async for e in db.ap_workflow_events.find({"document_id": doc_id}, {"_id": 0}).sort("at", 1)]
     for r in [r async for r in db.human_routing_decisions.find({"document_id": doc_id}, {"_id": 0}).sort("created_at", 1)]:
-        events.append({"at": r.get("created_at"), "action": "folder_decision", "by": r.get("source"),
+        events.append({"at": r.get("created_at"), "action": "folder_decision", "by": (r.get("decided_by") or {}).get("name") or r.get("source"),
                        "folder": r.get("selected_folder"), "hub_suggested": r.get("suggested_folder"), "notes": r.get("notes")})
     if d.get("non_transactional"):
         events.append({"at": d.get("non_transactional_at") or d.get("updated_utc"), "action": "excluded",

@@ -67,7 +67,8 @@ async def readback(db, limit: int = 200) -> Dict[str, Any]:
                     b_items = Counter(str(l.get("lineObjectNumber") or "").upper() for l in lines)
                     if p_items != b_items:
                         edits.append(f"line items {dict(p_items)} -> {dict(b_items)}")
-                state = {"state": str(v.get("status") or "").lower() or "unknown", "edits": edits}
+                state = {"state": str(v.get("status") or "").lower() or "unknown", "edits": edits,
+                         "lines": [{k: l.get(k) for k in ("lineType", "lineObjectNumber", "quantity", "unitCost")} for l in lines]}
                 stats["status_" + state["state"]] += 1
                 stats["edited" if edits else "unchanged"] += 1
                 if edits:

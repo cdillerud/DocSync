@@ -82,7 +82,7 @@ async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]
                                          {"_id": 0, "vendor_canonical": 1, "invoice_number_clean": 1}):
         seen.add((x.get("vendor_canonical"), str(x.get("invoice_number_clean") or "").upper()))
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": "ready",
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$in": ["ready", "awaiting_receipt"]},
              "document_type": "AP_Invoice", "is_duplicate": {"$ne": True}, "bc_link": {"$exists": False},
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$gt": 0},
              "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT},
@@ -288,6 +288,62 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
     return ""
 
 
+
+async def po_in_bc(db, po: str) -> bool:
+    """A Gamer purchase order in Production BC (the cache misses fully
+    received orders such as Canpack 118340; then ask BC, read-only)."""
+    if await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": po}, {"_id": 1}):
+        return True
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    try:
+        token = await bc.get_bc_token(environment="Production")
+        cid = await bc.get_bc_company_id(environment="Production")
+        base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+        async with httpx.AsyncClient(timeout=60) as c:
+            for ent, field in (("purchaseOrders", "number"), ("purchaseReceipts", "orderNumber")):
+                r = await c.get(f"{base}/{ent}", headers={"Authorization": f"Bearer {token}"},
+                                params={"$filter": f"{field} eq '{po}'", "$select": "number", "$top": "1"})
+                if r.status_code == 200 and r.json().get("value"):
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
+    """The lines a draft of this invoice gets (see vendor_line_coding_service).
+
+    Returns {"lines", "source"} | {"wait": reason} | {"problem": reason}.
+    """
+    from routers.gpi_integration import _build_pi_lines_with_mapping
+    from services.vendor_line_coding_service import coding_for, single_line, main_code_known
+    if rec.get("lines"):
+        return {"lines": rec["lines"], "source": "bc_receipt"}
+    coding = await coding_for(db, d.get("vendor_canonical"))
+    if coding and coding.get("dominant"):
+        return {"lines": single_line(coding, d), "source": "vendor_coding"}
+    po = str(d.get("po_number_clean") or "").strip().upper()
+    if coding and (coding.get("invoices") or 0) >= 5 and po:
+        if await po_in_bc(db, po):
+            return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
+    if coding and (coding.get("invoices") or 0) >= 5 and not coding.get("dominant"):
+        # A product vendor: the right lines are the PO's received items.
+        return {"problem": (f"PO {po} is not a purchase order or receipt in BC" if po else "the invoice shows no PO")
+                           + "; AP invoices this vendor against PO receipts, so the Hub cannot draft its lines"}
+    try:
+        lines = await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"])
+    except Exception as e:
+        return {"problem": f"line build failed: {e!r}"[:200]}
+    problem = lines_problem(lines)
+    if problem:
+        return {"problem": problem}
+    if main_code_known(coding, lines) is False:
+        m = max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={})
+        return {"problem": f"the Hub would code this {m.get('lineObjectNumber')}, which AP has not used for this vendor in BC"}
+    return {"lines": lines, "source": "vendor_profile"}
+
+
 async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
     """Re-check the Hub's own sandbox drafts against today's header checks.
 
@@ -309,6 +365,13 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             out["kept_edited"] += 1
             continue
         problem = await header_problem(db, d, shapes)
+        requeue = False
+        if not problem:
+            from services.vendor_line_coding_service import coding_for, main_code_known
+            lines = d.get("draft_lines_planned") or (rb.get("lines") or [])
+            if d.get("draft_lines_source") != "bc_receipt" and lines and main_code_known(await coding_for(db, d.get("vendor_canonical")), lines) is False:
+                problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
+                requeue = True
         if not problem:
             continue
         pi = d["bc_purchase_invoice"]
@@ -319,8 +382,10 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
         deleted = await _delete_orphan_pi_header(pi.get("bc_system_id"))
         await db.hub_documents.update_one({"id": d["id"]}, {
             "$set": {"bc_purchase_invoice_removed": {**pi, "removed_at": now, "reason": problem, "delete_result": deleted},
-                     "sandbox_draft_skipped": {"reason": problem, "at": now}},
-            "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": "", "bc_draft_readback": ""}})
+                     **({} if requeue else {"sandbox_draft_skipped": {"reason": problem, "at": now}}),
+                     **({"ap_stage": "ready"} if requeue else {})},
+            "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": "", "bc_draft_readback": "",
+                       "draft_lines_planned": "", "draft_lines_override": ""}})
         await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sandbox_draft_removed", "by": "hub", "at": now,
                                                 "environment": ALLOWED_ENVIRONMENT, "bc_record_no": pi.get("bc_record_no"),
                                                 "detail": {"reason": problem, "delete_result": deleted}})
@@ -343,21 +408,31 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
             "reason": reason, "at": datetime.now(timezone.utc).isoformat()}}})
 
-    for d in await candidates(db, limit * 3):
+    for d in await candidates(db, limit * 10):
         if len(results) >= limit:
             break
         problem = await header_problem(db, d, shapes)
         if problem:
             await skip(d, problem)
             continue
+        # Waiting for a receipt: re-check BC every 3 hours, not every hour.
+        wr = d.get("draft_waiting_receipt") or {}
+        if wr and str(wr.get("checked_at") or "") > (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat():
+            continue
         try:
             rec_probe = await receipt_lines_for(db, d)
         except Exception:
             rec_probe = {}
-        try:
-            problem = "" if rec_probe.get("lines") else lines_problem(await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"]))
-        except Exception as e:
-            problem = f"line build failed: {e!r}"[:200]
+        plan = await plan_lines(db, d, rec_probe)
+        if plan.get("wait") and wr.get("since") and str(wr["since"]) < (datetime.now(timezone.utc) - timedelta(days=10)).isoformat():
+            await skip(d, f"waited 10 days for a BC receipt that adds up to this invoice: {plan['wait']}")
+            continue
+        if plan.get("wait"):
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_waiting_receipt": {
+                "reason": plan["wait"], "po": d.get("po_number_clean"), "since": wr.get("since") or datetime.now(timezone.utc).isoformat(),
+                "checked_at": datetime.now(timezone.utc).isoformat()}}})
+            continue
+        problem = plan.get("problem", "")
         if problem:
             skipped.append({"document_id": d["id"], "file_name": d.get("file_name"), "reason": problem})
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
@@ -366,22 +441,23 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
         # Keep the exact lines this draft uses, to compare with what AP later
         # enters in Production BC (draft quality, learned per vendor).
         try:
-            used_lines = (rec_probe.get("lines") if rec_probe.get("lines")
-                          else await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"]))
+            used_lines = plan.get("lines") or []
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_lines_planned": [
                 {k: l.get(k) for k in ("lineType", "lineObjectNumber", "description", "quantity", "unitCost")}
                 for l in (used_lines or []) if isinstance(l, dict)]}})
         except Exception:
             pass
         legacy = d.get("bc_purchase_invoice") and (d["bc_purchase_invoice"].get("environment") != ALLOWED_ENVIRONMENT)
-        try:
-            rec = await receipt_lines_for(db, d)
-        except Exception:
-            rec = {}
-        if rec.get("lines"):
+        if plan.get("source") == "bc_receipt":
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
-                "draft_lines_override": rec["lines"], "draft_receipt_numbers": rec["receipts"],
-                "draft_lines_source": "bc_receipt"}})
+                "draft_lines_override": plan["lines"], "draft_receipt_numbers": rec_probe["receipts"],
+                "draft_lines_source": "bc_receipt"}, "$unset": {"draft_waiting_receipt": ""}})
+        elif plan.get("source") == "vendor_coding":
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
+                "draft_lines_override": plan["lines"], "draft_lines_source": "vendor_coding"}})
+        else:
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_lines_source": "vendor_profile"},
+                                                               "$unset": {"draft_lines_override": ""}})
         try:
             r = await create_purchase_invoice_from_document(
                 d["id"], vendor_no_override=d["vendor_canonical"], force=bool(legacy))

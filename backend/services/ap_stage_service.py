@@ -198,6 +198,11 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         if not rel["reliable"]:
             return {"ap_stage": "needs_staff", "staff_reason": "routing_uncertain", "suggested_folder": folder,
                     "routing_reason": why, "routing_path_accuracy": rel}
+        if d.get("draft_waiting_receipt") and not d.get("sandbox_draft_skipped"):
+            # A product invoice that arrived before its goods were received in
+            # BC: drafted from the receipt once it posts (re-checked every 3h).
+            return {"ap_stage": "awaiting_receipt", "suggested_folder": folder, "routing_reason": why,
+                    "routing_path_accuracy": rel}
         if d.get("sandbox_draft_skipped"):
             # The Hub could not draft it: the extracted lines do not add up.
             return {"ap_stage": "needs_staff", "staff_reason": "draft_lines_problem", "suggested_folder": folder,

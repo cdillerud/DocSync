@@ -13,6 +13,7 @@ const STAGES = [
   { key: 'awaiting_approval', label: 'Awaiting approval', help: 'Waiting for a named approver', action: { to: '/ap-workflow', label: 'Open approvals' }, tone: 'sky' },
   { key: 'on_hold', label: 'On hold', help: 'Held by staff with a reason', action: { to: '/ap-workflow', label: 'Open holds' }, tone: 'sky' },
   { key: 'drafted', label: 'Drafted in BC', help: 'The Hub drafted it in the BC sandbox (PRE); AP reviews and posts the draft in BC', tone: 'emerald' },
+  { key: 'awaiting_receipt', label: 'Waiting for receipt', help: 'Product invoice that arrived before the goods were received in BC; the Hub drafts it from the receipt once it posts', tone: 'sky' },
   { key: 'ready', label: 'Ready for AP', help: 'Vendor, number, amount and folder known; waiting for AP to enter it in BC', tone: 'emerald' },
   { key: 'in_bc_check', label: 'In BC, check', help: "Entered in BC, but BC's amount or invoice number differs from the document", tone: 'amber' },
   { key: 'in_bc', label: 'In BC', help: 'Entered by AP; BC is now the record', tone: 'muted' },

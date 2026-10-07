@@ -227,7 +227,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     txt = n(e.get("description"))
     known = {n(i): i for i in hist}
     # 1. A Gamer item number this customer buys, written on the PO.
-    desc_u = str(e.get("description") or "").upper()
+    desc_u = re.sub(r"(?<=\d),(?=\d{3})", "", str(e.get("description") or "").upper())   # 48,000/plt -> 48000/plt
     hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt
                    # pack counts are not item numbers: "48000/plt", "58,240/TL"
                    and not re.search(re.escape(orig) + r"\s*/\s*(PLT|PALLET|CS|CASE|TL|TRUCK|LAYER)", desc_u)}, key=len, reverse=True)

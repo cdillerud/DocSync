@@ -88,10 +88,10 @@ async def learn(db) -> Dict[str, Any]:
             a["q"] += float(l.get("quantity") or 0)
         for c, a in agg.items():
             seen_any[cust][c] += 1
+            all_q[cust][c].append(a["q"])
             if c in excluded:
                 continue
             obs[cust][c].append({"q": a["q"], "p": a["p"], "pq": pq, "pv": pv, "open": o.get("status") == "open"})
-            all_q[cust][c].append(a["q"])
             if len(prods) == 1 and a["q"] > 0:
                 it = str(prods[0]["lineObjectNumber"]).upper()
                 prod_ratio[(cust, it, c)].append(a["q"] / float(prods[0]["quantity"]))

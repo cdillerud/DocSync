@@ -52,7 +52,7 @@ async def list_docs(stage: str = "needs_rep", q: str = "", days: int = 45, skip:
     async for d in db.hub_documents.find(flt, {
             "_id": 0, "id": 1, "file_name": 1, "email_subject": 1, "email_sender": 1, "created_utc": 1, "document_type": 1,
             "sales_link": 1, "sales_stage": 1, "sales_stage_reason": 1, "sales_stage_detail": 1, "sales_resolution": 1,
-            "sales_draft": 1, "duplicate_of": 1, "extracted_fields.po_number": 1, "extracted_fields.customer": 1,
+            "sales_draft": 1, "sales_draft_readback": 1, "duplicate_of": 1, "extracted_fields.po_number": 1, "extracted_fields.customer": 1,
             "amount_float": 1}).sort([("created_utc", -1)]).skip(skip).limit(limit):
         sl = d.get("sales_link") or {}
         if sl.get("bc_customer_no"):
@@ -65,7 +65,8 @@ async def list_docs(stage: str = "needs_rep", q: str = "", days: int = 45, skip:
             "stage": d.get("sales_stage"), "reason": d.get("sales_stage_reason"),
             "reason_text": REASONS.get(d.get("sales_stage_reason") or "") or d.get("sales_stage_reason"),
             "detail": d.get("sales_stage_detail"), "bc_order_no": sl.get("order_no"), "match": sl.get("match"),
-            "draft": {k: (d.get("sales_draft") or {}).get(k) for k in ("bc_order_no", "environment", "total", "created_at")} if d.get("sales_draft") else None,
+            "draft": {k: (d.get("sales_draft") or {}).get(k) for k in ("bc_order_no", "environment", "total", "created_at", "to_complete")} if d.get("sales_draft") else None,
+            "readback": {k: (d.get("sales_draft_readback") or {}).get(k) for k in ("state", "edits", "checked_at")} if d.get("sales_draft_readback") else None,
             "resolution": d.get("sales_resolution"), "po_total": d.get("amount_float"), "duplicate_of": d.get("duplicate_of")})
     names = {}
     if custs:

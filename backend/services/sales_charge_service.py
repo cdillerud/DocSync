@@ -68,6 +68,8 @@ async def learn(db) -> Dict[str, Any]:
     prod_price = defaultdict(list)                    # (cust, product, charge) -> [unit price]
     glob_ratio = defaultdict(list)                    # (product, charge) -> [ratio]
     orders = Counter()
+    seen_any = defaultdict(Counter)                   # cust -> charge -> orders (incl. invoicing-time)
+    all_q = defaultdict(lambda: defaultdict(list))
     async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1}):
         ls = _lines(o)
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
@@ -80,18 +82,53 @@ async def learn(db) -> Dict[str, Any]:
         agg = {}
         for l in ls:
             c = str(l["lineObjectNumber"]).upper()
-            if is_product(c) or c in excluded:
+            if is_product(c):
                 continue
             a = agg.setdefault(c, {"q": 0.0, "p": float(l.get("unitPrice") or 0)})
             a["q"] += float(l.get("quantity") or 0)
         for c, a in agg.items():
+            seen_any[cust][c] += 1
+            if c in excluded:
+                continue
             obs[cust][c].append({"q": a["q"], "p": a["p"], "pq": pq, "pv": pv, "open": o.get("status") == "open"})
+            all_q[cust][c].append(a["q"])
             if len(prods) == 1 and a["q"] > 0:
                 it = str(prods[0]["lineObjectNumber"]).upper()
                 prod_ratio[(cust, it, c)].append(a["q"] / float(prods[0]["quantity"]))
                 prod_price[(cust, it, c)].append(round(a["p"], 4))
                 glob_ratio[(it, c)].append(a["q"] / float(prods[0]["quantity"]))
+    # Sandbox drafts a rep completed (lines added in BC) count as orders too:
+    # what reps add is what the Hub should learn to add.
+    async for d in db.hub_documents.find({"sales_draft_readback.edits.0": {"$exists": True}, "sales_draft_readback.lines.0": {"$exists": True}},
+                                         {"_id": 0, "sales_link.bc_customer_no": 1, "sales_draft_readback.lines": 1}):
+        cust = (d.get("sales_link") or {}).get("bc_customer_no")
+        ls = [{"lineType": "Item", **l} for l in d["sales_draft_readback"]["lines"]]
+        prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
+        if not cust or not prods:
+            continue
+        orders[cust] += 1
+        pq = sum(float(l["quantity"]) for l in prods)
+        pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
+        for l in ls:
+            c = str(l["lineObjectNumber"]).upper()
+            if not is_product(c) and c not in excluded:
+                obs[cust][c].append({"q": float(l.get("quantity") or 0), "p": float(l.get("unitPrice") or 0), "pq": pq, "pv": pv, "open": True})
     now = datetime.now(timezone.utc).isoformat()
+    usual = []
+    for cust, charges in seen_any.items():
+        if orders[cust] < 3:
+            continue
+        for c, k in charges.items():
+            rate = k / orders[cust]
+            if rate >= 0.3:
+                qs = sorted(all_q[cust][c]) or [None]
+                usual.append({"customer_no": cust, "charge": c, "rate": round(min(rate, 1.0), 2), "orders": orders[cust],
+                              "typical_qty": qs[len(qs) // 2], "when": "shipping / invoicing" if c in excluded else "order entry",
+                              "updated_at": now})
+    await db.sales_charge_usual.delete_many({})
+    if usual:
+        await db.sales_charge_usual.insert_many(usual)
+    await db.sales_charge_usual.create_index("customer_no")
     rules, product_rules = [], []
     for (cust, it, c), rs in prod_ratio.items():
         r = _steady(rs)
@@ -149,7 +186,7 @@ async def learn(db) -> Dict[str, Any]:
         await db.sales_charge_product_rules.insert_many(product_rules)
     await db.sales_charge_rules.create_index("customer_no")
     await db.sales_charge_product_rules.create_index([("product", 1), ("charge", 1)])
-    return {"rules": len(rules), "product_rules": len(product_rules), "invoice_time_excluded": sorted(excluded)}
+    return {"rules": len(rules), "product_rules": len(product_rules), "usual": len(usual), "invoice_time_excluded": sorted(excluded)}
 
 
 def po_freight(extracted_lines: List[Dict[str, Any]]) -> Optional[float]:
@@ -210,3 +247,18 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                     "price_source": r.get("price_basis")})
     return out
 
+
+
+
+async def to_complete(db, customer_no: str, drafted: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Charges / dunnage this customer usually gets that the draft does not
+    carry (the Hub could not size or price them reliably): the rep's list."""
+    have = {str(l.get("item") or "").upper() for l in drafted}
+    out = []
+    async for u in db.sales_charge_usual.find({"customer_no": customer_no}, {"_id": 0}).sort([("rate", -1)]):
+        if u["charge"] in have:
+            continue
+        it = await db.bc_reference_cache.find_one({"bc_entity_type": "item", "bc_document_no": u["charge"]}, {"_id": 0, "description": 1})
+        out.append({"item": u["charge"], "description": (it or {}).get("description"), "rate": u["rate"], "orders": u["orders"],
+                    "typical_qty": u["typical_qty"], "when": u.get("when")})
+    return out[:6]

@@ -52,6 +52,16 @@ function Lines({ resolution }) {
           ))}
         </tbody>
       </table>
+      {resolution.to_complete?.length > 0 && (
+        <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-xs">
+          <b>Rep to add before releasing</b> (usual for this customer; the Hub could not size or price them reliably, and notes them on the BC draft):
+          <ul className="mt-1 space-y-0.5">
+            {resolution.to_complete.map(t => (
+              <li key={t.item}><span className="font-mono">{t.item}</span>{t.description ? ` - ${t.description}` : ''} · on {Math.round(t.rate * 100)}% of {t.orders} orders · typical qty {t.typical_qty}{t.when === 'shipping / invoicing' ? ' · usually added at shipping / invoicing' : ''}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       {(resolution.planned_total != null || resolution.po_total != null) && (
         <p className="mt-1 text-xs text-muted-foreground tabular-nums">Products {money(resolution.planned_total)}{resolution.charges?.length ? ` · with charges ${money(resolution.planned_total_with_charges)}` : ''} · PO total {money(resolution.po_total)}</p>
       )}
@@ -158,7 +168,9 @@ export default function SalesInboxPage() {
                           <div className="text-xs text-muted-foreground truncate">{r.subject}</div></td>
                         <td className="py-2 pr-3 text-xs max-w-[280px]">
                           {r.stage === 'in_bc' && <>Production order <b className="font-mono">{r.bc_order_no}</b> ({r.match === 'customer_po' ? 'by customer PO' : r.match === 'items_and_quantities' ? 'same items and quantities' : 'by order no.'})</>}
-                          {r.stage === 'drafted' && r.draft && <>Sandbox draft <b className="font-mono">{r.draft.bc_order_no}</b> (PRE) · {money(r.draft.total)} · <span className="text-muted-foreground">not a real order</span></>}
+                          {r.stage === 'drafted' && r.draft && <>Sandbox draft <b className="font-mono">{r.draft.bc_order_no}</b> (PRE) · {money(r.draft.total)} · <span className="text-muted-foreground">not a real order</span>
+                            {r.draft.to_complete?.length > 0 && <div className="text-amber-700 dark:text-amber-400">Rep to add: {r.draft.to_complete.map(t => t.item).join(', ')}</div>}
+                            {r.readback?.edits?.length > 0 && <div className="text-muted-foreground">Rep changed: {r.readback.edits.slice(0, 3).join('; ')}</div>}</>}
                           {r.stage === 'needs_rep' && <span className="text-amber-700 dark:text-amber-400">{r.reason_text}{r.detail ? ` (${r.detail})` : ''}</span>}
                           {r.stage === 'duplicate' && <>Copy of <Link className="underline" to={`/documents/${r.duplicate_of}`} onClick={e => e.stopPropagation()}>another document</Link></>}
                           {['filed', 'purchasing', 'to_ap', 'ready'].includes(r.stage) && <span className="text-muted-foreground">{(r.role || '').replace(/_/g, ' ')}</span>}

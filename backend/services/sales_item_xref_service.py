@@ -54,6 +54,10 @@ def is_product(item: Any) -> bool:
     if code in _AUX or not code:
         return False
     cat = _CATEGORY.get(code)
+    # Dunnage (item category PALLET: O-I pallets / tier sheets / top frames,
+    # Ball, Canpack, Vulcan) is added by inside sales like a charge.
+    if cat == "PALLET":
+        return False
     return bool(cat) if cat is not None else True
 
 
@@ -223,7 +227,10 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     txt = n(e.get("description"))
     known = {n(i): i for i in hist}
     # 1. A Gamer item number this customer buys, written on the PO.
-    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt}, key=len, reverse=True)
+    desc_u = str(e.get("description") or "").upper()
+    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt
+                   # pack counts are not item numbers: "48000/plt", "58,240/TL"
+                   and not re.search(re.escape(orig) + r"\s*/\s*(PLT|PALLET|CS|CASE|TL|TRUCK|LAYER)", desc_u)}, key=len, reverse=True)
     if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
         out.append((hits[0], "item number on the PO", True))
     # 2. The customer's own item code, learned from their BC orders.

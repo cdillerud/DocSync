@@ -93,6 +93,8 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     from services.sales_charge_service import charge_lines
     charges = await charge_lines(db, cust, lines, (d.get("extracted_fields") or {}).get("line_items") or [])
     out["sales_resolution"]["charges"] = charges
+    from services.sales_charge_service import to_complete
+    out["sales_resolution"]["to_complete"] = await to_complete(db, cust, lines + charges)
     planned = round(sum(float(l["quantity"]) * float(l["unit_price"]) for l in lines), 2)
     with_charges = round(planned + sum(float(c["quantity"]) * float(c["unit_price"]) for c in charges), 2)
     out["sales_resolution"]["planned_total"] = planned

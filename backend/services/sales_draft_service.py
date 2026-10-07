@@ -127,6 +127,14 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                 lr = await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json=body)
                 if lr.status_code not in (200, 201):
                     errors.append(f"{l['item']}: {lr.text[:160]}")
+            # What the rep still has to add (dunnage, irregular charges): a
+            # comment line on the draft, where they finish the order in BC.
+            todo = res.get("to_complete") or []
+            if todo:
+                note = "HUB: usually also on this customer's orders: " + ", ".join(
+                    f"{t['item']} ({int(t['rate'] * 100)}%{', at shipping' if t.get('when') == 'shipping / invoicing' else ''})" for t in todo)
+                for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
+                    await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
             # Read back: every planned line present with its quantity.
             rb = await c.get(f"{base}/salesOrders({sid})", headers=h, params={"$expand": "salesOrderLines"})
             got = [x for x in (rb.json().get("salesOrderLines") or []) if x.get("lineObjectNumber")] if rb.status_code == 200 else []
@@ -142,7 +150,7 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
                 "sales_draft": {"environment": ALLOWED_ENVIRONMENT, "bc_order_no": sno, "bc_system_id": sid,
                                 "customer_no": cust, "external_document_no": po_text, "ship_to_from_history": bool(st),
-                                "lines": lines, "total": total, "created_at": now(), "status": "Draft"},
+                                "lines": lines, "to_complete": res.get("to_complete") or [], "total": total, "created_at": now(), "status": "Draft"},
                 "sales_stage": "drafted"}})
             await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sales_order_draft", "by": "hub", "at": now(),
                                                     "environment": ALLOWED_ENVIRONMENT, "bc_record_no": sno,

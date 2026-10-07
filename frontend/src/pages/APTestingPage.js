@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { FlaskConical, Loader2, ExternalLink, AlertTriangle } from 'lucide-react';
+import { FlaskConical, Loader2, AlertTriangle } from 'lucide-react';
 import api from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 
@@ -143,7 +143,7 @@ export default function APTestingPage() {
           <h2 className="text-lg font-semibold">Review the Hub's BC drafts</h2>
           <span className="ml-auto text-xs text-muted-foreground">40 min</span>
         </div>
-        <p className="text-sm">The most important test. For each draft, open it in the BC sandbox and compare it with the vendor's invoice (<b>Open</b> shows the Hub page and PDF).</p>
+        <p className="text-sm">The most important test. For each draft, open it in the BC sandbox and compare it with the vendor's invoice (<b>Open</b> shows the Hub page and PDF; the back arrow there brings you back here).</p>
         <ol className="list-decimal pl-5 space-y-1 text-sm">
           <li>In BC, environment <code className="text-xs">{env}</code>, go to <b>Purchase Invoices</b> and open the draft by its No.</li>
           <li>Check the header: vendor, vendor invoice no., invoice date, due date, currency, total.</li>
@@ -175,7 +175,7 @@ export default function APTestingPage() {
                     <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap">{money(d.amount)}</td>
                     <td className="py-2 pr-3 font-mono">{d.po || '—'}</td>
                     <td className="py-2 pr-3 text-xs">{d.lines_from}</td>
-                    <td className="py-2 pr-3"><Link className="inline-flex items-center gap-1 text-primary underline" to={`/documents/${d.document_id}`} target="_blank">Open <ExternalLink className="w-3 h-3" /></Link></td>
+                    <td className="py-2 pr-3"><Link className="inline-flex items-center gap-1 text-primary underline" to={`/documents/${d.document_id}`}>Open</Link></td>
                     <td className="py-2"><Result id={`draft_${d.bc_draft_no}`} value={tests[`draft_${d.bc_draft_no}`]} onChange={v => update(`draft_${d.bc_draft_no}`, v)} /></td>
                   </tr>
                 ))}

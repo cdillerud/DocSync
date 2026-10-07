@@ -597,7 +597,7 @@ export default function DocumentDetailPage() {
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/documents')} data-testid="back-to-queue-btn">
+        <Button variant="ghost" size="icon" onClick={() => (window.history.state?.idx > 0 ? navigate(-1) : navigate('/documents'))} title="Back" data-testid="back-to-queue-btn">
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1 min-w-0">

@@ -56,6 +56,9 @@ services:
       dockerfile: Dockerfile
       args:
         - REACT_APP_BACKEND_URL=
+        - REACT_APP_ENTRA_AUTH_ENABLED=true
+        - REACT_APP_ENTRA_TENANT_ID=c7b2de14-71d9-4c49-a0b9-2bec103a6fdc
+        - REACT_APP_ENTRA_CLIENT_ID=37d790f2-5c0a-438a-9d90-5d89541416d9
     container_name: gpi-frontend
     restart: unless-stopped
     depends_on:

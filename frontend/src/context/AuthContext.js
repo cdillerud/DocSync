@@ -1,12 +1,6 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import { login as apiLogin } from '../lib/api';
-import {
-  accountToLegacyUser,
-  entraAuthEnabled,
-  entraLogin,
-  entraLogout,
-  getActiveEntraAccount,
-} from '../lib/entraAuth';
+import { createContext, useContext, useState } from 'react';
+import { login as apiLogin, entraLogin as apiEntraLogin } from '../lib/api';
+import { entraAuthEnabled, entraLogin, entraLogout } from '../lib/entraAuth';
 
 const AuthContext = createContext(null);
 
@@ -17,33 +11,20 @@ export function AuthProvider({ children }) {
   });
   const [token, setToken] = useState(() => localStorage.getItem('gpi_token'));
 
-  // On mount: when Entra is enabled, hydrate the user from the active MSAL
-  // account if one already exists (e.g. after page refresh within session).
-  useEffect(() => {
-    if (!entraAuthEnabled()) return;
-    const account = getActiveEntraAccount();
-    if (account) {
-      const u = accountToLegacyUser(account);
-      if (u) {
-        localStorage.setItem('gpi_user', JSON.stringify(u));
-        setUser(u);
-        // We deliberately do NOT mirror the access token into React state —
-        // the axios interceptor pulls a fresh one per request.
-        setToken('entra'); // sentinel: non-empty truthy value gates isAuthenticated
-      }
-    }
-  }, []);
-
   const loginFn = async (username, password) => {
-    if (entraAuthEnabled()) {
-      const account = await entraLogin();
-      if (!account) {
-        throw new Error('Entra sign-in cancelled');
+    // Microsoft sign-in when no password was typed (the Microsoft button);
+    // the shared password login stays available as a fallback.
+    if (entraAuthEnabled() && !username && !password) {
+      const r = await entraLogin();
+      if (!r?.idToken) {
+        throw new Error('Microsoft sign-in cancelled');
       }
-      const u = accountToLegacyUser(account);
+      const res = await apiEntraLogin(r.idToken);
+      const { token: t, user: u } = res.data;
+      localStorage.setItem('gpi_token', t);
       localStorage.setItem('gpi_user', JSON.stringify(u));
+      setToken(t);
       setUser(u);
-      setToken('entra');
       return u;
     }
     const res = await apiLogin(username, password);
@@ -56,11 +37,10 @@ export function AuthProvider({ children }) {
   };
 
   const logout = async () => {
+    localStorage.removeItem('gpi_token');
+    localStorage.removeItem('gpi_user');
     if (entraAuthEnabled()) {
-      await entraLogout();
-    } else {
-      localStorage.removeItem('gpi_token');
-      localStorage.removeItem('gpi_user');
+      try { await entraLogout(); } catch { /* popup blocked: Hub session is already cleared */ }
     }
     setToken(null);
     setUser(null);

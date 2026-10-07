@@ -115,6 +115,41 @@ async def login(req: LoginRequest, request: Request, response: Response):
     }
 
 
+class EntraLoginRequest(BaseModel):
+    id_token: str
+
+
+@router.get("/entra/config")
+async def entra_config():
+    """Public: whether Microsoft sign-in is configured (no secrets)."""
+    from services import entra_auth_service as ea
+    c = ea.config()
+    return {"enabled": ea.enabled(), "tenant_id": c["tenant_id"] or None, "client_id": c["client_id"] or None}
+
+
+@router.post("/entra")
+async def entra_login(req: EntraLoginRequest, request: Request, response: Response):
+    """Exchange a verified Microsoft Entra ID token for a Hub session."""
+    from fastapi.concurrency import run_in_threadpool
+    from services import entra_auth_service as ea
+    ip = _client_ip(request)
+    if _recent_failures(ip) >= _MAX_FAILURES:
+        raise HTTPException(status_code=429, detail="Too many failed sign-in attempts. Try again later.")
+    if not ea.enabled():
+        raise HTTPException(status_code=404, detail="Microsoft sign-in is not configured")
+    try:
+        claims = await run_in_threadpool(ea.verify_id_token, req.id_token)
+    except ValueError as e:
+        _failed_logins.setdefault(ip, deque()).append(time.monotonic())
+        raise HTTPException(status_code=401, detail=f"Microsoft sign-in refused: {e}")
+    db = request.app.state.db
+    user = await ea.upsert_user(db, claims)
+    token = create_access_token(user_id=user["id"], email=user["email"], role=user.get("role", "user"))
+    response.set_cookie(key="access_token", value=token, httponly=True, samesite="lax", max_age=8 * 3600, path="/")
+    return {"token": token, "user": {"username": user["email"], "email": user["email"],
+                                     "display_name": user.get("display_name", user["email"]), "role": user.get("role", "user")}}
+
+
 @router.post("/logout")
 async def logout(response: Response, _user=Depends(get_current_user)):
     """Clear the access_token cookie. Requires a valid token to call."""

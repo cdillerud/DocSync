@@ -70,11 +70,13 @@ export const entraLogin = async () => {
   if (!instance) return null;
   await ensureInitialized(instance);
 
-  const result = await instance.loginPopup(loginRequest);
+  const result = await instance.loginPopup({ ...loginRequest, scopes: ['openid', 'profile', 'email', ...(loginRequest.scopes || [])] });
   if (result?.account) {
     instance.setActiveAccount(result.account);
   }
-  return result?.account || null;
+  // The Hub verifies this ID token once (/api/auth/entra) and issues its own
+  // session; API calls then carry the Hub token like a password sign-in.
+  return result?.account ? { account: result.account, idToken: result.idToken } : null;
 };
 
 /**

@@ -120,6 +120,8 @@ API_AUTH_MODE = os.environ.get("API_AUTH_MODE", "enforce").strip().lower()
 _AUTH_EXEMPT_PATHS = {
     "/api/health",
     "/api/auth/login",
+    "/api/auth/entra",        # Microsoft sign-in: verifies the Entra ID token itself
+    "/api/auth/entra/config",
     "/api/graph/webhook",     # Microsoft Graph change notifications
     "/api/spiro/callback",    # Spiro OAuth redirect
 }

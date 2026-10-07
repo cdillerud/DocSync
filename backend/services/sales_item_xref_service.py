@@ -25,12 +25,25 @@ _CODE = re.compile(r"(?<![A-Z0-9])([A-Z]{0,4}-?\d[A-Z0-9-]{2,24}|\d{3,}X\d{2,})(
 
 
 _CATEGORY: Dict[str, str] = {}
+_ITEM_BY_NORM: Dict[str, str] = {}
+_SOLD: Counter = Counter()
+
+
+async def load_sold(db) -> Counter:
+    """How often each item was on a BC sales order in the last year."""
+    if not _SOLD:
+        async for o in db.bc_sales_orders.find({}, {"_id": 0, "lines.lineObjectNumber": 1}):
+            for it in {str(l.get("lineObjectNumber") or "").upper() for l in o.get("lines") or []}:
+                if it:
+                    _SOLD[it] += 1
+    return _SOLD
 
 
 async def load_item_categories(db) -> Dict[str, str]:
     if not _CATEGORY:
         async for i in db.bc_reference_cache.find({"bc_entity_type": "item"}, {"_id": 0, "bc_document_no": 1, "item_category_code": 1}):
             _CATEGORY[str(i["bc_document_no"]).upper()] = str(i.get("item_category_code") or "")
+            _ITEM_BY_NORM[n(i["bc_document_no"])] = str(i["bc_document_no"]).upper()
     return _CATEGORY
 
 
@@ -192,87 +205,148 @@ async def customer_history(db, customer_no: str) -> Dict[str, Dict[str, Any]]:
     return hist
 
 
+def _newer_revision(item: str, hist: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    """A revision of `item` (same number + a letter / -A) the customer bought
+    more recently than `item` itself."""
+    base = re.sub(r"(-?[A-Z])$", "", str(item).upper()) if re.search(r"\d-?[A-Z]$", str(item).upper()) else str(item).upper()
+    fam = [i for i in hist if i != item and is_product(i) and re.fullmatch(re.escape(base) + r"-?[A-Z]", i)]
+    if not fam:
+        return None
+    last = (hist.get(item) or {}).get("last_date") or ""
+    best = max(fam, key=lambda i: hist[i].get("last_date") or "")
+    return best if (hist[best].get("last_date") or "") > last else None
+
+
+async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], rows: Dict[str, Dict[str, Any]]) -> List[tuple]:
+    """(item, how, strong) in priority order for one PO line."""
+    out: List[tuple] = []
+    txt = n(e.get("description"))
+    known = {n(i): i for i in hist}
+    # 1. A Gamer item number this customer buys, written on the PO.
+    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt}, key=len, reverse=True)
+    if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
+        out.append((hits[0], "item number on the PO", True))
+    # 2. The customer's own item code, learned from their BC orders.
+    for code in customer_codes(e):
+        r = rows.get("code:" + code)
+        if r and r["share"] >= 0.6:
+            out.append((r["item"], f"customer item {code} (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
+            break
+    # 3. Any Gamer item number written on the PO (new item for this customer).
+    if not _charge_text(e):
+        for tok in dict.fromkeys(n(t) for t in re.findall(r"[A-Z0-9][A-Z0-9-]{4,}", str(e.get("description") or "").upper())):
+            if tok in _ITEM_BY_NORM and _CATEGORY.get(_ITEM_BY_NORM[tok]) and not _SIZE.match(tok) and re.search(r"\d", tok):
+                out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", False))
+                break
+    # 4. The customer's description, learned.
+    r = rows.get("desc:" + desc_key(e))
+    if r and r["share"] >= 0.6:
+        out.append((r["item"], f"customer description (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
+    if _charge_text(e):
+        return out
+    # 5. A maker's code that starts one Gamer item number (C-8479 -> C-8479-10000229).
+    for tok in dict.fromkeys(n(t) for t in re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", str(e.get("description") or "").upper())):
+        if len(tok) < 4 or _SIZE.match(tok) or not re.search(r"\d", tok):
+            continue
+        own = [i for i in hist if n(i).startswith(tok) and is_product(i)]
+        pool = own or [i for i in _CATEGORY if _CATEGORY[i] and n(i).startswith(tok)]
+        if len(pool) > 1:
+            # Several revisions (C-503003-12033484 / -12033922): the one that
+            # clearly dominates BC sales, else a person decides.
+            sold = await load_sold(db)
+            ranked = sorted(pool, key=lambda i: sold.get(i, 0), reverse=True)
+            top, rest = sold.get(ranked[0], 0), sum(sold.get(i, 0) for i in ranked[1:])
+            pool = [ranked[0]] if top >= 3 and top >= 4 * rest else pool
+        if len(pool) == 1:
+            out.append((pool[0], f"{tok} starts Gamer item {pool[0]}" + ("" if own else " (new item for this customer)"), bool(own)))
+            break
+    # 6. The customer's own items by shared size / finish / colour words.
+    words = set(re.findall(r"[A-Z0-9]+", str(e.get("description") or "").upper())) - _STOP
+    scored = []
+    for it, h in hist.items():
+        if not is_product(it):
+            continue
+        hw = set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
+        common = words & hw
+        if hw:
+            scored.append((len(common) + 0.5 * sum(1 for w in common if any(c.isdigit() for c in w)), it))
+    scored.sort(reverse=True)
+    if scored and scored[0][0] >= 3 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 1.5):
+        out.append((scored[0][1], "description matches an item this customer buys", False))
+    seen, uniq = set(), []
+    for c in out:
+        if c[0] not in seen:
+            seen.add(c[0])
+            uniq.append(c)
+    return uniq
+
+
+def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Quantity in BC units and price for one candidate; fits = the PO line's
+    value agrees (None when the PO shows no value)."""
+    eq = num(e.get("quantity"))
+    price, uom = h.get("last_price"), h.get("uom")
+    if eq and rr:
+        qty = round(eq * rr["ratio"], 4)
+    elif eq and str(uom or "").upper() == "M" and eq >= 1000:
+        qty = round(eq / 1000, 4)       # BC sells per thousand; the PO counts units
+    else:
+        qty = eq
+    po_price = num(e.get("unit_price"))
+    price_source = "last BC price for this customer" if price else None
+    if po_price:
+        for f in (1, 1000):
+            cand = round(po_price * f, 6)
+            if price and abs(cand - price) <= 0.005 * price:
+                break                   # the PO shows BC's price rounded: keep BC's exact figure
+            if price and abs(cand - price) <= 0.15 * price:
+                exact = [p for p in h.get("prices") or () if abs(p - cand) <= 0.005 * p]
+                price = min(exact, key=lambda p: abs(p - cand)) if exact else cand
+                price_source = "PO price"
+                break
+            if not price and f == 1:
+                price, price_source = cand, "PO price"
+    fits = None
+    line_value = num(e.get("total")) or ((po_price or 0) * (eq or 0))
+    if eq and line_value and price:
+        # The PO line's value decides the unit (192,000 x 0.12572 = 24,138 ->
+        # 192 M at 125.72) and checks the item itself.
+        cands = {eq, round(eq / 1000, 4)} | ({round(eq * rr["ratio"], 4)} if rr else set())
+        best = min(cands, key=lambda q: abs(q * price - line_value))
+        off = abs(best * price - line_value) / line_value
+        if off <= 0.03:
+            fits, qty = True, best
+        elif off > 0.25:
+            fits = False                # clearly not this item (or unit)
+        # 3-25%: a price change; inconclusive
+    return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits}
+
+
 async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     await load_item_categories(db)
     hist = await customer_history(db, customer_no)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
-    known = {n(i): i for i in hist}
     out = []
     for e in extracted:
-        txt = n(e.get("description"))
-        item, how = None, None
-        for code in customer_codes(e):
-            r = rows.get("code:" + code)
-            if r and r["share"] >= 0.6:
-                item, how = r["item"], f"customer item {code} (learned from {r['n']} order{'s' if r['n'] > 1 else ''})"
-                break
-        if not item:
-            hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt}, key=len, reverse=True)
-            # longest code wins when one contains the others (6075072 vs 607507)
-            if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
-                item, how = hits[0], "item number on the PO"
-        if not item:
-            r = rows.get("desc:" + desc_key(e))
-            if r and r["share"] >= 0.6:
-                item, how = r["item"], f"customer description (learned from {r['n']} order{'s' if r['n'] > 1 else ''})"
-        if not item and not _charge_text(e):
-            # A code on the PO that starts exactly one Gamer item number: the
-            # maker's code inside Gamer's number (Giovanni "C-8479" ->
-            # C-8479-10000229). The customer's own items first, then all items.
-            raw = re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", str(e.get("description") or "").upper())
-            for tok in dict.fromkeys(n(t) for t in raw):
-                if len(tok) < 4 or _SIZE.match(tok) or not re.search(r"\d", tok):
-                    continue
-                own = [i for i in hist if n(i).startswith(tok) and is_product(i)]
-                pool = own or [i for i in _CATEGORY if _CATEGORY[i] and n(i).startswith(tok)]
-                if len(pool) == 1:
-                    item, how = pool[0], f"{tok} starts Gamer item {pool[0]}" + ("" if own else " (new item for this customer)")
-                    break
-        if not item and not _charge_text(e):
-            # The customer's own BC items, by shared size / finish / colour /
-            # material words ("27oz ... 401x411" -> 10142 "27oz Round, Tin
-            # Food Can, 401x411 Finish"); only a clear winner counts.
-            words = set(re.findall(r"[A-Z0-9]+", str(e.get("description") or "").upper())) - _STOP
-            scored = []
-            for it, h in hist.items():
-                if not is_product(it):
-                    continue
-                hw = set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
-                common = words & hw
-                if hw:
-                    scored.append((len(common) + 0.5 * sum(1 for w in common if any(c.isdigit() for c in w)), it))
-            scored.sort(reverse=True)
-            if scored and scored[0][0] >= 3 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 1.5):
-                item, how = scored[0][1], "description matches an item this customer buys"
-        eq = num(e.get("quantity"))
-        qty, price, uom = None, None, None
-        if item:
-            rr = rows.get("ratio:" + item)
-            h = hist.get(item) or {}
-            price, uom = h.get("last_price"), h.get("uom")
-            if eq and rr:
-                qty = round(eq * rr["ratio"], 4)
-            elif eq and str(uom or "").upper() == "M" and eq >= 1000:
-                # BC sells this item per thousand (M); the PO counts units
-                # (E.T. Browne 108,000 -> 108 M at 122.72 / M).
-                qty = round(eq / 1000, 4)
-            else:
-                qty = eq
-            po_price = num(e.get("unit_price"))
-            if po_price:
-                for f in (1, 1000):
-                    cand = round(po_price * f, 6)
-                    if price and abs(cand - price) <= 0.005 * price:
-                        break           # the PO shows BC's price rounded (0.2347 vs 0.23474): keep BC's
-                    if price and abs(cand - price) <= 0.15 * price:
-                        # A changed price the customer is ordering at; BC's exact
-                        # figure when they have paid it before (0.1964 -> 196.43 / M).
-                        exact = [p for p in h.get("prices") or () if abs(p - cand) <= 0.005 * p]
-                        price = min(exact, key=lambda p: abs(p - cand)) if exact else cand
-                        break
-                    if not price and f == 1:
-                        price = cand
-        out.append({"source": e, "item": item, "how": how, "quantity": qty, "unit_of_measure": uom, "unit_price": price,
-                    "price_source": ("PO price" if (price and num(e.get("unit_price")) and abs(price - num(e.get("unit_price"))) < 0.01 or (price and num(e.get("unit_price")) and abs(price - 1000 * num(e.get("unit_price"))) < 0.05)) else ("last BC price for this customer" if price else None))})
+        chosen = None
+        cands = await _candidates(db, e, hist, rows)
+        valued = [(item, how, _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item))) for item, how, _ in cands]
+        # The first candidate the PO line's value confirms; else the first not
+        # ruled out, in priority order.
+        strong = {item: st for item, _, st in cands}
+        pick = next((c for c in valued if c[2]["fits"] is True), None) or \
+            next((c for c in valued if c[2]["fits"] is None and strong[c[0]]), None)
+        if pick:
+            item, how, v = pick
+            # The customer has since moved to a newer revision of this item
+            # (Watkins FX60510A -> FX60510B, VetsPlus 120125 -> 120125-A).
+            newer = _newer_revision(item, hist)
+            if newer:
+                item, how = newer, how + f" · newer revision {newer} the customer now buys"
+                v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item))
+            chosen = {"item": item, "how": how + (" · PO value agrees" if v["fits"] else ""), **v}
+        chosen = chosen or {"item": None, "how": None, "quantity": None, "unit_price": None, "unit_of_measure": None, "price_source": None}
+        chosen.pop("fits", None)
+        out.append({"source": e, **chosen})
     return out
 

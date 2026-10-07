@@ -29,6 +29,7 @@ GAMER_DOMAIN = "gamerpackaging.com"
 _FREE_MAIL = {"gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "aol.com", "icloud.com", "comcast.net", "msn.com"}
 _ORDER_NO = re.compile(r"(?<![A-Z0-9])(1\d{5})(?![0-9])")
 _GAMER_PO = re.compile(r"(?<![A-Z0-9])(W1\d{5}|WR1\d{5}|WA\d{4,6})(?![0-9])", re.I)
+_NOT_ORDER = re.compile(r"\b(scar|rejection|reject|damage|damaged|spec|specification|sample|samples|complaint|issue|recycl|rma|vrma|quality|coa|certificate)\b", re.I)
 _PO_WORDS = re.compile(r"\b(purchase\s*order|p\.?\s?o\.?\s*#|\bPO\b|order\s+request|blanket|release)", re.I)
 
 
@@ -118,6 +119,13 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         if known_po and not order:
             gamer_pos = nums
 
+    # A "customer PO" number that is one of Gamer's own purchase orders (O-I
+    # is customer and supplier: "Purchase Order 119900" is Gamer's PO to O-I).
+    if pos and not order:
+        if await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": {"$in": [p for p in pos if p.isdigit() or p.startswith("W")]}}, {"_id": 1}):
+            gamer_pos |= {p for p in pos}
+            pos = set()
+    has_lines = bool((ef.get("line_items") or []))
     # Role.
     if dt == "AP_Invoice":
         role = "ap_invoice"
@@ -127,14 +135,17 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         role = "gamer_order_copy" if order else ("supplier" if gamer_pos else "internal_other")
     elif cp.get("vendor") and not cp.get("customer"):
         role = "supplier"
-    elif gamer_pos and not order and not cp.get("customer"):
+    elif gamer_pos and not order and (not cp.get("customer") or not pos):
         role = "supplier"
     elif dt in ("Shipping_Document", "Warehouse_Receipt") and not (order and match == "customer_po") \
             and not _PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"):
         role = "shipping"
     elif cp.get("customer") or order or dt in ("Sales_Order", "Sales_Quote") or _PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"):
+        # A customer PO carries a PO number or order lines; complaints, specs,
+        # samples and rejections that mention a PO are customer mail.
         role = "customer_po" if (dt in ("Sales_Order", "Sales_Quote", "Order_Confirmation", "Shipping_Document", "Unknown_Document")
-                                 and (pos or order or _PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"))) else "customer_other"
+                                 and (order or ((pos or has_lines) and not _NOT_ORDER.search(f"{d.get('file_name')} {d.get('email_subject')}"))
+                                      and (pos or has_lines))) else "customer_other"
     else:
         role = "other"
     return {"role": role, "order_no": (order or {}).get("order_no"), "match": match,

@@ -90,12 +90,18 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
                 return {**out, "sales_stage": "in_bc", "bc_order_no": o["order_no"]}
     if any(l["unit_price"] is None or not l["quantity"] for l in lines):
         return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "price_unknown"}
+    from services.sales_charge_service import charge_lines
+    charges = await charge_lines(db, cust, lines, (d.get("extracted_fields") or {}).get("line_items") or [])
+    out["sales_resolution"]["charges"] = charges
     planned = round(sum(float(l["quantity"]) * float(l["unit_price"]) for l in lines), 2)
+    with_charges = round(planned + sum(float(c["quantity"]) * float(c["unit_price"]) for c in charges), 2)
     out["sales_resolution"]["planned_total"] = planned
+    out["sales_resolution"]["planned_total_with_charges"] = with_charges
     po_total = d.get("amount_float")
     if po_total and float(po_total) > 0:
         out["sales_resolution"]["po_total"] = float(po_total)
-        if abs(planned - float(po_total)) > max(1.0, 0.02 * float(po_total)):
+        tol = max(1.0, 0.02 * float(po_total))
+        if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol:
             return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "totals_differ",
                     "sales_stage_detail": f"lines {planned:,.2f} vs PO {float(po_total):,.2f}"}
     return {**out, "sales_stage": "ready"}

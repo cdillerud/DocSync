@@ -40,11 +40,11 @@ function Lines({ resolution }) {
           </tr>
         </thead>
         <tbody>
-          {resolution.lines.map((l, i) => (
+          {[...resolution.lines, ...(resolution.charges || []).map(c => ({ ...c, po_description: 'Charge inside sales adds', po_quantity: null }))].map((l, i) => (
             <tr key={i} className="border-b border-border/60 align-top">
               <td className="py-1 pr-3 max-w-[320px]">{l.po_description}</td>
               <td className="py-1 pr-3 text-right tabular-nums">{l.po_quantity ?? '—'}</td>
-              <td className={`py-1 pr-3 font-mono ${l.item ? '' : 'text-amber-600'}`}>{l.item || 'not matched'}</td>
+              <td className={`py-1 pr-3 font-mono ${l.item ? '' : 'text-amber-600'}`}>{l.item || 'not matched'}{l.charge && <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans">charge</span>}</td>
               <td className="py-1 pr-3 text-right tabular-nums">{l.quantity ?? '—'} {l.unit_of_measure || ''}</td>
               <td className="py-1 pr-3 text-right tabular-nums">{l.unit_price ?? '—'}</td>
               <td className="py-1 text-muted-foreground">{l.how || '—'}{l.price_source ? `; price: ${l.price_source}` : ''}</td>
@@ -53,7 +53,7 @@ function Lines({ resolution }) {
         </tbody>
       </table>
       {(resolution.planned_total != null || resolution.po_total != null) && (
-        <p className="mt-1 text-xs text-muted-foreground tabular-nums">Lines total {money(resolution.planned_total)} · PO total {money(resolution.po_total)}</p>
+        <p className="mt-1 text-xs text-muted-foreground tabular-nums">Products {money(resolution.planned_total)}{resolution.charges?.length ? ` · with charges ${money(resolution.planned_total_with_charges)}` : ''} · PO total {money(resolution.po_total)}</p>
       )}
     </div>
   );

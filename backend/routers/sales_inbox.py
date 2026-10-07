@@ -34,7 +34,8 @@ async def summary(days: int = 45):
                                                   "sales_stage": {"$ne": "duplicate"}})
     linked = await db.hub_documents.count_documents({"created_utc": {"$gte": _since(days)}, "sales_link.role": "customer_po",
                                                      "sales_link.order_no": {"$ne": None}})
-    return {"days": days, "stages": counts, "needs_rep_reasons": reasons, "reason_text": REASONS,
+    from services.sales_draft_readback_service import metrics
+    return {"days": days, "draft_accuracy": await metrics(db), "stages": counts, "needs_rep_reasons": reasons, "reason_text": REASONS,
             "customer_pos": cpo, "customer_pos_in_bc": linked}
 
 

@@ -142,6 +142,23 @@ async def learn(db) -> Dict[str, Any]:
             if r:
                 ratio[(cust, item)].append(round(r, 6))
             stats["pairs"] += 1
+    # Drafts a reviewer corrected in the sandbox: what they left is the truth.
+    async for d in db.hub_documents.find({"sales_draft_readback.edits.0": {"$exists": True}, "sales_draft_readback.lines": {"$exists": True}},
+                                         {"_id": 0, "extracted_fields.line_items": 1, "sales_link": 1, "sales_draft_readback": 1}):
+        cust = (d.get("sales_link") or {}).get("bc_customer_no")
+        el = (d.get("extracted_fields") or {}).get("line_items") or []
+        rl = [{"lineType": "Item", **l} for l in d["sales_draft_readback"]["lines"]]
+        if not cust or not el:
+            continue
+        for e, b, r in pair(el, _bc_item_lines({"lines": rl})):
+            item = str(b["lineObjectNumber"]).upper()
+            for code in customer_codes(e):
+                if code != n(item):
+                    xref[(cust, "code:" + code)][item] += 3
+            dk = desc_key(e)
+            if dk:
+                xref[(cust, "desc:" + dk)][item] += 3
+            stats["reviewed_draft_pairs"] += 1
     await db.sales_item_xref.delete_many({})
     docs = []
     for (cust, key), items in xref.items():

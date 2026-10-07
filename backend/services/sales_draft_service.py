@@ -55,10 +55,21 @@ def _ship_to(d: Dict[str, Any], history: List[Dict[str, Any]]) -> Optional[Dict[
     return None
 
 
-async def candidates(db, limit: int = 10) -> List[Dict[str, Any]]:
-    return [d async for d in db.hub_documents.find(
-        {"sales_stage": "ready", "sales_draft.bc_order_no": {"$exists": False}, "sales_draft_skipped": {"$exists": False}},
-        {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)]).limit(limit)]
+async def candidates(db, limit: int = 10, per_customer: int = 3) -> List[Dict[str, Any]]:
+    """Newest first, at most `per_customer` per customer per run (Giovanni
+    sends one PO per truck and would otherwise fill every run)."""
+    out, per = [], {}
+    async for d in db.hub_documents.find(
+            {"sales_stage": "ready", "sales_draft.bc_order_no": {"$exists": False}, "sales_draft_skipped": {"$exists": False}},
+            {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)]):
+        c = (d.get("sales_link") or {}).get("bc_customer_no")
+        if per.get(c, 0) >= per_customer:
+            continue
+        per[c] = per.get(c, 0) + 1
+        out.append(d)
+        if len(out) >= limit:
+            break
+    return out
 
 
 async def draft(db, limit: int = 5) -> Dict[str, Any]:
@@ -88,7 +99,7 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             if prod:
                 await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_link.order_no": prod["order_no"], "sales_link.match": "customer_po", "sales_stage": "in_bc"}})
                 continue
-            lines = [l for l in res.get("lines") or [] if l.get("item")]
+            lines = [l for l in res.get("lines") or [] if l.get("item")] + list(res.get("charges") or [])
             if not lines or any(not l.get("quantity") for l in lines):
                 await skip(d, "a line has no quantity")
                 continue
@@ -120,7 +131,8 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             rb = await c.get(f"{base}/salesOrders({sid})", headers=h, params={"$expand": "salesOrderLines"})
             got = [x for x in (rb.json().get("salesOrderLines") or []) if x.get("lineObjectNumber")] if rb.status_code == 200 else []
             ok = not errors and len(got) == len(lines) and all(
-                any(str(g["lineObjectNumber"]).upper() == l["item"] and abs(float(g["quantity"]) - float(l["quantity"])) < 0.001 for g in got)
+                any(str(g["lineObjectNumber"]).upper() == str(l["item"]).upper() and abs(float(g["quantity"]) - float(l["quantity"])) < 0.001
+                    and (l.get("unit_price") is None or abs(float(g.get("unitPrice") or 0) - float(l["unit_price"])) < 0.005) for g in got)
                 for l in lines)
             if not ok:
                 dr = await c.delete(f"{base}/salesOrders({sid})", headers={**h, "If-Match": "*"})

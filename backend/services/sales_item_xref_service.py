@@ -232,7 +232,11 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
                    # pack counts are not item numbers: "48000/plt", "58,240/TL"
                    and not re.search(re.escape(orig) + r"\s*/\s*(PLT|PALLET|CS|CASE|TL|TRUCK|LAYER)", desc_u)}, key=len, reverse=True)
     if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
-        out.append((hits[0], "item number on the PO", True))
+        h0 = hits[0]
+        # A bare number (48000) is an item number only where the PO labels it
+        # one; anywhere else it may be a pack count or size: needs confirming.
+        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|PART\s*#?:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
+        out.append((h0, "item number on the PO", labelled))
     # 2. The customer's own item code, learned from their BC orders.
     for code in customer_codes(e):
         r = rows.get("code:" + code)

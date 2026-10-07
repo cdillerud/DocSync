@@ -319,7 +319,9 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
                 price, price_source = cand, "PO price"
     fits = None
     line_value = num(e.get("total")) or ((po_price or 0) * (eq or 0))
-    if eq and line_value and price:
+    # Only a BC price can confirm or rule out the item: a price taken from
+    # the PO itself always "agrees" (Litehouse bottle 48000 on a Giovanni cap PO).
+    if eq and line_value and price and h.get("last_price"):
         # The PO line's value decides the unit (192,000 x 0.12572 = 24,138 ->
         # 192 M at 125.72) and checks the item itself.
         cands = {eq, round(eq / 1000, 4)} | ({round(eq * rr["ratio"], 4)} if rr else set())

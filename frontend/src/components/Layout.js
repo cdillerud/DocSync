@@ -30,7 +30,7 @@ const navItems = [
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
   { to: '/ap-workflow', icon: ClipboardList, label: 'AP Workflow' },
   { to: '/ap-testing', icon: FlaskConical, label: 'AP Testing' },
-  { to: '/sales-inventory', icon: ShoppingCart, label: 'Sales' },
+  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
   { to: '/integrations', icon: Plug, label: 'Integrations' },
   { to: '/config', icon: Settings, label: 'Settings' },
 ];
@@ -120,6 +120,7 @@ export default function Layout() {
     if (path === '/decision-queue') return 'Decision Queue';
     if (path === '/ap-workflow') return 'AP Workflow';
     if (path === '/ap-testing') return 'AP Testing';
+    if (path === '/sales') return 'Sales Inbox';
     if (path === '/ap') return 'AP Inbox';
     if (path === '/review-queue') return 'Draft Review Queue';
     if (path === '/config') return 'Settings';

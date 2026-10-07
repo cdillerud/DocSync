@@ -149,6 +149,22 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["sandbox_drafts"] = {"error": repr(e)}
     try:
+        # Sales: BC sales history (incremental) -> link every sales document to
+        # its BC order -> learn the customer item cross-reference -> stages ->
+        # draft ready customer POs as sales orders in the PRE sandbox.
+        from services.bc_sales_history_service import sync as sales_sync
+        from services.sales_link_service import run as sales_link
+        from services.sales_item_xref_service import learn as sales_learn
+        from services.sales_stage_service import refresh as sales_stages
+        from services.sales_draft_service import draft as sales_draft
+        summary["sales"] = {"history": await sales_sync(db), "link": await sales_link(db, days=45),
+                            "xref": await sales_learn(db), "stages": await sales_stages(db, days=45)}
+        summary["sales"]["drafts"] = await sales_draft(db, limit=10)
+        if summary["sales"]["drafts"].get("drafted"):
+            summary["sales"]["stages"] = await sales_stages(db, days=45)
+    except Exception as e:
+        summary["sales"] = {"error": repr(e)}
+    try:
         # Once a day: replay current intake logic against staff filings and BC.
         from services.learning_metrics_service import record_daily
         summary["learning_metrics"] = await record_daily(db)

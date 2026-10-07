@@ -166,8 +166,10 @@ async def customer_history(db, customer_no: str) -> Dict[str, Dict[str, Any]]:
             if l.get("lineType") != "Item" or not l.get("lineObjectNumber"):
                 continue
             it = str(l["lineObjectNumber"]).upper()
-            h = hist.setdefault(it, {"n": 0, "last_date": "", "description": l.get("description")})
+            h = hist.setdefault(it, {"n": 0, "last_date": "", "description": l.get("description"), "prices": set()})
             h["n"] += 1
+            if float(l.get("unitPrice") or 0) > 0:
+                h["prices"].add(float(l["unitPrice"]))
             if when >= h["last_date"] and float(l.get("unitPrice") or 0) > 0:
                 h.update(last_date=when, last_price=float(l["unitPrice"]), uom=l.get("unitOfMeasureCode"), description=l.get("description"))
     return hist
@@ -197,6 +199,19 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]]) -
             if r and r["share"] >= 0.6:
                 item, how = r["item"], f"customer description (learned from {r['n']} order{'s' if r['n'] > 1 else ''})"
         if not item and not _charge_text(e):
+            # A code on the PO that starts exactly one Gamer item number: the
+            # maker's code inside Gamer's number (Giovanni "C-8479" ->
+            # C-8479-10000229). The customer's own items first, then all items.
+            raw = re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", str(e.get("description") or "").upper())
+            for tok in dict.fromkeys(n(t) for t in raw):
+                if len(tok) < 4 or _SIZE.match(tok) or not re.search(r"\d", tok):
+                    continue
+                own = [i for i in hist if n(i).startswith(tok) and is_product(i)]
+                pool = own or [i for i in _CATEGORY if _CATEGORY[i] and n(i).startswith(tok)]
+                if len(pool) == 1:
+                    item, how = pool[0], f"{tok} starts Gamer item {pool[0]}" + ("" if own else " (new item for this customer)")
+                    break
+        if not item and not _charge_text(e):
             # The customer's own BC items, by shared size / finish / colour /
             # material words ("27oz ... 401x411" -> 10142 "27oz Round, Tin
             # Food Can, 401x411 Finish"); only a clear winner counts.
@@ -216,15 +231,27 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]]) -
         qty, price, uom = None, None, None
         if item:
             rr = rows.get("ratio:" + item)
-            qty = round(eq * rr["ratio"], 4) if (eq and rr) else eq
             h = hist.get(item) or {}
             price, uom = h.get("last_price"), h.get("uom")
+            if eq and rr:
+                qty = round(eq * rr["ratio"], 4)
+            elif eq and str(uom or "").upper() == "M" and eq >= 1000:
+                # BC sells this item per thousand (M); the PO counts units
+                # (E.T. Browne 108,000 -> 108 M at 122.72 / M).
+                qty = round(eq / 1000, 4)
+            else:
+                qty = eq
             po_price = num(e.get("unit_price"))
             if po_price:
                 for f in (1, 1000):
-                    cand = round(po_price * f, 4)
+                    cand = round(po_price * f, 6)
+                    if price and abs(cand - price) <= 0.005 * price:
+                        break           # the PO shows BC's price rounded (0.2347 vs 0.23474): keep BC's
                     if price and abs(cand - price) <= 0.15 * price:
-                        price = cand
+                        # A changed price the customer is ordering at; BC's exact
+                        # figure when they have paid it before (0.1964 -> 196.43 / M).
+                        exact = [p for p in h.get("prices") or () if abs(p - cand) <= 0.005 * p]
+                        price = min(exact, key=lambda p: abs(p - cand)) if exact else cand
                         break
                     if not price and f == 1:
                         price = cand

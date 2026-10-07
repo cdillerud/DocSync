@@ -16,6 +16,7 @@ import IntakeLearningPage from "@/pages/IntakeLearningPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
 import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
 import APWorkflowPage from "@/pages/APWorkflowPage";
+import APTestingPage from "@/pages/APTestingPage";
 import APInboxPage from "@/pages/APInboxPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
@@ -57,6 +58,7 @@ function AppRoutes() {
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
         <Route path="ap-workflow" element={<APWorkflowPage />} />
+        <Route path="ap-testing" element={<APTestingPage />} />
         <Route path="ap" element={<APInboxPage />} />
         <Route path="review-queue" element={<ReviewQueuePage />} />
         <Route path="intake-benchmark" element={<BakeOffPage />} />

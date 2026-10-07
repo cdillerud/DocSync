@@ -369,8 +369,15 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
         if not problem:
             from services.vendor_line_coding_service import coding_for, main_code_known
             lines = d.get("draft_lines_planned") or (rb.get("lines") or [])
-            if d.get("draft_lines_source") != "bc_receipt" and lines and main_code_known(await coding_for(db, d.get("vendor_canonical")), lines) is False:
+            coding = await coding_for(db, d.get("vendor_canonical"))
+            if d.get("draft_lines_source") != "bc_receipt" and lines and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
+                requeue = True
+            elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in ("bc_receipt", "vendor_coding") \
+                    and len([l for l in lines if l.get("lineObjectNumber")]) > 1:
+                # AP codes this vendor as one line (R+L: one FREIGHT line); the
+                # older builder split it (2 x 6,415.19, -1 x 11,868.09, ...).
+                problem = "drafted as several lines; AP codes this vendor as one line - re-drafting that way"
                 requeue = True
         if not problem:
             continue

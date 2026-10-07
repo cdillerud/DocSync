@@ -76,7 +76,14 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         lo = (datetime.fromisoformat(recv) - timedelta(days=5)).date().isoformat()
         want = {(l["item"], round(float(l["quantity"] or 0), 3)) for l in lines}
         async for o in db.bc_sales_orders.find({"customer_no": cust, "$or": [{"order_date": {"$gte": lo}}, {"first_invoice_date": {"$gte": lo}}]},
-                                               {"_id": 0, "order_no": 1, "lines": 1}):
+                                               {"_id": 0, "order_no": 1, "lines": 1, "ext_tokens": 1}):
+            # Only an order entered without a PO number of its own (Giovanni
+            # sends one PO per truck, all for the same jar and quantity), and
+            # only one Hub PO per order.
+            if any(len(re.sub(r"\D", "", t)) >= 4 for t in o.get("ext_tokens") or []):
+                continue
+            if await db.hub_documents.count_documents({"sales_link.order_no": o["order_no"], "_id": {"$ne": d["_id"]}}, limit=1):
+                continue
             have = {(str(l.get("lineObjectNumber") or "").upper(), round(float(l.get("quantity") or 0), 3)) for l in o.get("lines") or []}
             if want and want <= have:
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sales_link.order_no": o["order_no"], "sales_link.match": "items_and_quantities"}})

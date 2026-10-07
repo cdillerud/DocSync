@@ -421,7 +421,7 @@ def filter_dispositioned_items(
 
 
 AP_REASON_ORDER = ["suspected_fraud", "vendor_unknown", "number_or_amount_missing", "po_not_in_bc",
-                   "routing_uncertain", "routing_error"]
+                   "draft_lines_problem", "routing_uncertain", "routing_error"]
 
 
 def _ap_question(d: Dict[str, Any]) -> str:
@@ -437,6 +437,10 @@ def _ap_question(d: Dict[str, Any]) -> str:
     if reason == "number_or_amount_missing":
         missing = [x for x, v in (("invoice number", d.get("invoice_number_clean")), ("amount", d.get("amount_float"))) if not v]
         return f"The {' and '.join(missing) or 'invoice details'} could not be read. Check the document, then file or exclude it."
+    if reason == "draft_lines_problem":
+        why = ((d.get("sandbox_draft_skipped") or {}).get("reason")) or "the line items do not add up"
+        return (f"The Hub could not draft this invoice in BC: {why}. Check the lines on the document; "
+                "file it to the suggested folder once AP has the correct lines, or exclude it.")
     if reason == "po_not_in_bc":
         return "The PO on this invoice is not a Gamer PO in BC. Where should it go?"
     if acc.get("n"):
@@ -457,7 +461,7 @@ async def _ap_stage_items(db, days: int = 30) -> List[Dict[str, Any]]:
             {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "mailbox_category": 1, "vendor_canonical": 1,
              "vendor_raw": 1, "email_sender": 1, "staff_reason": 1, "suggested_folder": 1, "routing_reason": 1,
              "routing_path_accuracy": 1, "invoice_number_clean": 1, "amount_float": 1, "created_utc": 1,
-             "fraud_risk": 1, "po_number_clean": 1}).sort([("created_utc", -1)]).limit(500):
+             "fraud_risk": 1, "po_number_clean": 1, "sandbox_draft_skipped": 1}).sort([("created_utc", -1)]).limit(500):
         acc = d.get("routing_path_accuracy") or {}
         items.append({
             "doc_id": d["id"],

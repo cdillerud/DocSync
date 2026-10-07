@@ -27,6 +27,7 @@ const REASONS = {
   vendor_unknown: 'Vendor unknown',
   number_or_amount_missing: 'Number or amount missing',
   po_not_in_bc: 'PO not found in BC',
+  draft_lines_problem: "Draft lines don't add up",
   routing_uncertain: 'Folder uncertain',
   approval_rejected: 'Approval rejected',
   amount_differs: 'BC amount differs',

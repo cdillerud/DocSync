@@ -38,7 +38,7 @@ const ISSUE_TYPE_META = {
 
 const TAB_ORDER = ['all', 'ap_needs_staff', 'isolated_misroute', 'ambiguous_classification', 'ambiguous_match', 'square9_side_issue'];
 
-const AP_REASON_ORDER = ['suspected_fraud', 'vendor_unknown', 'number_or_amount_missing', 'po_not_in_bc', 'routing_uncertain', 'routing_error'];
+const AP_REASON_ORDER = ['suspected_fraud', 'vendor_unknown', 'number_or_amount_missing', 'po_not_in_bc', 'draft_lines_problem', 'routing_uncertain', 'routing_error'];
 
 const AP_REASON_PLACEHOLDERS = {
   suspected_fraud: 'e.g. Called the vendor at the number on file; bank details confirmed',
@@ -53,6 +53,7 @@ const AP_REASON_LABELS = {
   vendor_unknown: 'Vendor unknown',
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
+  draft_lines_problem: "Draft lines don't add up",
   routing_uncertain: 'Folder uncertain',
   routing_error: 'Routing error',
 };

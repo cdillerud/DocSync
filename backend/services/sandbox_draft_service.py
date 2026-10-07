@@ -19,6 +19,7 @@ workflow. This service is the only automatic way the Hub drafts:
 * preview() shows exactly what would be drafted without calling BC.
 """
 import logging
+import re
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List
@@ -207,6 +208,125 @@ async def preview(db, limit: int = 10) -> Dict[str, Any]:
     return {"target": write_target(), "allowed": ALLOWED_ENVIRONMENT, "refusal": refusal() or None, "items": items}
 
 
+
+_MULTI_NUMBER = re.compile(r"[A-Za-z0-9-]{4,}\s*(?:,|;|&|\band\b)\s*[A-Za-z0-9-]{4,}")
+
+
+async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
+    """Why this document's header must not be drafted, or "".
+
+    Used for new drafts and to re-check drafts already in the sandbox
+    (audit_existing): FASTTRA statement "116854, 116890, 116938" and a
+    Westrock "Open Invoices" list were drafted as one invoice under the
+    numbers run together, Vidrala "17" and Dayton "125" (= the amount)
+    from multi-invoice PDFs - all before these checks existed.
+    """
+    from services.number_shape_service import fits
+    raw = str(d.get("invoice_number_raw") or "")
+    num = re.sub(r"[^A-Z0-9]", "", str(d.get("invoice_number_clean") or "").upper())
+    if _MULTI_NUMBER.search(raw):
+        return f"the document lists several invoice numbers ({raw[:60]}): a statement or several invoices in one file"
+    if len(num.lstrip("0")) < 4:
+        return f"invoice number {d.get('invoice_number_clean')} is too short to be a real invoice number"
+    try:
+        amt = float(d.get("amount_float") or 0)
+        if amt and num in {str(int(amt)), f"{amt:.2f}".replace(".", "")}:
+            return f"invoice number {d.get('invoice_number_clean')} is the invoice amount, not its number"
+    except Exception:
+        pass
+    shape_fit = fits(shapes.get(str(d.get("vendor_canonical") or "").upper()), d.get("invoice_number_clean"))
+    if shape_fit is False:
+        return f"invoice number {d.get('invoice_number_clean')} does not look like this vendor's invoice numbers in BC"
+    # The file is named after a vendor invoice AP already entered (Xolution
+    # XO-IN-2026-0033.pdf drafted under the forwarder's freight-bill number).
+    for tok in re.findall(r"[A-Za-z0-9][A-Za-z0-9-]{5,}", str(d.get("file_name") or "")):
+        t = re.sub(r"[^A-Z0-9]", "", tok.upper()).lstrip("0")
+        if len(t) < 6 or t == num.lstrip("0") or not re.search(r"\d{3}", t):
+            continue
+        hit = await db.bc_reference_cache.find_one(
+            {"bc_vendor_no": d.get("vendor_canonical"), "normalized_external_ref": t,
+             "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]}, "bc_status": {"$ne": "Canceled"}},
+            {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1})
+        if hit:
+            return (f"the file name is invoice {hit.get('bc_external_document_no')}, already in Production BC "
+                    f"(BC {hit.get('bc_document_no')})")
+    # Already entered by AP under another number? Same vendor and amount in
+    # Production BC within 60 days of receipt -> do not draft a duplicate.
+    try:
+        recv = datetime.fromisoformat(str(d.get("created_utc"))[:19])
+        lo, hi = (recv - timedelta(days=60)).date().isoformat(), (recv + timedelta(days=60)).date().isoformat()
+        amt = abs(float(d["amount_float"]))
+        # Only a BC invoice no other Hub document accounts for can be this
+        # one under another number: vendors bill repeat amounts (Tumalo
+        # flat 785.00, ATS 500.00, Canpack) - 27 false skips 2026-10-07.
+        async for b in db.bc_reference_cache.find(
+                {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
+                 "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
+                 "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "bc_posting_date": 1}):
+            # A number that fits the vendor's shape is a different invoice
+            # from an older one for the same amount (Hwa Hsia bills the same
+            # container amount every few weeks); only a twin entered around
+            # or after receipt can be this invoice under another number.
+            if shape_fit and str(b.get("bc_posting_date") or "") < (recv - timedelta(days=14)).date().isoformat():
+                continue
+            if not await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"], "id": {"$ne": d["id"]}}, limit=1):
+                return (f"BC already has invoice {b.get('bc_external_document_no')} (BC {b.get('bc_document_no')}) "
+                        f"from this vendor for the same amount")
+    except Exception:
+        pass
+    # Same vendor invoice number already in Production BC (any amount):
+    # the duplicate lookup in the draft path only checks the sandbox.
+    n = num.lstrip("0")
+    same_no = await db.bc_reference_cache.find_one(
+        {"bc_vendor_no": d["vendor_canonical"], "normalized_external_ref": n,
+         "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice", "purchase_credit_memo"]},
+         "bc_status": {"$ne": "Canceled"}},
+        {"_id": 0, "bc_document_no": 1}) if n else None
+    if same_no:
+        return f"Production BC already has this vendor invoice number (BC {same_no.get('bc_document_no')}): same vendor invoice number"
+    return ""
+
+
+async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
+    """Re-check the Hub's own sandbox drafts against today's header checks.
+
+    A draft AP has not touched (read-back state "draft", no edits) that
+    would not be drafted today is removed from the sandbox and the invoice
+    goes to staff with the reason. Drafts AP edited are left alone.
+    """
+    from services.number_shape_service import vendor_shapes
+    if refusal():
+        return {"refused": refusal()}
+    from routers.gpi_integration import _delete_orphan_pi_header
+    shapes = await vendor_shapes(db)
+    now = datetime.now(timezone.utc).isoformat()
+    out = {"checked": 0, "removed": [], "kept_edited": 0}
+    async for d in db.hub_documents.find({"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"_id": 0}):
+        out["checked"] += 1
+        rb = d.get("bc_draft_readback") or {}
+        if rb.get("edits"):
+            out["kept_edited"] += 1
+            continue
+        problem = await header_problem(db, d, shapes)
+        if not problem:
+            continue
+        pi = d["bc_purchase_invoice"]
+        out["removed"].append({"bc_record_no": pi.get("bc_record_no"), "vendor": d.get("vendor_canonical"),
+                               "number": d.get("invoice_number_clean"), "reason": problem})
+        if not apply:
+            continue
+        deleted = await _delete_orphan_pi_header(pi.get("bc_system_id"))
+        await db.hub_documents.update_one({"id": d["id"]}, {
+            "$set": {"bc_purchase_invoice_removed": {**pi, "removed_at": now, "reason": problem, "delete_result": deleted},
+                     "sandbox_draft_skipped": {"reason": problem, "at": now}},
+            "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": "", "bc_draft_readback": ""}})
+        await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sandbox_draft_removed", "by": "hub", "at": now,
+                                                "environment": ALLOWED_ENVIRONMENT, "bc_record_no": pi.get("bc_record_no"),
+                                                "detail": {"reason": problem, "delete_result": deleted}})
+    return out
+
+
 async def draft(db, limit: int = 5) -> Dict[str, Any]:
     reason = refusal()
     if reason:
@@ -226,45 +346,9 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
     for d in await candidates(db, limit * 3):
         if len(results) >= limit:
             break
-        # The number must look like this vendor's invoice numbers in BC.
-        if fits(shapes.get(str(d["vendor_canonical"]).upper()), d.get("invoice_number_clean")) is False:
-            await skip(d, f"invoice number {d.get('invoice_number_clean')} does not look like this vendor's invoice numbers in BC")
-            continue
-        # Already entered by AP under another number? Same vendor and amount in
-        # Production BC within 60 days of receipt -> do not draft a duplicate.
-        try:
-            recv = datetime.fromisoformat(str(d.get("created_utc"))[:19])
-            lo, hi = (recv - timedelta(days=60)).date().isoformat(), (recv + timedelta(days=60)).date().isoformat()
-            amt = abs(float(d["amount_float"]))
-            # Only a BC invoice no other Hub document accounts for can be this
-            # one under another number: vendors bill repeat amounts (Tumalo
-            # flat 785.00, ATS 500.00, Canpack) - 27 false skips 2026-10-07.
-            twin = None
-            async for b in db.bc_reference_cache.find(
-                    {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
-                     "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
-                     "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
-                    {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1}):
-                if not await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"], "id": {"$ne": d["id"]}}, limit=1):
-                    twin = b
-                    break
-        except Exception:
-            twin = None
-        if twin:
-            await skip(d, f"BC already has invoice {twin.get('bc_external_document_no')} (BC {twin.get('bc_document_no')}) "
-                          f"from this vendor for the same amount")
-            continue
-        # Same vendor invoice number already in Production BC (any amount):
-        # the duplicate lookup in the draft path only checks the sandbox.
-        import re as _re
-        num = _re.sub(r"[^A-Z0-9]", "", str(d.get("invoice_number_clean") or "").upper()).lstrip("0")
-        same_no = await db.bc_reference_cache.find_one(
-            {"bc_vendor_no": d["vendor_canonical"], "normalized_external_ref": num,
-             "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice", "purchase_credit_memo"]},
-             "bc_status": {"$ne": "Canceled"}},
-            {"_id": 0, "bc_document_no": 1}) if num else None
-        if same_no:
-            await skip(d, f"Production BC already has this vendor invoice number (BC {same_no.get('bc_document_no')}): same vendor invoice number")
+        problem = await header_problem(db, d, shapes)
+        if problem:
+            await skip(d, problem)
             continue
         try:
             rec_probe = await receipt_lines_for(db, d)

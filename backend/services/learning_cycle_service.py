@@ -138,6 +138,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
+        from services.sandbox_draft_service import audit_existing
+        summary["sandbox_draft_audit"] = await audit_existing(db)
         from services.sandbox_draft_service import draft as sandbox_draft
         summary["sandbox_drafts"] = await sandbox_draft(db, limit=10)
         if summary["sandbox_drafts"].get("drafted"):

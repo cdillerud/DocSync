@@ -468,6 +468,23 @@ function RoutingBadge({ routing, className = '' }) {
   );
 }
 
+// Current AP stage (ap_stage_service) - supersedes the intake-time checks.
+const AP_STAGE_LABELS = {
+  needs_staff: ['Needs staff', 'border-amber-500/40 bg-amber-500/10 text-amber-600'],
+  awaiting_approval: ['Awaiting approval', 'border-sky-500/40 bg-sky-500/10 text-sky-600'],
+  on_hold: ['On hold', 'border-sky-500/40 bg-sky-500/10 text-sky-600'],
+  awaiting_receipt: ['Waiting for receipt', 'border-sky-500/40 bg-sky-500/10 text-sky-600'],
+  drafted: ['Drafted in BC (sandbox)', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
+  ready: ['Ready for AP', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
+  in_bc_check: ['In BC, check', 'border-amber-500/40 bg-amber-500/10 text-amber-600'],
+  in_bc: ['In BC', 'border-border bg-muted text-muted-foreground'],
+  paid: ['Paid', 'border-border bg-muted text-muted-foreground'],
+  filed_by_staff: ['Filed by staff', 'border-border bg-muted text-muted-foreground'],
+  file_only: ['File only', 'border-border bg-muted text-muted-foreground'],
+  no_action: ['No action', 'border-border bg-muted text-muted-foreground'],
+  container: ['Split into pieces', 'border-border bg-muted text-muted-foreground'],
+};
+
 export default function DocumentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -475,6 +492,7 @@ export default function DocumentDetailPage() {
   const [workflows, setWorkflows] = useState([]);
   const [eventTimeline, setEventTimeline] = useState([]);
   const [derivedState, setDerivedState] = useState(null);
+  const [showIntake, setShowIntake] = useState(false);
   const [loading, setLoading] = useState(true);
   const [linking, setLinking] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -605,6 +623,12 @@ export default function DocumentDetailPage() {
             <h2 className="text-2xl font-bold tracking-tight truncate" style={{ fontFamily: 'Chivo, sans-serif' }}>
               {doc.file_name}
             </h2>
+            {AP_STAGE_LABELS[doc.ap_stage] ? (
+              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${AP_STAGE_LABELS[doc.ap_stage][1]}`}
+                data-testid="doc-status-badge" title="Current AP stage (see AP history)">
+                {AP_STAGE_LABELS[doc.ap_stage][0]}
+              </span>
+            ) : (
             <span
               className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
                 derivedState?.display?.workflow
@@ -616,6 +640,7 @@ export default function DocumentDetailPage() {
             >
               {derivedState?.display?.workflow?.label || doc.status}
             </span>
+            )}
           </div>
           <p className="text-xs text-muted-foreground font-mono mt-1" data-testid="doc-id-display">{doc.id}</p>
         </div>
@@ -812,6 +837,16 @@ export default function DocumentDetailPage() {
             const isWarn = vs === 'warn';
             const isFail = vs === 'fail';
             const isPass = !isWarn && !isFail;
+            const superseded = !!AP_STAGE_LABELS[doc.ap_stage];
+            if (superseded && !showIntake) return (
+              <Card className="border border-border" data-testid="doc-bc-validation-card">
+                <CardContent className="py-3 flex items-center gap-2 text-xs text-muted-foreground">
+                  <ShieldCheck className="w-4 h-4" />
+                  <span><b>BC validation at intake</b>: {isPass ? 'passed' : isWarn ? 'warnings' : 'did not pass'} when the document arrived. Superseded by the current stage in AP history.</span>
+                  <Button variant="ghost" size="sm" className="ml-auto h-6 text-[11px]" onClick={() => setShowIntake(true)}>Show</Button>
+                </CardContent>
+              </Card>
+            );
             return (
             <Card className="border border-border" data-testid="doc-bc-validation-card">
               <CardHeader className="pb-3">
@@ -1048,11 +1083,19 @@ export default function DocumentDetailPage() {
           {derivedState && (
             <Card className="border border-border" data-testid="derived-state-card">
               <CardHeader className="pb-3">
-                <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                  Intake checks (when it arrived)
-                </CardTitle>
-                <p className="text-[11px] text-muted-foreground">How the document looked to the Hub on arrival. The current stage is in AP history above.</p>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
+                    Intake checks (when it arrived)
+                  </CardTitle>
+                  {AP_STAGE_LABELS[doc.ap_stage] && (
+                    <Button variant="ghost" size="sm" className="ml-auto h-6 text-[11px]" onClick={() => setShowIntake(v => !v)}>
+                      {showIntake ? 'Hide' : 'Show'}
+                    </Button>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground">How the document looked to the Hub on arrival{AP_STAGE_LABELS[doc.ap_stage] ? <>; superseded by its current stage, <b>{AP_STAGE_LABELS[doc.ap_stage][0]}</b> (AP history above)</> : '. The current stage is in AP history above'}.</p>
               </CardHeader>
+              {(!AP_STAGE_LABELS[doc.ap_stage] || showIntake) && (
               <CardContent>
                 <div className="grid grid-cols-3 gap-4 mb-4">
                   {/* Validation State */}
@@ -1086,7 +1129,7 @@ export default function DocumentDetailPage() {
                   <div className="bg-muted/50 rounded-md p-2.5 mb-3">
                     <p className="text-xs text-muted-foreground">{derivedState.state_reason}</p>
                     {/* PO Override Button — shows when doc is blocked on PO match */}
-                    {derivedState.state_reason.includes('PO') && !doc.manual_po_override && (
+                    {derivedState.state_reason.includes('PO') && !doc.manual_po_override && !AP_STAGE_LABELS[doc.ap_stage] && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1129,10 +1172,10 @@ export default function DocumentDetailPage() {
                   )];
                   if (labels.length === 0) return null;
                   return (
-                  <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-md p-2.5 mb-3">
-                    <p className="text-xs font-medium text-red-700 dark:text-red-300 mb-1">Blocking Issues</p>
+                  <div className={`${AP_STAGE_LABELS[doc.ap_stage] ? 'bg-muted/50 border border-border' : 'bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800'} rounded-md p-2.5 mb-3`}>
+                    <p className={`text-xs font-medium mb-1 ${AP_STAGE_LABELS[doc.ap_stage] ? 'text-muted-foreground' : 'text-red-700 dark:text-red-300'}`}>{AP_STAGE_LABELS[doc.ap_stage] ? 'Issues found at intake' : 'Blocking Issues'}</p>
                     {labels.map((label, idx) => (
-                      <p key={idx} className="text-xs text-red-600 dark:text-red-400">• {label}</p>
+                      <p key={idx} className={`text-xs ${AP_STAGE_LABELS[doc.ap_stage] ? 'text-muted-foreground' : 'text-red-600 dark:text-red-400'}`}>• {label}</p>
                     ))}
                   </div>
                   );
@@ -1162,6 +1205,7 @@ export default function DocumentDetailPage() {
                   Derived from: {derivedState.derived_from === 'events' ? 'Event history' : 'Legacy fields'}
                 </p>
               </CardContent>
+              )}
             </Card>
           )}
           

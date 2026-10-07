@@ -7,12 +7,12 @@ import { ShoppingCart, Loader2, ChevronDown, ChevronRight, RefreshCw } from 'luc
 import api from '@/lib/api';
 
 // One stage per sales-mailbox document (sales_stage_service). BC is the
-// ground truth: a customer PO is "In BC" once inside sales' order carries it.
+// ground truth: a customer PO is "Entered in BC" once inside sales' Production order carries it.
 const STAGES = [
   { key: 'needs_rep', label: 'Needs a rep', help: 'A person must decide; the reason is shown', tone: 'amber' },
   { key: 'ready', label: 'Ready to draft', help: 'Customer and every line known; the Hub drafts it in the BC sandbox within the hour', tone: 'emerald' },
-  { key: 'drafted', label: 'Drafted in BC', help: 'Sales order drafted in the BC sandbox (PRE) for review', tone: 'emerald' },
-  { key: 'in_bc', label: 'In BC', help: 'A BC sales order carries this customer PO', tone: 'muted' },
+  { key: 'drafted', label: 'Drafted (sandbox)', help: 'The Hub drafted the sales order in the PRE sandbox, a test copy of BC. Not a real order: it moves to Entered in BC once inside sales enters it in Production', tone: 'emerald' },
+  { key: 'in_bc', label: 'Entered in BC', help: 'Inside sales entered it: a Production BC sales order carries this customer PO', tone: 'muted' },
   { key: 'duplicate', label: 'Duplicate', help: 'Another copy or page of a PO already counted', tone: 'muted' },
   { key: 'purchasing', label: 'Purchasing', help: "A supplier's document about a Gamer purchase order", tone: 'muted' },
   { key: 'to_ap', label: 'To AP', help: 'An AP invoice that came to sales', tone: 'muted' },
@@ -157,8 +157,8 @@ export default function SalesInboxPage() {
                         <td className="py-2 pr-3 max-w-[260px]"><Link className="text-primary underline" to={`/documents/${r.id}`} onClick={e => e.stopPropagation()}>{r.file_name}</Link>
                           <div className="text-xs text-muted-foreground truncate">{r.subject}</div></td>
                         <td className="py-2 pr-3 text-xs max-w-[280px]">
-                          {r.stage === 'in_bc' && <>BC order <b className="font-mono">{r.bc_order_no}</b> ({r.match === 'customer_po' ? 'by customer PO' : 'by order no.'})</>}
-                          {r.stage === 'drafted' && r.draft && <>Draft <b className="font-mono">{r.draft.bc_order_no}</b> in {r.draft.environment} · {money(r.draft.total)}</>}
+                          {r.stage === 'in_bc' && <>Production order <b className="font-mono">{r.bc_order_no}</b> ({r.match === 'customer_po' ? 'by customer PO' : r.match === 'items_and_quantities' ? 'same items and quantities' : 'by order no.'})</>}
+                          {r.stage === 'drafted' && r.draft && <>Sandbox draft <b className="font-mono">{r.draft.bc_order_no}</b> (PRE) · {money(r.draft.total)} · <span className="text-muted-foreground">not a real order</span></>}
                           {r.stage === 'needs_rep' && <span className="text-amber-700 dark:text-amber-400">{r.reason_text}{r.detail ? ` (${r.detail})` : ''}</span>}
                           {r.stage === 'duplicate' && <>Copy of <Link className="underline" to={`/documents/${r.duplicate_of}`} onClick={e => e.stopPropagation()}>another document</Link></>}
                           {['filed', 'purchasing', 'to_ap', 'ready'].includes(r.stage) && <span className="text-muted-foreground">{(r.role || '').replace(/_/g, ' ')}</span>}

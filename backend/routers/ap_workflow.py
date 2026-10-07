@@ -133,10 +133,10 @@ async def suggested_approver(doc_id: str):
 
 
 STAGE_LABELS = {
-    "needs_staff": "Needs staff", "ready": "Ready for AP", "in_bc": "In BC", "in_bc_check": "In BC, check",
+    "needs_staff": "Needs staff", "ready": "Ready for AP", "in_bc": "Entered in BC", "in_bc_check": "Entered in BC, check",
     "paid": "Paid", "no_action": "No action", "container": "Split into pieces", "filed_by_staff": "Filed by staff",
     "file_only": "File only", "on_hold": "On hold", "awaiting_approval": "Awaiting approval",
-    "drafted": "Drafted in BC (sandbox)", "awaiting_receipt": "Waiting for receipt",
+    "drafted": "Drafted (sandbox)", "awaiting_receipt": "Waiting for receipt",
 }
 
 

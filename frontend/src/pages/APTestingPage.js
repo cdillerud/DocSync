@@ -22,7 +22,7 @@ const TESTS = [
     steps: [
       <>Open the <Link className="text-primary underline" to="/ap">AP Inbox</Link>. Every AP document is in exactly one stage, shown as tiles along the top.</>,
       <>Click each tile and read its one-line description. Only <b>Needs staff</b>, <b>Awaiting approval</b> and <b>On hold</b> need a person.</>,
-      <>Click <b>In BC</b>. Use the search box (vendor or invoice number) to find three invoices you remember entering. Check the "Why" column shows the right BC document number.</>,
+      <>Click <b>Entered in BC</b>. Use the search box (vendor or invoice number) to find three invoices you remember entering. Check the "Why" column shows the right BC document number.</>,
       <>Click a file name to open the document. <b>AP history</b> shows the stage, the BC invoice, any corrections the Hub made, and who did what.</>,
     ],
     check: 'Pass if the stages make sense to you and the three invoices show the right BC numbers. Note anything that was unclear.',
@@ -31,7 +31,7 @@ const TESTS = [
   {
     key: 't3', title: 'Check the AP folders', time: '10 min',
     steps: [
-      <>In the <Link className="text-primary underline" to="/ap">AP Inbox</Link>, open <b>Drafted in BC</b>, then <b>Ready for AP</b> and <b>Waiting for receipt</b>.</>,
+      <>In the <Link className="text-primary underline" to="/ap">AP Inbox</Link>, open <b>Drafted (sandbox)</b>, then <b>Ready for AP</b> and <b>Waiting for receipt</b>.</>,
       <>For ten documents, look at the <b>Folder</b> column. Is that where you would file it in Square9 (lane and subfolder)?</>,
       <>Write down any document whose folder is wrong and where it should go.</>,
     ],

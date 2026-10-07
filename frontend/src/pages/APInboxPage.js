@@ -12,11 +12,11 @@ const STAGES = [
   { key: 'needs_staff', label: 'Needs staff', help: 'A person must decide; the reason is shown', action: { to: '/decision-queue', label: 'Open decision queue' }, tone: 'amber' },
   { key: 'awaiting_approval', label: 'Awaiting approval', help: 'Waiting for a named approver', action: { to: '/ap-workflow', label: 'Open approvals' }, tone: 'sky' },
   { key: 'on_hold', label: 'On hold', help: 'Held by staff with a reason', action: { to: '/ap-workflow', label: 'Open holds' }, tone: 'sky' },
-  { key: 'drafted', label: 'Drafted in BC', help: 'The Hub drafted it in the BC sandbox (PRE); AP reviews and posts the draft in BC', tone: 'emerald' },
+  { key: 'drafted', label: 'Drafted (sandbox)', help: 'The Hub drafted it in the PRE sandbox, a test copy of BC. Not a real invoice: it moves to Entered in BC once AP enters it in Production', tone: 'emerald' },
   { key: 'awaiting_receipt', label: 'Waiting for receipt', help: 'Product invoice that arrived before the goods were received in BC; the Hub drafts it from the receipt once it posts', tone: 'sky' },
   { key: 'ready', label: 'Ready for AP', help: 'Vendor, number, amount and folder known; waiting for AP to enter it in BC', tone: 'emerald' },
-  { key: 'in_bc_check', label: 'In BC, check', help: "Entered in BC, but BC's amount or invoice number differs from the document", tone: 'amber' },
-  { key: 'in_bc', label: 'In BC', help: 'Entered by AP; BC is now the record', tone: 'muted' },
+  { key: 'in_bc_check', label: 'Entered in BC, check', help: "Entered in Production BC, but BC's amount or invoice number differs from the document", tone: 'amber' },
+  { key: 'in_bc', label: 'Entered in BC', help: 'AP entered it in Production BC; BC is now the record', tone: 'muted' },
   { key: 'paid', label: 'Paid', help: 'BC shows it paid', tone: 'muted' },
   { key: 'filed_by_staff', label: 'Filed by staff', help: 'Staff already filed it in Square9', tone: 'muted' },
   { key: 'file_only', label: 'File only', help: 'Supporting paperwork (BOLs, packing lists, receipts); no AP decision', tone: 'muted' },
@@ -55,7 +55,7 @@ function why(doc) {
   if (doc.ap_approval) return `${doc.ap_approval.approver} to approve`;
   if (doc.suggested_approver) return `${doc.suggested_approver} to approve (suggested)`;
   if (doc.no_action_reason) return String(doc.no_action_reason).replace(/_/g, ' ').replace(/^excluded by staff:/, 'excluded by staff ');
-  if (doc.bc_draft_no) return `Draft ${doc.bc_draft_no} (${doc.bc_draft_environment && doc.bc_draft_environment.startsWith('PRE') ? 'PRE sandbox' : doc.bc_draft_environment})`;
+  if (doc.bc_draft_no) return `Sandbox draft ${doc.bc_draft_no} (${doc.bc_draft_environment && doc.bc_draft_environment.startsWith('PRE') ? 'PRE' : doc.bc_draft_environment}), not a real invoice`;
   if (doc.bc_link?.bc_document_no) return `BC ${doc.bc_link.bc_document_no}${doc.bc_link.bc_status ? ` (${doc.bc_link.bc_status})` : ''}`;
   if (doc.staff_decided) return 'Folder decided by staff';
   return '';

@@ -47,12 +47,19 @@ def refusal() -> str:
 async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]]:
     bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no"))
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    out, seen = [], set()
+    out = []
+    # Already drafted from another Hub copy of the same invoice (BC's own
+    # duplicate check refused R+L I848946906 the second time).
+    seen = set()
+    async for x in db.hub_documents.find({"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT},
+                                         {"_id": 0, "vendor_canonical": 1, "invoice_number_clean": 1}):
+        seen.add((x.get("vendor_canonical"), str(x.get("invoice_number_clean") or "").upper()))
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": "ready",
              "document_type": "AP_Invoice", "is_duplicate": {"$ne": True}, "bc_link": {"$exists": False},
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$gt": 0},
-             "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}},
+             "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT},
+             "sandbox_draft_skipped": {"$exists": False}},
             {"_id": 0, "file_content_b64": 0}).sort([("created_utc", 1)]):
         if d.get("vendor_canonical") not in bc_vendors:
             continue
@@ -66,6 +73,61 @@ async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]
     return out
 
 
+def _line_type(raw: str) -> str:
+    t = str(raw or "").replace("_x0020_", " ").replace("_x002F_", "/").replace("_x0028_", "(").replace("_x0029_", ")").strip()
+    if t.lower().startswith("g/l") or t.lower() == "account":
+        return "Account"
+    if t.lower().startswith("charge"):
+        return "Charge"
+    return t or "Item"
+
+
+async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Draft lines from the BC purchase receipt this invoice is for.
+
+    AP invoices PO-based purchases against what was received; the receipt's
+    item lines are exactly the invoice's (60/60 orders checked) and one
+    receipt's lines add up to the invoice total (80/80, 2026-10-06), where
+    the vendor-profile line builder matched BC's item only 51% of the time
+    (it coded Ball / O-I / Canpack product as pallets). Read-only BC GET.
+    """
+    import itertools
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    order = str(doc.get("po_number_clean") or "").strip().upper()
+    amount = abs(float(doc.get("amount_float") or 0))
+    if not order or not amount:
+        return {}
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.get(f"{base}/purchaseReceipts", headers={"Authorization": f"Bearer {token}"}, params={
+            "$filter": f"orderNumber eq '{order}'",
+            "$expand": "purchaseReceiptLines($select=lineType,lineObjectNumber,description,quantity,unitCost,unitOfMeasureCode)",
+            "$select": "number,orderNumber,postingDate"})
+    if r.status_code != 200:
+        return {}
+    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"id": {"$ne": doc.get("id")}}))
+    recs = [x for x in r.json().get("value", []) if x.get("number") not in used]
+
+    def item_lines(rec):
+        return [l for l in rec.get("purchaseReceiptLines", []) if l.get("lineObjectNumber") and float(l.get("quantity") or 0)]
+
+    tots = [round(sum(float(l["quantity"]) * float(l.get("unitCost") or 0) for l in item_lines(x)), 2) for x in recs]
+    for k in range(1, min(3, len(recs)) + 1):
+        for combo in itertools.combinations(range(len(recs)), k):
+            if abs(sum(tots[i] for i in combo) - amount) <= max(1.0, 0.002 * amount):
+                lines = []
+                for i in combo:
+                    for l in item_lines(recs[i]):
+                        lines.append({"lineType": _line_type(l.get("lineType")), "lineObjectNumber": l["lineObjectNumber"],
+                                      "description": (l.get("description") or "")[:100], "quantity": float(l["quantity"]),
+                                      "unitCost": float(l.get("unitCost") or 0), "source": f"bc_receipt {recs[i]['number']}"})
+                return {"lines": lines, "receipts": [recs[i]["number"] for i in combo], "order": order}
+    return {}
+
+
 def lines_problem(planned) -> str:
     """A draft AP can stand behind: no invented negative balancing lines on
     an invoice (the line builder forces the total with a negative line when
@@ -74,10 +136,13 @@ def lines_problem(planned) -> str:
         return "no lines could be built"
     for l in planned:
         try:
-            if float(l.get("unitCost") or 0) * float(l.get("quantity") or 1) < 0:
-                return "a negative balancing line was needed; the extracted lines do not add up"
+            amount = float(l.get("unitCost") or 0) * float(l.get("quantity") or 1)
         except (TypeError, ValueError):
             return "a line has no usable amount"
+        # A real discount line (R+L, XPO freight bills) is fine; a negative
+        # line the line builder invented to force the total is not.
+        if amount < 0 and (l.get("reconciled") or l.get("reconcile_info")):
+            return "a negative balancing line was needed; the extracted lines do not add up"
     return ""
 
 
@@ -86,7 +151,11 @@ async def preview(db, limit: int = 10) -> Dict[str, Any]:
     items = []
     for d in await candidates(db, limit):
         try:
-            lines = await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"])
+            rec = await receipt_lines_for(db, d)
+        except Exception:
+            rec = {}
+        try:
+            lines = rec.get("lines") or await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"])
         except Exception as e:
             lines = {"error": repr(e)[:200]}
         planned = lines if isinstance(lines, list) else (lines.get("lines") if isinstance(lines, dict) else None)
@@ -107,6 +176,7 @@ async def preview(db, limit: int = 10) -> Dict[str, Any]:
             "planned_total": total,
             "lines_match_amount": total is not None and abs(total - float(d.get("amount_float") or 0)) < 0.02,
             "lines_problem": lines_problem(planned) or None,
+            "lines_source": f"BC receipt {', '.join(rec['receipts'])}" if rec.get("lines") else "vendor profile",
         })
     return {"target": write_target(), "allowed": ALLOWED_ENVIRONMENT, "refusal": refusal() or None, "items": items}
 
@@ -118,12 +188,45 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
     from routers.gpi_integration import create_purchase_invoice_from_document
     results: List[Dict[str, Any]] = []
     from routers.gpi_integration import _build_pi_lines_with_mapping
+    from services.number_shape_service import vendor_shapes, fits
+    shapes = await vendor_shapes(db)
     skipped = []
+
+    async def skip(d, reason):
+        skipped.append({"document_id": d["id"], "file_name": d.get("file_name"), "reason": reason})
+        await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
+            "reason": reason, "at": datetime.now(timezone.utc).isoformat()}}})
+
     for d in await candidates(db, limit * 3):
         if len(results) >= limit:
             break
+        # The number must look like this vendor's invoice numbers in BC.
+        if fits(shapes.get(str(d["vendor_canonical"]).upper()), d.get("invoice_number_clean")) is False:
+            await skip(d, f"invoice number {d.get('invoice_number_clean')} does not look like this vendor's invoice numbers in BC")
+            continue
+        # Already entered by AP under another number? Same vendor and amount in
+        # Production BC within 60 days of receipt -> do not draft a duplicate.
         try:
-            problem = lines_problem(await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"]))
+            recv = datetime.fromisoformat(str(d.get("created_utc"))[:19])
+            lo, hi = (recv - timedelta(days=60)).date().isoformat(), (recv + timedelta(days=60)).date().isoformat()
+            amt = abs(float(d["amount_float"]))
+            twin = await db.bc_reference_cache.find_one(
+                {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
+                 "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
+                 "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1})
+        except Exception:
+            twin = None
+        if twin:
+            await skip(d, f"BC already has invoice {twin.get('bc_external_document_no')} (BC {twin.get('bc_document_no')}) "
+                          f"from this vendor for the same amount")
+            continue
+        try:
+            rec_probe = await receipt_lines_for(db, d)
+        except Exception:
+            rec_probe = {}
+        try:
+            problem = "" if rec_probe.get("lines") else lines_problem(await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"]))
         except Exception as e:
             problem = f"line build failed: {e!r}"[:200]
         if problem:
@@ -133,12 +236,25 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             continue
         legacy = d.get("bc_purchase_invoice") and (d["bc_purchase_invoice"].get("environment") != ALLOWED_ENVIRONMENT)
         try:
+            rec = await receipt_lines_for(db, d)
+        except Exception:
+            rec = {}
+        if rec.get("lines"):
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
+                "draft_lines_override": rec["lines"], "draft_receipt_numbers": rec["receipts"],
+                "draft_lines_source": "bc_receipt"}})
+        try:
             r = await create_purchase_invoice_from_document(
                 d["id"], vendor_no_override=d["vendor_canonical"], force=bool(legacy))
             if not isinstance(r, dict):
                 r = {"result": str(r)[:200]}
         except Exception as e:
             r = {"success": False, "error": getattr(e, "detail", None) or repr(e)[:300]}
+        if (r.get("error") == "line_total_mismatch" or (isinstance(r.get("error"), dict) and r["error"].get("error") == "line_total_mismatch")
+                or "line_total_mismatch" in str(r.get("error") or "")):
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
+                "reason": "the extracted lines do not add up to the invoice total",
+                "detail": str(r.get("error"))[:300], "at": datetime.now(timezone.utc).isoformat()}}})
         results.append({"document_id": d["id"], "file_name": d.get("file_name"), "vendor_no": d.get("vendor_canonical"),
                          "vendor_invoice_no": d.get("invoice_number_clean"), "amount": d.get("amount_float"),
                          "success": bool(r.get("success")) and not r.get("already_exists"),

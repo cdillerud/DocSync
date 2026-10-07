@@ -51,6 +51,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["cfdi"] = {"error": repr(e)}
     try:
+        # Invoice numbers that do not look like the vendor's numbers in BC
+        # ("10" for NBC Packaging 1813556) -> the one in the subject / file name.
+        from services.number_shape_service import correct_recent as shape_correct
+        summary["number_shape"] = await shape_correct(db)
+    except Exception as e:
+        summary["number_shape"] = {"error": repr(e)}
+    try:
         # The Gamer order when the PO field holds something else (glued
         # text, a vendor reference), confirmed against BC's known orders.
         from services.po_correction_service import correct_recent as po_correct

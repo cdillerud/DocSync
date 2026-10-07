@@ -258,6 +258,10 @@ async def _build_pi_lines_with_mapping(doc: dict, db, vendor_no: str = "") -> li
     
     The profile learns from what's IN BC — making our output as accurate as a human.
     """
+    # Lines prepared by sandbox_draft_service from the BC receipt this
+    # invoice is for (item, quantity, cost as AP would invoice them).
+    if isinstance(doc.get("draft_lines_override"), list) and doc["draft_lines_override"]:
+        return [dict(l) for l in doc["draft_lines_override"]]
     from services.vendor_invoice_profile_service import (
         get_or_build_profile, build_smart_pi_lines, detect_deviations
     )

@@ -188,6 +188,7 @@ async def ap_summary(doc_id: str):
         "bc": {k: bl.get(k) for k in ("bc_document_no", "bc_entity", "bc_status", "bc_vendor_no", "bc_amount",
                                       "bc_order_number", "match", "bc_location_lane", "linked_at")} if bl else None,
         "bc_number_typo_suspect": d.get("bc_number_typo_suspect"), "bc_amount_mismatch": d.get("bc_amount_mismatch"),
+        "bc_draft_readback": d.get("bc_draft_readback"),
         "bc_draft": ({k: (d.get("bc_purchase_invoice") or {}).get(k) for k in ("bc_record_no", "environment", "status", "created_at", "lines_added", "lines_total")}
                      if (d.get("bc_purchase_invoice") or {}).get("environment") else None),
         "duplicate_of": d.get("duplicate_of_document_id") if d.get("is_duplicate") else None,

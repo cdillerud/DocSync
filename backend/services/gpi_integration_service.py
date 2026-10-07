@@ -639,16 +639,26 @@ async def add_purchase_invoice_lines(
                     # Default to Comment if no item/account available
                     line_type = "Comment"
 
+            quantity = float(line.get("quantity", 1) or 1)
+            unit_cost = line.get("unitCost")
+            # BC ignores a negative unit cost on an item line and silently uses
+            # the item's default cost (R+L discount -2,515.94 became 45.00; the
+            # draft totalled 3,154.68 for a 593.74 invoice, 2026-10-07). A
+            # discount / credit line is negative quantity x positive cost.
+            if unit_cost is not None and float(unit_cost) < 0:
+                quantity, unit_cost = -quantity, -float(unit_cost)
             line_payload = {
                 "lineType": line_type,
-                "quantity": float(line.get("quantity", 1) or 1),
+                "quantity": quantity,
             }
             if line_obj and line_type != "Comment":
                 line_payload["lineObjectNumber"] = line_obj
             if line.get("description"):
                 line_payload["description"] = str(line["description"])[:100]
-            if line.get("unitCost") is not None and float(line.get("unitCost", 0)) > 0:
-                line_payload["unitCost"] = float(line["unitCost"])
+            # Always send the cost (0 included): an omitted cost also falls
+            # back to the item's default cost.
+            if unit_cost is not None and line_type != "Comment":
+                line_payload["unitCost"] = float(unit_cost)
 
             logger.info("Adding PI line %d/%d: type=%s obj=%s qty=%s cost=$%s desc=%s",
                         idx + 1, len(lines), line_payload.get("lineType"),

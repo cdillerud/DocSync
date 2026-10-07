@@ -34,6 +34,10 @@ def write_target() -> str:
 
 
 def refusal() -> str:
+    # Paused 2026-10-07: read-back found drafts whose BC total differs from
+    # the invoice (R+L 593.74 -> 3,154.68). Resume once fixed.
+    if os.environ.get("SANDBOX_DRAFTING_PAUSED", "true").strip().lower() == "true":
+        return "Sandbox drafting is paused (SANDBOX_DRAFTING_PAUSED)"
     if os.environ.get("BC_WRITE_ENABLED", "false").strip().lower() != "true":
         return "BC writes are disabled (BC_WRITE_ENABLED is not true)"
     target = write_target()
@@ -42,6 +46,28 @@ def refusal() -> str:
     if "prod" in target.lower():
         return "Drafting never targets Production"
     return ""
+
+
+async def verify_draft_total(system_id: str, expected: float) -> Dict[str, Any]:
+    """Read the draft just created back from BC and compare its total with
+    the invoice (read-only GET)."""
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    env = ALLOWED_ENVIRONMENT
+    token = await bc.get_bc_token(environment=env)
+    async with httpx.AsyncClient(timeout=60) as c:
+        comps = (await c.get(f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/{env}/api/v2.0/companies",
+                             headers={"Authorization": f"Bearer {token}"})).json().get("value", [])
+        cid = next((x["id"] for x in comps if "gamer" in str(x.get("name", "")).lower()), comps[0]["id"] if comps else None)
+        r = await c.get(f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/{env}/api/v2.0/companies({cid})/purchaseInvoices({system_id})",
+                        headers={"Authorization": f"Bearer {token}"}, params={"$select": "number,totalAmountIncludingTax,totalAmountExcludingTax"})
+    if r.status_code != 200:
+        return {"ok": None, "error": r.status_code}
+    v = r.json()
+    total = float(v.get("totalAmountIncludingTax") or 0)
+    excl = float(v.get("totalAmountExcludingTax") or 0)
+    ok = abs(total - abs(expected)) < 0.02 or abs(excl - abs(expected)) < 0.02
+    return {"ok": ok, "bc_total": total, "expected": expected}
 
 
 async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]]:
@@ -221,6 +247,18 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await skip(d, f"BC already has invoice {twin.get('bc_external_document_no')} (BC {twin.get('bc_document_no')}) "
                           f"from this vendor for the same amount")
             continue
+        # Same vendor invoice number already in Production BC (any amount):
+        # the duplicate lookup in the draft path only checks the sandbox.
+        import re as _re
+        num = _re.sub(r"[^A-Z0-9]", "", str(d.get("invoice_number_clean") or "").upper()).lstrip("0")
+        same_no = await db.bc_reference_cache.find_one(
+            {"bc_vendor_no": d["vendor_canonical"], "normalized_external_ref": num,
+             "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice", "purchase_credit_memo"]},
+             "bc_status": {"$ne": "Canceled"}},
+            {"_id": 0, "bc_document_no": 1}) if num else None
+        if same_no:
+            await skip(d, f"Production BC already has this vendor invoice number (BC {same_no.get('bc_document_no')}): same vendor invoice number")
+            continue
         try:
             rec_probe = await receipt_lines_for(db, d)
         except Exception:
@@ -265,6 +303,23 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": "the extracted lines do not add up to the invoice total",
                 "detail": str(r.get("error"))[:300], "at": datetime.now(timezone.utc).isoformat()}}})
+        if r.get("success") and not r.get("already_exists") and r.get("bc_system_id"):
+            # Verify in BC that the draft's total is the invoice total; a draft
+            # that came out different is removed (our own sandbox draft) and
+            # the invoice goes to staff.
+            try:
+                chk = await verify_draft_total(r["bc_system_id"], float(d["amount_float"]))
+            except Exception as e:
+                chk = {"ok": None, "error": repr(e)[:120]}
+            if chk.get("ok") is False:
+                from routers.gpi_integration import _delete_orphan_pi_header
+                deleted = await _delete_orphan_pi_header(r["bc_system_id"])
+                await db.hub_documents.update_one({"id": d["id"]}, {
+                    "$set": {"sandbox_draft_skipped": {"reason": f"draft total in BC {chk['bc_total']} differed from the invoice {chk['expected']}; draft removed ({deleted})",
+                                                       "at": datetime.now(timezone.utc).isoformat()},
+                             "bc_purchase_invoice_last_failure": d.get("bc_purchase_invoice")},
+                    "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": ""}})
+                r = {"success": False, "error": f"total mismatch after draft ({chk['bc_total']} vs {chk['expected']}); removed"}
         results.append({"document_id": d["id"], "file_name": d.get("file_name"), "vendor_no": d.get("vendor_canonical"),
                          "vendor_invoice_no": d.get("invoice_number_clean"), "amount": d.get("amount_float"),
                          "success": bool(r.get("success")) and not r.get("already_exists"),

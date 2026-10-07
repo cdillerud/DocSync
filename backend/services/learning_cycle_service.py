@@ -129,6 +129,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["ap_stages"] = {"error": repr(e)}
     try:
+        # BC -> Hub: read the Hub's sandbox drafts back (still there? edited?
+        # posted?) before drafting more.
+        from services.draft_readback_service import readback
+        summary["draft_readback"] = await readback(db)
+    except Exception as e:
+        summary["draft_readback"] = {"error": repr(e)}
+    try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
         from services.sandbox_draft_service import draft as sandbox_draft

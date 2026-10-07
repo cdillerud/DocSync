@@ -9,6 +9,7 @@ const REASON_LABELS = {
   vendor_unknown: 'Vendor unknown',
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
+  draft_lines_problem: "Draft lines don't add up",
   routing_uncertain: 'Folder uncertain',
   approval_rejected: 'Approval rejected',
 };
@@ -75,7 +76,14 @@ export default function APHistoryPanel({ documentId }) {
               {' '}({data.bc.bc_status}), vendor {data.bc.bc_vendor_no}, {money(data.bc.bc_amount)}{data.bc.bc_order_number ? `, order ${data.bc.bc_order_number}` : ''}</div>
           )}
           {data.bc_draft && (
-            <div><span className="text-muted-foreground">Hub draft</span> purchase invoice {data.bc_draft.bc_record_no} in {data.bc_draft.environment} ({data.bc_draft.status}, {data.bc_draft.lines_added}/{data.bc_draft.lines_total} lines)</div>
+            <div><span className="text-muted-foreground">Hub draft</span> purchase invoice {data.bc_draft.bc_record_no} in {data.bc_draft.environment} ({data.bc_draft.status}, {data.bc_draft.lines_added}/{data.bc_draft.lines_total} lines)
+              {data.bc_draft_readback && (
+                <span className="text-muted-foreground">
+                  {' '}— checked in BC {when(data.bc_draft_readback.checked_at)}: {data.bc_draft_readback.state === 'gone' ? 'no longer an unposted draft (posted or deleted by AP)' : data.bc_draft_readback.state}
+                  {(data.bc_draft_readback.edits || []).length > 0 ? `; AP changed ${data.bc_draft_readback.edits.join('; ')}` : (data.bc_draft_readback.state !== 'gone' ? '; unchanged' : '')}
+                </span>
+              )}
+            </div>
           )}
           {data.approval && (
             <div><span className="text-muted-foreground">Approval</span> {data.approval.approver}: {data.approval.status}

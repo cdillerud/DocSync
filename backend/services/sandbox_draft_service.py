@@ -234,6 +234,16 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": problem, "at": datetime.now(timezone.utc).isoformat()}}})
             continue
+        # Keep the exact lines this draft uses, to compare with what AP later
+        # enters in Production BC (draft quality, learned per vendor).
+        try:
+            used_lines = (rec_probe.get("lines") if rec_probe.get("lines")
+                          else await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"]))
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_lines_planned": [
+                {k: l.get(k) for k in ("lineType", "lineObjectNumber", "description", "quantity", "unitCost")}
+                for l in (used_lines or []) if isinstance(l, dict)]}})
+        except Exception:
+            pass
         legacy = d.get("bc_purchase_invoice") and (d["bc_purchase_invoice"].get("environment") != ALLOWED_ENVIRONMENT)
         try:
             rec = await receipt_lines_for(db, d)

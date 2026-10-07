@@ -111,6 +111,18 @@ export default function APTestingPage() {
     })();
   }, []);
 
+  // Coming back from a document: return to the draft row you opened.
+  useEffect(() => {
+    if (!drafts?.length) return;
+    let last = null;
+    try { last = sessionStorage.getItem('gpi.apTesting.lastDraft'); sessionStorage.removeItem('gpi.apTesting.lastDraft'); } catch (e) { /* ignore */ }
+    if (!last) return;
+    requestAnimationFrame(() => {
+      const row = document.getElementById(`draft-row-${last}`);
+      if (row) row.scrollIntoView({ block: 'start' });
+    });
+  }, [drafts]);
+
   const persist = useCallback((next) => {
     clearTimeout(timer.current);
     setSave({ text: 'Saving…', tone: '' });
@@ -167,7 +179,7 @@ export default function APTestingPage() {
               </thead>
               <tbody>
                 {drafts.map(d => (
-                  <tr key={d.bc_draft_no} className="border-b border-border align-top">
+                  <tr key={d.bc_draft_no} id={`draft-row-${d.bc_draft_no}`} className="border-b border-border align-top scroll-mt-24">
                     <td className="py-2 pr-3 font-mono">{d.bc_draft_no}</td>
                     <td className="py-2 pr-3">{d.vendor_name} <span className="text-xs text-muted-foreground">({d.vendor_no})</span>
                       {d.international && <div className="text-xs text-muted-foreground">International</div>}</td>
@@ -175,7 +187,8 @@ export default function APTestingPage() {
                     <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap">{money(d.amount)}</td>
                     <td className="py-2 pr-3 font-mono">{d.po || '—'}</td>
                     <td className="py-2 pr-3 text-xs">{d.lines_from}</td>
-                    <td className="py-2 pr-3"><Link className="inline-flex items-center gap-1 text-primary underline" to={`/documents/${d.document_id}`}>Open</Link></td>
+                    <td className="py-2 pr-3"><Link className="inline-flex items-center gap-1 text-primary underline" to={`/documents/${d.document_id}`}
+                      onClick={() => { try { sessionStorage.setItem('gpi.apTesting.lastDraft', d.bc_draft_no); } catch (e) { /* private window */ } }}>Open</Link></td>
                     <td className="py-2"><Result id={`draft_${d.bc_draft_no}`} value={tests[`draft_${d.bc_draft_no}`]} onChange={v => update(`draft_${d.bc_draft_no}`, v)} /></td>
                   </tr>
                 ))}

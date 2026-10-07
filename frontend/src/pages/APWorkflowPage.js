@@ -25,6 +25,7 @@ export default function APWorkflowPage() {
   const [loading, setLoading] = useState(true);
   const [approverFilter, setApproverFilter] = useState('all');
   const [actor, setActor] = useState(readActor());
+  const [me, setMe] = useState(null);
   const [busy, setBusy] = useState(null);
   const [notes, setNotes] = useState({});
   const [done, setDone] = useState(new Set());
@@ -32,12 +33,16 @@ export default function APWorkflowPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [{ data: queueData }, { data: peopleData }] = await Promise.all([
+      const [{ data: queueData }, { data: peopleData }, { data: meData }] = await Promise.all([
         api.get('/ap-workflow/queue', { params: { view } }),
         api.get('/ap-workflow/people'),
+        api.get('/ap-workflow/me').catch(() => ({ data: null })),
       ]);
       setData(queueData);
       setPeople(peopleData.people || []);
+      setMe(meData);
+      // Signed in with Microsoft: you act as yourself (the server records it too).
+      if (meData?.sso && meData.name) setActor(meData.name);
     } catch (error) {
       toast.error('Failed to load the AP workflow');
     } finally {
@@ -107,6 +112,15 @@ export default function APWorkflowPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {me?.sso ? (
+            <span className="text-sm" data-testid="ap-actor-signed-in">
+              <span className="text-xs text-muted-foreground mr-1.5">Approving as</span>
+              <span className="font-medium">{me.name}</span>
+              {me.full_name && me.full_name !== me.name && (
+                <span className="text-xs text-muted-foreground ml-1">({me.full_name})</span>
+              )}
+            </span>
+          ) : (<>
           <label className="text-xs text-muted-foreground" htmlFor="ap-actor">Approving as</label>
           <select
             id="ap-actor"
@@ -120,6 +134,7 @@ export default function APWorkflowPage() {
               <option key={p.name} value={p.name}>{p.name}</option>
             ))}
           </select>
+          </>)}
           <Button type="button" size="sm" variant="outline" onClick={load}>
             <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Refresh
           </Button>

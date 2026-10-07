@@ -1,11 +1,12 @@
 """AP workflow API: holds, approvals, people, audit trail (Hub database only)."""
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from deps import get_db
 import services.ap_workflow_service as wf
+from services.auth_deps import get_current_user
 
 router = APIRouter(prefix="/ap-workflow", tags=["AP Workflow"])
 
@@ -38,6 +39,17 @@ async def _doc(doc_id: str):
     if not d:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
     return d
+
+
+async def _by(req, user) -> str:
+    """Microsoft-signed-in users always act as themselves."""
+    a = await wf.actor_for(get_db(), user)
+    return a["name"] if a["sso"] else req.by
+
+
+@router.get("/me")
+async def me(user=Depends(get_current_user)):
+    return await wf.actor_for(get_db(), user)
 
 
 @router.get("/people")
@@ -76,34 +88,34 @@ async def queue(view: str = "approvals", approver: Optional[str] = None, limit: 
 
 
 @router.post("/document/{doc_id}/hold")
-async def hold(doc_id: str, req: HoldRequest):
+async def hold(doc_id: str, req: HoldRequest, user=Depends(get_current_user)):
     await _doc(doc_id)
-    return {"hold": await wf.put_on_hold(get_db(), doc_id, req.reason, req.until, req.by)}
+    return {"hold": await wf.put_on_hold(get_db(), doc_id, req.reason, req.until, await _by(req, user))}
 
 
 @router.post("/document/{doc_id}/release")
-async def release(doc_id: str, req: NoteRequest):
+async def release(doc_id: str, req: NoteRequest, user=Depends(get_current_user)):
     await _doc(doc_id)
-    await wf.release_hold(get_db(), doc_id, req.by, req.notes)
+    await wf.release_hold(get_db(), doc_id, await _by(req, user), req.notes)
     return {"ok": True}
 
 
 @router.post("/document/{doc_id}/request-approval")
-async def request_approval(doc_id: str, req: ApprovalRequest):
+async def request_approval(doc_id: str, req: ApprovalRequest, user=Depends(get_current_user)):
     await _doc(doc_id)
-    return {"approval": await wf.request_approval(get_db(), doc_id, req.approver, req.by, req.notes)}
+    return {"approval": await wf.request_approval(get_db(), doc_id, req.approver, await _by(req, user), req.notes)}
 
 
 @router.post("/document/{doc_id}/approve")
-async def approve(doc_id: str, req: NoteRequest):
+async def approve(doc_id: str, req: NoteRequest, user=Depends(get_current_user)):
     await _doc(doc_id)
-    return {"approval": await wf.decide_approval(get_db(), doc_id, True, req.by, req.notes)}
+    return {"approval": await wf.decide_approval(get_db(), doc_id, True, await _by(req, user), req.notes)}
 
 
 @router.post("/document/{doc_id}/reject")
-async def reject(doc_id: str, req: NoteRequest):
+async def reject(doc_id: str, req: NoteRequest, user=Depends(get_current_user)):
     await _doc(doc_id)
-    return {"approval": await wf.decide_approval(get_db(), doc_id, False, req.by, req.notes)}
+    return {"approval": await wf.decide_approval(get_db(), doc_id, False, await _by(req, user), req.notes)}
 
 
 @router.get("/document/{doc_id}/history")

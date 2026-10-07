@@ -127,3 +127,33 @@ async def decide_approval(db, doc_id: str, approved: bool, by: str, notes: str =
     await _event(db, doc_id, "approve" if approved else "reject", by, notes=notes)
     return appr
 
+
+
+
+async def actor_for(db, user) -> dict:
+    """The AP person a signed-in Hub user is.
+
+    Microsoft-signed-in users act as themselves: matched to an AP person by
+    a remembered e-mail, else by first name (Square9 folders name people by
+    first name: "Ellie to approve"); the link is remembered. Unmatched users
+    act under their own display name. The shared admin login (password) is
+    not a person: it still picks a name on the page.
+    """
+    user = user or {}
+    email = str(user.get("email") or "").lower()
+    if user.get("auth_provider") != "entra" or not email:
+        return {"sso": False, "name": "", "email": email}
+    person = await db.ap_people.find_one({"email": email}, {"_id": 0})
+    if not person:
+        first = str(user.get("display_name") or "").split(" ")[0].strip()
+        if first:
+            import re as _re
+            matches = [p async for p in db.ap_people.find(
+                {"name": {"$regex": f"^{_re.escape(first)}$", "$options": "i"}, "email": {"$exists": False}}, {"_id": 0})]
+            if len(matches) == 1:
+                person = matches[0]
+                await db.ap_people.update_one({"name": person["name"]}, {"$set": {
+                    "email": email, "full_name": user.get("display_name"), "linked_at": _now()}})
+    name = person["name"] if person else (user.get("display_name") or email)
+    return {"sso": True, "name": name, "email": email, "full_name": user.get("display_name"),
+            "person": bool(person), "roles": (person or {}).get("roles", [])}

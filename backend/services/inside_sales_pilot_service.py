@@ -855,11 +855,18 @@ def _extract_order_number(text: str) -> Optional[str]:
 # LOGGING HELPERS
 # ─────────────────────────────────────────────────────────────
 
+_SKIP_EVENTS = {"skipped_attachment", "skipped_relevance"}
+
+
 async def _log_pilot_event(
     db, run_id: str, mailbox: str, message_id: str,
     event_type: str, details: Dict[str, Any] = None,
 ):
     """Log a pilot observability event."""
+    # Skips are counted on the run record; one row per skipped inline image
+    # re-scanned every 10 minutes grew this log to 10M rows (2026-10-07).
+    if event_type in _SKIP_EVENTS:
+        return
     await db.inside_sales_pilot_log.insert_one({
         "run_id": run_id,
         "mailbox": mailbox,

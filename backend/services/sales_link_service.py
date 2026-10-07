@@ -127,7 +127,14 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
             pos = set()
     has_lines = bool((ef.get("line_items") or []))
     # Role.
-    if dt == "AP_Invoice":
+    po_words = bool(_PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"))
+    if dt == "AP_Invoice" and internal:
+        # Gamer's own invoice / export paperwork forwarded by staff.
+        role = "gamer_order_copy" if (order or nums) else "internal_other"
+    elif dt == "AP_Invoice" and cp.get("customer") and not cp.get("vendor") and (pos or po_words or has_lines) and not gamer_pos:
+        # A customer's PO the classifier called an invoice (Sun Bum PO010716).
+        role = "customer_po"
+    elif dt == "AP_Invoice":
         role = "ap_invoice"
     elif dt == "AR_Invoice":
         role = "ar_invoice"

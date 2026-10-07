@@ -140,3 +140,21 @@ async def refresh(db, days: int = 45) -> Dict[str, Any]:
         await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**st, "sales_stage_at": now}, **({"$unset": unset} if unset else {})})
     return dict(stats)
 
+
+
+
+async def move_ap_invoices(db, days: int = 45, apply: bool = True) -> Dict[str, Any]:
+    """Supplier invoices that reached the sales mailboxes go to AP, where the
+    AP Inbox stages, drafts and routes them (the move is recorded)."""
+    now = datetime.now(timezone.utc).isoformat()
+    moved = 0
+    async for d in db.hub_documents.find({"created_utc": {"$gte": (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()},
+                                          "mailbox_category": {"$in": ["SALES", "Sales"]}, "sales_link.role": "ap_invoice"},
+                                         {"_id": 1, "mailbox_category": 1}):
+        moved += 1
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "mailbox_category": "AP", "mailbox_category_previous": d["mailbox_category"],
+                "mailbox_moved": {"from": d["mailbox_category"], "to": "AP", "at": now,
+                                  "reason": "supplier invoice sent to a sales mailbox (sales_link role ap_invoice)"}}})
+    return {"moved_to_ap": moved}

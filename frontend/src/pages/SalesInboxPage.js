@@ -98,6 +98,10 @@ export default function SalesInboxPage() {
       {summary && (
         <p className="text-sm text-muted-foreground">
           Last {summary.days} days: <b className="text-foreground">{summary.customer_pos}</b> customer POs, <b className="text-foreground">{summary.customer_pos_in_bc}</b> already on a BC sales order.
+          {summary.draft_accuracy?.orders > 0 && (
+            <> Hub drafts graded against inside sales' own orders: <b className="text-foreground">{summary.draft_accuracy.exact}/{summary.draft_accuracy.orders}</b> exact,
+              products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}.</>
+          )}
         </p>
       )}
 

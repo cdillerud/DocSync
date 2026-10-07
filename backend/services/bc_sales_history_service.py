@@ -27,6 +27,26 @@ def norm(x: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(x or "").upper()).lstrip("0")
 
 
+def ext_tokens(x: Any) -> List[str]:
+    """Match keys of a customer PO as BC holds it: "24511797-A",
+    "PO26-2013-4", "P0028021-12/W118480", "103083, 103086, 103087" ->
+    each part, with and without a short suffix and a PO prefix."""
+    out = set()
+    for part in re.split(r"[,;/&]+|\s+(?=\S)", str(x or "")):
+        part = part.strip()
+        if not part:
+            continue
+        bases = {part, re.sub(r"-[A-Z0-9]{1,2}$", "", part, flags=re.I)}
+        for b in bases:
+            n = norm(b)
+            if len(n) >= 3:
+                out.add(n)
+                for p in ("PO", "P0"):
+                    if n.startswith(p) and len(n) - len(p) >= 3:
+                        out.add(n[len(p):].lstrip("0"))
+    return sorted(out)
+
+
 def _lines(ls: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out = []
     for l in ls or []:
@@ -65,6 +85,7 @@ async def sync(db, days: int = 365, full: bool = False) -> Dict[str, Any]:
     stats = {"open_orders": 0, "invoices": 0}
     await db.bc_sales_orders.create_index("order_no", unique=True)
     await db.bc_sales_orders.create_index("ext_norm")
+    await db.bc_sales_orders.create_index("ext_tokens")
     await db.bc_sales_orders.create_index("customer_no")
 
     async with httpx.AsyncClient(timeout=120) as c:
@@ -76,7 +97,8 @@ async def sync(db, days: int = 365, full: bool = False) -> Dict[str, Any]:
             await db.bc_sales_orders.update_one({"order_no": v["number"]}, {"$set": {
                 "order_no": v["number"], "status": "open", "customer_no": v.get("customerNumber"),
                 "customer_name": v.get("customerName"), "external_doc_no": v.get("externalDocumentNumber"),
-                "ext_norm": norm(v.get("externalDocumentNumber")), "order_date": v.get("orderDate"),
+                "ext_norm": norm(v.get("externalDocumentNumber")),
+                "ext_tokens": ext_tokens(v.get("externalDocumentNumber")), "order_date": v.get("orderDate"),
                 "requested_delivery_date": v.get("requestedDeliveryDate"), "ship_to": _ship_to(v),
                 "salesperson": v.get("salesperson"), "currency": v.get("currencyCode") or "USD",
                 "total": v.get("totalAmountExcludingTax"), "lines": _lines(ls),
@@ -99,7 +121,7 @@ async def sync(db, days: int = 365, full: bool = False) -> Dict[str, Any]:
             invoices = [i for i in (existing or {}).get("invoices") or [] if i.get("invoice_no") != v["number"]] + [inv]
             upd = {"order_no": key, "customer_no": v.get("customerNumber"), "customer_name": v.get("customerName"),
                    "external_doc_no": v.get("externalDocumentNumber"), "ext_norm": norm(v.get("externalDocumentNumber")),
-                   "ship_to": _ship_to(v), "salesperson": v.get("salesperson"), "currency": v.get("currencyCode") or "USD",
+                   "ext_tokens": ext_tokens(v.get("externalDocumentNumber")), "ship_to": _ship_to(v), "salesperson": v.get("salesperson"), "currency": v.get("currencyCode") or "USD",
                    "invoices": invoices, "first_invoice_date": min(i["posting_date"] for i in invoices if i.get("posting_date")),
                    "synced_at": now}
             if not existing or existing.get("status") != "open":

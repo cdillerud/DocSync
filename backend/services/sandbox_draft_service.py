@@ -236,11 +236,18 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             recv = datetime.fromisoformat(str(d.get("created_utc"))[:19])
             lo, hi = (recv - timedelta(days=60)).date().isoformat(), (recv + timedelta(days=60)).date().isoformat()
             amt = abs(float(d["amount_float"]))
-            twin = await db.bc_reference_cache.find_one(
-                {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
-                 "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
-                 "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
-                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1})
+            # Only a BC invoice no other Hub document accounts for can be this
+            # one under another number: vendors bill repeat amounts (Tumalo
+            # flat 785.00, ATS 500.00, Canpack) - 27 false skips 2026-10-07.
+            twin = None
+            async for b in db.bc_reference_cache.find(
+                    {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
+                     "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
+                     "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
+                    {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1}):
+                if not await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"], "id": {"$ne": d["id"]}}, limit=1):
+                    twin = b
+                    break
         except Exception:
             twin = None
         if twin:

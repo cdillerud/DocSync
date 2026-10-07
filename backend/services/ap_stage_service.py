@@ -198,6 +198,10 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         if not rel["reliable"]:
             return {"ap_stage": "needs_staff", "staff_reason": "routing_uncertain", "suggested_folder": folder,
                     "routing_reason": why, "routing_path_accuracy": rel}
+        if d.get("sandbox_draft_skipped"):
+            # The Hub could not draft it: the extracted lines do not add up.
+            return {"ap_stage": "needs_staff", "staff_reason": "draft_lines_problem", "suggested_folder": folder,
+                    "routing_reason": why, "routing_path_accuracy": rel}
         return {"ap_stage": "ready", "suggested_folder": folder, "routing_reason": why, "routing_path_accuracy": rel}
     return {"ap_stage": "ready"}
 
@@ -217,6 +221,16 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
         sf = staff_filed.get(d.get("id"))
         pre = stage_of(d, bc_vendors, None, reliability, sf)
         res = pre
+        if pre["ap_stage"] == "drafted":
+            # Drafted invoices keep their AP folder (folders are part of
+            # AP's workflow; the draft is only the BC side).
+            x = {k: v for k, v in d.items() if k != "_id"}
+            x.pop("bc_link", None)
+            try:
+                folder, why, _ = await route_with_feedback(x, is_international=bool(d.get("is_international")))
+                res = {**pre, "suggested_folder": folder, "routing_reason": why}
+            except Exception:
+                pass
         if pre["ap_stage"] in ("ready", "file_only") and not pre.get("staff_decided"):
             x = {k: v for k, v in d.items() if k != "_id"}
             x.pop("bc_link", None)

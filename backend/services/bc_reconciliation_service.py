@@ -480,3 +480,44 @@ async def fetch_ship_to(db, limit: int = SHIP_TO_PER_RUN) -> Dict[str, Any]:
                     "bc_link.bc_location_lane": location_lane(codes)}})
                 got += 1
     return {"fetched": got}
+
+
+
+async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[str, Any]:
+    """Invoices whose number could not be read (scans, multi-invoice PDFs)
+    linked to the BC invoice AP entered, by vendor + exact amount - only when
+    BC holds exactly one invoice from that vendor for that amount around
+    receipt and no other Hub document claims it (Amcor repeats amounts:
+    7 x 29,439.15 stays with staff). The BC invoice's number is filled in."""
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=days)).isoformat()
+    stats = {"checked": 0, "linked": 0}
+    async for d in db.hub_documents.find({
+            "created_utc": {"$gte": since}, "mailbox_category": "AP", "bc_link": {"$exists": False},
+            "vendor_canonical": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0, 0.0]},
+            "$or": [{"invoice_number_clean": None}, {"invoice_number_clean": ""}, {"invoice_number_clean": {"$exists": False}}]},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "created_utc": 1}):
+        stats["checked"] += 1
+        recv = datetime.fromisoformat(str(d["created_utc"])[:19])
+        lo, hi = (recv - timedelta(days=30)).date().isoformat(), (recv + timedelta(days=45)).date().isoformat()
+        a = abs(float(d["amount_float"]))
+        hits = [b async for b in db.bc_reference_cache.find(
+            {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
+             "bc_status": {"$ne": "Canceled"}, "bc_amount": {"$gte": a - 0.01, "$lte": a + 0.01}, "bc_posting_date": {"$gte": lo, "$lte": hi}},
+            {"_id": 0})]
+        if len(hits) != 1:
+            continue
+        b = hits[0]
+        if await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"]}, limit=1):
+            continue
+        stats["linked"] += 1
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "bc_link": {"bc_document_no": b["bc_document_no"], "bc_entity": b["bc_entity_type"], "bc_status": b.get("bc_status"),
+                            "bc_vendor_no": b.get("bc_vendor_no"), "bc_vendor_name": b.get("bc_vendor_name"), "bc_amount": b.get("bc_amount"),
+                            "bc_order_number": b.get("bc_order_number"), "bc_posting_date": b.get("bc_posting_date"),
+                            "match": "vendor+amount (no number on the document)", "linked_at": now.isoformat()},
+                "invoice_number_clean": b.get("bc_external_document_no"),
+                "invoice_number_source": "BC invoice AP entered (vendor + exact amount)"}})
+    return stats

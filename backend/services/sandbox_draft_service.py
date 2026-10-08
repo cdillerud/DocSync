@@ -514,3 +514,26 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
     return {"target": write_target(), "drafted": sum(1 for x in results if x["success"]), "results": results,
             "skipped": skipped}
 
+
+
+
+_LINE_PROBLEM = re.compile(r"do not add up|negative balancing|line build failed|would code this|has not used for this vendor", re.I)
+
+
+async def retry_line_skips(db) -> Dict[str, Any]:
+    """Invoices skipped for a line problem are retried once their vendor is
+    one AP codes as a single line (XPO: FREIGHT on 15/15, skipped before that
+    rule existed because its discount lines did not add up)."""
+    from services.vendor_line_coding_service import coding_for
+    n = 0
+    async for d in db.hub_documents.find({"sandbox_draft_skipped.reason": {"$exists": True}, "bc_link": {"$exists": False},
+                                          "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}},
+                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1}):
+        if not _LINE_PROBLEM.search(str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")):
+            continue
+        if not (await coding_for(db, d.get("vendor_canonical")) or {}).get("dominant"):
+            continue
+        await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sandbox_draft_skipped_previous": d["sandbox_draft_skipped"]},
+                                                               "$unset": {"sandbox_draft_skipped": ""}})
+        n += 1
+    return {"retried": n}

@@ -67,6 +67,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         from services.bc_reconciliation_service import reconcile_recent
         summary["bc_reconciliation"] = await reconcile_recent(db)
+        from services.bc_reconciliation_service import link_by_vendor_amount
+        summary["bc_link_by_amount"] = await link_by_vendor_amount(db)
         from services.bc_reconciliation_service import fetch_ship_to
         summary["bc_location"] = await fetch_ship_to(db)
         from services.lane_profile_service import rebuild_order_lanes
@@ -142,7 +144,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         # sandbox; refuses unless writes are on and the target is PRE.
         from services.vendor_line_coding_service import rebuild as rebuild_line_coding
         summary["vendor_line_coding"] = await rebuild_line_coding(db)
-        from services.sandbox_draft_service import audit_existing
+        from services.sandbox_draft_service import audit_existing, retry_line_skips
+        summary["sandbox_retry"] = await retry_line_skips(db)
         summary["sandbox_draft_audit"] = await audit_existing(db)
         from services.sandbox_draft_service import draft as sandbox_draft
         summary["sandbox_drafts"] = await sandbox_draft(db, limit=10)

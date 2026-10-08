@@ -224,8 +224,13 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     counts, reasons, uncertain = Counter(), Counter(), Counter()
+    # Recent documents, plus older ones still in an active stage (a stage is
+    # never left stale: Fort Dearborn's 9/7 statement sat in approvals).
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "mailbox_category": "AP"}, {"file_content_b64": 0}):
+            {"mailbox_category": "AP", "$or": [{"created_utc": {"$gte": since}},
+                                               {"ap_stage": {"$in": ["needs_staff", "awaiting_approval", "on_hold", "ready",
+                                                                     "drafted", "awaiting_receipt", "in_bc_check"]}}]},
+            {"file_content_b64": 0}):
         sf = staff_filed.get(d.get("id"))
         pre = stage_of(d, bc_vendors, None, reliability, sf)
         res = pre

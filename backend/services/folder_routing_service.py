@@ -1871,6 +1871,29 @@ def _pick_subfolder_core(doc: dict, hub_sub: str, vendor_counts: Dict[str, float
     return None
 
 
+_VENDOR_TOP_COUNTS: Dict[str, Any] = {"at": 0.0, "by_top": {}}
+DEFAULT_BY_VENDORS = True
+
+
+async def _vendor_weighted_top_counts(db, top_l: str) -> Dict[str, float]:
+    """Subfolder -> number of vendors whose usual folder it is, within a
+    top folder. A vendor with no filing history goes where most vendors go
+    ("Drop Ship All Others": 52 vendors), not where the most documents go
+    (a few heavy dunnage vendors made "Drop Ship Dunnage Vendors" the
+    document-count leader; replay 2026-10-08)."""
+    import time
+    if time.time() - _VENDOR_TOP_COUNTS["at"] > 3600:
+        by_top: Dict[str, Dict[str, float]] = {}
+        async for p in db.vendor_subfolder_profiles.find({}, {"_id": 0, "counts": 1, "top_l": 1}):
+            c = {k: v for k, v in (p.get("counts") or {}).items() if v > 0}
+            if c:
+                k = max(c.items(), key=lambda kv: kv[1])[0]
+                t = by_top.setdefault(p.get("top_l") or "", {})
+                t[k] = t.get(k, 0) + 1
+        _VENDOR_TOP_COUNTS.update(at=time.time(), by_top=by_top)
+    return _VENDOR_TOP_COUNTS["by_top"].get(top_l) or {}
+
+
 async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, **kwargs):
     path, reason, details = await _route_with_feedback_core(doc, is_international=is_international, **kwargs)
     try:
@@ -1886,7 +1909,10 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
         vendor = str(doc.get("vendor_canonical") or "").upper()
         prof = await db.vendor_subfolder_profiles.find_one({"vendor": vendor, "top_l": parts[0].lower()}, {"_id": 0, "counts": 1, "n": 1}) if vendor else None
         hub_sub = "/".join(parts[1:])
-        sub = _pick_subfolder(doc, hub_sub, (prof or {}).get("counts") or {}, t.get("counts") or {}, (prof or {}).get("n") or 0)
+        top_counts = t.get("counts") or {}
+        if DEFAULT_BY_VENDORS:
+            top_counts = await _vendor_weighted_top_counts(db, parts[0].lower()) or top_counts
+        sub = _pick_subfolder(doc, hub_sub, (prof or {}).get("counts") or {}, top_counts, (prof or {}).get("n") or 0)
         if sub is None or sub == hub_sub:
             return path, reason, details
         new_path = t["top"] + ("/" + sub if sub else "")

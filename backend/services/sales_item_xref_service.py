@@ -320,25 +320,55 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
             break
     # 6. The customer's own items by shared size / finish / colour words.
     words = set(re.findall(r"[A-Z0-9]+", str(e.get("description") or "").upper())) - _STOP
-    scored = []
-    for it, h in hist.items():
-        if not is_product(it):
-            continue
-        hw = set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
-        common = words & hw
-        if hw:
-            scored.append((len(common) + 0.5 * sum(1 for w in common if any(c.isdigit() for c in w)), it))
-    scored.sort(reverse=True)
-    if scored and scored[0][0] >= 3 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 1.5):
-        out.append((scored[0][1], "description matches an item this customer buys", False))
-    seen, uniq = set(), []
+    if DESC_IDF:
+        # Words weighted by how rare they are among this customer's items:
+        # "20-400 FLINT BOSTON ROUND" is every Apex bottle, "2OZ" picks one.
+        import math
+        items = {it: set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
+                 for it, h in hist.items() if is_product(it)}
+        df = Counter(w for ws in items.values() for w in ws)
+        N = len(items)
+        scored = sorted(((sum(math.log((N + 1) / (df[w] + 0.5)) for w in words & ws), it) for it, ws in items.items() if ws), reverse=True)
+        if scored and scored[0][0] >= DESC_T and (len(scored) == 1 or scored[0][0] >= scored[1][0] + DESC_M):
+            sure = DESC_STRONG and scored[0][0] >= DESC_STRONG and (len(scored) == 1 or scored[0][0] >= 1.25 * scored[1][0])
+            out.append((scored[0][1], "description matches an item this customer buys", bool(sure)))
+    else:
+        scored = []
+        for it, h in hist.items():
+            if not is_product(it):
+                continue
+            hw = set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
+            common = words & hw
+            if hw:
+                scored.append((len(common) + 0.5 * sum(1 for w in common if any(c.isdigit() for c in w)), it))
+        scored.sort(reverse=True)
+        if scored and scored[0][0] >= 3 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 1.5):
+            out.append((scored[0][1], "description matches an item this customer buys", False))
+    seen, uniq = {}, []
     for c in out:
         if c[0] not in seen:
-            seen.add(c[0])
+            seen[c[0]] = len(uniq)
             uniq.append(c)
+        elif AGREE_STRONG and not uniq[seen[c[0]]][2]:
+            # Two independent signals name the same item: as good as strong.
+            i = seen[c[0]]
+            uniq[i] = (c[0], uniq[i][1] + " · " + c[1], True)
     return uniq
 
 
+# Honest replay 2026-10-08 (items/precision/orders fully right):
+# 75/89/68 -> 76/92/70 with IDF descriptions (T 4, margin 1.5, strong 8),
+# items confirmed on BC's price only, and no rule-out by value for
+# customers whose PO prices BC replaces. PRINTED_FIRST and AGREE_STRONG
+# measured no change: off.
+DESC_IDF = True
+DESC_T = 4.0
+DESC_M = 1.5
+DESC_STRONG = 8.0
+AGREE_STRONG = False
+PRINTED_FIRST = False
+NO_RULEOUT_WHEN_OVERRIDDEN = True
+FIT_ON_BC = True
 _ITEM_UOM: Dict[str, str] = {}
 _HONOR_CACHE: Dict[Tuple[str, str], Tuple[int, int]] = {}
 _CACHE_AT = {"t": 0.0}
@@ -452,7 +482,9 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         # The PO line's value decides the unit (192,000 x 0.12572 = 24,138 ->
         # 192 M at 125.72) and checks the item itself.
         cands = {eq, round(eq / 1000, 4)} | ({round(eq * rr["ratio"], 4)} if rr else set())
-        fp = fit_price or price
+        # Confirm against BC's own price: the PO price (or one derived from
+        # it) always "agrees" with itself (Sun Bum .001 vs .002, 2026-10-08).
+        fp = h.get("last_price") if FIT_ON_BC else (fit_price or price)
         best = min(cands, key=lambda q: abs(q * fp - line_value))
         off = abs(best * fp - line_value) / line_value
         if off <= 0.03:
@@ -496,7 +528,16 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
         # The first candidate the PO line's value confirms; else the first not
         # ruled out, in priority order.
         strong = {item: st for item, _, st in cands}
-        pick = next((c for c in valued if c[2]["fits"] is True), None) or \
+        if overrides_po and NO_RULEOUT_WHEN_OVERRIDDEN:
+            # This customer's PO prices are their own list (Sun Bum 25-36%
+            # under BC): a value mismatch says nothing about the item.
+            for c in valued:
+                if c[2]["fits"] is False:
+                    c[2]["fits"] = None
+        printed = next((c for c in valued if PRINTED_FIRST and strong[c[0]]
+                        and (c[1].startswith("Gamer item number on the PO") or c[1].startswith("item number on the PO"))
+                        and c[2]["fits"] is not False), None)
+        pick = printed or next((c for c in valued if c[2]["fits"] is True), None) or \
             next((c for c in valued if c[2]["fits"] is None and strong[c[0]]), None)
         if pick:
             item, how, v = pick

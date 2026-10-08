@@ -495,6 +495,8 @@ async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[
     stats = {"checked": 0, "linked": 0}
     async for d in db.hub_documents.find({
             "created_utc": {"$gte": since}, "mailbox_category": "AP", "bc_link": {"$exists": False},
+            "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "status": {"$ne": "batch_parent"},
+            "is_duplicate": {"$ne": True},
             "vendor_canonical": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0, 0.0]},
             "$or": [{"invoice_number_clean": None}, {"invoice_number_clean": ""}, {"invoice_number_clean": {"$exists": False}}]},
             {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "created_utc": 1}):

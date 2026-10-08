@@ -485,6 +485,22 @@ const AP_STAGE_LABELS = {
   container: ['Split into pieces', 'border-border bg-muted text-muted-foreground'],
 };
 
+// Older analysis panels (readiness, intake intelligence, decision engine,
+// matching debug, Square9 tracker...) predate the AP / Sales stages. When a
+// document has a current stage they are folded away so the page leads with
+// what staff act on: AP history, the document itself, its data and lines.
+function LegacySection({ on, children }) {
+  if (!on) return <>{children}</>;
+  return (
+    <details className="rounded-lg border border-dashed border-border" data-testid="legacy-internals">
+      <summary className="cursor-pointer select-none px-4 py-2 text-xs text-muted-foreground">
+        Hub internals (older checks), superseded by the current stage: show
+      </summary>
+      <div className="space-y-4 p-2">{children}</div>
+    </details>
+  );
+}
+
 export default function DocumentDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -976,11 +992,13 @@ export default function DocumentDetailPage() {
           {/* Auto-File Failure Banner */}
           <AutoFileFailureBanner doc={doc} />
 
+          <LegacySection on={!!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage)}>
           {/* Readiness Panel */}
           <ReadinessPanel readiness={doc.readiness} docStatus={doc.status} />
 
           {/* BC + Spiro Intake Intelligence (Giovanni-style learning) */}
           <IntakeLearningPanel insights={doc.intake_insights} docId={doc.id} />
+          </LegacySection>
 
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />
@@ -988,6 +1006,7 @@ export default function DocumentDetailPage() {
           {/* Show-related-docs action — links to Order Graph (v2.5.18) */}
           <RelatedDocsLink doc={doc} />
 
+          <LegacySection on={!!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage)}>
           {/* Decision Explainability Panel */}
           <DecisionExplainabilityPanel
             document={doc}
@@ -1073,12 +1092,16 @@ export default function DocumentDetailPage() {
               fetchData(); // Refresh document data
             }}
           />
+          </LegacySection>
         </div>
 
         {/* Right: Document Preview + AP Review (if AP_Invoice) + Event Timeline */}
         <div className="lg:col-span-2 space-y-4">
           {/* AP history: stage, BC link, corrections and every staff action */}
           <APHistoryPanel documentId={id} />
+          {/* The document itself, right under its history (2026-10-08) */}
+          <PDFPreviewPanel document={doc} />
+          <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />
           {/* Derived State Summary Card - Always show */}
           {derivedState && (
             <Card className="border border-border" data-testid="derived-state-card">
@@ -1209,6 +1232,7 @@ export default function DocumentDetailPage() {
             </Card>
           )}
           
+          <LegacySection on={!!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage)}>
           {/* Stable Vendor Routing Decision */}
           {doc.stable_vendor_routing && (
             <Card className="border border-border" data-testid="stable-vendor-routing-card">
@@ -1253,6 +1277,7 @@ export default function DocumentDetailPage() {
               </CardContent>
             </Card>
           )}
+          </LegacySection>
 
           {/* AP Review Panel - only for AP Invoice documents.
               Rendered ABOVE the PDF preview so AP testers see the
@@ -1269,11 +1294,6 @@ export default function DocumentDetailPage() {
             </div>
           )}
 
-          {/* PDF Preview - show for ALL documents */}
-          <PDFPreviewPanel document={doc} />
-          
-          {/* Split Preview - show for multi-page documents */}
-          <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />
           
           {/* Event Timeline - New Event-Driven UI */}
           <Card className="border border-border" data-testid="event-timeline-card">

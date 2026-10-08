@@ -94,12 +94,12 @@ ACTIVE = ["needs_rep", "ready", "drafted"]
 async def reps(days: int = 45, user=Depends(get_current_user)):
     """One queue per inside sales rep: active work (needs a rep, ready,
     drafted) per rep, and which queue is the signed-in person's."""
-    from services.sales_rep_service import rep_mailboxes, context
+    from services.sales_rep_service import rep_mailboxes, context, _name
     db = get_db()
     ctx = await context(db)
     out = {}
     for m in rep_mailboxes():
-        out[m] = {"email": m, "name": ctx["users"].get(m) or None, "counts": {k: 0 for k in ACTIVE}}
+        out[m] = {"email": m, "name": _name(m, ctx["users"]), "counts": {k: 0 for k in ACTIVE}}
     out["unassigned"] = {"email": "unassigned", "name": "Unassigned", "counts": {k: 0 for k in ACTIVE}}
     async for x in db.hub_documents.aggregate([
             {"$match": {"created_utc": {"$gte": _since(days)}, "sales_stage": {"$in": ACTIVE}}},

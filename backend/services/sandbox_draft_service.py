@@ -82,12 +82,16 @@ async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]
                                          {"_id": 0, "vendor_canonical": 1, "invoice_number_clean": 1}):
         seen.add((x.get("vendor_canonical"), str(x.get("invoice_number_clean") or "").upper()))
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$in": ["ready", "awaiting_receipt"]},
+            # filed_by_staff: staff filed it in Square9 but AP has not entered it
+            # in BC yet - drafting it gets it graded against AP's entry (the
+            # learning signal), and it is half of each day's invoices.
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$in": ["ready", "awaiting_receipt", "filed_by_staff"]},
+             "fraud_risk.flagged": {"$ne": True},
              "document_type": "AP_Invoice", "is_duplicate": {"$ne": True}, "bc_link": {"$exists": False},
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$gt": 0},
              "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT},
              "sandbox_draft_skipped": {"$exists": False}},
-            {"_id": 0, "file_content_b64": 0}).sort([("created_utc", 1)]):
+            {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)]):   # newest first: beat AP's same-day entry
         if d.get("vendor_canonical") not in bc_vendors:
             continue
         key = (d["vendor_canonical"], str(d["invoice_number_clean"]).upper())

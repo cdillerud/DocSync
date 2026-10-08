@@ -66,6 +66,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["po_correction"] = {"error": repr(e)}
     try:
         from services.bc_reconciliation_service import reconcile_recent
+        from services.amount_recovery_service import recover as recover_amounts
+        summary["amount_recovery"] = {k: v for k, v in (await recover_amounts(db)).items() if k != "examples"}
         summary["bc_reconciliation"] = await reconcile_recent(db)
         from services.bc_reconciliation_service import link_by_vendor_amount
         summary["bc_link_by_amount"] = await link_by_vendor_amount(db)

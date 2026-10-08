@@ -24,7 +24,7 @@ const API = process.env.REACT_APP_BACKEND_URL;
 const navItems = [
   { to: '/', icon: Sun, label: 'Today', exact: true },
   { to: '/ap', icon: ClipboardList, label: 'AP Inbox' },
-  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
+  { to: '/sales', icon: ShoppingCart, label: 'Sales Inbox' },
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
   { to: '/ap-workflow', icon: ClipboardList, label: 'AP Workflow' },
   { to: '/search', icon: Search, label: 'Search' },

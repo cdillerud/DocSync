@@ -339,11 +339,78 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     return uniq
 
 
-def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+_ITEM_UOM: Dict[str, str] = {}
+_HONOR_CACHE: Dict[Tuple[str, str], Tuple[int, int]] = {}
+_CACHE_AT = {"t": 0.0}
+
+
+def _expire_caches() -> None:
+    import time
+    if time.time() - _CACHE_AT["t"] > 3600:     # live server: new orders and items count within the hour
+        _ITEM_UOM.clear()
+        _HONOR_CACHE.clear()
+        _CACHE_AT["t"] = time.time()
+HONOR_MIN_IGNORED = 1       # replay 2026-10-08: min 1 -> 87% prices, 2 -> 84%, 3 -> 82%, off -> 72%
+HONOR_MAX_RATE = 0.5
+
+
+async def item_uom(db, item: str) -> Optional[str]:
+    """The unit BC usually sells this item in, across all customers."""
+    _expire_caches()
+    if not _ITEM_UOM:
+        c: Dict[str, Counter] = {}
+        async for o in db.bc_sales_orders.find({}, {"_id": 0, "lines.lineObjectNumber": 1, "lines.unitOfMeasureCode": 1}):
+            for l in o.get("lines") or []:
+                if l.get("lineObjectNumber") and l.get("unitOfMeasureCode"):
+                    c.setdefault(str(l["lineObjectNumber"]).upper(), Counter())[str(l["unitOfMeasureCode"]).upper()] += 1
+        _ITEM_UOM.update({k: v.most_common(1)[0][0] for k, v in c.items()})
+        _ITEM_UOM["__loaded__"] = "1"
+    return _ITEM_UOM.get(str(item).upper())
+
+
+async def po_price_honor(db, customer_no: str, before_order: Optional[str] = None) -> Tuple[int, int]:
+    """(honored, overridden): on this customer's earlier POs, how often BC
+    kept the PO's unit price vs entered another. Sun Bum and Hearthside PO
+    prices are their own list; BC keeps Gamer's (replay 2026-10-08)."""
+    _expire_caches()
+    key = (customer_no, before_order or "")
+    if key in _HONOR_CACHE:
+        return _HONOR_CACHE[key]
+    limit = _order_seq(before_order) if before_order else 0
+    honored = overridden = 0
+    seen = set()
+    async for d in db.hub_documents.find({"sales_link.role": "customer_po", "sales_link.bc_customer_no": customer_no,
+                                          "sales_link.order_no": {"$ne": None}},
+                                         {"_id": 0, "extracted_fields.line_items": 1, "sales_link.order_no": 1}):
+        on = d["sales_link"]["order_no"]
+        seq = _order_seq(on)
+        if on in seen or (limit and (not seq or seq >= limit)):
+            continue
+        seen.add(on)
+        o = await db.bc_sales_orders.find_one({"order_no": on}, {"_id": 0, "lines": 1})
+        el = (d.get("extracted_fields") or {}).get("line_items") or []
+        bl = _bc_item_lines(o or {})
+        for e, b, _ in pair(el, bl):
+            pp, bp = num(e.get("unit_price")), float(b.get("unitPrice") or 0)
+            if not pp or bp <= 0:
+                continue
+            c = min((pp, pp * 1000), key=lambda v: abs(v - bp))
+            if abs(c - bp) <= 0.005 * bp:
+                honored += 1
+            elif abs(c - bp) <= 0.5 * bp:
+                overridden += 1
+    _HONOR_CACHE[key] = (honored, overridden)
+    return honored, overridden
+
+
+def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[str, Any]],
+           ctx: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Quantity in BC units and price for one candidate; fits = the PO line's
-    value agrees (None when the PO shows no value)."""
+    value agrees (None when the PO shows no value). ctx: item_uom (usual BC
+    unit of the item), overrides_po (BC rarely keeps this customer's PO price)."""
+    ctx = ctx or {}
     eq = num(e.get("quantity"))
-    price, uom = h.get("last_price"), h.get("uom")
+    price, uom = h.get("last_price"), h.get("uom") or ctx.get("item_uom")
     if eq and rr:
         qty = round(eq * rr["ratio"], 4)
     elif eq and str(uom or "").upper() == "M" and eq >= 1000:
@@ -352,11 +419,16 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         qty = eq
     po_price = num(e.get("unit_price"))
     price_source = "last BC price for this customer" if price else None
+    fit_price = None
     if po_price:
         for f in (1, 1000):
             cand = round(po_price * f, 6)
             if price and abs(cand - price) <= 0.005 * price:
                 break                   # the PO shows BC's price rounded: keep BC's exact figure
+            if price and abs(cand - price) <= 0.5 * price and ctx.get("overrides_po"):
+                price_source = f"last BC price (this customer's PO prices are usually replaced; PO shows {cand:g})"
+                fit_price = cand          # item/unit judged as before; only the price shown changes
+                break
             if price and abs(cand - price) <= 0.5 * price:
                 # The customer's PO price (a new price list, a quote): BC's
                 # exact figure when they have paid it before, else the PO's,
@@ -367,6 +439,10 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
                 price_source = "PO price" + ("" if exact or abs(price - last) <= 0.005 * last else f" (BC last {last:g})")
                 break
             if not price and f == 1:
+                # No history: a per-each PO price on an item BC sells per
+                # thousand (0.08614 -> 86.14 per M).
+                if str(uom or "").upper() == "M" and po_price < 5:
+                    cand = round(po_price * 1000, 4)
                 price, price_source = cand, "PO price"
     fits = None
     line_value = num(e.get("total")) or ((po_price or 0) * (eq or 0))
@@ -376,8 +452,9 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         # The PO line's value decides the unit (192,000 x 0.12572 = 24,138 ->
         # 192 M at 125.72) and checks the item itself.
         cands = {eq, round(eq / 1000, 4)} | ({round(eq * rr["ratio"], 4)} if rr else set())
-        best = min(cands, key=lambda q: abs(q * price - line_value))
-        off = abs(best * price - line_value) / line_value
+        fp = fit_price or price
+        best = min(cands, key=lambda q: abs(q * fp - line_value))
+        off = abs(best * fp - line_value) / line_value
         if off <= 0.03:
             fits, qty = True, best
         elif off > 0.25:
@@ -390,6 +467,8 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         checks.append("no BC price for this customer yet")
     elif price_source and price_source.startswith("PO price"):
         checks.append(f"PO price differs from the last BC price {h.get('last_price'):g}")
+    elif price_source and price_source.startswith("last BC price (this customer's"):
+        checks.append(price_source.split("(", 1)[1].rstrip(")"))
     if h.get("last_price") and h.get("last_date"):
         try:
             age = (datetime.now(timezone.utc).date() - datetime.fromisoformat(str(h["last_date"])[:10]).date()).days
@@ -406,11 +485,14 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
     await load_item_categories(db)
     hist = await customer_history(db, customer_no, as_of=as_of, before_order=before_order)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
+    hon, ovr = await po_price_honor(db, customer_no, before_order)
+    overrides_po = ovr >= HONOR_MIN_IGNORED and ovr / max(1, hon + ovr) >= HONOR_MAX_RATE
     out = []
     for e in extracted:
         chosen = None
         cands = await _candidates(db, e, hist, rows)
-        valued = [(item, how, _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item))) for item, how, _ in cands]
+        valued = [(item, how, _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
+                                     {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})) for item, how, _ in cands]
         # The first candidate the PO line's value confirms; else the first not
         # ruled out, in priority order.
         strong = {item: st for item, _, st in cands}
@@ -423,7 +505,8 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
             newer = _newer_revision(item, hist)
             if newer:
                 item, how = newer, how + f" · newer revision {newer} the customer now buys"
-                v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item))
+                v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
+                           {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})
             chosen = {"item": item, "how": how + (" · PO value agrees" if v["fits"] else ""), **v}
         chosen = chosen or {"item": None, "how": None, "quantity": None, "unit_price": None, "unit_of_measure": None, "price_source": None}
         chosen.pop("fits", None)

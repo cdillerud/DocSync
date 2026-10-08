@@ -48,6 +48,13 @@ async def assess_fraud_risk(db, doc: Dict[str, Any]) -> Dict[str, Any]:
     vendor_name = ef.get("vendor") or doc.get("vendor_raw") or doc.get("vendor_canonical") or ""
     vendor_no = str(doc.get("vendor_canonical") or "").strip()
     in_bc = bool(vendor_no) and await db.hub_bc_vendors.find_one({"number": vendor_no}, {"_id": 1}) is not None
+    if in_bc:
+        # A vendor Gamer has never paid, or one blocked in BC, is not "known"
+        # ("Becparts LLC" fuzzy-matched to blocked CHANGE, $34,117 "Advisory
+        # Overview" from bbaja.es, 2026-10-07).
+        cat = await db.bc_catalog_vendors.find_one({"vendor_no": vendor_no}, {"_id": 0, "blocked": 1})
+        paid = await db.bc_reference_cache.find_one({"bc_vendor_no": vendor_no, "bc_entity_type": "posted_purchase_invoice"}, {"_id": 1})
+        in_bc = not (cat or {}).get("blocked") and paid is not None
     domain_flat = domain.replace("-", "")
     domain_matches = any(t in domain_flat for t in _brand_tokens(vendor_name))
     wording = f"{doc.get('email_subject') or ''} {doc.get('file_name') or ''}"

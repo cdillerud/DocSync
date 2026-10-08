@@ -140,6 +140,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         return {"ap_stage": "no_action", "no_action_reason": d.get("duplicate_reason") or "duplicate"}
     if d.get("non_transactional") or d.get("excluded_from_processing"):
         return {"ap_stage": "no_action", "no_action_reason": "excluded_by_staff:" + str(d.get("non_transactional_reason") or d.get("non_transactional_disposition") or "")}
+    if d.get("document_type") == "AR_Invoice" and re.search(r"statement", f"{d.get('file_name') or ''} {d.get('email_subject') or ''}", re.I):
+        return {"ap_stage": "no_action", "no_action_reason": "statement"}
     if d.get("non_ap_kind") or d.get("document_type") in NO_ACTION_TYPES:
         return {"ap_stage": "no_action", "no_action_reason": d.get("non_ap_kind") or "not_ap:" + str(d.get("document_type"))}
     bl = d.get("bc_link") if isinstance(d.get("bc_link"), dict) else None
@@ -213,7 +215,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
 
 async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     from services.folder_routing_service import route_with_feedback
-    bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no"))
+    # Blocked BC vendors are not vendors to pay: their documents go to staff.
+    bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no", {"blocked": {"$ne": True}}))
     reliability = await load_reliability(db)
     staff_filed = {}
     async for o in db.routing_outcomes.find({"source": {"$ne": "staff_decision"}}, {"_id": 0, "hub_doc_id": 1, "staff_folder": 1}):

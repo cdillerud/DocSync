@@ -160,6 +160,24 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
                                       and (pos or has_lines))) else "customer_other"
     else:
         role = "other"
+    if role == "customer_po" and match == "gamer_order_no":
+        # Only a Gamer order number links this "customer PO": not when its own
+        # PO number is a Gamer purchase order (Gamer's PO to O-I naming the
+        # sales order it supplies: ALTECPA 114029), nor when both sides list
+        # items and none agree (Daizy's soda cans vs cooking-wine bottles).
+        if pos and await db.bc_reference_cache.find_one(
+                {"bc_entity_type": "purchase_order", "bc_document_no": {"$in": [p for p in pos if p.isdigit() or p.startswith("W")]}}, {"_id": 1}):
+            # A supplier's paperwork for Gamer's dropship PO: same number as
+            # the sales order it supplies, so it stays filed against it.
+            role = "supplier"
+            gamer_pos |= set(pos)
+        else:
+            from services.sales_item_xref_service import pair, _bc_item_lines, load_item_categories
+            await load_item_categories(db)
+            full = await db.bc_sales_orders.find_one({"order_no": order["order_no"]}, {"_id": 0, "lines": 1})
+            el, bl = ef.get("line_items") or [], _bc_item_lines(full or {})
+            if el and bl and not pair(el, bl):
+                order, match = None, None
     return {"role": role, "order_no": (order or {}).get("order_no"), "match": match,
             "bc_customer_no": (order or {}).get("customer_no") or cp.get("customer"),
             "counterparty": "gamer" if internal else ("customer" if cp.get("customer") else ("vendor" if cp.get("vendor") else "unknown")),

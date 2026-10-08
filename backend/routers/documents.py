@@ -526,6 +526,7 @@ async def search_documents(
         "amount_float": 1, "workflow_status": 1, "status": 1,
         "created_utc": 1, "extracted_fields": 1,
         "sharepoint_web_url": 1, "bc_document_no": 1,
+        "ap_stage": 1, "staff_reason": 1, "sales_stage": 1, "sales_stage_reason": 1, "mailbox_category": 1,
     }
 
     # Try $text search first

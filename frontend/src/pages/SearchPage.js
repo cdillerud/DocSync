@@ -69,6 +69,22 @@ function fmtMoney(v) {
   return n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 }
 
+// Current stage (AP Inbox / Sales Inbox), in the words staff see there.
+const AP_STAGE = {
+  needs_staff: 'Needs staff', awaiting_approval: 'Awaiting approval', on_hold: 'On hold', drafted: 'Drafted (sandbox)',
+  awaiting_receipt: 'Waiting for receipt', ready: 'Ready for AP', in_bc_check: 'Entered in BC, check', in_bc: 'Entered in BC',
+  paid: 'Paid', filed_by_staff: 'Filed by staff', file_only: 'File only', no_action: 'No action', container: 'Split into pieces',
+};
+const SALES_STAGE = {
+  needs_rep: 'Needs a rep', ready: 'Ready to draft', drafted: 'Drafted (sandbox)', in_bc: 'Entered in BC',
+  duplicate: 'Duplicate', purchasing: 'Purchasing', to_ap: 'To AP', filed: 'Filed',
+};
+function stageLabel(d) {
+  if (d.ap_stage && AP_STAGE[d.ap_stage]) return { area: 'AP', label: AP_STAGE[d.ap_stage], attention: ['needs_staff', 'awaiting_approval', 'on_hold', 'in_bc_check'].includes(d.ap_stage) };
+  if (d.sales_stage && SALES_STAGE[d.sales_stage]) return { area: 'Sales', label: SALES_STAGE[d.sales_stage], attention: d.sales_stage === 'needs_rep' };
+  return null;
+}
+
 // Normalize a hub_document row from either the search endpoint (compact)
 // or the list endpoint (full document) into a single shape the table renders.
 function normalizeRow(d) {
@@ -84,6 +100,7 @@ function normalizeRow(d) {
     po_number_clean: d.po_number_clean || ef.po_number || '',
     amount_float: (d.amount_float ?? null),
     workflow_status: d.workflow_status || d.status || '',
+    stage: stageLabel(d),
     created_utc: d.created_utc || d.created_at || '',
     sharepoint_web_url: d.sharepoint_web_url || d.sharepoint_share_link_url || '',
     bc_document_no: d.bc_document_no || '',
@@ -506,7 +523,7 @@ export default function SearchPage() {
                   <TableHead>Invoice / PO</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead>Created</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Stage</TableHead>
                   <TableHead className="text-right">Open</TableHead>
                 </TableRow>
               </TableHeader>
@@ -547,9 +564,14 @@ export default function SearchPage() {
                       {fmtDate(r.created_utc)}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {r.workflow_status || '—'}
-                      </Badge>
+                      {r.stage ? (
+                        <Badge variant="outline" title={`Legacy status: ${r.workflow_status || '—'}`}
+                          className={`text-[10px] ${r.stage.attention ? 'border-amber-500/50 text-amber-600' : ''}`}>
+                          {r.stage.area}: {r.stage.label}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-[10px]">{r.workflow_status || '—'}</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">

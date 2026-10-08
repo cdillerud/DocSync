@@ -25,13 +25,40 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from services.sales_item_xref_service import is_product, load_item_categories, num
+from services.sales_item_xref_service import _CATEGORY, is_product, load_item_categories, num
 
 MIN_ORDERS = 5
 MIN_RATE = 0.8
 MAX_SPREAD = 0.15
 _FREIGHT = {"FREIGHT", "Z-FREIGHT"}
 _FREIGHT_WORDS = re.compile(r"\b(freight|shipping|delivery|p-freight)\b", re.I)
+
+
+_ITEM_DESC: Dict[str, str] = {}
+
+
+async def _load_item_desc(db) -> Dict[str, str]:
+    if not _ITEM_DESC:
+        async for i in db.bc_reference_cache.find({"bc_entity_type": "item"}, {"_id": 0, "bc_document_no": 1, "description": 1}):
+            _ITEM_DESC[str(i["bc_document_no"]).upper()] = str(i.get("description") or "")
+    return _ITEM_DESC
+
+
+def size_signature(item: str, uom: Any = None) -> Optional[str]:
+    """'12oz, 202, Sleek, Printed, ...' -> '12OZ,202,SLEEK|M': dunnage per
+    unit is steady per container size (Ball 12oz sleek 0.1235 pallets per M
+    on 100% of 596 orders, O-I 24oz jar 4.96 tier sheets per M), not per
+    item number - every new can design is a new item."""
+    d = _ITEM_DESC.get(str(item).upper()) or ""
+    parts = [x.strip().upper().replace(" ", "") for x in d.split(",")[:3]]
+    if len(parts) < 2 or not re.match(r"^\d+(\.\d+)?(OZ|ML|L|G|CC|GAL)$", parts[0]):
+        return None          # not a container (artwork, tooling, charges)
+    return ",".join(parts) + "|" + str(uom or "").upper()
+
+
+SIZE_FALLBACK = True
+FREIGHT_PLACEHOLDER = True
+DUNNAGE_BY_SIZE = True
 
 
 def _lines(o: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -70,11 +97,25 @@ async def learn(db) -> Dict[str, Any]:
     orders = Counter()
     seen_any = defaultdict(Counter)                   # cust -> charge -> orders (incl. invoicing-time)
     all_q = defaultdict(lambda: defaultdict(list))
+    await _load_item_desc(db)
+    size_ratio = defaultdict(list)                    # (size signature, charge) -> [ratio]
+    size_price = defaultdict(Counter)                 # (size signature, charge) -> unit prices
+    size_orders = Counter()                           # size signature -> single-size orders
     async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1}):
         ls = _lines(o)
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
         if not prods:
             continue
+        sigs = {size_signature(l["lineObjectNumber"], l.get("unitOfMeasureCode")) for l in prods}
+        if len(sigs) == 1 and None not in sigs:
+            sig = sigs.pop()
+            size_orders[sig] += 1
+            pq_ = sum(float(l["quantity"]) for l in prods)
+            for l in ls:
+                c = str(l["lineObjectNumber"]).upper()
+                if not is_product(c) and float(l.get("quantity") or 0) > 0 and pq_:
+                    size_ratio[(sig, c)].append(float(l["quantity"]) / pq_)
+                    size_price[(sig, c)][round(float(l.get("unitPrice") or 0), 4)] += 1
         cust = o["customer_no"]
         orders[cust] += 1
         pq = sum(float(l["quantity"]) for l in prods)
@@ -138,6 +179,14 @@ async def learn(db) -> Dict[str, Any]:
         if r or price is not None:
             product_rules.append({"scope": "customer_product", "customer_no": cust, "product": it, "charge": c,
                                   "ratio": r, "price": price, "n": len(rs)})
+    for (sig, c), rs in size_ratio.items():
+        r = _steady(rs)
+        if r and len(rs) >= 5:
+            p_top, p_k = size_price[(sig, c)].most_common(1)[0]
+            product_rules.append({"scope": "size", "size": sig, "charge": c, "ratio": r, "n": len(rs),
+                                  "presence": round(len(rs) / max(1, size_orders[sig]), 3),
+                                  "price": p_top if p_k / len(rs) >= 0.8 else None,
+                                  "dunnage": _CATEGORY.get(c) == "PALLET"})
     for (it, c), rs in glob_ratio.items():
         r = _steady(rs)
         if r and len(rs) >= 5:
@@ -186,6 +235,7 @@ async def learn(db) -> Dict[str, Any]:
         await db.sales_charge_product_rules.insert_many(product_rules)
     await db.sales_charge_rules.create_index("customer_no")
     await db.sales_charge_product_rules.create_index([("product", 1), ("charge", 1)])
+    await db.sales_charge_product_rules.create_index([("size", 1), ("charge", 1)])
     return {"rules": len(rules), "product_rules": len(product_rules), "usual": len(usual), "invoice_time_excluded": sorted(excluded)}
 
 
@@ -217,6 +267,11 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                     {"scope": "customer_product", "customer_no": customer_no, "product": str(p["item"]).upper(), "charge": r["charge"]}, {"_id": 0})
                 gp = await db.sales_charge_product_rules.find_one({"scope": "product", "product": str(p["item"]).upper(), "charge": r["charge"]}, {"_id": 0})
                 ratio = (cp or {}).get("ratio") or (gp or {}).get("ratio")
+                if not ratio and SIZE_FALLBACK:
+                    await _load_item_desc(db)
+                    sig = size_signature(p["item"], p.get("unit_of_measure") or "M")
+                    sp = await db.sales_charge_product_rules.find_one({"scope": "size", "size": sig, "charge": r["charge"]}, {"_id": 0}) if sig else None
+                    ratio = (sp or {}).get("ratio")
                 if not ratio:
                     known = False
                     break
@@ -239,12 +294,44 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
             price = round(r["pct"] * pv / qty, 2)
         elif r["price_mode"] == "po_freight" and freight is not None:
             price, qty = freight, 1.0
+        elif r["price_mode"] == "po_freight" and FREIGHT_PLACEHOLDER:
+            # No freight on the PO: the line inside sales enters on open
+            # orders - 1 at 0, priced when it ships (501 of 760 open orders).
+            price, qty = 0.0, 1.0
+            r = {**r, "price_basis": "placeholder at 0, as inside sales enters it; priced when the order ships"}
         else:
             continue
         out.append({"item": r["charge"], "quantity": qty, "unit_price": price, "charge": True,
                     "how": f"on {int(r['rate'] * 100)}% of this customer's {r['orders']} BC orders"
                            + ("; quantity per product" if r["qty_mode"] in ("ratio", "per_product") else ""),
                     "price_source": r.get("price_basis")})
+    if DUNNAGE_BY_SIZE:
+        # Dunnage comes with the container, whoever buys it: Ball 12oz cans
+        # ship on Ball pallets / tier sheets / top frames on 80%+ of orders.
+        have = {o["item"] for o in out}
+        await _load_item_desc(db)
+        need: Dict[str, float] = {}
+        price_of: Dict[str, Any] = {}
+        for p in prods:
+            sig = size_signature(p["item"], p.get("unit_of_measure") or "M")
+            if not sig:
+                continue
+            # Only for a new item (an established one has its own history,
+            # and one size can come from two glass makers with their own
+            # dunnage: O-I vs Ardagh 24oz jars).
+            if await db.bc_sales_orders.count_documents({"lines.lineObjectNumber": p["item"]}, limit=3) >= 3:
+                continue
+            async for sp in db.sales_charge_product_rules.find({"scope": "size", "size": sig, "dunnage": True,
+                                                                "presence": {"$gte": 0.9}, "n": {"$gte": 10}}, {"_id": 0}):
+                if sp["charge"] in have or sp.get("price") is None:
+                    continue
+                need[sp["charge"]] = need.get(sp["charge"], 0) + sp["ratio"] * float(p.get("quantity") or 0)
+                price_of[sp["charge"]] = sp["price"]
+        for c, q in need.items():
+            if q > 0:
+                out.append({"item": c, "quantity": float(max(1, round(q))), "unit_price": price_of[c], "charge": True,
+                            "how": "dunnage that ships with this container size (90%+ of its BC orders)",
+                            "price_source": "usual price for this dunnage"})
     return out
 
 

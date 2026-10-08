@@ -25,7 +25,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from services.sales_item_xref_service import _CATEGORY, is_product, load_item_categories, num
+from services.sales_item_xref_service import _CATEGORY, _order_seq, is_product, load_item_categories, num
 
 MIN_ORDERS = 5
 MIN_RATE = 0.8
@@ -59,6 +59,8 @@ def size_signature(item: str, uom: Any = None) -> Optional[str]:
 SIZE_FALLBACK = True
 FREIGHT_PLACEHOLDER = True
 DUNNAGE_BY_SIZE = True
+ITEM_CHARGES = True
+ITEM_RULES_INVOICED_ONLY = False   # replay switch: learn item charges from invoiced orders only
 
 
 def _lines(o: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -101,11 +103,23 @@ async def learn(db) -> Dict[str, Any]:
     size_ratio = defaultdict(list)                    # (size signature, charge) -> [ratio]
     size_price = defaultdict(Counter)                 # (size signature, charge) -> unit prices
     size_orders = Counter()                           # size signature -> single-size orders
-    async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1}):
+    item_orders = Counter()                           # item -> orders
+    item_charge = defaultdict(list)                   # (item, charge) -> [(seq, qty_kind, qty, price)]
+    async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1, "order_no": 1}):
         ls = _lines(o)
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
         if not prods:
             continue
+        if len(prods) == 1 and not (ITEM_RULES_INVOICED_ONLY and o.get("status") == "open"):
+            it1 = str(prods[0]["lineObjectNumber"]).upper()
+            item_orders[it1] += 1
+            pq1 = float(prods[0]["quantity"])
+            for l in ls:
+                c = str(l["lineObjectNumber"]).upper()
+                if not is_product(c) and float(l.get("quantity") or 0) > 0:
+                    q = float(l["quantity"])
+                    kind = "same" if abs(q - pq1) < 1e-6 else ("one" if q == 1 else "other")
+                    item_charge[(it1, c)].append((_order_seq(o.get("order_no")), kind, q, float(l.get("unitPrice") or 0)))
         sigs = {size_signature(l["lineObjectNumber"], l.get("unitOfMeasureCode")) for l in prods}
         if len(sigs) == 1 and None not in sigs:
             sig = sigs.pop()
@@ -179,6 +193,17 @@ async def learn(db) -> Dict[str, Any]:
         if r or price is not None:
             product_rules.append({"scope": "customer_product", "customer_no": cust, "product": it, "charge": c,
                                   "ratio": r, "price": price, "n": len(rs)})
+    for (it, c), obs_ in item_charge.items():
+        n_it = item_orders[it]
+        if n_it < 3 or c in excluded:
+            continue
+        pres = len(obs_) / n_it
+        kinds = Counter(k for _, k, _, _ in obs_)
+        kind, kk = kinds.most_common(1)[0]
+        if pres >= 0.9 and kind in ("same", "one") and kk / len(obs_) >= 0.8:
+            last = max(obs_, key=lambda t: t[0])
+            product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3), "n": n_it,
+                                  "qty_kind": kind, "price": last[3]})
     for (sig, c), rs in size_ratio.items():
         r = _steady(rs)
         if r and len(rs) >= 5:
@@ -305,6 +330,20 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                     "how": f"on {int(r['rate'] * 100)}% of this customer's {r['orders']} BC orders"
                            + ("; quantity per product" if r["qty_mode"] in ("ratio", "per_product") else ""),
                     "price_source": r.get("price_basis")})
+    if ITEM_CHARGES:
+        # Charges that follow the item, whoever buys it: imported items carry
+        # TARIFF (qty = product qty) / CUSTOMS on 90%+ of their orders (69
+        # items always, 476 never).
+        have = {o["item"] for o in out}
+        for p in prods:
+            async for ic in db.sales_charge_product_rules.find({"scope": "item_charge", "product": str(p["item"]).upper()}, {"_id": 0}):
+                if ic["charge"] in have:
+                    continue
+                have.add(ic["charge"])
+                q = float(p.get("quantity") or 0) if ic["qty_kind"] == "same" else 1.0
+                out.append({"item": ic["charge"], "quantity": q, "unit_price": ic["price"], "charge": True,
+                            "how": f"on {int(ic['presence'] * 100)}% of this item's {ic['n']} BC orders",
+                            "price_source": "this item's latest price"})
     if DUNNAGE_BY_SIZE:
         # Dunnage comes with the container, whoever buys it: Ball 12oz cans
         # ship on Ball pallets / tier sheets / top frames on 80%+ of orders.

@@ -1,3 +1,4 @@
+import re
 """How AP codes each vendor's invoice lines in Production BC, and the
 draft lines that follow from it.
 
@@ -108,12 +109,57 @@ def main_code_known(coding: Optional[Dict[str, Any]], lines: List[Dict[str, Any]
     return str(m["lineObjectNumber"]).upper() in {c["code"] for c in coding.get("main_codes") or []}
 
 
+_FREIGHT_CODES = {"FREIGHT", "WHSEFRT", "DRAYAGE"}
+# Accessorials AP enters as their own line on a carrier invoice (replay
+# 2026-10-08: Tumalo DETENTION, ATS FRTTONU).
+_ACCESSORIALS = [(re.compile(r"\bDETENTION\b", re.I), "DETENTION"),
+                 (re.compile(r"\bTONU\b|TRUCK\s+ORDERED\s+NOT\s+USED", re.I), "FRTTONU")]
+# A port container move (ISO container number, chassis, port/gate fees) is
+# drayage, not over-the-road freight (Tumalo TXGU7820247 + CHASSIS RENTAL).
+_CONTAINER = re.compile(r"\b[A-Z]{4}\d{7}\b|\bCHASSIS\b|\bGATE FEES?\b|\bPORT SURCHARGE\b|\bPRE[- ]?PULL\b")
+
+
+def _line_amount(e: Dict[str, Any]) -> float:
+    for k in ("total", "amount"):
+        try:
+            v = float(str(e.get(k)).replace(",", "").replace("$", ""))
+            if v:
+                return v
+        except (TypeError, ValueError):
+            pass
+    try:
+        return float(e.get("quantity") or 0) * float(str(e.get("unit_price")).replace(",", "").replace("$", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+SPLIT_FREIGHT = True
+
+
 def single_line(coding: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, Any]]:
     dom = coding["dominant"]
-    return [{"lineType": dom["lineType"], "lineObjectNumber": dom["lineObjectNumber"],
+    total = round(abs(float(doc["amount_float"])), 2)
+    code, ltype = dom["lineObjectNumber"], dom["lineType"]
+    src = f"AP codes this vendor {code} ({int(dom['share'] * 100)}% of recent invoices)"
+    lines: List[Dict[str, Any]] = []
+    if SPLIT_FREIGHT and str(code).upper() in _FREIGHT_CODES:
+        items = ((doc.get("extracted_fields") or {}).get("line_items") or [])
+        text = " ".join(str(e.get("description") or "") for e in items).upper()
+        if str(code).upper() == "FREIGHT" and _CONTAINER.search(text):
+            code, ltype, src = "DRAYAGE", "Item", src + "; a port container move: DRAYAGE"
+        for e in items:
+            for rx, acc in _ACCESSORIALS:
+                amt = round(_line_amount(e), 2)
+                if rx.search(str(e.get("description") or "")) and 0 < amt < total:
+                    lines.append({"lineType": "Item", "lineObjectNumber": acc, "description": str(e.get("description"))[:100],
+                                  "quantity": 1.0, "unitCost": amt, "source": f"{acc} line on the invoice"})
+                    break
+    rest = round(total - sum(l["unitCost"] for l in lines), 2)
+    if rest <= 0:
+        lines, rest = [], total
+    return [{"lineType": ltype, "lineObjectNumber": code,
              "description": f"Invoice {doc.get('invoice_number_clean') or ''}".strip()[:100],
-             "quantity": 1.0, "unitCost": round(abs(float(doc["amount_float"])), 2),
-             "source": f"AP codes this vendor {dom['lineObjectNumber']} ({int(dom['share'] * 100)}% of recent invoices)"}]
+             "quantity": 1.0, "unitCost": rest, "source": src}] + lines
 
 
 

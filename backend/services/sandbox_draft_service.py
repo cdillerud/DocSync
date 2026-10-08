@@ -347,6 +347,9 @@ async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:
     return out
 
 
+PROFILE_TO_STAFF = True
+
+
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
     """The lines a draft of this invoice gets (see vendor_line_coding_service).
 
@@ -386,6 +389,10 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     if main_code_known(coding, lines) is False:
         m = max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={})
         return {"problem": f"the Hub would code this {m.get('lineObjectNumber')}, which AP has not used for this vendor in BC"}
+    if PROFILE_TO_STAFF:
+        # Replay vs AP's BC entries (2026-10-08): these lines were right 4 of
+        # 16 times (warehouse storage/handling splits, customs + tariff).
+        return {"problem": "AP codes this vendor's invoices in varying ways (no usual coding the Hub can follow)"}
     return {"lines": lines, "source": "vendor_profile"}
 
 

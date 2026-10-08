@@ -85,10 +85,15 @@ async def readback(db, limit: int = 200) -> Dict[str, Any]:
 
 
 def _lines_by_item(ls):
+    """item -> {q, c}. Lines that carry nothing are left out: zero-quantity
+    PO lines AP's invoice keeps (EVGREEN 57740 x 0) and $0 marker lines
+    (Z-POP, Z-DND, Z-TAG)."""
     out = {}
     for l in ls or []:
         it = str(l.get("lineObjectNumber") or "").upper()
-        if not it:
+        if not it or float(l.get("quantity") or 0) == 0:
+            continue
+        if it.startswith("Z-") and float(l.get("unitCost") or 0) == 0:
             continue
         a = out.setdefault(it, {"q": 0.0, "c": float(l.get("unitCost") or 0)})
         a["q"] += float(l.get("quantity") or 0)

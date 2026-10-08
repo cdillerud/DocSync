@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { toast } from 'sonner';
 import { Link } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -76,20 +77,41 @@ export default function SalesInboxPage() {
   const [data, setData] = useState(null);
   const [open, setOpen] = useState({});
   const [loading, setLoading] = useState(false);
+  const [reps, setReps] = useState(null);
+  const [rep, setRep] = useState(null);      // null until we know who is signed in
+
+  const loadReps = useCallback(async () => {
+    const { data: r } = await api.get('/sales-inbox/reps');
+    setReps(r);
+    setRep(cur => (cur === null ? (r.me || '') : cur));
+  }, []);
+  useEffect(() => { loadReps(); }, [loadReps]);
 
   const load = useCallback(async () => {
+    if (rep === null) return;
     setLoading(true);
     try {
       const [{ data: s }, { data: l }] = await Promise.all([
-        api.get('/sales-inbox/summary'),
-        api.get('/sales-inbox/list', { params: { stage, q, limit: 100 } }),
+        api.get('/sales-inbox/summary', { params: { rep } }),
+        api.get('/sales-inbox/list', { params: { stage, q, rep, limit: 100 } }),
       ]);
       setSummary(s);
       setData(l);
     } finally {
       setLoading(false);
     }
-  }, [stage, q]);
+  }, [stage, q, rep]);
+
+  const reassign = async (row, email, scope) => {
+    try {
+      await api.post(`/sales-inbox/document/${row.id}/assign`, { rep_email: email, scope });
+      toast.success(scope === 'customer' ? `All ${row.customer_name || row.customer_no} POs reassigned` : 'Reassigned');
+      load(); loadReps();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not reassign');
+    }
+  };
+  const repName = r => r.name || r.email.split('@')[0];
 
   useEffect(() => { const t = setTimeout(load, q ? 300 : 0); return () => clearTimeout(t); }, [load, q]);
 
@@ -113,6 +135,23 @@ export default function SalesInboxPage() {
               products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}.</>
           )}
         </p>
+      )}
+
+      {reps && (
+        <div className="flex flex-wrap items-center gap-1.5" data-testid="rep-queues">
+          <span className="text-xs text-muted-foreground mr-1">Queue</span>
+          {[{ email: '', name: 'Everyone' }, ...reps.reps].map(r => {
+            const open = r.counts ? (r.counts.needs_rep + r.counts.ready + r.counts.drafted) : null;
+            const active = rep === r.email;
+            return (
+              <button key={r.email || 'all'} type="button" onClick={() => setRep(r.email)}
+                className={`rounded-full border px-3 py-1 text-xs ${active ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}`}
+                title={r.counts ? `${r.counts.needs_rep} need a rep · ${r.counts.ready} ready · ${r.counts.drafted} drafted` : 'All reps'}>
+                {r.email && r.email === reps.me ? 'My queue' : repName(r)}{open != null && <b className="ml-1 tabular-nums">{open}</b>}
+              </button>
+            );
+          })}
+        </div>
       )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
@@ -152,7 +191,7 @@ export default function SalesInboxPage() {
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground border-b border-border">
                     <th className="py-2 pr-2"></th><th className="py-2 pr-3">Received</th><th className="py-2 pr-3">Customer</th><th className="py-2 pr-3">Customer PO</th>
-                    <th className="py-2 pr-3">Document</th><th className="py-2 pr-3">Why / BC</th><th className="py-2 pr-3 text-right">Lines</th>
+                    <th className="py-2 pr-3">Document</th><th className="py-2 pr-3">Why / BC</th><th className="py-2 pr-3">Rep</th><th className="py-2 pr-3 text-right">Lines</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -175,10 +214,25 @@ export default function SalesInboxPage() {
                           {r.stage === 'duplicate' && <>Copy of <Link className="underline" to={`/documents/${r.duplicate_of}`} onClick={e => e.stopPropagation()}>another document</Link></>}
                           {['filed', 'purchasing', 'to_ap', 'ready'].includes(r.stage) && <span className="text-muted-foreground">{(r.role || '').replace(/_/g, ' ')}</span>}
                         </td>
+                        <td className="py-2 pr-3 text-xs" onClick={e => e.stopPropagation()}>
+                          <div title={r.rep?.how}>{r.rep?.name || 'Unassigned'}</div>
+                          {reps && (
+                            <select className="mt-0.5 max-w-[140px] rounded border border-border bg-background px-1 py-0.5 text-[11px]" value=""
+                              onChange={e => { const [email, scope] = e.target.value.split('|'); if (scope) reassign(r, email, scope); }}>
+                              <option value="">Reassign…</option>
+                              {reps.reps.filter(x => x.email !== 'unassigned').map(x => (
+                                <optgroup key={x.email} label={repName(x)}>
+                                  <option value={`${x.email}|document`}>This PO</option>
+                                  {r.customer_no && <option value={`${x.email}|customer`}>All {r.customer_no} POs</option>}
+                                </optgroup>
+                              ))}
+                            </select>
+                          )}
+                        </td>
                         <td className="py-2 pr-3 text-right text-xs tabular-nums">{r.resolution ? `${r.resolution.resolved}/${r.resolution.total}` : '—'}</td>
                       </tr>
                       {open[r.id] && r.resolution && (
-                        <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={6} className="py-2 pr-3"><Lines resolution={r.resolution} /></td></tr>
+                        <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3"><Lines resolution={r.resolution} /></td></tr>
                       )}
                     </>
                   ))}

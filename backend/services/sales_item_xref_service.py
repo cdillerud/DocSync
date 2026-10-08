@@ -198,11 +198,15 @@ async def learn(db) -> Dict[str, Any]:
     return dict(stats)
 
 
-async def customer_history(db, customer_no: str) -> Dict[str, Dict[str, Any]]:
-    """item -> {last_price, uom, n, last_date, description} from BC orders."""
+async def customer_history(db, customer_no: str, as_of: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """item -> {last_price, uom, n, last_date, description} from BC orders
+    (only orders before `as_of` when given: an honest replay of a past PO)."""
     hist = {}
     async for o in db.bc_sales_orders.find({"customer_no": customer_no}, {"_id": 0, "lines": 1, "order_date": 1, "first_invoice_date": 1}):
         when = o.get("first_invoice_date") or o.get("order_date") or ""
+        od = o.get("order_date") if o.get("order_date") and not str(o.get("order_date")).startswith("0001") else when
+        if as_of and str(od or "") >= as_of:
+            continue
         for l in o.get("lines") or []:
             if l.get("lineType") != "Item" or not l.get("lineObjectNumber"):
                 continue
@@ -353,9 +357,9 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
     return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits}
 
 
-async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None) -> List[Dict[str, Any]]:
     await load_item_categories(db)
-    hist = await customer_history(db, customer_no)
+    hist = await customer_history(db, customer_no, as_of=as_of)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
     out = []
     for e in extracted:

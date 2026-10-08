@@ -79,6 +79,12 @@ const SALES_STAGE = {
   needs_rep: 'Needs a rep', ready: 'Ready to draft', drafted: 'Drafted (sandbox)', in_bc: 'Entered in BC',
   duplicate: 'Duplicate', purchasing: 'Purchasing', to_ap: 'To AP', filed: 'Filed',
 };
+// AP_INVOICE / AP_Invoice / Shipping_Document -> 'AP Invoice', 'Shipping Document'.
+function typeLabel(t) {
+  if (!t) return '—';
+  return String(t).split('_').map((w) => (/^(AP|AR|PO|BOL|SO|COA|SCAR)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())).join(' ');
+}
+
 function stageLabel(d) {
   if (d.ap_stage && AP_STAGE[d.ap_stage]) return { area: 'AP', label: AP_STAGE[d.ap_stage], attention: ['needs_staff', 'awaiting_approval', 'on_hold', 'in_bc_check'].includes(d.ap_stage) };
   if (d.sales_stage && SALES_STAGE[d.sales_stage]) return { area: 'Sales', label: SALES_STAGE[d.sales_stage], attention: d.sales_stage === 'needs_rep' };
@@ -93,7 +99,7 @@ function normalizeRow(d) {
   return {
     id,
     file_name: d.file_name || ef.file_name || '(unnamed)',
-    document_type: d.document_type || d.doc_type || d.suggested_job_type || '—',
+    document_type: typeLabel(d.document_type || d.doc_type || d.suggested_job_type),
     vendor_canonical: d.vendor_canonical || d.vendor_raw || ef.vendor || '',
     customer: ef.customer || d.customer || '',
     invoice_number_clean: d.invoice_number_clean || ef.invoice_number || '',
@@ -231,7 +237,7 @@ export default function SearchPage() {
       if (useTextSearch) {
         if (docType !== 'all') {
           const dt = docType.toLowerCase();
-          rows = rows.filter((r) => (r.document_type || '').toLowerCase().includes(dt));
+          rows = rows.filter((r) => (r.document_type || '').toLowerCase().replace(/ /g, '_').includes(dt));
         }
         if (statusFilter !== 'all') {
           const st = statusFilter.toLowerCase();

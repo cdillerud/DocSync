@@ -624,8 +624,12 @@ async def search_documents(
         results.append({
             "doc_id": doc.get("id", ""),
             "file_name": doc.get("file_name", ""),
-            "document_type": doc.get("doc_type") or doc.get("document_type", ""),
+            # document_type is the current classification; doc_type is the
+            # legacy field (a Ball invoice to Gamer still said SALES_INVOICE).
+            "document_type": doc.get("document_type") or doc.get("doc_type", ""),
             "vendor_canonical": doc.get("vendor_canonical", ""),
+            "ap_stage": doc.get("ap_stage"), "staff_reason": doc.get("staff_reason"),
+            "sales_stage": doc.get("sales_stage"), "mailbox_category": doc.get("mailbox_category"),
             "invoice_number_clean": doc.get("invoice_number_clean", ""),
             "po_number_clean": doc.get("po_number_clean", ""),
             "amount_float": doc.get("amount_float"),

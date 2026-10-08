@@ -33,7 +33,21 @@ def _name(email: str, users: Dict[str, str]) -> str:
     return f"{local[:1].upper()}. {local[1:2].upper()}{local[2:]}" if len(local) > 2 else local
 
 
-async def context(db) -> Dict[str, Any]:
+_CTX_CACHE: Dict[str, Any] = {"at": 0.0, "ctx": None}
+
+
+async def context(db, fresh: bool = False) -> Dict[str, Any]:
+    """Cached for a minute (it reads every BC order); a reassignment asks
+    for a fresh one."""
+    import time
+    if not fresh and _CTX_CACHE["ctx"] is not None and time.time() - _CTX_CACHE["at"] < 60:
+        return _CTX_CACHE["ctx"]
+    ctx = await _context(db)
+    _CTX_CACHE.update(at=time.time(), ctx=ctx)
+    return ctx
+
+
+async def _context(db) -> Dict[str, Any]:
     reps = rep_mailboxes()
     users = {}
     async for x in db.hub_documents.aggregate([

@@ -140,7 +140,7 @@ async def grade_against_production(db) -> Dict[str, Any]:
 
 async def ap_draft_metrics(db) -> Dict[str, Any]:
     c = Counter()
-    async for d in db.hub_documents.find({"ap_draft_vs_bc": {"$exists": True}}, {"_id": 0, "ap_draft_vs_bc": 1}):
+    async for d in db.hub_documents.find({"ap_draft_vs_bc.graded_at": {"$exists": True}}, {"_id": 0, "ap_draft_vs_bc": 1}):
         g = d["ap_draft_vs_bc"]
         c["drafts"] += 1
         c["exact"] += bool(g.get("exact"))

@@ -120,7 +120,7 @@ async def readback(db) -> Dict[str, Any]:
 async def metrics(db) -> Dict[str, Any]:
     """Drafting accuracy against inside sales' own Production orders."""
     c = Counter()
-    async for d in db.hub_documents.find({"sales_draft_vs_bc": {"$exists": True}}, {"_id": 0, "sales_draft_vs_bc": 1}):
+    async for d in db.hub_documents.find({"sales_draft_vs_bc.graded_at": {"$exists": True}}, {"_id": 0, "sales_draft_vs_bc": 1}):
         g = d["sales_draft_vs_bc"]
         c["orders"] += 1
         c["exact"] += bool(g.get("exact"))

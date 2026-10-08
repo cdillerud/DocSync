@@ -131,14 +131,14 @@ async def assign_rep(doc_id: str, req: AssignRequest, user=Depends(get_current_u
         if not cust:
             raise HTTPException(status_code=400, detail="This document has no customer to assign")
         await set_override(db, "customer", cust, req.rep_email, user or {})
-        ctx = await context(db)
+        ctx = await context(db, fresh=True)
         n = 0
         async for x in db.hub_documents.find({"sales_link.bc_customer_no": cust, "sales_stage": {"$exists": True}}, {"_id": 0, "id": 1, "pilot_mailbox": 1, "sales_link": 1}):
             await db.hub_documents.update_one({"id": x["id"]}, {"$set": {"sales_rep": assign(x, ctx)}})
             n += 1
         return {"ok": True, "updated": n}
     await set_override(db, "document", doc_id, req.rep_email, user or {})
-    ctx = await context(db)
+    ctx = await context(db, fresh=True)
     rep = assign(d, ctx)
     await db.hub_documents.update_one({"id": doc_id}, {"$set": {"sales_rep": rep}})
     return {"ok": True, "rep": rep}

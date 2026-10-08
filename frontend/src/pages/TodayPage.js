@@ -64,6 +64,7 @@ export default function TodayPage() {
   const c = new Proxy(ap?.counts || {}, { get: (o, k) => (k in o ? o[k] : (ap ? 0 : undefined)) });
   const st = new Proxy(sales?.stages || {}, { get: (o, k) => (k in o ? o[k] : (sales ? 0 : undefined)) });
   const apAcc = ap?.draft_accuracy || {};
+  const lineReplay = ap?.line_replay?.ap_lines || null;
   const sAcc = sales?.draft_accuracy || {};
   const first = (user?.display_name || '').split(' ')[0];
   const loading = !ap && !sales;
@@ -125,6 +126,11 @@ export default function TodayPage() {
                 <p className="text-muted-foreground">Items {apAcc.items_right}/{apAcc.ap_items} · quantities {apAcc.qty_right}/{apAcc.items_right} · costs {apAcc.cost_right}/{apAcc.items_right}</p>
               </>
             ) : <p className="text-muted-foreground">Graded as AP enters drafted invoices in Production; nothing graded yet.</p>}
+            {lineReplay && lineReplay.graded ? (
+              <p className="text-muted-foreground" title="Every day the Hub plans the lines of the invoices AP entered in the last 21 days, as it would draft them, and compares item, quantity and cost with AP's BC lines">
+                Daily replay: lines right on <b className="tabular-nums text-foreground">{lineReplay.exact}/{lineReplay.graded}</b> invoices AP entered ({lineReplay.exact_pct}%)
+              </p>
+            ) : null}
           </CardContent>
         </Card>
         <Card>

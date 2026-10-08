@@ -197,6 +197,13 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "awaiting_approval", "suggested_folder": folder, "routing_reason": why,
                     "approval_kind": "non_trade"}
         rel = reliability.get(reason_key(why)) or {"n": 0, "pct": None, "reliable": False}
+        # A folder staff created and named for this invoice's own PO
+        # ("Dropship International/120199 120200 120201 120208 120209" for an
+        # SGC invoice on PO 120199) is their filing decision already made.
+        po = str(d.get("po_number_clean") or "").strip().upper()
+        sub = (folder or "").strip("/").split("/")[-1].upper() if "/" in (folder or "").strip("/") else ""
+        if po and len(po) >= 5 and po in re.split(r"[\s,;&+]+", sub):
+            rel = {**rel, "reliable": True, "via": "existing folder named for this PO"}
         if not rel["reliable"]:
             return {"ap_stage": "needs_staff", "staff_reason": "routing_uncertain", "suggested_folder": folder,
                     "routing_reason": why, "routing_path_accuracy": rel}

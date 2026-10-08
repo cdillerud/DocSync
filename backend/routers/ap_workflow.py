@@ -239,4 +239,7 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
              .skip(max(0, skip)).limit(max(1, min(limit, 200)))]
     from services.draft_readback_service import ap_draft_metrics
     return {"stage": stage, "q": q, "days": days, "total": total, "counts": counts, "items": items,
-            "draft_accuracy": await ap_draft_metrics(db)}
+            "draft_accuracy": await ap_draft_metrics(db),
+            # Daily replay: the Hub's planned lines vs AP's BC entries (21 days).
+            "line_replay": ((await db.learning_metrics.find_one({"ap_lines.graded": {"$gt": 0}}, {"_id": 0, "date": 1, "ap_lines": 1},
+                                                                 sort=[("date", -1)])) or {})}

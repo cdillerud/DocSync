@@ -1,3 +1,4 @@
+import re
 """Daily replay of the Hub's current intake logic against ground truth.
 
 Once a day (from the hourly learning cycle) the Hub re-runs what it would
@@ -153,7 +154,15 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
         v_ok = res.get("vendor_canonical") == b.get("bc_vendor_no")
         num = d.get("invoice_number_extracted_previous") or d.get("invoice_number_clean")
         cands = {_n(num)} | {_n(apply_rule(r, num)) for r in rules.get(str(b.get("bc_vendor_no") or "").upper(), []) if apply_rule(r, num)}
-        n_ok = bool(num) and _n(b.get("bc_external_document_no")) in cands
+        # BC's number may hold two invoices AP combined ("6408428/6410093")
+        # - either one is the Hub's; a BC entry with no external number
+        # cannot contradict the Hub (17 such in 30 days, 2026-10-08).
+        bc_ext = str(b.get("bc_external_document_no") or "")
+        if not bc_ext.strip():
+            out["number_unverifiable"] = out.get("number_unverifiable", 0) + 1
+            n_ok = bool(num)
+        else:
+            n_ok = bool(num) and any(_n(part) in cands for part in re.split(r"[/,&]+", bc_ext) if part.strip())
         a_ok = (not d.get("amount_from_bc") and d.get("amount_float") is not None and b.get("bc_amount") is not None
                 and abs(abs(float(d["amount_float"])) - abs(float(bl.get("bc_amount") or b["bc_amount"]))) < 0.02)
         hub_type = d.get("document_type_previous") or d.get("document_type")

@@ -67,7 +67,14 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     unresolved = [l for l in lines if not l["item"]]
     out = {"sales_resolution": {"customer_no": cust, "lines": lines, "resolved": len(lines) - len(unresolved), "total": len(lines)}}
     if unresolved:
-        return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "items_unknown"}
+        # Name the codes: a customer code with no Gamer item is usually a new
+        # item to set up in BC (VetsPlus 0PA-5OZCAP).
+        codes = []
+        for l in unresolved:
+            m = re.match(r"\s*([A-Z0-9][A-Z0-9-]{3,})\b", str(l.get("po_description") or "").upper())
+            codes.append(m.group(1) if m else str(l.get("po_description") or "")[:30])
+        return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "items_unknown",
+                "sales_stage_detail": "no Gamer item for " + ", ".join(codes[:4]) + " (new item to set up in BC?)"}
     # Entered by inside sales under a customer PO written differently: an
     # order for this customer, dated around receipt, with the same items
     # and quantities.

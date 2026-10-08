@@ -324,10 +324,14 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
             cand = round(po_price * f, 6)
             if price and abs(cand - price) <= 0.005 * price:
                 break                   # the PO shows BC's price rounded: keep BC's exact figure
-            if price and abs(cand - price) <= 0.15 * price:
+            if price and abs(cand - price) <= 0.5 * price:
+                # The customer's PO price (a new price list, a quote): BC's
+                # exact figure when they have paid it before, else the PO's,
+                # with BC's last price shown so the rep sees the change.
                 exact = [p for p in h.get("prices") or () if abs(p - cand) <= 0.005 * p]
+                last = price
                 price = min(exact, key=lambda p: abs(p - cand)) if exact else cand
-                price_source = "PO price"
+                price_source = "PO price" + ("" if exact or abs(price - last) <= 0.005 * last else f" (BC last {last:g})")
                 break
             if not price and f == 1:
                 price, price_source = cand, "PO price"

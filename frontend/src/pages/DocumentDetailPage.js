@@ -1136,7 +1136,7 @@ export default function DocumentDetailPage() {
                         className="mt-2 h-7 text-[10px] gap-1 border-amber-600 text-amber-400 hover:bg-amber-900/20"
                         onClick={async () => {
                           try {
-                            await api.post(`/api/ap-review/documents/${doc.id}/override-po`);
+                            await api.post(`/ap-review/documents/${doc.id}/override-po`);
                             toast.success('PO check overridden — re-checking readiness...');
                             fetchDoc();
                           } catch (e) {

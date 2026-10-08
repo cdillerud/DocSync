@@ -198,25 +198,40 @@ async def learn(db) -> Dict[str, Any]:
     return dict(stats)
 
 
-async def customer_history(db, customer_no: str, as_of: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
-    """item -> {last_price, uom, n, last_date, description} from BC orders
-    (only orders before `as_of` when given: an honest replay of a past PO)."""
+def _order_seq(order_no: Any) -> int:
+    """Gamer order numbers are sequential: the number is when it was
+    ordered (invoiced BC orders carry no order date, and prices are set
+    when the order is created: Ball cans 116373 at 155.49 invoiced Oct 5,
+    new order 120149 at 153.94)."""
+    digits = re.sub(r"\D", "", str(order_no or ""))
+    return int(digits) if digits and len(digits) <= 8 else 0
+
+
+async def customer_history(db, customer_no: str, as_of: Optional[str] = None,
+                           before_order: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
+    """item -> {last_price, uom, n, last_seq, description, prices} from BC
+    orders; "last" = the latest ORDERED (highest order number). Replays use
+    before_order (orders created before it) or as_of (a date)."""
     hist = {}
-    async for o in db.bc_sales_orders.find({"customer_no": customer_no}, {"_id": 0, "lines": 1, "order_date": 1, "first_invoice_date": 1}):
-        when = o.get("first_invoice_date") or o.get("order_date") or ""
-        od = o.get("order_date") if o.get("order_date") and not str(o.get("order_date")).startswith("0001") else when
-        if as_of and str(od or "") >= as_of:
+    limit_seq = _order_seq(before_order) if before_order else 0
+    async for o in db.bc_sales_orders.find({"customer_no": customer_no}, {"_id": 0, "order_no": 1, "lines": 1, "order_date": 1, "first_invoice_date": 1}):
+        seq = _order_seq(o.get("order_no"))
+        if limit_seq and (not seq or seq >= limit_seq):
+            continue
+        od = o.get("order_date") if o.get("order_date") and not str(o.get("order_date")).startswith("0001") else (o.get("first_invoice_date") or "")
+        if as_of and not limit_seq and str(od or "") >= as_of:
             continue
         for l in o.get("lines") or []:
             if l.get("lineType") != "Item" or not l.get("lineObjectNumber"):
                 continue
             it = str(l["lineObjectNumber"]).upper()
-            h = hist.setdefault(it, {"n": 0, "last_date": "", "description": l.get("description"), "prices": set()})
+            h = hist.setdefault(it, {"n": 0, "last_seq": -1, "last_date": "", "description": l.get("description"), "prices": set()})
             h["n"] += 1
             if float(l.get("unitPrice") or 0) > 0:
                 h["prices"].add(float(l["unitPrice"]))
-            if when >= h["last_date"] and float(l.get("unitPrice") or 0) > 0:
-                h.update(last_date=when, last_price=float(l["unitPrice"]), uom=l.get("unitOfMeasureCode"), description=l.get("description"))
+                if seq > h["last_seq"] or (seq == h["last_seq"] and str(od) > h["last_date"]):
+                    h.update(last_seq=seq, last_date=str(od or ""), last_price=float(l["unitPrice"]),
+                             uom=l.get("unitOfMeasureCode"), description=l.get("description"))
     return hist
 
 
@@ -357,9 +372,10 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
     return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits}
 
 
-async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None) -> List[Dict[str, Any]]:
+async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None,
+                        before_order: Optional[str] = None) -> List[Dict[str, Any]]:
     await load_item_categories(db)
-    hist = await customer_history(db, customer_no, as_of=as_of)
+    hist = await customer_history(db, customer_no, as_of=as_of, before_order=before_order)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
     out = []
     for e in extracted:

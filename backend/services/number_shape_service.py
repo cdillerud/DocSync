@@ -93,13 +93,21 @@ async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 if n_.isdigit():
                     recent.append(int(n_))
             if len(recent) >= 8:
-                lo, hi = min(recent), max(recent)
-                span = max(hi - lo, 50)
                 from services.amount_recovery_service import _pdf_text
                 full = await db.hub_documents.find_one({"_id": d["_id"]})
                 text = _pdf_text(full or {})
                 cands = {_norm(t) for t in re.findall(r"(?<![A-Za-z0-9.,/-])(\d{4,12})(?![A-Za-z0-9.,/-])", text)}
-                good = [c for c in cands if c.isdigit() and fits(shape, c) and lo - span <= int(c) <= hi + 2 * span]
+
+                def in_range(c: str) -> bool:
+                    # Within the same-length series (Dayton has 9- and
+                    # 10-digit series; mixing them accepted anything).
+                    same = [r for r in recent if len(str(r)) == len(c)]
+                    if len(same) < 3:
+                        return False
+                    lo, hi = min(same), max(same)
+                    span = max(hi - lo, 50)
+                    return lo - span <= int(c) <= hi + 2 * span
+                good = [c for c in cands if c.isdigit() and fits(shape, c) and in_range(c)]
                 src = "PDF text (in the range of this vendor's recent BC invoice numbers)"
         if len(good) == 1:
             stats["corrected"] += 1

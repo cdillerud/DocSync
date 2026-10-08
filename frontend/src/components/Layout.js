@@ -35,7 +35,7 @@ const navItems = [
 ];
 
 const moreNavItems = [
-  { to: '/documents', icon: Files, label: 'Legacy queue' },
+  { to: '/documents', icon: Files, label: 'Legacy queue', exact: true },
   { to: '/monitor', icon: Activity, label: 'Monitor (legacy)' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
@@ -51,7 +51,7 @@ export default function Layout() {
   const [bcStatus, setBcStatus] = useState({ loading: true, connected: false, demoMode: false, readEnv: '', writeEnv: '' });
   const [reviewBadge, setReviewBadge] = useState(0);
   // Auto-expand "More" if the user is already on a deferred page (e.g. a bookmark), so it's never hidden mid-use.
-  const [moreOpen, setMoreOpen] = useState(() => moreNavItems.some((item) => location.pathname.startsWith(item.to)));
+  const [moreOpen, setMoreOpen] = useState(() => moreNavItems.some((item) => (item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to))));
 
   // Fetch review queue badge count
   useEffect(() => {
@@ -185,10 +185,11 @@ export default function Layout() {
               ? <ChevronDown className="w-3.5 h-3.5 ml-auto" />
               : <ChevronRight className="w-3.5 h-3.5 ml-auto" />}
           </button>
-          {moreOpen && moreNavItems.map(({ to, icon: Icon, label }) => (
+          {moreOpen && moreNavItems.map(({ to, icon: Icon, label, exact }) => (
             <NavLink
               key={to}
               to={to}
+              end={!!exact}
               onClick={() => setSidebarOpen(false)}
               className={({ isActive }) =>
                 `flex items-center gap-3 pl-6 pr-3 py-2 rounded-md text-sm font-medium transition-all duration-150 ${

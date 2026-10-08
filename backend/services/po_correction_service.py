@@ -47,7 +47,7 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     stats = {"checked": 0, "already_gamer_order": 0, "fixed_from_po_field": 0, "fixed_from_text": 0,
-             "ambiguous": 0, "none_found": 0}
+             "ambiguous": 0, "none_found": 0, "fixed_from_sibling": 0}
     known_cache: Dict[str, bool] = {}
 
     async def known(o: str) -> bool:
@@ -60,7 +60,7 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "po_from_text": {"$exists": False},
              "status": {"$ne": "batch_parent"}},
             {"_id": 1, "po_number_clean": 1, "po_number_previous": 1, "bc_link": 1, "file_content_b64": 1,
-             "file_name": 1, "extracted_fields.po_number": 1}):
+             "file_name": 1, "extracted_fields.po_number": 1, "batch_parent_id": 1, "invoice_number_clean": 1}):
         raw = d.get("po_number_previous") or d.get("po_number_clean") or (d.get("extracted_fields") or {}).get("po_number") or ""
         stats["checked"] += 1
         if raw and await known(str(raw).strip().upper()):
@@ -82,10 +82,19 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
                 stats["ambiguous"] += 1
         else:
             stats["ambiguous"] += 1
+        if not found and not raw and d.get("batch_parent_id") and d.get("invoice_number_clean"):
+            # Page 2 of a split invoice ("Invoice 1101621600_doc2"): the order
+            # is on its sibling piece of the same invoice.
+            sib = await db.hub_documents.find_one(
+                {"batch_parent_id": d["batch_parent_id"], "invoice_number_clean": d["invoice_number_clean"],
+                 "_id": {"$ne": d["_id"]}, "po_number_clean": {"$nin": [None, ""]}},
+                {"_id": 0, "po_number_clean": 1})
+            if sib and await known(str(sib["po_number_clean"]).strip().upper()):
+                found, source = str(sib["po_number_clean"]).strip().upper(), "split_sibling"
         if not found:
             stats["none_found"] += 0 if (field or source) else 1
             continue
-        stats["fixed_from_po_field" if source == "po_field" else "fixed_from_text"] += 1
+        stats["fixed_from_po_field" if source == "po_field" else ("fixed_from_sibling" if source == "split_sibling" else "fixed_from_text")] += 1
         upd: Dict[str, Any] = {"po_from_text": {"value": found, "source": source, "raw": raw, "at": now}}
         if not d.get("bc_link"):
             upd.update({"po_number_clean": found, "po_number_before_text": raw})

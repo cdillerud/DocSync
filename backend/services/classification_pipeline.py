@@ -384,7 +384,9 @@ async def stage_classify_llm(
                 "3. EXTRACT: Pull every field you can find — vendor/customer, amounts, dates, PO numbers, invoice numbers, line items.\n"
                 "4. ROUTE: Determine routing flags (is_international, is_tooling, is_storage_handling, is_credit_memo, is_dunnage, freight_direction).\n"
                 "Think carefully about classification — an invoice from a freight carrier is STILL an AP_Invoice, not a Freight_Document.\n"
-                "A packing list with a PO reference is STILL a Shipping_Document, not a Sales_Order."
+                "A packing list with a PO reference is STILL a Shipping_Document, not a Sales_Order.\n"
+                "The `amount` is the money total due (currency, usually with cents) - never the shipment weight "
+                "(lbs/kg), pieces or pallet count; on a freight bill put the weight in `weight` and the charges total in `amount`."
                 + bundle_note
                 + "\nRespond with JSON only."
                 + prompt_text_suffix

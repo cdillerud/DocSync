@@ -369,7 +369,22 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         elif off > 0.25:
             fits = False                # clearly not this item (or unit)
         # 3-25%: a price change; inconclusive
-    return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits}
+    # Price risk (replay 2026-10-08: lines with none of these signals were
+    # wrong 12% of the time; PO differs 66%, no history 75%, stale 38%).
+    checks = []
+    if price and not h.get("last_price"):
+        checks.append("no BC price for this customer yet")
+    elif price_source and price_source.startswith("PO price"):
+        checks.append(f"PO price differs from the last BC price {h.get('last_price'):g}")
+    if h.get("last_price") and h.get("last_date"):
+        try:
+            age = (datetime.now(timezone.utc).date() - datetime.fromisoformat(str(h["last_date"])[:10]).date()).days
+            if age > 120:
+                checks.append(f"last BC price is from {str(h['last_date'])[:10]}")
+        except Exception:
+            pass
+    return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits,
+            "price_check": "; ".join(checks) or None}
 
 
 async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None,

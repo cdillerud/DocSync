@@ -47,8 +47,9 @@ function Lines({ resolution }) {
               <td className="py-1 pr-3 text-right tabular-nums">{l.po_quantity ?? '—'}</td>
               <td className={`py-1 pr-3 font-mono ${l.item ? '' : 'text-amber-600'}`}>{l.item || 'not matched'}{l.charge && <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans">charge</span>}</td>
               <td className="py-1 pr-3 text-right tabular-nums">{l.quantity ?? '—'} {l.unit_of_measure || ''}</td>
-              <td className="py-1 pr-3 text-right tabular-nums">{l.unit_price ?? '—'}</td>
-              <td className="py-1 text-muted-foreground">{l.how || '—'}{l.price_source ? `; price: ${l.price_source}` : ''}</td>
+              <td className="py-1 pr-3 text-right tabular-nums">{l.unit_price ?? '—'}
+                {l.price_check && <div className="text-[10px] text-amber-600 dark:text-amber-400" title={l.price_check}>check price</div>}</td>
+              <td className="py-1 text-muted-foreground">{l.how || '—'}{l.price_source ? `; price: ${l.price_source}` : ''}{l.price_check ? <span className="text-amber-600 dark:text-amber-400"> · check price: {l.price_check}</span> : null}</td>
             </tr>
           ))}
         </tbody>
@@ -229,7 +230,8 @@ export default function SalesInboxPage() {
                             </select>
                           )}
                         </td>
-                        <td className="py-2 pr-3 text-right text-xs tabular-nums">{r.resolution ? `${r.resolution.resolved}/${r.resolution.total}` : '—'}</td>
+                        <td className="py-2 pr-3 text-right text-xs tabular-nums">{r.resolution ? `${r.resolution.resolved}/${r.resolution.total}` : '—'}
+                          {r.resolution?.price_checks > 0 && <div className="text-[10px] text-amber-600 dark:text-amber-400">{r.resolution.price_checks} price{r.resolution.price_checks > 1 ? 's' : ''} to check</div>}</td>
                       </tr>
                       {open[r.id] && r.resolution && (
                         <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3"><Lines resolution={r.resolution} /></td></tr>

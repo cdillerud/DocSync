@@ -62,10 +62,12 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     res = await resolve_lines(db, cust, el)
     lines = [{"item": r["item"], "quantity": r["quantity"], "unit_of_measure": r["unit_of_measure"],
               "unit_price": r["unit_price"], "how": r["how"], "price_source": r["price_source"],
-              "po_description": str(r["source"].get("description") or "")[:120], "po_quantity": r["source"].get("quantity")}
+              "po_description": str(r["source"].get("description") or "")[:120], "po_quantity": r["source"].get("quantity"),
+              "price_check": r.get("price_check")}
              for r in res]
     unresolved = [l for l in lines if not l["item"]]
-    out = {"sales_resolution": {"customer_no": cust, "lines": lines, "resolved": len(lines) - len(unresolved), "total": len(lines)}}
+    out = {"sales_resolution": {"customer_no": cust, "lines": lines, "resolved": len(lines) - len(unresolved), "total": len(lines),
+                                "price_checks": sum(1 for l in lines if l.get("price_check"))}}
     if unresolved:
         # Name the codes: a customer code with no Gamer item is usually a new
         # item to set up in BC (VetsPlus 0PA-5OZCAP).

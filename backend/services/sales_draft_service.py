@@ -128,6 +128,11 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                     errors.append(f"{l['item']}: {lr.text[:160]}")
             # What the rep still has to add (dunnage, irregular charges): a
             # comment line on the draft, where they finish the order in BC.
+            checks = [f"{l['item']}: {l['price_check']}" for l in res.get("lines") or [] if l.get("price_check")]
+            if checks:
+                note = "HUB: check price - " + "; ".join(checks)
+                for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
+                    await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
             todo = res.get("to_complete") or []
             if todo:
                 note = "HUB: usually also on this customer's orders: " + ", ".join(

@@ -1797,10 +1797,46 @@ async def _top_defaults(db) -> Dict[str, Any]:
     return _SUBFOLDER_DEFAULTS["tops"]
 
 
+_PO_TOKEN = re.compile(r"(?<![A-Z0-9-])(W?R?1\d{5}|W1\d{5}|WA\d{4,6})(?![0-9])", re.I)   # not HH-150922A
+_ORDER_FOLDER = "<per-order>"
+
+
+def _is_order_folder(name: str) -> bool:
+    """International folders hold one subfolder per order, named by its
+    Gamer PO numbers ("115179 115180", "W118530")."""
+    toks = [t for t in re.split(r"[\s,&]+", str(name or "").strip()) if t]
+    return bool(toks) and all(_PO_TOKEN.fullmatch(t) for t in toks)
+
+
+def _order_folder_for(doc: dict) -> str:
+    """This document's own per-order folder name: its Gamer PO numbers
+    (file name, subject, PO field), ascending, space-separated; "" when none."""
+    text = " ".join(str(doc.get(k) or "") for k in ("file_name", "email_subject", "po_number_clean", "po_number_raw"))
+    nums = sorted({m.upper() for m in _PO_TOKEN.findall(text)}, key=lambda x: (len(x), x))
+    return " ".join(nums[:6])
+
+
 def _pick_subfolder(doc: dict, hub_sub: str, vendor_counts: Dict[str, float], top_counts: Dict[str, float],
                     vendor_n: int = 0) -> Optional[str]:
     if hub_sub and _EXCEPTION_SUBFOLDER.search(hub_sub):
         return None  # a deliberate exception folder (Freight Issues, Sent to Quality) stays
+    # Per-order folders learned as if fixed ("115179 115180" suggested for
+    # every Hwa Hsia invoice): pool them, and build this document's own.
+    def pooled(counts):
+        out: Dict[str, float] = {}
+        for k, n in (counts or {}).items():
+            key = _ORDER_FOLDER if _is_order_folder(k) else k
+            out[key] = out.get(key, 0) + n
+        return out
+    vendor_counts, top_counts = pooled(vendor_counts), pooled(top_counts)
+    picked = _pick_subfolder_core(doc, hub_sub, vendor_counts, top_counts, vendor_n)
+    if picked == _ORDER_FOLDER or (picked is None and _is_order_folder(hub_sub)):
+        return _order_folder_for(doc)
+    return picked
+
+
+def _pick_subfolder_core(doc: dict, hub_sub: str, vendor_counts: Dict[str, float], top_counts: Dict[str, float],
+                         vendor_n: int = 0) -> Optional[str]:
     vc = {k: n for k, n in (vendor_counts or {}).items() if n > 0}
     tot = sum(vc.values())
     # Recency-weighted vendor history (2+ filings): its dominant folder.

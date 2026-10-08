@@ -193,6 +193,17 @@ async def diagnose_document(doc_id: str):
 # =============================================================================
 
 @router.get("")
+_COMPACT_LIST = {
+    "_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
+    "vendor_canonical": 1, "vendor_raw": 1, "customer": 1, "sender_email": 1,
+    "extracted_fields.customer": 1, "extracted_fields.vendor": 1, "extracted_fields.invoice_number": 1,
+    "extracted_fields.po_number": 1, "extracted_fields.sender_email": 1, "extracted_fields.file_name": 1,
+    "invoice_number_clean": 1, "po_number_clean": 1, "amount_float": 1, "workflow_status": 1, "status": 1,
+    "created_utc": 1, "created_at": 1, "sharepoint_web_url": 1, "sharepoint_share_link_url": 1, "bc_document_no": 1,
+    "ap_stage": 1, "staff_reason": 1, "sales_stage": 1, "sales_stage_reason": 1, "mailbox_category": 1,
+}
+
+
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
     document_types: str = Query(None, description="Comma-separated list of doc types (for workflow category filter)"),
@@ -201,7 +212,8 @@ async def list_documents(
     include_cleared: bool = Query(False, description="Include auto-cleared documents in results"),
     queue_view: bool = Query(True, description="Queue view mode - hides completed/cleared docs by default"),
     date_from: str = Query(None, description="Filter: created on or after this date (YYYY-MM-DD)"),
-    date_to: str = Query(None, description="Filter: created on or before this date (YYYY-MM-DD)")
+    date_to: str = Query(None, description="Filter: created on or before this date (YYYY-MM-DD)"),
+    compact: bool = Query(False, description="Only the columns a list shows (3 MB -> ~50 KB per 100 rows)"),
 ):
     db = get_db()
     fq = {"is_duplicate": {"$ne": True}}  # Always exclude duplicates
@@ -400,7 +412,7 @@ async def list_documents(
         distinct_statuses_raw,
     ) = await asyncio.gather(
         db.hub_documents.count_documents(fq),
-        db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit),
+        db.hub_documents.find(fq, _COMPACT_LIST if compact else {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit),
         db.hub_documents.count_documents(not_dup),
         db.hub_documents.count_documents({"auto_cleared": True, **not_dup}),
         db.hub_documents.count_documents(pending_count_fq),

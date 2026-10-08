@@ -186,6 +186,7 @@ export default function SearchPage() {
         params.set('limit', String(pageLimitRef.current));
         params.set('queue_view', 'false');
         params.set('include_cleared', 'true');
+        params.set('compact', 'true');
         if (docType !== 'all') {
           params.set('document_type', docType);
         } else if (docTypeGroup && QUICK_FILTERS[docTypeGroup]?.types) {

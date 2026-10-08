@@ -192,7 +192,6 @@ async def diagnose_document(doc_id: str):
 # SIMPLE ROUTES — Direct implementations using deps.get_db()
 # =============================================================================
 
-@router.get("")
 _COMPACT_LIST = {
     "_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
     "vendor_canonical": 1, "vendor_raw": 1, "customer": 1, "sender_email": 1,
@@ -204,6 +203,7 @@ _COMPACT_LIST = {
 }
 
 
+@router.get("")
 async def list_documents(
     status: str = Query(None), document_type: str = Query(None),
     document_types: str = Query(None, description="Comma-separated list of doc types (for workflow category filter)"),

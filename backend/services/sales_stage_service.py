@@ -53,8 +53,8 @@ def plain_bc_error(reason: Any) -> Any:
     r = str(reason or "")
     m = re.search(r"must be equal to 'No'\s+in Item: No\.=([^.]+)\. Current value is 'Yes'", r)
     if m:
-        return (f"Item {m.group(1).strip()} is blocked in BC (Blocked or Sales Blocked), so the Hub could not draft "
-                "this order. Pick the item that replaces it, or have it unblocked.")
+        return (f"Item {m.group(1).strip()} is blocked in BC (Blocked or Sales Blocked): pick the item that "
+                "replaces it, or have it unblocked.")
     return reason
 
 

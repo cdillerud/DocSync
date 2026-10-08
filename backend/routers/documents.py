@@ -195,6 +195,8 @@ async def diagnose_document(doc_id: str):
 _LIST_STATS = None
 _LIST_STATS_AT = 0.0
 
+_COUNT_CACHE: dict = {}
+
 _COMPACT_LIST = {
     "_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
     "vendor_canonical": 1, "vendor_raw": 1, "customer": 1, "sender_email": 1,
@@ -430,8 +432,25 @@ async def list_documents(
         )
         _LIST_STATS_AT = _time.time()
     base_filter = fq == {"is_duplicate": {"$ne": True}}
+    # The filtered total scans every matching document (0.3-0.4 s on 26k
+    # docs) while the page itself takes ~4 ms: totals are cached per filter
+    # for 60 s (2026-10-08).
+    _ck = repr(sorted(fq.items(), key=lambda kv: kv[0])) if not base_filter else None
+    _hit = _COUNT_CACHE.get(_ck) if _ck else None
+    if _hit and _time.time() - _hit[1] < 60:
+        _count_coro = asyncio.sleep(0, result=_hit[0])
+    elif base_filter:
+        _count_coro = asyncio.sleep(0, result=_LIST_STATS[0])
+    else:
+        async def _count_and_cache():
+            n = await db.hub_documents.count_documents(fq)
+            if len(_COUNT_CACHE) > 500:
+                _COUNT_CACHE.clear()
+            _COUNT_CACHE[_ck] = (n, _time.time())
+            return n
+        _count_coro = _count_and_cache()
     filtered_total, page_docs = await asyncio.gather(
-        db.hub_documents.count_documents(fq) if not base_filter else asyncio.sleep(0, result=_LIST_STATS[0]),
+        _count_coro,
         db.hub_documents.find(fq, _COMPACT_LIST if compact else {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit),
     )
     total, docs = filtered_total, page_docs

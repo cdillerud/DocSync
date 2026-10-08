@@ -133,6 +133,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         # posted?) before drafting more.
         from services.draft_readback_service import readback
         summary["draft_readback"] = await readback(db)
+        from services.draft_readback_service import grade_against_production
+        summary["ap_draft_grading"] = await grade_against_production(db)
     except Exception as e:
         summary["draft_readback"] = {"error": repr(e)}
     try:

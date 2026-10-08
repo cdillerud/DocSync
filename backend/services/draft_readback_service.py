@@ -80,3 +80,71 @@ async def readback(db, limit: int = 200) -> Dict[str, Any]:
     logger.info("[DraftReadback] %s", dict(stats))
     return dict(stats)
 
+
+
+
+def _lines_by_item(ls):
+    out = {}
+    for l in ls or []:
+        it = str(l.get("lineObjectNumber") or "").upper()
+        if not it:
+            continue
+        a = out.setdefault(it, {"q": 0.0, "c": float(l.get("unitCost") or 0)})
+        a["q"] += float(l.get("quantity") or 0)
+    return out
+
+
+async def grade_against_production(db) -> Dict[str, Any]:
+    """Hub sandbox drafts that AP has since entered in Production BC: the
+    draft's lines vs AP's (items, quantities, costs, total) - the real
+    accuracy of AP drafting. Stored as ap_draft_vs_bc on the document."""
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
+    now = datetime.now(timezone.utc).isoformat()
+    docs = [d async for d in db.hub_documents.find(
+        {"$or": [{"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"bc_purchase_invoice_removed.environment": ALLOWED_ENVIRONMENT}],
+         "bc_link.bc_document_no": {"$exists": True}, "ap_draft_vs_bc": {"$exists": False}},
+        {"_id": 1, "draft_lines_planned": 1, "bc_draft_readback": 1, "bc_link": 1, "amount_float": 1, "bc_purchase_invoice": 1})]
+    if not docs:
+        return {"graded": 0}
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    stats = Counter()
+    async with httpx.AsyncClient(timeout=60) as c:
+        for d in docs:
+            if not d.get("bc_purchase_invoice"):
+                continue          # removed by the Hub's own checks before AP saw it
+            no = d["bc_link"]["bc_document_no"]
+            r = await c.get(f"{base}/purchaseInvoices", headers={"Authorization": f"Bearer {token}"}, params={
+                "$filter": f"number eq '{no}'", "$expand": "purchaseInvoiceLines($select=lineObjectNumber,quantity,unitCost)",
+                "$select": "number,status,totalAmountIncludingTax"})
+            vals = r.json().get("value", []) if r.status_code == 200 else []
+            if not vals:
+                continue
+            ap = _lines_by_item(vals[0].get("purchaseInvoiceLines"))
+            hub = _lines_by_item((d.get("bc_draft_readback") or {}).get("lines") or d.get("draft_lines_planned"))
+            g = {"bc_document_no": no, "ap_items": len(ap), "items_right": len(set(ap) & set(hub)),
+                 "missing": sorted(set(ap) - set(hub)), "extra": sorted(set(hub) - set(ap)),
+                 "qty_right": sum(1 for it in set(ap) & set(hub) if abs(ap[it]["q"] - hub[it]["q"]) <= max(0.01, 0.002 * abs(ap[it]["q"]))),
+                 "cost_right": sum(1 for it in set(ap) & set(hub) if abs(ap[it]["c"] - hub[it]["c"]) <= max(0.005, 0.005 * abs(ap[it]["c"]))),
+                 "total_right": d.get("amount_float") is not None and abs(float(vals[0].get("totalAmountIncludingTax") or 0) - abs(float(d["amount_float"]))) < 0.02,
+                 "graded_at": now}
+            g["exact"] = not g["missing"] and not g["extra"] and g["qty_right"] == g["items_right"] and g["cost_right"] == g["items_right"]
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"ap_draft_vs_bc": g}})
+            stats["graded"] += 1
+            stats["exact"] += bool(g["exact"])
+    return dict(stats)
+
+
+async def ap_draft_metrics(db) -> Dict[str, Any]:
+    c = Counter()
+    async for d in db.hub_documents.find({"ap_draft_vs_bc": {"$exists": True}}, {"_id": 0, "ap_draft_vs_bc": 1}):
+        g = d["ap_draft_vs_bc"]
+        c["drafts"] += 1
+        c["exact"] += bool(g.get("exact"))
+        c["total_right"] += bool(g.get("total_right"))
+        for k in ("ap_items", "items_right", "qty_right", "cost_right"):
+            c[k] += int(g.get(k) or 0)
+    return dict(c)

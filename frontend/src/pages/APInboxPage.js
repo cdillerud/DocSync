@@ -101,6 +101,12 @@ export default function APInboxPage() {
               Every AP document is in exactly one stage. Only the first three need a person; everything else is
               handled, waiting for AP to enter it in Business Central, or already there.
             </p>
+            {data?.draft_accuracy?.drafts > 0 && (
+              <p className="text-xs text-muted-foreground mt-1" data-testid="ap-draft-accuracy">
+                Sandbox drafts graded against what AP then entered in Production: <b className="text-foreground">{data.draft_accuracy.exact}/{data.draft_accuracy.drafts}</b> exact ·
+                items {data.draft_accuracy.items_right}/{data.draft_accuracy.ap_items} · totals right {data.draft_accuracy.total_right}/{data.draft_accuracy.drafts}
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2">

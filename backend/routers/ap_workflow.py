@@ -237,4 +237,6 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
               "bc_link.bc_status": 1, "staff_decided": 1, "bc_draft_no": 1, "bc_draft_environment": 1}
     items = [d async for d in db.hub_documents.find(query, fields).sort([("created_utc", -1)])
              .skip(max(0, skip)).limit(max(1, min(limit, 200)))]
-    return {"stage": stage, "q": q, "days": days, "total": total, "counts": counts, "items": items}
+    from services.draft_readback_service import ap_draft_metrics
+    return {"stage": stage, "q": q, "days": days, "total": total, "counts": counts, "items": items,
+            "draft_accuracy": await ap_draft_metrics(db)}

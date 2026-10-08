@@ -52,6 +52,9 @@ def _server_config():
 # Vendor alias / DB matching
 # ---------------------------------------------------------------------------
 
+_LABEL_NAME = re.compile(r"^(account\s*(no|number|#)|acct\.?\s*(no|#)?|hbl\s*number|bol\s*(no|number)?|invoice(\s*(no|number|#|date))?|bill\s*to|ship\s*to|remit\s*to|sold\s*to|customer(\s*(no|number))?|page\s*\d*|date|total|amount|number|pro\s*(no|number)?|vendor|supplier)[\s.:#]*$", re.I)
+
+
 async def lookup_vendor_by_sender(
     sender_email: str,
     extracted_vendor: str | None = None,
@@ -147,7 +150,16 @@ async def lookup_vendor_by_sender(
 
     # --- Sender-Stamp Guard v1 ---
     guard_enabled = os.environ.get("SENDER_STAMP_GUARD_ENABLED", "true").lower() == "true"
-    if guard_enabled and strict and extracted_vendor:
+    # A sender BC has confirmed for exactly one vendor (3+ invoices AP entered)
+    # wins over the name read off the document; and a label read as the name
+    # ("ACCOUNT NO.", "HBL Number") is no name. (2026-10-08: Averitt read as
+    # "ACCOUNT NO." -> 217, Sonoco "RTS Packaging (A Sonoco Company)" -> ARTNPKG.)
+    bc_ev = mapping.get("bc_evidence") or {}
+    bc_confirmed = (len(bc_ev) == 1 and next(iter(bc_ev)) == mapping.get("vendor_canonical")
+                    and sum(bc_ev.values()) >= 3)
+    if extracted_vendor and _LABEL_NAME.match(str(extracted_vendor).strip()):
+        extracted_vendor = None
+    if guard_enabled and strict and extracted_vendor and not bc_confirmed:
         from services.vendor_name_helpers import vendor_identity_agrees
         sender_name = mapping.get("vendor_name") or mapping.get("vendor_canonical")
         if not vendor_identity_agrees(extracted_vendor, sender_name):

@@ -69,6 +69,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["bc_reconciliation"] = await reconcile_recent(db)
         from services.bc_reconciliation_service import link_by_vendor_amount
         summary["bc_link_by_amount"] = await link_by_vendor_amount(db)
+        from services.vendor_alias_check_service import check as alias_check
+        summary["vendor_alias_check"] = await alias_check(db)
         from services.bc_reconciliation_service import fetch_ship_to
         summary["bc_location"] = await fetch_ship_to(db)
         from services.lane_profile_service import rebuild_order_lanes

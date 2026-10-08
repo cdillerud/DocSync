@@ -58,18 +58,17 @@ def _ship_to(d: Dict[str, Any], history: List[Dict[str, Any]]) -> Optional[Dict[
 async def candidates(db, limit: int = 10, per_customer: int = 3) -> List[Dict[str, Any]]:
     """Newest first, at most `per_customer` per customer per run (Giovanni
     sends one PO per truck and would otherwise fill every run)."""
+    ready = [d async for d in db.hub_documents.find(
+        {"sales_stage": "ready", "sales_draft.bc_order_no": {"$exists": False}, "sales_draft_skipped": {"$exists": False}},
+        {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)])]
     out, per = [], {}
-    async for d in db.hub_documents.find(
-            {"sales_stage": "ready", "sales_draft.bc_order_no": {"$exists": False}, "sales_draft_skipped": {"$exists": False}},
-            {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)]):
+    for d in ready:                      # every customer gets a turn first
         c = (d.get("sales_link") or {}).get("bc_customer_no")
-        if per.get(c, 0) >= per_customer:
-            continue
-        per[c] = per.get(c, 0) + 1
-        out.append(d)
-        if len(out) >= limit:
-            break
-    return out
+        if per.get(c, 0) < per_customer:
+            per[c] = per.get(c, 0) + 1
+            out.append(d)
+    out += [d for d in ready if d not in out]   # then fill the run
+    return out[:limit]
 
 
 async def draft(db, limit: int = 5) -> Dict[str, Any]:

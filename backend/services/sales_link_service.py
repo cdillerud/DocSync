@@ -131,7 +131,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
     # Role.
     # Addressed to Gamer as the buyer ("customer: Gamer Packaging"): a
     # supplier's quote / acknowledgement, not a customer order.
-    to_gamer = bool(re.search(r"\bgamer\s*packaging\b", str(ef.get("customer") or ""), re.I))
+    to_gamer = bool(re.search(r"^\s*gamer\b|\bgamer\s*packaging\b", str(ef.get("customer") or ""), re.I))
     po_words = bool(_PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"))
     if dt == "AP_Invoice" and internal:
         # Gamer's own invoice / export paperwork forwarded by staff.

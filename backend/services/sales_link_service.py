@@ -71,7 +71,9 @@ async def counterparty_maps(db) -> Dict[str, Dict[str, Any]]:
     out = {}
     for dm, cn in vend.items():
         v, n = cn.most_common(1)[0]
-        if dm and n >= 3 and n / sum(cn.values()) >= 0.8 and not dm.endswith(GAMER_DOMAIN):
+        # A domain that bills AP is a supplier even when its invoices split
+        # across vendor numbers (Amcor / Berry).
+        if dm and sum(cn.values()) >= 3 and not dm.endswith(GAMER_DOMAIN) and dm not in _FREE_MAIL:
             out[dm] = {"vendor": v}
     for dm, cn in cust.items():
         c, n = cn.most_common(1)[0]
@@ -127,6 +129,9 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
             pos = set()
     has_lines = bool((ef.get("line_items") or []))
     # Role.
+    # Addressed to Gamer as the buyer ("customer: Gamer Packaging"): a
+    # supplier's quote / acknowledgement, not a customer order.
+    to_gamer = bool(re.search(r"\bgamer\s*packaging\b", str(ef.get("customer") or ""), re.I))
     po_words = bool(_PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"))
     if dt == "AP_Invoice" and internal:
         # Gamer's own invoice / export paperwork forwarded by staff.
@@ -140,7 +145,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         role = "ar_invoice"
     elif internal:
         role = "gamer_order_copy" if order else ("supplier" if gamer_pos else "internal_other")
-    elif cp.get("vendor") and not cp.get("customer"):
+    elif (cp.get("vendor") and not cp.get("customer")) or (to_gamer and not order):
         role = "supplier"
     elif gamer_pos and not order and (not cp.get("customer") or not pos):
         role = "supplier"

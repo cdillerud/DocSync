@@ -44,6 +44,7 @@ async def load_item_categories(db) -> Dict[str, str]:
         async for i in db.bc_reference_cache.find({"bc_entity_type": "item"}, {"_id": 0, "bc_document_no": 1, "item_category_code": 1}):
             _CATEGORY[str(i["bc_document_no"]).upper()] = str(i.get("item_category_code") or "")
             _ITEM_BY_NORM[n(i["bc_document_no"])] = str(i["bc_document_no"]).upper()
+            _ITEM_BY_NORM.setdefault(o0(i["bc_document_no"]), str(i["bc_document_no"]).upper())
     return _CATEGORY
 
 
@@ -59,6 +60,12 @@ def is_product(item: Any) -> bool:
     if cat == "PALLET":
         return False
     return bool(cat) if cat is not None else True
+
+
+def o0(x: Any) -> str:
+    """Letter O and zero are one character for matching codes (VetsPlus
+    writes OPA-8OZ53MMCL for BC 0PA-...)."""
+    return re.sub(r"[^A-Z0-9]", "", str(x or "").upper()).replace("O", "0")
 
 
 def n(x: Any) -> str:
@@ -228,14 +235,15 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     known = {n(i): i for i in hist}
     # 1. A Gamer item number this customer buys, written on the PO.
     desc_u = re.sub(r"(?<=\d),(?=\d{3})", "", str(e.get("description") or "").upper())   # 48,000/plt -> 48000/plt
-    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and code in txt
+    txt0 = txt.replace("O", "0")
+    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and (code in txt or code.replace("O", "0") in txt0)
                    # pack counts are not item numbers: "48000/plt", "58,240/TL"
                    and not re.search(re.escape(orig) + r"\s*/\s*(PLT|PALLET|CS|CASE|TL|TRUCK|LAYER)", desc_u)}, key=len, reverse=True)
     if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
         h0 = hits[0]
         # A bare number (48000) is an item number only where the PO labels it
         # one; anywhere else it may be a pack count or size: needs confirming.
-        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|PART\s*#?:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
+        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|PART\s*(?:NO\.?|#)?:?\s*|STOCK\s*CODE\s*:?\s*|SKU\s*:?\s*|P/N\s*:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
         out.append((h0, "item number on the PO", labelled))
     # 2. The customer's own item code, learned from their BC orders.
     for code in customer_codes(e):
@@ -246,8 +254,14 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     # 3. Any Gamer item number written on the PO (new item for this customer).
     if not _charge_text(e):
         for tok in dict.fromkeys(n(t) for t in re.findall(r"[A-Z0-9][A-Z0-9-]{4,}", str(e.get("description") or "").upper())):
+            if tok not in _ITEM_BY_NORM and tok.replace("O", "0") in _ITEM_BY_NORM:
+                tok = tok.replace("O", "0")
             if tok in _ITEM_BY_NORM and _CATEGORY.get(_ITEM_BY_NORM[tok]) and not _SIZE.match(tok) and re.search(r"\d", tok):
-                out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", False))
+                # A full alphanumeric Gamer item number printed on the PO
+                # (VetsPlus 0PA-5OZCAP) is the customer using Gamer's number;
+                # a bare number (48000) may be anything and must be confirmed.
+                strong = bool(re.search(r"[A-Z]", tok)) and len(tok) >= 6 and is_product(_ITEM_BY_NORM[tok])
+                out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", strong))
                 break
     # 4. The customer's description, learned.
     r = rows.get("desc:" + desc_key(e))

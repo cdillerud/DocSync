@@ -8,6 +8,7 @@ edits: they are recorded on the document (bc_draft_readback) and summed
 per vendor (draft_edit_stats) so drafting can learn from them.
 """
 import logging
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -105,7 +106,8 @@ async def grade_against_production(db) -> Dict[str, Any]:
     docs = [d async for d in db.hub_documents.find(
         {"$or": [{"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"bc_purchase_invoice_removed.environment": ALLOWED_ENVIRONMENT}],
          "bc_link.bc_document_no": {"$exists": True}, "ap_draft_vs_bc": {"$exists": False}},
-        {"_id": 1, "draft_lines_planned": 1, "bc_draft_readback": 1, "bc_link": 1, "amount_float": 1, "bc_purchase_invoice": 1})]
+        {"_id": 1, "draft_lines_planned": 1, "bc_draft_readback": 1, "bc_link": 1, "amount_float": 1, "bc_purchase_invoice": 1,
+         "bc_purchase_invoice_removed": 1})]
     if not docs:
         return {"graded": 0}
     token = await bc.get_bc_token(environment="Production")
@@ -114,8 +116,15 @@ async def grade_against_production(db) -> Dict[str, Any]:
     stats = Counter()
     async with httpx.AsyncClient(timeout=60) as c:
         for d in docs:
+            removed = d.get("bc_purchase_invoice_removed") or {}
+            draft_lines = (d.get("bc_draft_readback") or {}).get("lines") or d.get("draft_lines_planned")
             if not d.get("bc_purchase_invoice"):
-                continue          # removed by the Hub's own checks before AP saw it
+                # A draft removed because AP then entered the invoice in
+                # Production is exactly what to grade (its lines were kept);
+                # one removed for being wrong before AP saw it is not.
+                if not (removed.get("lines") and re.search(r"Production BC already has|BC already has invoice", str(removed.get("reason") or ""))):
+                    continue
+                draft_lines = removed["lines"]
             no = d["bc_link"]["bc_document_no"]
             r = await c.get(f"{base}/purchaseInvoices", headers={"Authorization": f"Bearer {token}"}, params={
                 "$filter": f"number eq '{no}'", "$expand": "purchaseInvoiceLines($select=lineObjectNumber,quantity,unitCost)",
@@ -124,7 +133,7 @@ async def grade_against_production(db) -> Dict[str, Any]:
             if not vals:
                 continue
             ap = _lines_by_item(vals[0].get("purchaseInvoiceLines"))
-            hub = _lines_by_item((d.get("bc_draft_readback") or {}).get("lines") or d.get("draft_lines_planned"))
+            hub = _lines_by_item(draft_lines)
             g = {"bc_document_no": no, "ap_items": len(ap), "items_right": len(set(ap) & set(hub)),
                  "missing": sorted(set(ap) - set(hub)), "extra": sorted(set(hub) - set(ap)),
                  "qty_right": sum(1 for it in set(ap) & set(hub) if abs(ap[it]["q"] - hub[it]["q"]) <= max(0.01, 0.002 * abs(ap[it]["q"]))),

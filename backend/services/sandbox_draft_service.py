@@ -396,7 +396,9 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             continue
         deleted = await _delete_orphan_pi_header(pi.get("bc_system_id"))
         await db.hub_documents.update_one({"id": d["id"]}, {
-            "$set": {"bc_purchase_invoice_removed": {**pi, "removed_at": now, "reason": problem, "delete_result": deleted},
+            "$set": {"bc_purchase_invoice_removed": {**pi, "removed_at": now, "reason": problem, "delete_result": deleted,
+                                                     # kept for grading against what AP entered in Production
+                                                     "lines": (rb.get("lines") or d.get("draft_lines_planned") or [])},
                      **({} if requeue else {"sandbox_draft_skipped": {"reason": problem, "at": now}}),
                      **({"ap_stage": "ready"} if requeue else {})},
             "$unset": {"bc_purchase_invoice": "", "bc_purchase_invoice_no": "", "bc_draft_readback": "",

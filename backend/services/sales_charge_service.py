@@ -60,6 +60,7 @@ SIZE_FALLBACK = True
 FREIGHT_PLACEHOLDER = True
 DUNNAGE_BY_SIZE = True
 ITEM_CHARGES = True
+ITEM_RATIO = True
 ITEM_RULES_INVOICED_ONLY = False   # replay switch: learn item charges from invoiced orders only
 
 
@@ -119,7 +120,7 @@ async def learn(db) -> Dict[str, Any]:
                 if not is_product(c) and float(l.get("quantity") or 0) > 0:
                     q = float(l["quantity"])
                     kind = "same" if abs(q - pq1) < 1e-6 else ("one" if q == 1 else "other")
-                    item_charge[(it1, c)].append((_order_seq(o.get("order_no")), kind, q, float(l.get("unitPrice") or 0)))
+                    item_charge[(it1, c)].append((_order_seq(o.get("order_no")), kind, q, float(l.get("unitPrice") or 0), q / pq1 if pq1 else 0))
         sigs = {size_signature(l["lineObjectNumber"], l.get("unitOfMeasureCode")) for l in prods}
         if len(sigs) == 1 and None not in sigs:
             sig = sigs.pop()
@@ -198,12 +199,20 @@ async def learn(db) -> Dict[str, Any]:
         if n_it < 3 or c in excluded:
             continue
         pres = len(obs_) / n_it
-        kinds = Counter(k for _, k, _, _ in obs_)
+        kinds = Counter(t[1] for t in obs_)
         kind, kk = kinds.most_common(1)[0]
-        if pres >= 0.9 and kind in ("same", "one") and kk / len(obs_) >= 0.8:
-            last = max(obs_, key=lambda t: t[0])
+        last = max(obs_, key=lambda t: t[0])
+        if pres < 0.9:
+            continue
+        if kind in ("same", "one") and kk / len(obs_) >= 0.8:
             product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3), "n": n_it,
                                   "qty_kind": kind, "price": last[3]})
+        elif ITEM_RATIO:
+            # Dunnage scales with the order: pallets per M of this item.
+            r = _steady([t[4] for t in obs_])
+            if r:
+                product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3), "n": n_it,
+                                      "qty_kind": "ratio", "ratio": r, "price": last[3]})
     for (sig, c), rs in size_ratio.items():
         r = _steady(rs)
         if r and len(rs) >= 5:
@@ -340,7 +349,10 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                 if ic["charge"] in have:
                     continue
                 have.add(ic["charge"])
-                q = float(p.get("quantity") or 0) if ic["qty_kind"] == "same" else 1.0
+                if ic["qty_kind"] == "ratio":
+                    q = float(max(1, round(ic["ratio"] * float(p.get("quantity") or 0))))
+                else:
+                    q = float(p.get("quantity") or 0) if ic["qty_kind"] == "same" else 1.0
                 out.append({"item": ic["charge"], "quantity": q, "unit_price": ic["price"], "charge": True,
                             "how": f"on {int(ic['presence'] * 100)}% of this item's {ic['n']} BC orders",
                             "price_source": "this item's latest price"})

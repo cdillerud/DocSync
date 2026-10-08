@@ -534,7 +534,7 @@ async def get_bootstrap_status_endpoint():
 @router.get("/search")
 async def search_documents(
     q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=200),   # the Search page asks for 200 (422 broke every text search)
 ):
     """Dedicated search endpoint with match-field highlights."""
     db = get_db()

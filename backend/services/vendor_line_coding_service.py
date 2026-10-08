@@ -115,3 +115,19 @@ def single_line(coding: Dict[str, Any], doc: Dict[str, Any]) -> List[Dict[str, A
              "quantity": 1.0, "unitCost": round(abs(float(doc["amount_float"])), 2),
              "source": f"AP codes this vendor {dom['lineObjectNumber']} ({int(dom['share'] * 100)}% of recent invoices)"}]
 
+
+
+
+async def is_product_vendor(db, coding) -> bool:
+    """AP's main lines for this vendor are mostly product items (bottles,
+    caps, cans... - an item category that is not PALLET), not G/L accounts
+    (Hwa Hsia 14500 in transit) or service charges (Reiles freight /
+    warehouse): such invoices are invoiced against BC receipts."""
+    from services.sales_item_xref_service import load_item_categories, is_product
+    if not coding or (coding.get("invoices") or 0) < 5 or coding.get("dominant"):
+        return False
+    await load_item_categories(db)
+    mains = coding.get("main_codes") or []
+    total = sum(m.get("n") or 0 for m in mains)
+    prod = sum(m.get("n") or 0 for m in mains if m.get("lineType") == "Item" and is_product(m.get("code")))
+    return bool(total) and prod / total >= 0.6

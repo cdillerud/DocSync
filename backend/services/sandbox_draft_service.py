@@ -324,10 +324,11 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     if coding and coding.get("dominant"):
         return {"lines": single_line(coding, d), "source": "vendor_coding"}
     po = str(d.get("po_number_clean") or "").strip().upper()
-    if coding and (coding.get("invoices") or 0) >= 5 and po:
+    from services.vendor_line_coding_service import is_product_vendor
+    if po and await is_product_vendor(db, coding):
         if await po_in_bc(db, po):
             return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
-    if coding and (coding.get("invoices") or 0) >= 5 and not coding.get("dominant"):
+    if await is_product_vendor(db, coding):
         # A product vendor: the right lines are the PO's received items.
         return {"problem": (f"PO {po} is not a purchase order or receipt in BC" if po else "the invoice shows no PO")
                            + "; AP invoices this vendor against PO receipts, so the Hub cannot draft its lines"}
@@ -367,11 +368,18 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
         problem = await header_problem(db, d, shapes)
         requeue = False
         if not problem:
-            from services.vendor_line_coding_service import coding_for, main_code_known
+            from services.vendor_line_coding_service import coding_for, main_code_known, is_product_vendor
             lines = d.get("draft_lines_planned") or (rb.get("lines") or [])
             coding = await coding_for(db, d.get("vendor_canonical"))
             if d.get("draft_lines_source") != "bc_receipt" and lines and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
+                requeue = True
+            elif d.get("draft_lines_source") != "bc_receipt" and d.get("po_number_clean") \
+                    and await is_product_vendor(db, coding) \
+                    and str((max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={}) or {}).get("lineType") or "Item") == "Item":
+                # A product vendor drafted from guessed lines (before receipts
+                # were used: Berry CD24410... where AP posted M-CAP-38MMTE).
+                problem = "a product invoice drafted without its BC receipt; re-drafting from the receipt once it posts"
                 requeue = True
             elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in ("bc_receipt", "vendor_coding") \
                     and len([l for l in lines if l.get("lineObjectNumber")]) > 1:

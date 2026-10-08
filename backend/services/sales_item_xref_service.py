@@ -235,6 +235,17 @@ async def customer_history(db, customer_no: str, as_of: Optional[str] = None,
     return hist
 
 
+def _code_tokens(desc: Any, min_len: int = 4) -> List[str]:
+    """Code-like tokens of a PO line, normalized: dots kept inside codes
+    (Sun Bum 20-20750.002444104A) and each token also joined with the next
+    one (20-20755.002 R444103 = 20-20755.002R444103)."""
+    raw = re.findall(r"[A-Z0-9][A-Z0-9.\-]{%d,}" % (min_len - 1), str(desc or "").upper())
+    raw = [t.rstrip(".-") for t in raw]
+    out = [n(t) for t in raw]
+    out += [n(a + b) for a, b in zip(raw, raw[1:])]
+    return [t for t in dict.fromkeys(out) if len(t) >= min_len]
+
+
 def _newer_revision(item: str, hist: Dict[str, Dict[str, Any]]) -> Optional[str]:
     """A revision of `item` (same number + a letter / -A) the customer bought
     more recently than `item` itself."""
@@ -272,14 +283,17 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
             break
     # 3. Any Gamer item number written on the PO (new item for this customer).
     if not _charge_text(e):
-        for tok in dict.fromkeys(n(t) for t in re.findall(r"[A-Z0-9][A-Z0-9-]{4,}", str(e.get("description") or "").upper())):
+        desc_up = str(e.get("description") or "").upper()
+        for tok in _code_tokens(desc_up, 5):
             if tok not in _ITEM_BY_NORM and tok.replace("O", "0") in _ITEM_BY_NORM:
                 tok = tok.replace("O", "0")
             if tok in _ITEM_BY_NORM and _CATEGORY.get(_ITEM_BY_NORM[tok]) and not _SIZE.match(tok) and re.search(r"\d", tok):
                 # A full alphanumeric Gamer item number printed on the PO
                 # (VetsPlus 0PA-5OZCAP) is the customer using Gamer's number;
                 # a bare number (48000) may be anything and must be confirmed.
-                strong = bool(re.search(r"[A-Z]", tok)) and len(tok) >= 6 and is_product(_ITEM_BY_NORM[tok])
+                # A bare number the PO labels as the item ("Item 612000046") counts too.
+                labelled = bool(re.search(r"(ITEM|PART|SKU|STOCK\s*CODE|P/N)\s*(NO\.?|#)?\s*:?\s*" + re.escape(_ITEM_BY_NORM[tok]), desc_up))
+                strong = (bool(re.search(r"[A-Z]", tok)) and len(tok) >= 6 or labelled) and is_product(_ITEM_BY_NORM[tok])
                 out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", strong))
                 break
     # 4. The customer's description, learned.
@@ -289,7 +303,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     if _charge_text(e):
         return out
     # 5. A maker's code that starts one Gamer item number (C-8479 -> C-8479-10000229).
-    for tok in dict.fromkeys(n(t) for t in re.findall(r"[A-Z0-9][A-Z0-9-]{3,}", str(e.get("description") or "").upper())):
+    for tok in _code_tokens(e.get("description"), 4):
         if len(tok) < 4 or _SIZE.match(tok) or not re.search(r"\d", tok):
             continue
         own = [i for i in hist if n(i).startswith(tok) and is_product(i)]

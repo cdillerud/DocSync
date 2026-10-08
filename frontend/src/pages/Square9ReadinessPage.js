@@ -586,6 +586,7 @@ export default function Square9ReadinessPage() {
                       <th className="py-1 pr-3 text-right">Invoices</th>
                       <th className="py-1 pr-3 text-right" title="Of invoices AP entered in BC (30 days): the Hub received it">Received</th>
                       <th className="py-1 pr-3 text-right" title="Of invoices AP entered in BC (30 days): the Hub's own reading would have drafted the same vendor, number, amount and type">Draft would match BC</th>
+                      <th className="py-1 pr-3 text-right" title="Of invoices AP entered in BC (21 days) that the Hub would draft: its planned lines (item, quantity, cost) match the lines AP entered">AP lines exact</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -601,6 +602,10 @@ export default function Square9ReadinessPage() {
                         <td className="py-1 pr-3 text-right">
                           {r.draft ? `${r.draft.draft_exact_of_received_pct}%` : '—'}
                           {r.draft && <span className="ml-1 text-[11px] text-muted-foreground">of {r.draft.received}</span>}
+                        </td>
+                        <td className="py-1 pr-3 text-right">
+                          {r.ap_lines && r.ap_lines.exact_pct != null ? `${r.ap_lines.exact_pct}%` : '—'}
+                          {r.ap_lines && r.ap_lines.graded ? <span className="ml-1 text-[11px] text-muted-foreground">of {r.ap_lines.graded}</span> : null}
                         </td>
                       </tr>
                     ))}

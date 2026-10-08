@@ -191,13 +191,66 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
     return out
 
 
+async def _line_replay(db, days: int = 21, limit: int = 400) -> Dict[str, Any]:
+    """AP draft lines as the Hub would plan them today vs the lines AP
+    entered in BC, on invoices AP has entered (read-only BC GETs). By source:
+    bc_receipt / bc_purchase_order / vendor_coding; 'problem' and 'wait'
+    are invoices the Hub would hand to staff or hold."""
+    import httpx
+    from collections import Counter
+    import services.bc_catalog_sync_service as bc
+    from services.sandbox_draft_service import plan_lines, receipt_lines_for
+    from services.draft_readback_service import _lines_by_item
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    c_ = Counter()
+    seen = set()
+    async with httpx.AsyncClient(timeout=60) as c:
+        async for d in db.hub_documents.find({"mailbox_category": "AP", "created_utc": {"$gte": since}, "document_type": "AP_Invoice",
+                                              "is_duplicate": {"$ne": True}, "bc_link.bc_document_no": {"$exists": True},
+                                              "amount_float": {"$gt": 0}}, {"_id": 0, "file_content_b64": 0}).limit(limit):
+            no = d["bc_link"]["bc_document_no"]
+            if no in seen:
+                continue
+            seen.add(no)
+            x = dict(d)
+            x.pop("bc_link", None)
+            try:
+                plan = await plan_lines(db, x, await receipt_lines_for(db, x))
+            except Exception:
+                c_["error"] += 1
+                continue
+            src = plan.get("source") or ("wait" if plan.get("wait") else "problem")
+            c_[src + "_n"] += 1
+            if not plan.get("lines"):
+                continue
+            r = await c.get(f"{base}/purchaseInvoices", headers={"Authorization": f"Bearer {token}"}, params={
+                "$filter": f"number eq '{no}'", "$expand": "purchaseInvoiceLines($select=lineObjectNumber,quantity,unitCost)", "$select": "number"})
+            vals = r.json().get("value", []) if r.status_code == 200 else []
+            if not vals:
+                continue
+            ap, hub = _lines_by_item(vals[0]["purchaseInvoiceLines"]), _lines_by_item(plan["lines"])
+            exact = set(ap) == set(hub) and all(
+                abs(ap[i]["q"] - hub[i]["q"]) <= max(0.01, 0.002 * abs(ap[i]["q"])) and abs(ap[i]["c"] - hub[i]["c"]) <= max(0.005, 0.005 * abs(ap[i]["c"]))
+                for i in ap)
+            c_["graded"] += 1
+            c_["exact"] += exact
+            c_[src + "_exact"] += exact
+            c_[src + "_graded"] += 1
+    out = dict(c_)
+    out["exact_pct"] = round(100 * c_["exact"] / c_["graded"], 1) if c_["graded"] else None
+    return out
+
+
 async def record_daily(db, force: bool = False) -> Dict[str, Any]:
     today = datetime.now(timezone.utc).date().isoformat()
     if not force and await db.learning_metrics.find_one({"date": today}, {"_id": 1}):
         return {"skipped": "already measured today"}
     row = {"date": today, "measured_at": datetime.now(timezone.utc).isoformat(),
            "routing": await _routing_replay(db), "vendor": await _vendor_replay(db),
-           "draft": await _draft_replay(db)}
+           "draft": await _draft_replay(db), "ap_lines": await _line_replay(db)}
     await db.learning_metrics.update_one({"date": today}, {"$set": row}, upsert=True)
     logger.info("[LearningMetrics] %s", row)
     return {k: v for k, v in row.items() if k != "measured_at"}

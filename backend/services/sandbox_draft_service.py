@@ -311,6 +311,38 @@ async def po_in_bc(db, po: str) -> bool:
     return False
 
 
+async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:
+    """The open (not yet invoiced) lines of a Gamer purchase order in
+    Production BC, read-only. Dropship orders (Ball, O-I, Anchor, Amcor) have
+    no receipt until the customer's shipment posts, but the invoice arrives
+    first - and the PO lines are the invoice: Ball 116378 = 202.4 M x 132.95
+    = 26,909.08 + its dunnage line."""
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.get(f"{base}/purchaseOrders", headers={"Authorization": f"Bearer {token}"}, params={
+            "$filter": f"number eq '{po}'",
+            "$expand": "purchaseOrderLines($select=lineType,lineObjectNumber,description,quantity,directUnitCost,invoicedQuantity,unitOfMeasureCode)",
+            "$select": "number"})
+    if r.status_code != 200:
+        return []
+    out = []
+    for x in r.json().get("value", []):
+        for l in x.get("purchaseOrderLines") or []:
+            if not l.get("lineObjectNumber"):
+                continue
+            q = float(l.get("quantity") or 0) - float(l.get("invoicedQuantity") or 0)
+            if q <= 0:
+                continue
+            out.append({"lineType": _line_type(l.get("lineType")), "lineObjectNumber": l["lineObjectNumber"],
+                        "description": (l.get("description") or "")[:100], "quantity": round(q, 5),
+                        "unitCost": float(l.get("directUnitCost") or 0), "source": f"bc_purchase_order {po}"})
+    return out
+
+
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
     """The lines a draft of this invoice gets (see vendor_line_coding_service).
 
@@ -326,6 +358,14 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     po = str(d.get("po_number_clean") or "").strip().upper()
     from services.vendor_line_coding_service import is_product_vendor
     if po and await is_product_vendor(db, coding):
+        # No receipt yet: the PO's open lines, when they ARE the invoice
+        # (to the cent - every draft's total is verified in BC).
+        try:
+            pl = await po_open_lines(db, po)
+        except Exception:
+            pl = []
+        if pl and abs(sum(l["quantity"] * l["unitCost"] for l in pl) - abs(float(d.get("amount_float") or 0))) <= 0.02:
+            return {"lines": pl, "source": "bc_purchase_order"}
         if await po_in_bc(db, po):
             return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
     if await is_product_vendor(db, coding):
@@ -371,17 +411,17 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             from services.vendor_line_coding_service import coding_for, main_code_known, is_product_vendor
             lines = d.get("draft_lines_planned") or (rb.get("lines") or [])
             coding = await coding_for(db, d.get("vendor_canonical"))
-            if d.get("draft_lines_source") != "bc_receipt" and lines and main_code_known(coding, lines) is False:
+            if d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order") and lines and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
                 requeue = True
-            elif d.get("draft_lines_source") != "bc_receipt" and d.get("po_number_clean") \
+            elif d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order") and d.get("po_number_clean") \
                     and await is_product_vendor(db, coding) \
                     and str((max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={}) or {}).get("lineType") or "Item") == "Item":
                 # A product vendor drafted from guessed lines (before receipts
                 # were used: Berry CD24410... where AP posted M-CAP-38MMTE).
                 problem = "a product invoice drafted without its BC receipt; re-drafting from the receipt once it posts"
                 requeue = True
-            elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in ("bc_receipt", "vendor_coding") \
+            elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in ("bc_receipt", "vendor_coding", "bc_purchase_order") \
                     and len([l for l in lines if l.get("lineObjectNumber")]) > 1:
                 # AP codes this vendor as one line (R+L: one FREIGHT line); the
                 # older builder split it (2 x 6,415.19, -1 x 11,868.09, ...).
@@ -469,6 +509,10 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
                 "draft_lines_override": plan["lines"], "draft_receipt_numbers": rec_probe["receipts"],
                 "draft_lines_source": "bc_receipt"}, "$unset": {"draft_waiting_receipt": ""}})
+        elif plan.get("source") == "bc_purchase_order":
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
+                "draft_lines_override": plan["lines"], "draft_lines_source": "bc_purchase_order"},
+                "$unset": {"draft_waiting_receipt": ""}})
         elif plan.get("source") == "vendor_coding":
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
                 "draft_lines_override": plan["lines"], "draft_lines_source": "vendor_coding"}})

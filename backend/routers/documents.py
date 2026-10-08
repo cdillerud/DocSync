@@ -192,6 +192,9 @@ async def diagnose_document(doc_id: str):
 # SIMPLE ROUTES — Direct implementations using deps.get_db()
 # =============================================================================
 
+_LIST_STATS = None
+_LIST_STATS_AT = 0.0
+
 _COMPACT_LIST = {
     "_id": 0, "id": 1, "file_name": 1, "doc_type": 1, "document_type": 1, "suggested_job_type": 1,
     "vendor_canonical": 1, "vendor_raw": 1, "customer": 1, "sender_email": 1,
@@ -401,35 +404,39 @@ async def list_documents(
         ]
     }
 
-    (
-        total,
-        docs,
-        total_all,
-        cleared_count,
-        pending_count,
-        completed_count,
-        distinct_types_raw,
-        distinct_statuses_raw,
-    ) = await asyncio.gather(
-        db.hub_documents.count_documents(fq),
+    # The global counts and filter lists scan every document (~0.7 s each);
+    # they change slowly, so they are cached for 5 minutes. Only the count
+    # for this request's filter and the page of rows are live.
+    global _LIST_STATS, _LIST_STATS_AT
+    import time as _time
+    if _LIST_STATS is None or _time.time() - _LIST_STATS_AT > 300:
+        _LIST_STATS = await asyncio.gather(
+            db.hub_documents.count_documents(not_dup),
+            db.hub_documents.count_documents({"auto_cleared": True, **not_dup}),
+            db.hub_documents.count_documents(pending_count_fq),
+            db.hub_documents.count_documents(completed_count_fq),
+            db.hub_documents.aggregate([
+                {"$match": {"is_duplicate": {"$ne": True}}},
+                {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
+                {"$match": {"_id": {"$ne": None}}},
+                {"$sort": {"count": -1}},
+            ]).to_list(50),
+            db.hub_documents.aggregate([
+                {"$match": {"is_duplicate": {"$ne": True}}},
+                {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+                {"$match": {"_id": {"$ne": None}}},
+                {"$sort": {"count": -1}},
+            ]).to_list(50),
+        )
+        _LIST_STATS_AT = _time.time()
+    base_filter = fq == {"is_duplicate": {"$ne": True}}
+    filtered_total, page_docs = await asyncio.gather(
+        db.hub_documents.count_documents(fq) if not base_filter else asyncio.sleep(0, result=_LIST_STATS[0]),
         db.hub_documents.find(fq, _COMPACT_LIST if compact else {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit),
-        db.hub_documents.count_documents(not_dup),
-        db.hub_documents.count_documents({"auto_cleared": True, **not_dup}),
-        db.hub_documents.count_documents(pending_count_fq),
-        db.hub_documents.count_documents(completed_count_fq),
-        db.hub_documents.aggregate([
-            {"$match": {"is_duplicate": {"$ne": True}}},
-            {"$group": {"_id": {"$ifNull": ["$doc_type", "$document_type"]}, "count": {"$sum": 1}}},
-            {"$match": {"_id": {"$ne": None}}},
-            {"$sort": {"count": -1}},
-        ]).to_list(50),
-        db.hub_documents.aggregate([
-            {"$match": {"is_duplicate": {"$ne": True}}},
-            {"$group": {"_id": "$status", "count": {"$sum": 1}}},
-            {"$match": {"_id": {"$ne": None}}},
-            {"$sort": {"count": -1}},
-        ]).to_list(50),
     )
+    total, docs = filtered_total, page_docs
+    total_all, cleared_count, pending_count, completed_count, distinct_types_raw, distinct_statuses_raw = _LIST_STATS
+
 
     # 2026-09-24: attach the same canonical derived_state model the detail
     # endpoint already computes, so the queue/list view can render status

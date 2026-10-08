@@ -1874,6 +1874,7 @@ def _pick_subfolder_core(doc: dict, hub_sub: str, vendor_counts: Dict[str, float
 _VENDOR_TOP_COUNTS: Dict[str, Any] = {"at": 0.0, "by_top": {}}
 DEFAULT_BY_VENDORS = True
 SH_FROM_HISTORY = True
+SH_FLAG_ROUTE = True
 
 
 async def _vendor_weighted_top_counts(db, top_l: str) -> Dict[str, float]:
@@ -1905,14 +1906,18 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
         db = get_db()
         tops = await _top_defaults(db)
         vendor0 = str(doc.get("vendor_canonical") or "").upper()
-        if SH_FROM_HISTORY and vendor0 and parts[0].lower() == "miscellaneous" and "approval" in (reason or "").lower():
+        ef0 = doc.get("extracted_fields") or {}
+        sh_flag = str(ef0.get("is_storage_handling") or doc.get("is_storage_handling") or "").lower() == "true" or ef0.get("is_storage_handling") is True
+        if SH_FROM_HISTORY and vendor0 and not parts[0].lower().startswith("s&h") and (
+                (parts[0].lower() == "miscellaneous" and "approval" in (reason or "").lower())
+                or (SH_FLAG_ROUTE and sh_flag)):
             # "Needs approval" from a vendor whose invoices staff file as S&H
             # (storage & handling) for approval (JBS Logistics, Child's): the
             # S&H approval folder is that same decision, for that vendor.
             profs = [p async for p in db.vendor_subfolder_profiles.find({"vendor": vendor0}, {"_id": 0, "top_l": 1, "n": 1})]
             tot = sum(p.get("n") or 0 for p in profs)
             sh = sum(p.get("n") or 0 for p in profs if str(p.get("top_l") or "").startswith("s&h invoices"))
-            if tot >= 4 and sh / tot >= 0.6 and tops.get("s&h invoices waiting for approval"):
+            if tot >= (2 if sh_flag else 4) and sh / tot >= 0.6 and tops.get("s&h invoices waiting for approval"):
                 parts = ["S&H Invoices waiting for approval"]
                 path = tops["s&h invoices waiting for approval"]["top"]
                 reason = "Needs approval; staff file this vendor as S&H"

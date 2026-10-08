@@ -491,6 +491,8 @@ const AP_STAGE_LABELS = {
 // what staff act on: AP history, the document itself, its data and lines.
 function LegacySection({ on, children }) {
   if (!on) return <>{children}</>;
+  return null;   // superseded by the AP / Sales stage (2026-10-08: removed, not folded)
+  // eslint-disable-next-line no-unreachable
   return (
     <details className="rounded-lg border border-dashed border-border" data-testid="legacy-internals">
       <summary className="cursor-pointer select-none px-4 py-2 text-xs text-muted-foreground">
@@ -1103,7 +1105,7 @@ export default function DocumentDetailPage() {
           <PDFPreviewPanel document={doc} />
           <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />
           {/* Derived State Summary Card - Always show */}
-          {derivedState && (
+          {derivedState && !(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage) && (
             <Card className="border border-border" data-testid="derived-state-card">
               <CardHeader className="pb-3">
                 <div className="flex items-center gap-2">
@@ -1295,6 +1297,10 @@ export default function DocumentDetailPage() {
           )}
 
           
+          {/* The old pipeline's event timeline: only for documents without a
+              current AP / Sales stage (its 'ReadyForPost', 'vendor match failed'
+              events contradicted the stage). */}
+          {!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage) && (<>
           {/* Event Timeline - New Event-Driven UI */}
           <Card className="border border-border" data-testid="event-timeline-card">
             <CardHeader className="pb-3">
@@ -1332,8 +1338,9 @@ export default function DocumentDetailPage() {
             </CardContent>
           </Card>
           
+          </>)}
           {/* Legacy Workflow Runs - Collapsible */}
-          {showLegacyWorkflows && workflows.length > 0 && (
+          {showLegacyWorkflows && workflows.length > 0 && !(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage) && (
             <Card className="border border-border border-dashed opacity-75" data-testid="workflow-audit-card">
               <CardHeader className="pb-3">
                 <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>

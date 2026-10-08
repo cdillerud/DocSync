@@ -78,11 +78,34 @@ async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, An
                 candidates.append((m.group(1) or m.group(2) or "").strip("-").upper())
             candidates += re.findall(r"(?<![A-Za-z0-9])([A-Za-z]{0,4}\d{4,12})(?![A-Za-z0-9])", text)
         good = [c for c in dict.fromkeys(candidates) if fits(shape, c)]
+        src = "subject_or_file_name (vendor number shape)"
+        if not good and shape:
+            # The PDF text, for vendors whose BC numbers are sequential: a
+            # number in the range of their recent invoices (Progressive
+            # 'ORIGINAL INVOICE 00133270' next to 132024..132983; the item
+            # number 138978 on the same page is out of range).
+            recent = []
+            async for b in db.bc_reference_cache.find(
+                    {"bc_vendor_no": str(d.get("vendor_canonical") or "").upper(),
+                     "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]}},
+                    {"_id": 0, "bc_external_document_no": 1}).sort("bc_posting_date", -1).limit(30):
+                n_ = _norm(b.get("bc_external_document_no"))
+                if n_.isdigit():
+                    recent.append(int(n_))
+            if len(recent) >= 8:
+                lo, hi = min(recent), max(recent)
+                span = max(hi - lo, 50)
+                from services.amount_recovery_service import _pdf_text
+                full = await db.hub_documents.find_one({"_id": d["_id"]})
+                text = _pdf_text(full or {})
+                cands = {_norm(t) for t in re.findall(r"(?<![A-Za-z0-9.,/-])(\d{4,12})(?![A-Za-z0-9.,/-])", text)}
+                good = [c for c in cands if c.isdigit() and fits(shape, c) and lo - span <= int(c) <= hi + 2 * span]
+                src = "PDF text (in the range of this vendor's recent BC invoice numbers)"
         if len(good) == 1:
             stats["corrected"] += 1
             if apply:
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
                     "invoice_number_clean": good[0].upper(), "invoice_number_shape_previous": d["invoice_number_clean"],
-                    "invoice_number_source": "subject_or_file_name (vendor number shape)", "invoice_number_filled_at": now}})
+                    "invoice_number_source": src, "invoice_number_filled_at": now}})
     return stats
 

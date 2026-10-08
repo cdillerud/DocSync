@@ -22,7 +22,7 @@ import logging
 import re
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -348,6 +348,43 @@ async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:
 
 
 PROFILE_TO_STAFF = True
+WAREHOUSE_SPLIT = True
+
+
+_WH_CODES = {"WHSESTORAGE", "WHSEHANDLING"}
+
+
+def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """A warehouse's storage & handling bill as AP enters it: one storage
+    line and one handling line, quantity 1 at the summed amounts (LSI
+    storage 178.50 + handling 399.00), not the per-pallet lines of the PDF.
+    Only for vendors AP codes with just WHSESTORAGE / WHSEHANDLING, and only
+    when the invoice's own lines add up to its total."""
+    if not WAREHOUSE_SPLIT or not coding:
+        return None
+    used = set(coding.get("codes_used") or [])
+    if not used or not used <= _WH_CODES:
+        return None
+    items = (d.get("extracted_fields") or {}).get("line_items") or []
+    from services.vendor_line_coding_service import _line_amount
+    buckets: Dict[str, float] = {}
+    for e in items:
+        amt = round(_line_amount(e), 2)
+        if not amt:
+            continue
+        code = "WHSESTORAGE" if re.search(r"storage|rent|recurring", str(e.get("description") or ""), re.I) else "WHSEHANDLING"
+        buckets[code] = round(buckets.get(code, 0) + amt, 2)
+    total = round(abs(float(d.get("amount_float") or 0)), 2)
+    if not buckets or abs(sum(buckets.values()) - total) > 0.02:
+        return None
+    if set(buckets) - used:
+        # A code AP has never used for this vendor: fold it into the one they use.
+        only = sorted(used)[0] if len(used) == 1 else None
+        if not only:
+            return None
+        buckets = {only: total}
+    return [{"lineType": "Item", "lineObjectNumber": c, "description": ("Storage" if c == "WHSESTORAGE" else "Handling") + f" - invoice {d.get('invoice_number_clean') or ''}",
+             "quantity": 1.0, "unitCost": v, "source": "storage / handling totals, as AP enters this warehouse"} for c, v in sorted(buckets.items())]
 
 
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
@@ -389,6 +426,9 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     if main_code_known(coding, lines) is False:
         m = max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={})
         return {"problem": f"the Hub would code this {m.get('lineObjectNumber')}, which AP has not used for this vendor in BC"}
+    wl = warehouse_split(d, coding)
+    if wl:
+        return {"lines": wl, "source": "warehouse_split"}
     if PROFILE_TO_STAFF:
         # Replay vs AP's BC entries (2026-10-08): these lines were right 4 of
         # 16 times (warehouse storage/handling splits, customs + tariff).

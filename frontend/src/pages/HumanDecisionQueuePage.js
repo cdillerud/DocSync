@@ -53,7 +53,7 @@ const AP_REASON_LABELS = {
   vendor_unknown: 'Vendor unknown',
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
-  draft_lines_problem: "Draft lines don't add up",
+  draft_lines_problem: "Hub couldn't draft it",
   routing_uncertain: 'Folder uncertain',
   routing_error: 'Routing error',
 };

@@ -193,6 +193,8 @@ async def ap_summary(doc_id: str):
     bl = d.get("bc_link") or {}
     return {
         "stage": d.get("ap_stage"), "stage_label": STAGE_LABELS.get(d.get("ap_stage"), d.get("ap_stage")),
+        # The Hub's own reason for not drafting (shown in words, not just a code).
+        "draft_problem": (d.get("sandbox_draft_skipped") or {}).get("reason") if d.get("staff_reason") == "draft_lines_problem" else None,
         "staff_reason": d.get("staff_reason"), "no_action_reason": d.get("no_action_reason") or d.get("non_ap_kind"),
         "suggested_folder": d.get("suggested_folder"), "routing_reason": d.get("routing_reason"),
         "routing_path_accuracy": d.get("routing_path_accuracy"), "suggested_approver": d.get("suggested_approver"),

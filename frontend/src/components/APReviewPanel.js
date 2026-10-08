@@ -321,7 +321,7 @@ export function APReviewPanel({ document, onUpdate }) {
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
             <FileText className="w-4 h-4" />
-            AP Invoice Review
+            Invoice data (correct and save)
           </CardTitle>
           <div className="flex items-center gap-2">
             {isPosted && (
@@ -700,7 +700,7 @@ export function APReviewPanel({ document, onUpdate }) {
               Save Changes
             </Button>
             
-            {!isReadyForPost && !isPosted && (
+            {false && !isReadyForPost && !isPosted && (   /* Mark Ready: old posting flow, retired 2026-10-08 */
               <Button 
                 variant="secondary" 
                 size="sm" 
@@ -714,7 +714,7 @@ export function APReviewPanel({ document, onUpdate }) {
               </Button>
             )}
             
-            {(isReadyForPost || bcPostingStatus === 'failed') && !isPosted && (
+            {false && (isReadyForPost || bcPostingStatus === 'failed') && !isPosted && (   /* Post to BC: the Hub never posts */
               <Button 
                 size="sm" 
                 className="flex-1 h-8 bg-emerald-600 hover:bg-emerald-700"

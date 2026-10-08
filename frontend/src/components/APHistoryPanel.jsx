@@ -9,7 +9,7 @@ const REASON_LABELS = {
   vendor_unknown: 'Vendor unknown',
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
-  draft_lines_problem: "Draft lines don't add up",
+  draft_lines_problem: "Hub couldn't draft it",
   routing_uncertain: 'Folder uncertain',
   approval_rejected: 'Approval rejected',
 };
@@ -58,7 +58,7 @@ export default function APHistoryPanel({ documentId }) {
             AP history
           </CardTitle>
           <Badge variant="outline" className={tone}>
-            {data.stage_label || (data.bc ? 'In BC' : 'Not staged (older than 30 days)')}{data.staff_reason ? ` — ${REASON_LABELS[data.staff_reason] || data.staff_reason}` : ''}
+            {data.stage_label || (data.bc ? 'In BC' : 'Not staged (older than 30 days)')}{data.staff_reason ? ` — ${REASON_LABELS[data.staff_reason] || data.staff_reason}` : ''}{data.draft_problem ? `: ${data.draft_problem}` : ''}
           </Badge>
         </div>
       </CardHeader>

@@ -18,6 +18,7 @@ import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
 import APWorkflowPage from "@/pages/APWorkflowPage";
 import APTestingPage from "@/pages/APTestingPage";
 import SalesInboxPage from "@/pages/SalesInboxPage";
+import TodayPage from "@/pages/TodayPage";
 import APInboxPage from "@/pages/APInboxPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
@@ -41,7 +42,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
-        <Route index element={<DocumentsHubPage />} />
+        <Route index element={<TodayPage />} />
         <Route path="documents" element={<DocumentsHubPage />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="search" element={<SearchPage />} />

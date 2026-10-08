@@ -122,7 +122,7 @@ export default function APInboxPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-11 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12 gap-2">
         {STAGES.map(s => (
           <button
             key={s.key}

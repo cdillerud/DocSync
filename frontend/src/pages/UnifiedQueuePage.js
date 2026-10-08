@@ -563,12 +563,7 @@ export default function UnifiedQueuePage() {
               <div className="w-px h-6 bg-border mx-1" />
             </>
           )}
-          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={handleRetryCaptured} disabled={bulkProcessing} data-testid="retry-captured-btn" title="Retry documents stuck in Captured status">
-            <RotateCcw className="w-3.5 h-3.5" /> Retry Stuck
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={handlePostReady} disabled={bulkProcessing} data-testid="post-ready-btn" title="Post all ReadyForPost documents to BC">
-            <Send className="w-3.5 h-3.5" /> Post Ready
-          </Button>
+          {/* Retry Stuck / Post Ready removed 2026-10-08: the Hub drafts in the sandbox and never posts. */}
           <Button variant="ghost" size="sm" className="h-8 text-xs gap-1" onClick={() => { fetchDocuments(); toast.success("Refreshed"); }} data-testid="refresh-btn">
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </Button>
@@ -739,7 +734,6 @@ export default function UnifiedQueuePage() {
           { key: "accounting", label: "Accounting", icon: Receipt, count: counts.accounting },
           { key: "sales", label: "Sales", icon: ShoppingCart, count: counts.sales },
           { key: "processed", label: "Processed", icon: CheckCircle2, count: counts.processed },
-          { key: "ready_to_post", label: "Ready to Post", icon: Send, count: counts.ready_to_post },
           { key: "batches", label: "Batches", icon: Layers, count: counts.batches },
           { key: "exceptions", label: "Exceptions", icon: AlertTriangle, count: counts.exceptions, accent: true },
           { key: "po_pending", label: "PO Pending", icon: Clock, count: counts.po_pending, accent: counts.po_pending > 0 },

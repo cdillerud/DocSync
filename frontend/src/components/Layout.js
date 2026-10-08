@@ -22,23 +22,21 @@ const API = process.env.REACT_APP_BACKEND_URL;
 // (Inbox/Search/Square9 Readiness/Decision Queue/Monitor) and Sales PO→SO
 // ingestion (Sales), plus the shared infra both depend on (Integrations, Settings).
 const navItems = [
+  { to: '/', icon: Sun, label: 'Today', exact: true },
   { to: '/ap', icon: ClipboardList, label: 'AP Inbox' },
-  { to: '/', icon: Files, label: 'All documents', exact: true },
-  { to: '/search', icon: Search, label: 'Search' },
-  { to: '/monitor', icon: Activity, label: 'Monitor' },
-  { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
+  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
   { to: '/ap-workflow', icon: ClipboardList, label: 'AP Workflow' },
+  { to: '/search', icon: Search, label: 'Search' },
+  { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
   { to: '/ap-testing', icon: FlaskConical, label: 'AP Testing' },
-  { to: '/sales', icon: ShoppingCart, label: 'Sales' },
   { to: '/integrations', icon: Plug, label: 'Integrations' },
   { to: '/config', icon: Settings, label: 'Settings' },
 ];
 
-// Everything else: real, working AP/analytics tooling — just not part of
-// either active priority right now. Collapsed by default so it doesn't
-// compete for attention. Nothing here was deleted; it's one click away.
 const moreNavItems = [
+  { to: '/documents', icon: Files, label: 'Legacy queue' },
+  { to: '/monitor', icon: Activity, label: 'Monitor (legacy)' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
@@ -109,8 +107,8 @@ export default function Layout() {
 
   const getPageTitle = () => {
     const path = location.pathname;
-    if (path === '/') return 'Inbox';
-    if (path === '/documents') return 'Inbox';
+    if (path === '/') return 'Today';
+    if (path === '/documents') return 'Legacy queue';
     if (path === '/sales-inventory') return 'Sales';
     if (path === '/intake/learning') return 'Intake Learning';
     if (path === '/posting-intelligence') return 'Posting Intelligence';

@@ -278,7 +278,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     # 2. The customer's own item code, learned from their BC orders.
     for code in customer_codes(e):
         r = rows.get("code:" + code)
-        if r and r["share"] >= 0.6:
+        if r and r["share"] >= CODE_SHARE:
             out.append((r["item"], f"customer item {code} (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
             break
     # 3. Any Gamer item number written on the PO (new item for this customer).
@@ -298,7 +298,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
                 break
     # 4. The customer's description, learned.
     r = rows.get("desc:" + desc_key(e))
-    if r and r["share"] >= 0.6:
+    if r and r["share"] >= DESC_SHARE:
         out.append((r["item"], f"customer description (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
     if _charge_text(e):
         return out
@@ -369,6 +369,8 @@ AGREE_STRONG = False
 PRINTED_FIRST = False
 NO_RULEOUT_WHEN_OVERRIDDEN = True
 FIT_ON_BC = True
+CODE_SHARE = 0.85      # 0.6 -> 0.85: items 76->78%, precision 92->95% (shared pack codes like Horseshoe 12KRP2)
+DESC_SHARE = 0.6
 _ITEM_UOM: Dict[str, str] = {}
 _HONOR_CACHE: Dict[Tuple[str, str], Tuple[int, int]] = {}
 _CACHE_AT = {"t": 0.0}

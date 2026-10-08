@@ -38,9 +38,32 @@ def total_due(text: str) -> Optional[float]:
     return vals.pop() if len(vals) == 1 else None
 
 
+async def reclassify_order_confirmations(db, apply: bool = True, days: int = 30) -> int:
+    """A supplier's order confirmation read as an AP invoice (Berry
+    '10446843 SR.PDF': no invoice number, 'ORDER CONFIRMATION' on the
+    page) sat in Needs staff as 'number missing'. Only when no invoice
+    number was found and the file name does not say invoice (Ardagh
+    'Invoice no 6012327555' carries both words)."""
+    from datetime import timedelta
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    n = 0
+    async for d in db.hub_documents.find({"created_utc": {"$gte": since}, "mailbox_category": "AP", "document_type": "AP_Invoice",
+                                          "invoice_number_clean": {"$in": [None, ""]}, "bc_link": {"$exists": False},
+                                          "order_confirmation_checked": {"$exists": False}}):
+        upd: Dict[str, Any] = {"order_confirmation_checked": True}
+        if not re.search(r"invoice", str(d.get("file_name") or ""), re.I) and re.search(r"ORDER\s+(CONFIRMATION|ACKNOWLEDG)", _pdf_text(d).upper()):
+            n += 1
+            upd.update({"document_type": "Order_Confirmation", "document_type_previous": d.get("document_type"),
+                        "document_type_corrected": {"at": datetime.now(timezone.utc).isoformat(), "reason": "order confirmation, not an invoice"}})
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": upd})
+    return n
+
+
 async def recover(db, apply: bool = True, limit: int = 300) -> Dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
-    out = {"checked": 0, "recovered": 0, "examples": []}
+    out = {"checked": 0, "recovered": 0, "examples": [],
+           "order_confirmations": await reclassify_order_confirmations(db, apply)}
     async for d in db.hub_documents.find({"amount_weight_suspect": {"$exists": True}, "amount_float": None,
                                           "amount_recovery_tried": {"$exists": False}}).limit(limit):
         out["checked"] += 1

@@ -133,7 +133,7 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
             {"_id": 0, "bc_link": 1, "email_sender": 1, "vendor_raw": 1, "extracted_fields.vendor": 1,
              "normalized_fields.vendor_normalized": 1, "invoice_number_clean": 1, "invoice_number_extracted_previous": 1,
              "amount_float": 1, "amount_from_bc": 1, "document_type": 1, "document_type_previous": 1,
-             "po_number_clean": 1, "po_number_previous": 1, "po_from_text": 1}):
+             "po_number_clean": 1, "po_number_previous": 1, "po_from_text": 1, "bc_combined_entry": 1}):
         bl = d["bc_link"]
         key = (bl.get("bc_entity") == "purchase_credit_memo", bl.get("bc_document_no"))
         b = bc.get(key)
@@ -164,7 +164,8 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
         else:
             n_ok = bool(num) and any(_n(part) in cands for part in re.split(r"[/,&]+", bc_ext) if part.strip())
         a_ok = (not d.get("amount_from_bc") and d.get("amount_float") is not None and b.get("bc_amount") is not None
-                and abs(abs(float(d["amount_float"])) - abs(float(bl.get("bc_amount") or b["bc_amount"]))) < 0.02)
+                and (abs(abs(float(d["amount_float"])) - abs(float(bl.get("bc_amount") or b["bc_amount"]))) < 0.02
+                     or bool(d.get("bc_combined_entry"))))   # one of invoices AP entered together; they add up
         hub_type = d.get("document_type_previous") or d.get("document_type")
         t_ok = (hub_type == "Credit_Memo") == key[0]
         out["vendor_ok"] += v_ok; out["number_ok"] += n_ok; out["amount_ok"] += a_ok; out["type_ok"] += t_ok

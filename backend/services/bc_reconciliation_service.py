@@ -183,7 +183,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1, "mailbox_category": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
          "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1,
-         "created_utc": 1})
+         "created_utc": 1, "bc_combined_entry": 1})
     async for d in cursor:
         is_ap = d.get("mailbox_category") == "AP"
         stats["documents" if is_ap else "non_ap_documents"] += 1
@@ -385,7 +385,8 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                 "at": stamp, "previous": d.get("mailbox_category"), "bc_document_no": best.get("bc_document_no")}})
             events.append({"kind": "mailbox", "from": d.get("mailbox_category"), "to": "AP"})
         unset = {}
-        if how == "number+vendor" and hub_amt is not None and best.get("bc_amount") is not None:
+        combined = (d.get("bc_combined_entry") or {}).get("bc_document_no") == best.get("bc_document_no")
+        if how == "number+vendor" and hub_amt is not None and best.get("bc_amount") is not None and not combined:
             update["bc_amount_mismatch"] = {"hub": hub_amt, "bc": best.get("bc_amount"), "at": stamp}
             stats["amount_mismatch"] += 1
         else:
@@ -523,3 +524,54 @@ async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[
                 "invoice_number_clean": b.get("bc_external_document_no"),
                 "invoice_number_source": "BC invoice AP entered (vendor + exact amount)"}})
     return stats
+
+
+async def resolve_combined_entries(db, apply: bool = True) -> Dict[str, Any]:
+    """AP often enters two invoices as one BC entry (external number
+    "88530/88531", amount = their sum). Each Hub invoice then links with an
+    amount 'mismatch' and sat in "Entered in BC, check" - Vpet, Aptar,
+    WestRock, Canpack, Ball (12 of 35 on 2026-10-08). When the Hub invoices
+    of that vendor named in BC's number add up to BC's amount, they are all
+    that entry: linked, no mismatch."""
+    import re as _re
+    stamp = datetime.now(timezone.utc).isoformat()
+    out = {"bc_entries": 0, "resolved_entries": 0, "documents": 0, "examples": []}
+    bc_nos = await db.hub_documents.distinct("bc_link.bc_document_no", {"bc_amount_mismatch": {"$exists": True}})
+    for bc_no in bc_nos:
+        bc = await db.bc_reference_cache.find_one({"bc_document_no": bc_no, "bc_entity_type": {"$in": ["purchase_invoice", "posted_purchase_invoice", "purchase_credit_memo"]}},
+                                                  {"_id": 0, "bc_external_document_no": 1, "bc_amount": 1, "bc_vendor_no": 1})
+        bc = bc or await db.bc_reference_cache.find_one({"bc_document_no": bc_no}, {"_id": 0, "bc_external_document_no": 1, "bc_amount": 1, "bc_vendor_no": 1})
+        if not bc or bc.get("bc_amount") is None:
+            continue
+        out["bc_entries"] += 1
+        parts = [p for p in _re.split(r"[/,&]+", str(bc.get("bc_external_document_no") or "")) if _norm(p)]
+        q = {"is_duplicate": {"$ne": True}, "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "amount_float": {"$ne": None},
+             "$or": [{"bc_link.bc_document_no": bc_no}]}
+        if len(parts) >= 2 and bc.get("bc_vendor_no"):
+            q["$or"].append({"vendor_canonical": bc["bc_vendor_no"], "invoice_number_clean": {"$in": [p.strip() for p in parts]}})
+        docs, copies, seen = [], [], set()
+        async for d in db.hub_documents.find(q, {"_id": 1, "id": 1, "invoice_number_clean": 1, "amount_float": 1, "bc_link": 1, "vendor_canonical": 1}):
+            copies.append(d)
+            key = (_norm(d.get("invoice_number_clean")), round(abs(float(d["amount_float"])), 2))
+            if key in seen:
+                continue          # the same invoice twice (resent) counts once
+            seen.add(key)
+            docs.append(d)
+        if len(docs) < 2:
+            continue
+        total = sum(abs(float(d["amount_float"])) for d in docs)
+        if abs(total - abs(float(bc["bc_amount"]))) > 0.01 * len(docs):
+            continue
+        out["resolved_entries"] += 1
+        out["documents"] += len(docs)
+        if len(out["examples"]) < 10:
+            out["examples"].append((bc_no, bc.get("bc_external_document_no"), bc["bc_amount"], [(d.get("invoice_number_clean"), d["amount_float"]) for d in docs]))
+        if apply:
+            first = next((d["bc_link"] for d in docs if d.get("bc_link")), None)
+            for d in copies:      # every copy, linked or not
+                upd = {"bc_combined_entry": {"bc_document_no": bc_no, "with": [x.get("id") for x in docs if x["_id"] != d["_id"]],
+                                             "bc_amount": bc["bc_amount"], "at": stamp}}
+                if not d.get("bc_link") and first:
+                    upd["bc_link"] = {**first, "match": "combined_entry", "linked_at": stamp}
+                await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": upd, "$unset": {"bc_amount_mismatch": ""}})
+    return out

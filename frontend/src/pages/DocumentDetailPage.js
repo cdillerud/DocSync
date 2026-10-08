@@ -855,7 +855,10 @@ export default function DocumentDetailPage() {
             const isWarn = vs === 'warn';
             const isFail = vs === 'fail';
             const isPass = !isWarn && !isFail;
-            const superseded = !!AP_STAGE_LABELS[doc.ap_stage];
+            const superseded = !!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage);
+            // The intake validation belongs to the old pipeline: removed once
+            // the document has a current stage (2026-10-08).
+            if (superseded) return null;
             if (superseded && !showIntake) return (
               <Card className="border border-border" data-testid="doc-bc-validation-card">
                 <CardContent className="py-3 flex items-center gap-2 text-xs text-muted-foreground">

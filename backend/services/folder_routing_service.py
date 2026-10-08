@@ -1846,6 +1846,17 @@ def _pick_subfolder_core(doc: dict, hub_sub: str, vendor_counts: Dict[str, float
         s1, n1 = max(vc.items(), key=lambda kv: kv[1])
         if n1 / tot >= 0.6:
             return s1
+        # Folder families (first segment): ATS files "Freight", "Freight/Ready
+        # to process Purch Inv", "Freight/... current month" - 52% for the
+        # top folder alone, 97% for the Freight family. A dominant family wins;
+        # within it, its most-used folder.
+        fam: Dict[str, float] = {}
+        for k, n in vc.items():
+            f = k.split("/")[0].strip().lower()
+            fam[f] = fam.get(f, 0) + n
+        f1, fn = max(fam.items(), key=lambda kv: kv[1])
+        if f1 and fn / tot >= 0.6:
+            return max(((k, n) for k, n in vc.items() if k.split("/")[0].strip().lower() == f1), key=lambda kv: kv[1])[0]
     real = {k for k, n in (top_counts or {}).items() if n > 0}
     if hub_sub and hub_sub in real:
         return None

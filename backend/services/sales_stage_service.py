@@ -32,6 +32,32 @@ def _key(customer: str, pos) -> str:
     return f"{customer}|{sorted(pos)[0] if pos else ''}"
 
 
+_DUNNAGE_WORDS = re.compile(r"\b(TIER\s*SHEETS?|TOP\s*FRAMES?|SLIP\s*SHEETS?|DUNNAGE|PALLETS?)\b", re.I)
+
+
+def _dunnage(e: Dict[str, Any]) -> bool:
+    """Pallets, tier sheets, top frames: Gamer items of category PALLET that
+    inside sales adds like a charge - not a product line to match (O-I
+    OITIERSHEET / OITOPFRAME on a PO were reported as 'new items')."""
+    from services.sales_item_xref_service import _code_tokens, _ITEM_BY_NORM, _CATEGORY
+    desc = str(e.get("description") or "")
+    for tok in _code_tokens(desc.upper(), 4):
+        it = _ITEM_BY_NORM.get(tok)
+        if it:
+            return _CATEGORY.get(it) == "PALLET"
+    return bool(_DUNNAGE_WORDS.search(desc)) and len(desc) < 90
+
+
+def plain_bc_error(reason: Any) -> Any:
+    """BC's validation errors in words a rep can act on."""
+    r = str(reason or "")
+    m = re.search(r"must be equal to 'No'\s+in Item: No\.=([^.]+)\. Current value is 'Yes'", r)
+    if m:
+        return (f"Item {m.group(1).strip()} is blocked in BC (Blocked or Sales Blocked), so the Hub could not draft "
+                "this order. Pick the item that replaces it, or have it unblocked.")
+    return reason
+
+
 async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     sl = d.get("sales_link") or {}
     role = sl.get("role")
@@ -50,13 +76,13 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         return {"sales_stage": "drafted", "bc_draft_no": sd["bc_order_no"]}
     if d.get("sales_draft_skipped"):
         return {"sales_stage": "needs_rep", "sales_stage_reason": "draft_problem",
-                "sales_stage_detail": d["sales_draft_skipped"].get("reason")}
+                "sales_stage_detail": plain_bc_error(d["sales_draft_skipped"].get("reason"))}
     cust = sl.get("bc_customer_no")
     if not cust:
         return {"sales_stage": "needs_rep", "sales_stage_reason": "customer_unknown"}
     if not sl.get("customer_po"):
         return {"sales_stage": "needs_rep", "sales_stage_reason": "customer_po_missing"}
-    el = [e for e in ((d.get("extracted_fields") or {}).get("line_items") or []) if not _charge_text(e)]
+    el = [e for e in ((d.get("extracted_fields") or {}).get("line_items") or []) if not _charge_text(e) and not _dunnage(e)]
     if not el:
         return {"sales_stage": "needs_rep", "sales_stage_reason": "no_lines"}
     res = await resolve_lines(db, cust, el)

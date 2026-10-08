@@ -160,6 +160,13 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
                                       and (pos or has_lines))) else "customer_other"
     else:
         role = "other"
+    if role == "customer_po" and not pos and (
+            (dt == "Order_Confirmation" and cp.get("vendor"))
+            or re.search(r"\bquot(e|ation)s?\b", str(d.get("file_name") or ""), re.I)):
+        # An order confirmation from a party that is also a Gamer supplier
+        # (Fast Track, O-I) confirms Gamer's PO; a quote file with no PO
+        # number is not an order.
+        role = "supplier" if dt == "Order_Confirmation" else "customer_other"
     if role == "customer_po" and match == "gamer_order_no":
         # Only a Gamer order number links this "customer PO": not when its own
         # PO number is a Gamer purchase order (Gamer's PO to O-I naming the

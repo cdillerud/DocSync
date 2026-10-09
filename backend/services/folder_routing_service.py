@@ -1340,6 +1340,14 @@ def _is_warehouse_order(doc: dict) -> bool:
     if bc_lane == "dropship":
         return False
 
+    # A freight bill delivered to a customer is dropship even when another
+    # document of the order was entered at a warehouse (Tumalo hauling to
+    # Best Bev on order 118343, whose Canpack invoice AP put at a warehouse
+    # location: 15 such misses in 60 days of staff filings).
+    if CONSIGNEE_BEFORE_VOTES and not doc.get("_ocean_import") and doc.get("_order_lane_votes") \
+            and _consignee_is_customer(doc) and not any(_WAREHOUSE_ORDER_PREFIX.match(o) for o in _order_numbers_of(doc, {}, doc.get("routing_details") or {})):
+        return False
+
     # Other documents of the same order that AP entered in BC (their line
     # location codes), excluding this document: majority lane decides.
     votes = doc.get("_order_lane_votes") or {}
@@ -1351,6 +1359,11 @@ def _is_warehouse_order(doc: dict) -> bool:
     # a warehouse) is dropship freight, whatever the order prefix: staff
     # agreed on 195 of 202 carrier invoices (Tumalo hauling Canpack cans
     # to a customer on a W-order went to Warehouse).
+    # Assembly / warehouse-receipt orders (WA..., WR...) stay warehouse even
+    # when the truck delivers to a customer.
+    if WA_BEFORE_CONSIGNEE and any(re.match(r"^(?:WA|WR|WTR)-?\d{4,}", o, re.I)
+                                   for o in _order_numbers_of(doc, {}, doc.get("routing_details") or {})):
+        return True
     if not doc.get("_ocean_import") and _consignee_is_customer(doc):
         return False
 
@@ -1432,6 +1445,8 @@ def _pdf_text(doc: dict) -> str:
 _TEXT_CREDIT_DOC = re.compile(r"\bcredit\s+(?:memo|note|invoice)\b", re.I)
 _TEXT_GAMER_NUMERIC_ORDER = re.compile(r"(?<![0-9])1[0-2]\d{4}(?![0-9])")
 LANE_PROFILE_MIN_FILINGS = 3
+CONSIGNEE_BEFORE_VOTES = True
+WA_BEFORE_CONSIGNEE = True
 LANE_PROFILE_INTL_MINORITY = 0.10
 LANE_PROFILE_MINORITY = 0.05
 

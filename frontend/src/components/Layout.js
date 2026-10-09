@@ -35,8 +35,6 @@ const navItems = [
 ];
 
 const moreNavItems = [
-  { to: '/documents', icon: Files, label: 'Legacy queue', exact: true },
-  { to: '/monitor', icon: Activity, label: 'Monitor (legacy)' },
   { to: '/intake/learning', icon: Sparkles, label: 'Intake Learning' },
   { to: '/posting-intelligence', icon: Brain, label: 'Posting AI' },
   { to: '/invoice-trace', icon: ArrowLeftRight, label: 'Trace' },
@@ -108,7 +106,7 @@ export default function Layout() {
   const getPageTitle = () => {
     const path = location.pathname;
     if (path === '/') return 'Today';
-    if (path === '/documents') return 'Legacy queue';
+    if (path === '/documents') return 'Search';
     if (path === '/sales-inventory') return 'Sales';
     if (path === '/intake/learning') return 'Intake Learning';
     if (path === '/posting-intelligence') return 'Posting Intelligence';

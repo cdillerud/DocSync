@@ -534,7 +534,7 @@ export default function DocumentDetailPage() {
       } else {
         toast.error(`Failed to load document (${status || 'network error'})`);
       }
-      navigate('/documents');
+      navigate('/search');
     } finally {
       setLoading(false);
     }
@@ -633,7 +633,7 @@ export default function DocumentDetailPage() {
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Button variant="ghost" size="icon" onClick={() => (window.history.state?.idx > 0 ? navigate(-1) : navigate('/documents'))} title="Back" data-testid="back-to-queue-btn">
+        <Button variant="ghost" size="icon" onClick={() => (window.history.state?.idx > 0 ? navigate(-1) : navigate('/search'))} title="Back" data-testid="back-to-queue-btn">
           <ArrowLeft className="w-4 h-4" />
         </Button>
         <div className="flex-1 min-w-0">
@@ -670,11 +670,7 @@ export default function DocumentDetailPage() {
               </a>
             </Button>
           )}
-          {/* Re-process button - always visible for all documents */}
-          <Button size="sm" variant="outline" onClick={handleResubmit} disabled={resubmitting} data-testid="resubmit-btn">
-            {resubmitting ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <RotateCcw className="w-3 h-3 mr-1.5" />}
-            {resubmitting ? 'Re-processing...' : 'Re-process'}
-          </Button>
+          {/* Re-process (re-ran the retired pipeline) removed 2026-10-08; Upload & Re-extract stays */}
           {/* Upload & Re-extract — for documents missing their file on disk */}
           <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={handleUploadFile} />
           <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploading} data-testid="upload-reextract-btn">

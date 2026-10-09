@@ -10,7 +10,6 @@ import DocumentDetailPage from "@/pages/DocumentDetailPage";
 import OperationsQueuePage from "@/pages/OperationsQueuePage";
 
 // Hub pages (consolidated)
-import DocumentsHubPage from "@/pages/DocumentsHubPage";
 import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
 import IntakeLearningPage from "@/pages/IntakeLearningPage";
 import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
@@ -27,7 +26,6 @@ import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
-import MonitoringDashboard from "@/pages/MonitoringDashboard";
 import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
 import SearchPage from "@/pages/SearchPage";
 
@@ -43,7 +41,7 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
         <Route index element={<TodayPage />} />
-        <Route path="documents" element={<DocumentsHubPage />} />
+        <Route path="documents" element={<Navigate to="/search" replace />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="search" element={<SearchPage />} />
         <Route path="review/:id" element={<SalesOrderReviewPage />} />
@@ -56,7 +54,7 @@ function AppRoutes() {
         <Route path="integrations" element={<IntegrationsHubPage />} />
         <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
         <Route path="invoice-trace" element={<InvoiceTracePage />} />
-        <Route path="monitor" element={<MonitoringDashboard />} />
+        <Route path="monitor" element={<Navigate to="/" replace />} />
         <Route path="square9-readiness" element={<Square9ReadinessPage />} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
         <Route path="ap-workflow" element={<APWorkflowPage />} />

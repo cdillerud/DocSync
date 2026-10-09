@@ -614,23 +614,49 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
 
 
 
-_LINE_PROBLEM = re.compile(r"do not add up|negative balancing|line build failed|would code this|has not used for this vendor", re.I)
+_LINE_PROBLEM = re.compile(r"do not add up|negative balancing|line build failed|would code this|has not used for this vendor|varying ways", re.I)
+_SKIP_NUMBER = re.compile(r"invoice number (\S+) (?:is too short|does not look like)", re.I)
+_SKIP_PO = re.compile(r"PO (\S+) is not a purchase order or receipt in BC", re.I)
+STALE_SKIP_HOURS = 72
+
+
+async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
+    """Why a skip no longer holds, or None. Skips record the state at the
+    time (Dayton "125" before the number was corrected to 838404656, a PO
+    purchasing had not entered yet). Only BC purchase orders count: Gamer
+    sales orders and shipments reuse the same number range."""
+    m = _SKIP_NUMBER.search(reason)
+    if m and m.group(1).upper() != str(d.get("invoice_number_clean") or "").upper():
+        return "invoice number corrected"
+    m = _SKIP_PO.search(reason)
+    if m and await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": m.group(1)}, {"_id": 1}):
+        return "PO now in BC"
+    at = str((d.get("sandbox_draft_skipped") or {}).get("at") or "")
+    if at and at < (datetime.now(timezone.utc) - timedelta(hours=STALE_SKIP_HOURS)).isoformat():
+        return f"re-checked after {STALE_SKIP_HOURS}h"
+    return None
 
 
 async def retry_line_skips(db) -> Dict[str, Any]:
-    """Invoices skipped for a line problem are retried once their vendor is
-    one AP codes as a single line (XPO: FREIGHT on 15/15, skipped before that
-    rule existed because its discount lines did not add up)."""
+    """Skipped invoices are retried once the skip no longer holds: a line
+    problem whose vendor AP now codes as a single line (XPO: FREIGHT on 15/15,
+    skipped before that rule existed), a number since corrected, a PO since
+    entered in BC, or any skip older than STALE_SKIP_HOURS (re-skipped with a
+    fresh reason if it still holds)."""
     from services.vendor_line_coding_service import coding_for
     n = 0
+    why = {}
     async for d in db.hub_documents.find({"sandbox_draft_skipped.reason": {"$exists": True}, "bc_link": {"$exists": False},
                                           "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}},
-                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1}):
-        if not _LINE_PROBLEM.search(str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")):
+                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1}):
+        reason = str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")
+        stale = await _skip_is_stale(db, d, reason)
+        if not stale and _LINE_PROBLEM.search(reason) and (await coding_for(db, d.get("vendor_canonical")) or {}).get("dominant"):
+            stale = "vendor now has a usual coding"
+        if not stale:
             continue
-        if not (await coding_for(db, d.get("vendor_canonical")) or {}).get("dominant"):
-            continue
-        await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sandbox_draft_skipped_previous": d["sandbox_draft_skipped"]},
+        await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sandbox_draft_skipped_previous": {**d["sandbox_draft_skipped"], "retried_because": stale}},
                                                                "$unset": {"sandbox_draft_skipped": ""}})
+        why[stale] = why.get(stale, 0) + 1
         n += 1
-    return {"retried": n}
+    return {"retried": n, "why": why}

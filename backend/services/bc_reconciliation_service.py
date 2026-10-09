@@ -590,10 +590,17 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     out = {"checked": 0, "linked": 0, "examples": []}
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "bc_link": {"$exists": False}, "is_duplicate": {"$ne": True},
+            {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True}, "bc_split_entries": {"$exists": False},
+             # unlinked, or linked to one part with the amount off (Vidrala
+             # 2500015210 = 2500015210 + A + B at 5,813.02 each)
+             "$or": [{"bc_link": {"$exists": False}}, {"bc_link.match": {"$in": ["number+vendor", "number"]}}],
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "vendor_canonical": {"$nin": [None, ""]},
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0]}},
-            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1}):
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1, "bc_link": 1}):
+        linked = d.get("bc_link") or {}
+        if linked and (linked.get("bc_amount") is None
+                       or abs(abs(float(linked["bc_amount"])) - abs(float(d["amount_float"]))) < 0.02):
+            continue
         base = _norm(d["invoice_number_clean"])
         if len(base) < 4:
             continue
@@ -609,12 +616,19 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
         total = sum(abs(float(p["bc_amount"])) for p in parts)
         if abs(total - abs(float(d["amount_float"]))) > 0.01 * len(parts):
             continue
+        if linked and linked.get("bc_document_no") not in {p["bc_document_no"] for p in parts}:
+            continue
         parts.sort(key=lambda p: p["normalized_external_ref"])
         first = parts[0]
         out["linked"] += 1
         if len(out["examples"]) < 10:
             out["examples"].append((d["vendor_canonical"], base, d["amount_float"], [(p["normalized_external_ref"], p["bc_amount"]) for p in parts]))
-        if apply:
+        split = [{"bc_document_no": p["bc_document_no"], "bc_external_document_no": p.get("bc_external_document_no"),
+                  "bc_amount": p["bc_amount"], "bc_order_number": p.get("bc_order_number")} for p in parts]
+        if apply and linked:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"bc_split_entries": split},
+                                                                  "$unset": {"bc_amount_mismatch": ""}})
+        elif apply:
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
                 "bc_link": {"bc_document_no": first["bc_document_no"], "bc_entity": first["bc_entity_type"], "bc_status": first.get("bc_status"),
                             "bc_vendor_no": first.get("bc_vendor_no"), "bc_vendor_name": first.get("bc_vendor_name"),

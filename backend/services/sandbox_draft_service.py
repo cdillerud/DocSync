@@ -415,6 +415,59 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
              "quantity": 1.0, "unitCost": v, "source": "storage / handling totals, as AP enters this warehouse"} for c, v in sorted(buckets.items())]
 
 
+FORWARDER_SPLIT = True
+# Line replay 2026-10-09: StraitLink 4/6 exact (AP adds a 125 line not on the
+# bill; duties sometimes TARIFF) - below the bar the other drafting rules meet: off.
+CUSTOMS_BROKER_LINES = False
+_CUSTOMS_LINE = re.compile(r"customs|clearance|\bISF\b|\bFDA\b|\bentry\b|\bbond\b|\bduty\b|\bduties\b", re.I)
+_DOC_LINE = re.compile(r"documentation|doc(?:ument)? fee", re.I)
+_FREIGHT_WORDS = re.compile(r"freight|ocean|\bEXW\b|\bCFR\b|\bFOB\b|\bCIF\b|transport|drayage|trucking|delivery", re.I)
+
+
+def forwarder_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """A freight forwarder's bill as AP enters it (Cargo Modules, 7 of 7):
+    FREIGHT = the freight line, CUSTOMS = customs clearance + ISF + FDA +
+    documentation added together (95 + 25 + 35 + 30 = 185); with no customs
+    fee on the bill, documentation rides with the freight. Charge lines on a
+    warehouse order (W / WR), Item lines otherwise. Only for vendors AP
+    codes with FREIGHT and CUSTOMS, and only when the lines add up."""
+    if not FORWARDER_SPLIT or not coding:
+        return None
+    used = set(coding.get("codes_used") or [])
+    from services.vendor_line_coding_service import _line_amount
+    items = (d.get("extracted_fields") or {}).get("line_items") or []
+    po = str(d.get("po_number_clean") or "").strip().upper()
+    ltype = "Charge" if re.match(r"^(?:W|WR|WTR)-?\d", po) else "Item"
+    if CUSTOMS_BROKER_LINES and used <= {"CUSTOMS", "TARIFF"} and "CUSTOMS" in used:
+        # A customs broker (StraitLink, 10 of 10): one CUSTOMS line per bill
+        # line - the 125.00 entry fee and the duties - as AP enters them.
+        out = [{"lineType": ltype, "lineObjectNumber": "CUSTOMS", "description": f"customs {po} {str(e.get('description') or '')}".strip()[:100],
+                "quantity": 1.0, "unitCost": round(_line_amount(e), 2), "source": "customs broker lines, as AP enters this vendor"}
+               for e in items if round(_line_amount(e), 2)]
+        total = round(abs(float(d.get("amount_float") or 0)), 2)
+        return out if out and abs(sum(l["unitCost"] for l in out) - total) <= 0.02 else None
+    if not {"FREIGHT", "CUSTOMS"} <= used:
+        return None
+    if not any(_FREIGHT_WORDS.search(str(e.get("description") or "")) for e in items):
+        return None
+    has_customs = any(_CUSTOMS_LINE.search(str(e.get("description") or "")) for e in items)
+    buckets: Dict[str, float] = {}
+    for e in items:
+        amt = round(_line_amount(e), 2)
+        if not amt:
+            continue
+        desc = str(e.get("description") or "")
+        code = "CUSTOMS" if has_customs and (_CUSTOMS_LINE.search(desc) or _DOC_LINE.search(desc)) else "FREIGHT"
+        buckets[code] = round(buckets.get(code, 0) + amt, 2)
+    total = round(abs(float(d.get("amount_float") or 0)), 2)
+    if "FREIGHT" not in buckets or abs(sum(buckets.values()) - total) > 0.02:
+        return None
+    label = {"FREIGHT": "Ocean", "CUSTOMS": "Customs Fee"}
+    return [{"lineType": ltype, "lineObjectNumber": c, "description": f"{po} {label[c]}".strip()[:100], "quantity": 1.0,
+             "unitCost": buckets[c], "source": "freight / customs totals, as AP enters this forwarder"}
+            for c in ("FREIGHT", "CUSTOMS") if c in buckets]
+
+
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
     """The lines a draft of this invoice gets (see vendor_line_coding_service).
 
@@ -444,6 +497,9 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
         # A product vendor: the right lines are the PO's received items.
         return {"problem": (f"PO {po} is not a purchase order or receipt in BC" if po else "the invoice shows no PO")
                            + "; AP invoices this vendor against PO receipts, so the Hub cannot draft its lines"}
+    fl = forwarder_split(d, coding)
+    if fl:
+        return {"lines": fl, "source": "forwarder_split"}
     try:
         lines = await _build_pi_lines_with_mapping(d, db, vendor_no=d["vendor_canonical"])
     except Exception as e:

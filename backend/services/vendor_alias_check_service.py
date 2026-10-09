@@ -9,7 +9,12 @@
    AP entered ADROITN) - is pointed at that vendor. The old row is backed up.
 BC-sourced aliases (bc_ground_truth, bc_name_canonical, bc_cache_seed) are
 left to scripts/bc_vendor_learning.py.
+3. A document the old gap closer resolved by fuzzy name ("Stephen Conroy" ->
+   ARDAGHM because "Ardagh - ST" reduced to "st"; 97 documents 2026-04..10)
+   is un-resolved when its own vendor name does not match any name of that
+   vendor. Never touches a document linked to a BC invoice.
 """
+import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -58,6 +63,63 @@ async def check(db, apply: bool = True) -> Dict[str, Any]:
                 await db.vendor_aliases.update_many({"alias_string": a.get("alias_string"), "source": a.get("source")}, {"$set": {
                     "vendor_no": to, "canonical_vendor_id": to, "vendor_name": names.get(to), "aligned_to_bc_at": now,
                     "aligned_evidence": n}})
+    undone = await undo_bad_gap_closer(db, apply=apply)
     return {"made_consistent": len(out["made_consistent"]), "realigned": len(out["realigned"]),
-            "examples": (out["made_consistent"][:5], out["realigned"][:8])}
+            "gap_closer_undone": len(undone),
+            "examples": (out["made_consistent"][:5], out["realigned"][:8], undone[:8])}
+
+
+_GENERIC = {"inc", "llc", "corp", "company", "group", "services", "service", "international", "packaging",
+            "solutions", "the", "and", "global", "usa", "america", "logistics", "warehouse", "plastics", "from",
+            "email", "based", "metal", "glass", "transportation", "trucking", "products", "limited", "shipping"}
+
+
+def _words(name: str) -> set:
+    s = str(name or "").lower().replace("o-i", "oi")
+    return {w for w in re.findall(r"[a-z]{2,}", s) if w not in _GENERIC and (len(w) >= 4 or w == "oi")}
+
+
+async def undo_bad_gap_closer(db, apply: bool = True, threshold: float = 0.72):
+    from services.vendor_name_helpers import calculate_fuzzy_score
+    names = defaultdict(set)
+    async for p in db.vendor_invoice_profiles.find({"vendor_no": {"$nin": [None, ""]}},
+                                                   {"_id": 0, "vendor_no": 1, "vendor_name": 1, "vendor_name_variants": 1, "vendor_card.displayName": 1}):
+        for n in (p.get("vendor_name"), (p.get("vendor_card") or {}).get("displayName"), *(p.get("vendor_name_variants") or [])):
+            if n:
+                names[p["vendor_no"]].add(n)
+    async for v in db.bc_catalog_vendors.find({}, {"_id": 0, "vendor_no": 1, "name": 1}):
+        if v.get("name"):
+            names[v["vendor_no"]].add(v["name"])
+    async for a in db.vendor_aliases.find({"source": {"$in": list(_BC_SOURCES) + ["manual", "manual_resolution"]}},
+                                          {"_id": 0, "vendor_no": 1, "alias_string": 1}):
+        if a.get("vendor_no") and a.get("alias_string"):
+            names[a["vendor_no"]].add(a["alias_string"])
+    now = datetime.now(timezone.utc).isoformat()
+    undone = []
+    async for d in db.hub_documents.find({"vendor_resolution.source": "auto_gap_closer", "bc_link": {"$exists": False},
+                                          "vendor_canonical": {"$nin": [None, ""]}},
+                                         {"_id": 1, "id": 1, "vendor_raw": 1, "extracted_fields.vendor": 1, "vendor_canonical": 1,
+                                          "vendor_no": 1, "bc_vendor_number": 1, "vendor_resolution": 1}):
+        raw = d.get("vendor_raw") or (d.get("extracted_fields") or {}).get("vendor")
+        v = d["vendor_canonical"]
+        if not raw or not names.get(v):
+            continue
+        best = max(calculate_fuzzy_score(raw, n) for n in names[v])
+        if best >= threshold:
+            continue
+        # A shared distinctive word, or the vendor code's start, keeps it
+        # ("Ward Trucking, LLC" is WARDTR, BC name "Forward Brokerage";
+        # "O-I (from warehouse.bog@o-i.com)" is OWENS, whose names say OI).
+        own = _words(raw)
+        if own & set().union(*(_words(n) for n in names[v])) or any(v.lower().startswith(w) for w in own if len(w) >= 4):
+            continue
+        undone.append((raw, v, round(best, 2)))
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {
+                "$set": {"vendor_gap_closer_undone": {"at": now, "vendor_canonical": v, "vendor_no": d.get("vendor_no"),
+                                                      "bc_vendor_number": d.get("bc_vendor_number"),
+                                                      "vendor_resolution": d.get("vendor_resolution"), "name_score": round(best, 2)},
+                         "vendor_resolution.status": "unresolved"},
+                "$unset": {"vendor_canonical": "", "vendor_no": "", "bc_vendor_number": ""}})
+    return undone
 

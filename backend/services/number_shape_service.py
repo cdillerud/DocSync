@@ -39,7 +39,8 @@ async def vendor_shapes(db) -> Dict[str, Dict[str, Any]]:
         ok_lens = {l for l, c in lens.items() if c / len(nums) >= 0.05}
         # Length only: sequential numbers drift (Ball 63xxxxx -> 64xxxxx), so a
         # prefix rule rejected numbers BC itself confirms.
-        shapes[v] = {"lengths": ok_lens, "prefixes": None, "n": len(nums)}
+        shapes[v] = {"lengths": ok_lens, "prefixes": None, "n": len(nums),
+                     "digits_share": sum(1 for n in nums if n.isdigit()) / len(nums)}
     return shapes
 
 
@@ -89,12 +90,28 @@ async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, An
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": "AP", "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]},
              "bc_link": {"$exists": False}, "invoice_number_clean": {"$nin": [None, ""]}},
-            {"_id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "email_subject": 1, "file_name": 1, "po_number_clean": 1}):
+            {"_id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "email_subject": 1, "file_name": 1, "po_number_clean": 1, "amount_float": 1}):
         shape = shapes.get(str(d.get("vendor_canonical") or "").upper())
         stats["checked"] += 1
         if fits(shape, d["invoice_number_clean"]) is not False:
             continue
         stats["misfit"] += 1
+        # A letter prefix BC drops (Boyer "SINV0021577" is BC 21577 for the
+        # same $86,322.33), for vendors whose BC numbers are digits (80%+). Only
+        # a prefix: Anchor's "4906610RI" suffix marks a re-invoice of 4906610.
+        m = re.fullmatch(r"[A-Z]{2,5}0*(\d{3,12})", _norm(d["invoice_number_clean"]))
+        if m and shape and shape.get("digits_share", 0) >= 0.8 and fits(shape, m.group(1)):
+            clash = await db.bc_reference_cache.find_one(
+                {"bc_vendor_no": str(d.get("vendor_canonical") or "").upper(), "normalized_external_ref": m.group(1),
+                 "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
+                 "bc_amount": {"$nin": [d.get("amount_float")]}}, {"_id": 1}) if d.get("amount_float") else None
+            if not clash:
+                stats["corrected"] += 1
+                if apply:
+                    await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                        "invoice_number_clean": m.group(1), "invoice_number_shape_previous": d["invoice_number_clean"],
+                        "invoice_number_source": "vendor's BC number form (letter prefix dropped)", "invoice_number_filled_at": now}})
+                continue
         candidates = []
         for text in (d.get("email_subject") or "", d.get("file_name") or ""):
             for m in NUMBER_IN_TEXT.finditer(text):

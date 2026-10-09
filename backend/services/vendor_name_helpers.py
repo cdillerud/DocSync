@@ -75,7 +75,9 @@ def calculate_fuzzy_score(name1: str, name2: str) -> float:
         n = name
         if ' - ' in n:
             parts = n.split(' - ', 1)
-            if len(parts) == 2 and len(parts[0]) <= 10:
+            # "TUMALOC - Tumalo Creek" is code - name; "Ardagh - ST" is name -
+            # plant code, and "ST" alone matched inside "Stephen Conroy".
+            if len(parts) == 2 and len(parts[0]) <= 10 and len(parts[1].strip()) >= 4:
                 n = parts[1]
         return n
 
@@ -90,7 +92,14 @@ def calculate_fuzzy_score(name1: str, name2: str) -> float:
 
     # rapidfuzz returns 0-100, normalize to 0-1
     token_sort = fuzz.token_sort_ratio(n1, n2) / 100.0
-    partial = fuzz.partial_ratio(n1, n2) / 100.0
+    # A short name only matches as a whole word ("XPO" in "XPO Logistics"):
+    # as a substring "ct" (CT Corporation) is inside "products" and "st"
+    # (Ardagh - ST) inside "Stephen Conroy" (97 documents mis-resolved).
+    short, long_ = sorted((n1, n2), key=len)
+    if len(short) < 5:
+        partial = 1.0 if re.search(r"(?<![a-z0-9])" + re.escape(short) + r"(?![a-z0-9])", long_) else 0.0
+    else:
+        partial = fuzz.partial_ratio(n1, n2) / 100.0
 
     # Weighted: token_sort is primary, partial helps with substrings
     score = max(token_sort, partial * 0.9)

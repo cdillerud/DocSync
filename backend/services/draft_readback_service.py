@@ -42,7 +42,7 @@ async def readback(db, limit: int = 200) -> Dict[str, Any]:
             r = await c.get(url, headers={"Authorization": f"Bearer {token}"}, params={
                 "$filter": f"number eq '{no}'",
                 "$expand": "purchaseInvoiceLines($select=lineType,lineObjectNumber,quantity,unitCost)",
-                "$select": "number,status,vendorNumber,vendorInvoiceNumber,totalAmountIncludingTax"})
+                "$select": "number,status,vendorNumber,vendorInvoiceNumber,totalAmountIncludingTax,lastModifiedDateTime"})
             if r.status_code != 200:
                 stats["read_error"] += 1
                 continue
@@ -68,7 +68,23 @@ async def readback(db, limit: int = 200) -> Dict[str, Any]:
                     b_items = Counter(str(l.get("lineObjectNumber") or "").upper() for l in lines)
                     if p_items != b_items:
                         edits.append(f"line items {dict(p_items)} -> {dict(b_items)}")
-                state = {"state": str(v.get("status") or "").lower() or "unknown", "edits": edits,
+                # Nobody has touched the draft since the Hub wrote it: the
+                # differences are the Hub's own later corrections (XPO amount
+                # 2,335.00 gross -> 1,350.27 net; a re-planned warehouse
+                # split), not AP's edits - the draft is stale, not edited.
+                hub_side = []
+                created = str((d.get("bc_purchase_invoice") or {}).get("created_at") or "")
+                modified = str(v.get("lastModifiedDateTime") or "")
+                if edits and created and modified:
+                    try:
+                        gap = (datetime.fromisoformat(modified.replace("Z", "+00:00"))
+                               - datetime.fromisoformat(created.replace("Z", "+00:00"))).total_seconds()
+                    except ValueError:
+                        gap = None
+                    if gap is not None and gap < 900:
+                        hub_side, edits = edits, []
+                        stats["stale"] += 1
+                state = {"state": str(v.get("status") or "").lower() or "unknown", "edits": edits, "hub_side_changes": hub_side,
                          "lines": [{k: l.get(k) for k in ("lineType", "lineObjectNumber", "quantity", "unitCost")} for l in lines]}
                 stats["status_" + state["state"]] += 1
                 stats["edited" if edits else "unchanged"] += 1

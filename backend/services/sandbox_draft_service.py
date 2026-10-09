@@ -279,6 +279,14 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
             # or after receipt can be this invoice under another number.
             if shape_fit and str(b.get("bc_posting_date") or "") < (recv - timedelta(days=14)).date().isoformat():
                 continue
+            # BC's number is another Hub document's own invoice number: that
+            # one is in BC, not this one (Anchor 4909838-41 and Owens
+            # 51591953/54 all 'matched' the first one AP entered, before
+            # reconcile linked it).
+            ext = str(b.get("bc_external_document_no") or "").strip().upper()
+            if ext and ext != str(d.get("invoice_number_clean") or "").strip().upper() and await db.hub_documents.count_documents(
+                    {"vendor_canonical": d["vendor_canonical"], "invoice_number_clean": ext, "id": {"$ne": d["id"]}}, limit=1):
+                continue
             if not await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"], "id": {"$ne": d["id"]}}, limit=1):
                 return (f"BC already has invoice {b.get('bc_external_document_no')} (BC {b.get('bc_document_no')}) "
                         f"from this vendor for the same amount")
@@ -478,6 +486,11 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             continue
         problem = await header_problem(db, d, shapes)
         requeue = False
+        if not problem and rb.get("hub_side_changes"):
+            # The invoice changed in the Hub after it was drafted (and nobody
+            # has touched the draft): replace it with one from today's data.
+            problem = "the invoice changed in the Hub after drafting (" + "; ".join(rb["hub_side_changes"])[:150] + "); re-drafting"
+            requeue = True
         if not problem:
             from services.vendor_line_coding_service import coding_for, main_code_known, is_product_vendor
             lines = d.get("draft_lines_planned") or (rb.get("lines") or [])

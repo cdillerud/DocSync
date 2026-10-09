@@ -108,3 +108,55 @@ async def reassess_recent(db, days: int = 60, apply: bool = True) -> Dict[str, A
             if apply:
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"fraud_risk": {**r, "assessed_at": now, "source": "hourly_reassess"}}})
     return {"flagged": len(flagged), "examples": flagged[:5]}
+
+
+PURGE_AFTER_DAYS = 30
+_LINKED_FIELDS = ("document_id", "hub_doc_id", "doc_id")
+
+
+async def purge(db, ids, reason: str) -> Dict[str, Any]:
+    """Permanently delete documents (owner's decision 2026-10-09: suspected
+    fraud is not shown to staff and is deleted): the document, its stored
+    file, and every row that refers to it. Only a one-line note per document
+    is kept (purge_log: sender domain, printed vendor, amount, why)."""
+    from datetime import datetime, timezone
+    from pathlib import Path
+    from paths import UPLOAD_DIR
+    ids = [i for i in ids if i]
+    if not ids:
+        return {"purged": 0}
+    now = datetime.now(timezone.utc).isoformat()
+    async for d in db.hub_documents.find({"id": {"$in": ids}}, {"_id": 0, "id": 1, "email_sender": 1, "vendor_raw": 1,
+                                                               "extracted_fields.vendor": 1, "amount_float": 1, "created_utc": 1}):
+        await db.purge_log.insert_one({"document_id": d["id"], "sender_domain": str(d.get("email_sender") or "").split("@")[-1],
+                                       "vendor_printed": d.get("vendor_raw") or (d.get("extracted_fields") or {}).get("vendor"),
+                                       "amount": d.get("amount_float"), "received": d.get("created_utc"), "reason": reason, "purged_at": now})
+    files = 0
+    for i in ids:
+        for p in Path(UPLOAD_DIR).glob(f"{i}*"):
+            if p.is_file():
+                p.unlink()
+                files += 1
+    related = 0
+    for c in await db.list_collection_names():
+        if c in ("hub_documents", "purge_log"):
+            continue
+        try:
+            r = await db[c].delete_many({"$or": [{f: {"$in": ids}} for f in _LINKED_FIELDS]})
+            related += r.deleted_count
+        except Exception:
+            pass
+    r = await db.hub_documents.delete_many({"id": {"$in": ids}})
+    return {"purged": r.deleted_count, "files": files, "related_rows": related}
+
+
+async def purge_expired(db, days: int = PURGE_AFTER_DAYS) -> Dict[str, Any]:
+    """Hourly: suspected-fraud documents are hidden from staff when flagged
+    and deleted PURGE_AFTER_DAYS later (time to notice a false positive)."""
+    from datetime import datetime, timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    ids = [d["id"] async for d in db.hub_documents.find(
+        {"fraud_risk.flagged": True, "bc_link": {"$exists": False},
+         "$or": [{"fraud_risk.assessed_at": {"$lt": cutoff}},
+                 {"fraud_risk.assessed_at": {"$exists": False}, "created_utc": {"$lt": cutoff}}]}, {"_id": 0, "id": 1})]
+    return await purge(db, ids, f"suspected fraud, hidden {days} days")

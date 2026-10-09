@@ -172,7 +172,9 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
     if staff_filed:
         return {"ap_stage": "filed_by_staff", "suggested_folder": staff_filed.get("staff_folder")}
     if (d.get("fraud_risk") or {}).get("flagged"):
-        return {"ap_stage": "needs_staff", "staff_reason": "suspected_fraud"}
+        # Not shown to staff (owner, 2026-10-09); deleted after 30 days by
+        # fraud_signal_service.purge_expired.
+        return {"ap_stage": "no_action", "no_action_reason": "suspected_fraud"}
     # A piece of a split PDF with no number or amount of its own is a
     # continuation page (the invoice total is on another piece).
     if d.get("batch_parent_id") and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):

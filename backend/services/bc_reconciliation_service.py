@@ -679,3 +679,19 @@ async def drop_bad_number_links(db, apply: bool = True) -> Dict[str, Any]:
                                                                                                "why": "number only; vendor and amount differ"}},
                                                                   "$unset": {"bc_link": "", "bc_amount_mismatch": ""}})
     return {"dropped": len(dropped)}
+
+
+async def clear_stale_typo_flags(db, apply: bool = True) -> Dict[str, Any]:
+    """A typo suspicion left over from an earlier near-number link to a
+    neighbouring invoice of the same amount (Tumalo bills 1,970.00 again and
+    again: 0314322 was first linked to BC 314320, flagged as AP's typo, and
+    later linked exactly to BC 0314322). Once the document links on its exact
+    number and amount to another BC entry, the suspicion no longer holds."""
+    n = 0
+    async for d in db.hub_documents.find({"bc_number_typo_suspect": {"$exists": True}, "bc_link.match": "number+amount"},
+                                         {"_id": 1, "bc_number_typo_suspect.bc_document_no": 1, "bc_link.bc_document_no": 1}):
+        if (d["bc_number_typo_suspect"] or {}).get("bc_document_no") != (d.get("bc_link") or {}).get("bc_document_no"):
+            n += 1
+            if apply:
+                await db.hub_documents.update_one({"_id": d["_id"]}, {"$unset": {"bc_number_typo_suspect": ""}})
+    return {"cleared": n}

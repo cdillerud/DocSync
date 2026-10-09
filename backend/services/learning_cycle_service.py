@@ -73,12 +73,16 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["bc_link_by_amount"] = await link_by_vendor_amount(db)
         from services.bc_reconciliation_service import resolve_combined_entries
         summary["bc_combined_entries"] = {k: v for k, v in (await resolve_combined_entries(db)).items() if k != "examples"}
+        from services.bc_reconciliation_service import clear_stale_typo_flags
+        summary["bc_typo_flags"] = await clear_stale_typo_flags(db)
         from services.bc_reconciliation_service import resolve_split_entries
         summary["bc_split_entries"] = {k: v for k, v in (await resolve_split_entries(db)).items() if k != "examples"}
         from services.vendor_alias_check_service import check as alias_check
         summary["vendor_alias_check"] = await alias_check(db)
         from services.fraud_signal_service import reassess_recent as fraud_reassess
         summary["fraud_reassess"] = await fraud_reassess(db)
+        from services.fraud_signal_service import purge_expired as fraud_purge
+        summary["fraud_purge"] = await fraud_purge(db)
         from services.bc_reconciliation_service import fetch_ship_to
         summary["bc_location"] = await fetch_ship_to(db)
         from services.lane_profile_service import rebuild_order_lanes

@@ -225,8 +225,10 @@ async def customer_history(db, customer_no: str, as_of: Optional[str] = None,
             if l.get("lineType") != "Item" or not l.get("lineObjectNumber"):
                 continue
             it = str(l["lineObjectNumber"]).upper()
-            h = hist.setdefault(it, {"n": 0, "last_seq": -1, "last_date": "", "description": l.get("description"), "prices": set()})
+            h = hist.setdefault(it, {"n": 0, "last_seq": -1, "last_date": "", "description": l.get("description"), "prices": set(), "qtys": []})
             h["n"] += 1
+            if float(l.get("quantity") or 0) > 0:
+                h["qtys"].append(float(l["quantity"]))
             if float(l.get("unitPrice") or 0) > 0:
                 h["prices"].add(float(l["unitPrice"]))
                 if seq > h["last_seq"] or (seq == h["last_seq"] and str(od) > h["last_date"]):
@@ -369,6 +371,7 @@ AGREE_STRONG = False
 PRINTED_FIRST = False
 NO_RULEOUT_WHEN_OVERRIDDEN = True
 FIT_ON_BC = True
+QTY_BY_HISTORY = True
 CODE_SHARE = 0.85      # 0.6 -> 0.85: items 76->78%, precision 92->95% (shared pack codes like Horseshoe 12KRP2)
 DESC_SHARE = 0.6
 _ITEM_UOM: Dict[str, str] = {}
@@ -494,6 +497,18 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         elif off > 0.25:
             fits = False                # clearly not this item (or unit)
         # 3-25%: a price change; inconclusive
+    if QTY_BY_HISTORY and eq and fits is not True and h.get("qtys"):
+        # Several readings of the PO quantity (as written, /1000, the learned
+        # ratio) differ 1000x: the one in the range this customer orders the
+        # item in BC (Sun Bum writes "270" for 270 M on one PO and "270,712"
+        # on the next; the learned ratio made the first 0.27).
+        import math
+        med = sorted(h["qtys"])[len(h["qtys"]) // 2]
+        readings = {eq} | ({round(eq / 1000, 4)} if str(uom or "").upper() == "M" else set()) \
+            | ({round(eq * rr["ratio"], 4)} if rr else set())
+        near = min(readings, key=lambda q: abs(math.log(q / med)) if q > 0 else 99)
+        if qty and qty > 0 and near != qty and abs(math.log(near / med)) < math.log(5) and abs(math.log(qty / med)) > math.log(50):
+            qty = near
     # Price risk (replay 2026-10-08: lines with none of these signals were
     # wrong 12% of the time; PO differs 66%, no history 75%, stale 38%).
     checks = []

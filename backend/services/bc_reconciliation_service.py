@@ -575,3 +575,51 @@ async def resolve_combined_entries(db, apply: bool = True) -> Dict[str, Any]:
                     upd["bc_link"] = {**first, "match": "combined_entry", "linked_at": stamp}
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": upd, "$unset": {"bc_amount_mismatch": ""}})
     return out
+
+
+async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict[str, Any]:
+    """The reverse of combined entries: AP splits one invoice across POs or
+    receipts as several BC entries, the invoice number with a letter suffix
+    (Canpack 1101622017 = 1101622017A..D: 8,254.52 + 11,006.02 + 1,834.34 +
+    1,834.34 = 22,929.22; Ark 173961 = 173961 + 173961A surcharge). An
+    unlinked Hub invoice whose vendor's BC entries "<number>" and
+    "<number><letter>" add up to its amount is that entry set: linked to the
+    first part, every part kept in bc_split_entries (65 found 2026-10-09)."""
+    import re as _re
+    stamp = datetime.now(timezone.utc).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    out = {"checked": 0, "linked": 0, "examples": []}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "bc_link": {"$exists": False}, "is_duplicate": {"$ne": True},
+             "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "vendor_canonical": {"$nin": [None, ""]},
+             "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0]}},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1}):
+        base = _norm(d["invoice_number_clean"])
+        if len(base) < 4:
+            continue
+        out["checked"] += 1
+        parts = [b async for b in db.bc_reference_cache.find(
+            {"bc_vendor_no": str(d["vendor_canonical"]).upper(), "normalized_external_ref": {"$regex": f"^{_re.escape(base)}[A-Z]?$"},
+             "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
+             "bc_status": {"$ne": "Canceled"}},
+            {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "normalized_external_ref": 1, "bc_amount": 1,
+             "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1})]
+        if not any(p["normalized_external_ref"] != base for p in parts) or any(p.get("bc_amount") is None for p in parts):
+            continue      # no suffixed part: the ordinary match handles it
+        total = sum(abs(float(p["bc_amount"])) for p in parts)
+        if abs(total - abs(float(d["amount_float"]))) > 0.01 * len(parts):
+            continue
+        parts.sort(key=lambda p: p["normalized_external_ref"])
+        first = parts[0]
+        out["linked"] += 1
+        if len(out["examples"]) < 10:
+            out["examples"].append((d["vendor_canonical"], base, d["amount_float"], [(p["normalized_external_ref"], p["bc_amount"]) for p in parts]))
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "bc_link": {"bc_document_no": first["bc_document_no"], "bc_entity": first["bc_entity_type"], "bc_status": first.get("bc_status"),
+                            "bc_vendor_no": first.get("bc_vendor_no"), "bc_vendor_name": first.get("bc_vendor_name"),
+                            "bc_amount": round(total, 2), "bc_order_number": first.get("bc_order_number"),
+                            "bc_posting_date": first.get("bc_posting_date"), "match": "split_entries", "linked_at": stamp},
+                "bc_split_entries": [{"bc_document_no": p["bc_document_no"], "bc_external_document_no": p.get("bc_external_document_no"),
+                                      "bc_amount": p["bc_amount"], "bc_order_number": p.get("bc_order_number")} for p in parts]}})
+    return out

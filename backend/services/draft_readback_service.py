@@ -95,8 +95,11 @@ def _lines_by_item(ls):
             continue
         if it.startswith("Z-") and float(l.get("unitCost") or 0) == 0:
             continue
-        a = out.setdefault(it, {"q": 0.0, "c": float(l.get("unitCost") or 0)})
-        a["q"] += float(l.get("quantity") or 0)
+        q, c = float(l.get("quantity") or 0), float(l.get("unitCost") or 0)
+        if q < 0 < c:
+            q, c = -q, -c       # -1 x 37.78 is AP's 1 x -37.78 (a credit line)
+        a = out.setdefault(it, {"q": 0.0, "c": c})
+        a["q"] += q
     return out
 
 

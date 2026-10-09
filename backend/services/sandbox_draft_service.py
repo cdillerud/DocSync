@@ -152,9 +152,14 @@ async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
                 lines = []
                 for i in combo:
                     for l in item_lines(recs[i]):
+                        q, uc = float(l["quantity"]), float(l.get("unitCost") or 0)
+                        if q < 0 < uc:
+                            # A credit on the receipt (-1 x 37.78 energy
+                            # surcharge, accrued dunnage): AP enters 1 x -37.78.
+                            q, uc = -q, -uc
                         lines.append({"lineType": _line_type(l.get("lineType")), "lineObjectNumber": l["lineObjectNumber"],
-                                      "description": (l.get("description") or "")[:100], "quantity": float(l["quantity"]),
-                                      "unitCost": float(l.get("unitCost") or 0), "source": f"bc_receipt {recs[i]['number']}"})
+                                      "description": (l.get("description") or "")[:100], "quantity": q,
+                                      "unitCost": uc, "source": f"bc_receipt {recs[i]['number']}"})
                 return {"lines": lines, "receipts": [recs[i]["number"] for i in combo], "order": order}
     return {}
 
@@ -352,6 +357,12 @@ WAREHOUSE_SPLIT = True
 
 
 _WH_CODES = {"WHSESTORAGE", "WHSEHANDLING"}
+# A warehouse that also bills freight and Canadian sales tax (CRALER:
+# storage 600.00 + Ontario HST 78.00 -> WHSESTORAGE + GST/HST TAX).
+# Line replay 2026-10-09: on, 1 more draft and it was wrong (5/6 vs 5/5): off.
+WAREHOUSE_SPLIT_TAX_FREIGHT = False
+_WH_EXTRA = {"FREIGHT", "GST/HST TAX"}
+_TAX_LINE = re.compile(r"\b(?:HST|GST|PST|QST|TPS|TVQ|TVH)\b|sales tax", re.I)
 
 
 def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -363,7 +374,8 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
     if not WAREHOUSE_SPLIT or not coding:
         return None
     used = set(coding.get("codes_used") or [])
-    if not used or not used <= _WH_CODES:
+    allowed = _WH_CODES | (_WH_EXTRA if WAREHOUSE_SPLIT_TAX_FREIGHT else set())
+    if not used or not used <= allowed or not used & _WH_CODES:
         return None
     items = (d.get("extracted_fields") or {}).get("line_items") or []
     from services.vendor_line_coding_service import _line_amount
@@ -372,7 +384,15 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
         amt = round(_line_amount(e), 2)
         if not amt:
             continue
-        code = "WHSESTORAGE" if re.search(r"storage|rent|recurring", str(e.get("description") or ""), re.I) else "WHSEHANDLING"
+        desc = str(e.get("description") or "")
+        if WAREHOUSE_SPLIT_TAX_FREIGHT and _TAX_LINE.search(desc):
+            code = "GST/HST TAX"        # CRALER: Ontario HST on its own line
+        elif re.search(r"storage|entreposage|rent|recurring", desc, re.I):
+            code = "WHSESTORAGE"
+        elif WAREHOUSE_SPLIT_TAX_FREIGHT and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
+            code = "FREIGHT"
+        else:
+            code = "WHSEHANDLING"
         buckets[code] = round(buckets.get(code, 0) + amt, 2)
     total = round(abs(float(d.get("amount_float") or 0)), 2)
     if not buckets or abs(sum(buckets.values()) - total) > 0.02:

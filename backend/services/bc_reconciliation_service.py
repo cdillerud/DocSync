@@ -196,7 +196,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1, "mailbox_category": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
          "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1,
-         "created_utc": 1, "bc_combined_entry": 1, "vendor_raw": 1, "extracted_fields.vendor": 1})
+         "created_utc": 1, "bc_combined_entry": 1, "vendor_raw": 1, "extracted_fields.vendor": 1, "bc_split_entries": 1})
     async for d in cursor:
         is_ap = d.get("mailbox_category") == "AP"
         stats["documents" if is_ap else "non_ap_documents"] += 1
@@ -277,6 +277,15 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
             if len(cands) == 1 and not await db.hub_documents.count_documents(
                     {"bc_link.bc_document_no": cands[0].get("bc_document_no"), "_id": {"$ne": d["_id"]}}, limit=1):
                 best, how = cands[0], "near-number+amount"
+        split_parts = {s.get("bc_document_no") for s in d.get("bc_split_entries") or []}
+        if (best is None and (d.get("bc_link") or {}).get("match") in ("split_entries", "combined_entry")) \
+                or (split_parts and best is not None and best.get("bc_document_no") in split_parts):
+            # Linked by resolve_split_entries / resolve_combined_entries,
+            # which this per-number pass cannot see: it unlinked 7 Canpack
+            # invoices AP split into A/B/C entries, and relinked others to
+            # one part as an "amount mismatch".
+            stats["kept_split_or_combined"] += 1
+            continue
         if best is None:
             if apply and (d.get("bc_link") or credit_of):
                 upd = {"$unset": {"bc_link": "", "bc_amount_mismatch": ""}}
@@ -607,7 +616,7 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     out = {"checked": 0, "linked": 0, "examples": []}
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True}, "bc_split_entries": {"$exists": False},
+            {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True},
              # unlinked, or linked to one part with the amount off (Vidrala
              # 2500015210 = 2500015210 + A + B at 5,813.02 each)
              "$or": [{"bc_link": {"$exists": False}}, {"bc_link.match": {"$in": ["number+vendor", "number"]}}],
@@ -615,6 +624,8 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0]}},
             {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1, "bc_link": 1}):
         linked = d.get("bc_link") or {}
+        if linked.get("match") == "split_entries":
+            continue
         if linked and (linked.get("bc_amount") is None
                        or abs(abs(float(linked["bc_amount"])) - abs(float(d["amount_float"]))) < 0.02):
             continue

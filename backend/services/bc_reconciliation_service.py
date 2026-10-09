@@ -43,6 +43,19 @@ def _norm(x: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(x or "").upper()).lstrip("0")
 
 
+_GENERIC_WORDS = {"inc", "llc", "corp", "company", "group", "services", "service", "international", "packaging",
+                  "solutions", "the", "and", "global", "usa", "america", "gmbh", "limited", "trade", "trading"}
+
+
+def printed_vendor_agrees(d: Dict[str, Any], bc_vendor_name: Any) -> bool:
+    """The vendor printed on the document shares a distinctive word with the
+    BC vendor's name ("XOLUTION Germany GmbH" / XOLUTION Germany GmbH) - a
+    supplier invoice forwarded by Cargo Modules is still that supplier's."""
+    raw = d.get("vendor_raw") or (d.get("extracted_fields") or {}).get("vendor") or ""
+    w = lambda s: {x for x in re.findall(r"[a-z]{4,}", str(s or "").lower()) if x not in _GENERIC_WORDS}
+    return bool(w(raw) & w(bc_vendor_name))
+
+
 def _keys(number: Any) -> List[str]:
     """Exact key first; then loose keys (suffix stripped, 8-digit tail) that
     only count when the amount agrees: Tumalo 0311459A is a separate invoice
@@ -183,7 +196,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1, "mailbox_category": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
          "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1,
-         "created_utc": 1, "bc_combined_entry": 1})
+         "created_utc": 1, "bc_combined_entry": 1, "vendor_raw": 1, "extracted_fields.vendor": 1})
     async for d in cursor:
         is_ap = d.get("mailbox_category") == "AP"
         stats["documents" if is_ap else "non_ap_documents"] += 1
@@ -215,7 +228,7 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     continue
                 if vend_ok and how != "number+vendor":
                     best, how = b, "number+vendor"
-                elif best is None and len(k) >= 7 and (not hub_amt or bc_amt is None
+                elif best is None and len(k) >= 7 and (not hub_amt or bc_amt is None or printed_vendor_agrees(d, b.get("bc_vendor_name"))
                                                        or abs(abs(float(hub_amt)) - abs(float(bc_amt))) <= 0.01 * abs(float(bc_amt))):
                     # Number alone, amount off: a customs broker's packet
                     # quoting the supplier's invoice (MKC 1,351.44 citing
@@ -650,12 +663,15 @@ async def drop_bad_number_links(db, apply: bool = True) -> Dict[str, Any]:
     customs packets citing a supplier's invoice number)."""
     stamp = datetime.now(timezone.utc).isoformat()
     dropped = []
-    async for d in db.hub_documents.find({"bc_link.match": "number"}, {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "bc_link": 1}):
+    async for d in db.hub_documents.find({"bc_link.match": "number"}, {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "bc_link": 1,
+                                                                         "vendor_raw": 1, "extracted_fields.vendor": 1}):
         bl = d["bc_link"]
         a, b = d.get("amount_float"), bl.get("bc_amount")
         if not a or b is None or abs(abs(float(a)) - abs(float(b))) <= 0.01 * abs(float(b)):
             continue
         if str(d.get("vendor_canonical") or "").upper() == str(bl.get("bc_vendor_no") or "").upper():
+            continue
+        if printed_vendor_agrees(d, bl.get("bc_vendor_name")):
             continue
         dropped.append(d["id"])
         if apply:

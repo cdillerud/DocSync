@@ -215,7 +215,11 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     continue
                 if vend_ok and how != "number+vendor":
                     best, how = b, "number+vendor"
-                elif best is None and len(k) >= 7:
+                elif best is None and len(k) >= 7 and (not hub_amt or bc_amt is None
+                                                       or abs(abs(float(hub_amt)) - abs(float(bc_amt))) <= 0.01 * abs(float(bc_amt))):
+                    # Number alone, amount off: a customs broker's packet
+                    # quoting the supplier's invoice (MKC 1,351.44 citing
+                    # Hwa Hsia HH-150804A of 12,905.57), not that invoice.
                     best, how = b, "number"
             if how == "number+amount":
                 break
@@ -637,3 +641,25 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
                 "bc_split_entries": [{"bc_document_no": p["bc_document_no"], "bc_external_document_no": p.get("bc_external_document_no"),
                                       "bc_amount": p["bc_amount"], "bc_order_number": p.get("bc_order_number")} for p in parts]}})
     return out
+
+
+
+async def drop_bad_number_links(db, apply: bool = True) -> Dict[str, Any]:
+    """Links made on the number alone before the amount rule, where neither
+    the vendor nor the amount agrees (25 on 2026-10-09, mostly Cargo Modules
+    customs packets citing a supplier's invoice number)."""
+    stamp = datetime.now(timezone.utc).isoformat()
+    dropped = []
+    async for d in db.hub_documents.find({"bc_link.match": "number"}, {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "bc_link": 1}):
+        bl = d["bc_link"]
+        a, b = d.get("amount_float"), bl.get("bc_amount")
+        if not a or b is None or abs(abs(float(a)) - abs(float(b))) <= 0.01 * abs(float(b)):
+            continue
+        if str(d.get("vendor_canonical") or "").upper() == str(bl.get("bc_vendor_no") or "").upper():
+            continue
+        dropped.append(d["id"])
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"bc_link_dropped": {**bl, "dropped_at": stamp,
+                                                                                               "why": "number only; vendor and amount differ"}},
+                                                                  "$unset": {"bc_link": "", "bc_amount_mismatch": ""}})
+    return {"dropped": len(dropped)}

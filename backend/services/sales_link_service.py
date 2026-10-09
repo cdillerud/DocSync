@@ -43,7 +43,9 @@ def po_variants(x: Any) -> Set[str]:
     short suffix / revision (same keys as BC's ext_tokens)."""
     from services.bc_sales_history_service import ext_tokens
     first = re.split(r",|\brev\b|\brevision\b", str(x or ""), flags=re.I)[0]
-    return set(ext_tokens(first))
+    # A PO key needs 3+ digits: words around the number ("W118606-Cookies &
+    # Cream" -> CREAM, "RMA", "REROUTE", "24OZ") matched other orders.
+    return {k for k in ext_tokens(first) if len(re.sub(r"\D", "", k)) >= 3}
 
 
 def domain(sender: Any) -> str:

@@ -462,7 +462,11 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             from services.vendor_line_coding_service import coding_for, main_code_known, is_product_vendor
             lines = d.get("draft_lines_planned") or (rb.get("lines") or [])
             coding = await coding_for(db, d.get("vendor_canonical"))
-            if d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order") and lines and main_code_known(coding, lines) is False:
+            # vendor_coding lines are AP's own coding plus the accessorial /
+            # container rules the line replay measured (Tumalo container move
+            # -> DRAYAGE): removing them re-drafted the same lines hourly.
+            if d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order", "vendor_coding") and lines \
+                    and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
                 requeue = True
             elif d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order") and d.get("po_number_clean") \
@@ -480,6 +484,10 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
                 requeue = True
         if not problem:
             continue
+        if requeue and (d.get("bc_purchase_invoice_removed") or {}).get("reason") == problem:
+            # Removed for this already and re-drafted the same way: staff.
+            requeue = False
+            problem += " (the re-draft came out the same; needs AP's lines)"
         pi = d["bc_purchase_invoice"]
         out["removed"].append({"bc_record_no": pi.get("bc_record_no"), "vendor": d.get("vendor_canonical"),
                                "number": d.get("invoice_number_clean"), "reason": problem})

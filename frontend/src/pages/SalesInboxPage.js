@@ -11,7 +11,7 @@ import { plainBcError } from '@/lib/plainText';
 // One stage per sales-mailbox document (sales_stage_service). BC is the
 // ground truth: a customer PO is "Entered in BC" once inside sales' Production order carries it.
 const STAGES = [
-  { key: 'needs_rep', label: 'Needs a rep', help: 'A person must decide; the reason is shown', tone: 'amber' },
+  { key: 'needs_rep', label: 'Rep to check', help: 'The rep fixes what stops the draft (item, customer or PO number); the reason is shown', tone: 'amber' },
   { key: 'ready', label: 'Ready to draft', help: 'Customer and every line known; the Hub drafts it in the BC sandbox within the hour', tone: 'emerald' },
   { key: 'drafted', label: 'Drafted (sandbox)', help: 'The Hub drafted the sales order in the PRE sandbox, a test copy of BC. Not a real order: it moves to Entered in BC once inside sales enters it in Production', tone: 'emerald' },
   { key: 'in_bc', label: 'Entered in BC', help: 'Inside sales entered it: a Production BC sales order carries this customer PO', tone: 'muted' },

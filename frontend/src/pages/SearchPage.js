@@ -76,7 +76,7 @@ const AP_STAGE = {
   paid: 'Paid', filed_by_staff: 'Filed by staff', file_only: 'File only', no_action: 'No action', container: 'Split into pieces',
 };
 const SALES_STAGE = {
-  needs_rep: 'Needs a rep', ready: 'Ready to draft', drafted: 'Drafted (sandbox)', in_bc: 'Entered in BC',
+  needs_rep: 'Rep to check', ready: 'Ready to draft', drafted: 'Drafted (sandbox)', in_bc: 'Entered in BC',
   duplicate: 'Duplicate', purchasing: 'Purchasing', to_ap: 'To AP', filed: 'Filed',
 };
 // AP_INVOICE / AP_Invoice / Shipping_Document -> 'AP Invoice', 'Shipping Document'.

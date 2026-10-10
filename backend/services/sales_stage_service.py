@@ -102,8 +102,18 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
             desc = re.sub(r"^\s*(ITEM|PART|SKU|STOCK\s*CODE|P/N)\s*(NO\.?|#)?\s*:?\s*", "", str(l.get("po_description") or "").upper())
             m = re.match(r"\s*([A-Z0-9][A-Z0-9-]{3,})\b", desc)
             codes.append(m.group(1) if m else str(l.get("po_description") or "")[:30])
+        # A line with only a word ("BOTTLE", "GLASS") has no code to set up:
+        # the rep picks which of the customer's items it is.
+        named = [c for c in codes if re.search(r"\d", c)]
+        bare = [c for c in codes if not re.search(r"\d", c)]
+        parts = []
+        if named:
+            parts.append("no Gamer item for " + ", ".join(named[:4]) + " (new item to set up in BC?)")
+        if bare:
+            parts.append("the PO line" + ("s" if len(bare) > 1 else "") + " " + ", ".join(f'"{b}"' for b in bare[:4])
+                         + (" give" if len(bare) > 1 else " gives") + " no item number: pick the Gamer item")
         return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "items_unknown",
-                "sales_stage_detail": "no Gamer item for " + ", ".join(codes[:4]) + " (new item to set up in BC?)"}
+                "sales_stage_detail": "; ".join(parts)}
     # An item BC has blocked (Giovanni's PO still names AA012014, blocked
     # since 2024): BC refuses the line, so the rep picks today's item.
     items = [l["item"] for l in lines if l["item"]]

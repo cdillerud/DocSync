@@ -140,7 +140,7 @@ export default function TodayPage() {
 
         <Side title="Sales" icon={ShoppingCart} accent="border-t-sky-500" to="/sales" linkLabel="Sales inbox" testid="today-sales">
           <Sub title="Needs a person">
-            <Tile to="/sales" icon={ClipboardList} label="Needs a rep" value={st.needs_rep} tone={st.needs_rep ? 'amber' : 'muted'} help="Customer POs a rep must look at" />
+            <Tile to="/sales?stage=needs_rep" icon={ClipboardList} label="Rep to check" value={st.needs_rep} tone={st.needs_rep ? 'amber' : 'muted'} help="Customer POs the Hub cannot draft until the rep fixes something (item, customer, PO number)" />
             {mine ? (
               <Tile to="/sales" icon={UserRound} label="My queue" value={(mine.stages?.needs_rep || 0) + (mine.stages?.ready || 0) + (mine.stages?.drafted || 0)} tone="sky" help="Your customers' POs: needing you, ready, or drafted" />
             ) : (

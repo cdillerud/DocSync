@@ -488,7 +488,7 @@ const AP_STAGE_LABELS = {
 
 // Current Sales stage (sales_stage_service), shown in the header like the AP stage.
 const SALES_STAGE_LABELS = {
-  needs_rep: ['Needs a rep', 'border-amber-500/40 bg-amber-500/10 text-amber-600'],
+  needs_rep: ['Rep to check', 'border-amber-500/40 bg-amber-500/10 text-amber-600'],
   ready: ['Ready to draft', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
   drafted: ['Drafted (sandbox)', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
   in_bc: ['Entered in BC', 'border-border bg-muted text-muted-foreground'],

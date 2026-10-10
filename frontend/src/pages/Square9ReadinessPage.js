@@ -393,7 +393,7 @@ export default function Square9ReadinessPage() {
               {[
                 ['needs_staff', 'Needs staff', 'A person must decide; reason shown below'],
                 ['drafted', 'Drafted (sandbox)', 'Drafted by the Hub in the PRE sandbox (a test copy of BC) for AP review; not a real invoice'],
-                ['awaiting_approval', 'Awaiting approval', 'Waiting for a named approver (AP Workflow page)'],
+                ['awaiting_approval', 'Awaiting approval', 'Waiting for a named approver (Approvals & holds page)'],
                 ['on_hold', 'On hold', 'Put on hold by staff, with a reason'],
                 ['ready', 'Ready for AP', 'Vendor, number, amount and folder known; waiting for AP to enter in BC'],
                 ['in_bc', 'Entered in BC', 'Entered by AP in Production BC; BC is now the truth'],

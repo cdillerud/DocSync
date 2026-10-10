@@ -49,7 +49,7 @@ const TESTS = [
   {
     key: 't5', title: 'Approvals and holds', time: '10 min',
     steps: [
-      <>Open <Link className="text-primary underline" to="/ap-workflow">AP Workflow</Link>. Check that <b>Approving as</b> shows your name (it comes from your Microsoft sign-in).</>,
+      <>Open <Link className="text-primary underline" to="/ap-workflow">Approvals &amp; holds</Link>. Check that <b>Acting as</b> shows your name (it comes from your Microsoft sign-in).</>,
       <>On <b>Awaiting approval</b>, filter by approver. Approve one item you are sure about. Reject one only if it should be rejected (a reason is required).</>,
       <>On <b>On hold</b>, find the hold you placed in Test 4 and release it.</>,
       <>Open that document and check AP history shows each step with your name and note.</>,
@@ -226,7 +226,7 @@ export default function APTestingPage() {
             <ul className="space-y-1">
               <li><b>Do not post any draft in BC</b>, and do not edit or delete Hub drafts. Write what is wrong in the notes; the Hub reads its drafts back every hour.</li>
               <li>Nothing you do in the Hub reaches Production BC, SharePoint or Square9. It is safe to click around.</li>
-              <li>Decisions in the Decision Queue and AP Workflow are <i>real</i>: the Hub learns from them and records your name. Make each one as you would for a real invoice; if unsure, skip it.</li>
+              <li>Decisions in the Decision Queue and Approvals &amp; holds are <i>real</i>: the Hub learns from them and records your name. Make each one as you would for a real invoice; if unsure, skip it.</li>
               <li>Every finding helps, including "this was confusing". Plain words are perfect.</li>
             </ul>
           </div>

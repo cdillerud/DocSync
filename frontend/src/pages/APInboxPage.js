@@ -211,7 +211,7 @@ export default function APInboxPage() {
                     <tr key={doc.id} className="border-b last:border-0 align-top hover:bg-muted/40 cursor-pointer"
                       onClick={event => { if (!event.target.closest('a')) navigate(`/documents/${encodeURIComponent(doc.id)}`); }}>
                       <td className="py-1.5 pr-3 whitespace-nowrap">{(doc.created_utc || '').slice(0, 10)}</td>
-                      <td className="py-1.5 pr-3">{doc.vendor_canonical || doc.vendor_raw || '—'}</td>
+                      <td className="py-1.5 pr-3" title={doc.vendor_canonical ? `Business Central vendor ${doc.vendor_canonical}` : undefined}>{doc.vendor_raw || doc.vendor_canonical || '—'}</td>
                       <td className="py-1.5 pr-3 font-mono text-xs">{doc.invoice_number_clean || '—'}
                         {doc.document_type === 'Credit_Memo' && <Badge variant="outline" className="ml-1 text-[10px]">credit</Badge>}
                       </td>

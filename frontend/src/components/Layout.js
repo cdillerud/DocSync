@@ -26,7 +26,7 @@ const navItems = [
   { to: '/ap', icon: ClipboardList, label: 'AP Inbox' },
   { to: '/sales', icon: ShoppingCart, label: 'Sales Inbox' },
   { to: '/decision-queue', icon: ClipboardCheck, label: 'Decision Queue' },
-  { to: '/ap-workflow', icon: ClipboardList, label: 'AP Workflow' },
+  { to: '/ap-workflow', icon: ClipboardList, label: 'Approvals & holds' },
   { to: '/search', icon: Search, label: 'Search' },
   { to: '/square9-readiness', icon: Gauge, label: 'Square9 Readiness' },
   { to: '/ap-testing', icon: FlaskConical, label: 'AP Testing' },
@@ -114,7 +114,7 @@ export default function Layout() {
     if (path === '/monitor') return 'System Monitor';
     if (path === '/square9-readiness') return 'Square9 Cutover Readiness';
     if (path === '/decision-queue') return 'Decision Queue';
-    if (path === '/ap-workflow') return 'AP Workflow';
+    if (path === '/ap-workflow') return 'Approvals & holds';
     if (path === '/ap-testing') return 'AP Testing';
     if (path === '/sales') return 'Sales Inbox';
     if (path === '/ap') return 'AP Inbox';

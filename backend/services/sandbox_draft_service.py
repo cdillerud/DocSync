@@ -489,6 +489,50 @@ def forwarder_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
             for c in ("FREIGHT", "CUSTOMS") if c in buckets]
 
 
+PREPAY_BEFORE_RECEIPT = True
+_PREPAY_ACCOUNTS = {"14500"}
+
+
+async def prepay_lines(db, d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """A vendor AP prepays before the goods arrive (Hwa Hsia: 9 of 15
+    invoices are 'Ppay Inv. HH-150728A' on G/L 14500 for the full amount,
+    the PO's item at quantity 0). Only while nothing on the PO is received
+    and the PO's total IS the invoice: a bill for several containers is
+    entered by AP as one invoice per container (HH-150730A, -1, -2)."""
+    if not PREPAY_BEFORE_RECEIPT or not coding:
+        return None
+    mains = coding.get("main_codes") or []
+    total_n = sum(m.get("n") or 0 for m in mains)
+    pre = [m for m in mains if m.get("lineType") == "Account" and str(m.get("code")) in _PREPAY_ACCOUNTS]
+    if not pre or not total_n or pre[0]["n"] < 3 or pre[0]["n"] / total_n < 0.5:
+        return None
+    po = str(d.get("po_number_clean") or "").strip().upper()
+    amt = round(abs(float(d.get("amount_float") or 0)), 2)
+    if not po or not amt:
+        return None
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    async with httpx.AsyncClient(timeout=60) as c:
+        r = await c.get(f"{base}/purchaseOrders", headers={"Authorization": f"Bearer {token}"}, params={
+            "$filter": f"number eq '{po}'",
+            "$expand": "purchaseOrderLines($select=lineObjectNumber,quantity,directUnitCost,receivedQuantity,invoicedQuantity)",
+            "$select": "number,vendorNumber"})
+    vals = r.json().get("value", []) if r.status_code == 200 else []
+    if len(vals) != 1 or str(vals[0].get("vendorNumber") or "").upper() != str(d.get("vendor_canonical") or "").upper():
+        return None
+    ls = [l for l in vals[0].get("purchaseOrderLines") or [] if l.get("lineObjectNumber") and float(l.get("quantity") or 0)]
+    if not ls or any(float(l.get("receivedQuantity") or 0) or float(l.get("invoicedQuantity") or 0) for l in ls):
+        return None
+    if abs(sum(float(l["quantity"]) * float(l.get("directUnitCost") or 0) for l in ls) - amt) > 0.02:
+        return None
+    return [{"lineType": "Account", "lineObjectNumber": pre[0]["code"],
+             "description": f"Ppay Inv. {d.get('invoice_number_clean') or ''}".strip()[:100], "quantity": 1.0, "unitCost": amt,
+             "source": f"prepayment before receipt on {pre[0]['code']}, as AP enters this vendor"}]
+
+
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
     """The lines a draft of this invoice gets (see vendor_line_coding_service).
 
@@ -501,6 +545,12 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     coding = await coding_for(db, d.get("vendor_canonical"))
     if coding and coding.get("dominant"):
         return {"lines": single_line(coding, d), "source": "vendor_coding"}
+    try:
+        pp = await prepay_lines(db, d, coding)
+    except Exception:
+        pp = None
+    if pp:
+        return {"lines": pp, "source": "prepay"}
     po = str(d.get("po_number_clean") or "").strip().upper()
     from services.vendor_line_coding_service import is_product_vendor
     if po and await is_product_vendor(db, coding):

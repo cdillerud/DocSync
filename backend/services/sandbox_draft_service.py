@@ -392,6 +392,10 @@ _WH_CODES = {"WHSESTORAGE", "WHSEHANDLING"}
 WAREHOUSE_SPLIT_TAX_FREIGHT = False
 _WH_EXTRA = {"FREIGHT", "GST/HST TAX"}
 _TAX_LINE = re.compile(r"\b(?:HST|GST|PST|QST|TPS|TVQ|TVH)\b|sales tax", re.I)
+_WH_SUBTOTAL = re.compile(r"^\s*(?:transportation |sub-? ?)?total\b", re.I)
+# ROTONDO handling bill: 'HANDLING CHARGE' -> WHSEHANDLING, the bare
+# '44" X 56" PALLET' line -> WHSESTORAGE (AP's last 4 bills).
+_WH_PALLET = re.compile(r'^\s*\d+"?\s*x\s*\d+"?\s*pallet\s*$', re.I)
 
 
 def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -418,15 +422,21 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
         if not amt:
             continue
         desc = str(e.get("description") or "")
+        if _WH_SUBTOTAL.search(desc):
+            continue                    # CRALER "Transportation Total" repeats the freight
         if tax_freight and _TAX_LINE.search(desc):
             code = "GST/HST TAX"        # CRALER: Ontario HST on its own line
-        elif re.search(r"storage|entreposage|rent|recurring", desc, re.I):
+        elif re.search(r"storage handling", desc, re.I):
+            code = "WHSEHANDLING"       # CRALER "September storage handling"
+        elif _WH_PALLET.search(desc) or re.search(r"storage|entreposage|rent|recurring", desc, re.I):
             code = "WHSESTORAGE"
         elif tax_freight and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
             code = "FREIGHT"
         else:
             code = "WHSEHANDLING"
         buckets[code] = round(buckets.get(code, 0) + amt, 2)
+    if "GST/HST TAX" in buckets and not set(buckets) & _WH_CODES:
+        return None                     # CRALER Quebec GST on freight: AP put it in FREIGHT (1 bill)
     total = round(abs(float(d.get("amount_float") or 0)), 2)
     if not buckets or abs(sum(buckets.values()) - total) > 0.02:
         return None

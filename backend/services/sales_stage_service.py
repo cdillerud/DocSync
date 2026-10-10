@@ -55,6 +55,15 @@ def plain_bc_error(reason: Any) -> Any:
     if m:
         return (f"Item {m.group(1).strip()} is blocked in BC (Blocked or Sales Blocked): pick the item that "
                 "replaces it, or have it unblocked.")
+    m = re.search(r"\(([A-Z0-9][\w.-]*): .*Item does not exist", r)
+    if m:
+        # Production has the item (FX60503B, set up 2026-09-28); the test copy
+        # of BC the Hub drafts in is older and does not.
+        return (f"Item {m.group(1)} is newer than the test copy of BC the Hub drafts in, so the Hub could not "
+                "draft this order: enter it in BC as usual.")
+    m = re.search(r"Customer (\S+) is blocked", r)
+    if m:
+        return f"Customer {m.group(1)} is blocked in BC: have it unblocked, or use the customer account that replaced it."
     return reason
 
 
@@ -71,13 +80,21 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         return {"sales_stage": "filed", "sales_stage_reason": role or "other"}
     if sl.get("order_no"):
         return {"sales_stage": "in_bc", "bc_order_no": sl["order_no"]}
+    # The sender is not linked to a customer (Carlsbad Gourmet writes from a
+    # yahoo.com address) but the document was: use that customer, and look
+    # for its PO on that customer's BC orders (PO 1026 = SO 120147).
+    cust = sl.get("bc_customer_no") or d.get("customer_canonical")
+    if cust and not sl.get("bc_customer_no"):
+        pos = {t for p in sl.get("customer_po") or [] for t in (str(p).upper(), re.sub(r"[^A-Z0-9]", "", str(p).upper())) if t}
+        o = await db.bc_sales_orders.find_one({"customer_no": cust, "ext_norm": {"$in": sorted(pos)}}, {"_id": 0, "order_no": 1}) if pos else None
+        if o:
+            return {"sales_stage": "in_bc", "bc_order_no": o["order_no"]}
     sd = d.get("sales_draft") or {}
     if sd.get("bc_order_no") and sd.get("environment"):
         return {"sales_stage": "drafted", "bc_draft_no": sd["bc_order_no"]}
     if d.get("sales_draft_skipped"):
         return {"sales_stage": "needs_rep", "sales_stage_reason": "draft_problem",
                 "sales_stage_detail": plain_bc_error(d["sales_draft_skipped"].get("reason"))}
-    cust = sl.get("bc_customer_no")
     if not cust:
         return {"sales_stage": "needs_rep", "sales_stage_reason": "customer_unknown"}
     if not sl.get("customer_po"):

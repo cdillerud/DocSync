@@ -421,7 +421,7 @@ def filter_dispositioned_items(
 
 
 AP_REASON_ORDER = ["suspected_fraud", "vendor_unknown", "number_or_amount_missing", "po_not_in_bc",
-                   "draft_lines_problem", "routing_uncertain", "routing_error"]
+                   "invoice_check", "draft_lines_problem", "routing_uncertain", "routing_error"]
 
 
 def _ap_question(d: Dict[str, Any]) -> str:
@@ -433,14 +433,18 @@ def _ap_question(d: Dict[str, Any]) -> str:
         return f"Possible fraud ({flags}). Verify with the vendor by phone before anything is paid."
     if reason == "vendor_unknown":
         return (f"Which vendor is this? The Hub could not match \"{d.get('vendor_raw') or 'no name'}\" to a BC vendor. "
-                "File it to the right folder, or exclude it if it is not an AP document.")
+                "File it to the right folder, or remove it if it is not an AP document.")
     if reason == "number_or_amount_missing":
         missing = [x for x, v in (("invoice number", d.get("invoice_number_clean")), ("amount", d.get("amount_float"))) if not v]
-        return f"The {' and '.join(missing) or 'invoice details'} could not be read. Check the document, then file or exclude it."
+        return f"The {' and '.join(missing) or 'invoice details'} could not be read. Check the document, then file or remove it."
+    if reason == "invoice_check":
+        why = ((d.get("sandbox_draft_skipped") or {}).get("reason")) or "the invoice looks unusual"
+        return (f"Check this invoice: {why}. If it is right, file it to the suggested folder; "
+                "if it is a duplicate or a statement, remove it.")
     if reason == "draft_lines_problem":
         why = ((d.get("sandbox_draft_skipped") or {}).get("reason")) or "the line items do not add up"
         return (f"The Hub could not draft this invoice in BC: {why}. Check the lines on the document; "
-                "file it to the suggested folder once AP has the correct lines, or exclude it.")
+                "file it to the suggested folder once AP has the correct lines, or remove it.")
     if reason == "po_not_in_bc":
         return "The PO on this invoice is not a Gamer PO in BC. Where should it go?"
     if acc.get("n"):

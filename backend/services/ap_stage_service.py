@@ -227,11 +227,25 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "awaiting_receipt", "suggested_folder": folder, "routing_reason": why,
                     "routing_path_accuracy": rel}
         if d.get("sandbox_draft_skipped"):
-            # The Hub could not draft it: the extracted lines do not add up.
-            return {"ap_stage": "needs_staff", "staff_reason": "draft_lines_problem", "suggested_folder": folder,
-                    "routing_reason": why, "routing_path_accuracy": rel}
+            skip = str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")
+            if _CHECK_INVOICE.search(skip):
+                # The document itself looks wrong (odd number, statement, likely
+                # duplicate): a person checks it before AP enters anything.
+                return {"ap_stage": "needs_staff", "staff_reason": "invoice_check", "suggested_folder": folder,
+                        "routing_reason": why, "routing_path_accuracy": rel}
+            # Only the Hub's draft failed (vendor coded differently each time,
+            # PRE refused the lines, no receipt PO): AP enters it in BC as
+            # usual, so it is ready, not a staff decision (2026-10-10: half of
+            # Needs staff was this).
+            return {"ap_stage": "ready", "suggested_folder": folder, "routing_reason": why,
+                    "routing_path_accuracy": rel, "no_draft_reason": skip[:240]}
         return {"ap_stage": "ready", "suggested_folder": folder, "routing_reason": why, "routing_path_accuracy": rel}
     return {"ap_stage": "ready"}
+
+
+# Draft skips that mean the document itself needs a look (sandbox_draft_service reasons).
+_CHECK_INVOICE = re.compile(r"does not look like this vendor|too short to be|lists several invoice numbers|"
+                            r"already in Production BC|BC already has invoice", re.I)
 
 
 async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optional[str] = None) -> Dict[str, Any]:
@@ -284,7 +298,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
             if res["staff_reason"] == "routing_uncertain":
                 uncertain[reason_key(res.get("routing_reason"))] += 1
         if apply:
-            unset = {k: "" for k in ("staff_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
+            unset = {k: "" for k in ("staff_reason", "no_draft_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
                                      "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind",
                                      "bc_draft_no", "bc_draft_environment") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},

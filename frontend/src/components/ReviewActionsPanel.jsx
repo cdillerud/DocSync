@@ -28,6 +28,7 @@ const STAFF_REASON_ADVICE = {
   vendor_unknown: ['The Hub can’t tell which BC vendor sent this.', 'Fix the vendor under “Fix the invoice data”, or remove it if it isn’t an invoice.'],
   number_or_amount_missing: ['The invoice number or amount couldn’t be read.', 'Try “Read the file again”, or type them in under “Fix the invoice data”.'],
   po_not_in_bc: ['The PO on the invoice isn’t in BC.', 'Check the PO number in the invoice data. If it’s right, put it on hold until the PO exists, or send it for approval.'],
+  invoice_check: ['The invoice looks unusual (odd number, statement, or maybe a duplicate).', 'Check it against the document. If it is fine, AP enters it; if not, remove it.'],
   draft_lines_problem: ['The Hub couldn’t build the BC lines for a draft.', 'AP enters this one in BC as usual; nothing to fix here.'],
   routing_uncertain: ['The Hub isn’t sure which folder this belongs in.', 'Pick the folder in the Decision Queue; the Hub learns from it.'],
   approval_rejected: ['The approver rejected it.', 'Send it to another approver, put it on hold, or remove it.'],
@@ -56,6 +57,7 @@ function advice(doc) {
   }
   if (st === 'awaiting_approval') return [`Waiting for ${doc.ap_approval?.approver || doc.suggested_approver || 'an approver'} to approve.`, 'Approve or reject it below.', 'sky'];
   if (st === 'on_hold') return [`On hold${doc.ap_hold?.reason ? `: ${doc.ap_hold.reason}` : ''}.`, 'Release it when it can go ahead.', 'sky'];
+  if (st === 'ready' && doc.no_draft_reason) return ['Ready for AP to enter in BC. The Hub could not draft it in the sandbox.', `Why no draft: ${doc.no_draft_reason}`, 'emerald'];
   if (['ready', 'drafted', 'awaiting_receipt'].includes(st)) return ['The Hub is handling this one.', 'Nothing to do unless something on it is wrong.', 'emerald'];
   if (['in_bc', 'paid', 'filed_by_staff', 'file_only', 'no_action', 'container'].includes(st)) return ['Done. It is entered, filed, or needs no action.', 'Nothing to do.', 'muted'];
   if (doc.sales_stage === 'needs_rep') {

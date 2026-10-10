@@ -38,7 +38,7 @@ const ISSUE_TYPE_META = {
 
 const TAB_ORDER = ['all', 'ap_needs_staff', 'isolated_misroute', 'ambiguous_classification', 'ambiguous_match', 'square9_side_issue'];
 
-const AP_REASON_ORDER = ['suspected_fraud', 'vendor_unknown', 'number_or_amount_missing', 'po_not_in_bc', 'draft_lines_problem', 'routing_uncertain', 'routing_error'];
+const AP_REASON_ORDER = ['suspected_fraud', 'vendor_unknown', 'number_or_amount_missing', 'po_not_in_bc', 'invoice_check', 'draft_lines_problem', 'routing_uncertain', 'routing_error'];
 
 const AP_REASON_PLACEHOLDERS = {
   suspected_fraud: 'e.g. Called the vendor at the number on file; bank details confirmed',
@@ -54,6 +54,7 @@ const AP_REASON_LABELS = {
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
   draft_lines_problem: "Hub couldn't draft it",
+  invoice_check: 'Check the invoice',
   routing_uncertain: 'Folder uncertain',
   routing_error: 'Routing error',
 };
@@ -324,7 +325,7 @@ export default function HumanDecisionQueuePage() {
               Decision Queue
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Documents the Hub will not decide on its own. Each one says why. Review the document, then use the Hub&apos;s suggestion, choose a folder, correct the type, or exclude it. Every decision is recorded with your reason and teaches the Hub, so the same question comes up less often.
+              Documents the Hub will not decide on its own. Each one says why. Review the document, then use the Hub&apos;s suggestion, choose a folder, correct the type, or remove it. Every decision is recorded with your reason and teaches the Hub, so the same question comes up less often.
             </p>
           </div>
         </div>
@@ -1058,9 +1059,11 @@ function DecisionCard({
           <Button
             type="button"
             size="sm"
-            variant="destructive"
+            variant="outline"
+            className="border-red-500/40 text-red-500 hover:bg-red-500/10"
             disabled={submitting}
             onClick={() => setDispositionOpen(true)}
+            title="Not something anyone acts on. The file and history are kept; it can be put back from the document page"
             data-testid={`exclude-from-processing-${primary.doc_id}`}
           >
             {submitting ? (
@@ -1068,7 +1071,7 @@ function DecisionCard({
             ) : (
               <Ban className="w-3.5 h-3.5 mr-1.5" />
             )}
-            Exclude from processing
+            Remove from the queues
           </Button>
         </div>
 

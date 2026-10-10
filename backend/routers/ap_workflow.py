@@ -266,7 +266,7 @@ async def ap_summary(doc_id: str):
     return {
         "stage": d.get("ap_stage"), "stage_label": STAGE_LABELS.get(d.get("ap_stage"), d.get("ap_stage")),
         # The Hub's own reason for not drafting (shown in words, not just a code).
-        "draft_problem": (d.get("sandbox_draft_skipped") or {}).get("reason") if d.get("staff_reason") == "draft_lines_problem" else None,
+        "draft_problem": (d.get("sandbox_draft_skipped") or {}).get("reason") if d.get("staff_reason") in ("draft_lines_problem", "invoice_check") else d.get("no_draft_reason"),
         "staff_reason": d.get("staff_reason"), "no_action_reason": d.get("no_action_reason") or d.get("non_ap_kind"),
         "suggested_folder": d.get("suggested_folder"), "routing_reason": d.get("routing_reason"),
         "routing_path_accuracy": d.get("routing_path_accuracy"), "suggested_approver": d.get("suggested_approver"),
@@ -307,7 +307,8 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
     fields = {"_id": 0, "id": 1, "file_name": 1, "created_utc": 1, "vendor_canonical": 1, "vendor_raw": 1,
               "invoice_number_clean": 1, "amount_float": 1, "currency": 1, "po_number_clean": 1, "document_type": 1,
               "ap_stage": 1, "staff_reason": 1, "suggested_folder": 1, "suggested_approver": 1, "ap_hold": 1,
-              "ap_approval": 1, "no_action_reason": 1, "check_reason": 1, "bc_link.bc_document_no": 1,
+              "ap_approval": 1, "no_action_reason": 1, "check_reason": 1, "bc_link.bc_document_no": 1, "no_draft_reason": 1,
+              "sandbox_draft_skipped.reason": 1,
               "bc_link.bc_status": 1, "staff_decided": 1, "bc_draft_no": 1, "bc_draft_environment": 1}
     items = [d async for d in db.hub_documents.find(query, fields).sort([("created_utc", -1)])
              .skip(max(0, skip)).limit(max(1, min(limit, 200)))]

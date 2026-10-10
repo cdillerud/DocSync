@@ -10,6 +10,7 @@ const REASON_LABELS = {
   number_or_amount_missing: 'Invoice number or amount missing',
   po_not_in_bc: 'PO not found in BC',
   draft_lines_problem: "Hub couldn't draft it",
+  invoice_check: 'Check the invoice',
   routing_uncertain: 'Folder uncertain',
   approval_rejected: 'Approval rejected',
 };

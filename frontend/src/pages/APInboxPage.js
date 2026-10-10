@@ -35,6 +35,7 @@ const REASONS = {
   number_or_amount_missing: 'Number or amount missing',
   po_not_in_bc: 'PO not found in BC',
   draft_lines_problem: "Hub couldn't draft it",
+  invoice_check: 'Check the invoice',
   routing_uncertain: 'Folder uncertain',
   approval_rejected: 'Approval rejected',
   amount_differs: 'BC amount differs',
@@ -60,6 +61,7 @@ function why(doc) {
   if (doc.ap_hold) return doc.ap_hold.reason;
   if (doc.ap_approval) return `${doc.ap_approval.approver} to approve`;
   if (doc.suggested_approver) return `${doc.suggested_approver} to approve (suggested)`;
+  if (doc.no_draft_reason) return 'AP enters it (no sandbox draft)';
   if (doc.no_action_reason) return String(doc.no_action_reason).replace(/_/g, ' ').replace(/^excluded by staff:/, 'excluded by staff ');
   if (doc.bc_draft_no) return `Sandbox draft ${doc.bc_draft_no} (${doc.bc_draft_environment && doc.bc_draft_environment.startsWith('PRE') ? 'PRE' : doc.bc_draft_environment}), not a real invoice`;
   if (doc.bc_link?.bc_document_no) return `BC ${doc.bc_link.bc_document_no}${doc.bc_link.bc_status ? ` (${doc.bc_link.bc_status})` : ''}`;
@@ -217,7 +219,7 @@ export default function APInboxPage() {
                       <td className="py-1.5 pr-3 font-mono text-xs">{doc.po_number_clean || '—'}</td>
                       <td className="py-1.5 pr-3 text-xs">{doc.suggested_folder || '—'}</td>
                       <td className="py-1.5 pr-3 text-xs">
-                        <Badge variant="outline" className={TONE[current?.tone || 'muted']} title={doc.draft_problem || doc.routing_reason || undefined}>{why(doc) || current?.label}</Badge>
+                        <Badge variant="outline" className={TONE[current?.tone || 'muted']} title={doc.no_draft_reason || doc.sandbox_draft_skipped?.reason || doc.routing_reason || undefined}>{why(doc) || current?.label}</Badge>
                       </td>
                       <td className="py-1.5 pr-3 text-xs">
                         <Link className="hover:underline" to={`/documents/${encodeURIComponent(doc.id)}`}>{doc.file_name}</Link>

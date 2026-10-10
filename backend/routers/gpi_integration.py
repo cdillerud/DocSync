@@ -233,7 +233,13 @@ def _pi_lines_total_mismatch(doc: dict, bc_lines: list):
     vendor_invoice_profile_service (max $1 or 0.5%), but enforced.
     """
     from services.vendor_invoice_profile_service import _extract_total_amount
-    invoice_total = _extract_total_amount(doc)
+    # The Hub's own amount first: amount recovery corrects the extractor's
+    # (XPO 112-241706: lines add up to 377.10, the extractor read 281.00),
+    # and the draft is verified against amount_float in BC afterwards.
+    try:
+        invoice_total = abs(float(doc.get("amount_float") or 0)) or _extract_total_amount(doc)
+    except (TypeError, ValueError):
+        invoice_total = _extract_total_amount(doc)
     if invoice_total <= 0 or not bc_lines:
         return None
     planned_total = sum(

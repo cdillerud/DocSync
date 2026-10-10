@@ -81,6 +81,37 @@ def _in_range(recent: list, c: str) -> bool:
     return lo - span <= int(c) <= hi + 2 * span
 
 
+_SUFFIX_CACHE: Dict[tuple, bool] = {}
+
+
+async def _suffix_dropped(db, vendor: Any, suffix: str) -> bool:
+    """Earlier invoices of this vendor numbered '<digits> <suffix>' that AP
+    entered are in BC as <digits> at the same amount: at least 3, and 80% of
+    the entered ones."""
+    v = str(vendor or "").upper()
+    if (v, suffix) in _SUFFIX_CACHE:
+        return _SUFFIX_CACHE[(v, suffix)]
+    same = n = 0
+    seen = set()
+    rx = r"^\s*\d{5,12}\s*" + re.escape(suffix) + r"\s*$"
+    async for d in db.hub_documents.find({"vendor_canonical": v, "invoice_number_raw": {"$regex": rx, "$options": "i"},
+                                          "amount_float": {"$gt": 0}}, {"_id": 0, "invoice_number_raw": 1, "amount_float": 1}).limit(400):
+        dig = re.sub(r"\D", "", d["invoice_number_raw"])
+        if dig in seen:
+            continue
+        seen.add(dig)
+        bs = [b async for b in db.bc_reference_cache.find(
+            {"bc_vendor_no": v, "normalized_external_ref": {"$in": [dig, dig.lstrip("0")]},
+             "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]}}, {"_id": 0, "bc_amount": 1})]
+        if not bs:
+            continue
+        n += 1
+        same += any(abs(float(b.get("bc_amount") or 0) - float(d["amount_float"])) <= 0.02 for b in bs)
+    ok = same >= 3 and same >= 0.8 * n
+    _SUFFIX_CACHE[(v, suffix)] = ok
+    return ok
+
+
 async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     from services.non_ap_reclassifier import NUMBER_IN_TEXT
     shapes = await vendor_shapes(db)
@@ -112,6 +143,18 @@ async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, An
                         "invoice_number_clean": m.group(1), "invoice_number_shape_previous": d["invoice_number_clean"],
                         "invoice_number_source": "vendor's BC number form (letter prefix dropped)", "invoice_number_filled_at": now}})
                 continue
+        # A letter suffix AP drops: Anchor "4884617 RI" is BC 4884617 at the
+        # same amount on 356 of 393 earlier RI invoices; "RH" never is (0/9),
+        # so it is learned per vendor and suffix from what AP entered.
+        m = re.fullmatch(r"(\d{5,12})([A-Z]{1,3})", _norm(d["invoice_number_clean"]))
+        if m and shape and fits(shape, m.group(1)) and await _suffix_dropped(db, d.get("vendor_canonical"), m.group(2)):
+            stats["corrected"] += 1
+            if apply:
+                await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                    "invoice_number_clean": m.group(1), "invoice_number_shape_previous": d["invoice_number_clean"],
+                    "invoice_number_source": f"vendor's BC number form (suffix {m.group(2)} dropped, as AP enters it)",
+                    "invoice_number_filled_at": now}})
+            continue
         candidates = []
         for text in (d.get("email_subject") or "", d.get("file_name") or ""):
             for m in NUMBER_IN_TEXT.finditer(text):

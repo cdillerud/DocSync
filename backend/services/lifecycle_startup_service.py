@@ -5,6 +5,7 @@ The first extracted startup slice owns core MongoDB index creation.
 """
 
 from __future__ import annotations
+import uuid
 
 
 async def initialize_core_indexes(*, db, logger) -> None:
@@ -223,23 +224,33 @@ async def initialize_pre_scheduler_services(
             # Only insert if not already present
             existing = await db.vendor_aliases.find_one({"normalized_alias": normalized})
             if not existing:
-                await db.vendor_aliases.insert_one({
-                    "alias_string": display,
-                    "normalized_alias": normalized,
-                    "canonical_vendor_id": vendor_no,
-                    "vendor_no": vendor_no,
-                    "vendor_name": display,
-                    "vendor_id": vendor_no,
-                    "source": "bc_bootstrap",
-                    "confidence": 1.0,
-                    "usage_count": 0,
-                    "first_seen": datetime.now(timezone.utc).isoformat(),
-                    "last_seen": datetime.now(timezone.utc).isoformat(),
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                })
-                vendor_alias_map[display] = display
-                vendor_alias_map[normalized] = display
-                bootstrap_count += 1
+                try:
+                    await db.vendor_aliases.insert_one({
+                        # alias_id is unique-indexed: without it every insert
+                        # after the first failed and stopped the bootstrap.
+                        "alias_id": str(uuid.uuid4()),
+                        "alias": display.upper(),
+                        "alias_string": display,
+                        "normalized_alias": normalized,
+                        "canonical_vendor_id": vendor_no,
+                        "vendor_no": vendor_no,
+                        "vendor_name": display,
+                        "vendor_id": vendor_no,
+                        "source": "bc_bootstrap",
+                        "confidence": 1.0,
+                        "usage_count": 0,
+                        "first_seen": datetime.now(timezone.utc).isoformat(),
+                        "last_seen": datetime.now(timezone.utc).isoformat(),
+                        "created_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                    vendor_alias_map[display] = display
+                    vendor_alias_map[normalized] = display
+                    bootstrap_count += 1
+                except Exception as dup:
+                    # Same name already an alias (two BC vendors named alike,
+                    # or seeded by knowledge_seed_service): skip this one only.
+                    if "E11000" not in str(dup):
+                        raise
         if bootstrap_count > 0:
             logger.info("Bootstrapped %d BC vendor aliases into vendor_aliases collection", bootstrap_count)
     except Exception as e:

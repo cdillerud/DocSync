@@ -719,6 +719,12 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": problem, "at": datetime.now(timezone.utc).isoformat()}}})
             continue
+        # $0 marker lines (Z-COC "C of C required", Z-TAG, Z-POP) carry no
+        # amount and grading ignores them; PRE refuses some (Z-COC is set up
+        # under vendor MHPLAS there), which failed whole Berry drafts.
+        if plan.get("lines"):
+            plan["lines"] = [l for l in plan["lines"] if not (str(l.get("lineObjectNumber") or "").upper().startswith("Z-")
+                                                              and not float(l.get("unitCost") or 0))] or plan["lines"]
         # Keep the exact lines this draft uses, to compare with what AP later
         # enters in Production BC (draft quality, learned per vendor).
         try:

@@ -250,7 +250,7 @@ async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["SALES", "Sales"]}, "status": {"$ne": "batch_parent"}},
             {"_id": 1, "id": 1, "document_type": 1, "email_sender": 1, "email_subject": 1, "file_name": 1,
-             "extracted_fields": 1, "po_number_raw": 1, "po_number_clean": 1}):
+             "extracted_fields": 1, "po_number_raw": 1, "po_number_clean": 1, "email_id": 1}):
         r = await link_one(db, d, maps)
         stats["role:" + r["role"]] += 1
         if r["order_no"]:

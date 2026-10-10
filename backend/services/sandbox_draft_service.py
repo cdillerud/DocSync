@@ -774,7 +774,7 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                     deleted = await _delete_orphan_pi_header(sid)
                 except Exception as e:
                     deleted = repr(e)[:120]
-            why = (_re.search(r"(The [^.]{3,150})", msg) or [None, "see detail"])[1]
+            why = (_re.search(r"message[^A-Za-z]{1,12}([A-Za-z][^\\\"]{3,160})", msg) or [None, msg[-200:]])[1]
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": f"BC refused the draft lines ({why}); line build failed", "header_removed": str(deleted)[:80],
                 "at": datetime.now(timezone.utc).isoformat()}}})

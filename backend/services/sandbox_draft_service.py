@@ -591,6 +591,11 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     return {"lines": lines, "source": "vendor_profile"}
 
 
+# Lines built by a rule measured against AP's entries (not the old vendor
+# profile builder): the audit leaves them alone.
+PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "vendor_coding", "forwarder_split", "warehouse_split", "prepay"}
+
+
 async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
     """Re-check the Hub's own sandbox drafts against today's header checks.
 
@@ -625,18 +630,18 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
             # vendor_coding lines are AP's own coding plus the accessorial /
             # container rules the line replay measured (Tumalo container move
             # -> DRAYAGE): removing them re-drafted the same lines hourly.
-            if d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order", "vendor_coding") and lines \
+            if d.get("draft_lines_source") not in PLANNED_SOURCES and lines \
                     and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
                 requeue = True
-            elif d.get("draft_lines_source") not in ("bc_receipt", "bc_purchase_order") and d.get("po_number_clean") \
+            elif d.get("draft_lines_source") not in PLANNED_SOURCES - {"vendor_coding"} and d.get("po_number_clean") \
                     and await is_product_vendor(db, coding) \
                     and str((max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={}) or {}).get("lineType") or "Item") == "Item":
                 # A product vendor drafted from guessed lines (before receipts
                 # were used: Berry CD24410... where AP posted M-CAP-38MMTE).
                 problem = "a product invoice drafted without its BC receipt; re-drafting from the receipt once it posts"
                 requeue = True
-            elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in ("bc_receipt", "vendor_coding", "bc_purchase_order") \
+            elif (coding or {}).get("dominant") and d.get("draft_lines_source") not in PLANNED_SOURCES \
                     and len([l for l in lines if l.get("lineObjectNumber")]) > 1:
                 # AP codes this vendor as one line (R+L: one FREIGHT line); the
                 # older builder split it (2 x 6,415.19, -1 x 11,868.09, ...).
@@ -732,9 +737,14 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
                 "draft_lines_override": plan["lines"], "draft_lines_source": "bc_purchase_order"},
                 "$unset": {"draft_waiting_receipt": ""}})
-        elif plan.get("source") == "vendor_coding":
+        elif plan.get("lines") and plan.get("source") not in (None, "vendor_profile"):
+            # Every planned source the drafter must use as planned (vendor
+            # coding, forwarder / warehouse splits, prepayment): before
+            # 2026-10-10 only vendor_coding was passed on, and the forwarder
+            # plan fell back to the profile builder (FREIGHT-WH item charges
+            # PRE does not have - 0/5 lines, an orphan header every hour).
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
-                "draft_lines_override": plan["lines"], "draft_lines_source": "vendor_coding"}})
+                "draft_lines_override": plan["lines"], "draft_lines_source": plan["source"]}})
         else:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_lines_source": "vendor_profile"},
                                                                "$unset": {"draft_lines_override": ""}})
@@ -750,6 +760,24 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": "the extracted lines do not add up to the invoice total",
                 "detail": str(r.get("error"))[:300], "at": datetime.now(timezone.utc).isoformat()}}})
+        msg = str(r.get("message") or r.get("error") or "")
+        if "partial_post" in msg:
+            # BC took the header but refused the lines: remove the empty
+            # header (our own sandbox draft) and park the invoice with BC's
+            # reason, instead of a new orphan header every hour.
+            import re as _re
+            sid = r.get("bc_system_id") or (_re.search(r"system_id=([0-9a-f-]{36})", msg) or [None, None])[1]
+            deleted = None
+            if sid:
+                from routers.gpi_integration import _delete_orphan_pi_header
+                try:
+                    deleted = await _delete_orphan_pi_header(sid)
+                except Exception as e:
+                    deleted = repr(e)[:120]
+            why = (_re.search(r"(The [^.]{3,150})", msg) or [None, "see detail"])[1]
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
+                "reason": f"BC refused the draft lines ({why}); line build failed", "header_removed": str(deleted)[:80],
+                "at": datetime.now(timezone.utc).isoformat()}}})
         if r.get("success") and not r.get("already_exists") and r.get("bc_system_id"):
             # Verify in BC that the draft's total is the invoice total; a draft
             # that came out different is removed (our own sandbox draft) and

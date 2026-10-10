@@ -190,7 +190,7 @@ async def refresh(db, days: int = 45) -> Dict[str, Any]:
     docs = [d async for d in db.hub_documents.find(
         {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["SALES", "Sales"]}, "sales_link": {"$exists": True}},
         {"_id": 1, "id": 1, "status": 1, "pilot_mailbox": 1, "sales_link": 1, "sales_draft": 1, "sales_draft_skipped": 1,
-         "extracted_fields.line_items": 1, "created_utc": 1, "amount_float": 1}).sort([("created_utc", 1)])]
+         "extracted_fields.line_items": 1, "created_utc": 1, "amount_float": 1, "customer_canonical": 1}).sort([("created_utc", 1)])]
     # Several copies / pages of one customer PO: the one with the most lines counts.
     best: Dict[str, Any] = {}
     for d in docs:

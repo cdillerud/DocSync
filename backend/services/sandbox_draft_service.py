@@ -272,12 +272,23 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
                 {"bc_vendor_no": d["vendor_canonical"], "bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice"]},
                  "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": lo, "$lte": hi},
                  "bc_amount": {"$gte": amt - 0.02, "$lte": amt + 0.02}},
-                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "bc_posting_date": 1}):
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "bc_posting_date": 1, "bc_order_number": 1}):
             # A number that fits the vendor's shape is a different invoice
             # from an older one for the same amount (Hwa Hsia bills the same
             # container amount every few weeks); only a twin entered around
             # or after receipt can be this invoice under another number.
             if shape_fit and str(b.get("bc_posting_date") or "") < (recv - timedelta(days=14)).date().isoformat():
+                continue
+            # Both numbers look like this vendor's and differ by more than a
+            # typo: two invoices (Tumalo 0314549 vs 313885 on the same 4450
+            # lane, Owens 51591194 vs 1588070). Unless BC's number is this
+            # invoice's PO: AP enters CM Forwarding (45499-00) and Fast Track
+            # (119147) under the PO - those twins are this invoice.
+            other = str(b.get("bc_external_document_no") or "")
+            po_digits = re.sub(r"-0+$", "", str(d.get("po_number_clean") or "").upper())
+            if shape_fit and fits(shapes.get(str(d.get("vendor_canonical") or "").upper()), other) \
+                    and other.upper() not in (po_digits, str(b.get("bc_order_number") or "").upper()) \
+                    and _edit_distance(num.lstrip("0"), other.upper().lstrip("0")) > 2:
                 continue
             # BC's number is another Hub document's own invoice number: that
             # one is in BC, not this one (Anchor 4909838-41 and Owens
@@ -304,6 +315,16 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
         return f"Production BC already has this vendor invoice number (BC {same_no.get('bc_document_no')}): same vendor invoice number"
     return ""
 
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        cur = [i]
+        for j, y in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x != y)))
+        prev = cur
+    return prev[-1]
 
 
 async def po_in_bc(db, po: str) -> bool:

@@ -196,6 +196,13 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         return {"ap_stage": "needs_staff", "staff_reason": "vendor_unknown"}
     if d.get("document_type") in INVOICE_TYPES and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):
         return {"ap_stage": "needs_staff", "staff_reason": "number_or_amount_missing"}
+    s9 = square9_folder(d)
+    if route and s9 and _root(route[0]) != _root(s9):
+        # Staff already filed it in Square9 (backfilled documents carry the
+        # folder): follow them rather than ask again (2026-10-10: FedEx and UPS
+        # bills staff put in "Misc Invoices - need approval" sat in Needs staff
+        # as "Dropship International?").
+        route = (s9, "Filed by staff in Square9")
     if route:
         folder, why = route
         if not (folder or "").strip("/") or "not found as" in (why or ""):
@@ -211,6 +218,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         vrel = reliability.get(f"{reason_key(why)}|{d.get('vendor_canonical')}")
         if not rel["reliable"] and vrel and vrel["reliable"]:
             rel = {**vrel, "via": "this vendor's filings on this path"}
+        if s9 and _root(folder) == _root(s9):
+            rel = {**rel, "reliable": True, "via": "staff filed it here in Square9"}
         # A folder staff created and named for this invoice's own PO
         # ("Dropship International/120199 120200 120201 120208 120209" for an
         # SGC invoice on PO 120199) is their filing decision already made.
@@ -241,6 +250,16 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
                     "routing_path_accuracy": rel, "no_draft_reason": skip[:240]}
         return {"ap_stage": "ready", "suggested_folder": folder, "routing_reason": why, "routing_path_accuracy": rel}
     return {"ap_stage": "ready"}
+
+
+_S9_SUBJECT = re.compile(r"^square9_backfill:\s*(.+?)(?:\s*\[Pages[^\]]*\])?\s*$")
+
+
+def square9_folder(d: Dict[str, Any]) -> Optional[str]:
+    """The Square9 folder staff filed a backfilled document in, or None."""
+    m = _S9_SUBJECT.match(str(d.get("email_subject") or ""))
+    folder = (m.group(1).strip().strip("/") if m else "")
+    return folder or None
 
 
 # Draft skips that mean the document itself needs a look (sandbox_draft_service reasons).

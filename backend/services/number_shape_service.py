@@ -197,3 +197,54 @@ async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, An
                     "invoice_number_source": src, "invoice_number_filled_at": now}})
     return stats
 
+
+
+async def fill_missing(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
+    """Invoices and credit memos with no number at all (Needs staff
+    "number or amount missing"): the credit memo number the extractor read
+    into its own field (Silgan credit 24574496, 2026-10-10), else the one
+    number in the subject / file name that fits the vendor's BC shape."""
+    from services.non_ap_reclassifier import NUMBER_IN_TEXT
+    shapes = await vendor_shapes(db)
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    now = datetime.now(timezone.utc).isoformat()
+    stats = {"checked": 0, "filled": 0, "examples": []}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]},
+             "bc_link": {"$exists": False}, "invoice_number_clean": {"$in": [None, ""]},
+             # Not pieces of a split PDF: their subject is the whole e-mail's
+             # (Citi Cargo SI346328 on every continuation page).
+             "batch_parent_id": {"$in": [None, ""]}, "status": {"$ne": "batch_parent"}},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "document_type": 1, "email_subject": 1, "file_name": 1,
+             "po_number_clean": 1, "extracted_fields.credit_memo_number": 1}):
+        stats["checked"] += 1
+        shape = shapes.get(str(d.get("vendor_canonical") or "").upper())
+        po = _norm(d.get("po_number_clean"))
+        number, src = None, None
+        cm = str(((d.get("extracted_fields") or {}).get("credit_memo_number")) or "").strip()
+        if d.get("document_type") == "Credit_Memo" and re.fullmatch(r"[A-Za-z]{0,4}-?\d[\dA-Za-z-]{3,20}", cm) \
+                and len(re.sub(r"\D", "", cm)) >= 4 and _norm(cm) != po:
+            number, src = cm.upper(), "credit memo number on the document"
+        elif shape:
+            candidates = []
+            for text in (d.get("email_subject") or "", d.get("file_name") or ""):
+                for m in NUMBER_IN_TEXT.finditer(text):
+                    candidates.append((m.group(1) or m.group(2) or "").strip("-").upper())
+                candidates += [c.upper() for c in re.findall(r"(?<![A-Za-z0-9])([A-Za-z]{0,4}\d{4,12})(?![A-Za-z0-9])", text)]
+            good = list(dict.fromkeys(c for c in candidates if fits(shape, c) and _norm(c) != po))
+            if len(good) == 1:
+                number, src = good[0], "subject_or_file_name (vendor number shape)"
+        if not number:
+            continue
+        # Another document already has this number for this vendor: this one
+        # is a copy or a companion page, not a second invoice.
+        if await db.hub_documents.count_documents({"vendor_canonical": d.get("vendor_canonical"), "invoice_number_clean": number,
+                                                   "id": {"$ne": d.get("id")}}, limit=1):
+            continue
+        stats["filled"] += 1
+        if len(stats["examples"]) < 10:
+            stats["examples"].append({"id": d.get("id"), "vendor": d.get("vendor_canonical"), "number": number, "from": src})
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "invoice_number_clean": number, "invoice_number_source": src, "invoice_number_filled_at": now}})
+    return stats

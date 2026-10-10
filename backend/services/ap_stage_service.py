@@ -136,7 +136,10 @@ async def load_reliability(db) -> Dict[str, Dict[str, Any]]:
     return out
 
 SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document", "Inspection_Form",
-                    "Warehouse_Document", "Packing_Slip"}
+                    "Warehouse_Document", "Packing_Slip",
+                    # A customer's PO sent to AP (Fagron PON027xxx): staff file it
+                    # as backup in the drop-ship folder, as the router does (2 of 2).
+                    "Sales_Order"}
 
 
 def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]],

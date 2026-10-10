@@ -403,7 +403,11 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
     if not WAREHOUSE_SPLIT or not coding:
         return None
     used = set(coding.get("codes_used") or [])
-    allowed = _WH_CODES | (_WH_EXTRA if WAREHOUSE_SPLIT_TAX_FREIGHT else set())
+    # Tax and freight lines only for a warehouse AP codes with Canadian tax
+    # (CRALER): on for everyone, Reiles / JBS freight bills became handling
+    # (replay 2026-10-10: 11/16 vs 8/9).
+    tax_freight = WAREHOUSE_SPLIT_TAX_FREIGHT or "GST/HST TAX" in used
+    allowed = _WH_CODES | (_WH_EXTRA if tax_freight else set())
     if not used or not used <= allowed or not used & _WH_CODES:
         return None
     items = (d.get("extracted_fields") or {}).get("line_items") or []
@@ -414,11 +418,11 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
         if not amt:
             continue
         desc = str(e.get("description") or "")
-        if WAREHOUSE_SPLIT_TAX_FREIGHT and _TAX_LINE.search(desc):
+        if tax_freight and _TAX_LINE.search(desc):
             code = "GST/HST TAX"        # CRALER: Ontario HST on its own line
         elif re.search(r"storage|entreposage|rent|recurring", desc, re.I):
             code = "WHSESTORAGE"
-        elif WAREHOUSE_SPLIT_TAX_FREIGHT and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
+        elif tax_freight and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
             code = "FREIGHT"
         else:
             code = "WHSEHANDLING"
@@ -432,7 +436,8 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
         if not only:
             return None
         buckets = {only: total}
-    return [{"lineType": "Item", "lineObjectNumber": c, "description": ("Storage" if c == "WHSESTORAGE" else "Handling") + f" - invoice {d.get('invoice_number_clean') or ''}",
+    label = {"WHSESTORAGE": "Storage", "WHSEHANDLING": "Handling", "FREIGHT": "Freight", "GST/HST TAX": "GST/HST"}
+    return [{"lineType": "Item", "lineObjectNumber": c, "description": label.get(c, c) + f" - invoice {d.get('invoice_number_clean') or ''}",
              "quantity": 1.0, "unitCost": v, "source": "storage / handling totals, as AP enters this warehouse"} for c, v in sorted(buckets.items())]
 
 
@@ -442,6 +447,15 @@ FORWARDER_SPLIT = True
 CUSTOMS_BROKER_LINES = False
 _CUSTOMS_LINE = re.compile(r"customs|clearance|\bISF\b|\bFDA\b|\bentry\b|\bbond\b|\bduty\b|\bduties\b", re.I)
 _DOC_LINE = re.compile(r"documentation|doc(?:ument)? fee", re.I)
+# Cargo Modules 126174358-AR (2026-10-10): AP entered FREIGHT 5100, XDOCK
+# 1100 = destination CFS handling 950 + chassis 150, CUSTOMS 80.63 =
+# documentation 30 + Pier Pass 40.63 + port check 10. Only for vendors AP
+# codes with XDOCK; origin CFS ("loading charges in Shanghai") stays freight.
+FORWARDER_XDOCK = True
+_XDOCK_LINE = re.compile(r"^(?!.*\bloading\b)(?!.*\bin [A-Z][a-z]+).*\bCFS handling\b", re.I)
+# Chassis rides with the CFS line into XDOCK; on a bill without one AP keeps it in freight.
+_CHASSIS_LINE = re.compile(r"chassis", re.I)
+_PORT_FEE_LINE = re.compile(r"pier ?pass|port check", re.I)
 _FREIGHT_WORDS = re.compile(r"freight|ocean|\bEXW\b|\bCFR\b|\bFOB\b|\bCIF\b|transport|drayage|trucking|delivery", re.I)
 
 
@@ -471,22 +485,30 @@ def forwarder_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
         return None
     if not any(_FREIGHT_WORDS.search(str(e.get("description") or "")) for e in items):
         return None
-    has_customs = any(_CUSTOMS_LINE.search(str(e.get("description") or "")) for e in items)
+    xdock = FORWARDER_XDOCK and "XDOCK" in used
+    has_cfs = xdock and any(_XDOCK_LINE.search(str(e.get("description") or "")) for e in items)
+    has_customs = any(_CUSTOMS_LINE.search(str(e.get("description") or "")) or
+                      (xdock and _PORT_FEE_LINE.search(str(e.get("description") or ""))) for e in items)
     buckets: Dict[str, float] = {}
     for e in items:
         amt = round(_line_amount(e), 2)
         if not amt:
             continue
         desc = str(e.get("description") or "")
-        code = "CUSTOMS" if has_customs and (_CUSTOMS_LINE.search(desc) or _DOC_LINE.search(desc)) else "FREIGHT"
+        if xdock and (_XDOCK_LINE.search(desc) or (has_cfs and _CHASSIS_LINE.search(desc))):
+            code = "XDOCK"
+        elif xdock and _PORT_FEE_LINE.search(desc):
+            code = "CUSTOMS"
+        else:
+            code = "CUSTOMS" if has_customs and (_CUSTOMS_LINE.search(desc) or _DOC_LINE.search(desc)) else "FREIGHT"
         buckets[code] = round(buckets.get(code, 0) + amt, 2)
     total = round(abs(float(d.get("amount_float") or 0)), 2)
     if "FREIGHT" not in buckets or abs(sum(buckets.values()) - total) > 0.02:
         return None
-    label = {"FREIGHT": "Ocean", "CUSTOMS": "Customs Fee"}
+    label = {"FREIGHT": "Ocean", "CUSTOMS": "Customs Fee", "XDOCK": "CFS / Chassis"}
     return [{"lineType": ltype, "lineObjectNumber": c, "description": f"{po} {label[c]}".strip()[:100], "quantity": 1.0,
              "unitCost": buckets[c], "source": "freight / customs totals, as AP enters this forwarder"}
-            for c in ("FREIGHT", "CUSTOMS") if c in buckets]
+            for c in ("FREIGHT", "XDOCK", "CUSTOMS") if c in buckets]
 
 
 PREPAY_BEFORE_RECEIPT = True

@@ -109,7 +109,7 @@ async def measure_reason_accuracy(db, csv_path: str, source: str) -> Dict[str, A
         n += 1
         agree += hit
         await db.routing_outcomes.update_one({"hub_doc_id": r["hub_doc_id"]}, {"$set": {
-            "hub_doc_id": r["hub_doc_id"], "reason_key": reason_key(why), "agreed": hit,
+            "hub_doc_id": r["hub_doc_id"], "reason_key": reason_key(why), "agreed": hit, "vendor": d.get("vendor_canonical"),
             "hub_folder": path, "staff_folder": r.get("square9_parent_path"),
             "filed_at": d.get("created_utc"), "measured_at": now, "source": source}}, upsert=True)
     return {"filings": n, "agreed": agree}
@@ -124,6 +124,15 @@ async def load_reliability(db) -> Dict[str, Dict[str, Any]]:
         n, ok = g["n"], g["ok"]
         pct = round(100 * ok / n, 1) if n else 0.0
         out[g["_id"]] = {"n": n, "pct": pct, "reliable": n >= RELIABLE_MIN_N and pct >= RELIABLE_PCT}
+    # The same path per vendor: "International vendor invoice" is 84.5%
+    # overall but Fevisa's 32 filings are 30 right, Owens' 18 of 18
+    # (Cargo Modules 12 of 15 drags the path down) - keyed "path|VENDOR".
+    async for g in db.routing_outcomes.aggregate([
+            {"$match": {"filed_at": {"$gte": since}, "vendor": {"$nin": [None, ""]}}},
+            {"$group": {"_id": {"k": "$reason_key", "v": "$vendor"}, "n": {"$sum": 1}, "ok": {"$sum": {"$cond": ["$agreed", 1, 0]}}}}]):
+        n, ok = g["n"], g["ok"]
+        pct = round(100 * ok / n, 1) if n else 0.0
+        out[f"{g['_id']['k']}|{g['_id']['v']}"] = {"n": n, "pct": pct, "reliable": n >= RELIABLE_MIN_N and pct >= RELIABLE_PCT}
     return out
 
 SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document", "Inspection_Form",
@@ -199,6 +208,9 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             return {"ap_stage": "awaiting_approval", "suggested_folder": folder, "routing_reason": why,
                     "approval_kind": "non_trade"}
         rel = reliability.get(reason_key(why)) or {"n": 0, "pct": None, "reliable": False}
+        vrel = reliability.get(f"{reason_key(why)}|{d.get('vendor_canonical')}")
+        if not rel["reliable"] and vrel and vrel["reliable"]:
+            rel = {**vrel, "via": "this vendor's filings on this path"}
         # A folder staff created and named for this invoice's own PO
         # ("Dropship International/120199 120200 120201 120208 120209" for an
         # SGC invoice on PO 120199) is their filing decision already made.

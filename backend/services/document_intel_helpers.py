@@ -18,6 +18,8 @@ Consumers:
 
 import os
 import re
+
+_CA_SALES_TAX = re.compile(r"\b(HST|GST|PST|QST|TPS|TVQ)\b", re.I)
 import uuid
 import json
 import logging
@@ -885,6 +887,29 @@ def compute_ap_normalized_fields(extracted_fields: dict, file_name: str = None) 
                     result["amount_float"] = None
             except ValueError:
                 pass
+        # The pre-tax subtotal read as the total (CRALER storage 600.00 +
+        # Ontario HST 78.00, AP entered 678.00): the other lines add up to the
+        # amount and a Canadian sales tax line is on top. Since 2026-03 this
+        # fires on 2 invoices, both then matching BC; none it would break.
+        items = extracted_fields.get("line_items") or []
+        if result.get("amount_float") and isinstance(items, list):
+            def _amt(e):
+                for k in ("amount", "total", "line_total", "extended_price"):
+                    try:
+                        if isinstance(e, dict) and e.get(k) not in (None, ""):
+                            return float(re.sub(r"[^\d.-]", "", str(e[k])) or 0)
+                    except ValueError:
+                        pass
+                try:
+                    return float(e.get("quantity") or 0) * float(e.get("unit_price") or 0)
+                except (ValueError, TypeError, AttributeError):
+                    return 0.0
+            is_tax = lambda e: isinstance(e, dict) and _CA_SALES_TAX.search(str(e.get("description") or ""))
+            tax = round(sum(_amt(e) for e in items if is_tax(e)), 2)
+            rest = round(sum(_amt(e) for e in items if not is_tax(e)), 2)
+            if tax > 0 and abs(rest - result["amount_float"]) <= 0.02:
+                result["amount_subtotal_read"] = result["amount_float"]
+                result["amount_float"] = round(result["amount_float"] + tax, 2)
     else:
         result["amount_raw"] = None
         result["amount_float"] = None

@@ -142,6 +142,9 @@ SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document"
                     "Sales_Order"}
 
 
+_ACCOUNT_STATEMENT = re.compile(r"statement of accounts?\b|account statement|customer statement", re.I)
+
+
 def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]],
              reliability: Dict[str, Dict[str, Any]], staff_filed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The stage of one document. route = (folder, reason) at intake view, or
@@ -157,6 +160,13 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
     if d.get("non_ap_kind") or d.get("document_type") in NO_ACTION_TYPES:
         return {"ap_stage": "no_action", "no_action_reason": d.get("non_ap_kind") or "not_ap:" + str(d.get("document_type"))}
     bl = d.get("bc_link") if isinstance(d.get("bc_link"), dict) else None
+    if (not (bl and bl.get("bc_document_no")) and not re.search(r"invoice|\binv", str(d.get("file_name") or ""), re.I)
+            and _ACCOUNT_STATEMENT.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}")):
+        # A vendor's "Statement of Account" read as an invoice (FASTTRA weekly
+        # statement, its "invoice number" the POs run together): nothing to
+        # enter. Not "Monthly Statement" (parking, lease): those are the bill;
+        # nor "Sales Invoice - SINV…" PDFs sent with Boyer's statement email.
+        return {"ap_stage": "no_action", "no_action_reason": "statement"}
     if bl and bl.get("bc_document_no"):
         if str(bl.get("bc_status") or "").lower() == "paid" or bl.get("bc_entity") == "posted_purchase_invoice":
             return {"ap_stage": "paid"}

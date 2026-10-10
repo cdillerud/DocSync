@@ -14,11 +14,12 @@ import {
   CheckCircle2, AlertCircle, Clock, Loader2, Copy, RotateCcw, 
   ShieldCheck, ShieldAlert, Building2, FileSearch, Receipt,
   Zap, User, Cpu, Eye, Inbox, Check, XCircle, AlertTriangle,
-  Gauge, CircleDot, FolderOpen, Send, Archive, Upload
+  Gauge, CircleDot, FolderOpen, Send, Archive
 } from 'lucide-react';
 import { Square9WorkflowTracker } from '../components/Square9WorkflowTracker';
 import APReviewPanel from '../components/APReviewPanel';
 import APHistoryPanel from '../components/APHistoryPanel';
+import ReviewActionsPanel from '../components/ReviewActionsPanel';
 import OwnershipEvidencePanel from '../components/OwnershipEvidencePanel';
 import { labelForBlocker, labelForWarning } from '../lib/blockerLabels';
 import PDFPreviewPanel from '../components/PDFPreviewPanel';
@@ -485,6 +486,18 @@ const AP_STAGE_LABELS = {
   container: ['Split into pieces', 'border-border bg-muted text-muted-foreground'],
 };
 
+// Current Sales stage (sales_stage_service), shown in the header like the AP stage.
+const SALES_STAGE_LABELS = {
+  needs_rep: ['Needs a rep', 'border-amber-500/40 bg-amber-500/10 text-amber-600'],
+  ready: ['Ready to draft', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
+  drafted: ['Drafted (sandbox)', 'border-emerald-500/40 bg-emerald-500/10 text-emerald-600'],
+  in_bc: ['Entered in BC', 'border-border bg-muted text-muted-foreground'],
+  purchasing: ['Purchasing document', 'border-border bg-muted text-muted-foreground'],
+  to_ap: ['Moved to AP', 'border-border bg-muted text-muted-foreground'],
+  filed: ['Filed', 'border-border bg-muted text-muted-foreground'],
+  duplicate: ['Duplicate copy', 'border-border bg-muted text-muted-foreground'],
+};
+
 // Older analysis panels (readiness, intake intelligence, decision engine,
 // matching debug, Square9 tracker...) predate the AP / Sales stages. When a
 // document has a current stage they are folded away so the page leads with
@@ -519,6 +532,7 @@ export default function DocumentDetailPage() {
   const [uploading, setUploading] = useState(false);
   const fileInputRef = React.useRef(null);
   const [showLegacyWorkflows, setShowLegacyWorkflows] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
 
   const fetchDoc = async () => {
     try {
@@ -646,6 +660,11 @@ export default function DocumentDetailPage() {
                 data-testid="doc-status-badge" title="Current AP stage (see AP history)">
                 {AP_STAGE_LABELS[doc.ap_stage][0]}
               </span>
+            ) : SALES_STAGE_LABELS[doc.sales_stage] ? (
+              <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${SALES_STAGE_LABELS[doc.sales_stage][1]}`}
+                data-testid="doc-status-badge" title="Current Sales stage">
+                {SALES_STAGE_LABELS[doc.sales_stage][0]}
+              </span>
             ) : (
             <span
               className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold shrink-0 ${
@@ -673,10 +692,8 @@ export default function DocumentDetailPage() {
           {/* Re-process (re-ran the retired pipeline) removed 2026-10-08; Upload & Re-extract stays */}
           {/* Upload & Re-extract — for documents missing their file on disk */}
           <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg,.tiff" onChange={handleUploadFile} />
-          <Button size="sm" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={uploading} data-testid="upload-reextract-btn">
-            {uploading ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Upload className="w-3 h-3 mr-1.5" />}
-            {uploading ? 'Uploading...' : 'Upload & Re-extract'}
-          </Button>
+          {/* Replace the file: moved into "What to do with this document" (2026-10-10) */}
+          {uploading && <span className="flex items-center text-xs text-muted-foreground"><Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> Uploading…</span>}
           {(doc.status === 'Classified' || doc.status === 'Exception') && doc.bc_document_no && (
             <Button size="sm" onClick={handleLink} disabled={linking} data-testid="link-to-bc-btn">
               {linking ? <Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> : <Link className="w-3 h-3 mr-1.5" />}
@@ -708,7 +725,7 @@ export default function DocumentDetailPage() {
           {/* Processing Pipeline Visualization */}
           <PipelineVisualization documentId={id} />
 
-          <Card className="border border-border" data-testid="doc-classification-card">
+          <Card id="doc-classification" className="border border-border" data-testid="doc-classification-card">
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
@@ -1098,8 +1115,19 @@ export default function DocumentDetailPage() {
 
         {/* Right: Document Preview + AP Review (if AP_Invoice) + Event Timeline */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Every action a person can take, grouped, with the Hub's suggestion first */}
+          <ReviewActionsPanel
+            doc={doc}
+            onChanged={() => { fetchDoc(); setHistoryKey(k => k + 1); }}
+            onEditType={() => {
+              setEditing(true);
+              setEditData({ document_type: doc.document_type, bc_document_no: doc.bc_document_no || '' });
+              document.getElementById('doc-classification')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }}
+            onReplaceFile={() => fileInputRef.current?.click()}
+          />
           {/* AP history: stage, BC link, corrections and every staff action */}
-          <APHistoryPanel documentId={id} />
+          <APHistoryPanel key={historyKey} documentId={id} />
           {/* The document itself, right under its history (2026-10-08) */}
           <PDFPreviewPanel document={doc} />
           <SplitPreviewPanel document={doc} onSplitComplete={fetchDoc} />

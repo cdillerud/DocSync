@@ -234,7 +234,7 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
     return {"ap_stage": "ready"}
 
 
-async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
+async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optional[str] = None) -> Dict[str, Any]:
     from services.folder_routing_service import route_with_feedback
     # Blocked BC vendors are not vendors to pay: their documents go to staff.
     bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no", {"blocked": {"$ne": True}}))
@@ -247,11 +247,13 @@ async def refresh_stages(db, days: int = 30, apply: bool = True) -> Dict[str, An
     counts, reasons, uncertain = Counter(), Counter(), Counter()
     # Recent documents, plus older ones still in an active stage (a stage is
     # never left stale: Fort Dearborn's 9/7 statement sat in approvals).
-    async for d in db.hub_documents.find(
-            {"mailbox_category": "AP", "$or": [{"created_utc": {"$gte": since}},
-                                               {"ap_stage": {"$in": ["needs_staff", "awaiting_approval", "on_hold", "ready",
-                                                                     "drafted", "awaiting_receipt", "in_bc_check"]}}]},
-            {"file_content_b64": 0}):
+    q = {"mailbox_category": "AP", "$or": [{"created_utc": {"$gte": since}},
+                                           {"ap_stage": {"$in": ["needs_staff", "awaiting_approval", "on_hold", "ready",
+                                                                 "drafted", "awaiting_receipt", "in_bc_check"]}}]}
+    if doc_id:
+        # One document, right after a person acted on it (document page).
+        q = {"mailbox_category": "AP", "id": doc_id}
+    async for d in db.hub_documents.find(q, {"file_content_b64": 0}):
         sf = staff_filed.get(d.get("id"))
         pre = stage_of(d, bc_vendors, None, reliability, sf)
         res = pre

@@ -21,7 +21,8 @@ const ACTION_LABELS = {
   approve: 'Approved',
   reject: 'Rejected',
   folder_decision: 'Folder decided',
-  excluded: 'Excluded from processing',
+  excluded: 'Removed from the queues',
+  restored: 'Put back in the queues',
 };
 
 function when(value) {

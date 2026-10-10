@@ -118,6 +118,78 @@ async def reject(doc_id: str, req: NoteRequest, user=Depends(get_current_user)):
     return {"approval": await wf.decide_approval(get_db(), doc_id, False, await _by(req, user), req.notes)}
 
 
+class RemoveRequest(BaseModel):
+    disposition: str = Field(..., min_length=2, max_length=60)
+    notes: str = Field(default="", max_length=1000)
+    by: str = Field(default="", max_length=100)
+
+
+_REMOVED_FIELDS = ("non_transactional", "non_transactional_disposition", "non_transactional_label",
+                   "non_transactional_notes", "non_transactional_disposed_at", "non_transactional_disposed_by",
+                   "excluded_from_processing", "excluded_from_bc", "excluded_from_routing", "workflow_status",
+                   "auto_clear_reason")
+
+
+async def restage_one(doc_id: str) -> dict:
+    """Recompute the AP or Sales stage of one document now, instead of at
+    the next hourly refresh, so the page shows the effect of an action."""
+    db = get_db()
+    from services.ap_stage_service import refresh_stages
+    await refresh_stages(db, doc_id=doc_id)
+    d = await db.hub_documents.find_one({"id": doc_id}, {"file_content_b64": 0})
+    if d and d.get("sales_link") and d.get("mailbox_category") in ("SALES", "Sales"):
+        from services.sales_stage_service import stage_of as sales_stage_of
+        st = await sales_stage_of(db, d)
+        unset = {k: "" for k in ("sales_stage_reason", "sales_stage_detail", "sales_resolution", "bc_order_no",
+                                 "bc_draft_no", "duplicate_of") if k not in st}
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {**st, "sales_stage_at": wf._now()},
+                                                           **({"$unset": unset} if unset else {})})
+    d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "ap_stage": 1, "staff_reason": 1, "sales_stage": 1})
+    return d or {}
+
+
+@router.post("/document/{doc_id}/remove")
+async def remove(doc_id: str, req: RemoveRequest, user=Depends(get_current_user)):
+    """Take a document out of every queue (not an invoice, duplicate, spam...).
+    The file and its history stay, and Put back undoes it."""
+    from services.non_transactional_disposition_service import apply_non_transactional_disposition
+    await _doc(doc_id)
+    by = await _by(req, user)
+    try:
+        out = await apply_non_transactional_disposition(doc_id, req.disposition, disposed_by=by or "document page",
+                                                        notes=req.notes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await wf._event(get_db(), doc_id, "excluded", by, reason=req.disposition.replace("_", " "), notes=req.notes)
+    return {**out, "stage": await restage_one(doc_id)}
+
+
+@router.post("/document/{doc_id}/restore")
+async def restore(doc_id: str, req: NoteRequest, user=Depends(get_current_user)):
+    """Undo Remove: the document goes back into the queues."""
+    db = get_db()
+    d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "non_transactional": 1, "excluded_from_processing": 1,
+                                                         "non_transactional_disposition": 1})
+    if not d:
+        raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
+    if not (d.get("non_transactional") or d.get("excluded_from_processing")):
+        return {"ok": True, "skipped": "not removed", "stage": await restage_one(doc_id)}
+    by = await _by(req, user)
+    await db.hub_documents.update_one({"id": doc_id}, {
+        "$set": {"status": "Classified", "auto_cleared": False,
+                 "restored_from_removal": {"was": d.get("non_transactional_disposition"), "by": by, "at": wf._now()}},
+        "$unset": {k: "" for k in _REMOVED_FIELDS}})
+    await db.document_intelligence_results.update_one({"document_id": doc_id}, {"$set": {"non_transactional": False}})
+    await wf._event(db, doc_id, "restored", by, notes=req.notes)
+    return {"ok": True, "stage": await restage_one(doc_id)}
+
+
+@router.post("/document/{doc_id}/restage")
+async def restage(doc_id: str):
+    await _doc(doc_id)
+    return {"stage": await restage_one(doc_id)}
+
+
 @router.get("/document/{doc_id}/history")
 async def history(doc_id: str):
     db = get_db()

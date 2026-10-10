@@ -761,6 +761,12 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                 "reason": "the extracted lines do not add up to the invoice total",
                 "detail": str(r.get("error"))[:300], "at": datetime.now(timezone.utc).isoformat()}}})
         msg = str(r.get("message") or r.get("error") or "")
+        if "already exists in BC" in msg and not r.get("success"):
+            # Another Hub copy (or an earlier run) already put this vendor
+            # invoice in the sandbox: retrying hourly only repeats the refusal.
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
+                "reason": "this vendor invoice is already a draft in the sandbox (" + msg[-120:] + ")",
+                "at": datetime.now(timezone.utc).isoformat()}}})
         if "partial_post" in msg:
             # BC took the header but refused the lines: remove the empty
             # header (our own sandbox draft) and park the invoice with BC's

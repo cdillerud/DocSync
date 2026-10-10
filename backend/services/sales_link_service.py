@@ -89,6 +89,49 @@ def _texts(d: Dict[str, Any]) -> str:
                                            ef.get("po_number"), ef.get("reference")))
 
 
+_GAMER_PO_CACHE: Dict[str, bool] = {}
+
+
+async def _gamer_po(db, pos) -> bool:
+    """One of these numbers is a Gamer purchase order in BC: open (cache) or
+    received / still open in Production (read-only BC lookup, memoized)."""
+    from services.sandbox_draft_service import po_in_bc
+    cands = [p for p in pos if (p.isdigit() and len(p) == 6) or re.fullmatch(r"W[RT]?\d{6}", p)][:3]
+    for p in cands:
+        if p not in _GAMER_PO_CACHE:
+            try:
+                _GAMER_PO_CACHE[p] = bool(await po_in_bc(db, p))
+            except Exception:
+                _GAMER_PO_CACHE[p] = False
+        if _GAMER_PO_CACHE[p]:
+            return True
+    return False
+
+
+async def _thread_has_gamer_po(db, d: Dict[str, Any]) -> bool:
+    """Another document of the same e-mail carries a Gamer purchase order
+    number (O-I's '24oz Salsa POs' ticket: 119900, 119901 received, 119903
+    not yet in BC)."""
+    if not d.get("email_id"):
+        return False
+    others = set()
+    async for x in db.hub_documents.find({"email_id": d["email_id"], "id": {"$ne": d.get("id")}},
+                                         {"_id": 0, "po_number_clean": 1}).limit(20):
+        if x.get("po_number_clean"):
+            others.add(str(x["po_number_clean"]).upper())
+    return bool(others) and await _gamer_po(db, others)
+
+
+async def _is_gamer_po_number(db, pos, cp: Dict[str, Any], d: Dict[str, Any]) -> bool:
+    """The document's "customer PO" is a Gamer purchase order: an open one
+    (cache), or - only from a sender that is also a Gamer supplier (ET
+    Browne's own PO 104475 is an old Gamer PO number too) - a received one
+    or one in the same e-mail as another Gamer PO."""
+    if await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": {"$in": [p for p in pos if p.isdigit() or p.startswith("W")]}}, {"_id": 1}):
+        return True
+    return bool(cp.get("vendor")) and (await _gamer_po(db, pos) or await _thread_has_gamer_po(db, d))
+
+
 async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     ef = d.get("extracted_fields") or {}
     sender_dom = domain(d.get("email_sender"))
@@ -125,8 +168,13 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
 
     # A "customer PO" number that is one of Gamer's own purchase orders (O-I
     # is customer and supplier: "Purchase Order 119900" is Gamer's PO to O-I).
+    # Fully received POs leave BC's open list and the cache (119900/119901,
+    # received 2026-10-09, were drafted as sales orders for blocked OWENSBR):
+    # receipts count too, and so does any PO in the same e-mail.
     if pos and not order:
-        if await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": {"$in": [p for p in pos if p.isdigit() or p.startswith("W")]}}, {"_id": 1}):
+        # Only for a sender that is also a Gamer supplier: ET Browne's own PO
+        # 104475 is an old Gamer PO number too.
+        if await _is_gamer_po_number(db, pos, cp, d):
             gamer_pos |= {p for p in pos}
             pos = set()
     has_lines = bool((ef.get("line_items") or []))
@@ -174,8 +222,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         # PO number is a Gamer purchase order (Gamer's PO to O-I naming the
         # sales order it supplies: ALTECPA 114029), nor when both sides list
         # items and none agree (Daizy's soda cans vs cooking-wine bottles).
-        if pos and await db.bc_reference_cache.find_one(
-                {"bc_entity_type": "purchase_order", "bc_document_no": {"$in": [p for p in pos if p.isdigit() or p.startswith("W")]}}, {"_id": 1}):
+        if pos and await _is_gamer_po_number(db, pos, cp, d):
             # A supplier's paperwork for Gamer's dropship PO: same number as
             # the sales order it supplies, so it stays filed against it.
             role = "supplier"

@@ -104,6 +104,13 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
             codes.append(m.group(1) if m else str(l.get("po_description") or "")[:30])
         return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "items_unknown",
                 "sales_stage_detail": "no Gamer item for " + ", ".join(codes[:4]) + " (new item to set up in BC?)"}
+    # An item BC has blocked (Giovanni's PO still names AA012014, blocked
+    # since 2024): BC refuses the line, so the rep picks today's item.
+    items = [l["item"] for l in lines if l["item"]]
+    blocked = [x["item_no"] async for x in db.bc_catalog_items.find({"item_no": {"$in": items}, "blocked": True}, {"_id": 0, "item_no": 1})] if items else []
+    if blocked:
+        return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "items_unknown",
+                "sales_stage_detail": "item " + ", ".join(blocked[:4]) + " is blocked in BC (replaced by another item?)"}
     # Entered by inside sales under a customer PO written differently: an
     # order for this customer, dated around receipt, with the same items
     # and quantities.

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import api from '../lib/api';
+import { plainBcError } from '../lib/plainText';
 
 // One place on the document page for everything a person can do with the
 // document, grouped by intent (move it along / fix it / remove it), with the
@@ -44,16 +45,6 @@ const SALES_REASON = {
   totals_differ: 'The lines the Hub would draft do not add up to the PO total.',
 };
 
-// BC errors arrive as JSON; keep only BC's message ("Item does not exist.").
-function plainDetail(text) {
-  if (!text) return '';
-  const t = String(text);
-  const m = t.match(/"message"\s*:\s*"([^"]+)/);
-  const code = t.match(/\(([A-Z0-9][A-Z0-9-]{3,})[):]/);   // "(FX60503B: {...}" names the item
-  if (m) return `${code ? 'item ' + code[1] + ': ' : ''}${m[1].replace(/\s*CorrelationId:.*$/i, '').trim()}`;
-  return t.length > 160 ? t.slice(0, 160) + '…' : t;
-}
-
 function advice(doc) {
   const st = doc.ap_stage;
   if (doc.non_transactional || doc.excluded_from_processing) {
@@ -69,7 +60,7 @@ function advice(doc) {
   if (['in_bc', 'paid', 'filed_by_staff', 'file_only', 'no_action', 'container'].includes(st)) return ['Done. It is entered, filed, or needs no action.', 'Nothing to do.', 'muted'];
   if (doc.sales_stage === 'needs_rep') {
     const why = SALES_REASON[doc.sales_stage_reason] || 'A rep needs to look at this.';
-    const detail = plainDetail(doc.sales_stage_detail);
+    const detail = plainBcError(doc.sales_stage_detail);
     return [why + (detail ? ` (${detail})` : ''), 'The assigned rep enters it in BC, or reassign it to the right rep. Remove it if nobody needs to act on it.', 'amber'];
   }
   if (['ready', 'drafted'].includes(doc.sales_stage)) return ['The Hub is drafting this sales order.', 'The rep reviews the draft; nothing else to do.', 'emerald'];

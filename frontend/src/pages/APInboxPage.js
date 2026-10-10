@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,12 +15,18 @@ const STAGES = [
   { key: 'drafted', label: 'Drafted (sandbox)', help: 'The Hub drafted it in the PRE sandbox, a test copy of BC. Not a real invoice: it moves to Entered in BC once AP enters it in Production', tone: 'emerald' },
   { key: 'awaiting_receipt', label: 'Waiting for receipt', help: 'Product invoice that arrived before the goods were received in BC; the Hub drafts it from the receipt once it posts', tone: 'sky' },
   { key: 'ready', label: 'Ready for AP', help: 'Vendor, number, amount and folder known; waiting for AP to enter it in BC', tone: 'emerald' },
-  { key: 'in_bc_check', label: 'Entered in BC, check', help: "Entered in Production BC, but BC's amount or invoice number differs from the document", tone: 'amber' },
+  { key: 'in_bc_check', label: 'Entered in BC, check', help: "Entered in Production BC, but BC's amount or invoice number differs from the document: check which one is right", tone: 'amber' },
   { key: 'in_bc', label: 'Entered in BC', help: 'AP entered it in Production BC; BC is now the record', tone: 'muted' },
   { key: 'paid', label: 'Paid', help: 'BC shows it paid', tone: 'muted' },
   { key: 'filed_by_staff', label: 'Filed by staff', help: 'Staff already filed it in Square9', tone: 'muted' },
   { key: 'file_only', label: 'File only', help: 'Supporting paperwork (BOLs, packing lists, receipts); no AP decision', tone: 'muted' },
   { key: 'no_action', label: 'No action', help: 'Duplicate, companion copy, continuation page, or not an AP document', tone: 'muted' },
+];
+
+const GROUPS = [
+  { title: 'Needs a person', keys: ['needs_staff', 'awaiting_approval', 'on_hold', 'in_bc_check'], cls: 'border-amber-500/30 bg-amber-500/5' },
+  { title: 'The Hub is handling', keys: ['drafted', 'awaiting_receipt', 'ready'], cls: 'border-emerald-500/30 bg-emerald-500/5' },
+  { title: 'Done', keys: ['in_bc', 'paid', 'filed_by_staff', 'file_only', 'no_action'], cls: 'border-border bg-muted/20' },
 ];
 
 const REASONS = {
@@ -62,7 +68,9 @@ function why(doc) {
 }
 
 export default function APInboxPage() {
-  const [stage, setStage] = useState('needs_staff');
+  const navigate = useNavigate();
+  // ?stage=drafted opens that stage (links from Today)
+  const [stage, setStage] = useState(() => new URLSearchParams(window.location.search).get('stage') || 'needs_staff');
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [days, setDays] = useState(30);
@@ -98,8 +106,8 @@ export default function APInboxPage() {
           <div>
             <h1 className="text-2xl font-bold" style={{ fontFamily: 'Chivo, sans-serif' }}>AP Inbox</h1>
             <p className="text-sm text-muted-foreground max-w-3xl">
-              Every AP document is in exactly one stage. Only the first three need a person; everything else is
-              handled, waiting for AP to enter it in Business Central, or already there.
+              Every AP document is in exactly one stage. Only the amber group needs a person; the Hub handles the
+              green group, and the grey group is done. Click a row to open the document and its “What to do” box.
             </p>
             {data?.draft_accuracy?.drafts > 0 && (
               <p className="text-xs text-muted-foreground mt-1" data-testid="ap-draft-accuracy">
@@ -122,20 +130,27 @@ export default function APInboxPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 xl:grid-cols-12 gap-2">
-        {STAGES.map(s => (
-          <button
-            key={s.key}
-            type="button"
-            title={s.help}
-            onClick={() => { setStage(s.key); setPage(0); }}
-            className={`rounded-md border p-2 text-left transition-colors ${
-              stage === s.key ? 'border-primary bg-primary/10' : 'border-border hover:border-foreground/30'}`}
-            data-testid={`ap-stage-${s.key}`}
-          >
-            <div className="text-[11px] text-muted-foreground leading-tight">{s.label}</div>
-            <div className={`text-lg font-semibold ${s.tone === 'amber' && counts[s.key] ? 'text-amber-400' : ''}`}>{counts[s.key] || 0}</div>
-          </button>
+      <div className="grid gap-3 lg:grid-cols-[4fr_3fr_5fr]">
+        {GROUPS.map(g => (
+          <div key={g.title} className={`rounded-lg border p-2 space-y-1.5 ${g.cls}`}>
+            <div className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{g.title}</div>
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${g.keys.length}, minmax(0, 1fr))` }}>
+              {g.keys.map(k => STAGES.find(x => x.key === k)).map(s => (
+                <button
+                  key={s.key}
+                  type="button"
+                  title={s.help}
+                  onClick={() => { setStage(s.key); setPage(0); }}
+                  className={`rounded-md border p-2 text-left transition-colors bg-background/60 ${
+                    stage === s.key ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-foreground/30'}`}
+                  data-testid={`ap-stage-${s.key}`}
+                >
+                  <div className="text-[11px] text-muted-foreground leading-tight">{s.label}</div>
+                  <div className={`text-lg font-semibold ${s.tone === 'amber' && counts[s.key] ? 'text-amber-400' : ''}`}>{counts[s.key] || 0}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 
@@ -191,7 +206,8 @@ export default function APInboxPage() {
                 </thead>
                 <tbody>
                   {data.items.map(doc => (
-                    <tr key={doc.id} className="border-b last:border-0 align-top hover:bg-muted/30">
+                    <tr key={doc.id} className="border-b last:border-0 align-top hover:bg-muted/40 cursor-pointer"
+                      onClick={event => { if (!event.target.closest('a')) navigate(`/documents/${encodeURIComponent(doc.id)}`); }}>
                       <td className="py-1.5 pr-3 whitespace-nowrap">{(doc.created_utc || '').slice(0, 10)}</td>
                       <td className="py-1.5 pr-3">{doc.vendor_canonical || doc.vendor_raw || '—'}</td>
                       <td className="py-1.5 pr-3 font-mono text-xs">{doc.invoice_number_clean || '—'}
@@ -201,7 +217,7 @@ export default function APInboxPage() {
                       <td className="py-1.5 pr-3 font-mono text-xs">{doc.po_number_clean || '—'}</td>
                       <td className="py-1.5 pr-3 text-xs">{doc.suggested_folder || '—'}</td>
                       <td className="py-1.5 pr-3 text-xs">
-                        <Badge variant="outline" className={TONE[current?.tone || 'muted']}>{why(doc) || current?.label}</Badge>
+                        <Badge variant="outline" className={TONE[current?.tone || 'muted']} title={doc.draft_problem || doc.routing_reason || undefined}>{why(doc) || current?.label}</Badge>
                       </td>
                       <td className="py-1.5 pr-3 text-xs">
                         <Link className="hover:underline" to={`/documents/${encodeURIComponent(doc.id)}`}>{doc.file_name}</Link>

@@ -116,11 +116,12 @@ export default function TodayPage() {
             <Tile to="/decision-queue" icon={ClipboardList} label="Needs staff" value={c.needs_staff} tone={c.needs_staff ? 'amber' : 'muted'} help="A person must decide; the reason is on each one" />
             <Tile to="/ap-workflow" icon={CheckCircle2} label="Awaiting approval" value={c.awaiting_approval} tone={c.awaiting_approval ? 'sky' : 'muted'} help="Waiting for a named approver" />
             <Tile to="/ap-workflow" icon={PauseCircle} label="On hold" value={c.on_hold} tone={c.on_hold ? 'sky' : 'muted'} help="Held by staff with a reason" />
+            <Tile to="/ap?stage=in_bc_check" icon={ClipboardList} label="Entered in BC, check" value={c.in_bc_check} tone={c.in_bc_check ? 'amber' : 'muted'} help="BC's amount or invoice number differs from the document" />
           </Sub>
           <Sub title="Handled by the Hub">
-            <Tile to="/ap" label="Drafted (sandbox)" value={c.drafted} tone="emerald" help="Purchase invoices drafted in the PRE sandbox" />
-            <Tile to="/ap" label="Waiting for receipt" value={c.awaiting_receipt} help="Drafted once the goods are received in BC" />
-            <Tile to="/ap" label="Entered in BC" value={c.in_bc} help="Entered by AP; linked to the BC invoice" />
+            <Tile to="/ap?stage=drafted" label="Drafted (sandbox)" value={c.drafted} tone="emerald" help="Purchase invoices drafted in the PRE sandbox" />
+            <Tile to="/ap?stage=awaiting_receipt" label="Waiting for receipt" value={c.awaiting_receipt} help="Drafted once the goods are received in BC" />
+            <Tile to="/ap?stage=in_bc" label="Entered in BC" value={c.in_bc} help="Entered by AP; linked to the BC invoice" />
           </Sub>
           <Accuracy title="Hub drafts vs what AP entered">
             {apAcc.drafts ? (
@@ -143,13 +144,13 @@ export default function TodayPage() {
             {mine ? (
               <Tile to="/sales" icon={UserRound} label="My queue" value={(mine.stages?.needs_rep || 0) + (mine.stages?.ready || 0) + (mine.stages?.drafted || 0)} tone="sky" help="Your customers' POs: needing you, ready, or drafted" />
             ) : (
-              <Tile to="/sales" icon={CheckCircle2} label="Drafts to review" value={st.drafted} tone={st.drafted ? 'sky' : 'muted'} help="Sales orders drafted in the sandbox for reps" />
+              <Tile to="/sales?stage=drafted" icon={CheckCircle2} label="Drafts to review" value={st.drafted} tone={st.drafted ? 'sky' : 'muted'} help="Sales orders drafted in the sandbox for reps" />
             )}
           </Sub>
           <Sub title="Handled by the Hub">
-            <Tile to="/sales" label="Drafted (sandbox)" value={st.drafted} tone="emerald" help="Sales orders drafted in the PRE sandbox" />
-            <Tile to="/sales" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within the hour" />
-            <Tile to="/sales" label="Entered in BC" value={st.in_bc} help="Already on a Production sales order" />
+            <Tile to="/sales?stage=drafted" label="Drafted (sandbox)" value={st.drafted} tone="emerald" help="Sales orders drafted in the PRE sandbox" />
+            <Tile to="/sales?stage=ready" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within the hour" />
+            <Tile to="/sales?stage=in_bc" label="Entered in BC" value={st.in_bc} help="Already on a Production sales order" />
           </Sub>
           <Accuracy title="Hub drafts vs what inside sales entered">
             {sAcc.orders ? (

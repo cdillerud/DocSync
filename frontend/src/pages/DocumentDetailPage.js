@@ -709,16 +709,26 @@ export default function DocumentDetailPage() {
           <Card className="border border-border" data-testid="doc-info-card">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground" style={{ fontFamily: 'Chivo, sans-serif' }}>
-                Document Info
+                Where it came from
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              <InfoRow label="Source" value={doc.source} />
-              <InfoRow label="Content Type" value={doc.content_type} mono />
-              <InfoRow label="File Size" value={doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : '-'} />
-              <InfoRow label="SHA-256" value={doc.sha256_hash?.slice(0, 16) + '...'} mono copyable={doc.sha256_hash} onCopy={copyToClipboard} />
-              <InfoRow label="Created" value={formatDate(doc.created_utc)} mono />
-              <InfoRow label="Updated" value={formatDate(doc.updated_utc)} mono />
+              <InfoRow label="Received" value={formatDate(doc.created_utc)} mono />
+              <InfoRow label="From" value={doc.email_sender || doc.sender || doc.source} />
+              {doc.email_subject && <InfoRow label="Subject" value={doc.email_subject} />}
+              {/* Technical rows folded away: staff never need them (2026-10-10) */}
+              <details className="text-xs">
+                <summary className="cursor-pointer select-none text-muted-foreground">Technical details</summary>
+                <div className="mt-2 space-y-2">
+                  <InfoRow label="Source" value={doc.source} />
+                  <InfoRow label="Content Type" value={doc.content_type} mono />
+                  <InfoRow label="File Size" value={doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : '-'} />
+                  <InfoRow label="SHA-256" value={doc.sha256_hash?.slice(0, 16) + '...'} mono copyable={doc.sha256_hash} onCopy={copyToClipboard} />
+                  <InfoRow label="Updated" value={formatDate(doc.updated_utc)} mono />
+                  <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
+                  <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
+                </div>
+              </details>
             </CardContent>
           </Card>
 
@@ -833,8 +843,6 @@ export default function DocumentDetailPage() {
                   <span>Filed & cleared</span>
                 </div>
               )}
-              <InfoRow label="Drive ID" value={doc.sharepoint_drive_id ? doc.sharepoint_drive_id.slice(0, 16) + '...' : '-'} mono />
-              <InfoRow label="Item ID" value={doc.sharepoint_item_id ? doc.sharepoint_item_id.slice(0, 12) + '...' : '-'} mono />
               {doc.sharepoint_share_link_url && (
                 <div>
                   <p className="text-xs text-muted-foreground mb-1">Share Link</p>

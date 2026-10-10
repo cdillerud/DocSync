@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ShoppingCart, Loader2, ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import api from '@/lib/api';
+import { plainBcError } from '@/lib/plainText';
 
 // One stage per sales-mailbox document (sales_stage_service). BC is the
 // ground truth: a customer PO is "Entered in BC" once inside sales' Production order carries it.
@@ -18,6 +19,11 @@ const STAGES = [
   { key: 'purchasing', label: 'Purchasing', help: "A supplier's document about a Gamer purchase order", tone: 'muted' },
   { key: 'to_ap', label: 'To AP', help: 'An AP invoice that came to sales', tone: 'muted' },
   { key: 'filed', label: 'Filed', help: "Gamer's own order copies, AR invoices and other customer mail: evidence, not work", tone: 'muted' },
+];
+const GROUPS = [
+  { title: 'Needs a person', keys: ['needs_rep'], cls: 'border-amber-500/30 bg-amber-500/5' },
+  { title: 'The Hub is handling', keys: ['ready', 'drafted'], cls: 'border-emerald-500/30 bg-emerald-500/5' },
+  { title: 'Done, or not sales work', keys: ['in_bc', 'duplicate', 'purchasing', 'to_ap', 'filed'], cls: 'border-border bg-muted/20' },
 ];
 const TONE = {
   amber: 'border-amber-500/40 bg-amber-500/10',
@@ -73,7 +79,8 @@ function Lines({ resolution }) {
 
 export default function SalesInboxPage() {
   const [summary, setSummary] = useState(null);
-  const [stage, setStage] = useState('needs_rep');
+  // ?stage=drafted opens that stage (links from Today)
+  const [stage, setStage] = useState(() => new URLSearchParams(window.location.search).get('stage') || 'needs_rep');
   const [q, setQ] = useState('');
   const [data, setData] = useState(null);
   const [open, setOpen] = useState({});
@@ -155,13 +162,20 @@ export default function SalesInboxPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-        {STAGES.map(s => (
-          <button key={s.key} type="button" onClick={() => setStage(s.key)} title={s.help}
-            className={`rounded-lg border px-3 py-2 text-left transition-colors ${TONE[s.tone]} ${stage === s.key ? 'ring-2 ring-primary' : 'hover:bg-muted'}`}>
-            <div className="text-xs text-muted-foreground">{s.label}</div>
-            <div className="text-xl font-semibold tabular-nums">{summary?.stages?.[s.key] ?? '—'}</div>
-          </button>
+      <div className="grid gap-3 lg:grid-cols-[1fr_2fr_5fr]">
+        {GROUPS.map(g => (
+          <div key={g.title} className={`rounded-lg border p-2 space-y-1.5 ${g.cls}`}>
+            <div className="px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{g.title}</div>
+            <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${g.keys.length}, minmax(0, 1fr))` }}>
+              {g.keys.map(k => STAGES.find(x => x.key === k)).map(s => (
+                <button key={s.key} type="button" onClick={() => setStage(s.key)} title={s.help}
+                  className={`rounded-md border px-3 py-2 text-left transition-colors bg-background/60 ${stage === s.key ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-foreground/30'}`}>
+                  <div className="text-xs text-muted-foreground">{s.label}</div>
+                  <div className={`text-xl font-semibold tabular-nums ${s.tone === 'amber' && summary?.stages?.[s.key] ? 'text-amber-400' : ''}`}>{summary?.stages?.[s.key] ?? '—'}</div>
+                </button>
+              ))}
+            </div>
+          </div>
         ))}
       </div>
 
@@ -211,7 +225,7 @@ export default function SalesInboxPage() {
                           {r.stage === 'drafted' && r.draft && <>Sandbox draft <b className="font-mono">{r.draft.bc_order_no}</b> (PRE) · {money(r.draft.total)} · <span className="text-muted-foreground">not a real order</span>
                             {r.draft.to_complete?.length > 0 && <div className="text-amber-700 dark:text-amber-400">Rep to add: {r.draft.to_complete.map(t => t.item).join(', ')}</div>}
                             {r.readback?.edits?.length > 0 && <div className="text-muted-foreground">Rep changed: {r.readback.edits.slice(0, 3).join('; ')}</div>}</>}
-                          {r.stage === 'needs_rep' && <span className="text-amber-700 dark:text-amber-400">{r.reason_text}{r.detail ? ` (${r.detail})` : ''}</span>}
+                          {r.stage === 'needs_rep' && <span className="text-amber-700 dark:text-amber-400">{r.reason_text}{r.detail ? ` (${plainBcError(r.detail)})` : ''}</span>}
                           {r.stage === 'duplicate' && <>Copy of <Link className="underline" to={`/documents/${r.duplicate_of}`} onClick={e => e.stopPropagation()}>another document</Link></>}
                           {['filed', 'purchasing', 'to_ap', 'ready'].includes(r.stage) && <span className="text-muted-foreground">{(r.role || '').replace(/_/g, ' ')}</span>}
                         </td>

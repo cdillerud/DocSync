@@ -55,6 +55,14 @@ page 71126 "GPI Comm Product API"
                 field(priceChangeNote; Rec."Price Change Note") { Caption = 'Price Change Note'; }
                 field(drawingFileName; Rec."Drawing File Name") { Caption = 'Drawing File Name'; }
                 field(blocked; Rec.Blocked) { Caption = 'Blocked'; }
+                field(incoterm; Rec.Incoterm) { Caption = 'Incoterm'; }
+                field(incotermLocation; Rec."Incoterm Location") { Caption = 'Incoterm Location'; }
+                field(tradeScope; Rec."Trade Scope") { Caption = 'Trade Scope'; }
+                field(moq; Rec.MOQ) { Caption = 'MOQ'; }
+                field(moqQuantity; Rec."MOQ Quantity") { Caption = 'MOQ Quantity'; }
+                field(tariffPerUnit; Rec."Tariff per Unit") { Caption = 'Tariff per Unit'; }
+                field(drawingUrl; Rec."Drawing URL") { Caption = 'Drawing URL'; }
+                field(supplierName; Rec."Supplier Name") { Caption = 'Supplier Name'; }
             }
         }
     }

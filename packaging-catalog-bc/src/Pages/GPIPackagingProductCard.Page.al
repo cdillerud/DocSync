@@ -155,6 +155,30 @@ page 71000 "GPI Pack Prod Card"
                 {
                     ApplicationArea = All;
                 }
+                field(Incoterm; Rec.Incoterm)
+                {
+                    ApplicationArea = All;
+                }
+                field("Incoterm Location"; Rec."Incoterm Location")
+                {
+                    ApplicationArea = All;
+                }
+                field("Trade Scope"; Rec."Trade Scope")
+                {
+                    ApplicationArea = All;
+                }
+                field(MOQ; Rec.MOQ)
+                {
+                    ApplicationArea = All;
+                }
+                field("MOQ Quantity"; Rec."MOQ Quantity")
+                {
+                    ApplicationArea = All;
+                }
+                field("Supplier Name"; Rec."Supplier Name")
+                {
+                    ApplicationArea = All;
+                }
             }
             group(Pricing)
             {
@@ -175,6 +199,10 @@ page 71000 "GPI Pack Prod Card"
                 {
                     ApplicationArea = All;
                 }
+                field("Tariff per Unit"; Rec."Tariff per Unit")
+                {
+                    ApplicationArea = All;
+                }
             }
             group(Documents)
             {
@@ -187,6 +215,10 @@ page 71000 "GPI Pack Prod Card"
                     ApplicationArea = All;
                 }
                 field("Drawing File Name"; Rec."Drawing File Name")
+                {
+                    ApplicationArea = All;
+                }
+                field("Drawing URL"; Rec."Drawing URL")
                 {
                     ApplicationArea = All;
                 }

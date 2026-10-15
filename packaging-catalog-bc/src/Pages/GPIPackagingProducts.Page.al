@@ -108,6 +108,31 @@ page 71001 "GPI Pack Products"
                     Visible = ShowExtendedColumns;
                     ToolTip = 'Shows whether the linked Business Central item is currently blocked.';
                 }
+                field(Incoterm; Rec.Incoterm)
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Incoterm Location"; Rec."Incoterm Location")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Trade Scope"; Rec."Trade Scope")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field(MOQ; Rec.MOQ)
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
+                field("Supplier Name"; Rec."Supplier Name")
+                {
+                    ApplicationArea = All;
+                    Visible = ShowExtendedColumns;
+                }
                 field(Blocked; Rec.Blocked)
                 {
                     ApplicationArea = All;

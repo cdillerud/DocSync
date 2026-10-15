@@ -208,6 +208,50 @@ table 71000 "GPI Pack Product"
         {
             Caption = 'Blocked';
         }
+        // RFQ Masterbook columns with no earlier home in the catalog (0.49.0.0).
+        field(80; Incoterm; Code[10])
+        {
+            Caption = 'Incoterm';
+            ToolTip = 'Specifies the supplier Incoterm for this option, such as EXW, FOB or CIF.';
+        }
+        field(81; "Incoterm Location"; Text[100])
+        {
+            Caption = 'Incoterm Location';
+            ToolTip = 'Specifies the named place for the Incoterm as the supplier quotes it, such as Busan or Winchester, IN or Muncie, IN.';
+        }
+        field(82; "Trade Scope"; Enum "GPI Pack Trade Scope")
+        {
+            Caption = 'Domestic / International';
+            ToolTip = 'Specifies whether the option is sourced domestically or imported, as the RFQ Masterbook classifies it.';
+        }
+        field(83; MOQ; Text[50])
+        {
+            Caption = 'MOQ';
+            ToolTip = 'Specifies the supplier minimum order as quoted, such as 300,000, 1 container or Made to Order.';
+        }
+        field(84; "MOQ Quantity"; Decimal)
+        {
+            Caption = 'MOQ Quantity';
+            DecimalPlaces = 0 : 5;
+            ToolTip = 'Specifies the minimum order quantity in units when the supplier quotes a number.';
+        }
+        field(85; "Tariff per Unit"; Decimal)
+        {
+            Caption = 'Tariff per Unit';
+            AutoFormatType = 2;
+            ToolTip = 'Specifies the tariff amount per unit from the RFQ Masterbook. Reference only: landed-cost calculations do not use it.';
+        }
+        field(86; "Drawing URL"; Text[2048])
+        {
+            Caption = 'Drawing URL';
+            ExtendedDatatype = URL;
+            ToolTip = 'Specifies a link to the product drawing, such as a SharePoint PDF.';
+        }
+        field(87; "Supplier Name"; Text[100])
+        {
+            Caption = 'Supplier Name';
+            ToolTip = 'Specifies the supplier name as quoted. Used when the supplier is not yet set up as a Business Central vendor.';
+        }
     }
 
     keys

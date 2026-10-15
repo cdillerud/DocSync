@@ -74,27 +74,33 @@ Then rerun this build script.
 }
 
 if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
-    $ExtensionsRoot = Join-Path $env:USERPROFILE '.vscode\extensions'
-    if (-not (Test-Path -LiteralPath $ExtensionsRoot -PathType Container)) {
-        throw "VS Code extensions folder was not found: $ExtensionsRoot"
+    # VS Code (stable and Insiders) AL Language extensions. Older builds ship bin\win32\alc.exe; newer
+    # builds may ship the compiler elsewhere under bin, or only as alc.dll (run with dotnet).
+    $ExtensionsRoots = @(
+        (Join-Path $env:USERPROFILE '.vscode\extensions'),
+        (Join-Path $env:USERPROFILE '.vscode-insiders\extensions')
+    ) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+    if (-not $ExtensionsRoots) {
+        throw "No VS Code extensions folder was found under $env:USERPROFILE (.vscode or .vscode-insiders)."
     }
 
-    $CompilerCandidates = @(
-        Get-ChildItem -LiteralPath $ExtensionsRoot -Directory -Filter 'ms-dynamics-smb.al-*' -ErrorAction SilentlyContinue |
-            ForEach-Object {
-                $Candidate = Join-Path $_.FullName 'bin\win32\alc.exe'
-                if (Test-Path -LiteralPath $Candidate -PathType Leaf) {
-                    Get-Item -LiteralPath $Candidate
-                }
-            } |
-            Sort-Object LastWriteTime -Descending
+    $AlExtensions = @(
+        $ExtensionsRoots | ForEach-Object {
+            Get-ChildItem -LiteralPath $_ -Directory -Filter 'ms-dynamics-smb.al-*' -ErrorAction SilentlyContinue
+        } | Sort-Object LastWriteTime -Descending
     )
-
-    if ($CompilerCandidates.Count -eq 0) {
-        throw 'No AL compiler was found under the installed VS Code AL Language extensions.'
+    foreach ($Extension in $AlExtensions) {
+        $Found = @(Get-ChildItem -LiteralPath (Join-Path $Extension.FullName 'bin') -Recurse -File -Include 'alc.exe' -ErrorAction SilentlyContinue |
+            Sort-Object { if ($_.FullName -match '\\win32\\') { 0 } else { 1 } })
+        if ($Found.Count -gt 0) { $CompilerPath = $Found[0].FullName; break }
+        $Dll = @(Get-ChildItem -LiteralPath (Join-Path $Extension.FullName 'bin') -Recurse -File -Include 'alc.dll' -ErrorAction SilentlyContinue)
+        if ($Dll.Count -gt 0) { $CompilerPath = $Dll[0].FullName; break }
     }
 
-    $CompilerPath = $CompilerCandidates[0].FullName
+    if ([string]::IsNullOrWhiteSpace($CompilerPath)) {
+        $Seen = ($AlExtensions | ForEach-Object { $_.Name }) -join ', '
+        throw "No AL compiler (alc.exe or alc.dll) was found. AL Language extensions seen: $(if ($Seen) { $Seen } else { 'none' }). Install or update the AL Language extension in VS Code, or pass -CompilerPath."
+    }
 }
 
 $CompilerPath = [System.IO.Path]::GetFullPath($CompilerPath)
@@ -128,7 +134,12 @@ $PackageArg = "/packagecachepath:$PackageCachePath"
 $OutputArg = "/out:$OutputPath"
 $GenerateReportLayoutArg = '/GenerateReportLayout-'
 
-& $CompilerPath $ProjectArg $PackageArg $OutputArg $GenerateReportLayoutArg
+if ([System.IO.Path]::GetExtension($CompilerPath) -eq '.dll') {
+    & dotnet $CompilerPath $ProjectArg $PackageArg $OutputArg $GenerateReportLayoutArg
+}
+else {
+    & $CompilerPath $ProjectArg $PackageArg $OutputArg $GenerateReportLayoutArg
+}
 $CompilerExitCode = $LASTEXITCODE
 
 if ($CompilerExitCode -ne 0) {

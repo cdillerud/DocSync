@@ -1027,9 +1027,16 @@ def _determine_folder_path_core(
 # HELPER FUNCTIONS
 # =============================================================================
 
+_CANPACK_VENDOR_CODES = {"canpusa", "canpack"}
+
+
 def _is_canpack_vendor(vendor_name: str) -> bool:
-    """Check if the vendor is Canpack (overrides other routing)."""
-    return "canpack" in vendor_name.lower()
+    """Check if the vendor is Canpack (overrides other routing). Routing passes
+    vendor_canonical first, and CanPack US's BC code is CANPUSA, which the old
+    "canpack" substring check never matched (replay of 3,012 staff filings on
+    2026-10-20: 9 fixed, 0 broken)."""
+    v = (vendor_name or "").strip().lower()
+    return v in _CANPACK_VENDOR_CODES or bool(re.search(r"can[\s\-]?pack", v))
 
 
 

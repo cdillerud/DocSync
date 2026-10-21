@@ -64,11 +64,7 @@ codeunit 71010 "GPI Catalog Sync"
         Vendor: Record Vendor;
         Cost: Decimal;
     begin
-        if Item.Type <> Item.Type::Inventory then
-            exit(false);
-        if Item.Blocked or (DelChr(Item.Description, '<>', ' ') = '') then
-            exit(false);
-        if not InCategories(Item."Item Category Code", Setup."Item Category Filter") then
+        if not Qualifies(Item, Setup) then
             exit(false);
         Product.SetRange("BC Item No.", Item."No.");
         if not Product.IsEmpty() then
@@ -85,13 +81,74 @@ codeunit 71010 "GPI Catalog Sync"
         if Item."Vendor Item No." <> '' then
             Product."Supplier Mold No." := CopyStr(Item."Vendor Item No.", 1, MaxStrLen(Product."Supplier Mold No."));
         ReadDescription(Item.Description, Product);
-        Cost := Item."Last Direct Cost";
-        if Cost = 0 then
-            Cost := Item."Unit Cost";
+        Cost := ItemCost(Item);
         Product."Current Supplier Unit Cost" := Cost;
         Product."Price Effective Date" := Today();
         Product."Price Change Note" := CopyStr(StrSubstNo('Added automatically from BC item %1 (cost = last direct cost)', Format(Today(), 0, 9)), 1, MaxStrLen(Product."Price Change Note"));
         exit(Product.Insert(true));
+    end;
+
+    procedure Qualifies(var Item: Record Item; Setup: Record "GPI Cat Sync Setup"): Boolean
+    var
+        Upper: Text;
+        Word: Text;
+    begin
+        // Something the sales team sources: an inventory item in a packaging category, with a description and a cost,
+        // that isn't a fee, a charge or a quality/sample record.
+        if Item.Type <> Item.Type::Inventory then
+            exit(false);
+        if Item.Blocked or (DelChr(Item.Description, '<>', ' ') = '') then
+            exit(false);
+        if not InCategories(Item."Item Category Code", Setup."Item Category Filter") then
+            exit(false);
+        if ItemCost(Item) = 0 then
+            exit(false);
+        Upper := ' ' + UpperCase(Item.Description) + ' ' + UpperCase(Item."No.") + ' ';
+        foreach Word in NotProductWords() do
+            if StrPos(Upper, Word) > 0 then
+                exit(false);
+        exit(true);
+    end;
+
+    local procedure NotProductWords(): List of [Text]
+    var
+        Words: List of [Text];
+    begin
+        Words.Add('CHARGE');
+        Words.Add('SET UP');
+        Words.Add('SETUP');
+        Words.Add('FREIGHT');
+        Words.Add('SURCHARGE');
+        Words.Add(' FEE');
+        Words.Add('TOOLING');
+        Words.Add('DEPOSIT');
+        Words.Add('QUALITY');
+        Words.Add('SAMPLE');
+        exit(Words);
+    end;
+
+    local procedure ItemCost(var Item: Record Item): Decimal
+    begin
+        if Item."Last Direct Cost" <> 0 then
+            exit(Item."Last Direct Cost");
+        exit(Item."Unit Cost");
+    end;
+
+    procedure RedoAutoAdded(var Removed: Integer; var Added: Integer; var BlockedChanged: Integer)
+    var
+        Product: Record "GPI Pack Product";
+    begin
+        // Removes the catalog products this sync added that nobody has edited since, then adds them again under the
+        // current rules (categories, what counts as a product, how descriptions are read). Edited rows are kept.
+        Removed := 0;
+        Product.SetFilter("Price Change Note", 'Added automatically from BC item*');
+        if Product.FindSet(true) then
+            repeat
+                if Product.SystemModifiedAt <= Product.SystemCreatedAt + 1000 then
+                    if Product.Delete(true) then
+                        Removed += 1;
+            until Product.Next() = 0;
+        SyncAllItems(Added, BlockedChanged);
     end;
 
     local procedure MirrorBlocked(var Item: Record Item): Integer
@@ -156,7 +213,7 @@ codeunit 71010 "GPI Catalog Sync"
         Product."Finish Type" := CopyStr(DelChr(Parts.Get(3), '<>', ' '), 1, MaxStrLen(Product."Finish Type"));
         Token := DelChr(Parts.Get(4), '<>', ' ');
         SetColor(Product, Token, UpperCase(Token));
-        Product.Material := CopyStr(UpperCase(DelChr(Parts.Get(5), '<>', ' ')), 1, MaxStrLen(Product.Material));
+        SetMaterial(Product, UpperCase(DelChr(Parts.Get(5), '<>', ' ')));
         for i := 6 to Parts.Count() do begin
             Token := DelChr(Parts.Get(i), '<>', ' ');
             Upper := UpperCase(Token);
@@ -188,6 +245,7 @@ codeunit 71010 "GPI Catalog Sync"
         Upper: Text;
         StyleText: Text;
         IsSize: Boolean;
+        StyleDone: Boolean;
     begin
         // AL evaluates both sides of "and", so checks with side effects or indexing are nested, never combined.
         Parts := Description.Split(',');
@@ -209,15 +267,31 @@ codeunit 71010 "GPI Catalog Sync"
                                 SetColor(Product, Token, Upper)
                             else
                                 if (Product.Material = '') and IsMaterial(Upper) then
-                                    Product.Material := CopyStr(Upper, 1, MaxStrLen(Product.Material))
+                                    SetMaterial(Product, Upper)
                                 else
                                     if IsPackout(Upper) then
                                         AddPackout(Product, Token)
                                     else
-                                        if not IsCategoryWord(Upper) then
-                                            AddStyle(StyleText, Token, MaxStrLen(Product.Style));
+                                        if IsCategoryWord(Upper) then
+                                            StyleDone := true
+                                        else
+                                            if not StyleDone and not IsNoiseWord(Upper) then
+                                                AddStyle(StyleText, Token, MaxStrLen(Product.Style));
         end;
         Product.Style := CopyStr(StyleText, 1, MaxStrLen(Product.Style));
+    end;
+
+    local procedure IsNoiseWord(Upper: Text): Boolean
+    begin
+        // Liner, coating and compliance codes on can descriptions, not part of the style.
+        exit(Upper in ['BPANI', 'PFASNI', 'RETORT', 'STD', 'PRINTED', 'DIGITALLY PRINTED', 'BRITE']);
+    end;
+
+    local procedure SetMaterial(var Product: Record "GPI Pack Product"; Upper: Text)
+    begin
+        if Upper in ['ALUM', 'ALUMINIUM'] then
+            Upper := 'ALUMINUM';
+        Product.Material := CopyStr(Upper, 1, MaxStrLen(Product.Material));
     end;
 
     local procedure SetColor(var Product: Record "GPI Pack Product"; Token: Text; Upper: Text)
@@ -261,13 +335,15 @@ codeunit 71010 "GPI Catalog Sync"
             exit(false);
         NumberText := CopyStr(Token, 1, i - 1);
         UnitText := UpperCase(DelChr(CopyStr(Token, i), '<>', ' .'));
-        if not (UnitText in ['OZ', 'ML', 'L', 'LTR', 'CC', 'GAL', 'DRAM', 'G', 'LB']) then
+        if not (UnitText in ['OZ', 'ML', 'L', 'LTR', 'CC', 'GAL', 'GALLON', 'DRAM']) then
             exit(false);
         if not Evaluate(Value, NumberText, 9) then
             exit(false);
         Product.Capacity := Value;
         if UnitText = 'LTR' then
             UnitText := 'L';
+        if UnitText = 'GALLON' then
+            UnitText := 'GAL';
         Product."Capacity UOM" := CopyStr(UnitText, 1, MaxStrLen(Product."Capacity UOM"));
         exit(true);
     end;
@@ -297,9 +373,13 @@ codeunit 71010 "GPI Catalog Sync"
     var
         Dash: Integer;
     begin
-        // "82-2040", "38-400", "28-3500", "70G-450", "24MM", "18-605-405"
+        // "82-2040", "38-400", "28-3500", "70G-450", "24MM", "18-605-405"; can diameters "202", "206"
         if not IsDigitAt(Upper, 1) then
             exit(false);
+        if (StrLen(Upper) > 15) or (StrPos(Upper, ' ') > 0) then
+            exit(false);
+        if (StrLen(Upper) = 3) and (CopyStr(Upper, 1, 2) in ['20', '21']) and IsDigitAt(Upper, 3) then
+            exit(true);
         if EndsWith(Upper, 'MM') then
             exit(true);
         Dash := StrPos(Upper, '-');
@@ -323,7 +403,8 @@ codeunit 71010 "GPI Catalog Sync"
 
     local procedure IsMaterial(Upper: Text): Boolean
     begin
-        exit(Upper in ['GLASS', 'PET', 'HDPE', 'LDPE', 'PP', 'PVC', 'ALUMINUM', 'TIN', 'TFS', 'METAL', 'PAPERBOARD', 'PLASTIC']);
+        exit(Upper in ['GLASS', 'PET', 'HDPE', 'LDPE', 'PP', 'PVC', 'ALUMINUM', 'ALUM', 'ALUMINIUM', 'TIN', 'TFS', 'METAL',
+                       'PAPERBOARD', 'PLASTIC']);
     end;
 
     local procedure IsPackout(Upper: Text): Boolean

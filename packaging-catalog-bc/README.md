@@ -217,7 +217,9 @@ Keeps the Packaging Catalog in step with items, so an item entered without a cat
 
 - **GPI Catalog Sync Setup** (search for it): turn on *Add New Items to the Catalog* (off by default) and
   *Block Catalog Rows with Their Item* (on by default), and list the packaging item categories
-  (`BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX|OTHER`; PALLET is left out on purpose).
+  (`BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX`; PALLET and OTHER are left out on purpose: OTHER holds
+  slip sheets, bags, fees and customer components). Fees, charges, quality and sample items and items with no cost are
+  never added.
 - When someone saves an item in one of those categories with a description, a catalog product is added:
   Gamer ID and BC Item No. = the item number; vendor and vendor item no. from the item; cost = last direct
   cost (unit cost when there is none); size, finish, finish type, color, material, style and packout read
@@ -225,6 +227,8 @@ Keeps the Packaging Catalog in step with items, so an item entered without a cat
 - Blocking or unblocking an item does the same to its catalog products.
 - **Sync All Items** on the setup page adds every packaging item still missing and matches blocked flags,
   once, for items entered before this version.
+- **Redo Automatic Additions** (0.50.1.0) removes the products the sync added that nobody has edited since and adds
+  them again under the current settings, for use after changing the categories or the description rules.
 - Existing catalog values are never overwritten, and nothing here can stop an item from being saved (only
   edits people make trigger it; cost adjustment and posting do not).
 

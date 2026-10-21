@@ -25,8 +25,8 @@ table 71015 "GPI Cat Sync Setup"
         field(12; "Item Category Filter"; Text[250])
         {
             Caption = 'Packaging Item Categories';
-            ToolTip = 'Specifies the item categories that belong in the Packaging Catalog, separated by |. Items in other categories, such as PALLET, are never added.';
-            InitValue = 'BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX|OTHER';
+            ToolTip = 'Specifies the item categories that belong in the Packaging Catalog, separated by |. Items in other categories, such as PALLET and OTHER, are never added. Fees, charges, quality and sample items and items with no cost are never added either.';
+            InitValue = 'BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX';
         }
         field(20; "Last Sync Run"; DateTime)
         {

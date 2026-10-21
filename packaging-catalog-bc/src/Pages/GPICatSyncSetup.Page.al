@@ -74,6 +74,27 @@ page 71033 "GPI Cat Sync Setup"
                     Message('%1 products added to the catalog. %2 blocked flags matched to their items.', Added, BlockedChanged);
                 end;
             }
+            action(RedoAuto)
+            {
+                ApplicationArea = All;
+                Caption = 'Redo Automatic Additions';
+                Image = Restore;
+                ToolTip = 'Removes the catalog products this sync added that nobody has edited since, and adds them again under the current settings. Use it after changing the categories. Edited products are kept.';
+
+                trigger OnAction()
+                var
+                    Sync: Codeunit "GPI Catalog Sync";
+                    Removed: Integer;
+                    Added: Integer;
+                    BlockedChanged: Integer;
+                begin
+                    if not Confirm('Remove the automatically added catalog products nobody has edited, and add them again under the current settings?', false) then
+                        exit;
+                    Sync.RedoAutoAdded(Removed, Added, BlockedChanged);
+                    CurrPage.Update(false);
+                    Message('%1 automatic additions removed, %2 products added under the current settings.', Removed, Added);
+                end;
+            }
             action(OpenCatalog)
             {
                 ApplicationArea = All;
@@ -86,6 +107,9 @@ page 71033 "GPI Cat Sync Setup"
         area(Promoted)
         {
             actionref(SyncAll_Promoted; SyncAll)
+            {
+            }
+            actionref(RedoAuto_Promoted; RedoAuto)
             {
             }
         }

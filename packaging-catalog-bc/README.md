@@ -232,6 +232,25 @@ Keeps the Packaging Catalog in step with items, so an item entered without a cat
 - Existing catalog values are never overwritten, and nothing here can stop an item from being saved (only
   edits people make trigger it; cost adjustment and posting do not).
 
+## 0.50.2.0: optional reverse sync (catalog to item list)
+
+For catalog products that arrive before their BC item (a supplier quote or price list imported into the catalog).
+Off by default.
+
+- **GPI Catalog Sync Setup**: turn on *Create Items for New Catalog Products*. Optionally set a *Model Item No.*
+  to copy from when no similar item is in the catalog.
+- When it is on, a catalog product with no BC item that has a vendor, material, style and a size or finish gets an
+  item a few minutes after it is saved (a background task, so imports and edits are never slowed or failed by it,
+  and edits made in those minutes are included). The product is then linked to the item.
+- Item number = the catalog number. If an item with that number already exists for the same vendor (or no vendor),
+  it is linked instead; for another vendor nothing is done.
+- Description written the usual way (`16oz, 28-410, CT, Clear, PET, Bell Round, Bottle`); vendor and vendor item no.
+  (supplier mold no.) from the catalog; item category, base unit of measure, posting groups, costing method and
+  replenishment from the most similar catalog product that has an item (same vendor, material and style first).
+- No cost is written to the item: catalog prices never go to the item card.
+- **Create Items for Catalog Products** on the setup page does the same at once for every product already waiting,
+  and reports what it created, linked and couldn't do. It works whether or not the switch is on.
+
 The Commercial AI service also checks every night (read-only) for packaging items missing from the catalog
 and blocked mismatches, and sends anything it finds through the same review email as supplier lists.
 

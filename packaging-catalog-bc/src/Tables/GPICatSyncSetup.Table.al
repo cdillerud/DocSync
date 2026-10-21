@@ -28,6 +28,17 @@ table 71015 "GPI Cat Sync Setup"
             ToolTip = 'Specifies the item categories that belong in the Packaging Catalog, separated by |. Items in other categories, such as PALLET and OTHER, are never added. Fees, charges, quality and sample items and items with no cost are never added either.';
             InitValue = 'BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX';
         }
+        field(13; "Create Items from Catalog"; Boolean)
+        {
+            Caption = 'Create Items for New Catalog Products';
+            ToolTip = 'Specifies whether a catalog product with no BC item gets one a few minutes after it is saved, once it has a vendor, material, style and a size or finish. The item number is the catalog number; item category, unit of measure and posting groups are copied from a similar item. No cost is written to the item. Off until someone turns it on.';
+        }
+        field(14; "Model Item No."; Code[20])
+        {
+            Caption = 'Model Item No.';
+            ToolTip = 'Specifies the item to copy the item category, unit of measure and posting groups from when no similar item is in the catalog.';
+            TableRelation = Item."No.";
+        }
         field(20; "Last Sync Run"; DateTime)
         {
             Caption = 'Last Sync Run';

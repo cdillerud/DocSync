@@ -211,6 +211,26 @@ The validated route UAT used `12.5` miles at `2.5` per mile, producing `31.25` o
 
 `scripts/Test-GPIPackagingRouteAPIUAT.ps1` is the regression harness for Milestone 9.
 
+## 0.50.0.0: catalog sync with the item list
+
+Keeps the Packaging Catalog in step with items, so an item entered without a catalog row still gets one.
+
+- **GPI Catalog Sync Setup** (search for it): turn on *Add New Items to the Catalog* (off by default) and
+  *Block Catalog Rows with Their Item* (on by default), and list the packaging item categories
+  (`BOTTLE|JAR|CAP|CAN|CANEND|CROWN|TUBE|CARRIER|CARTON|FLEX|OTHER`; PALLET is left out on purpose).
+- When someone saves an item in one of those categories with a description, a catalog product is added:
+  Gamer ID and BC Item No. = the item number; vendor and vendor item no. from the item; cost = last direct
+  cost (unit cost when there is none); size, finish, finish type, color, material, style and packout read
+  from the description written the usual way (`16oz, 82-2040, CT, Flint, Glass, Salsa, Jar, FH`).
+- Blocking or unblocking an item does the same to its catalog products.
+- **Sync All Items** on the setup page adds every packaging item still missing and matches blocked flags,
+  once, for items entered before this version.
+- Existing catalog values are never overwritten, and nothing here can stop an item from being saved (only
+  edits people make trigger it; cost adjustment and posting do not).
+
+The Commercial AI service also checks every night (read-only) for packaging items missing from the catalog
+and blocked mismatches, and sends anything it finds through the same review email as supplier lists.
+
 ## Important semantic choice
 
 The React field `current_price` is used by the existing app as the product's base supplier cost in landed-cost and gross-margin calculations. In this extension it is named **Current Supplier Unit Cost** to avoid confusing supplier cost with customer sell price.

@@ -52,7 +52,7 @@ $lines = $js | ssh $VmHost 'docker exec -i gpi-mongodb mongosh --quiet gpi_docum
 if ($LASTEXITCODE -ne 0) { throw 'The search on the Hub VM failed (SSH or MongoDB).' }
 $rows = @($lines | Where-Object { $_ -match "`t" } | ConvertFrom-Csv -Delimiter "`t")
 $rows | Export-Csv -Path $OutCsv -NoTypeInformation -Encoding UTF8
-$supplierRows = @($rows | Where-Object { $_.category -like '*[supplier]*' })
+$supplierRows = @($rows | Where-Object { $_.category -match '\[supplier\]' })
 Write-Host ("Found {0} documents that look like price lists, inventory, RFQs, quotes or specs; {1} name a packaging supplier." -f $rows.Count, $supplierRows.Count) -ForegroundColor Green
 $supplierRows | Select-Object -First 25 created_utc, extracted_vendor, subject, file_name | Format-Table -AutoSize -Wrap
 Write-Host "Full list: $OutCsv. Nothing was changed in GPI Hub." -ForegroundColor Green

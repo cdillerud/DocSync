@@ -117,7 +117,7 @@ page 71033 "GPI Cat Sync Setup"
                 trigger OnAction()
                 var
                     Product: Record "GPI Pack Product";
-                    ItemCreate: Codeunit "GPI Catalog Item Create";
+                    ItemCreate: Codeunit "GPI Cat Item Create";
                     Ready: Integer;
                     Created: Integer;
                     Linked: Integer;

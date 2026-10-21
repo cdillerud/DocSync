@@ -121,7 +121,7 @@ permissionset 71000 "GPI PACK CATALOG"
         query "GPI Item Cost Evid" = X,
         codeunit "GPI Pack Catalog Mgt" = X,
         codeunit "GPI Catalog Sync" = X,
-        codeunit "GPI Catalog Item Create" = X,
+        codeunit "GPI Cat Item Create" = X,
         codeunit "GPI Pack Cost Mgt" = X,
         codeunit "GPI Pack Quote Mgt" = X,
         codeunit "GPI Quote Audit Mgt" = X,

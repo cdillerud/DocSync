@@ -1,4 +1,4 @@
-codeunit 71011 "GPI Catalog Item Create"
+codeunit 71011 "GPI Cat Item Create"
 {
     // The optional reverse sync: a Packaging Catalog product with no BC item gets one, and the two are linked.
     //  - Off until "Create Items for New Catalog Products" is turned on in GPI Catalog Sync Setup.
@@ -47,7 +47,7 @@ codeunit 71011 "GPI Catalog Item Create"
         if not ReadyForItem(Product) then
             exit;
         if TaskScheduler.CanCreateTask() then
-            TaskScheduler.CreateTask(Codeunit::"GPI Catalog Item Create", 0, true, CompanyName(),
+            TaskScheduler.CreateTask(Codeunit::"GPI Cat Item Create", 0, true, CompanyName(),
                 CurrentDateTime() + 5 * 60 * 1000, Product.RecordId());
     end;
 
@@ -82,7 +82,7 @@ codeunit 71011 "GPI Catalog Item Create"
             Product.Get(ProductNo);
             ItemExisted := Item.Get(ProductNo);
             ClearLastError();
-            if Codeunit.Run(Codeunit::"GPI Catalog Item Create", Product) then begin
+            if Codeunit.Run(Codeunit::"GPI Cat Item Create", Product) then begin
                 Product.Get(ProductNo);
                 if Product."BC Item No." <> '' then
                     if ItemExisted then

@@ -54,6 +54,57 @@ Open http://4.204.41.190 in your browser.
 | `ENABLE_CREATE_DRAFT_HEADER` | `false` | Enable BC draft creation |
 | `EMAIL_POLLING_ENABLED` | `false` | Enable email polling |
 | `EMAIL_POLLING_USER` | | AP inbox email address |
+| `CATALOG_FORWARD_ENABLED` | `false` | Send supplier pricing documents to the Commercial AI catalog inbox (see below) |
+| `CATALOG_FORWARD_URL` | | Catalog inbox submit URL |
+| `CATALOG_FORWARD_KEY` | | Catalog inbox intake key (secret) |
+| `CATALOG_FORWARD_DRY_RUN` | `false` | Decide and log only; send nothing |
+
+### Catalog Forward (supplier pricing to the Packaging Catalog)
+
+When it is on, the Hub sends supplier pricing documents it has just received
+by email to the Commercial AI catalog inbox. The inbox reads them and, a few
+minutes later, emails the catalog reviewers the usual review (changes,
+proposed new products, flagged price moves). It is **off by default**.
+
+**What gets sent:** supplier price lists, supplier quotes, price-increase and
+surcharge letters, RFQ responses, and stock / availability / open-inventory
+lists (.xlsx, .xlsm, .csv, .pdf, .msg, .eml), recognised from the file name or
+email subject, from a supplier (sender outside gamerpackaging.com, or a
+supplier read from the document when a Gamer person forwards it). All such
+attachments of one email go in one submit.
+
+**What is never sent:** AP invoices, statements, remittances, credit memos,
+purchase orders and customer orders (and anything else the classifier gave a
+transactional type), Gamer's own quotes to customers (Spiro `QUO-####`
+numbers or Gamer letterhead), page-split copies (`*_doc1.pdf`), files over
+15 MB, and anything already sent once.
+
+**Turn it on** by adding these lines to `backend/.env` on the Hub VM (the
+backend container reads that file) and restarting the backend. The URL and
+the key come from the Commercial AI web app (`GPI_CATALOG_INTAKE_KEY` app
+setting). Start with a dry run for a few days:
+
+```bash
+CATALOG_FORWARD_ENABLED=true
+CATALOG_FORWARD_DRY_RUN=true
+CATALOG_FORWARD_URL=https://gpi-commercial-ai-v62-uat-4e0833.azurewebsites.net/api/v70/catalog/intake/submit
+CATALOG_FORWARD_KEY=<intake key>
+```
+
+```bash
+sudo docker compose up -d backend
+```
+
+Check what it decided at `GET /api/admin/catalog-forward/status` (admin
+login; shows recent decisions with reasons, never the key) or in the backend
+log (`[CatalogForward]` lines). When the decisions look right, set
+`CATALOG_FORWARD_DRY_RUN=false` and restart the backend again. To turn it
+off, set `CATALOG_FORWARD_ENABLED=false` (or remove the lines) and restart.
+
+Each document's outcome is kept on its record in `hub_documents`
+(`catalog_forward`, and `catalog_forwarded_utc` once the inbox accepted it)
+and in the `catalog_forward_log` collection. A failed send is recorded as
+`failed` and is not retried automatically. Code: `backend/services/catalog_forward.py`.
 
 ---
 

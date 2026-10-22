@@ -45,7 +45,13 @@ def po_variants(x: Any) -> Set[str]:
     first = re.split(r",|\brev\b|\brevision\b", str(x or ""), flags=re.I)[0]
     # A PO key needs 3+ digits: words around the number ("W118606-Cookies &
     # Cream" -> CREAM, "RMA", "REROUTE", "24OZ") matched other orders.
-    return {k for k in ext_tokens(first) if len(re.sub(r"\D", "", k)) >= 3}
+    keys = set(ext_tokens(first))
+    # A release suffix "-001" (Moore's "68093-001", entered in BC as "68093"):
+    # ext_tokens only drops 1-2 character suffixes.
+    base = re.sub(r"-0\d{2}$", "", first.strip())
+    if base != first.strip():
+        keys |= set(ext_tokens(base))
+    return {k for k in keys if len(re.sub(r"\D", "", k)) >= 3}
 
 
 def domain(sender: Any) -> str:

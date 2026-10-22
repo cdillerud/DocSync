@@ -17,6 +17,11 @@ MIN_VALUE = 100_000
 MIN_HISTORY = 3
 
 
+def _qty(x: float) -> str:
+    """202,400 / 202.4 - never 2.024e+05."""
+    return f"{x:,.0f}" if abs(x - round(x)) < 1e-9 else f"{x:,.4f}".rstrip("0").rstrip(".")
+
+
 async def check(db) -> Dict[str, Any]:
     hist = defaultdict(list)
     open_orders = []
@@ -45,8 +50,8 @@ async def check(db) -> Dict[str, Any]:
                               "external_doc_no": o.get("external_doc_no"), "order_date": o.get("order_date"),
                               "item": l["lineObjectNumber"], "quantity": q, "unit": l.get("unitOfMeasureCode"),
                               "usual_quantity": usual, "unit_price": float(l.get("unitPrice") or 0), "line_value": round(value, 2),
-                              "why": f"{q:,.4g} {l.get('unitOfMeasureCode') or ''} of {l['lineObjectNumber']}; this customer usually orders "
-                                     f"{usual:,.4g} {l.get('unitOfMeasureCode') or ''}", "checked_at": now})
+                              "why": f"{_qty(q)} {l.get('unitOfMeasureCode') or ''} of {l['lineObjectNumber']}; this customer usually orders "
+                                     f"{_qty(usual)} {l.get('unitOfMeasureCode') or ''}", "checked_at": now})
     await db.bc_order_checks.delete_many({})
     if flags:
         await db.bc_order_checks.insert_many([dict(f) for f in flags])

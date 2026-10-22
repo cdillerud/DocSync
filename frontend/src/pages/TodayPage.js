@@ -167,6 +167,19 @@ export default function TodayPage() {
               </ul>
             </div>
           )}
+          {checks?.price_count > 0 && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 space-y-1.5 text-sm" data-testid="bc-price-checks">
+              <div className="font-medium">BC prices to check: {checks.price_count} open order line{checks.price_count === 1 ? '' : 's'} priced differently from the customer's PO ({fmtMoney(checks.price_gap)} difference)</div>
+              <p className="text-xs text-muted-foreground">The customer will likely pay the PO price. Confirm the price with the customer, or correct the order in BC.</p>
+              <ul className="space-y-0.5 text-xs max-h-48 overflow-y-auto">
+                {checks.prices.slice(0, 50).map(o => (
+                  <li key={o.order_no + o.item} className="tabular-nums">
+                    <b>{o.order_no}</b> · {o.customer_name || o.customer_no} · {o.external_doc_no} · {o.why} · {fmtMoney(o.line_value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <Sub title="Handled by the Hub">
             <Tile to="/sales?stage=drafted" label="Drafted (sandbox)" value={st.drafted} tone="emerald" help="Sales orders drafted in the PRE sandbox" />
             <Tile to="/sales?stage=ready" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within about 10 minutes" />

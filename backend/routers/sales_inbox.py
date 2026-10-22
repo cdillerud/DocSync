@@ -47,8 +47,10 @@ async def order_checks():
     """Open BC sales orders with a quantity far beyond the customer's usual
     (bc_order_check_service): read-only, for inside sales to correct in BC."""
     db = get_db()
-    rows = [r async for r in db.bc_order_checks.find({}, {"_id": 0}).sort([("line_value", -1)]).limit(200)]
-    return {"orders": rows, "count": len(rows), "value": round(sum(r.get("line_value") or 0 for r in rows), 2)}
+    rows = [r async for r in db.bc_order_checks.find({"kind": {"$ne": "price"}}, {"_id": 0}).sort([("line_value", -1)]).limit(200)]
+    prices = [r async for r in db.bc_order_checks.find({"kind": "price"}, {"_id": 0}).sort([("order_no", 1)]).limit(200)]
+    return {"orders": rows, "count": len(rows), "value": round(sum(r.get("line_value") or 0 for r in rows), 2),
+            "prices": prices, "price_count": len(prices), "price_gap": round(sum(r.get("line_value") or 0 for r in prices), 2)}
 
 
 @router.get("/list")

@@ -55,7 +55,8 @@ async def splits_per_line(db, customer_no: str) -> bool:
     97%; Millennium splits by delivery but keeps 3 lines: not this)."""
     import re
     from datetime import timedelta
-    from services.sales_item_xref_service import is_product
+    from services.sales_item_xref_service import is_product, load_item_categories
+    await load_item_categories(db)       # is_product needs the item categories loaded
     since = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
     orders = [o async for o in db.bc_sales_orders.find({"customer_no": customer_no, "order_date": {"$gte": since}},
                                                        {"_id": 0, "external_doc_no": 1, "lines": 1})]

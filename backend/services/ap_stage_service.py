@@ -154,6 +154,7 @@ _OPEN_ITEMS_REPORT = re.compile(r"open invoice report|open invoices? list|aging 
 # none ever entered by AP. The word alone is not enough - an "Overdue Balance
 # Notice" carried an invoice copy and an invoice came in a "Delivery Notice"
 # thread - so the document must also have nothing billable on it.
+_FORWARDER_MAIL = re.compile(r"@(cargomodules\.com|straitlink\.ca)$", re.I)
 _NOTICE = re.compile(r"notice|notification|surcharge|price increase|rate (change|increase)|price adjustment", re.I)
 _CERTIFICATE = re.compile(r"(^|[^A-Z])(COC|COA)[-_ ]|certificate of (conformance|conformity|analysis)", re.I)
 
@@ -229,6 +230,15 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         if route and (route[0] or "").strip("/"):
             return {"ap_stage": "file_only", "suggested_folder": route[0], "routing_reason": route[1]}
         return {"ap_stage": "file_only"}
+    if (d.get("vendor_canonical") and d.get("vendor_canonical") not in bc_vendors
+            and _FORWARDER_MAIL.search(str(d.get("email_sender") or ""))):
+        # Backup paperwork in a forwarder's bill (MKC customs broker, Glory
+        # Logistics, a CBP form in a StraitLink invoice): the forwarder bills
+        # these costs; 13 such attachments from a vendor not in BC, none ever
+        # entered. An unread vendor still goes to staff (2 were real suppliers).
+        if route and (route[0] or "").strip("/"):
+            return {"ap_stage": "file_only", "suggested_folder": route[0], "routing_reason": route[1], "file_only_reason": "forwarder_backup"}
+        return {"ap_stage": "file_only", "file_only_reason": "forwarder_backup"}
     if d.get("vendor_canonical") not in bc_vendors:
         return {"ap_stage": "needs_staff", "staff_reason": "vendor_unknown"}
     if d.get("document_type") in INVOICE_TYPES and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):

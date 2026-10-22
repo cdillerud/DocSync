@@ -149,6 +149,12 @@ _ACCOUNT_STATEMENT = re.compile(r"statement of accounts?\b|account statement|cus
 _OPEN_ITEMS_REPORT = re.compile(r"open invoice report|open invoices? list|aging report|aged (receivables|payables)", re.I)
 # A certificate of conformance / analysis sent with the goods (Happy Ann
 # "COC-HAPPYANN.pdf"): 61 documents, none entered by AP.
+# A notice (price change, surcharge, payment, receiving, appointment) bills
+# nothing: with no invoice number and no total read, 34 such documents and
+# none ever entered by AP. The word alone is not enough - an "Overdue Balance
+# Notice" carried an invoice copy and an invoice came in a "Delivery Notice"
+# thread - so the document must also have nothing billable on it.
+_NOTICE = re.compile(r"notice|notification|surcharge|price increase|rate (change|increase)|price adjustment", re.I)
 _CERTIFICATE = re.compile(r"(^|[^A-Z])(COC|COA)[-_ ]|certificate of (conformance|conformity|analysis)", re.I)
 
 
@@ -182,6 +188,9 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         return {"ap_stage": "no_action", "no_action_reason": "statement"}
     if not (bl and bl.get("bc_document_no")) and _CERTIFICATE.search(str(d.get("file_name") or "")):
         return {"ap_stage": "no_action", "no_action_reason": "certificate"}
+    if (not (bl and bl.get("bc_document_no")) and d.get("amount_float") in (None, "", 0, 0.0)
+            and not d.get("invoice_number_clean") and _NOTICE.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}")):
+        return {"ap_stage": "no_action", "no_action_reason": "notice"}
     if bl and bl.get("bc_document_no"):
         if str(bl.get("bc_status") or "").lower() == "paid" or bl.get("bc_entity") == "posted_purchase_invoice":
             return {"ap_stage": "paid"}

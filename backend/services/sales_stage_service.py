@@ -116,7 +116,7 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         # item to set up in BC (VetsPlus 0PA-5OZCAP).
         codes = []
         for l in unresolved:
-            desc = re.sub(r"^\s*(ITEM|PART|SKU|STOCK\s*CODE|P/N)\s*(NO\.?|#)?\s*:?\s*", "", str(l.get("po_description") or "").upper())
+            desc = re.sub(r"^\s*(ITEM|PART|SKU|STOCK\s*CODE|P/N|MATERIAL)\s*(NO\.?|#)?\s*:?\s*", "", str(l.get("po_description") or "").upper())
             m = re.match(r"\s*([A-Z0-9][A-Z0-9-]{3,})\b", desc)
             codes.append(m.group(1) if m else str(l.get("po_description") or "")[:30])
         # A line with only a word ("BOTTLE", "GLASS") has no code to set up:

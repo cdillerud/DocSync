@@ -565,6 +565,30 @@ async def prepay_lines(db, d: Dict[str, Any], coding: Optional[Dict[str, Any]]) 
              "source": f"prepayment before receipt on {pre[0]['code']}, as AP enters this vendor"}]
 
 
+# Freight inside sales re-bills to the customer: they enter a sales order
+# "FREIGHT COST FOR PO W118755" with a WHSEFRT line, and AP codes the
+# carrier's bill WHSEFRT, described "W118755/120791". 60 days of freight
+# invoices: 11 of 11 where that order exists (else FREIGHT, 1,227 of 1,234).
+REBILL_WHSEFRT = True
+
+
+async def rebill_order(db, d: Dict[str, Any]):
+    """(W-PO, sales order) when this freight bill's W-PO was re-billed, else None."""
+    ef = d.get("extracted_fields") or {}
+    refs = []
+    for t in (d.get("po_number_clean"), ef.get("po_number"), ef.get("bol_number")):
+        t = str(t or "").strip().upper()
+        refs += re.findall(r"\bW\d{6}\b", t)
+        refs += ["W" + x for x in re.findall(r"^(\d{6})$", t)]   # ATS writes BOL 119285 for W119285
+    for w in dict.fromkeys(refs):
+        o = await db.bc_sales_orders.find_one(
+            {"external_doc_no": {"$regex": r"FREIGHT COST FOR\s*(PO\s*)?" + w + r"\b", "$options": "i"}},
+            {"_id": 0, "order_no": 1})
+        if o:
+            return w, o["order_no"]
+    return None
+
+
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:
     """The lines a draft of this invoice gets (see vendor_line_coding_service).
 
@@ -574,9 +598,19 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     from services.vendor_line_coding_service import coding_for, single_line, main_code_known
     if rec.get("lines"):
         return {"lines": rec["lines"], "source": "bc_receipt"}
+    if d.get("amount_float") in (None, ""):
+        # No total was read (XPO multi-invoice PDFs: the "amount" was the
+        # shipment weight, 2,280 lbs): nothing to code the lines against.
+        return {"problem": "no invoice total was read from the document"}
     coding = await coding_for(db, d.get("vendor_canonical"))
     if coding and coding.get("dominant"):
-        return {"lines": single_line(coding, d), "source": "vendor_coding"}
+        lines = single_line(coding, d)
+        if REBILL_WHSEFRT and lines and str(lines[0].get("lineObjectNumber")).upper() == "FREIGHT":
+            rb = await rebill_order(db, d)
+            if rb:
+                lines[0] = {**lines[0], "lineObjectNumber": "WHSEFRT", "description": f"{rb[0]}/{rb[1]}",
+                            "source": f"freight re-billed to the customer on sales order {rb[1]} ('FREIGHT COST FOR {rb[0]}'): AP codes it WHSEFRT"}
+        return {"lines": lines, "source": "vendor_coding"}
     try:
         pp = await prepay_lines(db, d, coding)
     except Exception:

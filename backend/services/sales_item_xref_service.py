@@ -275,7 +275,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
         h0 = hits[0]
         # A bare number (48000) is an item number only where the PO labels it
         # one; anywhere else it may be a pack count or size: needs confirming.
-        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|PART\s*(?:NO\.?|#)?:?\s*|STOCK\s*CODE\s*:?\s*|SKU\s*:?\s*|P/N\s*:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
+        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|MATERIAL\s*:?\s*|PART\s*(?:NO\.?|#)?:?\s*|STOCK\s*CODE\s*:?\s*|SKU\s*:?\s*|P/N\s*:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
         out.append((h0, "item number on the PO", labelled))
     # 2. The customer's own item code, learned from their BC orders.
     for code in customer_codes(e):
@@ -294,7 +294,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
                 # (VetsPlus 0PA-5OZCAP) is the customer using Gamer's number;
                 # a bare number (48000) may be anything and must be confirmed.
                 # A bare number the PO labels as the item ("Item 612000046") counts too.
-                labelled = bool(re.search(r"(ITEM|PART|SKU|STOCK\s*CODE|P/N)\s*(NO\.?|#)?\s*:?\s*" + re.escape(_ITEM_BY_NORM[tok]), desc_up))
+                labelled = bool(re.search(r"(ITEM|PART|SKU|STOCK\s*CODE|P/N|MATERIAL)\s*(NO\.?|#)?\s*:?\s*" + re.escape(_ITEM_BY_NORM[tok]), desc_up))
                 strong = (bool(re.search(r"[A-Z]", tok)) and len(tok) >= 6 or labelled) and is_product(_ITEM_BY_NORM[tok])
                 out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", strong))
                 break

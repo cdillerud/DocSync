@@ -80,6 +80,11 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         return {"sales_stage": "filed", "sales_stage_reason": role or "other"}
     if sl.get("order_no"):
         return {"sales_stage": "in_bc", "bc_order_no": sl["order_no"]}
+    if re.search(r"\bblanket\b", f"{d.get('file_name') or ''} {d.get('email_subject') or ''}", re.I):
+        # Inside sales never enters the blanket itself (Giovanni blanket 1144,
+        # House 19739 / 19740 are not in BC); each release comes as its own PO
+        # (Giovanni 63xxx per truck, House 19741-19743).
+        return {"sales_stage": "filed", "sales_stage_reason": "blanket order: each release PO is entered, not the blanket"}
     # The sender is not linked to a customer (Carlsbad Gourmet writes from a
     # yahoo.com address) but the document was: use that customer, and look
     # for its PO on that customer's BC orders (PO 1026 = SO 120147).
@@ -194,7 +199,7 @@ async def refresh(db, days: int = 45) -> Dict[str, Any]:
     docs = [d async for d in db.hub_documents.find(
         {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["SALES", "Sales"]}, "sales_link": {"$exists": True}},
         {"_id": 1, "id": 1, "status": 1, "pilot_mailbox": 1, "sales_link": 1, "sales_draft": 1, "sales_draft_skipped": 1,
-         "extracted_fields.line_items": 1, "created_utc": 1, "amount_float": 1, "customer_canonical": 1}).sort([("created_utc", 1)])]
+         "extracted_fields.line_items": 1, "created_utc": 1, "amount_float": 1, "customer_canonical": 1, "file_name": 1, "email_subject": 1}).sort([("created_utc", 1)])]
     # Several copies / pages of one customer PO: the one with the most lines counts.
     best: Dict[str, Any] = {}
     for d in docs:

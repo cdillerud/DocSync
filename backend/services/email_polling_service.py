@@ -53,6 +53,16 @@ SKIP_FILENAME_PATTERNS = [
     r'\.vcf$',
 ]
 
+def _schedule_catalog_forward(doc_ids) -> None:
+    """Hand one email's newly ingested documents to the catalog forward
+    (services/catalog_forward.py). Off by default; never raises into intake."""
+    try:
+        from services.catalog_forward import schedule_forward_for_email
+        schedule_forward_for_email(doc_ids)
+    except Exception as e:  # noqa: BLE001
+        logger.error("[CatalogForward] hook failed (ingestion unaffected): %r", e)
+
+
 # ── Global state for polling workers ──
 _email_polling_lock = asyncio.Lock()
 _dynamic_mailbox_polling_task = None
@@ -605,6 +615,7 @@ async def _poll_mailbox_for_attachments_unlocked():
                         continue
 
                     attachments = att_resp.json().get("value", [])
+                    catalog_forward_doc_ids = []
                     for att in attachments:
                         att_id = att.get("id")
                         filename = att.get("name", "unknown")
@@ -690,6 +701,7 @@ async def _poll_mailbox_for_attachments_unlocked():
                                 filename=filename, status="Processed", sharepoint_doc_id=doc_id,
                             )
                             stats["attachments_ingested"] += 1
+                            catalog_forward_doc_ids.append(doc_id)
                             logger.info("[EmailPoll:%s] Ingested %s -> doc %s", run_id, filename, doc_id)
                         except Exception as e:
                             await record_mail_intake_log(
@@ -699,6 +711,9 @@ async def _poll_mailbox_for_attachments_unlocked():
                             )
                             stats["attachments_failed"] += 1
                             stats["errors"].append(f"Intake failed for {filename}: {str(e)}")
+                    # Catalog forward (off by default): supplier pricing files of
+                    # this email go to the catalog inbox in the background.
+                    _schedule_catalog_forward(catalog_forward_doc_ids)
                 except Exception as e:
                     stats["errors"].append(f"Failed processing message {msg_id}: {str(e)}")
 
@@ -1100,6 +1115,7 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             continue
 
                         attachments = att_resp.json().get("value", [])
+                        catalog_forward_doc_ids = []
                         for att in attachments:
                             att_id = att.get("id")
                             filename = att.get("name", "unknown")
@@ -1229,10 +1245,15 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                                     sharepoint_doc_id=doc_id,
                                 )
                                 stats["attachments_ingested"] += 1
+                                catalog_forward_doc_ids.append(doc_id)
 
                             except Exception as e:
                                 stats["attachments_failed"] += 1
                                 stats["errors"].append(f"Failed to process {filename}: {str(e)}")
+
+                        # Catalog forward (off by default): supplier pricing files of
+                        # this email go to the catalog inbox in the background.
+                        _schedule_catalog_forward(catalog_forward_doc_ids)
 
                     # Advance per-mailbox watermark so we don't replay the same
                     # 1-hour window every minute.

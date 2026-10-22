@@ -84,7 +84,9 @@ async def retry_po_lines(db, days: int = 21, limit: int = 10, delay_seconds: flo
     the House one came back with its line on the first retry."""
     from services.document_reprocess_service import reprocess_document
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    query = {"created_utc": {"$gte": since}, "sales_link.role": "customer_po",
+    # Sales orders only: BOLs, labels and pick tickets filed under a customer
+    # PO have no lines to find (20 of 22 non-recoveries, 2026-10-21).
+    query = {"created_utc": {"$gte": since}, "sales_link.role": "customer_po", "document_type": "Sales_Order",
              "status": {"$ne": "batch_parent"}, "file_content_b64": {"$exists": True, "$ne": None},
              "$or": [{"extracted_fields.line_items": {"$exists": False}}, {"extracted_fields.line_items": {"$size": 0}},
                      {"extracted_fields.line_items": None}],

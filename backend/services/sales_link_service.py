@@ -150,7 +150,11 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
                                                           {"_id": 0, "order_no": 1, "customer_no": 1, "ext_norm": 1, "status": 1})]
         if cands:
             pref = set(cp.get("customers") or [])
-            best = [o for o in cands if o["customer_no"] in pref] or cands
+            # The sender domain's main customer first: maplevalley.coop also
+            # lists MORTON, which has its own PO "665" (116127), so Maple
+            # Valley's PO 665 never linked to BC 120303.
+            best = ([o for o in cands if o["customer_no"] == cp.get("customer")]
+                    or [o for o in cands if o["customer_no"] in pref] or cands)
             if len({o["customer_no"] for o in best}) == 1:
                 order, match = best[0], "customer_po"
     # Gamer order number named on the document.

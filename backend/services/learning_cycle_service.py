@@ -206,6 +206,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         from services.extraction_retry_service import retry_failed_extractions
         summary["extraction_retry"] = await retry_failed_extractions(db, limit=20)
+        from services.extraction_retry_service import retry_po_lines
+        summary["po_line_retry"] = await retry_po_lines(db)
     except Exception as e:
         summary["extraction_retry"] = {"error": repr(e)}
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()

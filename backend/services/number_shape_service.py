@@ -231,6 +231,9 @@ async def fill_missing(db, days: int = 30, apply: bool = True) -> Dict[str, Any]
                 for m in NUMBER_IN_TEXT.finditer(text):
                     candidates.append((m.group(1) or m.group(2) or "").strip("-").upper())
                 candidates += [c.upper() for c in re.findall(r"(?<![A-Za-z0-9])([A-Za-z]{0,4}\d{4,12})(?![A-Za-z0-9])", text)]
+                # Letters inside the number: Happy Annie "INV-PI26X207017 Gamer PO 116449".
+                candidates += [c.upper() for c in re.findall(r"(?<![A-Za-z0-9])([A-Za-z]{0,4}\d[A-Za-z0-9]{5,18})(?![A-Za-z0-9])", text)
+                               if len(re.sub(r"\D", "", c)) >= 6]
             good = list(dict.fromkeys(c for c in candidates if fits(shape, c) and _norm(c) != po))
             if len(good) == 1:
                 number, src = good[0], "subject_or_file_name (vendor number shape)"

@@ -187,6 +187,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["sales"] = {"history": await sales_sync(db), "link": await sales_link(db, days=45),
                             "readback": await sales_readback(db),
                             "xref": await sales_learn(db)}
+        from services.bc_order_check_service import check as order_check
+        summary["sales"]["order_checks"] = await order_check(db)
         from services.sales_charge_service import learn as charge_learn
         summary["sales"]["charges"] = await charge_learn(db)
         summary["sales"]["stages"] = await sales_stages(db, days=45)

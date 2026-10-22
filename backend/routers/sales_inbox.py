@@ -42,6 +42,15 @@ async def summary(days: int = 45, rep: str = ""):
             "customer_pos": cpo, "customer_pos_in_bc": linked}
 
 
+@router.get("/order-checks")
+async def order_checks():
+    """Open BC sales orders with a quantity far beyond the customer's usual
+    (bc_order_check_service): read-only, for inside sales to correct in BC."""
+    db = get_db()
+    rows = [r async for r in db.bc_order_checks.find({}, {"_id": 0}).sort([("line_value", -1)]).limit(200)]
+    return {"orders": rows, "count": len(rows), "value": round(sum(r.get("line_value") or 0 for r in rows), 2)}
+
+
 @router.get("/list")
 async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: int = 45, skip: int = 0, limit: int = 50):
     db = get_db()

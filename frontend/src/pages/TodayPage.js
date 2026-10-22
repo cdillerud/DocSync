@@ -60,6 +60,10 @@ function Accuracy({ title, children }) {
   );
 }
 
+function fmtMoney(v) {
+  return v == null ? '—' : Number(v).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
 function pct(a, b) {
   return b ? `${Math.round((100 * a) / b)}%` : '—';
 }
@@ -70,16 +74,19 @@ export default function TodayPage() {
   const [sales, setSales] = useState(null);
   const [reps, setReps] = useState(null);
   const [mine, setMine] = useState(null);
+  const [checks, setChecks] = useState(null);
 
   useEffect(() => {
     (async () => {
-      const [a, s, r] = await Promise.allSettled([
+      const [a, s, r, k] = await Promise.allSettled([
         api.get('/ap-workflow/worklist', { params: { stage: 'needs_staff', days: 30, limit: 1 } }),
         api.get('/sales-inbox/summary'),
         api.get('/sales-inbox/reps'),
+        api.get('/sales-inbox/order-checks'),
       ]);
       if (a.status === 'fulfilled') setAp(a.value.data);
       if (s.status === 'fulfilled') setSales(s.value.data);
+      if (k.status === 'fulfilled') setChecks(k.value.data);
       if (r.status === 'fulfilled') {
         setReps(r.value.data);
         if (r.value.data.me) {
@@ -147,9 +154,22 @@ export default function TodayPage() {
               <Tile to="/sales?stage=drafted" icon={CheckCircle2} label="Drafts to review" value={st.drafted} tone={st.drafted ? 'sky' : 'muted'} help="Sales orders drafted in the sandbox for reps" />
             )}
           </Sub>
+          {checks?.count > 0 && (
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 space-y-1.5 text-sm" data-testid="bc-order-checks">
+              <div className="font-medium">BC orders to check: {checks.count} line{checks.count === 1 ? '' : 's'} with a quantity far above this customer's usual ({fmtMoney(checks.value)} in open orders)</div>
+              <p className="text-xs text-muted-foreground">Most likely a unit slip (thousands entered as units). The Hub does not change BC; correct these in BC.</p>
+              <ul className="space-y-0.5 text-xs max-h-48 overflow-y-auto">
+                {checks.orders.slice(0, 50).map(o => (
+                  <li key={o.order_no + o.item} className="tabular-nums">
+                    <b>{o.order_no}</b> · {o.customer_name || o.customer_no} · {o.external_doc_no} · {o.why} · {fmtMoney(o.line_value)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <Sub title="Handled by the Hub">
             <Tile to="/sales?stage=drafted" label="Drafted (sandbox)" value={st.drafted} tone="emerald" help="Sales orders drafted in the PRE sandbox" />
-            <Tile to="/sales?stage=ready" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within the hour" />
+            <Tile to="/sales?stage=ready" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within about 10 minutes" />
             <Tile to="/sales?stage=in_bc" label="Entered in BC" value={st.in_bc} help="Already on a Production sales order" />
           </Sub>
           <Accuracy title="Hub drafts vs what inside sales entered">

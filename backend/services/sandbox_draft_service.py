@@ -571,6 +571,32 @@ async def prepay_lines(db, d: Dict[str, Any], coding: Optional[Dict[str, Any]]) 
 # invoices: 11 of 11 where that order exists (else FREIGHT, 1,227 of 1,234).
 REBILL_WHSEFRT = True
 
+# "Truck ordered not used" is its own item: AP coded ATS's TONU charge
+# FRTTONU on all 5 ATS invoices that carried one (alone, or beside the
+# FREIGHT line for the load that did move).
+TONU_SPLIT = True
+_TONU = re.compile(r"truck ordered not used|\bTONU\b|ordered,? not used", re.I)
+
+
+def _tonu_split(d: Dict[str, Any], lines: list) -> list:
+    t = 0.0
+    for li in d.get("line_items") or []:
+        if _TONU.search(str(li.get("description") or "")):
+            try:
+                t += float(li.get("total") if li.get("total") not in (None, "") else
+                           float(li.get("quantity") or 1) * float(li.get("unit_price") or 0))
+            except (TypeError, ValueError):
+                return lines
+    one = lines[0]
+    whole = float(one.get("quantity") or 1) * float(one.get("unitCost") or 0)
+    if t <= 0 or t > whole + 0.005:
+        return lines
+    tonu = {**one, "lineType": "Item", "lineObjectNumber": "FRTTONU", "quantity": 1.0, "unitCost": round(t, 2),
+            "source": "truck ordered not used: AP codes it FRTTONU"}
+    if abs(whole - t) <= 0.005:
+        return [tonu]
+    return [{**one, "quantity": 1.0, "unitCost": round(whole - t, 2)}, tonu]
+
 
 async def rebill_order(db, d: Dict[str, Any]):
     """(W-PO, sales order) when this freight bill's W-PO was re-billed, else None."""
@@ -610,6 +636,8 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
             if rb:
                 lines[0] = {**lines[0], "lineObjectNumber": "WHSEFRT", "description": f"{rb[0]}/{rb[1]}",
                             "source": f"freight re-billed to the customer on sales order {rb[1]} ('FREIGHT COST FOR {rb[0]}'): AP codes it WHSEFRT"}
+        if TONU_SPLIT and lines and len(lines) == 1 and str(lines[0].get("lineObjectNumber")).upper() in ("FREIGHT", "WHSEFRT"):
+            lines = _tonu_split(d, lines)
         return {"lines": lines, "source": "vendor_coding"}
     try:
         pp = await prepay_lines(db, d, coding)

@@ -144,6 +144,12 @@ SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document"
 
 _REMITTANCE = re.compile(r"remittance advice|payment advice|remit advice", re.I)
 _ACCOUNT_STATEMENT = re.compile(r"statement of accounts?\b|account statement|customer statement", re.I)
+# A vendor's list of open invoices (Warehouse Basics "Open Invoice Report"):
+# 8 such documents, none ever a BC invoice.
+_OPEN_ITEMS_REPORT = re.compile(r"open invoice report|open invoices? list|aging report|aged (receivables|payables)", re.I)
+# A certificate of conformance / analysis sent with the goods (Happy Ann
+# "COC-HAPPYANN.pdf"): 61 documents, none entered by AP.
+_CERTIFICATE = re.compile(r"(^|[^A-Z])(COC|COA)[-_ ]|certificate of (conformance|conformity|analysis)", re.I)
 
 
 def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]],
@@ -172,6 +178,10 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         # A payment advice (Gamer's payment to Ball read as a 658k "invoice"
         # of 30 numbers): no remittance-named document was ever a BC invoice.
         return {"ap_stage": "no_action", "no_action_reason": "remittance"}
+    if not (bl and bl.get("bc_document_no")) and _OPEN_ITEMS_REPORT.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
+        return {"ap_stage": "no_action", "no_action_reason": "statement"}
+    if not (bl and bl.get("bc_document_no")) and _CERTIFICATE.search(str(d.get("file_name") or "")):
+        return {"ap_stage": "no_action", "no_action_reason": "certificate"}
     if bl and bl.get("bc_document_no"):
         if str(bl.get("bc_status") or "").lower() == "paid" or bl.get("bc_entity") == "posted_purchase_invoice":
             return {"ap_stage": "paid"}

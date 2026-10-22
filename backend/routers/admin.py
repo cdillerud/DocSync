@@ -951,3 +951,15 @@ async def filename_heuristics_vendor_history(
         limit=limit,
     )
 
+
+
+@router.get("/catalog-forward/status")
+async def catalog_forward_status(
+    limit: int = Query(50, ge=1, le=500, description="How many recent decisions to return"),
+    _user: dict = Depends(require_admin),
+):
+    """Read-only: catalog forward settings (key shown only as set / not set)
+    and the most recent forward decisions (sent, dry_run, skipped + reason,
+    failed). See services/catalog_forward.py. ADMIN ONLY."""
+    from services.catalog_forward import get_status
+    return await get_status(limit=limit)

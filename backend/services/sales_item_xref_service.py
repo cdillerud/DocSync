@@ -142,6 +142,11 @@ def _charge_text(e: Dict[str, Any]) -> bool:
     return bool(_CHARGE_WORDS.search(str(e.get("description") or ""))) and not re.search(r"\d{4,}", str(e.get("description") or ""))
 
 
+SUPPLIER_CODES = True
+_SUPPLIER_PAIR = re.compile(r"(?:ball|canpack|vendor|supplier)?\s*item[:#\s]*([0-9]{7}|[A-Z0-9-]{5,})[^A-Za-z0-9]{1,6}(?:customer|cust\.?)\s*item[:#\s]*([A-Z]{1,4}[0-9][A-Z0-9-]{3,})", re.I)
+_SUPPLIER_PAIR_REV = re.compile(r"(?:customer|cust\.?)\s*item[:#\s]*([A-Z]{1,4}[0-9][A-Z0-9-]{3,})[^A-Za-z0-9]{1,6}(?:ball\s*)?item[:#\s]*([0-9]{7})", re.I)
+
+
 async def learn(db) -> Dict[str, Any]:
     await load_item_categories(db)
     now = datetime.now(timezone.utc).isoformat()
@@ -183,6 +188,32 @@ async def learn(db) -> Dict[str, Any]:
             if dk:
                 xref[(cust, "desc:" + dk)][item] += 3
             stats["reviewed_draft_pairs"] += 1
+    # Supplier invoices that print the end customer's code next to the
+    # item (Ball: "Ball Item 6072810, Customer Item CN000113A"): Horseshoe's
+    # CN codes never appear on its BC orders, where reps type 6072810. The
+    # code goes to the customer who buys that item (>= 80% of its orders).
+    if SUPPLIER_CODES:
+        pairs = Counter()
+        async for d in db.hub_documents.find({"mailbox_category": "AP", "extracted_fields.line_items.description": {"$regex": "customer item", "$options": "i"}},
+                                             {"_id": 0, "extracted_fields.line_items.description": 1}):
+            for e in (d.get("extracted_fields") or {}).get("line_items") or []:
+                t = str(e.get("description") or "")
+                for m in _SUPPLIER_PAIR.finditer(t):
+                    pairs[(n(m.group(2)), str(m.group(1)).upper())] += 1
+                for m in _SUPPLIER_PAIR_REV.finditer(t):
+                    pairs[(n(m.group(1)), str(m.group(2)).upper())] += 1
+        for (code, item), k in pairs.items():
+            if not is_product(item) or code == n(item):
+                continue
+            buyers = Counter()
+            async for o in db.bc_sales_orders.find({"lines.lineObjectNumber": item}, {"_id": 0, "customer_no": 1}):
+                buyers[o["customer_no"]] += 1
+            if not buyers:
+                continue
+            cust, bn = buyers.most_common(1)[0]
+            if bn >= 3 and bn >= 0.8 * sum(buyers.values()):
+                xref[(cust, "code:" + code)][item] += k
+                stats["supplier_code_pairs"] += 1
     await db.sales_item_xref.delete_many({})
     docs = []
     for (cust, key), items in xref.items():

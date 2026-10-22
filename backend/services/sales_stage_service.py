@@ -173,7 +173,11 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     if po_total and float(po_total) > 0:
         out["sales_resolution"]["po_total"] = float(po_total)
         tol = max(1.0, 0.02 * float(po_total))
-        if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol:
+        # Every price is BC's own because BC replaces this customer's PO
+        # prices (Horseshoe PO 145.75, BC 155.49): a different total is
+        # expected, and each line carries the price check for the rep.
+        replaced = all("usually replaced" in str(l.get("price_source") or "") for l in lines)
+        if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol and not replaced:
             return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "totals_differ",
                     "sales_stage_detail": f"lines {planned:,.2f} vs PO {float(po_total):,.2f}"}
     return {**out, "sales_stage": "ready"}

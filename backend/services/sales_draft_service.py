@@ -43,6 +43,45 @@ async def _bc(env: str):
     return f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/{env}/api/v2.0/companies({cid})", {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+# Customers whose POs inside sales enters as one BC order per PO line
+# ("P0028021-1/W118463", "-2", ...): learned from BC, not listed.
+SPLIT_PER_LINE = True
+_SPLIT_EXT = None
+
+
+async def splits_per_line(db, customer_no: str) -> bool:
+    """>= 80% of the customer's recent orders are numbered PO-n with the PO
+    on 2+ orders, and >= 80% carry a single product line (Horseshoe 95% /
+    97%; Millennium splits by delivery but keeps 3 lines: not this)."""
+    import re
+    from datetime import timedelta
+    from services.sales_item_xref_service import is_product
+    since = (datetime.now(timezone.utc) - timedelta(days=180)).date().isoformat()
+    orders = [o async for o in db.bc_sales_orders.find({"customer_no": customer_no, "order_date": {"$gte": since}},
+                                                       {"_id": 0, "external_doc_no": 1, "lines": 1})]
+    if len(orders) < 5:
+        return False
+    rx = re.compile(r"^\s*([A-Z0-9]+?)\s*-\s*(\d{1,3})(?:\s*/.*)?$", re.I)
+    bases: Dict[str, int] = {}
+    for o in orders:
+        m = rx.match(str(o.get("external_doc_no") or ""))
+        if m:
+            bases[m.group(1).upper()] = bases.get(m.group(1).upper(), 0) + 1
+    split_share = sum(n for n in bases.values() if n >= 2) / len(orders)
+    single = sum(1 for o in orders if sum(1 for l in o.get("lines") or []
+                                          if l.get("lineType") == "Item" and is_product(l.get("lineObjectNumber"))) == 1) / len(orders)
+    return split_share >= 0.8 and single >= 0.8
+
+
+def _split_base(sl: Dict[str, Any], po_text: str) -> str:
+    """The PO as inside sales writes it before "-n": the customer_po token
+    with its letter prefix (P0030199, not "P0030199, Rev. 1" or 30199)."""
+    import re
+    toks = [str(t).upper() for t in sl.get("customer_po") or [] if t]
+    lettered = [t for t in toks if re.match(r"^[A-Z]", t)]
+    return (max(lettered, key=len) if lettered else (max(toks, key=len) if toks else re.split(r"[,\s]", po_text)[0]))
+
+
 def _ship_to(d: Dict[str, Any], history: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     """A ship-to this customer has used in BC whose postal code / city is on the PO."""
     text = str((d.get("extracted_fields") or {}).get("ship_to") or "").upper()
@@ -98,67 +137,95 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             if prod:
                 await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_link.order_no": prod["order_no"], "sales_link.match": "customer_po", "sales_stage": "in_bc"}})
                 continue
-            lines = [l for l in res.get("lines") or [] if l.get("item")] + list(res.get("charges") or [])
+            prods = [l for l in res.get("lines") or [] if l.get("item")]
+            lines = prods + list(res.get("charges") or [])
             if not lines or any(not l.get("quantity") for l in lines):
                 await skip(d, "a line has no quantity")
                 continue
             hist = [o.get("ship_to") or {} async for o in db.bc_sales_orders.find({"customer_no": cust}, {"_id": 0, "ship_to": 1}).sort([("order_no", -1)]).limit(40)]
             st = _ship_to(d, hist)
-            header = {"customerNumber": cust, "externalDocumentNumber": po_text}
-            od = str((d.get("extracted_fields") or {}).get("order_date") or "")[:10]
-            if len(od) == 10 and od[4] == "-":
-                header["orderDate"] = od
-            if st:
-                header.update({k: v for k, v in st.items() if v})
-            r = await c.post(f"{base}/salesOrders", headers=h, json=header)
-            if r.status_code not in (200, 201):
-                await skip(d, f"BC refused the order header: {r.text[:200]}")
+            # One order per PO line for a customer inside sales enters that
+            # way (Horseshoe: P0028021-1 ... -13, one can line each, 140 of
+            # 144 orders), each with its own charges.
+            groups = [(po_text, lines)]
+            if SPLIT_PER_LINE and len(prods) > 1 and await splits_per_line(db, cust):
+                from services.sales_charge_service import charge_lines
+                base_po = _split_base(sl, po_text)
+                el = (d.get("extracted_fields") or {}).get("line_items") or []
+                groups = [(f"{base_po}-{n}"[:35], [l] + await charge_lines(db, cust, [l], el)) for n, l in enumerate(prods, 1)]
+            made, failed = [], None
+            for ext, glines in groups:
+                header = {"customerNumber": cust, "externalDocumentNumber": ext}
+                od = str((d.get("extracted_fields") or {}).get("order_date") or "")[:10]
+                if len(od) == 10 and od[4] == "-":
+                    header["orderDate"] = od
+                if st:
+                    header.update({k: v for k, v in st.items() if v})
+                r = await c.post(f"{base}/salesOrders", headers=h, json=header)
+                if r.status_code not in (200, 201):
+                    failed = f"BC refused the order header: {r.text[:200]}"
+                    break
+                so = r.json()
+                sid, sno = so["id"], so["number"]
+                made.append({"bc_order_no": sno, "bc_system_id": sid, "external_document_no": ext, "lines": glines})
+                errors = []
+                for l in glines:
+                    body = {"lineType": "Item", "lineObjectNumber": l["item"], "quantity": float(l["quantity"])}
+                    if l.get("unit_price") is not None:
+                        body["unitPrice"] = float(l["unit_price"])
+                    if l.get("unit_of_measure"):
+                        body["unitOfMeasureCode"] = l["unit_of_measure"]
+                    lr = await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json=body)
+                    if lr.status_code not in (200, 201):
+                        errors.append(f"{l['item']}: {lr.text[:160]}")
+                # What the rep still has to add (dunnage, irregular charges): a
+                # comment line on the draft, where they finish the order in BC.
+                gitems = {str(l.get("item")).upper() for l in glines}
+                checks = [f"{l['item']}: {l['price_check']}" for l in res.get("lines") or [] if l.get("price_check") and str(l.get("item")).upper() in gitems]
+                if checks:
+                    note = "HUB: check price - " + "; ".join(dict.fromkeys(checks))
+                    for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
+                        await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
+                todo = [t for t in res.get("to_complete") or [] if str(t.get("item")).upper() not in gitems]
+                if todo:
+                    note = "HUB: usually also on this customer's orders: " + ", ".join(
+                        f"{t['item']} ({int(t['rate'] * 100)}%{', at shipping' if t.get('when') == 'shipping / invoicing' else ''})" for t in todo)
+                    for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
+                        await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
+                # Read back: every planned line present with its quantity.
+                rb = await c.get(f"{base}/salesOrders({sid})", headers=h, params={"$expand": "salesOrderLines"})
+                got = [x for x in (rb.json().get("salesOrderLines") or []) if x.get("lineObjectNumber")] if rb.status_code == 200 else []
+                ok = not errors and len(got) == len(glines) and all(
+                    any(str(g["lineObjectNumber"]).upper() == str(l["item"]).upper() and abs(float(g["quantity"]) - float(l["quantity"])) < 0.001
+                        and (l.get("unit_price") is None or abs(float(g.get("unitPrice") or 0) - float(l["unit_price"])) < 0.005) for g in got)
+                    for l in glines)
+                if not ok:
+                    failed = f"draft did not come out as planned ({'; '.join(errors)[:200] or 'lines differ'})"
+                    break
+                made[-1]["total"] = rb.json().get("totalAmountExcludingTax")
+            if failed:
+                # All or nothing: a PO half drafted is worse than none.
+                codes = []
+                for m in made:
+                    dr = await c.delete(f"{base}/salesOrders({m['bc_system_id']})", headers={**h, "If-Match": "*"})
+                    codes.append(str(dr.status_code))
+                await skip(d, f"{failed}; removed ({', '.join(codes) or 'nothing created'})")
                 continue
-            so = r.json()
-            sid, sno = so["id"], so["number"]
-            errors = []
-            for l in lines:
-                body = {"lineType": "Item", "lineObjectNumber": l["item"], "quantity": float(l["quantity"])}
-                if l.get("unit_price") is not None:
-                    body["unitPrice"] = float(l["unit_price"])
-                if l.get("unit_of_measure"):
-                    body["unitOfMeasureCode"] = l["unit_of_measure"]
-                lr = await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json=body)
-                if lr.status_code not in (200, 201):
-                    errors.append(f"{l['item']}: {lr.text[:160]}")
-            # What the rep still has to add (dunnage, irregular charges): a
-            # comment line on the draft, where they finish the order in BC.
-            checks = [f"{l['item']}: {l['price_check']}" for l in res.get("lines") or [] if l.get("price_check")]
-            if checks:
-                note = "HUB: check price - " + "; ".join(checks)
-                for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
-                    await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
-            todo = res.get("to_complete") or []
-            if todo:
-                note = "HUB: usually also on this customer's orders: " + ", ".join(
-                    f"{t['item']} ({int(t['rate'] * 100)}%{', at shipping' if t.get('when') == 'shipping / invoicing' else ''})" for t in todo)
-                for chunk in [note[i:i + 100] for i in range(0, min(len(note), 300), 100)]:
-                    await c.post(f"{base}/salesOrders({sid})/salesOrderLines", headers=h, json={"lineType": "Comment", "description": chunk})
-            # Read back: every planned line present with its quantity.
-            rb = await c.get(f"{base}/salesOrders({sid})", headers=h, params={"$expand": "salesOrderLines"})
-            got = [x for x in (rb.json().get("salesOrderLines") or []) if x.get("lineObjectNumber")] if rb.status_code == 200 else []
-            ok = not errors and len(got) == len(lines) and all(
-                any(str(g["lineObjectNumber"]).upper() == str(l["item"]).upper() and abs(float(g["quantity"]) - float(l["quantity"])) < 0.001
-                    and (l.get("unit_price") is None or abs(float(g.get("unitPrice") or 0) - float(l["unit_price"])) < 0.005) for g in got)
-                for l in lines)
-            if not ok:
-                dr = await c.delete(f"{base}/salesOrders({sid})", headers={**h, "If-Match": "*"})
-                await skip(d, f"draft did not come out as planned ({'; '.join(errors)[:200] or 'lines differ'}); removed ({dr.status_code})")
-                continue
-            total = rb.json().get("totalAmountExcludingTax")
-            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
-                "sales_draft": {"environment": ALLOWED_ENVIRONMENT, "bc_order_no": sno, "bc_system_id": sid,
-                                "customer_no": cust, "external_document_no": po_text, "ship_to_from_history": bool(st),
-                                "lines": lines, "to_complete": res.get("to_complete") or [], "total": total, "created_at": now(), "status": "Draft"},
-                "sales_stage": "drafted"}})
+            first = made[0]
+            total = round(sum(float(m.get("total") or 0) for m in made), 2)
+            draft_rec = {"environment": ALLOWED_ENVIRONMENT, "bc_order_no": first["bc_order_no"], "bc_system_id": first["bc_system_id"],
+                         "customer_no": cust, "external_document_no": first["external_document_no"], "ship_to_from_history": bool(st),
+                         "lines": lines if len(made) == 1 else [l for m in made for l in m["lines"]],
+                         "to_complete": res.get("to_complete") or [], "total": total, "created_at": now(), "status": "Draft"}
+            if len(made) > 1:
+                draft_rec["orders"] = [{k: m.get(k) for k in ("bc_order_no", "bc_system_id", "external_document_no", "total")} for m in made]
+                draft_rec["split_per_line"] = True
+            await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_draft": draft_rec, "sales_stage": "drafted"}})
             await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sales_order_draft", "by": "hub", "at": now(),
-                                                    "environment": ALLOWED_ENVIRONMENT, "bc_record_no": sno,
-                                                    "detail": {"customer": cust, "customer_po": po_text, "lines": len(lines), "total": total}})
-            results.append({"document_id": d["id"], "bc_order_no": sno, "customer": cust, "customer_po": po_text, "lines": len(lines), "total": total})
+                                                    "environment": ALLOWED_ENVIRONMENT, "bc_record_no": first["bc_order_no"],
+                                                    "detail": {"customer": cust, "customer_po": po_text, "lines": len(draft_rec["lines"]), "total": total,
+                                                               "orders": [m["bc_order_no"] for m in made]}})
+            results.append({"document_id": d["id"], "bc_order_no": first["bc_order_no"], "orders": [m["bc_order_no"] for m in made],
+                            "customer": cust, "customer_po": po_text, "lines": len(draft_rec["lines"]), "total": total})
     return {"drafted": sum(1 for r in results if r.get("bc_order_no")), "results": results}
 

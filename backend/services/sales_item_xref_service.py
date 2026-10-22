@@ -560,6 +560,27 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
             "price_check": "; ".join(checks) or None}
 
 
+DESC_CONFIRMS = True
+
+
+def _desc_confirms(e: Dict[str, Any], item: str, hist: Dict[str, Dict[str, Any]]) -> bool:
+    """The PO line names a word of this item's BC description that none of
+    the customer's other items has (flavour, design, colour)."""
+    def words(t):
+        return {w for w in re.findall(r"[A-Z]{4,}", str(t or "").upper()) if w not in _STOP}
+    mine = words((hist.get(item) or {}).get("description"))
+    if not mine:
+        return False
+    others = set()
+    for it, h in hist.items():
+        # Goods only: an artwork / tooling charge names the design too
+        # ("Artwork Charges - Cookies & Cream revision").
+        if it != item and is_product(it) and not re.search(r"artwork|tooling|charge|plate|set ?up|die\b", str(h.get("description") or ""), re.I):
+            others |= words(h.get("description"))
+    distinctive = mine - others
+    return bool(distinctive & words(e.get("description")))
+
+
 async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None,
                         before_order: Optional[str] = None) -> List[Dict[str, Any]]:
     await load_item_categories(db)
@@ -587,6 +608,16 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                         and c[2]["fits"] is not False), None)
         pick = printed or next((c for c in valued if c[2]["fits"] is True), None) or \
             next((c for c in valued if c[2]["fits"] is None and strong[c[0]]), None)
+        if not pick and DESC_CONFIRMS:
+            # A weak candidate (a code seen once: Horseshoe CN000112A from one
+            # Ball invoice) whose BC description shares a word no other item
+            # of this customer has ("COOKIES": Nurri Cookies&Cream).
+            for c in valued:
+                # Only a learned customer code: a description candidate
+                # "confirmed" by its own description proves nothing.
+                if c[2]["fits"] is None and c[1].startswith("customer item") and _desc_confirms(e, c[0], hist):
+                    pick = (c[0], c[1] + " · description agrees", c[2])
+                    break
         if pick:
             item, how, v = pick
             # The customer has since moved to a newer revision of this item

@@ -14,6 +14,7 @@ Hourly, read-only:
    charges_right, charges, missing, extra} - the real accuracy of drafting.
 """
 import logging
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -34,8 +35,13 @@ def _norm_lines(ls: List[Dict[str, Any]]) -> Dict[str, Dict[str, float]]:
     return out
 
 
-def compare(planned: List[Dict[str, Any]], actual: List[Dict[str, Any]]) -> Dict[str, Any]:
+def compare(planned: List[Dict[str, Any]], actual: List[Dict[str, Any]], later: frozenset = frozenset()) -> Dict[str, Any]:
+    """later: charges this customer gets at shipping / invoicing (Giovanni's
+    O-I pallets on 100% of invoiced orders): a draft is the order as entered,
+    so their absence is not a miss."""
     p, a = _norm_lines(planned), _norm_lines(actual)
+    a_later = sorted(it for it in a if it in later and it not in p)
+    a = {it: x for it, x in a.items() if it not in a_later}
     c = Counter()
     for it, x in a.items():
         kind = "products" if is_product(it) else "charges"
@@ -49,6 +55,26 @@ def compare(planned: List[Dict[str, Any]], actual: List[Dict[str, Any]]) -> Dict
     out["missing"] = sorted(it for it in a if it not in p)
     out["extra"] = sorted(it for it in p if it not in a)
     out["exact"] = not out["missing"] and not out["extra"] and c["qty_right"] == c["products"] and c["price_right"] == c["products"]
+    if a_later:
+        out["added_at_shipping"] = a_later
+    return out
+
+
+async def _later_charges(db, customer_no: Any) -> frozenset:
+    return frozenset([u["charge"] async for u in db.sales_charge_usual.find(
+        {"customer_no": customer_no, "when": "shipping / invoicing"}, {"_id": 0, "charge": 1})])
+
+
+def _merge(gs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    out: Dict[str, Any] = Counter()
+    for g in gs:
+        for k, v in g.items():
+            if isinstance(v, int) and not isinstance(v, bool):
+                out[k] += v
+    out = dict(out)
+    for k in ("missing", "extra", "added_at_shipping"):
+        out[k] = sorted({x for g in gs for x in g.get(k) or []})
+    out["exact"] = all(g.get("exact") for g in gs)
     return out
 
 
@@ -105,10 +131,28 @@ async def readback(db) -> Dict[str, Any]:
             upd = {"sales_draft_readback": state}
             # Graded against the order inside sales entered in Production.
             order_no = (d.get("sales_link") or {}).get("order_no")
-            if order_no:
+            later = await _later_charges(db, sd.get("customer_no"))
+            if sd.get("orders") and all(x.get("lines") for x in sd["orders"]):
+                # One draft per PO line (Horseshoe P0030240-3): graded against
+                # the rep's order for that line ("P0030240-3/W118465").
+                gs, nos = [], []
+                for x in sd["orders"]:
+                    ext = str(x.get("external_document_no") or "")
+                    o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"}},
+                                                          {"_id": 0, "order_no": 1, "lines": 1})
+                    if o:
+                        gs.append(compare(x["lines"], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"], later))
+                        nos.append(o["order_no"])
+                if gs:
+                    g = _merge(gs)
+                    upd["sales_draft_vs_bc"] = {**g, "bc_order_no": nos[0], "bc_orders": nos, "orders_graded": len(gs),
+                                                "orders_drafted": len(sd["orders"]), "graded_at": now}
+                    stats["graded"] += 1
+                    stats["graded_exact"] += bool(g["exact"])
+            elif order_no:
                 o = await db.bc_sales_orders.find_one({"order_no": order_no}, {"_id": 0, "lines": 1})
                 if o:
-                    g = compare(sd.get("lines") or [], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"])
+                    g = compare(sd.get("lines") or [], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"], later)
                     upd["sales_draft_vs_bc"] = {**g, "bc_order_no": order_no, "graded_at": now}
                     stats["graded"] += 1
                     stats["graded_exact"] += bool(g["exact"])

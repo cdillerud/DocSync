@@ -219,7 +219,7 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                          "lines": lines if len(made) == 1 else [l for m in made for l in m["lines"]],
                          "to_complete": res.get("to_complete") or [], "total": total, "created_at": now(), "status": "Draft"}
             if len(made) > 1:
-                draft_rec["orders"] = [{k: m.get(k) for k in ("bc_order_no", "bc_system_id", "external_document_no", "total")} for m in made]
+                draft_rec["orders"] = [{k: m.get(k) for k in ("bc_order_no", "bc_system_id", "external_document_no", "total", "lines")} for m in made]
                 draft_rec["split_per_line"] = True
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_draft": draft_rec, "sales_stage": "drafted"}})
             await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sales_order_draft", "by": "hub", "at": now(),

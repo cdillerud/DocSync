@@ -142,6 +142,7 @@ SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document"
                     "Sales_Order"}
 
 
+_REMITTANCE = re.compile(r"remittance advice|payment advice|remit advice", re.I)
 _ACCOUNT_STATEMENT = re.compile(r"statement of accounts?\b|account statement|customer statement", re.I)
 
 
@@ -167,6 +168,10 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         # enter. Not "Monthly Statement" (parking, lease): those are the bill;
         # nor "Sales Invoice - SINV…" PDFs sent with Boyer's statement email.
         return {"ap_stage": "no_action", "no_action_reason": "statement"}
+    if not (bl and bl.get("bc_document_no")) and _REMITTANCE.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
+        # A payment advice (Gamer's payment to Ball read as a 658k "invoice"
+        # of 30 numbers): no remittance-named document was ever a BC invoice.
+        return {"ap_stage": "no_action", "no_action_reason": "remittance"}
     if bl and bl.get("bc_document_no"):
         if str(bl.get("bc_status") or "").lower() == "paid" or bl.get("bc_entity") == "posted_purchase_invoice":
             return {"ap_stage": "paid"}

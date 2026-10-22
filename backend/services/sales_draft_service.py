@@ -111,7 +111,21 @@ async def candidates(db, limit: int = 10, per_customer: int = 3) -> List[Dict[st
     return out[:limit]
 
 
+_DRAFT_LOCK = None
+
+
 async def draft(db, limit: int = 5) -> Dict[str, Any]:
+    """One drafting run at a time: the learning cycle and the 10-minute sales
+    loop both call this, and must not draft the same PO twice."""
+    import asyncio
+    global _DRAFT_LOCK
+    if _DRAFT_LOCK is None:
+        _DRAFT_LOCK = asyncio.Lock()
+    async with _DRAFT_LOCK:
+        return await _draft(db, limit)
+
+
+async def _draft(db, limit: int = 5) -> Dict[str, Any]:
     import httpx
     from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
     reason = refusal()
@@ -137,6 +151,14 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
             prod = await db.bc_sales_orders.find_one({"customer_no": cust, "ext_tokens": {"$in": tokens}}, {"_id": 0, "order_no": 1})
             if prod:
                 await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_link.order_no": prod["order_no"], "sales_link.match": "customer_po", "sales_stage": "in_bc"}})
+                continue
+            # Another copy of this PO already has a Hub draft (a resend, or a
+            # copy older than the fast loop's 3-day window): do not draft twice.
+            twin = await db.hub_documents.find_one({"sales_link.bc_customer_no": cust, "sales_link.customer_po": {"$in": tokens},
+                                                    "sales_draft.bc_order_no": {"$exists": True}, "id": {"$ne": d["id"]}}, {"_id": 0, "id": 1})
+            if twin:
+                await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_stage": "duplicate", "sales_stage_reason": "another copy of this customer PO",
+                                                                             "duplicate_of": twin["id"]}})
                 continue
             prods = [l for l in res.get("lines") or [] if l.get("item")]
             lines = prods + list(res.get("charges") or [])

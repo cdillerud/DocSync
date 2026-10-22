@@ -266,6 +266,8 @@ async def startup():
     # Hourly AP learning cycle (BC reconciliation, vendor learning, duplicates, sales links, extraction retry)
     from services.learning_cycle_service import learning_cycle_scheduler
     _asyncio.create_task(learning_cycle_scheduler())
+    from services.learning_cycle_service import sales_fast_scheduler
+    _asyncio.create_task(sales_fast_scheduler())
 
     register_doc_routes(app)
     register_wf_routes(app)

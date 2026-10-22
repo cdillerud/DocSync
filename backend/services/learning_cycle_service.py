@@ -231,3 +231,37 @@ async def learning_cycle_scheduler() -> None:
         except Exception as e:
             logger.warning("[LearningCycle] cycle failed: %r", e)
         await asyncio.sleep(CYCLE_MINUTES * 60)
+
+
+SALES_FAST_MINUTES = int(os.environ.get("SALES_FAST_MINUTES", "10"))
+SALES_FAST_ENABLED = os.environ.get("SALES_FAST_ENABLED", "true").strip().lower() != "false"
+
+
+async def sales_fast_scheduler() -> None:
+    """New customer POs drafted within minutes, not at the next learning
+    cycle (~78 min): reps entered 60 of 115 undrafted POs the same day they
+    arrived, 17 before. Sync BC orders (so an entered PO is not drafted),
+    link and stage the last 3 days, draft. ~35 s a run (2026-10-21)."""
+    if not SALES_FAST_ENABLED:
+        logger.info("[SalesFast] disabled")
+        return
+    await asyncio.sleep(300)
+    while True:
+        try:
+            from deps import get_db
+            from services.sales_draft_service import refusal, draft
+            db = get_db()
+            if not refusal():
+                from services.bc_sales_history_service import sync as sales_sync
+                from services.sales_link_service import run as sales_link
+                from services.sales_stage_service import refresh as sales_stages
+                await sales_sync(db)
+                await sales_link(db, days=2)
+                await sales_stages(db, days=3)
+                r = await draft(db, limit=5)
+                if r.get("drafted"):
+                    await sales_stages(db, days=3)
+                    logger.info("[SalesFast] %s", r)
+        except Exception as e:
+            logger.warning("[SalesFast] run failed: %r", e)
+        await asyncio.sleep(SALES_FAST_MINUTES * 60)

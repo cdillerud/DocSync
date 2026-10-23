@@ -147,6 +147,10 @@ async def harvest(db) -> Dict[str, Any]:
             "$select": "number,orderNumber,vendorNumber,postingDate",
             "$expand": "purchaseReceiptLines($select=sequence,lineType,lineObjectNumber,description,quantity,unitCost,unitOfMeasureCode)"},
             db.bc_purchase_receipts)
+        out["credit_memos"] = await _pull(c, H, f"{base}/purchaseCreditMemos", {
+            "$filter": f"lastModifiedDateTime ge {since} and status ne 'Draft'",
+            "$select": "number,vendorNumber,vendorCreditMemoNumber,creditMemoDate,postingDate,totalAmountExcludingTax,status,invoiceNumber"},
+            db.bc_purchase_credit_memos)
     await db.line_learning_state.update_one({"_id": "harvest"}, {"$set": {"since": started}}, upsert=True)
     return out
 

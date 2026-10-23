@@ -160,7 +160,8 @@ _CERTIFICATE = re.compile(r"(^|[^A-Z])(COC|COA)[-_ ]|certificate of (conformance
 
 
 def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]],
-             reliability: Dict[str, Dict[str, Any]], staff_filed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+             reliability: Dict[str, Dict[str, Any]], staff_filed: Optional[Dict[str, Any]] = None,
+             learned: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The stage of one document. route = (folder, reason) at intake view, or
     None when routing is not needed for the decision."""
     if d.get("status") == "batch_parent":
@@ -174,22 +175,25 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
     if d.get("non_ap_kind") or d.get("document_type") in NO_ACTION_TYPES:
         return {"ap_stage": "no_action", "no_action_reason": d.get("non_ap_kind") or "not_ap:" + str(d.get("document_type"))}
     bl = d.get("bc_link") if isinstance(d.get("bc_link"), dict) else None
-    if (not (bl and bl.get("bc_document_no")) and not re.search(r"invoice|\binv", str(d.get("file_name") or ""), re.I)
+    # Hand-written document-type rules are skipped once the learned model
+    # (document_disposition_service) covers what they catch.
+    retired = (learned or {}).get("retired") or set()
+    if ("account_statement" not in retired and not (bl and bl.get("bc_document_no")) and not re.search(r"invoice|\binv", str(d.get("file_name") or ""), re.I)
             and _ACCOUNT_STATEMENT.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}")):
         # A vendor's "Statement of Account" read as an invoice (FASTTRA weekly
         # statement, its "invoice number" the POs run together): nothing to
         # enter. Not "Monthly Statement" (parking, lease): those are the bill;
         # nor "Sales Invoice - SINV…" PDFs sent with Boyer's statement email.
         return {"ap_stage": "no_action", "no_action_reason": "statement"}
-    if not (bl and bl.get("bc_document_no")) and _REMITTANCE.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
+    if "remittance" not in retired and not (bl and bl.get("bc_document_no")) and _REMITTANCE.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
         # A payment advice (Gamer's payment to Ball read as a 658k "invoice"
         # of 30 numbers): no remittance-named document was ever a BC invoice.
         return {"ap_stage": "no_action", "no_action_reason": "remittance"}
-    if not (bl and bl.get("bc_document_no")) and _OPEN_ITEMS_REPORT.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
+    if "open_items_report" not in retired and not (bl and bl.get("bc_document_no")) and _OPEN_ITEMS_REPORT.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}"):
         return {"ap_stage": "no_action", "no_action_reason": "statement"}
-    if not (bl and bl.get("bc_document_no")) and _CERTIFICATE.search(str(d.get("file_name") or "")):
+    if "certificate" not in retired and not (bl and bl.get("bc_document_no")) and _CERTIFICATE.search(str(d.get("file_name") or "")):
         return {"ap_stage": "no_action", "no_action_reason": "certificate"}
-    if (not (bl and bl.get("bc_document_no")) and d.get("amount_float") in (None, "", 0, 0.0)
+    if ("notice" not in retired and not (bl and bl.get("bc_document_no")) and d.get("amount_float") in (None, "", 0, 0.0)
             and not d.get("invoice_number_clean") and _NOTICE.search(f"{d.get('file_name') or ''} {d.get('email_subject') or ''}")):
         return {"ap_stage": "no_action", "no_action_reason": "notice"}
     if bl and bl.get("bc_document_no"):
@@ -230,7 +234,7 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         if route and (route[0] or "").strip("/"):
             return {"ap_stage": "file_only", "suggested_folder": route[0], "routing_reason": route[1]}
         return {"ap_stage": "file_only"}
-    if (d.get("vendor_canonical") and d.get("vendor_canonical") not in bc_vendors
+    if ("forwarder_backup" not in retired and d.get("vendor_canonical") and d.get("vendor_canonical") not in bc_vendors
             and _FORWARDER_MAIL.search(str(d.get("email_sender") or ""))):
         # Backup paperwork in a forwarder's bill (MKC customs broker, Glory
         # Logistics, a CBP form in a StraitLink invoice): the forwarder bills
@@ -239,6 +243,15 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
         if route and (route[0] or "").strip("/"):
             return {"ap_stage": "file_only", "suggested_folder": route[0], "routing_reason": route[1], "file_only_reason": "forwarder_backup"}
         return {"ap_stage": "file_only", "file_only_reason": "forwarder_backup"}
+    p = (learned or {}).get("p")
+    if p is not None and p < (learned or {}).get("threshold", 0):
+        # Learned from AP's own BC entries: documents like this one are not
+        # entered in BC (held-out check: <= 2% were). Nothing to enter; staff
+        # still file it.
+        out = {"ap_stage": "file_only", "file_only_reason": "not_an_invoice_learned", "learned_p_entered": round(p, 3)}
+        if route and (route[0] or "").strip("/"):
+            out.update({"suggested_folder": route[0], "routing_reason": route[1]})
+        return out
     if d.get("vendor_canonical") not in bc_vendors:
         return {"ap_stage": "needs_staff", "staff_reason": "vendor_unknown"}
     if d.get("document_type") in INVOICE_TYPES and (not d.get("invoice_number_clean") or d.get("amount_float") in (None, 0, 0.0)):
@@ -319,6 +332,9 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
     # Blocked BC vendors are not vendors to pay: their documents go to staff.
     bc_vendors = set(await db.bc_catalog_vendors.distinct("vendor_no", {"blocked": {"$ne": True}}))
     reliability = await load_reliability(db)
+    from services import document_disposition_service as DD
+    dm = await DD.load(db)
+    dm_retired = DD.retired(dm)
     staff_filed = {}
     async for o in db.routing_outcomes.find({"source": {"$ne": "staff_decision"}}, {"_id": 0, "hub_doc_id": 1, "staff_folder": 1}):
         staff_filed[o["hub_doc_id"]] = o
@@ -335,7 +351,8 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
         q = {"mailbox_category": "AP", "id": doc_id}
     async for d in db.hub_documents.find(q, {"file_content_b64": 0}):
         sf = staff_filed.get(d.get("id"))
-        pre = stage_of(d, bc_vendors, None, reliability, sf)
+        learned = {"p": DD.score(dm, d), "threshold": dm.get("threshold") or 0, "retired": dm_retired}
+        pre = stage_of(d, bc_vendors, None, reliability, sf, learned)
         res = pre
         if pre["ap_stage"] == "drafted":
             # Drafted invoices keep their AP folder (folders are part of
@@ -352,7 +369,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
             x.pop("bc_link", None)
             try:
                 folder, why, _ = await route_with_feedback(x, is_international=bool(d.get("is_international")))
-                res = stage_of(d, bc_vendors, (folder, why), reliability, sf)
+                res = stage_of(d, bc_vendors, (folder, why), reliability, sf, learned)
             except Exception as e:
                 res = {"ap_stage": "needs_staff", "staff_reason": "routing_error", "routing_reason": repr(e)[:120]}
         if res["ap_stage"] == "awaiting_approval" and not (d.get("ap_approval") or {}).get("approver"):
@@ -366,7 +383,7 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
         if apply:
             unset = {k: "" for k in ("staff_reason", "no_draft_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
                                      "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind",
-                                     "bc_draft_no", "bc_draft_environment") if k not in res}
+                                     "bc_draft_no", "bc_draft_environment", "learned_p_entered", "file_only_reason") if k not in res}
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}

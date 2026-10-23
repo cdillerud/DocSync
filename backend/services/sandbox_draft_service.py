@@ -400,6 +400,11 @@ _WH_PALLET = re.compile(r'^\s*\d+"?\s*x\s*\d+"?\s*pallet\s*$', re.I)
 # the S PAL lines in WHSESTORAGE (replay 2026-10-23: 9/19 -> 19/19, no other
 # warehouse vendor changed).
 _WH_S_PAL = re.compile(r"(^|[\s(-])S\.? ?PAL\b", re.I)
+# CHILDLO prefixes every line "WAREHOUSE STORAGE": AP puts the pallet in / out
+# charges and label work in WHSEHANDLING, only the monthly fee in storage.
+# GROUPWA "... ISTO" is initial storage (AP: WHSESTORAGE), "... HNDL" handling.
+_WH_HANDLING_FIRST = re.compile(r"\bpallet (?:in|out)\b|\blabel\b", re.I)
+_WH_ISTO = re.compile(r"\bISTO\b")
 
 
 def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -432,7 +437,9 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
             code = "GST/HST TAX"        # CRALER: Ontario HST on its own line
         elif re.search(r"storage handling", desc, re.I):
             code = "WHSEHANDLING"       # CRALER "September storage handling"
-        elif _WH_PALLET.search(desc) or _WH_S_PAL.search(desc) or re.search(r"storage|entreposage|rent|recurring", desc, re.I):
+        elif _WH_HANDLING_FIRST.search(desc):
+            code = "WHSEHANDLING"
+        elif _WH_PALLET.search(desc) or _WH_S_PAL.search(desc) or _WH_ISTO.search(desc) or re.search(r"storage|entreposage|rent|recurring", desc, re.I):
             code = "WHSESTORAGE"
         elif tax_freight and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
             code = "FREIGHT"

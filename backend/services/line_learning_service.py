@@ -24,6 +24,7 @@ import collections
 import logging
 import math
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -35,6 +36,7 @@ MIN_N = 10            # invoices the vendor's score is measured on
 MIN_ACC = 0.90        # leave-one-out exact share needed to be promoted
 MIN_CONF = 0.5        # every line of a learned draft must be at least this sure
 K = 5
+PREPAID_ACCOUNTS = {"14500", "14400"}   # BC prepaid-expense / deposit accounts (data for a context feature)
 VENDOR_WEIGHT, OTHER_WEIGHT = 1.0, 0.6
 MAX_ALIGN_LINES = 14
 
@@ -104,7 +106,35 @@ async def context(db, d: Dict[str, Any]) -> List[str]:
             ctx.append("@REBILL")
     except Exception:
         pass
+    if po:
+        # An earlier AP entry for this PO went to a prepaid account: what that
+        # means for this invoice's lines is learned from AP's history.
+        if (await _prepaid_by_po(db)).get(po, set()) - {d.get("id")}:
+            ctx.append("@PO_PREPAID")
     return ctx
+
+
+_PREPAID: Optional[Tuple[float, Dict[str, set]]] = None
+
+
+async def _prepaid_by_po(db) -> Dict[str, set]:
+    """PO -> hub documents whose AP entry went to a prepaid account (one pass, cached 10 min)."""
+    global _PREPAID
+    if _PREPAID and time.time() - _PREPAID[0] < 600:
+        return _PREPAID[1]
+    nos = set()
+    async for inv in db.bc_purchase_invoice_lines.find({"purchaseInvoiceLines.lineObjectNumber": {"$in": sorted(PREPAID_ACCOUNTS)}},
+                                                       {"_id": 0, "number": 1}):
+        nos.add(inv.get("number"))
+    out: Dict[str, set] = collections.defaultdict(set)
+    if nos:
+        async for o in db.hub_documents.find({"bc_link.bc_document_no": {"$in": sorted(nos)}},
+                                             {"_id": 0, "id": 1, "po_number_clean": 1}):
+            p = str(o.get("po_number_clean") or "").strip().upper()
+            if p:
+                out[p].add(o.get("id"))
+    _PREPAID = (time.time(), out)
+    return out
 
 
 # ---------------------------------------------------------------- harvest
@@ -309,6 +339,8 @@ class Coder:
 
     # ---- candidates and features (a product line's item comes from its PO)
     def candidates(self, po: str) -> List[Dict[str, Any]]:
+        if not po:
+            return []           # no PO: receipts without an order number are not this invoice's
         seen, out = set(), []
         for l in self.receipts.get(po or "", []):
             code = str(l.get("lineObjectNumber") or "").upper()
@@ -560,6 +592,7 @@ def _show_invoice(lines: List[Dict[str, Any]], vendor_label: str = "") -> str:
     """One past invoice: its lines and how AP grouped them into BC lines."""
     rows = [f"  {n}. \"{e['description'][:80]}\" {e['amount']}" + (f" @ {e.get('unit_price')}" if e.get("unit_price") else "")
             for n, e in enumerate(lines, 1)]
+    when = str(lines[0].get("posting_date") or "")[:10]
     groups: Dict[int, List[int]] = collections.defaultdict(list)
     for n, e in enumerate(lines, 1):
         groups[e["ap_group"]].append(n)
@@ -569,7 +602,9 @@ def _show_invoice(lines: List[Dict[str, Any]], vendor_label: str = "") -> str:
         tot = round(sum(lines[n - 1]["amount"] for n in ns), 2)
         ap.append(f"{e['code']} = line{'s' if len(ns) > 1 else ''} {'+'.join(map(str, ns))} ({tot})")
     ctx = lines[0].get("context") or []
-    head = "Past invoice" + (f" from {vendor_label}" if vendor_label else "") + (" [freight rebilled to a customer]" if "@REBILL" in ctx else "")
+    head = ("Past invoice" + (f" from {vendor_label}" if vendor_label else "") + (f", entered {when}" if when else "")
+            + (" [freight rebilled to a customer]" if "@REBILL" in ctx else "")
+            + (" [an earlier invoice on its PO went to a prepaid account]" if "@PO_PREPAID" in ctx else ""))
     return head + ":\n" + "\n".join(rows) + "\n  AP entered: " + "; ".join(ap)
 
 
@@ -589,7 +624,17 @@ async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_do
         return None, "the invoice's lines do not add up to its total"
     qs = [tokens(e.get("description"), ctx, _num(e.get("unit_price"))) for e in items]
     def rank(invs):
-        return sorted(invs.items(), key=lambda kv: -max(C._sim(q, x["_t"]) for q in qs for x in kv[1]))
+        # most similar first, newest first among equally similar; identical invoices once
+        def key(kv):
+            sim = round(max(C._sim(q, x["_t"]) for q in qs for x in kv[1]), 2)
+            return (-sim, -int(re.sub(r"\D", "", str(kv[1][0].get("posting_date") or "")) or 0))
+        out, sigs = [], set()
+        for no, ls in sorted(invs.items(), key=key):
+            sig = tuple((e["description"][:40], e["amount"], e["code"], e["ap_group"]) for e in ls)
+            if sig not in sigs:
+                sigs.add(sig)
+                out.append((no, ls))
+        return out
     own = _past_invoices(C, [i for i in C.by_vendor.get(v, []) if C.ex[i]["bc_document_no"] != exclude_doc])
     shown = [_show_invoice(ls) for _, ls in rank(own)[:AI_INVOICES]]
     allowed = {e["code"] for ls in own.values() for e in ls}
@@ -617,8 +662,9 @@ async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_do
                       for n, e in enumerate(items, 1))
     system = ("You enter vendor invoices into Business Central exactly the way this company's AP team does. "
               "Learn the pattern only from the past invoices shown: which code AP gives each kind of line, and which lines AP adds "
-              "together into one BC line. Use only the allowed codes. Reply with JSON only.")
-    user = (f"Vendor: {v}\nThis invoice's context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO)\n\n"
+              "together into one BC line. AP's practice can change over time: where past invoices disagree, follow the most "
+              "recently entered ones. Use only the allowed codes. Reply with JSON only.")
+    user = (f"Vendor: {v}\nThis invoice's context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO, @PO_PREPAID = an earlier invoice on this PO went to a prepaid account)\n\n"
             + "\n\n".join(shown) + f"\n\nThe PO's received items:\n{receipt}\n\nAllowed codes: {', '.join(allowed)}\n\n"
             f"New invoice (total {total}):\n{lines}\n\n"
             'For each line give the code and a group number; lines AP would add together into one BC line share a group. '

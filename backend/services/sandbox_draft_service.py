@@ -396,6 +396,10 @@ _WH_SUBTOTAL = re.compile(r"^\s*(?:transportation |sub-? ?)?total\b", re.I)
 # ROTONDO handling bill: 'HANDLING CHARGE' -> WHSEHANDLING, the bare
 # '44" X 56" PALLET' line -> WHSESTORAGE (AP's last 4 bills).
 _WH_PALLET = re.compile(r'^\s*\d+"?\s*x\s*\d+"?\s*pallet\s*$', re.I)
+# PROGLOG writes storage as "S PAL" (handling "H PAL"): AP's last 19 bills put
+# the S PAL lines in WHSESTORAGE (replay 2026-10-23: 9/19 -> 19/19, no other
+# warehouse vendor changed).
+_WH_S_PAL = re.compile(r"(^|[\s(-])S\.? ?PAL\b", re.I)
 
 
 def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -428,7 +432,7 @@ def warehouse_split(d: Dict[str, Any], coding: Optional[Dict[str, Any]]) -> Opti
             code = "GST/HST TAX"        # CRALER: Ontario HST on its own line
         elif re.search(r"storage handling", desc, re.I):
             code = "WHSEHANDLING"       # CRALER "September storage handling"
-        elif _WH_PALLET.search(desc) or re.search(r"storage|entreposage|rent|recurring", desc, re.I):
+        elif _WH_PALLET.search(desc) or _WH_S_PAL.search(desc) or re.search(r"storage|entreposage|rent|recurring", desc, re.I):
             code = "WHSESTORAGE"
         elif tax_freight and "FREIGHT" in used and re.search(r"freight|transport|delivery|drayage|line ?haul|fuel", desc, re.I):
             code = "FREIGHT"

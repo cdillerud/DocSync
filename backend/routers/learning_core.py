@@ -309,3 +309,15 @@ async def drift_watchlist_runs(limit: int = Query(20, ge=1, le=100)):
         {}, {"_id": 0},
     ).sort("ran_at", -1).limit(limit).to_list(limit)
     return {"total": len(runs), "runs": runs}
+
+
+
+@router.get("/line-coding/scoreboard")
+async def line_coding_scoreboard():
+    """Learned line coding per vendor: leave-one-out accuracy on AP's own BC
+    entries vs the current method, and whether the vendor's drafts use it."""
+    from deps import get_db
+    db = get_db()
+    rows = [r async for r in db.line_learning_scores.find({}, {"_id": 0}).sort("invoices", -1)]
+    model = await db.line_learning_state.find_one({"_id": "model"}, {"_id": 0}) or {}
+    return {"model": model, "promoted": sum(1 for r in rows if r.get("promoted")), "vendors": rows}

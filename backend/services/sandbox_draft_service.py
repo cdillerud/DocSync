@@ -709,7 +709,7 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
 # Lines built by a rule measured against AP's entries (not the old vendor
 # profile builder): the audit leaves them alone.
 PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "vendor_coding", "forwarder_split", "warehouse_split", "prepay",
-                   "learned_coding"}
+                   "learned_coding", "learned_coding_ai"}
 
 
 async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:

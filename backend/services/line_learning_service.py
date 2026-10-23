@@ -258,6 +258,10 @@ class Coder:
             for t in e["_t"]:
                 self.index[(e["vendor"], t)].append(i)
         self.vendors = list(self.by_vendor)
+        self.gindex: Dict[str, List[int]] = collections.defaultdict(list)
+        for i, e in enumerate(self.ex):
+            for tk in e["_t"]:
+                self.gindex[tk].append(i)
         # Does AP add same-code PDF lines into one line for this vendor?
         self.separate: Dict[str, bool] = {}
         for v, idx in self.by_vendor.items():
@@ -532,55 +536,93 @@ class Coder:
         return lines, ""
 
 
-AI_CODING = False   # on once its sample replay beats the current method
-AI_EXAMPLES = 15
-AI_MIN_CONF = 0.8
+AI_CODING = True
+AI_MIN_CONF = 0.5        # its stated confidence barely separates right from wrong: gate per vendor
+AI_PER_VENDOR = 15       # replayed invoices per vendor
+AI_VENDORS = 20          # vendors replayed per run (most invoices the learner abstains on)
+AI_MIN_N = 7
+AI_MIN_ACC = 0.95
+AI_EVAL_DAYS = 7
+
+
+AI_INVOICES = 6
+AI_CROSS_VENDOR = 4
+
+
+def _past_invoices(C: "Coder", idx: List[int]) -> Dict[str, List[Dict[str, Any]]]:
+    inv: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    for i in idx:
+        inv[C.ex[i]["bc_document_no"]].append(C.ex[i])
+    return inv
+
+
+def _show_invoice(lines: List[Dict[str, Any]], vendor_label: str = "") -> str:
+    """One past invoice: its lines and how AP grouped them into BC lines."""
+    rows = [f"  {n}. \"{e['description'][:80]}\" {e['amount']}" + (f" @ {e.get('unit_price')}" if e.get("unit_price") else "")
+            for n, e in enumerate(lines, 1)]
+    groups: Dict[int, List[int]] = collections.defaultdict(list)
+    for n, e in enumerate(lines, 1):
+        groups[e["ap_group"]].append(n)
+    ap = []
+    for g, ns in groups.items():
+        e = lines[ns[0] - 1]
+        tot = round(sum(lines[n - 1]["amount"] for n in ns), 2)
+        ap.append(f"{e['code']} = line{'s' if len(ns) > 1 else ''} {'+'.join(map(str, ns))} ({tot})")
+    ctx = lines[0].get("context") or []
+    head = "Past invoice" + (f" from {vendor_label}" if vendor_label else "") + (" [freight rebilled to a customer]" if "@REBILL" in ctx else "")
+    return head + ":\n" + "\n".join(rows) + "\n  AP entered: " + "; ".join(ap)
 
 
 async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_doc: Optional[str] = None,
-                   provider=None) -> Tuple[Optional[List[Dict[str, Any]]], str]:
-    """The AI model codes an invoice the similarity learner is unsure of,
-    shown this vendor's own past lines as AP coded them (the nearest ones
-    plus the most common), the PO's receipt lines, and the codes AP uses for
-    this vendor; it must answer with one of those codes."""
+                   provider=None, raw_out: Optional[Dict[str, Any]] = None) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+    """The AI model codes an invoice the similarity learner is unsure of.
+    It is shown whole past invoices of this vendor (nearest first) with how
+    AP coded and grouped their lines into BC lines - plus similar invoices of
+    other vendors when this one has little history - and must answer with
+    codes AP uses for this vendor (or the PO's received items), grouping the
+    lines the way AP would."""
     import json as _json
     v = d.get("vendor_canonical")
     items = [e for e in (d.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
     total = round(abs(float(d.get("amount_float") or 0)), 2)
     if not items or abs(sum(_pdf_amount(e) for e in items) - total) > 0.02:
         return None, "the invoice's lines do not add up to its total"
-    idx = [i for i in C.by_vendor.get(v, []) if C.ex[i]["bc_document_no"] != exclude_doc]
-    if len(idx) < 3:
+    qs = [tokens(e.get("description"), ctx, _num(e.get("unit_price"))) for e in items]
+    def rank(invs):
+        return sorted(invs.items(), key=lambda kv: -max(C._sim(q, x["_t"]) for q in qs for x in kv[1]))
+    own = _past_invoices(C, [i for i in C.by_vendor.get(v, []) if C.ex[i]["bc_document_no"] != exclude_doc])
+    shown = [_show_invoice(ls) for _, ls in rank(own)[:AI_INVOICES]]
+    allowed = {e["code"] for ls in own.values() for e in ls}
+    coding = await db.vendor_line_coding.find_one({"vendor": str(v or "").upper()}, {"_id": 0, "codes_used": 1}) or {}
+    allowed |= set(coding.get("codes_used") or [])
+    if len(own) < 3:
+        # Little history: similar invoices of other vendors, labelled as such.
+        cand = set()
+        for q in qs:
+            for tk in q:
+                cand.update(i for i in C.gindex.get(tk, [])[:300] if C.ex[i]["vendor"] != v)
+        other = _past_invoices(C, [i for i in cand if C.ex[i]["bc_document_no"] != exclude_doc])
+        for no, ls in rank(other)[:AI_CROSS_VENDOR]:
+            shown.append(_show_invoice(ls, vendor_label=f"another vendor ({ls[0]['vendor']})"))
+        if not allowed:
+            allowed |= {e["code"] for _, ls in rank(other)[:AI_CROSS_VENDOR] for e in ls}
+    if not shown or not allowed:
         return None, "too little history for this vendor"
-    allowed = sorted({C.ex[i]["code"] for i in idx})
     po = str(d.get("po_number_clean") or "").strip().upper()
     rec = C.candidates(po)
-    allowed = sorted(set(allowed) | {r["code"] for r in rec})
-    # nearest examples to any of this invoice's lines, then the most common
-    qs = [tokens(e.get("description"), ctx, _num(e.get("unit_price"))) for e in items]
-    scored = sorted(idx, key=lambda i: -max(C._sim(q, C.ex[i]["_t"]) for q in qs))
-    pick, seen = [], set()
-    for i in scored + idx:
-        e = C.ex[i]
-        k = (e["description"][:60], e["code"])
-        if k in seen:
-            continue
-        seen.add(k)
-        pick.append(e)
-        if len(pick) >= AI_EXAMPLES:
-            break
-    examples = "\n".join(f"- \"{e['description'][:90]}\" amount {e['amount']}" + (f" unit price {e.get('unit_price')}" if e.get("unit_price") else "")
-                         + (" [freight rebilled to a customer]" if "@REBILL" in (e.get("context") or []) else "") + f" -> {e['code']}" for e in pick)
+    allowed |= {r["code"] for r in rec}
+    allowed = sorted(allowed)
     receipt = "\n".join(f"- {r['code']}: \"{r['desc'][:60]}\" unit cost {r['unit_cost']} qty {r.get('qty')}" for r in rec[:15]) or "(none)"
-    lines = "\n".join(f"{n}. \"{str(e.get('description') or '')[:120]}\" amount {_pdf_amount(e)}" + (f" unit price {e.get('unit_price')}" if e.get("unit_price") else "")
+    lines = "\n".join(f"{n}. \"{str(e.get('description') or '')[:120]}\" {_pdf_amount(e)}" + (f" @ {e.get('unit_price')}" if e.get("unit_price") else "")
                       for n, e in enumerate(items, 1))
-    system = ("You code vendor invoice lines the way this company's AP team enters them in Business Central. "
-              "Learn the pattern only from the examples of this vendor's past lines and the codes AP chose. "
-              "Answer only with codes from the allowed list. Reply with JSON.")
-    user = (f"Vendor: {v}\nInvoice context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO)\n\n"
-            f"Past lines from this vendor and the code AP used:\n{examples}\n\nThe PO's received lines (item codes):\n{receipt}\n\n"
-            f"Allowed codes: {', '.join(allowed)}\n\nCode each line of this invoice:\n{lines}\n\n"
-            'Reply as {"lines": [{"n": 1, "code": "...", "confidence": 0.0-1.0}, ...]}')
+    system = ("You enter vendor invoices into Business Central exactly the way this company's AP team does. "
+              "Learn the pattern only from the past invoices shown: which code AP gives each kind of line, and which lines AP adds "
+              "together into one BC line. Use only the allowed codes. Reply with JSON only.")
+    user = (f"Vendor: {v}\nThis invoice's context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO)\n\n"
+            + "\n\n".join(shown) + f"\n\nThe PO's received items:\n{receipt}\n\nAllowed codes: {', '.join(allowed)}\n\n"
+            f"New invoice (total {total}):\n{lines}\n\n"
+            'For each line give the code and a group number; lines AP would add together into one BC line share a group. '
+            'Reply as {"lines": [{"n": 1, "code": "...", "group": 1, "confidence": 0.0-1.0}, ...]}')
     try:
         if provider is None:
             from services.llm_router import get_provider
@@ -589,39 +631,41 @@ async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_do
         raw = await _aio.wait_for(provider.complete(system, user, f"line-coding-{d.get('id')}", expect_json=True), 60)
         j = _json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
     except Exception as e:
-        return None, f"AI coding failed: {e!r}"[:400]
+        return None, f"AI coding failed: {e!r}"[:300]
     got = {int(x.get("n")): x for x in j.get("lines") or [] if str(x.get("n", "")).isdigit()}
-    out = []
+    conf_min = 1.0
+    groups: Dict[Any, List[Any]] = {}
     for n, e in enumerate(items, 1):
         x = got.get(n) or {}
         c = str(x.get("code") or "").upper()
         conf = float(x.get("confidence") or 0)
-        if c not in allowed or conf < AI_MIN_CONF:
-            return None, f"the AI was not sure how AP codes '{str(e.get('description'))[:50]}'"
-        r = None if C.as_charge(v, c) else next((r for r in rec if r["code"] == c), None)
-        out.append((c, _pdf_amount(e), str(e.get("description") or ""), conf, r["unit_cost"] if r else None, e, r))
-    if not C.separate.get(v):
-        agg: Dict[Tuple[str, Any], List[Any]] = {}
-        for c, a, desc, p, uc, e, r in out:
-            k = (c, uc)
-            if k in agg:
-                agg[k][1] = round(agg[k][1] + a, 2)
-            else:
-                agg[k] = [c, a, desc, p, uc, e, r]
-        out = [tuple(x) for x in agg.values()]
+        conf_min = min(conf_min, conf)
+        if c not in allowed:
+            return None, f"the AI gave a code AP does not use for this vendor ('{str(e.get('description'))[:40]}')"
+        g = (x.get("group"), c)
+        groups.setdefault(g, []).append(e)
+    if raw_out is not None:
+        raw_out["confidence"] = conf_min
+    if conf_min < AI_MIN_CONF:
+        return None, f"the AI was not sure ({conf_min:.2f})"
     res = []
-    for c, a, desc, p, uc, e, r in out:
-        qty, cost = 1.0, round(a, 2)
-        if uc:
-            qty = round(a / uc, 5)
-            seen_q = [x for x in (_num(e.get("quantity")), (r or {}).get("qty")) if x]
+    for (g, c), es in groups.items():
+        a = round(sum(_pdf_amount(e) for e in es), 2)
+        r = None if C.as_charge(v, c) else next((r for r in rec if r["code"] == c), None)
+        qty, cost = 1.0, a
+        if r and r.get("unit_cost"):
+            qty = round(a / r["unit_cost"], 5)
+            seen_q = [x for x in ([_num(e.get("quantity")) for e in es] + [r.get("qty")]) if x]
+            if len(es) > 1:
+                seen_q.append(sum(_num(e.get("quantity")) or 0 for e in es))
             seen_q += [x / 1000 for x in seen_q] + [x * 1000 for x in seen_q]
             if not any(abs(qty - x) <= max(0.01 * abs(x), 0.001) for x in seen_q):
-                return None, f"the quantity for '{desc[:50]}' does not match the invoice or the receipt"
-            cost = uc
+                return None, f"the quantity for '{str(es[0].get('description'))[:50]}' does not match the invoice or the receipt"
+            cost = r["unit_cost"]
         lt = C.line_type.get((v, c), "Item")
-        res.append({"lineType": "Account" if lt == "Account" else "Item", "lineObjectNumber": c, "description": desc[:100],
-                    "quantity": qty, "unitCost": cost, "source": f"AI, from AP's coding of this vendor's past invoices ({int(p * 100)}% sure)"})
+        res.append({"lineType": "Account" if lt == "Account" else "Item", "lineObjectNumber": c,
+                    "description": str(es[0].get("description") or "")[:100], "quantity": qty, "unitCost": cost,
+                    "source": f"AI, from AP's coding of this vendor's past invoices ({int(conf_min * 100)}% sure)"})
     return res, ""
 
 
@@ -710,20 +754,80 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
             "abstain": tot["abstain"], "promoted_vendors": sorted(promoted)[:40]}
 
 
+async def evaluate_ai(db, force: bool = False) -> Dict[str, Any]:
+    """Replay the AI step on each vendor's most recent invoices the learner
+    abstains on (AP's answer hidden) and turn it on per vendor where it is
+    at least AI_MIN_ACC exact on AI_MIN_N or more. Weekly; ~250 model calls."""
+    import asyncio as _aio
+    if not AI_CODING:
+        return {"disabled": True}
+    st = await db.line_learning_state.find_one({"_id": "ai_eval"}) or {}
+    if not force and st.get("at") and st["at"] > (datetime.now(timezone.utc) - timedelta(days=AI_EVAL_DAYS)).isoformat():
+        return {"skipped": "evaluated " + st["at"]}
+    C = await coder(db, refresh=True)
+    prom = set(await db.line_learning_scores.distinct("vendor", {"promoted": True}))
+    pool: Dict[str, List[Any]] = collections.defaultdict(list)
+    seen = set()
+    async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1):
+        no = d["bc_link"]["bc_document_no"]
+        v = d.get("vendor_canonical")
+        if no in seen or not v or v in prom or len(pool[v]) >= AI_PER_VENDOR:
+            continue
+        seen.add(no)
+        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0, "purchaseInvoiceLines": 1})
+        if not inv:
+            continue
+        ctx = await context(db, d)
+        lines, why = C.lines(d, ctx, exclude_doc=no)
+        if lines is None and "add up" not in why:
+            pool[v].append((d, inv, ctx))
+    from services.llm_router import get_provider
+    prov = get_provider("classification")
+    out, now = {}, datetime.now(timezone.utc).isoformat()
+    for v in sorted(pool, key=lambda x: -len(pool[x]))[:AI_VENDORS]:
+        n = att = ok = 0
+        for d, inv, ctx in pool[v]:
+            no = d["bc_link"]["bc_document_no"]
+            ap = [(str(l["lineObjectNumber"]).upper(), _bc_amount(l)) for l in inv.get("purchaseInvoiceLines", [])
+                  if l.get("lineObjectNumber") and _bc_amount(l)]
+            lines, _ = await ai_lines(db, C, d, ctx, exclude_doc=no, provider=prov)
+            await _aio.sleep(2)
+            n += 1
+            if lines is None:
+                continue
+            att += 1
+            ok += _same([(l["lineObjectNumber"], round(l["quantity"] * l["unitCost"], 2)) for l in lines], ap)
+        acc = ok / att if att else 0.0
+        on = att >= AI_MIN_N and acc >= AI_MIN_ACC
+        out[v] = {"n": n, "attempted": att, "exact": ok, "on": on}
+        await db.line_learning_scores.update_one({"vendor": v}, {"$set": {
+            "ai_replayed": n, "ai_attempted": att, "ai_exact": ok, "ai_accuracy": round(acc, 3),
+            "ai_promoted": on, "ai_evaluated_at": now}}, upsert=True)
+    await db.line_learning_state.update_one({"_id": "ai_eval"}, {"$set": {"at": now, "result": out}}, upsert=True)
+    return {"vendors": len(out), "ai_promoted": sorted(v for v, r in out.items() if r["on"])}
+
+
 # ------------------------------------------------------------------- plan
 async def plan(db, d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Learned lines for a promoted vendor's invoice, else None."""
     if not LEARNED_CODING:
         return None
     v = d.get("vendor_canonical")
-    s = await db.line_learning_scores.find_one({"vendor": v, "promoted": True}, {"_id": 0, "accuracy": 1})
-    if not s:
+    s = await db.line_learning_scores.find_one({"vendor": v}, {"_id": 0, "accuracy": 1, "promoted": 1,
+                                                                 "ai_promoted": 1, "ai_accuracy": 1})
+    if not s or not (s.get("promoted") or s.get("ai_promoted")):
         return None
     C = await coder(db)
-    lines, why = C.lines(d, await context(db, d))
-    if not lines:
-        return None
-    return {"lines": lines, "source": "learned_coding", "accuracy": s.get("accuracy")}
+    ctx = await context(db, d)
+    if s.get("promoted"):
+        lines, why = C.lines(d, ctx)
+        if lines:
+            return {"lines": lines, "source": "learned_coding", "accuracy": s.get("accuracy")}
+    if AI_CODING and s.get("ai_promoted"):
+        lines, why = await ai_lines(db, C, d, ctx)
+        if lines:
+            return {"lines": lines, "source": "learned_coding_ai", "accuracy": s.get("ai_accuracy")}
+    return None
 
 
 async def run(db) -> Dict[str, Any]:
@@ -734,4 +838,8 @@ async def run(db) -> Dict[str, Any]:
         out["harvest"] = {"error": repr(e)[:200]}
     out["examples"] = await build_examples(db)
     out["evaluate"] = await evaluate(db)
+    try:
+        out["ai"] = await evaluate_ai(db)
+    except Exception as e:
+        out["ai"] = {"error": repr(e)[:200]}
     return out

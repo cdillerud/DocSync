@@ -68,7 +68,9 @@ async def rebuild(db, days: int = 60, max_age_hours: int = 24) -> Dict[str, Any]
             mains, codes, one_line = Counter(), Counter(), 0
             for inv in invs:
                 ls = [l for l in inv.get("purchaseInvoiceLines", []) if l.get("lineObjectNumber")]
-                one_line += len(ls) == 1
+                # Detention / TONU beside the freight line still counts as one
+                # line: single_line splits those accessorials out itself.
+                one_line += len([l for l in ls if str(l["lineObjectNumber"]).upper() not in _ACCESSORIAL_CODES]) == 1
                 for l in ls:
                     codes[str(l["lineObjectNumber"]).upper()] += 1
                 m = _main(ls)
@@ -77,11 +79,13 @@ async def rebuild(db, days: int = 60, max_age_hours: int = 24) -> Dict[str, Any]
             total = len(invs)
             by_code = Counter()
             for (t, code), k in mains.items():
-                by_code[code] += k
+                # DRAYAGE counts with FREIGHT: single_line picks DRAYAGE for a
+                # port container move (Tumalo: 8 FREIGHT + 6 DRAYAGE of 15).
+                by_code["FREIGHT" if code == "DRAYAGE" else code] += k
             dominant = None
             if total >= 5 and by_code:
                 code, k = by_code.most_common(1)[0]
-                types = Counter({t: kk for (t, cc), kk in mains.items() if cc == code})
+                types = Counter({t: kk for (t, cc), kk in mains.items() if cc == code or (code == "FREIGHT" and cc == "DRAYAGE")})
                 t = next((x for x, _ in types.most_common() if x in ("Item", "Account")), types.most_common(1)[0][0])
                 if k / total >= DOMINANT_SHARE and one_line / total >= DOMINANT_SHARE:
                     dominant = {"lineType": t, "lineObjectNumber": code, "share": round(k / total, 2)}
@@ -110,6 +114,7 @@ def main_code_known(coding: Optional[Dict[str, Any]], lines: List[Dict[str, Any]
 
 
 _FREIGHT_CODES = {"FREIGHT", "WHSEFRT", "DRAYAGE"}
+_ACCESSORIAL_CODES = {"DETENTION", "FRTTONU"}
 # Accessorials AP enters as their own line on a carrier invoice (replay
 # 2026-10-08: Tumalo DETENTION, ATS FRTTONU).
 _ACCESSORIALS = [(re.compile(r"\bDETENTION\b", re.I), "DETENTION"),

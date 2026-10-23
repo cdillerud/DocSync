@@ -64,12 +64,17 @@ def _shape(w: str) -> str:
     return re.sub(r"(.)\1{2,}", r"\1\1\1", s)
 
 
-def tokens(desc: str, ctx: List[str]) -> frozenset:
-    """Words, 4-letter pieces of longer words, word shapes (AAAA9999999 =
-    a container number) and the context features."""
+def tokens(desc: str, ctx: List[str], unit_price: Optional[float] = None) -> frozenset:
+    """Words, word pairs (so one-letter words count: "S PAL" vs "H PAL"),
+    4-letter pieces of longer words, word shapes (AAAA9999999 = a container
+    number), the line's unit price and the context features."""
     up = str(desc or "").upper()
     raw = re.findall(r"[A-Z0-9][A-Z0-9&/.\-]*", up)
     out = set(ctx)
+    plain = [re.sub(r"\d", "9", w.strip(".-/")) for w in raw if w.strip(".-/")]
+    out.update("^" + a + "_" + b for a, b in zip(plain, plain[1:]))
+    if unit_price:
+        out.add("$%g" % round(float(unit_price), 2))
     for w in raw:
         w = w.strip(".-/")
         if len(w) < 2:
@@ -217,6 +222,7 @@ async def build_examples(db) -> Dict[str, Any]:
                          "po": str(d.get("po_number_clean") or "").strip().upper(),
                          "unit_price": _num(e.get("unit_price")), "quantity": _num(e.get("quantity")),
                          "code": str(l["lineObjectNumber"]).upper(), "line_type": l.get("lineType"), "ap_group": j,
+                         "ap_qty": float(l.get("quantity") or 0),
                          "ap_lines": len(ap), "pdf_lines": len(items)})
     await db.line_coding_examples.delete_many({})
     if rows:
@@ -225,7 +231,9 @@ async def build_examples(db) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------ model
-FEATURES = ("text", "code_in_desc", "amount", "price", "history", "receipt_x_vendor_rate", "receipt_x_other_rate", "not_on_receipt")
+FEATURES = ("s1_bias", "s1_vendor_receipt_rate", "s1_best_text", "s1_best_code_in_desc", "s1_best_amount", "s1_best_price",
+            "s1_history_on_receipt", "s1_history_other", "s1_has_receipt",
+            "s2_text", "s2_code_in_desc", "s2_amount", "s2_price", "s2_history")
 
 
 def _close(a: Optional[float], b: Optional[float], scale: float) -> float:
@@ -239,7 +247,7 @@ class Coder:
         self.receipts = receipts or {}
         self.ex = examples
         for e in self.ex:
-            e["_t"] = tokens(e["description"], e.get("context") or [])
+            e["_t"] = tokens(e["description"], e.get("context") or [], e.get("unit_price"))
         df = collections.Counter(t for e in self.ex for t in e["_t"])
         n = max(len(self.ex), 1)
         self.idf = {t: math.log((n + 1) / (c + 0.5)) for t, c in df.items()}
@@ -268,6 +276,14 @@ class Coder:
                         sep += len(g) > 1
                         agg += len(g) == 1
             self.separate[v] = sep > agg
+        # Does AP enter this vendor's code as 1 x the amount (a charge: FREIGHT,
+        # STORAGE) or at a real quantity (a stocked item)? Learned per code.
+        q1, qn = collections.Counter(), collections.Counter()
+        for e in self.ex:
+            if e.get("ap_qty"):
+                qn[(e["vendor"], e["code"])] += 1
+                q1[(e["vendor"], e["code"])] += abs(float(e["ap_qty"]) - 1.0) < 1e-9
+        self.qty_one = {k: q1[k] / n for k, n in qn.items() if n}
         self.line_type: Dict[Tuple[str, str], str] = {}
         lt = collections.defaultdict(collections.Counter)
         for e in self.ex:
@@ -303,8 +319,8 @@ class Coder:
                         "amount": round(q * uc, 2), "lt": l.get("lineType")})
         return out
 
-    def votes(self, desc: str, ctx: List[str], vendor: str, exclude_doc: Optional[str]) -> Tuple[Dict[str, float], float]:
-        q = tokens(desc, ctx)
+    def votes(self, desc: str, ctx: List[str], vendor: str, exclude_doc: Optional[str], unit_price: Optional[float] = None) -> Tuple[Dict[str, float], float]:
+        q = tokens(desc, ctx, unit_price)
         cand = set()
         for tk in q:
             cand.update(self.index.get((vendor, tk), ()))
@@ -343,53 +359,93 @@ class Coder:
                 on_rec * vrate, on_rec * (1.0 - vrate), 1.0 - on_rec]
 
     def options(self, line: Dict[str, Any], ctx: List[str], vendor: str, po: str, exclude_doc: Optional[str]):
-        hist, best = self.votes(line.get("description"), ctx, vendor, exclude_doc)
+        hist, best = self.votes(line.get("description"), ctx, vendor, exclude_doc, line.get("unit_price"))
         cands = self.candidates(po)
         have = {c["code"] for c in cands}
         cands = cands + [{"code": c, "unit_cost": None} for c in hist if c not in have]
         vrate = self.receipt_rate.get(vendor, 0.5)
         return [(c, self.features(line, c, hist, best, vrate)) for c in cands]
 
+    def as_charge(self, vendor: str, code: str) -> bool:
+        return self.qty_one.get((vendor, code), 0.0) >= 0.8
+
+    # ---- two stages: (1) is this line one of the PO's received items, or a
+    # charge? (2) which item / which charge code. Each stage is learned from
+    # AP's past invoices; the number of unrelated receipt lines on a W-PO no
+    # longer dilutes the answer.
+    def _stage1(self, opts, vrate: float) -> List[float]:
+        rec = [f for c, f in opts if c.get("unit_cost") is not None]
+        his = [(c, f) for c, f in opts if c.get("unit_cost") is None]
+        m = [max((f[i] for f in rec), default=0.0) for i in range(4)]
+        hist_other = max((f[4] for _, f in his), default=0.0)
+        hist_rec = max((f[4] for f in rec), default=0.0)
+        return [1.0, vrate, m[0], m[1], m[2], m[3], hist_rec, hist_other, 1.0 if rec else 0.0]
+
     def _train(self, epochs: int = 300, lr: float = 0.5):
-        """Softmax over each past line's candidates: which features point to
-        the code AP chose. Plain numpy gradient ascent."""
         import numpy as np
-        rows = []
+        s1, s2 = [], []
         for e in self.ex:
             if not self.receipts.get(e.get("po") or ""):
                 continue
             line = {"description": e["description"], "amount": e["amount"], "unit_price": e.get("unit_price")}
             opts = self.options(line, e.get("context") or [], e["vendor"], e["po"], e["bc_document_no"])
-            ys = [i for i, (c, _) in enumerate(opts) if c["code"] == e["code"]]
-            if len(opts) < 2 or not ys:
+            if not opts:
                 continue
-            rows.append((np.array([f for _, f in opts]), ys[0]))
-        w = np.zeros(len(FEATURES))
-        if not rows:
-            return w
+            rec = [(c, f) for c, f in opts if c.get("unit_cost") is not None]
+            is_rec = any(c["code"] == e["code"] for c, _ in rec)
+            s1.append((self._stage1(opts, self.receipt_rate.get(e["vendor"], 0.5)), 1.0 if is_rec else 0.0))
+            if is_rec and len(rec) > 1:
+                y = next(i for i, (c, _) in enumerate(rec) if c["code"] == e["code"])
+                s2.append((np.array([f[:5] for _, f in rec]), y))
+        w1 = np.zeros(9)
+        if s1:
+            X = np.array([x for x, _ in s1]); Y = np.array([y for _, y in s1])
+            for _ in range(epochs * 2):
+                p = 1 / (1 + np.exp(-(X @ w1)))
+                w1 += lr * (X.T @ (Y - p)) / len(Y)
+        w2 = np.zeros(5)
         for _ in range(epochs):
-            g = np.zeros_like(w)
-            for X, y in rows:
-                s = X @ w
-                p = np.exp(s - s.max())
-                p /= p.sum()
-                g += X[y] - p @ X
-            w += lr * g / len(rows)
-        self.train_rows = len(rows)
-        return w
+            g = np.zeros_like(w2)
+            for X2, y in s2:
+                s = X2 @ w2
+                p = np.exp(s - s.max()); p /= p.sum()
+                g += X2[y] - p @ X2
+            if s2:
+                w2 += lr * g / len(s2)
+        self.w1, self.w2 = w1, w2
+        self.train_rows = len(s1)
+        return np.concatenate([w1, w2])
 
     def pick(self, line: Dict[str, Any], ctx: List[str], vendor: str, po: str, exclude_doc: Optional[str]) -> Tuple[Optional[str], float]:
         import numpy as np
         opts = self.options(line, ctx, vendor, po, exclude_doc)
         if not opts:
             return None, 0.0
-        X = np.array([f for _, f in opts])
-        s = X @ self.weights
-        p = np.exp(s - s.max())
-        p /= p.sum()
-        i = int(p.argmax())
-        self.last_pick = opts[i][0]
-        return opts[i][0]["code"], float(p[i])
+        rec = [(c, f) for c, f in opts if c.get("unit_cost") is not None]
+        his = [(c, f) for c, f in opts if c.get("unit_cost") is None]
+        p_rec = 0.0
+        if rec:
+            z = float(np.array(self._stage1(opts, self.receipt_rate.get(vendor, 0.5))) @ self.w1)
+            p_rec = 1 / (1 + math.exp(-max(-30.0, min(30.0, z))))
+        best_rec, q_rec = None, 0.0
+        if rec:
+            s = np.array([f[:5] for _, f in rec]) @ self.w2
+            q = np.exp(s - s.max()); q /= q.sum()
+            i = int(q.argmax())
+            best_rec, q_rec = rec[i][0], float(q[i])
+        best_his, q_his = None, 0.0
+        if his:
+            # history vote share among the codes that are not on the receipt
+            tot = sum(f[4] for _, f in his) or 1.0
+            c, f = max(his, key=lambda x: x[1][4])
+            best_his, q_his = c, f[4] / tot
+        if best_rec is not None and (best_his is None or p_rec * q_rec >= (1 - p_rec) * q_his):
+            self.last_pick = best_rec
+            return best_rec["code"], p_rec * q_rec
+        if best_his is not None:
+            self.last_pick = best_his
+            return best_his["code"], (1 - p_rec) * q_his if rec else q_his
+        return None, 0.0
 
     def _w(self, t: str) -> float:
         return self.idf.get(t, 3.0)
@@ -439,7 +495,7 @@ class Coder:
             if not c or p < MIN_CONF:
                 return None, f"not sure how AP codes '{str(e.get('description'))[:60]}'"
             lp = getattr(self, "last_pick", None) or {}
-            uc = lp.get("unit_cost")
+            uc = None if self.as_charge(v, c) else lp.get("unit_cost")
             if uc:
                 # The quantity BC gets must be one the documents show: the
                 # invoice's (in pieces or thousands) or the receipt line's.
@@ -474,6 +530,99 @@ class Coder:
                           "description": desc[:100], "quantity": qty, "unitCost": cost,
                           "source": f"learned from AP's coding of this vendor's past invoices ({int(p * 100)}% sure)"})
         return lines, ""
+
+
+AI_CODING = False   # on once its sample replay beats the current method
+AI_EXAMPLES = 15
+AI_MIN_CONF = 0.8
+
+
+async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_doc: Optional[str] = None,
+                   provider=None) -> Tuple[Optional[List[Dict[str, Any]]], str]:
+    """The AI model codes an invoice the similarity learner is unsure of,
+    shown this vendor's own past lines as AP coded them (the nearest ones
+    plus the most common), the PO's receipt lines, and the codes AP uses for
+    this vendor; it must answer with one of those codes."""
+    import json as _json
+    v = d.get("vendor_canonical")
+    items = [e for e in (d.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
+    total = round(abs(float(d.get("amount_float") or 0)), 2)
+    if not items or abs(sum(_pdf_amount(e) for e in items) - total) > 0.02:
+        return None, "the invoice's lines do not add up to its total"
+    idx = [i for i in C.by_vendor.get(v, []) if C.ex[i]["bc_document_no"] != exclude_doc]
+    if len(idx) < 3:
+        return None, "too little history for this vendor"
+    allowed = sorted({C.ex[i]["code"] for i in idx})
+    po = str(d.get("po_number_clean") or "").strip().upper()
+    rec = C.candidates(po)
+    allowed = sorted(set(allowed) | {r["code"] for r in rec})
+    # nearest examples to any of this invoice's lines, then the most common
+    qs = [tokens(e.get("description"), ctx, _num(e.get("unit_price"))) for e in items]
+    scored = sorted(idx, key=lambda i: -max(C._sim(q, C.ex[i]["_t"]) for q in qs))
+    pick, seen = [], set()
+    for i in scored + idx:
+        e = C.ex[i]
+        k = (e["description"][:60], e["code"])
+        if k in seen:
+            continue
+        seen.add(k)
+        pick.append(e)
+        if len(pick) >= AI_EXAMPLES:
+            break
+    examples = "\n".join(f"- \"{e['description'][:90]}\" amount {e['amount']}" + (f" unit price {e.get('unit_price')}" if e.get("unit_price") else "")
+                         + (" [freight rebilled to a customer]" if "@REBILL" in (e.get("context") or []) else "") + f" -> {e['code']}" for e in pick)
+    receipt = "\n".join(f"- {r['code']}: \"{r['desc'][:60]}\" unit cost {r['unit_cost']} qty {r.get('qty')}" for r in rec[:15]) or "(none)"
+    lines = "\n".join(f"{n}. \"{str(e.get('description') or '')[:120]}\" amount {_pdf_amount(e)}" + (f" unit price {e.get('unit_price')}" if e.get("unit_price") else "")
+                      for n, e in enumerate(items, 1))
+    system = ("You code vendor invoice lines the way this company's AP team enters them in Business Central. "
+              "Learn the pattern only from the examples of this vendor's past lines and the codes AP chose. "
+              "Answer only with codes from the allowed list. Reply with JSON.")
+    user = (f"Vendor: {v}\nInvoice context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO)\n\n"
+            f"Past lines from this vendor and the code AP used:\n{examples}\n\nThe PO's received lines (item codes):\n{receipt}\n\n"
+            f"Allowed codes: {', '.join(allowed)}\n\nCode each line of this invoice:\n{lines}\n\n"
+            'Reply as {"lines": [{"n": 1, "code": "...", "confidence": 0.0-1.0}, ...]}')
+    try:
+        if provider is None:
+            from services.llm_router import get_provider
+            provider = get_provider("classification")
+        import asyncio as _aio
+        raw = await _aio.wait_for(provider.complete(system, user, f"line-coding-{d.get('id')}", expect_json=True), 60)
+        j = _json.loads(raw[raw.find("{"):raw.rfind("}") + 1])
+    except Exception as e:
+        return None, f"AI coding failed: {e!r}"[:400]
+    got = {int(x.get("n")): x for x in j.get("lines") or [] if str(x.get("n", "")).isdigit()}
+    out = []
+    for n, e in enumerate(items, 1):
+        x = got.get(n) or {}
+        c = str(x.get("code") or "").upper()
+        conf = float(x.get("confidence") or 0)
+        if c not in allowed or conf < AI_MIN_CONF:
+            return None, f"the AI was not sure how AP codes '{str(e.get('description'))[:50]}'"
+        r = None if C.as_charge(v, c) else next((r for r in rec if r["code"] == c), None)
+        out.append((c, _pdf_amount(e), str(e.get("description") or ""), conf, r["unit_cost"] if r else None, e, r))
+    if not C.separate.get(v):
+        agg: Dict[Tuple[str, Any], List[Any]] = {}
+        for c, a, desc, p, uc, e, r in out:
+            k = (c, uc)
+            if k in agg:
+                agg[k][1] = round(agg[k][1] + a, 2)
+            else:
+                agg[k] = [c, a, desc, p, uc, e, r]
+        out = [tuple(x) for x in agg.values()]
+    res = []
+    for c, a, desc, p, uc, e, r in out:
+        qty, cost = 1.0, round(a, 2)
+        if uc:
+            qty = round(a / uc, 5)
+            seen_q = [x for x in (_num(e.get("quantity")), (r or {}).get("qty")) if x]
+            seen_q += [x / 1000 for x in seen_q] + [x * 1000 for x in seen_q]
+            if not any(abs(qty - x) <= max(0.01 * abs(x), 0.001) for x in seen_q):
+                return None, f"the quantity for '{desc[:50]}' does not match the invoice or the receipt"
+            cost = uc
+        lt = C.line_type.get((v, c), "Item")
+        res.append({"lineType": "Account" if lt == "Account" else "Item", "lineObjectNumber": c, "description": desc[:100],
+                    "quantity": qty, "unitCost": cost, "source": f"AI, from AP's coding of this vendor's past invoices ({int(p * 100)}% sure)"})
+    return res, ""
 
 
 _CODER: Optional[Coder] = None

@@ -1037,6 +1037,10 @@ class BusinessCentralService:
                         invoice_id,
                     )
                     return "deleted"
+                if resp.status_code == 404:
+                    # Already gone: the partial-post path deletes it first and
+                    # the sandbox drafter's own clean-up then finds nothing.
+                    return "already deleted"
                 logger.warning(
                     "[BCCreatePI] Failed to delete orphan draft %s: %d %s",
                     invoice_id, resp.status_code, resp.text[:200],

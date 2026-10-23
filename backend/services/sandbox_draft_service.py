@@ -639,6 +639,16 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
         # No total was read (XPO multi-invoice PDFs: the "amount" was the
         # shipment weight, 2,280 lbs): nothing to code the lines against.
         return {"problem": "no invoice total was read from the document"}
+    # Lines learned from AP's own BC entries, for vendors where the learned
+    # coder has proven at least as good as the methods below on AP's past
+    # invoices (line_learning_service: leave-one-out, re-scored every cycle).
+    try:
+        from services.line_learning_service import plan as learned_plan
+        lp = await learned_plan(db, d)
+    except Exception:
+        lp = None
+    if lp:
+        return lp
     coding = await coding_for(db, d.get("vendor_canonical"))
     if coding and coding.get("dominant"):
         lines = single_line(coding, d)
@@ -698,7 +708,8 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
 
 # Lines built by a rule measured against AP's entries (not the old vendor
 # profile builder): the audit leaves them alone.
-PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "vendor_coding", "forwarder_split", "warehouse_split", "prepay"}
+PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "vendor_coding", "forwarder_split", "warehouse_split", "prepay",
+                   "learned_coding"}
 
 
 async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:

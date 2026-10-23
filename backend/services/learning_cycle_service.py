@@ -161,6 +161,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["draft_readback"] = {"error": repr(e)}
     try:
+        # Learn how AP codes each invoice line from its BC entries, and
+        # re-score every vendor (promotes / demotes the learned coder).
+        from services.line_learning_service import run as run_line_learning
+        summary["line_learning"] = await run_line_learning(db)
+    except Exception as e:
+        summary["line_learning"] = {"error": repr(e)[:200]}
+    try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
         from services.vendor_line_coding_service import rebuild as rebuild_line_coding

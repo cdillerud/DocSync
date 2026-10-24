@@ -119,6 +119,19 @@ def near_number(hub: Any, bc: Any) -> bool:
         return True
     return min(len(a), len(b)) >= 5 and _osa(a, b) <= 1
 
+async def reconcile_history(db, hours: int = 20) -> Dict[str, Any]:
+    """Once a day, the same reconciliation over all history: documents older
+    than the hourly 45-day window were never linked if AP entered them late
+    or BC's number arrived later (2,950 relinked on 2026-10-24), and every
+    link is a labelled example for the learners."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    if await db.bc_reconciliation_runs.find_one({"full_history": True, "at": {"$gte": since}}, {"_id": 1}):
+        return {"skipped": "ran in the last day"}
+    r = await reconcile_recent(db, days=400, bc_days=430, apply=True)
+    await db.bc_reconciliation_runs.update_one({"at": r["at"]}, {"$set": {"full_history": True}})
+    return {k: v for k, v in r.items() if not isinstance(v, list)}
+
+
 async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool = True) -> Dict[str, Any]:
     now = datetime.now(timezone.utc)
     stamp = now.isoformat()

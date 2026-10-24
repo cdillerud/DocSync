@@ -736,7 +736,64 @@ def _same(pred: List[Tuple[str, float]], ap: List[Tuple[str, float]]) -> bool:
 
 
 # --------------------------------------------------------------- evaluate
+OOT_MONTHS = 3           # out-of-time test window (calendar months, current included)
+MIN_ACC_LOW_VOLUME = 0.95  # leave-one-out bar for vendors with too few recent invoices to test on time
+
+
+async def _out_of_time(db, months: int = OOT_MONTHS) -> Dict[str, collections.Counter]:
+    """Per vendor: each of the last `months` months coded by a model trained
+    only on AP's entries posted before that month, with the receipts that
+    existed when the invoice was posted - how the coder does on invoices it
+    has not seen, the way it meets them live. Leave-one-out reads ~3 points
+    better than this (2026-10-24: 98% vs 95%)."""
+    ex = [e async for e in db.line_coding_examples.find({}, {"_id": 0})]
+    receipts: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    async for r in db.bc_purchase_receipts.find({}, {"_id": 0, "orderNumber": 1, "postingDate": 1, "purchaseReceiptLines": 1}):
+        for l in r.get("purchaseReceiptLines") or []:
+            receipts[str(r.get("orderNumber") or "").upper()].append(dict(l, _posted=str(r.get("postingDate") or "")))
+    now = datetime.now(timezone.utc)
+    starts = []
+    y, m = now.year, now.month
+    for _ in range(months):
+        starts.append(f"{y:04d}-{m:02d}")
+        y, m = (y, m - 1) if m > 1 else (y - 1, 12)
+    by_month: Dict[str, List[Any]] = collections.defaultdict(list)
+    seen = set()
+    async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}},
+                                         {"_id": 0, "vendor_canonical": 1, "bc_link": 1, "po_number_clean": 1, "amount_float": 1, "id": 1,
+                                          "extracted_fields.line_items": 1, "extracted_fields.po_number": 1, "extracted_fields.bol_number": 1}):
+        no = d["bc_link"]["bc_document_no"]
+        if no in seen or not d.get("vendor_canonical"):
+            continue
+        seen.add(no)
+        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0, "postingDate": 1, "purchaseInvoiceLines": 1})
+        if inv and str(inv.get("postingDate") or "")[:7] in starts:
+            by_month[str(inv["postingDate"])[:7]].append((d, inv))
+    out: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    for mo in starts:
+        start = mo + "-01"
+        past = [dict(e) for e in ex if str(e.get("posting_date") or "") < start]
+        if not past:
+            continue
+        C = Coder(past, {po: [l for l in ls if l["_posted"] < start] for po, ls in receipts.items()})
+        for d, inv in by_month[mo]:
+            ap = [(str(l["lineObjectNumber"]).upper(), _bc_amount(l)) for l in inv.get("purchaseInvoiceLines", [])
+                  if l.get("lineObjectNumber") and _bc_amount(l)]
+            if not ap:
+                continue
+            po = str(d.get("po_number_clean") or "").strip().upper()
+            C.receipts = {po: [l for l in receipts.get(po, []) if l["_posted"] <= str(inv.get("postingDate") or "")]} if po else {}
+            lines, _ = C.lines(d, await context(db, d), exclude_doc=d["bc_link"]["bc_document_no"])
+            if lines is None:
+                continue
+            o = out[d["vendor_canonical"]]
+            o["attempted"] += 1
+            o["exact"] += _same([(l["lineObjectNumber"], round(l["quantity"] * l["unitCost"], 2)) for l in lines], ap)
+    return out
+
+
 async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
+    oot = await _out_of_time(db)
     C = await coder(db, refresh=True)
     t: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     seen = set()
@@ -780,24 +837,36 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
         acc = tv["exact"] / tv["attempted"] if tv["attempted"] else 0.0
         cur = tv["cur_exact"] / tv["cur_graded"] if tv["cur_graded"] >= 5 else None
         lcur = tv["learned_on_cur"] / tv["attempted_on_cur"] if tv["attempted_on_cur"] >= 5 else None
-        ok = tv["attempted"] >= MIN_N and acc >= MIN_ACC and (cur is None or lcur is None or lcur >= cur)
+        o = oot.get(v) or collections.Counter()
+        oacc = o["exact"] / o["attempted"] if o["attempted"] else None
+        beats_current = cur is None or lcur is None or lcur >= cur
+        if o["attempted"] >= MIN_N:
+            # Enough recent invoices: judged on time, as it will meet them live.
+            ok = oacc >= MIN_ACC and acc >= MIN_ACC and beats_current
+        else:
+            ok = tv["attempted"] >= MIN_N and acc >= MIN_ACC_LOW_VOLUME and beats_current
         if ok:
             promoted.append(v)
         await db[scores].update_one({"vendor": v}, {"$set": {
             "vendor": v, "invoices": tv["n"], "attempted": tv["attempted"], "exact": tv["exact"],
             "accuracy": round(acc, 3), "coverage": round(tv["attempted"] / tv["n"], 3) if tv["n"] else 0,
+            "oot_attempted": o["attempted"], "oot_exact": o["exact"],
+            "oot_accuracy": round(oacc, 3) if oacc is not None else None,
             "current_method_accuracy": round(cur, 3) if cur is not None else None,
             "learned_on_same_invoices": round(lcur, 3) if lcur is not None else None,
             "promoted": ok, "updated_at": now}}, upsert=True)
     tot = sum((tv for tv in t.values()), collections.Counter())
+    po = sum((oot[v] for v in promoted if v in oot), collections.Counter())
+    oot_promoted = {"attempted": po["attempted"], "exact": po["exact"],
+                    "accuracy": round(po["exact"] / po["attempted"], 4) if po["attempted"] else None}
     if scores == "line_learning_scores":
         await db.line_learning_state.update_one({"_id": "model"}, {"$set": {
             "weights": dict(zip(FEATURES, [round(float(x), 3) for x in C.weights])), "trained_on": getattr(C, "train_rows", 0),
             "examples": len(C.ex), "attempted": tot["attempted"], "exact": tot["exact"], "abstain": tot["abstain"],
-            "promoted": len(promoted), "evaluated_at": now}}, upsert=True)
+            "promoted": len(promoted), "oot_promoted": oot_promoted, "evaluated_at": now}}, upsert=True)
     return {"weights": dict(zip(FEATURES, [round(float(x), 2) for x in C.weights])), "trained_on": getattr(C, "train_rows", 0),
             "vendors": len(t), "promoted": len(promoted), "attempted": tot["attempted"], "exact": tot["exact"],
-            "abstain": tot["abstain"], "promoted_vendors": sorted(promoted)[:40]}
+            "abstain": tot["abstain"], "oot_promoted": oot_promoted, "promoted_vendors": sorted(promoted)[:60]}
 
 
 async def evaluate_ai(db, force: bool = False) -> Dict[str, Any]:

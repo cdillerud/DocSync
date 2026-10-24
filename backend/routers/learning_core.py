@@ -321,3 +321,14 @@ async def line_coding_scoreboard():
     rows = [r async for r in db.line_learning_scores.find({}, {"_id": 0}).sort("invoices", -1)]
     model = await db.line_learning_state.find_one({"_id": "model"}, {"_id": 0}) or {}
     return {"model": model, "promoted": sum(1 for r in rows if r.get("promoted")), "vendors": rows}
+
+
+@router.get("/trend")
+async def learning_trend(days: int = Query(90, ge=1, le=365)):
+    """One row per day: the learned models' self-evaluation (line coder,
+    disposition, folders) and the daily replays against staff and BC - is
+    the system getting better over time?"""
+    from deps import get_db
+    db = get_db()
+    rows = [r async for r in db.learning_metrics.find({}, {"_id": 0}).sort("date", -1).limit(days)]
+    return {"days": len(rows), "rows": rows[::-1]}

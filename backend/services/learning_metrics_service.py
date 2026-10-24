@@ -245,13 +245,35 @@ async def _line_replay(db, days: int = 21, limit: int = 400) -> Dict[str, Any]:
     return out
 
 
+async def _models(db) -> Dict[str, Any]:
+    """The learned models' own self-evaluation, kept per day so the trend
+    (is it learning?) is visible instead of overwritten each cycle."""
+    out: Dict[str, Any] = {}
+    m = await db.line_learning_state.find_one({"_id": "model"}, {"_id": 0, "weights": 0}) or {}
+    out["line_coder"] = {k: m.get(k) for k in ("examples", "trained_on", "attempted", "exact", "abstain", "promoted", "oot_promoted")}
+    if m.get("attempted"):
+        out["line_coder"]["accuracy"] = round(m["exact"] / m["attempted"], 4)
+    out["line_ai_vendors"] = sorted(await db.line_learning_scores.distinct("vendor", {"ai_promoted": True, "promoted": {"$ne": True}}))
+    dm = await db.disposition_model.find_one({"_id": "current"}, {"_id": 0, "auc": 1, "threshold": 1, "train": 1, "test": 1,
+                                                                    "under_threshold": 1, "under_entered": 1, "rules": 1}) or {}
+    dm["retired_rules"] = sorted(k for k, v in (dm.pop("rules", None) or {}).items() if v.get("retired"))
+    out["disposition"] = dm
+    fm = await db.folder_model.find_one({"_id": "current"}, {"_id": 0, "filings": 1, "held_out": 1, "gate": 1, "enabled": 1}) or {}
+    h = fm.get("held_out") or {}
+    out["folders"] = {"filings": fm.get("filings"), "enabled": fm.get("enabled"),
+                      **{k: h.get(k) for k in ("learned_sub", "rules_sub", "learned_top", "rules_top")},
+                      "combined_sub": (fm.get("gate") or {}).get("combined_acc")}
+    out["bc_links"] = await db.hub_documents.count_documents({"bc_link.bc_document_no": {"$exists": True}})
+    return out
+
+
 async def record_daily(db, force: bool = False) -> Dict[str, Any]:
     today = datetime.now(timezone.utc).date().isoformat()
     if not force and await db.learning_metrics.find_one({"date": today}, {"_id": 1}):
         return {"skipped": "already measured today"}
     row = {"date": today, "measured_at": datetime.now(timezone.utc).isoformat(),
            "routing": await _routing_replay(db), "vendor": await _vendor_replay(db),
-           "draft": await _draft_replay(db), "ap_lines": await _line_replay(db)}
+           "draft": await _draft_replay(db), "ap_lines": await _line_replay(db), "models": await _models(db)}
     await db.learning_metrics.update_one({"date": today}, {"$set": row}, upsert=True)
     logger.info("[LearningMetrics] %s", row)
     return {k: v for k, v in row.items() if k != "measured_at"}

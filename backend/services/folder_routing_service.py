@@ -1918,7 +1918,28 @@ async def _vendor_weighted_top_counts(db, top_l: str) -> Dict[str, float]:
     return _VENDOR_TOP_COUNTS["by_top"].get(top_l) or {}
 
 
-async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, **kwargs):
+async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, learned: bool = True, **kwargs):
+    """The rules' folder, then the learned subfolder where the model trained
+    on staff's filings is confident enough to beat the rules
+    (folder_learning_service). learned=False: the rules alone."""
+    path, reason, details = await _route_rules(doc, is_international=is_international, **kwargs)
+    if not learned or not path:
+        return path, reason, details
+    try:
+        from deps import get_db
+        from services.folder_learning_service import override
+        o = await override(get_db(), doc, path)
+        if o:
+            details = dict(details or {})
+            details["rule_path"] = path
+            details["learned_folder"] = {"label": o[2], "confidence": round(o[1], 3)}
+            return o[0], f"{reason}; subfolder learned from staff filings ({int(o[1] * 100)}%)", details
+    except Exception as e:
+        logger.warning("[FolderLearning] override failed: %r", e)
+    return path, reason, details
+
+
+async def _route_rules(doc: Dict[str, Any], is_international: bool = False, **kwargs):
     path, reason, details = await _route_with_feedback_core(doc, is_international=is_international, **kwargs)
     try:
         parts = [p for p in (path or "").strip("/").split("/") if p]

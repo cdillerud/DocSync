@@ -177,6 +177,14 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["disposition_model"] = {"error": repr(e)[:200]}
     try:
+        # Which subfolder staff file a document in, learned daily from their
+        # filings; replaces the rules' subfolder only where it beats them on
+        # the newest held-out filings.
+        from services.folder_learning_service import train as train_folders
+        summary["folder_model"] = await train_folders(db)
+    except Exception as e:
+        summary["folder_model"] = {"error": repr(e)[:200]}
+    try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
         from services.vendor_line_coding_service import rebuild as rebuild_line_coding

@@ -456,6 +456,7 @@ async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
         )
         folder, reason, details = await route_with_feedback(
             doc=doc,
+            ai=False,
             is_international=is_international,
             location_code=(
                 doc.get("resolved_location_code")

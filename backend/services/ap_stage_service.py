@@ -102,7 +102,7 @@ async def measure_reason_accuracy(db, csv_path: str, source: str) -> Dict[str, A
         d.pop("bc_link", None)
         d.pop("bc_credit_of", None)
         try:
-            path, why, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")))
+            path, why, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")), ai=False)
         except Exception:
             continue
         hit = _root(path) == _root(r.get("square9_parent_path"))

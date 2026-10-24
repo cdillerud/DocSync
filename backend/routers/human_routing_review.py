@@ -164,6 +164,7 @@ async def get_routing_suggestion(doc_id: str):
 
     suggested_folder, reason, details = await route_with_feedback(
         doc=doc,
+        ai=False,
         is_international=profile["is_international"],
     )
 
@@ -196,6 +197,7 @@ async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment
 
     suggested_folder, suggested_reason, suggested_details = await route_with_feedback(
         doc=doc,
+        ai=False,
         is_international=profile["is_international"],
     )
     comparison_folder = profile["current_folder"] or suggested_folder or ""

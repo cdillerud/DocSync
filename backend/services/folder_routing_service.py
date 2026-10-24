@@ -1918,10 +1918,15 @@ async def _vendor_weighted_top_counts(db, top_l: str) -> Dict[str, float]:
     return _VENDOR_TOP_COUNTS["by_top"].get(top_l) or {}
 
 
-async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, learned: bool = True, **kwargs):
+async def route_with_feedback(doc: Dict[str, Any], is_international: bool = False, learned: bool = True,
+                              ai: bool = True, **kwargs):
     """The rules' folder, then the learned subfolder where the model trained
     on staff's filings is confident enough to beat the rules
-    (folder_learning_service). learned=False: the rules alone."""
+    (folder_learning_service), and where that model is unsure the AI's
+    decision (ai_routing_service, on while its replay shows it beats the
+    others there). learned=False: the rules alone. ai=False: no new AI
+    call (replays over history, pages); a decision already kept on the
+    document is still used."""
     path, reason, details = await _route_rules(doc, is_international=is_international, **kwargs)
     if not learned or not path:
         return path, reason, details
@@ -1936,6 +1941,18 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
             return o[0], f"{reason}; subfolder learned from staff filings ({int(o[1] * 100)}%)", details
     except Exception as e:
         logger.warning("[FolderLearning] override failed: %r", e)
+    try:
+        if ai or (doc.get("ai_routing") or {}).get("rule_path") == path:
+            from deps import get_db
+            from services.ai_routing_service import route as ai_route
+            a = await ai_route(get_db(), doc, path)
+            if a:
+                details = dict(details or {})
+                details["rule_path"] = path
+                details["ai_folder"] = {"label": a[2], "confidence": round(a[1], 3), "why": a[3]}
+                return a[0], f"AI decided where the learned model was unsure: {a[3]}", details
+    except Exception as e:
+        logger.warning("[AIRouting] failed: %r", e)
     return path, reason, details
 
 

@@ -63,7 +63,7 @@ async def _routing_replay(db) -> Dict[str, Any]:
         d.pop("bc_link", None)
         d.pop("bc_credit_of", None)
         try:
-            path, _, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")))
+            path, _, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")), ai=False)
         except Exception:
             continue
         n += 1

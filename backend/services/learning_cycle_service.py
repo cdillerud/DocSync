@@ -185,6 +185,13 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["folder_model"] = {"error": repr(e)[:200]}
     try:
+        # Where the folder model is unsure the AI decides, while its daily
+        # replay shows it beats current routing there.
+        from services.ai_routing_service import evaluate as eval_ai_routing
+        summary["ai_routing"] = await eval_ai_routing(db)
+    except Exception as e:
+        summary["ai_routing"] = {"error": repr(e)[:200]}
+    try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
         from services.vendor_line_coding_service import rebuild as rebuild_line_coding

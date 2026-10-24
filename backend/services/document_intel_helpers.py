@@ -455,6 +455,7 @@ async def _call_llm_for_extraction(
         from services.classification_learning_context import build_learning_enriched_prompt
         merged_doc = dict(doc or {})
         merged_doc.setdefault("file_name", file_name)
+        merged_doc.setdefault("file_path", file_path)
         dynamic_prompt, _profile_used = await build_learning_enriched_prompt(
             _CLASSIFY_SYSTEM_PROMPT, doc=merged_doc, log_prefix="EXTRACT:LIVE",
         )

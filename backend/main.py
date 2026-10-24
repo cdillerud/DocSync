@@ -268,6 +268,8 @@ async def startup():
     _asyncio.create_task(learning_cycle_scheduler())
     from services.learning_cycle_service import sales_fast_scheduler
     _asyncio.create_task(sales_fast_scheduler())
+    from services.document_memory_service import document_memory_scheduler
+    _asyncio.create_task(document_memory_scheduler())
 
     register_doc_routes(app)
     register_wf_routes(app)

@@ -45,7 +45,7 @@ logger = logging.getLogger("classification_learning_context")
 SOURCES = (
     "vep", "few_shot", "vendor_hint", "feedback_loop",
     "bc_intelligence", "deep_learning", "amount_intelligence",
-    "field_correlation", "invoice_number_format",
+    "field_correlation", "invoice_number_format", "similar_documents",
 )
 
 
@@ -314,9 +314,54 @@ async def build_learning_enriched_prompt(
         status["field_correlation"] = f"error:{type(e).__name__}"
         logger.debug("[%s] Field correlation injection failed: %s", log_prefix, e)
 
+    # 7. Similar past documents — the documents AP already handled that read
+    # most like this one (document_memory: the AP SharePoint library and the
+    # Hub's own history), with where staff filed each. Evidence from how
+    # documents like this one went before, added to the signals above.
+    try:
+        block = await similar_documents_block(doc) if SIMILAR_DOCS else ""
+        if block:
+            status["similar_documents"] = "fired"
+            dynamic_prompt += block
+    except Exception as e:
+        status["similar_documents"] = f"error:{type(e).__name__}"
+        logger.debug("[%s] Similar documents injection failed: %s", log_prefix, e)
+
     await _record_injection_event(log_prefix, effective_vendor, existing_doc_type, status)
 
     return dynamic_prompt, profile_used
+
+
+import os as _os
+
+# Off until replay against staff filings shows it helps (then on by default).
+SIMILAR_DOCS = _os.environ.get("SIMILAR_DOCS", "false").strip().lower() == "true"
+SIMILAR_K = 5
+SIMILAR_MIN = 0.25
+
+
+async def similar_documents_block(doc: Dict[str, Any]) -> str:
+    from deps import get_db
+    from services import document_memory_service as DM
+    path = doc.get("file_path") or ""
+    name = doc.get("file_name") or ""
+    text = doc.get("document_text") or ""
+    if not text and path.lower().endswith(".pdf"):
+        import asyncio
+        with open(path, "rb") as fh:
+            data = fh.read()
+        text = await asyncio.get_running_loop().run_in_executor(None, DM.pdf_text, data)
+    if not (text or name):
+        return ""
+    hits = [h for h in await DM.similar(get_db(), text, name, k=SIMILAR_K) if h["similarity"] >= SIMILAR_MIN]
+    if not hits:
+        return ""
+    rows = [f"- \"{h['name']}\" ({str(h.get('created') or '')[:10]}) - staff filed it in: {h.get('folder') or '(top of the AP library)'}"
+            f" [similarity {h['similarity']:.2f}]" for h in hits]
+    return ("\n\n## PAST DOCUMENTS MOST LIKE THIS ONE (AP's SharePoint library: what staff named them and where they filed them):\n"
+            + "\n".join(rows)
+            + "\nThese show how documents like this one were handled before (paid invoice, wire, credit, DO NOT PAY,"
+              " dropship or warehouse lane, not entered in AP...). Weigh them as evidence; what this document itself says comes first.\n")
 
 
 async def _record_injection_event(

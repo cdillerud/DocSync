@@ -60,6 +60,104 @@ def _num(x) -> Optional[float]:
         return None
 
 
+def _alnum(s: Any) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(s or "").upper())
+
+
+async def _bc_headers(db) -> Dict[str, List[Dict[str, Any]]]:
+    idx: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
+    async for i in db.bc_purchase_invoice_lines.find({}, {"_id": 0, "number": 1, "vendorNumber": 1,
+                                                         "vendorInvoiceNumber": 1, "totalAmountExcludingTax": 1}):
+        idx[i.get("vendorNumber")].append(i)
+    return idx
+
+
+async def ap_entry(db, d: Dict[str, Any], inv: Dict[str, Any], headers: Dict[str, List[Dict[str, Any]]]) -> Tuple[Dict[str, Any], List[str]]:
+    """AP's whole answer for this invoice. AP sometimes enters one invoice as
+    several BC invoices (Canpack 1101610308A + B, one per receipt; Cargo
+    Modules 126169393-AR + -AR-1, one per W-PO); the hub document links to
+    one of them. When the entries carrying the invoice's number add up to its
+    total, their lines together are what AP entered (same item at the same
+    cost summed). Otherwise the linked entry alone."""
+    amt = abs(float(d.get("amount_float") or 0))
+    nos = [inv["number"]]
+    if amt and abs(amt - abs(float(inv.get("totalAmountExcludingTax") or 0))) > 0.02:
+        hn = _alnum(d.get("invoice_number_clean"))
+        if len(hn) >= 4:
+            sib = [x for x in headers.get(inv.get("vendorNumber"), []) if _alnum(x.get("vendorInvoiceNumber")).startswith(hn)]
+            if len(sib) > 1 and abs(sum(abs(float(x.get("totalAmountExcludingTax") or 0)) for x in sib) - amt) <= 0.05:
+                nos = [x["number"] for x in sib]
+    if len(nos) == 1:
+        return inv, nos
+    merged: Dict[Tuple[str, float], Dict[str, Any]] = {}
+    dates = []
+    async for x in db.bc_purchase_invoice_lines.find({"number": {"$in": nos}}, {"_id": 0, "postingDate": 1, "purchaseInvoiceLines": 1}):
+        dates.append(str(x.get("postingDate") or ""))
+        for l in x.get("purchaseInvoiceLines") or []:
+            if not (l.get("lineObjectNumber") and _bc_amount(l)):
+                continue
+            k = (str(l["lineObjectNumber"]).upper(), round(float(l.get("unitCost") or 0), 5))
+            if k in merged:
+                merged[k]["quantity"] = float(merged[k].get("quantity") or 0) + float(l.get("quantity") or 0)
+            else:
+                merged[k] = dict(l, amountExcludingTax=0)
+    return {**inv, "purchaseInvoiceLines": list(merged.values()), "postingDate": max(dates)}, nos
+
+
+def _charged(items: List[Dict[str, Any]], total: float) -> Optional[List[Dict[str, Any]]]:
+    """The lines the invoice's total is made of. All of them when they add up
+    (a cent of rounding per line; a credit's lines may carry the sign its
+    total does not); else the one subset that adds up, when exactly one does
+    (Canpack lists its returnable pallets and tier sheets beside the cans but
+    charges only the cans). None when nothing, or more than one set, fits."""
+    tol = 0.01 * len(items) + 0.01
+    s = sum(_pdf_amount(e) for e in items)
+    if abs(s - total) <= tol or abs(s + total) <= tol:
+        return items
+    if not total or len(items) > 12:
+        return None
+    import itertools
+    for r in range(len(items) - 1, 0, -1):
+        fits = [c for c in itertools.combinations(range(len(items)), r)
+                if abs(sum(_pdf_amount(items[i]) for i in c) - total) <= 0.01 * r + 0.01]
+        if len(fits) > 1:
+            return None
+        if fits:
+            return [items[i] for i in fits[0]]
+    return None
+
+
+async def with_pages(db, d: Dict[str, Any]) -> Dict[str, Any]:
+    """An invoice read as several hub documents, one per page (Anchor's _p1,
+    _p2): when the document's lines do not make its total and other pages of
+    the same invoice (same vendor, number and total) complete it, the
+    invoice's lines are all of theirs."""
+    items = [e for e in (d.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
+    total = round(abs(float(d.get("amount_float") or 0)), 2)
+    inv = d.get("invoice_number_clean")
+    if not items or not total or not inv or _charged(items, total) is not None:
+        return d
+    s = sum(_pdf_amount(e) for e in items)
+    pages, names = [], {d.get("file_name")}
+    async for x in db.hub_documents.find({"vendor_canonical": d.get("vendor_canonical"), "invoice_number_clean": inv,
+                                          "id": {"$ne": d.get("id")}},
+                                         {"_id": 0, "amount_float": 1, "file_name": 1, "extracted_fields.line_items": 1}):
+        xi = [e for e in (x.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
+        xs = sum(_pdf_amount(e) for e in xi)
+        if (xi and x.get("file_name") not in names and abs(xs - total) > 0.02
+                and abs(round(abs(float(x.get("amount_float") or 0)), 2) - total) <= 0.02):
+            pages.append(xi)
+            names.add(x.get("file_name"))
+    import itertools
+    for r in range(1, min(len(pages), 4) + 1):
+        for comb in itertools.combinations(pages, r):
+            n = len(items) + sum(len(p) for p in comb)
+            if abs(s + sum(_pdf_amount(e) for p in comb for e in p) - total) <= 0.01 * n + 0.01:
+                return {**d, "extracted_fields": {**(d.get("extracted_fields") or {}),
+                                                  "line_items": items + [e for p in comb for e in p]}}
+    return d
+
+
 def _shape(w: str) -> str:
     s = re.sub(r"[A-Z]", "A", w)
     s = re.sub(r"\d", "9", s)
@@ -248,8 +346,10 @@ async def build_examples(db) -> Dict[str, Any]:
     stats = collections.Counter()
     seen = set()
     rows = []
+    headers = await _bc_headers(db)
     async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}},
                                          {"_id": 0, "id": 1, "vendor_canonical": 1, "bc_link": 1, "po_number_clean": 1,
+                                          "amount_float": 1, "invoice_number_clean": 1, "file_name": 1,
                                           "extracted_fields.line_items": 1, "extracted_fields.po_number": 1,
                                           "extracted_fields.bol_number": 1}):
         no = d["bc_link"]["bc_document_no"]
@@ -259,8 +359,14 @@ async def build_examples(db) -> Dict[str, Any]:
         if not inv:
             stats["no_bc"] += 1
             continue
+        inv, nos = await ap_entry(db, d, inv, headers)
+        if len(nos) > 1:
+            stats["split_entries"] += 1
+            seen.update(nos)
         ap = [l for l in inv.get("purchaseInvoiceLines", []) if l.get("lineObjectNumber") and _bc_amount(l)]
+        d = await with_pages(db, d)
         items = [e for e in (d.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
+        items = (_charged(items, round(abs(float(d.get("amount_float") or 0)), 2)) or items) if items else items
         sol = align([_pdf_amount(e) for e in items], [_bc_amount(l) for l in ap]) if ap and items else None
         if sol is None:
             stats["no_fit" if ap and items else "empty"] += 1
@@ -553,7 +659,8 @@ class Coder:
         if not items:
             return None, "no invoice lines were read"
         total = round(abs(float(d.get("amount_float") or 0)), 2)
-        if abs(sum(_pdf_amount(e) for e in items) - total) > 0.02:
+        items = _charged(items, total)
+        if items is None:
             return None, "the invoice's lines do not add up to its total"
         out = []
         po = str(d.get("po_number_clean") or "").strip().upper()
@@ -652,7 +759,8 @@ async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_do
     v = d.get("vendor_canonical")
     items = [e for e in (d.get("extracted_fields") or {}).get("line_items") or [] if _pdf_amount(e)]
     total = round(abs(float(d.get("amount_float") or 0)), 2)
-    if not items or abs(sum(_pdf_amount(e) for e in items) - total) > 0.02:
+    items = _charged(items, total) if items else None
+    if not items:
         return None, "the invoice's lines do not add up to its total"
     qs = [tokens(e.get("description"), ctx, _num(e.get("unit_price"))) for e in items]
     def rank(invs):
@@ -791,14 +899,19 @@ async def _out_of_time(db, months: int = OOT_MONTHS) -> Dict[str, collections.Co
         y, m = (y, m - 1) if m > 1 else (y - 1, 12)
     by_month: Dict[str, List[Any]] = collections.defaultdict(list)
     seen = set()
+    headers = await _bc_headers(db)
     async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}},
                                          {"_id": 0, "vendor_canonical": 1, "bc_link": 1, "po_number_clean": 1, "amount_float": 1, "id": 1,
+                                          "invoice_number_clean": 1, "file_name": 1,
                                           "extracted_fields.line_items": 1, "extracted_fields.po_number": 1, "extracted_fields.bol_number": 1}):
         no = d["bc_link"]["bc_document_no"]
         if no in seen or not d.get("vendor_canonical"):
             continue
         seen.add(no)
-        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0, "postingDate": 1, "purchaseInvoiceLines": 1})
+        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0})
+        if inv:
+            inv, nos = await ap_entry(db, d, inv, headers)
+            seen.update(nos)
         if inv and str(inv.get("postingDate") or "")[:7] in starts:
             by_month[str(inv["postingDate"])[:7]].append((d, inv))
     out: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
@@ -815,7 +928,7 @@ async def _out_of_time(db, months: int = OOT_MONTHS) -> Dict[str, collections.Co
                 continue
             po = str(d.get("po_number_clean") or "").strip().upper()
             C.receipts = {po: [l for l in receipts.get(po, []) if l["_posted"] <= str(inv.get("postingDate") or "")]} if po else {}
-            lines, _ = C.lines(d, await context(db, d), exclude_doc=d["bc_link"]["bc_document_no"])
+            lines, _ = C.lines(await with_pages(db, d), await context(db, d), exclude_doc=d["bc_link"]["bc_document_no"])
             if lines is None:
                 continue
             o = out[d["vendor_canonical"]]
@@ -829,9 +942,10 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
     C = await coder(db, refresh=True)
     t: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     seen = set()
+    headers = await _bc_headers(db)
     async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}},
                                          {"_id": 0, "vendor_canonical": 1, "bc_link": 1, "po_number_clean": 1, "amount_float": 1,
-                                          "extracted_fields.line_items": 1, "extracted_fields.po_number": 1,
+                                          "invoice_number_clean": 1, "file_name": 1, "id": 1, "extracted_fields.line_items": 1, "extracted_fields.po_number": 1,
                                           "extracted_fields.bol_number": 1, "ap_draft_vs_bc": 1}):
         no = d["bc_link"]["bc_document_no"]
         if no in seen:
@@ -840,9 +954,11 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
         v = d.get("vendor_canonical")
         if not v or v not in C.by_vendor:
             continue
-        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0, "purchaseInvoiceLines": 1})
+        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0})
         if not inv:
             continue
+        inv, nos = await ap_entry(db, d, inv, headers)
+        seen.update(nos)
         ap = [(str(l["lineObjectNumber"]).upper(), _bc_amount(l)) for l in inv.get("purchaseInvoiceLines", [])
               if l.get("lineObjectNumber") and _bc_amount(l)]
         if not ap:
@@ -853,7 +969,7 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
         if "exact" in g:
             tv["cur_graded"] += 1
             tv["cur_exact"] += bool(g.get("exact"))
-        lines, _ = C.lines(d, await context(db, d), exclude_doc=no)
+        lines, _ = C.lines(await with_pages(db, d), await context(db, d), exclude_doc=no)
         if lines is None:
             tv["abstain"] += 1
             continue
@@ -915,16 +1031,20 @@ async def evaluate_ai(db, force: bool = False) -> Dict[str, Any]:
     prom = set(await db.line_learning_scores.distinct("vendor", {"promoted": True}))
     pool: Dict[str, List[Any]] = collections.defaultdict(list)
     seen = set()
+    headers = await _bc_headers(db)
     async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1):
         no = d["bc_link"]["bc_document_no"]
         v = d.get("vendor_canonical")
         if no in seen or not v or v in prom or len(pool[v]) >= AI_PER_VENDOR:
             continue
         seen.add(no)
-        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0, "purchaseInvoiceLines": 1})
+        inv = await db.bc_purchase_invoice_lines.find_one({"number": no}, {"_id": 0})
         if not inv:
             continue
+        inv, nos = await ap_entry(db, d, inv, headers)
+        seen.update(nos)
         ctx = await context(db, d)
+        d = await with_pages(db, d)
         lines, why = C.lines(d, ctx, exclude_doc=no)
         if lines is None and "add up" not in why:
             pool[v].append((d, inv, ctx))
@@ -966,6 +1086,7 @@ async def plan(db, d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     C = await coder(db)
     ctx = await context(db, d)
+    d = await with_pages(db, d)
     if s.get("promoted"):
         lines, why = C.lines(d, ctx)
         if lines:

@@ -111,7 +111,31 @@ async def context(db, d: Dict[str, Any]) -> List[str]:
         # means for this invoice's lines is learned from AP's history.
         if (await _prepaid_by_po(db)).get(po, set()) - {d.get("id")}:
             ctx.append("@PO_PREPAID")
+    ctx.extend(_invoice_words(d))
     return ctx
+
+
+INVOICE_CONTEXT = True
+INVOICE_WORDS = 12
+
+
+def _invoice_words(d: Dict[str, Any]) -> List[str]:
+    """What else is on the invoice, as context for each line: a container
+    line next to chassis rental and pre-pull fees is drayage, the same words
+    next to a plate-trailer run are freight. Which co-occurring words matter
+    (and how) is learned from AP's history; IDF weighting keeps common ones
+    from dominating."""
+    if not INVOICE_CONTEXT:
+        return []
+    out: List[str] = []
+    for e in (d.get("extracted_fields") or {}).get("line_items") or []:
+        for w in re.findall(r"[A-Z0-9][A-Z0-9]*", str(e.get("description") or "").upper()):
+            t = "@I:" + (("#" + _shape(w)) if re.search(r"\d", w) else w)
+            if (len(w) >= 4 or re.search(r"\d", w)) and t not in out:
+                out.append(t)
+            if len(out) >= INVOICE_WORDS:
+                return out
+    return out
 
 
 _PREPAID: Optional[Tuple[float, Dict[str, set]]] = None
@@ -672,7 +696,7 @@ async def ai_lines(db, C: "Coder", d: Dict[str, Any], ctx: List[str], exclude_do
               "Learn the pattern only from the past invoices shown: which code AP gives each kind of line, and which lines AP adds "
               "together into one BC line. AP's practice can change over time: where past invoices disagree, follow the most "
               "recently entered ones. Use only the allowed codes. Reply with JSON only.")
-    user = (f"Vendor: {v}\nThis invoice's context: {', '.join(ctx) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO, @PO_PREPAID = an earlier invoice on this PO went to a prepaid account)\n\n"
+    user = (f"Vendor: {v}\nThis invoice's context: {', '.join(c for c in ctx if not c.startswith('@I:')) or 'none'} (@REBILL = freight rebilled to a customer, @POW = warehouse PO, @NOPO = no PO, @PO_PREPAID = an earlier invoice on this PO went to a prepaid account)\n\n"
             + "\n\n".join(shown) + f"\n\nThe PO's received items:\n{receipt}\n\nAllowed codes: {', '.join(allowed)}\n\n"
             f"New invoice (total {total}):\n{lines}\n\n"
             'For each line give the code and a group number; lines AP would add together into one BC line share a group. '

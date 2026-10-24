@@ -272,6 +272,16 @@ def _close(a: Optional[float], b: Optional[float], scale: float) -> float:
     return math.exp(-abs(math.log(abs(a) / abs(b))) * scale)
 
 
+def _nearest(scored: List[Tuple[float, str]]) -> List[Tuple[float, str]]:
+    """The K most similar past lines plus every one tied with the K-th.
+    Sorting (score, code) pairs and keeping K let the code name break ties:
+    with 192 identical past lines, 5 FREIGHT (reverse-alphabetically first)
+    outvoted 187 CUSTOMS (StraitLink "Entry Fee / Brokerage", 2026-10-24)."""
+    scored = sorted(scored, key=lambda x: -x[0])
+    cut = scored[min(K, len(scored)) - 1][0]
+    return [x for x in scored if x[0] >= cut]
+
+
 class Coder:
     def __init__(self, examples: List[Dict[str, Any]], receipts: Optional[Dict[str, List[Dict[str, Any]]]] = None):
         self.receipts = receipts or {}
@@ -370,8 +380,7 @@ class Coder:
                 scored.append((s, e["code"]))
         if not scored:
             return {}, 0.0
-        scored.sort(reverse=True)
-        top = scored[:K]
+        top = _nearest(scored)
         v = collections.Counter()
         for s, c in top:
             v[c] += s
@@ -507,8 +516,7 @@ class Coder:
                 scored.append((s, e["code"]))
         if not scored:
             return None, 0.0
-        scored.sort(reverse=True)
-        top = scored[:K]
+        top = _nearest(scored)
         votes = collections.Counter()
         for s, c in top:
             votes[c] += s

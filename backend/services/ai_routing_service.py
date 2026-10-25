@@ -9,9 +9,11 @@ the rules' proposal, and past documents like it with where staff filed
 each (document_memory: the vendor's latest filings and documents that read
 alike). Added on top of the rules and the model, not in place of them.
 
-Replay on filings after the model's training period (2026-10-24, 648
-filings, 51 unsure): current routing 52.9% right on the unsure ones, the
-AI 62.7%; all 648: 86.3% -> 87.0%.
+Replay on filings after the model's training period (2026-10-25, the
+120 latest unsure ones of 1,133 held out): current routing 70 right, the
+AI with the vendor's latest filings as examples 79, the AI with each
+past document's order shown (received in BC or not, international or not)
+and told staff file by the order, not the vendor's habit, 84.
 
 On only while it earns it: evaluate() replays the latest unsure filings
 each day (a model trained on the filings before them, so neither side has
@@ -34,15 +36,20 @@ logger = logging.getLogger("ai_routing")
 AI_ROUTING = True
 UNSURE = 0.6            # learned model's top-choice probability under which the AI decides
 EVAL_HOURS = 20
-EVAL_MAX = 60           # unsure filings replayed per evaluation (one AI call each)
+EVAL_MAX = 120          # unsure filings replayed per evaluation (one AI call each)
+EVAL_CUT = 0.65         # model trained on the earliest 65% of filings, replayed on the rest
 MIN_N = 30
-MIN_GAIN = 2            # documents the AI must get right beyond current routing
-EXAMPLES = 8
+MIN_GAIN = 0.03         # share of the replayed documents the AI must get right beyond current routing (at least 2)
+SAME_VENDOR = 8
+SIMILAR = 5
 
 SYSTEM = ("You route Gamer Packaging's accounts-payable documents to the SharePoint folder staff would file them in. "
           "You see the document, what the Hub's order lookup in Business Central says about its order, the folders a model "
           "trained on staff's past filings thinks most likely (with probabilities), the folder the hand-written rules propose, "
           "and past documents like this one with the folder staff filed each in. Decide where staff would file it. "
+          "Staff file by the order behind a document (warehouse or dropship, international or not, the order's own folder), "
+          "not by what the vendor's last few documents were: compare each past document's order to this one's and follow "
+          "the past documents whose order is like this one's. "
           "Staff also keep a folder per order (e.g. \"warehouse international/w118658\"): the order folder the rules propose, "
           "or one a past document was filed in, is a valid answer too. "
           "Answer JSON only: {\"folder\": \"<a listed folder, the rules' folder, or a past document's folder, exactly as written>\", "
@@ -80,23 +87,49 @@ def _folder_of(folder: str) -> str:
     return "/".join([p.strip() for p in fo.split("/") if p.strip()][:2])
 
 
+async def _order_kind(db, po: Any) -> str:
+    po = str(po or "").strip().upper()
+    if not po:
+        return "no order number"
+    rec = await db.bc_purchase_receipts.count_documents({"orderNumber": po}, limit=1)
+    so = await db.bc_sales_orders.count_documents({"number": po}, limit=1)
+    return f"order {po}: " + ("received in BC" if rec else "no BC receipt") + ("; also a sales order number" if so else "")
+
+
+async def _note(db, h: Dict[str, Any], why: str) -> str:
+    """What the AI compares: the past document's type and its order."""
+    if h.get("source") != "hub":
+        return why
+    x = await db.hub_documents.find_one({"id": h["item_id"]}, {"_id": 0, "po_number_clean": 1, "document_type": 1,
+                                                                "is_international": 1})
+    if not x:
+        return why
+    return (f"{why}; {x.get('document_type')}; {await _order_kind(db, x.get('po_number_clean'))}; "
+            f"international={x.get('is_international')}")
+
+
 async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> List[Tuple[Dict[str, Any], str, str]]:
+    """The vendor's latest filed documents and documents that read alike,
+    each with its order, so the AI can follow the ones whose order is like
+    this one's."""
     from services import document_memory_service as DM
     ex, seen = [], set()
     async for h in db.document_memory.find({"source": "hub", "vendor": d.get("vendor_canonical"), "folder": {"$ne": ""},
                                             "created": {"$lt": before}, "item_id": {"$ne": d.get("id")}},
-                                           {"_id": 0, "text": 0}).sort("created", -1).limit(4):
-        ex.append((h, _label_of(h["folder"]), "same vendor, most recent"))
+                                           {"_id": 0, "text": 0}).sort("created", -1).limit(SAME_VENDOR):
+        ex.append((h, _label_of(h["folder"]), await _note(db, h, "same vendor, recent")))
         seen.add(h["item_id"])
     m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}
+    n = 0
     for h in await DM.similar(db, m.get("text") or "", d.get("file_name") or "", k=60, exclude={d.get("id")} | seen):
-        if len(ex) >= EXAMPLES:
+        if n >= SIMILAR:
             break
         if not h.get("folder") or str(h.get("created") or "") >= before or h["name"] == own_name:
             continue
         if h.get("source") == "sharepoint_ap" and not h["folder"].lower().startswith("temp folder/"):
             continue
-        ex.append((h, _label_of(h["folder"]), f"reads similar ({h['similarity']:.2f})"))
+        ex.append((h, _label_of(h["folder"]), await _note(db, h, f"reads similar ({h['similarity']:.2f})")))
+        n += 1
     return ex
 
 
@@ -204,15 +237,17 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         dd = dict(d)
         dd.pop("bc_link", None)
         dd.pop("bc_credit_of", None)
+        dd.pop("ai_routing", None)
         try:
-            rule = (await route_with_feedback(dd, is_international=bool(dd.get("is_international")), learned=False))[0] or ""
+            rule = (await route_with_feedback(dd, is_international=bool(dd.get("is_international")), learned=False,
+                                              ai=False))[0] or ""
         except Exception:
             rule = ""
         data.append((str(f.get("filed_at") or f.get("created_at")), FL.tokens(dd, rule), FL.label(f), FL._second(rule), f, dd))
     data.sort(key=lambda x: x[0])
     if len(data) < 500:
         return {"skipped": f"only {len(data)} filings"}
-    cut = int(len(data) * 0.8)
+    cut = int(len(data) * EVAL_CUT)
     tr, te = data[:cut], data[cut:]
     classes = sorted({x[2] for x in tr})
     ci = {c: k for k, c in enumerate(classes)}
@@ -245,7 +280,7 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         r["ai_right"] += (ai or cur) == truth
         if len(rows) < 15 and ai and ai != cur:
             rows.append({"file": d.get("file_name"), "staff": truth, "current": cur, "ai": ai, "why": why})
-    on = r["n"] >= MIN_N and r["ai_right"] >= r["current_right"] + MIN_GAIN
+    on = r["n"] >= MIN_N and r["ai_right"] >= r["current_right"] + max(2, round(MIN_GAIN * r["n"]))
     res = {"evaluated_at": _now(), "on": on, "n": r["n"], "ai_right": r["ai_right"], "current_right": r["current_right"],
            "unsure_below": UNSURE, "test_from": te[0][0][:10], "allowed": allowed, "examples": rows}
     await db.folder_model.update_one({"_id": "ai_routing"}, {"$set": res}, upsert=True)

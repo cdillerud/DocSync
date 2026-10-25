@@ -382,3 +382,41 @@ async def apply_recent(db, days: int = 30) -> Dict[str, Any]:
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"order_flow": {**v, "at": _now()}}})
             stats["noted"] += 1
     return dict(stats)
+
+
+async def run_isolated(timeout: int = 2400) -> Dict[str, Any]:
+    """apply_recent in its own process. Learning walks ~130k documents in
+    pure Python; even in a thread it held the interpreter lock long enough for
+    the backend's health checks to time out (2026-10-25 21:20 and 22:06 UTC).
+    A separate process leaves the API untouched; results go to the database."""
+    import json
+    import sys
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "services.order_flow_service",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return {"error": f"timed out after {timeout}s"}
+    line = (out or b"").decode(errors="replace").strip().splitlines()
+    try:
+        return json.loads(line[-1]) if line else {"error": f"no output, exit {proc.returncode}"}
+    except ValueError:
+        return {"error": line[-1][:200]}
+
+
+if __name__ == "__main__":
+    import json
+    import os
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    async def _main():
+        db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        import deps
+        deps.set_db(db)
+        r = await apply_recent(db)
+        print(json.dumps(r, default=str))
+
+    logging.disable(logging.WARNING)
+    asyncio.run(_main())

@@ -181,8 +181,10 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         # print ours: learned from the numbers it shares with the order's other
         # paperwork (Zetadocs, staff's order folders); on only while it is
         # right >= 95% of the time on the newest documents.
-        from services.order_flow_service import apply_recent as order_flow
-        summary["order_flow"] = await order_flow(db)
+        # in its own process: the learning walk is CPU-bound and starved the
+        # API's event loop (health checks timed out 2026-10-25)
+        from services.order_flow_service import run_isolated as order_flow
+        summary["order_flow"] = await order_flow()
     except Exception as e:
         summary["order_flow"] = {"error": repr(e)[:200]}
     try:

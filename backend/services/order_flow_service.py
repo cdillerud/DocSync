@@ -35,8 +35,9 @@ from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 logger = logging.getLogger("order_flow")
 
 TOK = re.compile(r"\b[A-Z0-9][A-Z0-9\-/]{4,24}[A-Z0-9]\b")
-ORD = re.compile(r"\b(W?\d{6})[A-Z]?\b")
+ORD = re.compile(r"\b((?:WR|W)?\d{6})[A-Z]?\b")
 _LEAD = re.compile(r"(?:WR|W)?\d{6}[A-Z]?")
+_WORDER = re.compile(r"WR?\d{6}[A-Z]?")   # warehouse POs: a printed W-number is unambiguous
 ORDER_RECORDS = {"Purchase Order", "Sales Order", "Posted Purchase Receipt"}
 WINDOW_DAYS = 120          # containers and bills are reused; links are only to recent paperwork
 MAX_ORDERS = 2             # a number shared by more orders identifies none of them
@@ -119,38 +120,52 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
 
     def row(day, key, o, text, vendor, name, src):
         raw = tokens(text)
-        return (day, key, frozenset(o), _clean(raw, known), vendor, _stem(name), src, _prints_order(raw, o))
+        prints = _prints_order(raw, o)
+        # Paperwork of a consolidated shipment names all its orders (an entry
+        # summary filed as "115648" listing W118672-W118679): the document
+        # belongs to all of them, so a number on it is no evidence for one.
+        # Only W-orders: a bare 6-digit number is as often a receipt or zip.
+        also = {t for t in raw if _WORDER.fullmatch(t) and t in known}
+        if also - set(o) and len(set(o) | also) <= 12:
+            o = set(o) | also
+        return (day, key, frozenset(o), _clean(raw, known), vendor, _stem(name), src, prints)
     out = []
     async for m in db.zetadocs_memory.find({"has_text": True}, {"_id": 1, "name": 1, "record_type": 1, "record_no": 1,
                                                                "company_no": 1, "created": 1, "text": 1}):
         o = orders_in(m.get("name", ""))
         if m.get("record_type") in ORDER_RECORDS and m.get("record_no") in known:
             o.add(m["record_no"])
-        if o and len(o) <= 6:
+        if o and len(o) <= 12:
             out.append(row(_day(m.get("created")), m["_id"], o, m.get("text", ""), m.get("company_no") or "", m.get("name", ""), "zetadocs"))
     async for m in db.document_memory.find({"source": "sharepoint_ap", "folder": {"$regex": "^Temp Folder/"}, "text": {"$ne": ""}},
                                            {"_id": 0, "item_id": 1, "folder": 1, "name": 1, "created": 1, "text": 1}):
         o = orders_in("/".join(m["folder"].split("/")[2:]) + " " + m.get("name", ""))
-        if o and len(o) <= 6:
+        if o and len(o) <= 12:
             out.append(row(_day(m.get("created")), m["item_id"], o, m["text"], "", m.get("name", ""), "ap_folder"))
     # Freight bills staff attached in Zetadocs and renamed with their orders
     # ("W118604 W118607_TUMALO_0314238_10162026.pdf"): the Hub's own copy of
     # the same bill (vendor + invoice number) gets those orders as its label.
-    renamed: Dict[Tuple[str, str], Set[str]] = {}
+    # Staff attach a carrier's bill to the product order's record, so the
+    # record's vendor is the supplier: match on the invoice number plus the
+    # carrier's name in the file name ("..._TUMALO_0314238_...").
+    renamed: Dict[str, List[Tuple[str, Set[str]]]] = {}
     async for m in db.zetadocs_memory.find({"record_type": {"$in": ["Purchase Invoice", "Posted Purchase Invoice", "Purchase Order"]},
-                                            "name": {"$regex": r"\d{6}"}}, {"_id": 0, "name": 1, "company_no": 1}):
+                                            "name": {"$regex": r"\d{6}"}}, {"_id": 0, "name": 1}):
         o = orders_in(m.get("name", ""))
-        if not o or len(o) > 6 or not m.get("company_no"):
+        if not o or len(o) > 6:
             continue
-        for t in re.findall(r"[A-Z0-9]{4,}", m["name"].upper()):
-            if t not in o and any(ch.isdigit() for ch in t):
-                renamed.setdefault((m["company_no"], t.lstrip("0")), set()).update(o)
+        up = m["name"].upper()
+        for t in re.findall(r"[A-Z0-9]{5,}", up):
+            if t not in o and sum(ch.isdigit() for ch in t) >= 5:
+                renamed.setdefault(t.lstrip("0"), []).append((re.sub(r"[^A-Z]", "", up), o))
     pos = {}
     async for d in db.hub_documents.find({"invoice_number_clean": {"$nin": [None, ""]}, "vendor_canonical": {"$nin": [None, ""]},
                                           "po_number_clean": {"$in": [None, ""]}},
                                          {"_id": 0, "id": 1, "invoice_number_clean": 1, "vendor_canonical": 1, "created_utc": 1, "file_name": 1}):
-        o = renamed.get((str(d["vendor_canonical"]).upper(), str(d["invoice_number_clean"]).upper().lstrip("0")))
-        if o:
+        v4 = re.sub(r"[^A-Z]", "", str(d["vendor_canonical"]).upper())[:4]
+        hits = [o for letters, o in renamed.get(str(d["invoice_number_clean"]).upper().lstrip("0"), []) if len(v4) == 4 and v4 in letters]
+        o = set().union(*hits) if hits else set()
+        if o and len(o) <= 6:
             pos[d["id"]] = {**d, "po_number_clean": " ".join(sorted(o)), "_orders": o}
     async for d in db.hub_documents.find({"po_number_clean": {"$nin": [None, ""]}}, {"_id": 0, "id": 1, "po_number_clean": 1,
                                                                                     "created_utc": 1, "vendor_canonical": 1, "file_name": 1}):
@@ -167,40 +182,60 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
     return out
 
 
-def _links(idx, day: int, toks: Set[str], exclude: Set[str], stem: str, key: str) -> List[Tuple[str, Set[FrozenSet[str]], str]]:
+def _links(idx, day: int, toks: Set[str], exclude: Set[str], stem: str, key: str) -> List[Tuple[str, Set[FrozenSet[str]], str, Set[str]]]:
+    """(number, the order sets it is on, an evidence file, the evidence documents' vendors)."""
     out = []
     same = hash(frozenset(toks))
     for t in toks - exclude:
-        hits = [(o, s, k) for d, o, s, k, h in idx.get(t, ()) if day - WINDOW_DAYS <= d < day and k != key and s != stem and h != same]
+        hits = [(o, s, v) for d, o, s, k, h, v in idx.get(t, ()) if day - WINDOW_DAYS <= d < day and k != key and s != stem and h != same]
         distinct = {o for o, _, _ in hits}
         if distinct and len({x for o in distinct for x in o}) <= MAX_ORDERS * 3 and len(distinct) <= MAX_ORDERS:
-            out.append((t, distinct, hits[-1][1]))
+            out.append((t, distinct, hits[-1][1], {v for _, _, v in hits}))
     return out
 
 
-def _trusted(stats, vendor: str, sh: str) -> Optional[float]:
-    for c in (stats.get((vendor, sh)), stats.get(("", sh))):
-        if c and c[0] + c[1] >= MIN_N:
-            p = (c[0] + 1) / (c[0] + c[1] + 2)
-            return p if p >= TRUST else None
-    return None
+def _rate(c) -> Optional[float]:
+    return (c[0] + 1) / (c[0] + c[1] + 2) if c and c[0] + c[1] >= MIN_N else None
+
+
+def _trusted(stats, vendor: str, sh: str, evidence: Set[str] = frozenset()) -> Optional[float]:
+    """How far to believe a shared number of this shape: the shape's record
+    for this vendor (else overall), and - where there is a record - the
+    record of links drawn from the evidence documents' vendors (a
+    forwarder's consolidated invoice labelled with one of its orders is poor
+    evidence for any one of them)."""
+    p = _rate(stats.get((vendor, sh)))
+    if p is None:
+        p = _rate(stats.get(("", sh)))
+    if p is None or p < TRUST:
+        return None
+    for ev in evidence:
+        q = _rate(stats.get(("@" + ev, "")))
+        if q is not None and q < TRUST:
+            return None
+    return p
 
 
 def _vote(links, stats, vendor: str):
     votes: Dict[str, float] = collections.defaultdict(float)
     ev: Dict[str, Tuple[str, str, str]] = {}
-    for t, distinct, frm in links:
-        p = _trusted(stats, vendor, shape(t))
+    for t, distinct, frm, evv in links:
+        p = _trusted(stats, vendor, shape(t), evv)
         if p is None:
             continue
         for o in distinct:
             for x in o:
-                votes[x] += p / len(distinct)
+                # paperwork naming five orders says less about each than a
+                # document of one order does
+                votes[x] += p / len(distinct) / len(o)
                 ev.setdefault(x, (t, frm, shape(t)))
     if not votes:
         return None
-    best = max(votes.items(), key=lambda kv: kv[1])[0]
-    group = sorted({x for t, distinct, _ in links if _trusted(stats, vendor, shape(t)) for o in distinct if best in o for x in o})
+    ranked = sorted(votes.items(), key=lambda kv: -kv[1])
+    if len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * 0.999:
+        return None   # a consolidated shipment's orders tie: the numbers do not say which
+    best = ranked[0][0]
+    group = sorted({x for t, distinct, _, evv in links if _trusted(stats, vendor, shape(t), evv) for o in distinct if best in o for x in o})
     return {"order": best, "orders": group, "via": ev[best][0], "from": ev[best][1], "shape": ev[best][2]}
 
 
@@ -219,11 +254,17 @@ async def learn(db) -> Dict[str, Any]:
     for day, key, orders, toks, vendor, stem, src, prints in docs:
         links = _links(idx, day, toks, set(orders), stem, key)
         if day < split:
-            for t, distinct, _ in links:
+            for t, distinct, _, evv in links:
                 ok = int(any(orders & o for o in distinct))
-                for k in ((vendor, shape(t)), ("", shape(t))):
+                # evidence vendors are judged only on links that would be believed
+                ev_keys = [("@" + ev, "") for ev in evv] if _trusted(stats, vendor, shape(t)) else []
+                for k in [(vendor, shape(t)), ("", shape(t))] + ev_keys:
                     stats[k][0 if ok else 1] += 1
-        elif not prints:
+        elif not prints and src != "hub":
+            # Tested on what it is for: documents whose order was not known
+            # otherwise. A Hub document is in memory with an order because the
+            # Hub already had it (email subject, file name), so it trains the
+            # index but is no test of it.
             v = _vote(links, stats, vendor)
             r = "abstain" if not v else ("right" if v["order"] in orders else "wrong")
             res[r] += 1
@@ -231,7 +272,7 @@ async def learn(db) -> Dict[str, Any]:
             if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
                 examples.append(f"{r}: {src} {stem[:60]} -> {v['order']} via {v['via']} ({v['shape']}) truth {sorted(orders)}")
         for t in toks - orders:
-            idx[t].append((day, orders, stem, key, hash(frozenset(toks))))
+            idx[t].append((day, orders, stem, key, hash(frozenset(toks)), vendor))
     n = res["right"] + res["wrong"]
     precision = res["right"] / n if n else 0.0
     on = n >= GATE_MIN and precision >= GATE
@@ -240,7 +281,9 @@ async def learn(db) -> Dict[str, Any]:
     out = {"_id": STATE_ID, "at": _now(), "documents": len(docs), "numbers": len(idx), "test_days": SPLIT_DAYS,
            "right": res["right"], "wrong": res["wrong"], "abstain": res["abstain"], "precision": round(precision, 4),
            "coverage": round(n / (n + res["abstain"]), 4) if n + res["abstain"] else 0.0, "on": on,
-           "by_source": {k: dict(v) for k, v in by_source.items()}, "trusted_shapes": trusted, "examples": examples,
+           "by_source": {k: dict(v) for k, v in by_source.items()}, "trusted_shapes": trusted,
+           "distrusted_evidence": sorted(((k[0][1:] or "?", v[0], v[1]) for k, v in stats.items()
+                                          if k[0].startswith("@") and (_rate(v) or 1) < TRUST), key=lambda x: -x[2])[:15], "examples": examples,
            "seconds": int(time.time() - t0)}
     await db.learning_state.replace_one({"_id": STATE_ID}, out, upsert=True)
     _IDX.clear()

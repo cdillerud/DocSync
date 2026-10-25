@@ -65,11 +65,19 @@ def _labels(path: str) -> Dict[str, Any]:
 
 
 async def _graph(client, url: str, token_box: Dict[str, Any], stream: bool = False):
+    import httpx
     from services.config_service import get_graph_token
     for attempt in range(4):
         if not token_box.get("t") or time.time() - token_box.get("at", 0) > 2400:
             token_box["t"], token_box["at"] = await get_graph_token(), time.time()
-        r = await client.get(url, headers={"Authorization": f"Bearer {token_box['t']}"}, follow_redirects=True)
+        try:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token_box['t']}"}, follow_redirects=True)
+        except httpx.TransportError:
+            # A dropped connection (ReadError) ended a whole pass on 2026-10-25.
+            if attempt == 3:
+                raise
+            await asyncio.sleep(2 ** attempt * 3)
+            continue
         if r.status_code == 429 or r.status_code >= 500:
             await asyncio.sleep(float(r.headers.get("Retry-After") or 2 ** attempt * 3))
             continue
@@ -114,7 +122,11 @@ async def harvest(db, seconds: int = HARVEST_SECONDS) -> Dict[str, Any]:
                     ext = x["name"].rsplit(".", 1)[-1].lower() if "." in x["name"] else ""
                     text = ""
                     if ext in READ_EXT and (x.get("size") or 0) <= MAX_BYTES:
-                        rr = await _graph(c, f"{base}/items/{x['id']}/content", box)
+                        try:
+                            rr = await _graph(c, f"{base}/items/{x['id']}/content", box)
+                        except httpx.TransportError:
+                            stats["read_errors"] += 1
+                            continue
                         if rr.status_code == 200:
                             text = await asyncio.get_running_loop().run_in_executor(None, pdf_text, rr.content)
                         stats["read" if text else "no_text"] += 1
@@ -204,14 +216,15 @@ async def document_memory_scheduler() -> None:
         return
     await asyncio.sleep(900)
     while True:
-        try:
-            from deps import get_db
-            r = await harvest(get_db(), seconds=3000)
-            r["hub"] = await harvest_hub(get_db())
-            r["outcomes_refreshed"] = await refresh_hub_outcomes(get_db())
-            logger.info("[DocumentMemory] %s", r)
-        except Exception as e:
-            logger.warning("[DocumentMemory] harvest failed: %r", e)
+        from deps import get_db
+        r: Dict[str, Any] = {}
+        for name, step in (("sharepoint", lambda: harvest(get_db(), seconds=3000)), ("hub", lambda: harvest_hub(get_db())),
+                           ("outcomes_refreshed", lambda: refresh_hub_outcomes(get_db()))):
+            try:
+                r[name] = await step()
+            except Exception as e:
+                r[name] = {"error": repr(e)[:200]}
+        logger.info("[DocumentMemory] %s", r)
         await asyncio.sleep(MEMORY_MINUTES * 60)
 
 

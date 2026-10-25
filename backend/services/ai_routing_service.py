@@ -112,6 +112,47 @@ async def _note(db, h: Dict[str, Any], why: str) -> str:
             f"international={x.get('is_international')}")
 
 
+_NUM: Dict[str, Any] = {}
+NUM_SECONDS = 3600
+
+
+async def _shared(db, d: Dict[str, Any], before: str, seen: set, k: int = 3) -> List[Tuple[Dict[str, Any], str, str]]:
+    """Filed documents that share a container, bill or reference number with
+    this one (a carrier's bill and the order's customs entry), with where staff
+    filed them. A/B on the gate's 120 unsure filings, 2026-10-25: 88 vs 87,
+    the one change a Tumalo bill moved into staff's subfolder, none worse."""
+    import time
+    from services import order_flow_service as OF
+    if not _NUM or time.time() - _NUM["at"] > NUM_SECONDS:
+        known = await OF._known_orders(db)
+        idx: Dict[str, List[Tuple[str, str]]] = {}
+        async for m in db.document_memory.find({"folder": {"$ne": ""}, "text": {"$ne": ""}},
+                                               {"_id": 0, "item_id": 1, "folder": 1, "source": 1, "created": 1, "text": 1}):
+            if m.get("source") == "sharepoint_ap" and not m["folder"].lower().startswith("temp folder/"):
+                continue
+            for t in OF._clean(OF.tokens(m["text"]), known):
+                if re.search(r"[A-Z]", t) or len(t) >= 10:
+                    idx.setdefault(t, []).append((str(m.get("created") or ""), m["item_id"]))
+        _NUM.clear()
+        _NUM.update(at=time.time(), idx=idx, known=known)
+    m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}
+    out: List[Tuple[Dict[str, Any], str, str]] = []
+    for t in sorted(OF._clean(OF.tokens(m.get("text") or ""), _NUM["known"])):
+        hits = [h for h in _NUM["idx"].get(t, ()) if h[0] < before and h[1] != d.get("id")]
+        if not hits or len(hits) > 6:      # a number on many documents identifies none of them
+            continue
+        for _, iid in hits[-2:]:
+            if iid in seen:
+                continue
+            h = await db.document_memory.find_one({"item_id": iid}, {"_id": 0, "text": 0})
+            if h and h.get("folder"):
+                out.append((h, _label_of(h["folder"]), await _note(db, h, f"shares number {t} with this document")))
+                seen.add(iid)
+        if len(out) >= k:
+            break
+    return out[:k]
+
+
 async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> List[Tuple[Dict[str, Any], str, str]]:
     """The vendor's latest filed documents and documents that read alike,
     each with its order, so the AI can follow the ones whose order is like
@@ -141,6 +182,10 @@ async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> L
             continue
         ex.append((h, _label_of(h["folder"]), await _note(db, h, f"reads similar ({h['similarity']:.2f})")))
         n += 1
+    try:
+        ex = (await _shared(db, d, before, set(seen) | {h["item_id"] for h, _, _ in ex})) + ex
+    except Exception as e:
+        logger.warning("[AIRouting] shared numbers: %r", e)
     return ex
 
 

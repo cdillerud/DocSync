@@ -130,13 +130,30 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
             o = set(o) | also
         return (day, key, frozenset(o), _clean(raw, known), vendor, _stem(name), src, prints)
     out = []
+    # AP routes by purchase order. A sales order shares its number with the
+    # purchase order only on dropship orders; a warehouse order's sales order
+    # (120361) is a different number from its PO (W118658) and taught the
+    # learner that the shared container was misleading (2026-10-25).
+    pos: Set[str] = set()
+    async for r in db.bc_reference_cache.find({"bc_entity_type": {"$in": ["purchase_order", "posted_purchase_receipt"]}},
+                                              {"_id": 0, "normalized_document_no": 1, "bc_order_number": 1}):
+        for k in ("normalized_document_no", "bc_order_number"):
+            if r.get(k):
+                pos.add(str(r[k]).upper())
+    async for r in db.bc_purchase_receipts.find({}, {"_id": 0, "orderNumber": 1}):
+        if r.get("orderNumber"):
+            pos.add(str(r["orderNumber"]).upper())
     async for m in db.zetadocs_memory.find({"has_text": True}, {"_id": 1, "name": 1, "record_type": 1, "record_no": 1,
                                                                "company_no": 1, "created": 1, "text": 1}):
+        sales = str(m.get("record_type", "")).startswith("Sales")
+        if sales and m.get("record_no") not in pos:
+            continue
         o = orders_in(m.get("name", ""))
         if m.get("record_type") in ORDER_RECORDS and m.get("record_no") in known:
             o.add(m["record_no"])
         if o and len(o) <= 12:
-            out.append(row(_day(m.get("created")), m["_id"], o, m.get("text", ""), m.get("company_no") or "", m.get("name", ""), "zetadocs"))
+            out.append(row(_day(m.get("created")), m["_id"], o, m.get("text", ""), m.get("company_no") or "", m.get("name", ""),
+                           "zetadocs_sales" if str(m.get("record_type", "")).startswith("Sales") else "zetadocs"))
     async for m in db.document_memory.find({"source": "sharepoint_ap", "folder": {"$regex": "^Temp Folder/"}, "text": {"$ne": ""}},
                                            {"_id": 0, "item_id": 1, "folder": 1, "name": 1, "created": 1, "text": 1}):
         o = orders_in("/".join(m["folder"].split("/")[2:]) + " " + m.get("name", ""))
@@ -262,11 +279,12 @@ async def learn(db) -> Dict[str, Any]:
                 ev_keys = [("@" + ev, "") for ev in evv] if _trusted(stats, vendor, shape(t)) else []
                 for k in [(vendor, shape(t)), ("", shape(t))] + ev_keys:
                     stats[k][0 if ok else 1] += 1
-        elif not prints and src != "hub":
+        elif not prints and src not in ("hub", "zetadocs_sales"):
             # Tested on what it is for: documents whose order was not known
             # otherwise. A Hub document is in memory with an order because the
             # Hub already had it (email subject, file name), so it trains the
-            # index but is no test of it.
+            # index but is no test of it. Sales-order paperwork (BOLs, pick
+            # tickets) trains it too, but it is applied to AP documents only.
             v = _vote(links, stats, vendor)
             r = "abstain" if not v else ("right" if (set(v["orders"]) <= orders if v.get("group") else v["order"] in orders) else "wrong")
             if v and v.get("group"):

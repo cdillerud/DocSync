@@ -207,7 +207,64 @@ async def document_memory_scheduler() -> None:
         try:
             from deps import get_db
             r = await harvest(get_db(), seconds=3000)
+            r["hub"] = await harvest_hub(get_db())
+            r["outcomes_refreshed"] = await refresh_hub_outcomes(get_db())
             logger.info("[DocumentMemory] %s", r)
         except Exception as e:
             logger.warning("[DocumentMemory] harvest failed: %r", e)
         await asyncio.sleep(MEMORY_MINUTES * 60)
+
+
+async def harvest_hub(db, limit: int = 0) -> Dict[str, Any]:
+    """The Hub's own documents, with what became of each: the Hub's type,
+    where staff filed it (folder_filings) and whether AP entered it in BC
+    (bc_link). Text from the stored file; incremental by document id."""
+    import base64
+    stats = collections.Counter()
+    filed = {f["hub_doc_id"]: (f.get("top") or "") + ("/" + f["subpath"] if f.get("subpath") else "")
+             async for f in db.folder_filings.find({}, {"_id": 0, "hub_doc_id": 1, "top": 1, "subpath": 1})}
+    have = set(await db.document_memory.distinct("item_id", {"source": "hub"}))
+    q = {"file_content_b64": {"$exists": True, "$ne": None}}
+    async for d in db.hub_documents.find(q, {"_id": 0, "id": 1}).sort("created_utc", 1):
+        if d["id"] in have:
+            continue
+        full = await db.hub_documents.find_one({"id": d["id"]}, {"_id": 0, "id": 1, "file_name": 1, "file_content_b64": 1, "document_type": 1,
+                                                                "vendor_canonical": 1, "created_utc": 1, "bc_link.bc_document_no": 1,
+                                                                "email_subject": 1, "content_type": 1})
+        name = full.get("file_name") or ""
+        text = ""
+        if name.lower().endswith(".pdf") or "pdf" in str(full.get("content_type") or ""):
+            try:
+                data = base64.b64decode(full.get("file_content_b64") or "")
+                text = await asyncio.get_running_loop().run_in_executor(None, pdf_text, data)
+            except Exception:
+                text = ""
+        folder = filed.get(d["id"], "")
+        await db.document_memory.update_one({"item_id": d["id"]}, {"$set": {
+            "source": "hub", "item_id": d["id"], "name": name, "text": text, "created": full.get("created_utc"),
+            "folder": folder, "top": folder.split("/")[0] if folder else "", "kind": folder,
+            "doc_type": full.get("document_type"), "vendor": full.get("vendor_canonical"),
+            "subject": str(full.get("email_subject") or "")[:200],
+            "bc_entered": (full.get("bc_link") or {}).get("bc_document_no"), "harvested_at": _now()}}, upsert=True)
+        stats["remembered"] += 1
+        stats["text" if text else "no_text"] += 1
+        if limit and stats["remembered"] >= limit:
+            break
+    _INDEX.clear()
+    return dict(stats)
+
+
+async def refresh_hub_outcomes(db) -> int:
+    """Outcomes arrive after the document: staff file it, AP enters it."""
+    filed = {f["hub_doc_id"]: (f.get("top") or "") + ("/" + f["subpath"] if f.get("subpath") else "")
+             async for f in db.folder_filings.find({}, {"_id": 0, "hub_doc_id": 1, "top": 1, "subpath": 1})}
+    n = 0
+    async for d in db.hub_documents.find({"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "id": 1, "bc_link.bc_document_no": 1}):
+        r = await db.document_memory.update_one({"item_id": d["id"], "source": "hub", "bc_entered": {"$ne": d["bc_link"]["bc_document_no"]}},
+                                                {"$set": {"bc_entered": d["bc_link"]["bc_document_no"]}})
+        n += r.modified_count
+    for hid, folder in filed.items():
+        r = await db.document_memory.update_one({"item_id": hid, "source": "hub", "folder": {"$ne": folder}},
+                                                {"$set": {"folder": folder, "top": folder.split("/")[0], "kind": folder}})
+        n += r.modified_count
+    return n

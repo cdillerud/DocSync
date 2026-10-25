@@ -43,7 +43,10 @@ SYSTEM = ("You route Gamer Packaging's accounts-payable documents to the SharePo
           "You see the document, what the Hub's order lookup in Business Central says about its order, the folders a model "
           "trained on staff's past filings thinks most likely (with probabilities), the folder the hand-written rules propose, "
           "and past documents like this one with the folder staff filed each in. Decide where staff would file it. "
-          "Answer JSON only: {\"folder\": \"<one of the listed folders, exactly>\", \"confidence\": 0-1, \"why\": \"<short>\"}")
+          "Staff also keep a folder per order (e.g. \"warehouse international/w118658\"): the order folder the rules propose, "
+          "or one a past document was filed in, is a valid answer too. "
+          "Answer JSON only: {\"folder\": \"<a listed folder, the rules' folder, or a past document's folder, exactly as written>\", "
+          "\"confidence\": 0-1, \"why\": \"<short>\"}")
 
 
 def _now() -> str:
@@ -71,6 +74,12 @@ def _label_of(folder: str) -> str:
     return label({"top": parts[0] if parts else "", "subpath": "/".join(parts[1:])})
 
 
+def _folder_of(folder: str) -> str:
+    """Top folder and first subfolder as staff spelled them."""
+    fo = folder[12:] if folder.lower().startswith("temp folder/") else folder
+    return "/".join([p.strip() for p in fo.split("/") if p.strip()][:2])
+
+
 async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> List[Tuple[Dict[str, Any], str, str]]:
     from services import document_memory_service as DM
     ex, seen = [], set()
@@ -92,7 +101,10 @@ async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> L
 
 
 async def decide(db, d: Dict[str, Any], top3: str, rule_lbl: str, allowed: List[Tuple[str, int]],
-                 before: str, own_name: str = "", provider=None) -> Tuple[str, float, str]:
+                 before: str, own_name: str = "", provider=None, rule_path: str = "") -> Tuple[str, float, str, str]:
+    """(label, confidence, why, folder). The label is one of the folders
+    staff use, or an order's own folder the rules proposed or staff filed a
+    past document in (shown to the AI); folder is how staff spell it."""
     from services.llm_router import get_provider
     prov = provider or get_provider("classification")
     m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}
@@ -111,9 +123,12 @@ async def decide(db, d: Dict[str, Any], top3: str, rule_lbl: str, allowed: List[
     raw = await asyncio.wait_for(prov.complete(SYSTEM, user, f"ai-routing-{d.get('id')}", expect_json=True), 60)
     j = raw if isinstance(raw, dict) else json.loads(re.search(r"\{.*\}", str(getattr(raw, "content", raw)), re.S).group(0))
     lbl = str(j.get("folder") or "").strip().lower()
-    if lbl not in {c for c, _ in allowed}:
-        return "", 0.0, "not a folder staff use"
-    return lbl, float(j.get("confidence") or 0), str(j.get("why") or "")[:200]
+    seen = {_label_of(h["folder"]): _folder_of(h["folder"]) for h, _, _ in ex}
+    if rule_lbl and rule_path:
+        seen[rule_lbl] = _folder_of(rule_path)
+    if lbl not in {c for c, _ in allowed} and lbl not in seen:
+        return "", 0.0, "not a folder staff use", ""
+    return lbl, float(j.get("confidence") or 0), str(j.get("why") or "")[:200], seen.get(lbl, "")
 
 
 def _view(m: Dict[str, Any], d: Dict[str, Any], rule_path: str):
@@ -140,20 +155,26 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
     if p >= UNSURE:
         return None
     cached = d.get("ai_routing") or {}
-    if cached.get("rule_path") == rule_path and cached.get("label"):
-        lbl_ai, conf, why = cached["label"], cached.get("confidence") or 0.0, cached.get("why") or ""
+    if cached.get("rule_path") == rule_path and cached.get("v") == 2:
+        lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
+                                     cached.get("why") or "", cached.get("folder") or "")
     else:
         allowed = (await db.folder_model.find_one({"_id": "ai_routing"}, {"_id": 0, "allowed": 1}) or {}).get("allowed") or []
         try:
-            lbl_ai, conf, why = await decide(db, dd, top3, _second(rule_path), [tuple(a) for a in allowed], before=_now())
+            lbl_ai, conf, why, folder = await decide(db, dd, top3, _second(rule_path), [tuple(a) for a in allowed],
+                                                     before=_now(), rule_path=rule_path)
         except Exception as e:
             logger.warning("[AIRouting] %s: %r", d.get("id"), e)
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
-            "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "model_top": top3, "at": _now()}}})
+            "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
+            "model_top": top3, "at": _now(), "v": 2}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)
+    if not top and folder:
+        top, _, sub = folder.partition("/")
+        sub = sub or None
     if not top:
         return None
     from services.folder_routing_service import _top_defaults
@@ -214,8 +235,8 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         cur = lbl if FL._takes(lbl, p, th, rule_lbl) else rule_lbl
         top3 = ", ".join(f"{classes[k]} ({P[i][k]:.0%})" for k in order[:3])
         try:
-            ai, conf, why = await decide(db, d, top3, rule_lbl, allowed, before=str(d.get("created_utc") or ""),
-                                         own_name=str(f.get("_id") or "").rsplit("/", 1)[-1], provider=prov)
+            ai, conf, why, _ = await decide(db, d, top3, rule_lbl, allowed, before=str(d.get("created_utc") or ""),
+                                            own_name=str(f.get("_id") or "").rsplit("/", 1)[-1], provider=prov)
         except Exception:
             ai, conf, why = "", 0.0, "error"
         await asyncio.sleep(2)

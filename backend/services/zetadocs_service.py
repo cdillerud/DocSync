@@ -170,3 +170,21 @@ async def read_text(db, seconds: int = 1500, workers: int = 4) -> Dict[str, Any]
     stats["seconds"] = int(time.time() - t0)
     await db.learning_state.update_one({"_id": "zetadocs"}, {"$set": {"text_at": _now(), "text": dict(stats)}}, upsert=True)
     return dict(stats)
+
+
+if __name__ == "__main__":
+    # Run as its own process from the memory scheduler: parsing PDFs in the
+    # backend held the interpreter lock and its health checks timed out
+    # (2026-10-25 22:57 UTC).
+    import json
+    import os
+    import sys
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    async def _main(step: str, seconds: int):
+        db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        r = await (harvest_labels if step == "harvest_labels" else read_text)(db, seconds=seconds)
+        print(json.dumps(r, default=str))
+
+    logging.disable(logging.WARNING)
+    asyncio.run(_main(sys.argv[1], int(sys.argv[2])))

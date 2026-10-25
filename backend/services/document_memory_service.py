@@ -209,10 +209,24 @@ MEMORY_MINUTES = 60
 
 async def _zd(step: str, seconds: int):
     """DocsNAV Zetadocs: documents staff attached to BC records (labels for
-    every file, first-page text for those on purchase records first)."""
-    from deps import get_db
-    from services import zetadocs_service
-    return await getattr(zetadocs_service, step)(get_db(), seconds=seconds)
+    every file, first-page text for those on order records first). In its own
+    process: parsing PDFs inside the backend held the interpreter lock and the
+    API's health checks timed out (2026-10-25 22:57 UTC)."""
+    import json
+    import sys
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "services.zetadocs_service", step, str(seconds),
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), seconds + 600)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return {"error": "timed out"}
+    lines = (out or b"").decode(errors="replace").strip().splitlines()
+    try:
+        return json.loads(lines[-1]) if lines else {"error": f"no output, exit {proc.returncode}"}
+    except ValueError:
+        return {"error": lines[-1][:200]}
 
 
 async def document_memory_scheduler() -> None:

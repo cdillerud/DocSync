@@ -188,7 +188,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
     if p >= UNSURE:
         return None
     cached = d.get("ai_routing") or {}
-    if cached.get("rule_path") == rule_path and cached.get("v") == 2:
+    if cached.get("rule_path") == rule_path and cached.get("v") == 3:
         lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
                                      cached.get("why") or "", cached.get("folder") or "")
     else:
@@ -201,7 +201,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
             "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
-            "model_top": top3, "at": _now(), "v": 2}}})
+            "model_top": top3, "at": _now(), "v": 3}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)

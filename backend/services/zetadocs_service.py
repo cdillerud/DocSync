@@ -148,9 +148,15 @@ async def read_text(db, seconds: int = 1500, workers: int = 4) -> Dict[str, Any]
             await db.zetadocs_memory.update_one({"_id": m["_id"]}, {"$set": {
                 "text": text, "has_text": bool(text), "read_failed": not text, "read_at": _now()}})
 
-        for first in (True, False):
-            q = {"has_text": False, "ext": {"$in": sorted(READ_EXT)}, "read_failed": {"$ne": True},
-                 "record_type": {"$in" if first else "$nin": list(READ_FIRST)}}
+        from datetime import timedelta
+        year_ago = (datetime.now(timezone.utc) - timedelta(days=365)).strftime("%Y-%m-%d")
+        base = {"has_text": False, "ext": {"$in": sorted(READ_EXT)}, "read_failed": {"$ne": True}}
+        # The last year of order paperwork first - purchase and sales orders
+        # (a dropship order's BOLs and shipping papers sit on the sales order
+        # of the same number) - then older purchase records, then the rest.
+        for q in ({**base, "created": {"$gte": year_ago}, "record_type": {"$in": list(READ_FIRST) + ["Sales Order"]}},
+                  {**base, "record_type": {"$in": list(READ_FIRST)}},
+                  base):
             batch: List[Dict[str, Any]] = []
             async for m in db.zetadocs_memory.find(q, {"_id": 1, "lib": 1, "list_item_id": 1, "ext": 1, "size": 1}).sort("created", -1):
                 if time.time() - t0 > seconds:

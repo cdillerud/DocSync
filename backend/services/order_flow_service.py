@@ -233,7 +233,9 @@ def _vote(links, stats, vendor: str):
         return None
     ranked = sorted(votes.items(), key=lambda kv: -kv[1])
     if len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * 0.999:
-        return None   # a consolidated shipment's orders tie: the numbers do not say which
+        # A consolidated shipment's orders tie: the numbers do not say which.
+        # (Answering with the whole group was tried 2026-10-25: 13 of 23.)
+        return None
     best = ranked[0][0]
     group = sorted({x for t, distinct, _, evv in links if _trusted(stats, vendor, shape(t), evv) for o in distinct if best in o for x in o})
     return {"order": best, "orders": group, "via": ev[best][0], "from": ev[best][1], "shape": ev[best][2]}
@@ -266,7 +268,9 @@ async def learn(db) -> Dict[str, Any]:
             # Hub already had it (email subject, file name), so it trains the
             # index but is no test of it.
             v = _vote(links, stats, vendor)
-            r = "abstain" if not v else ("right" if v["order"] in orders else "wrong")
+            r = "abstain" if not v else ("right" if (set(v["orders"]) <= orders if v.get("group") else v["order"] in orders) else "wrong")
+            if v and v.get("group"):
+                res["group_" + r] += 1
             res[r] += 1
             by_source[src][r] += 1
             if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
@@ -280,6 +284,7 @@ async def learn(db) -> Dict[str, Any]:
                      key=lambda x: -x[2])[:25]
     out = {"_id": STATE_ID, "at": _now(), "documents": len(docs), "numbers": len(idx), "test_days": SPLIT_DAYS,
            "right": res["right"], "wrong": res["wrong"], "abstain": res["abstain"], "precision": round(precision, 4),
+           "group_right": res["group_right"], "group_wrong": res["group_wrong"],
            "coverage": round(n / (n + res["abstain"]), 4) if n + res["abstain"] else 0.0, "on": on,
            "by_source": {k: dict(v) for k, v in by_source.items()}, "trusted_shapes": trusted,
            "distrusted_evidence": sorted(((k[0][1:] or "?", v[0], v[1]) for k, v in stats.items()

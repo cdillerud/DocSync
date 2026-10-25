@@ -25,6 +25,7 @@ Nothing is overwritten: the result is kept on the document as order_flow
 """
 from __future__ import annotations
 
+import asyncio
 import collections
 import logging
 import re
@@ -173,13 +174,13 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
         if m.get("record_type") in ORDER_RECORDS and m.get("record_no") in known:
             o.add(m["record_no"])
         if o and len(o) <= 12:
-            out.append(row(_day(m.get("created")), m["_id"], o, m.get("text", ""), m.get("company_no") or "", m.get("name", ""),
+            out.append((_day(m.get("created")), m["_id"], o, m.get("text", ""), m.get("company_no") or "", m.get("name", ""),
                            "zetadocs_sales" if str(m.get("record_type", "")).startswith("Sales") else "zetadocs"))
     async for m in db.document_memory.find({"source": "sharepoint_ap", "folder": {"$regex": "^Temp Folder/"}, "text": {"$ne": ""}},
                                            {"_id": 0, "item_id": 1, "folder": 1, "name": 1, "created": 1, "text": 1}):
         o = orders_in("/".join(m["folder"].split("/")[2:]) + " " + m.get("name", ""))
         if o and len(o) <= 12:
-            out.append(row(_day(m.get("created")), m["item_id"], o, m["text"], "", m.get("name", ""), "ap_folder"))
+            out.append((_day(m.get("created")), m["item_id"], o, m["text"], "", m.get("name", ""), "ap_folder"))
     # Freight bills staff attached in Zetadocs and renamed with their orders
     # ("W118604 W118607_TUMALO_0314238_10162026.pdf"): the Hub's own copy of
     # the same bill (vendor + invoice number) gets those orders as its label.
@@ -214,9 +215,11 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
         d = pos.get(m["item_id"])
         if d:
             o = d.get("_orders") or {str(d["po_number_clean"]).strip().upper()}
-            out.append(row(_day(d.get("created_utc")), d["id"], o, m["text"], d.get("vendor_canonical") or "", d.get("file_name", ""),
+            out.append((_day(d.get("created_utc")), d["id"], o, m["text"], d.get("vendor_canonical") or "", d.get("file_name", ""),
                            "hub_zetadocs" if d.get("_orders") else "hub"))
-    out.sort(key=lambda x: x[0])
+    # Reading numbers out of ~100k texts is CPU work: off the event loop, or
+    # the API stops answering for minutes (health check failed 2026-10-25).
+    out = await asyncio.to_thread(lambda: sorted((row(*r) for r in out), key=lambda x: x[0]))
     return out
 
 
@@ -286,36 +289,41 @@ async def learn(db) -> Dict[str, Any]:
     known = await _known_orders(db)
     docs = await _documents(db, known)
     split = (datetime.now(timezone.utc) - timedelta(days=SPLIT_DAYS)).toordinal()
-    idx: Dict[str, List[Tuple[int, FrozenSet[str], str, str, int]]] = collections.defaultdict(list)
-    stats: Dict[Tuple[str, str], List[int]] = collections.defaultdict(lambda: [0, 0])
-    res = collections.Counter()
-    by_source = collections.defaultdict(collections.Counter)
-    examples = []
-    for day, key, orders, toks, vendor, stem, src, prints in docs:
-        links = _links(idx, day, toks, set(orders), stem, key)
-        if day < split:
-            for t, distinct, _, evv in links:
-                ok = int(any(orders & o for o in distinct))
-                # evidence vendors are judged only on links that would be believed
-                ev_keys = [("@" + ev, "") for ev in evv] if _trusted(stats, vendor, shape(t)) else []
-                for k in [(vendor, shape(t)), ("", shape(t))] + ev_keys:
-                    stats[k][0 if ok else 1] += 1
-        elif not prints and src not in ("hub", "zetadocs_sales"):
-            # Tested on what it is for: documents whose order was not known
-            # otherwise. A Hub document is in memory with an order because the
-            # Hub already had it (email subject, file name), so it trains the
-            # index but is no test of it. Sales-order paperwork (BOLs, pick
-            # tickets) trains it too, but it is applied to AP documents only.
-            v = _vote(links, stats, vendor)
-            r = "abstain" if not v else ("right" if (set(v["orders"]) <= orders if v.get("group") else v["order"] in orders) else "wrong")
-            if v and v.get("group"):
-                res["group_" + r] += 1
-            res[r] += 1
-            by_source[src][r] += 1
-            if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
-                examples.append(f"{r}: {src} {stem[:60]} -> {v['order']} via {v['via']} ({v['shape']}) truth {sorted(orders)}")
-        for t in toks - orders:
-            idx[t].append((day, orders, stem, key, hash(frozenset(toks)), vendor))
+
+    def walk():
+        idx: Dict[str, List[Tuple[int, FrozenSet[str], str, str, int]]] = collections.defaultdict(list)
+        stats: Dict[Tuple[str, str], List[int]] = collections.defaultdict(lambda: [0, 0])
+        res = collections.Counter()
+        by_source = collections.defaultdict(collections.Counter)
+        examples = []
+        for day, key, orders, toks, vendor, stem, src, prints in docs:
+            links = _links(idx, day, toks, set(orders), stem, key)
+            if day < split:
+                for t, distinct, _, evv in links:
+                    ok = int(any(orders & o for o in distinct))
+                    # evidence vendors are judged only on links that would be believed
+                    ev_keys = [("@" + ev, "") for ev in evv] if _trusted(stats, vendor, shape(t)) else []
+                    for k in [(vendor, shape(t)), ("", shape(t))] + ev_keys:
+                        stats[k][0 if ok else 1] += 1
+            elif not prints and src not in ("hub", "zetadocs_sales"):
+                # Tested on what it is for: documents whose order was not known
+                # otherwise. A Hub document is in memory with an order because the
+                # Hub already had it (email subject, file name), so it trains the
+                # index but is no test of it. Sales-order paperwork (BOLs, pick
+                # tickets) trains it too, but it is applied to AP documents only.
+                v = _vote(links, stats, vendor)
+                r = "abstain" if not v else ("right" if (set(v["orders"]) <= orders if v.get("group") else v["order"] in orders) else "wrong")
+                if v and v.get("group"):
+                    res["group_" + r] += 1
+                res[r] += 1
+                by_source[src][r] += 1
+                if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
+                    examples.append(f"{r}: {src} {stem[:60]} -> {v['order']} via {v['via']} ({v['shape']}) truth {sorted(orders)}")
+            for t in toks - orders:
+                idx[t].append((day, orders, stem, key, hash(frozenset(toks)), vendor))
+        return idx, stats, res, by_source, examples
+
+    idx, stats, res, by_source, examples = await asyncio.to_thread(walk)
     n = res["right"] + res["wrong"]
     precision = res["right"] / n if n else 0.0
     on = n >= GATE_MIN and precision >= GATE

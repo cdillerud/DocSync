@@ -99,24 +99,45 @@ def _day(s: str) -> int:
 
 
 async def _known_orders(db) -> Set[str]:
+    """Order numbers only: BC orders, the order a receipt/shipment is for,
+    and every purchase/sales order Zetadocs has files on (back to 2018; the
+    BC cache holds only recent orders). Receipt and shipment document numbers
+    are not orders - with them, the date "240223" in "w114318 tumalo 240223"
+    was taken for an order (2026-10-25)."""
     known: Set[str] = set()
     async for r in db.bc_reference_cache.find({}, {"_id": 0, "normalized_document_no": 1, "bc_order_number": 1, "bc_entity_type": 1}):
         e = str(r.get("bc_entity_type"))
-        if "order" in e or "receipt" in e or "shipment" in e:
-            for k in ("normalized_document_no", "bc_order_number"):
-                if r.get(k):
-                    known.add(str(r[k]).upper())
+        if "order" in e and r.get("normalized_document_no"):
+            known.add(str(r["normalized_document_no"]).upper())
+        if r.get("bc_order_number"):
+            known.add(str(r["bc_order_number"]).upper())
     async for r in db.bc_purchase_receipts.find({}, {"_id": 0, "orderNumber": 1}):
         if r.get("orderNumber"):
             known.add(str(r["orderNumber"]).upper())
+    for no in await db.zetadocs_memory.distinct("record_no", {"record_type": {"$in": sorted(ORDER_RECORDS)}}):
+        if no and len(no) >= 5:
+            known.add(str(no).upper())
     return known
+
+
+_YYMMDD = re.compile(r"(1[7-9]|2[0-9])(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])")
+
+
+def _date_like(o: str) -> bool:
+    return len(o) == 6 and bool(_YYMMDD.fullmatch(o))
 
 
 async def _documents(db, known: Set[str]) -> List[Tuple]:
     """(day, key, orders, numbers, vendor, stem, source, prints_its_order)
     for every document tied to an order."""
     def orders_in(s: str) -> Set[str]:
-        return {o for o in ORD.findall((s or "").upper()) if o in known}
+        # Staff's file names carry orders and dates ("w114318 tumalo 240223
+        # 267593"): a bare yymmdd is the date; a W-number is always an order.
+        out = set()
+        for o in ORD.findall((s or "").upper().replace("_", " ")):   # "PO_W118530", "po_114948 + _114949"
+            if o.startswith("W") or (o in known and not _date_like(o)):
+                out.add(o)
+        return out
 
     def row(day, key, o, text, vendor, name, src):
         raw = tokens(text)

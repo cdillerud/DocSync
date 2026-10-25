@@ -123,6 +123,13 @@ async def _examples(db, d: Dict[str, Any], before: str, own_name: str = "") -> L
                                            {"_id": 0, "text": 0}).sort("created", -1).limit(SAME_VENDOR):
         ex.append((h, _label_of(h["folder"]), await _note(db, h, "same vendor, recent")))
         seen.add(h["item_id"])
+    flow = (d.get("order_flow") or {}).get("order")
+    if flow and not d.get("po_number_clean"):
+        # Where staff filed earlier paperwork of the order this document is linked to.
+        async for h in db.document_memory.find({"folder": {"$regex": flow}, "created": {"$lt": before}, "item_id": {"$nin": list(seen)}},
+                                               {"_id": 0, "text": 0}).sort("created", -1).limit(3):
+            ex.append((h, _label_of(h["folder"]), f"earlier paperwork of linked order {flow}"))
+            seen.add(h["item_id"])
     m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}
     n = 0
     for h in await DM.similar(db, m.get("text") or "", d.get("file_name") or "", k=60, exclude={d.get("id")} | seen):
@@ -149,10 +156,15 @@ async def decide(db, d: Dict[str, Any], top3: str, rule_lbl: str, allowed: List[
     ef = d.get("extracted_fields") or {}
     lines = [str(e.get("description") or "")[:70] for e in (ef.get("line_items") or [])[:5]]
     po = str(d.get("po_number_clean") or "").strip().upper()
+    flow = d.get("order_flow") or {}
+    flow_line = ""
+    if not po and flow.get("order"):
+        flow_line = (f"\nNo order number on the document, but its {flow.get('via')} is also on the paperwork of order(s) "
+                     f"{', '.join(flow.get('orders') or [flow['order']])} (learned link): {await order_facts(db, flow['order'])}")
     user = (f"Document:\nFile: {d.get('file_name')}\nEmail subject: {d.get('email_subject')}\nVendor: {d.get('vendor_canonical') or d.get('vendor_raw')}\n"
             f"Hub type: {d.get('document_type')}  PO/order: {po or '-'}  International flag: {d.get('is_international')}  Amount: {d.get('amount_float')}\n"
             f"Lines: {lines}\nFirst text: {(m.get('text') or '')[:500]}\n\n"
-            f"Order in Business Central: {await order_facts(db, po)}\n\n"
+            f"Order in Business Central: {await order_facts(db, po)}{flow_line}\n\n"
             f"Model trained on staff's filings, most likely: {top3}\nHand-written rules propose: {rule_lbl}\n\n"
             "Folders staff use (count): " + ", ".join(f"{c} ({n})" for c, n in allowed[:45]) + "\n\n"
             "Past documents and where staff filed them:\n"
@@ -192,7 +204,8 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
     if p >= UNSURE:
         return None
     cached = d.get("ai_routing") or {}
-    if cached.get("rule_path") == rule_path and cached.get("v") == 4:
+    flow = (d.get("order_flow") or {}).get("order")
+    if cached.get("rule_path") == rule_path and cached.get("v") == 4 and cached.get("flow") == flow:
         lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
                                      cached.get("why") or "", cached.get("folder") or "")
     else:
@@ -205,7 +218,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
             "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
-            "model_top": top3, "at": _now(), "v": 4}}})
+            "model_top": top3, "at": _now(), "v": 4, "flow": flow}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)

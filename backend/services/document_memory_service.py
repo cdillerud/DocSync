@@ -207,6 +207,14 @@ async def similar(db, text: str, name: str = "", k: int = 5, exclude: Optional[s
 MEMORY_MINUTES = 60
 
 
+async def _zd(step: str, seconds: int):
+    """DocsNAV Zetadocs: documents staff attached to BC records (labels for
+    every file, first-page text for those on purchase records first)."""
+    from deps import get_db
+    from services import zetadocs_service
+    return await getattr(zetadocs_service, step)(get_db(), seconds=seconds)
+
+
 async def document_memory_scheduler() -> None:
     """Keep document memory current: the first full read of the AP library
     runs over several passes (it resumes where it stopped); after that each
@@ -219,7 +227,8 @@ async def document_memory_scheduler() -> None:
         from deps import get_db
         r: Dict[str, Any] = {}
         for name, step in (("sharepoint", lambda: harvest(get_db(), seconds=3000)), ("hub", lambda: harvest_hub(get_db())),
-                           ("outcomes_refreshed", lambda: refresh_hub_outcomes(get_db()))):
+                           ("outcomes_refreshed", lambda: refresh_hub_outcomes(get_db())),
+                           ("zetadocs_labels", lambda: _zd("harvest_labels", 600)), ("zetadocs_text", lambda: _zd("read_text", 2400))):
             try:
                 r[name] = await step()
             except Exception as e:

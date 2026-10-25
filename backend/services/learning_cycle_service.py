@@ -177,6 +177,15 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["disposition_model"] = {"error": repr(e)[:200]}
     try:
+        # The order a freight bill / customs entry belongs to when it does not
+        # print ours: learned from the numbers it shares with the order's other
+        # paperwork (Zetadocs, staff's order folders); on only while it is
+        # right >= 95% of the time on the newest documents.
+        from services.order_flow_service import apply_recent as order_flow
+        summary["order_flow"] = await order_flow(db)
+    except Exception as e:
+        summary["order_flow"] = {"error": repr(e)[:200]}
+    try:
         # Which subfolder staff file a document in, learned daily from their
         # filings; replaces the rules' subfolder only where it beats them on
         # the newest held-out filings.

@@ -236,6 +236,42 @@ app.include_router(missed_intake_router, prefix="/api")
 app.include_router(sales_router)
 
 
+def _start_loop_watchdog(loop, stall_seconds: float = 5.0):
+    """Log where the event loop is stuck when it stalls: health checks timed
+    out on 2026-10-25 while CPU-heavy work ran on the loop. A thread watches a
+    heartbeat the loop updates every second and, on a stall, logs the main
+    thread's stack once (then again only if the stall moves elsewhere)."""
+    import sys
+    import threading
+    import time as _time
+    import traceback
+    beat = {"t": _time.monotonic()}
+
+    def tick():
+        beat["t"] = _time.monotonic()
+        loop.call_later(1.0, tick)
+
+    loop.call_soon(tick)
+    main_id = threading.get_ident()
+
+    def watch():
+        last = None
+        while True:
+            _time.sleep(1.0)
+            lag = _time.monotonic() - beat["t"]
+            if lag < stall_seconds:
+                last = None
+                continue
+            frame = sys._current_frames().get(main_id)
+            stack = "".join(traceback.format_stack(frame)[-12:]) if frame else "?"
+            where = stack.strip().splitlines()[-2:] if stack else []
+            if where != last:
+                logger.warning("[LoopStall] event loop blocked %.0fs at:\n%s", lag, stack)
+                last = where
+
+    threading.Thread(target=watch, name="loop-watchdog", daemon=True).start()
+
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy", "service": "gpi-document-hub"}
@@ -270,6 +306,7 @@ async def startup():
     _asyncio.create_task(sales_fast_scheduler())
     from services.document_memory_service import document_memory_scheduler
     _asyncio.create_task(document_memory_scheduler())
+    _start_loop_watchdog(_asyncio.get_running_loop())
 
     register_doc_routes(app)
     register_wf_routes(app)

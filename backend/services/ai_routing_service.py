@@ -13,7 +13,9 @@ Replay on filings after the model's training period (2026-10-25, the
 120 latest unsure ones of 1,133 held out): current routing 70 right, the
 AI with the vendor's latest filings as examples 79, the AI with each
 past document's order shown (received in BC or not, international or not)
-and told staff file by the order, not the vendor's habit, 84.
+and told staff file by the order, not the vendor's habit, 84; plus "a
+folder named for a vendor (Ball, dunnage vendors...) goes by the vendor",
+86 vs 84 on the same documents.
 
 On only while it earns it: evaluate() replays the latest unsure filings
 each day (a model trained on the filings before them, so neither side has
@@ -50,6 +52,8 @@ SYSTEM = ("You route Gamer Packaging's accounts-payable documents to the SharePo
           "Staff file by the order behind a document (warehouse or dropship, international or not, the order's own folder), "
           "not by what the vendor's last few documents were: compare each past document's order to this one's and follow "
           "the past documents whose order is like this one's. "
+          "The exception is a folder named for a vendor or vendor group (Ball, Canpack, dunnage vendors, Evergreen orders and "
+          "the like): there the vendor decides, as the vendor's past filings in it show. "
           "Staff also keep a folder per order (e.g. \"warehouse international/w118658\"): the order folder the rules propose, "
           "or one a past document was filed in, is a valid answer too. "
           "Answer JSON only: {\"folder\": \"<a listed folder, the rules' folder, or a past document's folder, exactly as written>\", "
@@ -188,7 +192,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
     if p >= UNSURE:
         return None
     cached = d.get("ai_routing") or {}
-    if cached.get("rule_path") == rule_path and cached.get("v") == 3:
+    if cached.get("rule_path") == rule_path and cached.get("v") == 4:
         lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
                                      cached.get("why") or "", cached.get("folder") or "")
     else:
@@ -201,7 +205,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
             "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
-            "model_top": top3, "at": _now(), "v": 3}}})
+            "model_top": top3, "at": _now(), "v": 4}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)

@@ -70,6 +70,8 @@ if g fetch -q origin '$Branch' 2>/tmp/nir-fetch.txt; then
 else
   echo "FETCH=failed: `$(tail -1 /tmp/nir-fetch.txt)"
 fi
+if [ -f backend/services/new_item_requests.py ] && grep -q new_item_requests backend/services/email_polling_service.py; then echo 'CODE=present'; else echo 'CODE=absent'; fi
+if docker exec gpi-backend test -f /app/services/new_item_requests.py 2>/dev/null; then echo 'RUNNING=yes'; else echo 'RUNNING=no'; fi
 for k in CATALOG_FORWARD_URL CATALOG_FORWARD_KEY NEW_ITEM_REQUESTS_URL NEW_ITEM_REQUESTS_KEY NEW_ITEM_REQUESTS_ENABLED NEW_ITEM_REQUESTS_DRY_RUN; do
   if grep -q "^`$k=." backend/.env 2>/dev/null; then echo "ENV_`$k=set"; else echo "ENV_`$k=missing"; fi
 done
@@ -85,14 +87,22 @@ else {
     Write-Host "New code    : $Branch @ $($info.TARGET) ($($info.BEHIND) commits ahead)"
     Write-Host "Fast-forward: $($info.FASTFORWARD)"
 }
+Write-Host "Reader code : in the checkout: $(if ($info.CODE -eq 'present') {'yes'} else {'no'}); in the running backend: $($info.RUNNING)"
+# Merged into the VM's branch already (e.g. by the session that deploys the Hub): only the settings are needed.
+$settingsOnly = $info.CODE -eq 'present'
 foreach ($k in 'CATALOG_FORWARD_URL', 'CATALOG_FORWARD_KEY', 'NEW_ITEM_REQUESTS_URL', 'NEW_ITEM_REQUESTS_KEY', 'NEW_ITEM_REQUESTS_ENABLED', 'NEW_ITEM_REQUESTS_DRY_RUN') {
     Write-Host ("{0,-26}: {1}" -f $k, $info["ENV_$k"])
 }
 if ($info.STATE) { throw "The Hub folder $HubDir is $($info.STATE); deploy by hand (DEPLOYMENT.md)." }
 
 $problems = @()
-if ($info.FETCH) { $problems += 'the VM could not fetch the branch from GitHub' }
-if ($info.FASTFORWARD -ne 'yes') { $problems += "the VM's branch has commits the new branch doesn't (not a fast-forward); merge them first" }
+if ($info.FETCH -and -not $settingsOnly) { $problems += 'the VM could not fetch the branch from GitHub' }
+if (-not $settingsOnly -and -not $info.FETCH -and $info.FASTFORWARD -ne 'yes') {
+    $problems += "the VM's branch has commits the new branch doesn't (not a fast-forward); merge them first"
+}
+if ($settingsOnly -and $info.RUNNING -ne 'yes') {
+    $problems += 'the reader is in the checkout but the running backend was built before it; rebuild the backend first (the session that deploys the Hub does this)'
+}
 if ([int]($info.DIRTY) -gt 0) { $problems += 'the VM checkout has uncommitted changes' }
 $needKey = $info.ENV_CATALOG_FORWARD_KEY -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_KEY -ne 'set'
 $needUrl = $info.ENV_CATALOG_FORWARD_URL -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_URL -ne 'set'
@@ -134,25 +144,27 @@ if ($needKey) {
     Write-Host 'Intake key stored on the VM.'
 }
 $urlLine = if ($needUrl) { "NEW_ITEM_REQUESTS_URL=$IntakeUrl" } else { '' }
+# Code already merged and built: only the settings change, and the backend is recreated (not rebuilt) to read them.
+$codeStep = if ($settingsOnly) { 'echo "code already on the VM; settings only"' } else { "g fetch -q origin '$Branch'`ng merge --ff-only -q FETCH_HEAD" }
+$composeStep = if ($settingsOnly) { 'docker compose up -d --force-recreate --no-build backend' } else { 'docker compose up -d --build backend' }
 
 $apply = @"
 set -e
 cd '$HubDir'
 owner=`$(stat -c %U .git)
 g() { sudo -u "`$owner" git "`$@"; }
-g fetch -q origin '$Branch'
-g merge --ff-only -q FETCH_HEAD
+$codeStep
 [ -n "`$(tail -c1 backend/.env)" ] && echo >> backend/.env
 for kv in NEW_ITEM_REQUESTS_ENABLED=true NEW_ITEM_REQUESTS_DRY_RUN=true $urlLine; do
   k=`${kv%%=*}
   if ! grep -q "^`$k=" backend/.env; then echo "`$kv" >> backend/.env; fi
 done
-docker compose up -d --build backend >/tmp/nir-build.txt 2>&1 || { tail -5 /tmp/nir-build.txt; exit 1; }
+$composeStep >/tmp/nir-build.txt 2>&1 || { tail -5 /tmp/nir-build.txt; exit 1; }
 echo "DEPLOYED=`$(g log -1 --format='%h %s' | cut -c1-90)"
 docker compose ps backend --format '{{.Name}} {{.Status}}' 2>/dev/null | head -2
 "@
 Write-Host ''
-Write-Host 'Deploying (fast-forward, dry run on, backend rebuild: a few minutes) ...'
+Write-Host $(if ($settingsOnly) { 'Turning it on (settings only, dry run on, backend restart: about a minute) ...' } else { 'Deploying (fast-forward, dry run on, backend rebuild: a few minutes) ...' })
 $result = Invoke-OnVm $apply
 Write-Host $result
 if ($result -notmatch 'DEPLOYED=') { throw 'The deploy did not finish; see the lines above.' }

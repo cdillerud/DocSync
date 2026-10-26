@@ -1,7 +1,8 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-  GPI Hub: dry-run backfill of New Item Template forms the Hub already holds (nothing is sent).
+  GPI Hub: dry-run backfill of New Item Template forms the Hub already holds (nothing is sent), or with -SharePoint
+  of the forms Zetadocs filed in SharePoint (DocsNAV, GamerDocs); -Send then sends those to the catalog.
 
 .DESCRIPTION
   Runs the New Item Requests reader inside the Hub's backend container over the workbooks received in the last
@@ -9,17 +10,31 @@
   on its Hub record, nothing goes to the catalog. Prints counts only: forms found, forms that are request forms,
   items read, and the kinds of problems found on the forms (no file names, customers or item numbers).
 
+  -SharePoint searches the DocsNAV site for workbooks named like a new item request, modified in the last -Days
+  days, reads each (a copy of a form already read is skipped) and records the decision in the Hub's
+  new_item_request_sharepoint collection. Dry run unless -Send -Confirmation 'SEND NEW ITEM REQUESTS'; a file is
+  sent once. The reader is loaded for this run from the branch (git on the VM), so the running Hub is unchanged.
+
   Reaches the VM through Azure (az vm run-command, with your az login).
 .EXAMPLE
   .\scripts\Preview-Hub-New-Item-Requests.ps1 -Days 120
+  .\scripts\Preview-Hub-New-Item-Requests.ps1 -SharePoint -Days 365
+  .\scripts\Preview-Hub-New-Item-Requests.ps1 -SharePoint -Days 365 -Send -Confirmation 'SEND NEW ITEM REQUESTS'
 #>
 [CmdletBinding()]
 param(
     [int]$Days = 120,
     [int]$Limit = 1000,
+    [switch]$SharePoint,
+    [switch]$Send,
+    [string]$Confirmation = '',
+    [string]$Branch = 'feature/hub-new-item-requests-live',
     [string]$VmHost = 'azureuser@4.204.41.190'
 )
 $ErrorActionPreference = 'Stop'
+if ($Send -and (-not $SharePoint -or $Confirmation -ne 'SEND NEW ITEM REQUESTS')) {
+    throw "-Send works with -SharePoint and needs -Confirmation 'SEND NEW ITEM REQUESTS'."
+}
 
 $ip = ($VmHost -split '@')[-1]
 $vm = $null
@@ -66,11 +81,34 @@ async def main():
 
 asyncio.run(main())
 "@
+$spDry = if ($Send) { 'False' } else { 'True' }
+$pySp = @"
+import asyncio, json, os, importlib.util
+from motor.motor_asyncio import AsyncIOMotorClient
+import deps
+spec = importlib.util.spec_from_file_location("nir_sp", "/tmp/nir_sp.py")
+n = importlib.util.module_from_spec(spec); spec.loader.exec_module(n)
+
+async def main():
+    deps.set_db(AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "gpi_document_hub")])
+    out = await n.sharepoint_backfill(days=$Days, limit=$Limit, dry_run=$spDry)
+    out.pop("since", None)
+    print(json.dumps(out, indent=1))
+
+asyncio.run(main())
+"@
+if ($SharePoint) { $py = $pySp }
 $pyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($py))
 # az on Windows is a .cmd wrapper that garbles quotes and redirections: the shell steps travel base64-encoded too.
-$sh = "echo $pyB64 | base64 -d > /tmp/nir-preview.py && docker cp /tmp/nir-preview.py gpi-backend:/tmp/nir-preview.py && docker exec -w /app -e PYTHONPATH=/app gpi-backend python /tmp/nir-preview.py 2>&1 | tail -60"
+$fetch = if ($SharePoint) {
+    # This run's reader comes from the branch (the running Hub keeps its own copy).
+    "cd /opt/gpi-hub && o=`$(stat -c %U .git) && sudo -u `$o git fetch -q origin '$Branch' && sudo -u `$o git show FETCH_HEAD:backend/services/new_item_requests.py > /tmp/nir_sp.py && docker cp /tmp/nir_sp.py gpi-backend:/tmp/nir_sp.py && "
+} else { '' }
+$sh = "$fetch echo $pyB64 | base64 -d > /tmp/nir-preview.py && docker cp /tmp/nir-preview.py gpi-backend:/tmp/nir-preview.py && docker exec -w /app -e PYTHONPATH=/app gpi-backend python /tmp/nir-preview.py 2>&1 | tail -60"
 $script = "echo $([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sh))) | base64 -d | sudo bash"
-Write-Host "Reading the request forms of the last $Days days in dry run (nothing is sent) ..."
+Write-Host $(if ($Send) { "Sending the SharePoint request forms of the last $Days days to the catalog ..." }
+             elseif ($SharePoint) { "Reading the SharePoint request forms of the last $Days days in dry run (nothing is sent) ..." }
+             else { "Reading the request forms of the last $Days days in dry run (nothing is sent) ..." })
 $out = az vm run-command invoke --subscription $vm.subscription -g $vm.group -n $vm.name --command-id RunShellScript `
     --scripts $script --query 'value[0].message' -o tsv
 if ($LASTEXITCODE -ne 0) { throw 'Azure could not run the preview on the VM.' }

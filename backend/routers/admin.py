@@ -978,6 +978,20 @@ async def new_item_requests_backfill(
     return await backfill(days=days, limit=limit, dry_run=dry_run)
 
 
+@router.post("/new-item-requests/sharepoint-backfill")
+async def new_item_requests_sharepoint_backfill(
+    days: int = Query(365, ge=1, le=2500, description="Forms modified in the last N days"),
+    limit: int = Query(1000, ge=1, le=5000, description="At most this many files"),
+    dry_run: bool = Query(True, description="Read and record only; send nothing (default)"),
+    _user: dict = Depends(require_admin),
+):
+    """Read the New Item Template forms Zetadocs filed in SharePoint (DocsNAV,
+    GamerDocs) and, when dry_run=false, send them to the catalog intake, oldest
+    first, each form once. Counts only. ADMIN ONLY."""
+    from services.new_item_requests import sharepoint_backfill
+    return await sharepoint_backfill(days=days, limit=limit, dry_run=dry_run)
+
+
 @router.get("/catalog-forward/status")
 async def catalog_forward_status(
     limit: int = Query(50, ge=1, le=500, description="How many recent decisions to return"),

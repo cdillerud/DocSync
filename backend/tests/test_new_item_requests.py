@@ -250,3 +250,71 @@ async def test_backfill_dry_run_works_while_off(fake_db, files, posts, monkeypat
     out = await nir.backfill(days=1095, dry_run=True)
     assert out["candidates"] == 1 and out["counts"] == {"dry_run": 1} and posts == []
     assert (await nir.backfill(dry_run=False))["enabled"] is False
+
+
+# ── SharePoint backfill (forms Zetadocs filed with their items) ─────
+
+@pytest.fixture
+def sharepoint(monkeypatch):
+    form = _workbook()
+    files = {
+        "f1": ("New Item Template ANGIE.xlsx", "2026-09-01T10:00:00Z", form),
+        "f2": ("New Item Template ANGIE.xlsx", "2026-09-01T10:05:00Z", form),        # the same form filed again
+        "f3": ("New Item Template blank.xlsx", "2026-09-02T10:00:00Z", _workbook(filled=False)),
+        "f4": ("Pricing.xlsx", "2026-09-03T10:00:00Z", b"x"),                          # no request hint in the name
+        "f5": ("New item request old.xlsx", "2020-01-01T00:00:00Z", form),            # too old
+    }
+
+    async def _get(client, token, url):
+        if "/sites/" in url and ":/sites/" in url:
+            return {"id": "site1"}
+        if url.endswith("/drives?$select=id,name"):
+            return {"value": [{"id": "drv1", "name": "Documents"}]}
+        if "search(q='New Item')" in url:
+            return {"value": [{"id": k, "name": n, "size": 1000, "lastModifiedDateTime": m, "webUrl": f"https://sp/{k}",
+                               "file": {}, "parentReference": {"path": "/drive/root:/Zetadocs/GamerDocs"}}
+                              for k, (n, m, _) in files.items()]}
+        return {"value": []}
+
+    async def _bytes(client, token, drive_id, item_id):
+        return files[item_id][2]
+
+    async def _token():
+        return "real-token"
+    monkeypatch.setattr(nir, "_sp_get", _get)
+    monkeypatch.setattr(nir, "_sp_bytes", _bytes)
+    import services.catalog_forward as cf
+    monkeypatch.setattr(cf, "_graph_token", _token)
+    return files
+
+
+@pytest.mark.asyncio
+async def test_sharepoint_backfill_dry_run_reads_each_form_once(fake_db, sharepoint, posts, monkeypatch):
+    out = await nir.sharepoint_backfill(days=2000, dry_run=True)
+    assert out["status"] == "OK" and out["files_found"] == 3            # f4 has no hint, f5 is too old
+    assert out["decisions"] == {"dry_run": 1, "copy_of_a_form_already_read": 1, "form_without_items": 1}
+    assert out["items_read"] == 2 and posts == []
+
+
+@pytest.mark.asyncio
+async def test_sharepoint_backfill_sends_once(fake_db, sharepoint, posts, enabled):
+    out = await nir.sharepoint_backfill(days=2000, dry_run=False)
+    assert out["decisions"]["sent"] == 1 and len(posts) == 1
+    assert posts[0]["payload"]["document_id"] == "sp:f1" and posts[0]["payload"]["document_url"] == "https://sp/f1"
+    again = await nir.sharepoint_backfill(days=2000, dry_run=False)
+    assert len(posts) == 1 and again["decisions"].get("already_sent") == 1
+    assert again["decisions"].get("copy_of_a_form_already_read") == 1
+
+
+@pytest.mark.asyncio
+async def test_sharepoint_access_refused_is_reported(fake_db, monkeypatch):
+    async def _get(client, token, url):
+        raise nir.SharePointError("Microsoft Graph refused access (403)")
+
+    async def _token():
+        return "real-token"
+    monkeypatch.setattr(nir, "_sp_get", _get)
+    import services.catalog_forward as cf
+    monkeypatch.setattr(cf, "_graph_token", _token)
+    out = await nir.sharepoint_backfill(dry_run=True)
+    assert out["status"] == "SHAREPOINT_ERROR" and "403" in out["reason"]

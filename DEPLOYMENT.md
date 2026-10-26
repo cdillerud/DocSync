@@ -150,6 +150,17 @@ forms the Hub already holds (dry run by default; `dry_run=false` sends them,
 oldest first, once sending is on). When the dry-run decisions look right, set
 `NEW_ITEM_REQUESTS_DRY_RUN=false` and restart the backend.
 
+**SharePoint backfill:** request forms are also filed by Zetadocs with their
+items in SharePoint (DocsNAV, `GamerDocs/<date>/<item>/Sales/`), and the Hub
+never received most of them by email.
+`POST /api/admin/new-item-requests/sharepoint-backfill?days=365&dry_run=true`
+(or `scripts/Preview-Hub-New-Item-Requests.ps1 -SharePoint`) searches that
+site for workbooks named like a request, reads each (copies of a form already
+read are skipped) and, with `dry_run=false` (`-Send -Confirmation 'SEND NEW
+ITEM REQUESTS'`), sends them oldest first, each file once. Decisions are kept
+in `new_item_request_sharepoint`. The Hub's Graph app needs read access to that
+site; without it the backfill says so and changes nothing.
+
 Each form's outcome is on its `hub_documents` record (`new_item_request`,
 `new_item_request_sent_utc`) and in `new_item_request_log`. Code:
 `backend/services/new_item_requests.py`.

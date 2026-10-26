@@ -34,6 +34,7 @@ Settings (environment, read on every call):
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import logging
 import os
@@ -440,6 +441,150 @@ async def backfill(days: int = 120, limit: int = 500, dry_run: Optional[bool] = 
     return {"enabled": True, "dry_run": settings.dry_run, "since": since, "candidates": len(candidates), "counts": counts}
 
 
+# =============================================================================
+# SharePoint backfill: request forms Zetadocs filed with their items (GamerDocs)
+# =============================================================================
+
+SP_COLLECTION = "new_item_request_sharepoint"
+SP_SITE_PATH = "/sites/DocsNAV"            # where Zetadocs files item documents (GamerDocs/<date>/<item>/Sales/...)
+SP_QUERIES = ("New Item", "Item Request", "Item Template")
+SP_MAX_PAGES = 40
+GRAPH = "https://graph.microsoft.com/v1.0"
+
+
+class SharePointError(RuntimeError):
+    pass
+
+
+async def _sp_get(client: httpx.AsyncClient, token: str, url: str) -> Dict[str, Any]:
+    resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+    if resp.status_code in (401, 403):
+        raise SharePointError(f"Microsoft Graph refused access ({resp.status_code}) to {url.split('?')[0]}: the Hub's app "
+                              "needs read access to that SharePoint site (Sites.Read.All or the site granted)")
+    if resp.status_code >= 400:
+        raise SharePointError(f"Microsoft Graph returned HTTP {resp.status_code} for {url.split('?')[0]}")
+    return resp.json()
+
+
+async def _sp_bytes(client: httpx.AsyncClient, token: str, drive_id: str, item_id: str) -> bytes:
+    resp = await client.get(f"{GRAPH}/drives/{drive_id}/items/{item_id}/content",
+                            headers={"Authorization": f"Bearer {token}"}, follow_redirects=True)
+    if resp.status_code >= 400:
+        raise SharePointError(f"download returned HTTP {resp.status_code}")
+    return resp.content
+
+
+async def sharepoint_files(client: httpx.AsyncClient, token: str, since: str, site_path: str = SP_SITE_PATH,
+                           host: str = "") -> List[Dict[str, Any]]:
+    """Workbooks on the site whose name looks like a new item request, modified since ``since`` (ISO)."""
+    if not host:
+        from services.config_service import SHAREPOINT_SITE_HOSTNAME
+        host = SHAREPOINT_SITE_HOSTNAME
+    site = await _sp_get(client, token, f"{GRAPH}/sites/{host}:{site_path}")
+    drives = (await _sp_get(client, token, f"{GRAPH}/sites/{site['id']}/drives?$select=id,name")).get("value") or []
+    found: Dict[str, Dict[str, Any]] = {}
+    for drive in drives:
+        for q in SP_QUERIES:
+            url = (f"{GRAPH}/drives/{drive['id']}/root/search(q='{q}')"
+                   "?$select=id,name,size,lastModifiedDateTime,webUrl,file,parentReference&$top=200")
+            for _ in range(SP_MAX_PAGES):
+                page = await _sp_get(client, token, url)
+                for it in page.get("value") or []:
+                    name = str(it.get("name") or "")
+                    if "file" not in it or os.path.splitext(name)[1].lower() not in EXTENSIONS:
+                        continue
+                    if not FILE_HINT_RE.search(name) or str(it.get("lastModifiedDateTime") or "") < since:
+                        continue
+                    if (it.get("size") or 0) > MAX_FILE_BYTES:
+                        continue
+                    found[it["id"]] = {"id": it["id"], "drive_id": drive["id"], "name": name,
+                                       "modified": it.get("lastModifiedDateTime"), "url": it.get("webUrl") or "",
+                                       "folder": str((it.get("parentReference") or {}).get("path") or "")}
+                url = page.get("@odata.nextLink")
+                if not url:
+                    break
+    return sorted(found.values(), key=lambda f: str(f["modified"]))
+
+
+def _issue_kind(issue: str) -> str:
+    text = issue.split(": ", 1)[-1]
+    for kind, rx in (("description too long", r"^Description is"), ("item no. too long", r"characters \(BC allows 20\)"),
+                     ("classification blank", r"Item Classification is blank"), ("same item on two tabs", r"on two tabs"),
+                     ("cell shows an Excel error", r"shows #"), ("no item filled in", r"no tab has an Item No")):
+        if re.search(rx, text):
+            return kind
+    return "other"
+
+
+async def sharepoint_backfill(days: int = 365, limit: int = 1000, dry_run: bool = True,
+                              site_path: str = SP_SITE_PATH) -> Dict[str, Any]:
+    """Read the request forms Zetadocs filed in SharePoint (oldest first, so the newest request per item wins) and,
+    unless ``dry_run``, send them to the catalog intake. A file already sent is skipped, and so is a copy of a form
+    already read (the same form is often filed under each of its items). Counts only in the answer."""
+    settings = get_settings()
+    if not dry_run and not (settings.url and settings.key):
+        return {"status": "NOT_CONFIGURED", "reason": "NEW_ITEM_REQUESTS_URL/KEY (or the catalog forward's) missing"}
+    db = get_db()
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 2500)))).isoformat()
+    from services.catalog_forward import _graph_token
+    token = await _graph_token()
+    if not token or token.startswith("mock-"):
+        return {"status": "NO_GRAPH", "reason": "no Microsoft Graph token (demo mode or Graph settings missing)"}
+    counts: Dict[str, int] = {}
+    kinds: Dict[str, int] = {}
+    items_read = 0
+    seen_hashes: set = set()
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        try:
+            files = await sharepoint_files(client, token, since, site_path)
+        except SharePointError as exc:
+            return {"status": "SHAREPOINT_ERROR", "reason": str(exc)}
+        files = files[: max(1, min(int(limit), 5000))]
+        for f in files:
+            prior = await db[SP_COLLECTION].find_one({"item_id": f["id"]}, {"_id": 0, "status": 1, "hash": 1})
+            if prior and prior.get("status") == "sent":
+                counts["already_sent"] = counts.get("already_sent", 0) + 1
+                seen_hashes.add(prior.get("hash"))
+                continue
+            status, extra = "skipped", {}
+            try:
+                data = await _sp_bytes(client, token, f["drive_id"], f["id"])
+                digest = hashlib.sha256(data).hexdigest()
+                if digest in seen_hashes or await db[SP_COLLECTION].find_one({"hash": digest, "status": "sent"}):
+                    status, extra = "copy_of_a_form_already_read", {"hash": digest}
+                else:
+                    seen_hashes.add(digest)
+                    is_form, records, issues = parse_workbook(data)
+                    all_issues = issues + [f"{r['item_no']}: {i}" for r in records for i in r.get("issues") or []]
+                    extra = {"hash": digest, "records": len(records), "items": [r["item_no"] for r in records][:50],
+                             "issues": all_issues}
+                    if not is_form:
+                        status = "not_a_new_item_request"
+                    elif not records:
+                        status = "form_without_items"
+                    else:
+                        items_read += len(records)
+                        for i in all_issues:
+                            kinds[_issue_kind(i)] = kinds.get(_issue_kind(i), 0) + 1
+                        if dry_run:
+                            status = "dry_run"
+                        else:
+                            doc = {"id": f"sp:{f['id']}", "file_name": f["name"], "created_utc": f["modified"],
+                                   "sharepoint_web_url": f["url"]}
+                            answer = await _post(settings, _payload(doc, records, issues))
+                            status, extra["stored"] = "sent", answer.get("stored")
+            except Exception as exc:  # noqa: BLE001
+                status, extra = "failed", {"reason": f"{type(exc).__name__}: {exc}"[:200]}
+            counts[status] = counts.get(status, 0) + 1
+            await db[SP_COLLECTION].update_one(
+                {"item_id": f["id"]},
+                {"$set": {"item_id": f["id"], "drive_id": f["drive_id"], "name": f["name"], "modified": f["modified"],
+                          "url": f["url"], "status": status, "decided_utc": _now(), **extra}},
+                upsert=True)
+    return {"status": "OK", "dry_run": dry_run, "site": site_path, "since": since, "files_found": len(files),
+            "decisions": counts, "items_read": items_read, "problems_by_kind": kinds}
+
+
 async def get_status(limit: int = 50) -> Dict[str, Any]:
     limit = max(1, min(int(limit or 50), 500))
     db = get_db()
@@ -450,5 +595,5 @@ async def get_status(limit: int = 50) -> Dict[str, Any]:
     return {"settings": get_settings().public(), "counts_in_recent": counts, "recent": recent}
 
 
-__all__ = ["NewItemRequestSettings", "backfill", "get_settings", "get_status", "might_be_request", "parse_workbook",
+__all__ = ["NewItemRequestSettings", "backfill", "sharepoint_backfill", "sharepoint_files", "get_settings", "get_status", "might_be_request", "parse_workbook",
            "process_document", "process_documents", "read_form_sheet", "schedule_for_email"]

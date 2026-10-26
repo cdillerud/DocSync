@@ -164,11 +164,7 @@ def _vec(toks: List[str], idf: Dict[str, float]) -> Dict[str, float]:
     return {t: x / norm for t, x in v.items()}
 
 
-async def _index(db) -> Dict[str, Any]:
-    if _INDEX and time.time() - _INDEX["at"] < INDEX_SECONDS:
-        return _INDEX
-    docs = [m async for m in db.document_memory.find({"text": {"$ne": ""}}, {"_id": 0, "item_id": 1, "name": 1, "folder": 1,
-                                                                            "kind": 1, "top": 1, "created": 1, "text": 1, "source": 1})]
+def _build(docs: List[Dict[str, Any]]) -> Dict[str, Any]:
     toks = [_toks(m["name"] + " " + m["text"]) for m in docs]
     dfc = collections.Counter(t for ts in toks for t in set(ts))
     n = len(docs) or 1
@@ -179,8 +175,35 @@ async def _index(db) -> Dict[str, Any]:
             post[t].append((i, w))
     for m in docs:
         m.pop("text", None)
-    _INDEX.clear()
-    _INDEX.update({"at": time.time(), "docs": docs, "idf": idf, "post": post})
+    return {"at": time.time(), "docs": docs, "idf": idf, "post": post}
+
+
+_BUILDING: Dict[str, Any] = {}
+
+
+async def _rebuild(db) -> None:
+    try:
+        docs = [m async for m in db.document_memory.find({"text": {"$ne": ""}}, {"_id": 0, "item_id": 1, "name": 1, "folder": 1,
+                                                                                "kind": 1, "top": 1, "created": 1, "text": 1, "source": 1})]
+        new = await asyncio.to_thread(_build, docs)
+        _INDEX.clear()
+        _INDEX.update(new)
+    finally:
+        _BUILDING.pop("task", None)
+
+
+async def _index(db) -> Dict[str, Any]:
+    """Tokenizing every remembered text ran on the event loop and stalled
+    the API 18s at a time (inside sales intake -> AI routing, 2026-10-26
+    19:30 UTC): built in a thread now, one build at a time, and a stale
+    index keeps answering while the next one builds."""
+    if _INDEX and time.time() - _INDEX["at"] < INDEX_SECONDS:
+        return _INDEX
+    task = _BUILDING.get("task")
+    if task is None:
+        task = _BUILDING["task"] = asyncio.ensure_future(_rebuild(db))
+    if not _INDEX:
+        await asyncio.shield(task)
     return _INDEX
 
 

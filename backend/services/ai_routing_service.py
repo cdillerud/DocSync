@@ -125,14 +125,20 @@ async def _shared(db, d: Dict[str, Any], before: str, seen: set, k: int = 3) -> 
     from services import order_flow_service as OF
     if not _NUM or time.time() - _NUM["at"] > NUM_SECONDS:
         known = await OF._known_orders(db)
-        idx: Dict[str, List[Tuple[str, str]]] = {}
-        async for m in db.document_memory.find({"folder": {"$ne": ""}, "text": {"$ne": ""}},
-                                               {"_id": 0, "item_id": 1, "folder": 1, "source": 1, "created": 1, "text": 1}):
-            if m.get("source") == "sharepoint_ap" and not m["folder"].lower().startswith("temp folder/"):
-                continue
-            for t in OF._clean(OF.tokens(m["text"]), known):
-                if re.search(r"[A-Z]", t) or len(t) >= 10:
-                    idx.setdefault(t, []).append((str(m.get("created") or ""), m["item_id"]))
+        mem = [m async for m in db.document_memory.find({"folder": {"$ne": ""}, "text": {"$ne": ""}},
+                                                        {"_id": 0, "item_id": 1, "folder": 1, "source": 1, "created": 1, "text": 1})]
+
+        def build() -> Dict[str, List[Tuple[str, str]]]:
+            # reading numbers out of every filed text is CPU work: off the event loop
+            idx: Dict[str, List[Tuple[str, str]]] = {}
+            for m in mem:
+                if m.get("source") == "sharepoint_ap" and not m["folder"].lower().startswith("temp folder/"):
+                    continue
+                for t in OF._clean(OF.tokens(m["text"]), known):
+                    if re.search(r"[A-Z]", t) or len(t) >= 10:
+                        idx.setdefault(t, []).append((str(m.get("created") or ""), m["item_id"]))
+            return idx
+        idx = await asyncio.to_thread(build)
         _NUM.clear()
         _NUM.update(at=time.time(), idx=idx, known=known)
     m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}

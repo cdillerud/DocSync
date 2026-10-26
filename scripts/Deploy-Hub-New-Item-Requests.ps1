@@ -130,12 +130,16 @@ if ($needKey) {
     # Azure run-command's protected parameters are made for secrets: encrypted in transit, never returned by Azure,
     # and handed to the script as an environment variable (never on its command line).
     $cmdName = 'gpi-nir-key-' + (Get-Date -Format 'yyyyMMddHHmmss')
-    $keyScript = 'f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || printf "NEW_ITEM_REQUESTS_KEY=%s\n" "$NIR_KEY" >> $f; echo KEY_SET' -f $HubDir
+    # az on Windows is a .cmd wrapper that garbles quotes and redirections, so the script and the key both travel
+    # base64-encoded (letters, digits, + / = only) and are decoded on the VM.
+    $keyScript = 'k=$(printf %s "$NIR_KEY_B64" | base64 -d); f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || printf "NEW_ITEM_REQUESTS_KEY=%s\n" "$k" >> $f; echo KEY_SET' -f $HubDir
+    $scriptB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($keyScript))
+    $keyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($key))
     Write-Host 'Storing the intake key on the VM (Azure run-command, protected parameter) ...'
     $null = az vm run-command create --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName `
-        --location $vm.location --script $keyScript --protected-parameters "NIR_KEY=$key" --async-execution false --timeout-in-seconds 120 `
+        --location $vm.location --script "echo $scriptB64 | base64 -d | bash" --protected-parameters "NIR_KEY_B64=$keyB64" --async-execution false --timeout-in-seconds 120 `
         --only-show-errors -o none
-    $key = $null
+    $key = $null; $keyB64 = $null
     $answer = az vm run-command show --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName `
         --instance-view --query 'instanceView.output' -o tsv --only-show-errors
     $null = az vm run-command delete --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName --yes `

@@ -330,6 +330,7 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     prov = get_provider("classification")
     r = collections.Counter()
     rows = []
+    cal = []
     unsure = [i for i in range(len(te)) if float(P[i].max()) < UNSURE][-EVAL_MAX:]
     for i in unsure:
         when, toks, truth, rule_lbl, f, d = te[i]
@@ -346,10 +347,27 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         r["n"] += 1
         r["current_right"] += cur == truth
         r["ai_right"] += (ai or cur) == truth
+        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0]))
         if len(rows) < 15 and ai and ai != cur:
             rows.append({"file": d.get("file_name"), "staff": truth, "current": cur, "ai": ai, "why": why})
     on = r["n"] >= MIN_N and r["ai_right"] >= r["current_right"] + max(2, round(MIN_GAIN * r["n"]))
+    # How often the AI's top folder matches staff's at each confidence: AP
+    # stages trust an AI-routed document only at a confidence where staff's
+    # own unsure filings show it reliable (before this, every AI-routed
+    # document sat in Needs staff as an unmeasured path - 13 of 30 on
+    # 2026-10-26, most at 0.97-0.99).
+    from services.ap_stage_service import RELIABLE_MIN_N, RELIABLE_PCT
+    calibration, reliable_conf = {}, None
+    for t in (0.99, 0.97, 0.95, 0.9, 0.85, 0.8):
+        hit = [ok for c, has, ok in cal if has and c >= t]
+        pct = round(100 * sum(hit) / len(hit), 1) if hit else None
+        calibration[str(t)] = {"n": len(hit), "pct": pct}
+        if len(hit) >= RELIABLE_MIN_N and pct >= RELIABLE_PCT:
+            reliable_conf = t
+        elif reliable_conf is not None:
+            break
     res = {"evaluated_at": _now(), "on": on, "n": r["n"], "ai_right": r["ai_right"], "current_right": r["current_right"],
+           "calibration": calibration, "reliable_conf": reliable_conf,
            "unsure_below": UNSURE, "test_from": te[0][0][:10], "allowed": allowed, "examples": rows}
     await db.folder_model.update_one({"_id": "ai_routing"}, {"$set": res}, upsert=True)
     return {k: v for k, v in res.items() if k not in ("allowed", "examples")}

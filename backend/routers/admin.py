@@ -953,6 +953,31 @@ async def filename_heuristics_vendor_history(
 
 
 
+@router.get("/new-item-requests/status")
+async def new_item_requests_status(
+    limit: int = Query(50, ge=1, le=500, description="How many recent decisions to return"),
+    _user: dict = Depends(require_admin),
+):
+    """Read-only: new item request settings (key shown only as set / not set)
+    and the most recent decisions (sent, dry_run, failed + reason).
+    See services/new_item_requests.py. ADMIN ONLY."""
+    from services.new_item_requests import get_status
+    return await get_status(limit=limit)
+
+
+@router.post("/new-item-requests/backfill")
+async def new_item_requests_backfill(
+    days: int = Query(120, ge=1, le=1100, description="Request forms received in the last N days"),
+    limit: int = Query(500, ge=1, le=2000, description="At most this many forms"),
+    dry_run: bool = Query(True, description="Read and record only; send nothing (default)"),
+    _user: dict = Depends(require_admin),
+):
+    """Send the New Item Template forms the Hub already holds to the catalog
+    intake, oldest first. Dry run by default. ADMIN ONLY."""
+    from services.new_item_requests import backfill
+    return await backfill(days=days, limit=limit, dry_run=dry_run)
+
+
 @router.get("/catalog-forward/status")
 async def catalog_forward_status(
     limit: int = Query(50, ge=1, le=500, description="How many recent decisions to return"),

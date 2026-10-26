@@ -58,6 +58,10 @@ Open http://4.204.41.190 in your browser.
 | `CATALOG_FORWARD_URL` | | Catalog inbox submit URL |
 | `CATALOG_FORWARD_KEY` | | Catalog inbox intake key (secret) |
 | `CATALOG_FORWARD_DRY_RUN` | `false` | Decide and log only; send nothing |
+| `NEW_ITEM_REQUESTS_ENABLED` | `false` | Read New Item Template forms and send their fields to the catalog intake (see below) |
+| `NEW_ITEM_REQUESTS_DRY_RUN` | `false` | Read and record only; send nothing |
+| `NEW_ITEM_REQUESTS_URL` | from `CATALOG_FORWARD_URL` | Catalog intake new-items URL (`.../catalog/intake/new-items`) |
+| `NEW_ITEM_REQUESTS_KEY` | `CATALOG_FORWARD_KEY` | Catalog intake key (secret) |
 
 ### Catalog Forward (supplier pricing to the Packaging Catalog)
 
@@ -105,6 +109,46 @@ Each document's outcome is kept on its record in `hub_documents`
 (`catalog_forward`, and `catalog_forwarded_utc` once the inbox accepted it)
 and in the `catalog_forward_log` collection. A failed send is recorded as
 `failed` and is not retried automatically. Code: `backend/services/catalog_forward.py`.
+
+### New Item Requests (items@gamerpackaging.com to the Packaging Catalog)
+
+Reps request new items on the Inside Sales **New Item Template** (an .xlsx:
+an Instructions tab naming items@gamerpackaging.com and one "New Item Request
+Form" tab per item type) and send it to items@gamerpackaging.com; Sales Ops
+approves it and sets the item up in Business Central. When this is on, the
+Hub reads every such form it ingests, by its layout (label in column A, value
+in column B, never by AI), one record per filled tab, and posts the fields to
+the Commercial AI catalog intake. The catalog keeps them until the BC item
+exists, then proposes the item's Packaging Catalog row from them (size,
+finish, color, material, style, packout, pallet and load quantities, vendor)
+and checks the vendor against BC. It is **off by default**.
+
+Problems the Hub names on the way in (stored with the decision and passed on):
+a description over 100 characters, an Item No. over 20, a blank Item
+Classification, the same Item No. on two tabs, a cell showing `#VALUE!`.
+
+**Mailbox:** the forms reach the Hub once items@gamerpackaging.com is a
+mailbox source (Mailbox Sources screen; Graph mail access to that mailbox is an
+IT request). Forms that reach any other watched mailbox are read too.
+
+**Deploy:** `scripts/Deploy-Hub-New-Item-Requests.ps1` (from a Windows
+computer with `az login`) first only checks the VM (branch, uncommitted
+changes, whether the new branch is a fast-forward, the catalog settings in
+`backend/.env`); with `-Deploy -Confirmation 'DEPLOY HUB NEW ITEM REQUESTS'`
+it fast-forwards `/opt/gpi-hub`, adds `NEW_ITEM_REQUESTS_ENABLED=true` and
+`NEW_ITEM_REQUESTS_DRY_RUN=true`, and rebuilds the backend. URL and key come
+from the catalog forward settings.
+
+**Check and backfill (admin):** `GET /api/admin/new-item-requests/status`
+(recent decisions, never the key);
+`POST /api/admin/new-item-requests/backfill?days=120&dry_run=true` reads the
+forms the Hub already holds (dry run by default; `dry_run=false` sends them,
+oldest first, once sending is on). When the dry-run decisions look right, set
+`NEW_ITEM_REQUESTS_DRY_RUN=false` and restart the backend.
+
+Each form's outcome is on its `hub_documents` record (`new_item_request`,
+`new_item_request_sent_utc`) and in `new_item_request_log`. Code:
+`backend/services/new_item_requests.py`.
 
 ---
 

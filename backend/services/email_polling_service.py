@@ -61,6 +61,13 @@ def _schedule_catalog_forward(doc_ids) -> None:
         schedule_forward_for_email(doc_ids)
     except Exception as e:  # noqa: BLE001
         logger.error("[CatalogForward] hook failed (ingestion unaffected): %r", e)
+    # New item request forms (items@gamerpackaging.com) go to the catalog intake
+    # too (services/new_item_requests.py). Off by default; never raises.
+    try:
+        from services.new_item_requests import schedule_for_email
+        schedule_for_email(doc_ids)
+    except Exception as e:  # noqa: BLE001
+        logger.error("[NewItemRequests] hook failed (ingestion unaffected): %r", e)
 
 
 # ── Global state for polling workers ──

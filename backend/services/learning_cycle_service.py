@@ -165,8 +165,9 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         # Learn how AP codes each invoice line from its BC entries, and
         # re-score every vendor (promotes / demotes the learned coder).
-        from services.line_learning_service import run as run_line_learning
-        summary["line_learning"] = await run_line_learning(db)
+        # in its own process: training blocked the API's event loop (2026-10-26)
+        from services.line_learning_service import run_isolated as run_line_learning
+        summary["line_learning"] = await run_line_learning()
     except Exception as e:
         summary["line_learning"] = {"error": repr(e)[:200]}
     try:

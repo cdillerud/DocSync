@@ -20,6 +20,7 @@ entries in Production BC instead of hand-written vendor rules.
 Context (rebilled freight, warehouse PO, no PO) is given to the model as
 features; how much each matters is learned from AP's history.
 """
+import asyncio
 import collections
 import logging
 import math
@@ -864,7 +865,10 @@ async def coder(db, refresh: bool = False) -> Coder:
         receipts: Dict[str, List[Dict[str, Any]]] = collections.defaultdict(list)
         async for r in db.bc_purchase_receipts.find({}, {"_id": 0, "orderNumber": 1, "purchaseReceiptLines": 1}):
             receipts[str(r.get("orderNumber") or "").upper()].extend(r.get("purchaseReceiptLines") or [])
-        _CODER = Coder([e async for e in db.line_coding_examples.find({}, {"_id": 0})], receipts)
+        examples = [e async for e in db.line_coding_examples.find({}, {"_id": 0})]
+        # Building the coder is CPU work: off the event loop (the backend's
+        # watchdog caught it blocking the API, 2026-10-26).
+        _CODER = await asyncio.to_thread(Coder, examples, receipts)
     return _CODER
 
 
@@ -1111,3 +1115,43 @@ async def run(db) -> Dict[str, Any]:
     except Exception as e:
         out["ai"] = {"error": repr(e)[:200]}
     return out
+
+
+async def run_isolated(timeout: int = 3600) -> Dict[str, Any]:
+    """run() in its own process. Training and evaluating the coder is
+    CPU-bound pure Python/numpy; on the backend's event loop it blocked the
+    API for up to 42 s at a time every learning cycle (event-loop watchdog,
+    2026-10-26). Results go to the database as before; the backend's cached
+    coder is dropped so the next plan() loads the retrained one."""
+    global _CODER
+    import json
+    import sys
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "services.line_learning_service",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return {"error": f"timed out after {timeout}s"}
+    _CODER = None
+    lines = (out or b"").decode(errors="replace").strip().splitlines()
+    try:
+        return json.loads(lines[-1]) if lines else {"error": f"no output, exit {proc.returncode}"}
+    except ValueError:
+        return {"error": lines[-1][:200]}
+
+
+if __name__ == "__main__":
+    import json
+    import os
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    async def _main():
+        db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
+        import deps
+        deps.set_db(db)
+        print(json.dumps(await run(db), default=str))
+
+    logging.disable(logging.WARNING)
+    asyncio.run(_main())

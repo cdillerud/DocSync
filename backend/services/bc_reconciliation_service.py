@@ -291,10 +291,11 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
                     {"bc_link.bc_document_no": cands[0].get("bc_document_no"), "_id": {"$ne": d["_id"]}}, limit=1):
                 best, how = cands[0], "near-number+amount"
         split_parts = {s.get("bc_document_no") for s in d.get("bc_split_entries") or []}
-        if (best is None and (d.get("bc_link") or {}).get("match") in ("split_entries", "combined_entry")) \
+        if (best is None and (d.get("bc_link") or {}).get("match") in ("split_entries", "combined_entry", "numbers_in_one", "number_in_text")) \
                 or (split_parts and best is not None and best.get("bc_document_no") in split_parts):
-            # Linked by resolve_split_entries / resolve_combined_entries,
-            # which this per-number pass cannot see: it unlinked 7 Canpack
+            # Linked by resolve_split_entries / resolve_combined_entries /
+            # resolve_numbers_in_one / resolve_number_in_text, which this
+            # per-number pass cannot see: it unlinked 7 Canpack
             # invoices AP split into A/B/C entries, and relinked others to
             # one part as an "amount mismatch".
             stats["kept_split_or_combined"] += 1
@@ -744,6 +745,76 @@ async def resolve_numbers_in_one(db, days: int = 120, apply: bool = True) -> Dic
                             "bc_posting_date": first.get("bc_posting_date"), "match": "numbers_in_one", "linked_at": stamp},
                 "bc_split_entries": [{"bc_document_no": p["bc_document_no"], "bc_external_document_no": p.get("bc_external_document_no"),
                                       "bc_amount": p["bc_amount"], "bc_order_number": p.get("bc_order_number")} for p in parts]}})
+    return out
+
+
+_DATE8 = re.compile(r"(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])20\d\d|20\d\d(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])")
+
+
+async def resolve_number_in_text(db, days: int = 120, apply: bool = True) -> Dict[str, Any]:
+    """An unlinked document whose name, subject or text holds exactly one of
+    its vendor's not-yet-linked BC numbers is that BC entry. The number AP
+    keyed is on the paper even when the Hub read no invoice number (Happy
+    Ann's "S/C: C26X207017", Amcor's 96534316 in a combined PDF). Measured on
+    6,688 documents already linked: 6,664 right (99.6%); the misses were
+    mostly date-like numbers ("08052026"), left out here (2026-10-26)."""
+    stamp = datetime.now(timezone.utc).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    bc_since = (datetime.now(timezone.utc) - timedelta(days=days + 60)).strftime("%Y-%m-%d")
+    taken = {d["bc_link"]["bc_document_no"] async for d in db.hub_documents.find(
+        {"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_link.bc_document_no": 1})}
+    async for d in db.hub_documents.find({"bc_split_entries.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_split_entries": 1}):
+        taken.update(p.get("bc_document_no") for p in d.get("bc_split_entries") or [])
+    out: Dict[str, Any] = {"checked": 0, "linked": 0, "several": 0, "examples": []}
+    by_vendor: Dict[str, List[Dict[str, Any]]] = {}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True}, "bc_link": {"$exists": False},
+             "status": {"$ne": "batch_parent"}, "vendor_canonical": {"$nin": [None, ""]},
+             "document_type": {"$in": ["AP_Invoice", "AP_INVOICE", "Credit_Memo"]}},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "file_name": 1, "email_subject": 1, "amount_float": 1, "created_utc": 1}):
+        v = str(d["vendor_canonical"]).upper()
+        if v not in by_vendor:
+            by_vendor[v] = [b async for b in db.bc_reference_cache.find(
+                {"bc_vendor_no": v, "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
+                 "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": bc_since}},
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "normalized_external_ref": 1, "bc_amount": 1,
+                 "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1})
+                if len(b.get("normalized_external_ref") or "") >= 6 and not _DATE8.fullmatch(b["normalized_external_ref"])]
+        # AP enters an invoice after it arrives (or a few weeks before, from another copy)
+        try:
+            floor = (datetime.fromisoformat(str(d.get("created_utc"))[:10]) - timedelta(days=45)).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+        cands = [b for b in by_vendor[v] if b["bc_document_no"] not in taken and str(b.get("bc_posting_date") or "") >= floor]
+        if not cands:
+            continue
+        out["checked"] += 1
+        m = await db.document_memory.find_one({"item_id": d.get("id")}, {"_id": 0, "text": 1}) or {}
+        hay = "|".join(_norm(str(x or "")) for x in (d.get("file_name"), d.get("email_subject"), m.get("text")))
+        hits = [b for b in cands if b["normalized_external_ref"] in hay]
+        hits = [b for b in hits if not any(o is not b and b["normalized_external_ref"] in o["normalized_external_ref"] for o in hits)]
+        if len(hits) != 1:
+            out["several"] += len(hits) > 1
+            continue
+        b = hits[0]
+        taken.add(b["bc_document_no"])
+        out["linked"] += 1
+        if len(out["examples"]) < 15:
+            out["examples"].append((v, d.get("file_name"), b["bc_external_document_no"], b.get("bc_amount"), d.get("amount_float")))
+        # Linked, but shown as a check when the amounts differ (a 30% deposit
+        # AP entered against a proforma, one bill of a carrier's statement).
+        hub_amt, bc_amt = d.get("amount_float"), b.get("bc_amount")
+        differs = (hub_amt not in (None, 0) and bc_amt not in (None, "")
+                   and abs(abs(float(hub_amt)) - abs(float(bc_amt))) > max(0.02, 0.01 * abs(float(bc_amt))))
+        out["amount_differs"] = out.get("amount_differs", 0) + differs
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                **({"bc_amount_mismatch": {"hub": hub_amt, "bc": bc_amt, "at": stamp}} if differs else {}),
+                "bc_link": {
+                "bc_document_no": b["bc_document_no"], "bc_entity": b["bc_entity_type"], "bc_status": b.get("bc_status"),
+                "bc_vendor_no": b.get("bc_vendor_no"), "bc_vendor_name": b.get("bc_vendor_name"), "bc_amount": b.get("bc_amount"),
+                "bc_order_number": b.get("bc_order_number"), "bc_posting_date": b.get("bc_posting_date"),
+                "bc_external_document_no": b.get("bc_external_document_no"), "match": "number_in_text", "linked_at": stamp}}})
     return out
 
 

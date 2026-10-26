@@ -68,7 +68,7 @@ asyncio.run(main())
 "@
 $pyB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($py))
 # az on Windows is a .cmd wrapper that garbles quotes and redirections: the shell steps travel base64-encoded too.
-$sh = "echo $pyB64 | base64 -d > /tmp/nir-preview.py && docker cp /tmp/nir-preview.py gpi-backend:/tmp/nir-preview.py && docker exec -w /app gpi-backend python /tmp/nir-preview.py 2>&1 | tail -60"
+$sh = "echo $pyB64 | base64 -d > /tmp/nir-preview.py && docker cp /tmp/nir-preview.py gpi-backend:/tmp/nir-preview.py && docker exec -w /app -e PYTHONPATH=/app gpi-backend python /tmp/nir-preview.py 2>&1 | tail -60"
 $script = "echo $([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sh))) | base64 -d | sudo bash"
 Write-Host "Reading the request forms of the last $Days days in dry run (nothing is sent) ..."
 $out = az vm run-command invoke --subscription $vm.subscription -g $vm.group -n $vm.name --command-id RunShellScript `

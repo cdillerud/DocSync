@@ -83,11 +83,13 @@ asyncio.run(main())
 "@
 $spDry = if ($Send) { 'False' } else { 'True' }
 $pySp = @"
-import asyncio, json, os, importlib.util
+import asyncio, json, os, sys, importlib.util
 from motor.motor_asyncio import AsyncIOMotorClient
 import deps
 spec = importlib.util.spec_from_file_location("nir_sp", "/tmp/nir_sp.py")
-n = importlib.util.module_from_spec(spec); spec.loader.exec_module(n)
+n = importlib.util.module_from_spec(spec)
+sys.modules["nir_sp"] = n  # registered before it runs (dataclasses look the module up)
+spec.loader.exec_module(n)
 
 async def main():
     deps.set_db(AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ.get("DB_NAME", "gpi_document_hub")])

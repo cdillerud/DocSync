@@ -15,9 +15,9 @@
 
   The intake URL and key: the catalog forward settings in backend/.env when they are there; otherwise the deploy
   adds NEW_ITEM_REQUESTS_URL and copies the intake key (GPI_CATALOG_INTAKE_KEY on the Commercial AI web app) to
-  NEW_ITEM_REQUESTS_KEY over SSH, so it is never on a command line, in a log or on screen.
+  NEW_ITEM_REQUESTS_KEY as an Azure run-command protected parameter, so it is never shown, logged or kept.
 
-  Reaches the VM through Azure (az vm run-command, with your az login); the key alone goes over SSH.
+  Reaches the VM through Azure (az vm run-command, with your az login); no SSH needed.
 .EXAMPLE
   .\scripts\Deploy-Hub-New-Item-Requests.ps1
   .\scripts\Deploy-Hub-New-Item-Requests.ps1 -Deploy -Confirmation 'DEPLOY HUB NEW ITEM REQUESTS'
@@ -39,7 +39,7 @@ if ($Deploy -and $Confirmation -ne 'DEPLOY HUB NEW ITEM REQUESTS') {
 $ip = ($VmHost -split '@')[-1]
 $vm = $null
 foreach ($sub in @(az account list --query '[].id' -o tsv)) {
-    $found = az vm list -d --subscription $sub --query "[?publicIps=='$ip'].{name:name, group:resourceGroup}" -o json 2>$null | ConvertFrom-Json
+    $found = az vm list -d --subscription $sub --query "[?publicIps=='$ip'].{name:name, group:resourceGroup, location:location}" -o json 2>$null | ConvertFrom-Json
     if ($found) { $vm = $found[0]; $vm | Add-Member subscription $sub; break }
 }
 if (-not $vm) { throw "No Azure VM with public IP $ip in the subscriptions this login can see. Run 'az login' first." }
@@ -96,7 +96,7 @@ if ($info.FASTFORWARD -ne 'yes') { $problems += "the VM's branch has commits the
 if ([int]($info.DIRTY) -gt 0) { $problems += 'the VM checkout has uncommitted changes' }
 $needKey = $info.ENV_CATALOG_FORWARD_KEY -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_KEY -ne 'set'
 $needUrl = $info.ENV_CATALOG_FORWARD_URL -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_URL -ne 'set'
-if ($needKey) { Write-Host 'Intake key  : not on the VM yet; the deploy copies it from the web app over SSH (never shown)' }
+if ($needKey) { Write-Host 'Intake key  : not on the VM yet; the deploy copies it from the web app (never shown)' }
 if (-not $Deploy) {
     Write-Host ''
     if ($problems) { Write-Host ('Not ready to deploy: ' + ($problems -join '; ') + '.') -ForegroundColor Yellow }
@@ -107,8 +107,7 @@ if (-not $Deploy) {
 if ($problems) { throw ('Not deployed: ' + ($problems -join '; ') + '. Nothing was changed.') }
 
 if ($needKey) {
-    # The intake key goes from the web app's settings to the VM over SSH (stdin): never on a command line, in a
-    # log, in Azure's run-command history or on screen.
+    # The intake key goes from the web app's settings to the VM's backend/.env; never on screen or in a log.
     $key = az webapp config appsettings list -g rg-gpi-commercial-ai-v62-uat -n gpi-commercial-ai-v62-uat-4e0833 `
         --subscription 4e083304-514c-4751-855e-c38a1740a924 --query "[?name=='GPI_CATALOG_INTAKE_KEY'].value | [0]" -o tsv 2>$null
     if (-not $key) {
@@ -118,11 +117,20 @@ if ($needKey) {
         Remove-Item Env:\AZURE_CONFIG_DIR -ErrorAction SilentlyContinue
     }
     if (-not $key) { throw 'Could not read GPI_CATALOG_INTAKE_KEY from the Commercial AI web app (az login to that subscription). Nothing was changed.' }
-    $remote = 'sudo bash -c ''read -r k; k=$(printf %s "$k" | tr -d "\r"); f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || echo "NEW_ITEM_REQUESTS_KEY=$k" >> $f; echo KEY_SET''' -f $HubDir
-    Write-Host "Storing the intake key on the VM over SSH (if SSH asks for your VM password or key passphrase, enter it) ..."
-    $answer = $key | ssh -o ConnectTimeout=20 $VmHost $remote
+    # Azure run-command's protected parameters are made for secrets: encrypted in transit, never returned by Azure,
+    # and handed to the script as an environment variable (never on its command line).
+    $cmdName = 'gpi-nir-key-' + (Get-Date -Format 'yyyyMMddHHmmss')
+    $keyScript = 'f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || printf "NEW_ITEM_REQUESTS_KEY=%s\n" "$NIR_KEY" >> $f; echo KEY_SET' -f $HubDir
+    Write-Host 'Storing the intake key on the VM (Azure run-command, protected parameter) ...'
+    $null = az vm run-command create --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName `
+        --location $vm.location --script $keyScript --protected-parameters "NIR_KEY=$key" --async-execution false --timeout-in-seconds 120 `
+        --only-show-errors -o none
     $key = $null
-    if ("$answer" -notmatch 'KEY_SET') { throw "Could not reach $VmHost over SSH to store the intake key (the deploy needs the same SSH access you use to log in to the VM). Nothing was deployed." }
+    $answer = az vm run-command show --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName `
+        --instance-view --query 'instanceView.output' -o tsv --only-show-errors
+    $null = az vm run-command delete --subscription $vm.subscription -g $vm.group --vm-name $vm.name --run-command-name $cmdName --yes `
+        --only-show-errors -o none
+    if ("$answer" -notmatch 'KEY_SET') { throw 'Could not store the intake key on the VM (Azure run-command). Nothing was deployed.' }
     Write-Host 'Intake key stored on the VM.'
 }
 $urlLine = if ($needUrl) { "NEW_ITEM_REQUESTS_URL=$IntakeUrl" } else { '' }

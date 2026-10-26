@@ -119,7 +119,8 @@ if ($needKey) {
     }
     if (-not $key) { throw 'Could not read GPI_CATALOG_INTAKE_KEY from the Commercial AI web app (az login to that subscription). Nothing was changed.' }
     $remote = 'sudo bash -c ''read -r k; k=$(printf %s "$k" | tr -d "\r"); f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || echo "NEW_ITEM_REQUESTS_KEY=$k" >> $f; echo KEY_SET''' -f $HubDir
-    $answer = $key | ssh -o BatchMode=yes -o ConnectTimeout=15 $VmHost $remote 2>$null
+    Write-Host "Storing the intake key on the VM over SSH (if SSH asks for your VM password or key passphrase, enter it) ..."
+    $answer = $key | ssh -o ConnectTimeout=20 $VmHost $remote
     $key = $null
     if ("$answer" -notmatch 'KEY_SET') { throw "Could not reach $VmHost over SSH to store the intake key (the deploy needs the same SSH access you use to log in to the VM). Nothing was deployed." }
     Write-Host 'Intake key stored on the VM.'

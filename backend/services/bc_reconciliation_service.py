@@ -646,12 +646,17 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
         if len(base) < 4:
             continue
         out["checked"] += 1
+        # Letter parts (1101622017A..D) or dash-number parts AP adds per
+        # container (Hwa Hsia HH-150813A-1, -2): digits only when BC's own
+        # number has the dash, or "313627"+"9" would look like a part of 31362.
         parts = [b async for b in db.bc_reference_cache.find(
-            {"bc_vendor_no": str(d["vendor_canonical"]).upper(), "normalized_external_ref": {"$regex": f"^{_re.escape(base)}[A-Z]?$"},
+            {"bc_vendor_no": str(d["vendor_canonical"]).upper(), "normalized_external_ref": {"$regex": f"^{_re.escape(base)}([A-Z]|\\d{{1,2}})?$"},
              "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
              "bc_status": {"$ne": "Canceled"}},
             {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "normalized_external_ref": 1, "bc_amount": 1,
              "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1})]
+        parts = [p for p in parts if p["normalized_external_ref"] == base or p["normalized_external_ref"][len(base):].isalpha()
+                 or _re.search(r"-\d{1,2}$", str(p.get("bc_external_document_no") or "").strip())]
         if not any(p["normalized_external_ref"] != base for p in parts) or any(p.get("bc_amount") is None for p in parts):
             continue      # no suffixed part: the ordinary match handles it
         total = sum(abs(float(p["bc_amount"])) for p in parts)

@@ -47,6 +47,7 @@ TRUST = 0.9
 GATE = 0.95
 GATE_MIN = 40
 SPLIT_DAYS = 60
+TIE = 0.999              # runner-up at this share of the winner's evidence -> no clear order
 STATE_ID = "order_flow"
 
 _IDX: Dict[str, Any] = {}
@@ -273,7 +274,7 @@ def _vote(links, stats, vendor: str):
     if not votes:
         return None
     ranked = sorted(votes.items(), key=lambda kv: -kv[1])
-    if len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * 0.999:
+    if len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * TIE:
         # A consolidated shipment's orders tie: the numbers do not say which.
         # (Answering with the whole group was tried 2026-10-25: 13 of 23.)
         return None

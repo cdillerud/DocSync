@@ -1424,6 +1424,10 @@ def record_bc_entry_coverage(days_back: int = 14) -> Dict[str, Any]:
             m = re.fullmatch(r"(\d{5,})[A-Z]{1,2}", inv)
             if m:
                 variants.add(m.group(1))
+            # A part AP adds per container: "HH-150813A-1" is invoice HH-150813A.
+            m = re.match(r"(.{5,}?)-\d{1,2}$", str(d.get("bc_external_document_no") or "").strip())
+            if m:
+                variants.add(_bc_norm(m.group(1)))
             # BC suffixes like "14333_DIGI" (Canworks): the leading number.
             m = re.match(r"(\d{4,})[_\-][A-Za-z]+$", str(d.get("bc_external_document_no") or "").strip())
             if m:

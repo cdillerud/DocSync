@@ -54,6 +54,105 @@ Open http://4.204.41.190 in your browser.
 | `ENABLE_CREATE_DRAFT_HEADER` | `false` | Enable BC draft creation |
 | `EMAIL_POLLING_ENABLED` | `false` | Enable email polling |
 | `EMAIL_POLLING_USER` | | AP inbox email address |
+| `CATALOG_FORWARD_ENABLED` | `false` | Send supplier pricing documents to the Commercial AI catalog inbox (see below) |
+| `CATALOG_FORWARD_URL` | | Catalog inbox submit URL |
+| `CATALOG_FORWARD_KEY` | | Catalog inbox intake key (secret) |
+| `CATALOG_FORWARD_DRY_RUN` | `false` | Decide and log only; send nothing |
+| `NEW_ITEM_REQUESTS_ENABLED` | `false` | Read New Item Template forms and send their fields to the catalog intake (see below) |
+| `NEW_ITEM_REQUESTS_DRY_RUN` | `false` | Read and record only; send nothing |
+| `NEW_ITEM_REQUESTS_URL` | from `CATALOG_FORWARD_URL` | Catalog intake new-items URL (`.../catalog/intake/new-items`) |
+| `NEW_ITEM_REQUESTS_KEY` | `CATALOG_FORWARD_KEY` | Catalog intake key (secret) |
+
+### Catalog Forward (supplier pricing to the Packaging Catalog)
+
+When it is on, the Hub sends supplier pricing documents it has just received
+by email to the Commercial AI catalog inbox. The inbox reads them and, a few
+minutes later, emails the catalog reviewers the usual review (changes,
+proposed new products, flagged price moves). It is **off by default**.
+
+**What gets sent:** supplier price lists, supplier quotes, price-increase and
+surcharge letters, RFQ responses, and stock / availability / open-inventory
+lists (.xlsx, .xlsm, .csv, .pdf, .msg, .eml), recognised from the file name or
+email subject, from a supplier (sender outside gamerpackaging.com, or a
+supplier read from the document when a Gamer person forwards it). All such
+attachments of one email go in one submit.
+
+**What is never sent:** AP invoices, statements, remittances, credit memos,
+purchase orders and customer orders (and anything else the classifier gave a
+transactional type), Gamer's own quotes to customers (Spiro `QUO-####`
+numbers or Gamer letterhead), page-split copies (`*_doc1.pdf`), files over
+15 MB, and anything already sent once.
+
+**Turn it on** by adding these lines to `backend/.env` on the Hub VM (the
+backend container reads that file) and restarting the backend. The URL and
+the key come from the Commercial AI web app (`GPI_CATALOG_INTAKE_KEY` app
+setting). Start with a dry run for a few days:
+
+```bash
+CATALOG_FORWARD_ENABLED=true
+CATALOG_FORWARD_DRY_RUN=true
+CATALOG_FORWARD_URL=https://gpi-commercial-ai-v62-uat-4e0833.azurewebsites.net/api/v70/catalog/intake/submit
+CATALOG_FORWARD_KEY=<intake key>
+```
+
+```bash
+sudo docker compose up -d backend
+```
+
+Check what it decided at `GET /api/admin/catalog-forward/status` (admin
+login; shows recent decisions with reasons, never the key) or in the backend
+log (`[CatalogForward]` lines). When the decisions look right, set
+`CATALOG_FORWARD_DRY_RUN=false` and restart the backend again. To turn it
+off, set `CATALOG_FORWARD_ENABLED=false` (or remove the lines) and restart.
+
+Each document's outcome is kept on its record in `hub_documents`
+(`catalog_forward`, and `catalog_forwarded_utc` once the inbox accepted it)
+and in the `catalog_forward_log` collection. A failed send is recorded as
+`failed` and is not retried automatically. Code: `backend/services/catalog_forward.py`.
+
+### New Item Requests (items@gamerpackaging.com to the Packaging Catalog)
+
+Reps request new items on the Inside Sales **New Item Template** (an .xlsx:
+an Instructions tab naming items@gamerpackaging.com and one "New Item Request
+Form" tab per item type) and send it to items@gamerpackaging.com; Sales Ops
+approves it and sets the item up in Business Central. When this is on, the
+Hub reads every such form it ingests, by its layout (label in column A, value
+in column B, never by AI), one record per filled tab, and posts the fields to
+the Commercial AI catalog intake. The catalog keeps them until the BC item
+exists, then proposes the item's Packaging Catalog row from them (size,
+finish, color, material, style, packout, pallet and load quantities, vendor)
+and checks the vendor against BC. It is **off by default**.
+
+Problems the Hub names on the way in (stored with the decision and passed on):
+a description over 100 characters, an Item No. over 20, a blank Item
+Classification, the same Item No. on two tabs, a cell showing `#VALUE!`.
+
+**Mailbox:** the forms reach the Hub once items@gamerpackaging.com is a
+mailbox source (Mailbox Sources screen; Graph mail access to that mailbox is an
+IT request). Forms that reach any other watched mailbox are read too.
+
+**Deploy:** `scripts/Deploy-Hub-New-Item-Requests.ps1` (from a Windows
+computer with `az login`) first only checks the VM (branch, uncommitted
+changes, whether the new branch is a fast-forward, the catalog settings in
+`backend/.env`); with `-Deploy -Confirmation 'DEPLOY HUB NEW ITEM REQUESTS'`
+it fast-forwards `/opt/gpi-hub`, adds `NEW_ITEM_REQUESTS_ENABLED=true` and
+`NEW_ITEM_REQUESTS_DRY_RUN=true`, and rebuilds the backend. URL and key come
+from the catalog forward settings when they are set; otherwise it adds
+`NEW_ITEM_REQUESTS_URL` and copies the intake key from the Commercial AI web
+app to `NEW_ITEM_REQUESTS_KEY` over SSH (never shown or logged). The branch it
+deploys, `feature/hub-new-item-requests-live`, is the VM's
+`gemini-model-fix-clean` plus the catalog forward and this reader.
+
+**Check and backfill (admin):** `GET /api/admin/new-item-requests/status`
+(recent decisions, never the key);
+`POST /api/admin/new-item-requests/backfill?days=120&dry_run=true` reads the
+forms the Hub already holds (dry run by default; `dry_run=false` sends them,
+oldest first, once sending is on). When the dry-run decisions look right, set
+`NEW_ITEM_REQUESTS_DRY_RUN=false` and restart the backend.
+
+Each form's outcome is on its `hub_documents` record (`new_item_request`,
+`new_item_request_sent_utc`) and in `new_item_request_log`. Code:
+`backend/services/new_item_requests.py`.
 
 ---
 

@@ -12,16 +12,22 @@ This learns that from the documents already tied to an order:
     files staff renamed with their orders,
   - the AP library's order folders (Temp Folder/.../W118530),
   - Hub documents whose order BC knows.
-A number shared with earlier documents of one or two orders is a link.
-Which kinds of numbers to believe is learned, not listed: walking forward in
-time, each link's number shape (letters/digits pattern, e.g. a container
-"A4N7"), per vendor where there is enough, is scored by whether it named the
-document's real order. Only shapes that were right >= TRUST of the time are
-used, and the whole thing turns itself on only if, on the latest SPLIT_DAYS
-of documents that do not print their order, it is right >= GATE of the time.
+Every order whose earlier paperwork shares a number with the document is a
+candidate. Which evidence to believe is learned, not listed: walking forward
+in time, each candidate is described by its evidence - the number's shape
+(letters/digits runs, a container is "A4N7") and vendor, how many orders and
+how many numbers of that kind the evidence names (a forwarder invoice listing
+three containers says little about each), whether the two documents disagree
+on another number of the same kind (two Tumalo bills on one bill of lading
+but different containers are sibling orders), age, sources - and a logistic
+model trained on ~1M past candidates weighs them. An answer needs P_MIN and a
+MARGIN over the runner-up, and the whole thing turns itself on only if, on
+the latest SPLIT_DAYS of documents that do not print their order, it is right
+>= GATE of the time. (The hand-tuned shape-trust vote it replaced, 2026-10-26:
+115 right of 144; this: 164 of 167 on the same documents.)
 
 Nothing is overwritten: the result is kept on the document as order_flow
-{orders, via, from, shape} for routing and the AI to use as evidence.
+{order, orders, via, from, shape, p} for routing and the AI to use as evidence.
 """
 from __future__ import annotations
 
@@ -31,7 +37,7 @@ import logging
 import re
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger("order_flow")
 
@@ -40,14 +46,14 @@ ORD = re.compile(r"\b((?:WR|W)?\d{6})[A-Z]?\b")
 _LEAD = re.compile(r"(?:WR|W)?\d{6}[A-Z]?")
 _WORDER = re.compile(r"WR?\d{6}[A-Z]?")   # warehouse POs: a printed W-number is unambiguous
 ORDER_RECORDS = {"Purchase Order", "Sales Order", "Posted Purchase Receipt"}
-WINDOW_DAYS = 120          # containers and bills are reused; links are only to recent paperwork
-MAX_ORDERS = 2             # a number shared by more orders identifies none of them
-MIN_N = 15                 # observations before a shape's record counts
-TRUST = 0.9
+_NAMED = re.compile(r"[A-Z]{1,3}\d{4,6}[A-Z]?")   # any order of ours staff wrote in a file name (WA2328, W118658A)
+WINDOW_DAYS = 365          # older evidence is weighed by the model (age is a feature), not cut off at 120 days
+MAX_SETS = 12              # a number on paperwork of more order groups identifies none of them
+P_MIN = 0.9
+MARGIN = 0.05              # siblings of one shipment score alike: no answer without a lead
 GATE = 0.95
 GATE_MIN = 40
 SPLIT_DAYS = 60
-TIE = 0.999              # runner-up at this share of the winner's evidence -> no clear order
 STATE_ID = "order_flow"
 
 _IDX: Dict[str, Any] = {}
@@ -141,7 +147,15 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
                 out.add(o)
         return out
 
+    # Zetadocs keeps a warehouse PO under its bare number ("Purchase Order
+    # 115092", Vidrala) where BC calls it WR115092: one order, two spellings,
+    # and every link between them was scored wrong (7 of 29 misses, 2026-10-26).
+    alias = {o[2:]: o for o in known if o.startswith("WR")}
+
     def row(day, key, o, text, vendor, name, src):
+        if src != "zetadocs_sales":
+            o = set(o) | {t for t in _NAMED.findall((name or "").upper()) if t in known}
+            o = {alias.get(x, x) for x in o}
         raw = tokens(text)
         prints = _prints_order(raw, o)
         # Paperwork of a consolidated shipment names all its orders (an entry
@@ -224,124 +238,185 @@ async def _documents(db, known: Set[str]) -> List[Tuple]:
     return out
 
 
-def _links(idx, day: int, toks: Set[str], exclude: Set[str], stem: str, key: str) -> List[Tuple[str, Set[FrozenSet[str]], str, Set[str]]]:
-    """(number, the order sets it is on, an evidence file, the evidence documents' vendors)."""
-    out = []
-    same = hash(frozenset(toks))
+def _byshape(toks: Set[str]) -> Dict[str, Set[str]]:
+    m: Dict[str, Set[str]] = collections.defaultdict(set)
+    for t in toks:
+        m[shape(t)].add(t)
+    return m
+
+
+def _candidates(idx, meta, day: int, toks: Set[str], bs: Dict[str, Set[str]], vendor: str, exclude: Set[str],
+                stem: str, key: str) -> Dict[str, Tuple[Dict[str, float], str, str]]:
+    """Every order the document's numbers are shared with: {order: (what
+    its evidence looks like, the number, the evidence document)}."""
+    cand: Dict[str, List[Tuple[str, int, int]]] = collections.defaultdict(list)
     for t in toks - exclude:
-        hits = [(o, s, v) for d, o, s, k, h, v in idx.get(t, ()) if day - WINDOW_DAYS <= d < day and k != key and s != stem and h != same]
-        distinct = {o for o, _, _ in hits}
-        if distinct and len({x for o in distinct for x in o}) <= MAX_ORDERS * 3 and len(distinct) <= MAX_ORDERS:
-            out.append((t, distinct, hits[-1][1], {v for _, _, v in hits}))
+        hits = [e for e in idx.get(t, ()) if day - WINDOW_DAYS <= meta[e][0] < day and meta[e][3] != key and meta[e][2] != stem]
+        sets = {meta[e][1] for e in hits}
+        if not sets or len(sets) > MAX_SETS:
+            continue
+        for e in hits:
+            for x in meta[e][1]:
+                cand[x].append((t, e, len(sets)))
+    if not cand:
+        return {}
+    score = {x: sum(1.0 / len(meta[e][1]) / ns for _, e, ns in hs) for x, hs in cand.items()}
+    tot = sum(score.values())
+    ranked = sorted(score, key=lambda x: -score[x])
+    out = {}
+    for x, hs in cand.items():
+        share = score[x] / tot
+        other = score[ranked[1]] / tot if x == ranked[0] and len(ranked) > 1 else score[ranked[0]] / tot if x != ranked[0] else 0.0
+        f = {"bias": 1.0, "share": share, "top": float(x == ranked[0]), "margin": share - other,
+             "nc:" + str(min(len(cand), 6)): 1.0}
+        toks_x = {t for t, _, _ in hs}
+        f["ntok"] = min(len(toks_x), 6) / 6
+        for t in toks_x:
+            f["sh:" + shape(t)] = 1.0
+            f["vsh:" + vendor + ":" + shape(t)] = 1.0
+        f["minsets"] = 1.0 / min(ns for _, _, ns in hs)
+        f["spec"] = max(1.0 / len(meta[e][1]) for _, e, _ in hs)
+        f["single"] = float(any(len(meta[e][1]) == 1 for _, e, _ in hs))
+        # how many numbers of the linking kind the evidence lists (a forwarder invoice naming 3 containers)
+        f["csame"] = max(1.0 / max(1, len(meta[e][7].get(shape(t), ()))) for t, e, _ in hs)
+        best = max({e for _, e, _ in hs}, key=lambda e: len(toks & meta[e][6]))
+        eb = meta[best]
+        f["jac"] = len(toks & eb[6]) / max(1, len(toks | eb[6]))
+        f["evsrc:" + eb[5]] = 1.0
+        f["evv:" + (eb[4] or "?")] = 1.0
+        f["samev"] = float(bool(vendor) and vendor == eb[4])
+        for s, ts in bs.items():
+            es = eb[7].get(s)
+            if es:
+                agree = bool(ts & es)
+                f[("agr:" if agree else "dis:") + s] = 1.0
+                if not agree:
+                    f["vdis:" + vendor + ":" + s] = 1.0
+        gap = day - max(meta[e][0] for _, e, _ in hs)
+        f["gap:" + str(min(gap // 30, 6))] = 1.0
+        via = next(t for t, e, _ in hs if e == best)
+        out[x] = (f, via, eb[2])
     return out
 
 
-def _rate(c) -> Optional[float]:
-    return (c[0] + 1) / (c[0] + c[1] + 2) if c and c[0] + c[1] >= MIN_N else None
+def _fit(R, C, V, y, ncols: int, iters: int = 400, lam: float = 1e-4):
+    """Logistic regression, sparse rows (R row, C column, V value), AdaGrad."""
+    import numpy as np
+    n = len(y)
+    w = np.zeros(ncols)
+    G = np.zeros(ncols) + 1e-8
+    for _ in range(iters):
+        p = 1 / (1 + np.exp(-np.bincount(R, weights=V * w[C], minlength=n)))
+        g = np.bincount(C, weights=V * (p - y)[R], minlength=ncols) / n + lam * w
+        G += g * g
+        w -= 0.5 * g / np.sqrt(G)
+    return w
 
 
-def _trusted(stats, vendor: str, sh: str, evidence: Set[str] = frozenset()) -> Optional[float]:
-    """How far to believe a shared number of this shape: the shape's record
-    for this vendor (else overall), and - where there is a record - the
-    record of links drawn from the evidence documents' vendors (a
-    forwarder's consolidated invoice labelled with one of its orders is poor
-    evidence for any one of them)."""
-    p = _rate(stats.get((vendor, sh)))
-    if p is None:
-        p = _rate(stats.get(("", sh)))
-    if p is None or p < TRUST:
+def _prob(f: Dict[str, float], cols: Dict[str, int], w) -> float:
+    import math
+    z = sum(w[cols[k]] * v for k, v in f.items() if k in cols)
+    return 1 / (1 + math.exp(-max(-30.0, min(30.0, z))))
+
+
+def _decide(scored: List[Tuple[float, str]]) -> Optional[Tuple[float, str]]:
+    scored = sorted(scored, reverse=True)
+    if not scored or scored[0][0] < P_MIN:
         return None
-    for ev in evidence:
-        q = _rate(stats.get(("@" + ev, "")))
-        if q is not None and q < TRUST:
-            return None
-    return p
-
-
-def _vote(links, stats, vendor: str):
-    votes: Dict[str, float] = collections.defaultdict(float)
-    ev: Dict[str, Tuple[str, str, str]] = {}
-    for t, distinct, frm, evv in links:
-        p = _trusted(stats, vendor, shape(t), evv)
-        if p is None:
-            continue
-        for o in distinct:
-            for x in o:
-                # paperwork naming five orders says less about each than a
-                # document of one order does
-                votes[x] += p / len(distinct) / len(o)
-                ev.setdefault(x, (t, frm, shape(t)))
-    if not votes:
+    if len(scored) > 1 and scored[0][0] - scored[1][0] < MARGIN:
         return None
-    ranked = sorted(votes.items(), key=lambda kv: -kv[1])
-    if len(ranked) > 1 and ranked[1][1] >= ranked[0][1] * TIE:
-        # A consolidated shipment's orders tie: the numbers do not say which.
-        # (Answering with the whole group was tried 2026-10-25: 13 of 23.)
-        return None
-    best = ranked[0][0]
-    group = sorted({x for t, distinct, _, evv in links if _trusted(stats, vendor, shape(t), evv) for o in distinct if best in o for x in o})
-    return {"order": best, "orders": group, "via": ev[best][0], "from": ev[best][1], "shape": ev[best][2]}
+    return scored[0]
 
 
 async def learn(db) -> Dict[str, Any]:
-    """Walk all order-tied documents forward in time: learn which number
-    shapes link to the right order (before the split), test on the rest."""
+    """Walk all order-tied documents forward in time, describing every
+    candidate order by its evidence; train on the candidates before the
+    split, test on the documents after it that do not print their order;
+    then train on everything for use."""
+    import array
+    import numpy as np
     t0 = time.time()
     known = await _known_orders(db)
     docs = await _documents(db, known)
     split = (datetime.now(timezone.utc) - timedelta(days=SPLIT_DAYS)).toordinal()
 
     def walk():
-        idx: Dict[str, List[Tuple[int, FrozenSet[str], str, str, int]]] = collections.defaultdict(list)
-        stats: Dict[Tuple[str, str], List[int]] = collections.defaultdict(lambda: [0, 0])
-        res = collections.Counter()
-        by_source = collections.defaultdict(collections.Counter)
-        examples = []
-        for day, key, orders, toks, vendor, stem, src, prints in docs:
-            links = _links(idx, day, toks, set(orders), stem, key)
-            if day < split:
-                for t, distinct, _, evv in links:
-                    ok = int(any(orders & o for o in distinct))
-                    # evidence vendors are judged only on links that would be believed
-                    ev_keys = [("@" + ev, "") for ev in evv] if _trusted(stats, vendor, shape(t)) else []
-                    for k in [(vendor, shape(t)), ("", shape(t))] + ev_keys:
-                        stats[k][0 if ok else 1] += 1
-            elif not prints and src not in ("hub", "zetadocs_sales"):
-                # Tested on what it is for: documents whose order was not known
-                # otherwise. A Hub document is in memory with an order because the
-                # Hub already had it (email subject, file name), so it trains the
-                # index but is no test of it. Sales-order paperwork (BOLs, pick
-                # tickets) trains it too, but it is applied to AP documents only.
-                v = _vote(links, stats, vendor)
-                r = "abstain" if not v else ("right" if (set(v["orders"]) <= orders if v.get("group") else v["order"] in orders) else "wrong")
-                if v and v.get("group"):
-                    res["group_" + r] += 1
-                res[r] += 1
-                by_source[src][r] += 1
-                if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
-                    examples.append(f"{r}: {src} {stem[:60]} -> {v['order']} via {v['via']} ({v['shape']}) truth {sorted(orders)}")
+        idx: Dict[str, List[int]] = collections.defaultdict(list)
+        meta: List[Tuple] = []     # (day, orders, stem, key, vendor, src, numbers, numbers by shape)
+        interned: Dict[str, str] = {}
+        cols: Dict[str, int] = {}
+        R, C, V = array.array("i"), array.array("i"), array.array("f")
+        rows: List[Tuple[int, str, int, int]] = []    # (document no, order, label, 0 train / 1 test / 2 later)
+        for n, (day, key, orders, toks, vendor, stem, src, prints) in enumerate(docs):
+            toks = {interned.setdefault(t, t) for t in toks}
+            bs = _byshape(toks)
+            kind = 0 if day < split else 1 if not prints and src not in ("hub", "zetadocs_sales") else 2
+            # Tested on what it is for: documents whose order was not known
+            # otherwise. A Hub document is in memory with an order because the
+            # Hub already had it (email subject, file name), so it trains the
+            # model but is no test of it; sales paperwork likewise.
+            for x, (f, _, _) in _candidates(idx, meta, day, toks, bs, vendor, set(orders), stem, key).items():
+                r = len(rows)
+                for k, v in f.items():
+                    R.append(r)
+                    C.append(cols.setdefault(k, len(cols)))
+                    V.append(v)
+                rows.append((n, x, int(x in orders), kind))
+            meta.append((day, orders, stem, key, vendor, src, toks, bs))
             for t in toks - orders:
-                idx[t].append((day, orders, stem, key, hash(frozenset(toks)), vendor))
-        return idx, stats, res, by_source, examples
+                idx[t].append(n)
+        return idx, meta, cols, np.frombuffer(R, dtype=np.int32), np.frombuffer(C, dtype=np.int32), \
+            np.frombuffer(V, dtype=np.float32).astype(np.float64), rows
 
-    idx, stats, res, by_source, examples = await asyncio.to_thread(walk)
-    n = res["right"] + res["wrong"]
-    precision = res["right"] / n if n else 0.0
-    on = n >= GATE_MIN and precision >= GATE
-    trusted = sorted(((k[0] or "*", k[1], v[0], v[1]) for k, v in stats.items() if _trusted(stats, k[0], k[1]) and k[0] in ("",)),
-                     key=lambda x: -x[2])[:25]
+    idx, meta, cols, R, C, V, rows = await asyncio.to_thread(walk)
+    kind = np.array([r[3] for r in rows])
+    y = np.array([r[2] for r in rows], dtype=np.float64)
+
+    def subset(mask):
+        keep = mask[R]
+        new = np.cumsum(mask) - 1
+        return new[R[keep]], C[keep], V[keep], y[mask]
+
+    w = await asyncio.to_thread(lambda: _fit(*subset(kind == 0), len(cols)))
+    # test: the held-out documents, one answer per document
+    z = np.bincount(R, weights=V * w[C], minlength=len(rows))
+    p = 1 / (1 + np.exp(-z))
+    bydoc: Dict[int, List[Tuple[float, str]]] = collections.defaultdict(list)
+    for i, (n, x, lab, k) in enumerate(rows):
+        if k == 1:
+            bydoc[n].append((float(p[i]), x))
+    res = collections.Counter()
+    by_source: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
+    examples = []
+    tested = 0
+    for n, d in enumerate(docs):
+        day, key, orders, toks, vendor, stem, src, prints = d
+        if day < split or prints or src in ("hub", "zetadocs_sales"):
+            continue
+        tested += 1
+        v = _decide(bydoc.get(n, []))
+        r = "abstain" if not v else "right" if v[1] in orders else "wrong"
+        res[r] += 1
+        by_source[src][r] += 1
+        if v and len(examples) < 12 and (r == "wrong" or len(examples) < 6):
+            examples.append(f"{r}: {src} {stem[:60]} -> {v[1]} p={v[0]:.2f} truth {sorted(orders)}")
+    n_ans = res["right"] + res["wrong"]
+    precision = res["right"] / n_ans if n_ans else 0.0
+    on = n_ans >= GATE_MIN and precision >= GATE
+    inv = {j: k for k, j in cols.items()}
+    top = [f"{inv[j]} {w[j]:+.2f}" for j in np.argsort(-np.abs(w))[:20]]
+    if on:
+        w = await asyncio.to_thread(lambda: _fit(R, C, V, y, len(cols)))
     out = {"_id": STATE_ID, "at": _now(), "documents": len(docs), "numbers": len(idx), "test_days": SPLIT_DAYS,
+           "method": "ranker", "candidates_trained": int((kind == 0).sum()), "features": len(cols),
            "right": res["right"], "wrong": res["wrong"], "abstain": res["abstain"], "precision": round(precision, 4),
-           "group_right": res["group_right"], "group_wrong": res["group_wrong"],
-           "coverage": round(n / (n + res["abstain"]), 4) if n + res["abstain"] else 0.0, "on": on,
-           "by_source": {k: dict(v) for k, v in by_source.items()}, "trusted_shapes": trusted,
-           "distrusted_evidence": sorted(((k[0][1:] or "?", v[0], v[1]) for k, v in stats.items()
-                                          if k[0].startswith("@") and (_rate(v) or 1) < TRUST), key=lambda x: -x[2])[:15], "examples": examples,
+           "coverage": round(n_ans / tested, 4) if tested else 0.0, "on": on, "p_min": P_MIN, "margin": MARGIN,
+           "by_source": {k: dict(v) for k, v in by_source.items()}, "top_weights": top, "examples": examples,
            "seconds": int(time.time() - t0)}
     await db.learning_state.replace_one({"_id": STATE_ID}, out, upsert=True)
     _IDX.clear()
-    _IDX.update({"at": time.time(), "idx": idx, "stats": dict(stats), "on": on, "known": known})
-    logger.info("[OrderFlow] %s", {k: v for k, v in out.items() if k not in ("examples", "trusted_shapes")})
+    _IDX.update({"at": time.time(), "idx": idx, "meta": meta, "cols": cols, "w": w, "on": on, "known": known})
+    logger.info("[OrderFlow] %s", {k: v for k, v in out.items() if k not in ("examples", "top_weights")})
     return out
 
 
@@ -351,9 +426,14 @@ async def link(db, text: str, vendor: str = "", created: str = "", key: str = ""
         await learn(db)
     if not _IDX.get("on"):
         return None
-    day = _day(created) or datetime.now(timezone.utc).toordinal()
-    links = _links(_IDX["idx"], day + 1, _clean(tokens(text), _IDX["known"]), set(), _stem(name), key)
-    return _vote(links, _IDX["stats"], vendor)
+    day = (_day(created) or datetime.now(timezone.utc).toordinal()) + 1
+    toks = _clean(tokens(text), _IDX["known"])
+    cand = _candidates(_IDX["idx"], _IDX["meta"], day, toks, _byshape(toks), vendor, set(), _stem(name), key)
+    v = _decide([(_prob(f, _IDX["cols"], _IDX["w"]), x) for x, (f, _, _) in cand.items()])
+    if not v:
+        return None
+    _, via, frm = cand[v[1]]
+    return {"order": v[1], "orders": [v[1]], "via": via, "from": frm, "shape": shape(via), "p": round(v[0], 3)}
 
 
 async def apply_recent(db, days: int = 30) -> Dict[str, Any]:

@@ -13,10 +13,11 @@
   recorded, nothing is sent), and rebuilds the backend container. It stops without changing anything when the
   checkout isn't a clean git checkout or the branch isn't a fast-forward.
 
-  The intake URL and key are taken from the catalog forward settings already in backend/.env (CATALOG_FORWARD_URL,
-  CATALOG_FORWARD_KEY); the key is never read or printed by this script.
+  The intake URL and key: the catalog forward settings in backend/.env when they are there; otherwise the deploy
+  adds NEW_ITEM_REQUESTS_URL and copies the intake key (GPI_CATALOG_INTAKE_KEY on the Commercial AI web app) to
+  NEW_ITEM_REQUESTS_KEY over SSH, so it is never on a command line, in a log or on screen.
 
-  Reaches the VM through Azure (az vm run-command, with your az login).
+  Reaches the VM through Azure (az vm run-command, with your az login); the key alone goes over SSH.
 .EXAMPLE
   .\scripts\Deploy-Hub-New-Item-Requests.ps1
   .\scripts\Deploy-Hub-New-Item-Requests.ps1 -Deploy -Confirmation 'DEPLOY HUB NEW ITEM REQUESTS'
@@ -26,7 +27,8 @@ param(
     [switch]$Deploy,
     [string]$Confirmation = '',
     [string]$VmHost = 'azureuser@4.204.41.190',
-    [string]$Branch = 'feature/hub-new-item-requests',
+    [string]$Branch = 'feature/hub-new-item-requests-live',
+    [string]$IntakeUrl = 'https://gpi-commercial-ai-v62-uat-4e0833.azurewebsites.net/api/v70/catalog/intake/new-items',
     [string]$HubDir = '/opt/gpi-hub'
 )
 $ErrorActionPreference = 'Stop'
@@ -68,7 +70,7 @@ if g fetch -q origin '$Branch' 2>/tmp/nir-fetch.txt; then
 else
   echo "FETCH=failed: `$(tail -1 /tmp/nir-fetch.txt)"
 fi
-for k in CATALOG_FORWARD_URL CATALOG_FORWARD_KEY NEW_ITEM_REQUESTS_ENABLED NEW_ITEM_REQUESTS_DRY_RUN; do
+for k in CATALOG_FORWARD_URL CATALOG_FORWARD_KEY NEW_ITEM_REQUESTS_URL NEW_ITEM_REQUESTS_KEY NEW_ITEM_REQUESTS_ENABLED NEW_ITEM_REQUESTS_DRY_RUN; do
   if grep -q "^`$k=." backend/.env 2>/dev/null; then echo "ENV_`$k=set"; else echo "ENV_`$k=missing"; fi
 done
 "@
@@ -83,7 +85,7 @@ else {
     Write-Host "New code    : $Branch @ $($info.TARGET) ($($info.BEHIND) commits ahead)"
     Write-Host "Fast-forward: $($info.FASTFORWARD)"
 }
-foreach ($k in 'CATALOG_FORWARD_URL', 'CATALOG_FORWARD_KEY', 'NEW_ITEM_REQUESTS_ENABLED', 'NEW_ITEM_REQUESTS_DRY_RUN') {
+foreach ($k in 'CATALOG_FORWARD_URL', 'CATALOG_FORWARD_KEY', 'NEW_ITEM_REQUESTS_URL', 'NEW_ITEM_REQUESTS_KEY', 'NEW_ITEM_REQUESTS_ENABLED', 'NEW_ITEM_REQUESTS_DRY_RUN') {
     Write-Host ("{0,-26}: {1}" -f $k, $info["ENV_$k"])
 }
 if ($info.STATE) { throw "The Hub folder $HubDir is $($info.STATE); deploy by hand (DEPLOYMENT.md)." }
@@ -92,9 +94,9 @@ $problems = @()
 if ($info.FETCH) { $problems += 'the VM could not fetch the branch from GitHub' }
 if ($info.FASTFORWARD -ne 'yes') { $problems += "the VM's branch has commits the new branch doesn't (not a fast-forward); merge them first" }
 if ([int]($info.DIRTY) -gt 0) { $problems += 'the VM checkout has uncommitted changes' }
-if ($info.ENV_CATALOG_FORWARD_URL -ne 'set' -or $info.ENV_CATALOG_FORWARD_KEY -ne 'set') {
-    $problems += 'CATALOG_FORWARD_URL / CATALOG_FORWARD_KEY are not in backend/.env (see DEPLOYMENT.md, Catalog Forward)'
-}
+$needKey = $info.ENV_CATALOG_FORWARD_KEY -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_KEY -ne 'set'
+$needUrl = $info.ENV_CATALOG_FORWARD_URL -ne 'set' -and $info.ENV_NEW_ITEM_REQUESTS_URL -ne 'set'
+if ($needKey) { Write-Host 'Intake key  : not on the VM yet; the deploy copies it from the web app over SSH (never shown)' }
 if (-not $Deploy) {
     Write-Host ''
     if ($problems) { Write-Host ('Not ready to deploy: ' + ($problems -join '; ') + '.') -ForegroundColor Yellow }
@@ -104,6 +106,26 @@ if (-not $Deploy) {
 }
 if ($problems) { throw ('Not deployed: ' + ($problems -join '; ') + '. Nothing was changed.') }
 
+if ($needKey) {
+    # The intake key goes from the web app's settings to the VM over SSH (stdin): never on a command line, in a
+    # log, in Azure's run-command history or on screen.
+    $key = az webapp config appsettings list -g rg-gpi-commercial-ai-v62-uat -n gpi-commercial-ai-v62-uat-4e0833 `
+        --subscription 4e083304-514c-4751-855e-c38a1740a924 --query "[?name=='GPI_CATALOG_INTAKE_KEY'].value | [0]" -o tsv 2>$null
+    if (-not $key) {
+        $env:AZURE_CONFIG_DIR = Join-Path $env:LOCALAPPDATA 'GPI\AccountingDeployment\AzureCLI'
+        $key = az webapp config appsettings list -g rg-gpi-commercial-ai-v62-uat -n gpi-commercial-ai-v62-uat-4e0833 `
+            --subscription 4e083304-514c-4751-855e-c38a1740a924 --query "[?name=='GPI_CATALOG_INTAKE_KEY'].value | [0]" -o tsv 2>$null
+        Remove-Item Env:\AZURE_CONFIG_DIR -ErrorAction SilentlyContinue
+    }
+    if (-not $key) { throw 'Could not read GPI_CATALOG_INTAKE_KEY from the Commercial AI web app (az login to that subscription). Nothing was changed.' }
+    $remote = 'sudo bash -c ''read -r k; k=$(printf %s "$k" | tr -d "\r"); f={0}/backend/.env; [ -n "$(tail -c1 $f)" ] && echo >> $f; grep -q ^NEW_ITEM_REQUESTS_KEY= $f || echo "NEW_ITEM_REQUESTS_KEY=$k" >> $f; echo KEY_SET''' -f $HubDir
+    $answer = $key | ssh -o BatchMode=yes -o ConnectTimeout=15 $VmHost $remote 2>$null
+    $key = $null
+    if ("$answer" -notmatch 'KEY_SET') { throw "Could not reach $VmHost over SSH to store the intake key (the deploy needs the same SSH access you use to log in to the VM). Nothing was deployed." }
+    Write-Host 'Intake key stored on the VM.'
+}
+$urlLine = if ($needUrl) { "NEW_ITEM_REQUESTS_URL=$IntakeUrl" } else { '' }
+
 $apply = @"
 set -e
 cd '$HubDir'
@@ -111,7 +133,8 @@ owner=`$(stat -c %U .git)
 g() { sudo -u "`$owner" git "`$@"; }
 g fetch -q origin '$Branch'
 g merge --ff-only -q FETCH_HEAD
-for kv in NEW_ITEM_REQUESTS_ENABLED=true NEW_ITEM_REQUESTS_DRY_RUN=true; do
+[ -n "`$(tail -c1 backend/.env)" ] && echo >> backend/.env
+for kv in NEW_ITEM_REQUESTS_ENABLED=true NEW_ITEM_REQUESTS_DRY_RUN=true $urlLine; do
   k=`${kv%%=*}
   if ! grep -q "^`$k=" backend/.env; then echo "`$kv" >> backend/.env; fi
 done

@@ -137,7 +137,11 @@ changes, whether the new branch is a fast-forward, the catalog settings in
 `backend/.env`); with `-Deploy -Confirmation 'DEPLOY HUB NEW ITEM REQUESTS'`
 it fast-forwards `/opt/gpi-hub`, adds `NEW_ITEM_REQUESTS_ENABLED=true` and
 `NEW_ITEM_REQUESTS_DRY_RUN=true`, and rebuilds the backend. URL and key come
-from the catalog forward settings.
+from the catalog forward settings when they are set; otherwise it adds
+`NEW_ITEM_REQUESTS_URL` and copies the intake key from the Commercial AI web
+app to `NEW_ITEM_REQUESTS_KEY` over SSH (never shown or logged). The branch it
+deploys, `feature/hub-new-item-requests-live`, is the VM's
+`gemini-model-fix-clean` plus the catalog forward and this reader.
 
 **Check and backfill (admin):** `GET /api/admin/new-item-requests/status`
 (recent decisions, never the key);

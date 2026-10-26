@@ -86,6 +86,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         summary["bc_typo_flags"] = await clear_stale_typo_flags(db)
         from services.bc_reconciliation_service import resolve_split_entries
         summary["bc_split_entries"] = {k: v for k, v in (await resolve_split_entries(db)).items() if k != "examples"}
+        from services.bc_reconciliation_service import resolve_numbers_in_one
+        summary["bc_numbers_in_one"] = {k: v for k, v in (await resolve_numbers_in_one(db)).items() if k != "examples"}
         from services.vendor_alias_check_service import check as alias_check
         summary["vendor_alias_check"] = await alias_check(db)
         from services.fraud_signal_service import reassess_recent as fraud_reassess

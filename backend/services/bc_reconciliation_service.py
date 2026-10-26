@@ -686,6 +686,67 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
 
 
 
+async def resolve_numbers_in_one(db, days: int = 120, apply: bool = True) -> Dict[str, Any]:
+    """Several BC entries behind one Hub document read as a single number:
+    SGC's "SGC-20-SEP-2026-1SGC-20-SEP-2026-2" (20,336.40) is BC SGC-20-SEP-
+    2026-1 (9,884.70) + -2 (10,451.70); WestRock "4306380110 4315035189".
+    An unlinked document whose number or file name contains two or more of
+    the vendor's not-yet-linked BC numbers, and whose amount is their sum to
+    the cent, is that set: linked to the first, every part kept in
+    bc_split_entries. Until then it sat in Needs staff though AP had entered
+    it (2026-10-26)."""
+    stamp = datetime.now(timezone.utc).isoformat()
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    bc_since = (datetime.now(timezone.utc) - timedelta(days=days + 60)).strftime("%Y-%m-%d")
+    taken = {d["bc_link"]["bc_document_no"] async for d in db.hub_documents.find(
+        {"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_link.bc_document_no": 1})}
+    async for d in db.hub_documents.find({"bc_split_entries.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_split_entries": 1}):
+        taken.update(p.get("bc_document_no") for p in d.get("bc_split_entries") or [])
+    out: Dict[str, Any] = {"checked": 0, "linked": 0, "examples": []}
+    by_vendor: Dict[str, List[Dict[str, Any]]] = {}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True}, "bc_link": {"$exists": False},
+             "status": {"$ne": "batch_parent"}, "vendor_canonical": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0]}},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "file_name": 1, "amount_float": 1}):
+        v = str(d["vendor_canonical"]).upper()
+        if v not in by_vendor:
+            by_vendor[v] = [b async for b in db.bc_reference_cache.find(
+                {"bc_vendor_no": v, "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
+                 "bc_status": {"$ne": "Canceled"}, "bc_posting_date": {"$gte": bc_since}},
+                {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "normalized_external_ref": 1, "bc_amount": 1,
+                 "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1})
+                if b["bc_document_no"] not in taken and len(b.get("normalized_external_ref") or "") >= 5 and b.get("bc_amount") not in (None, "")]
+        cands = by_vendor[v]
+        if len(cands) < 2:
+            continue
+        out["checked"] += 1
+        hay = _norm(str(d.get("invoice_number_clean") or "") + " " + str(d.get("file_name") or ""))
+        parts = [b for b in cands if b["normalized_external_ref"] in hay]
+        # a number inside a longer one is the longer one's prefix, not a part
+        parts = [b for b in parts if not any(o is not b and b["normalized_external_ref"] in o["normalized_external_ref"] for o in parts)]
+        if len(parts) < 2 or len(parts) > 8:
+            continue
+        total = sum(abs(float(p["bc_amount"])) for p in parts)
+        if abs(total - abs(float(d["amount_float"]))) > 0.01 * len(parts):
+            continue
+        parts.sort(key=lambda p: p["normalized_external_ref"])
+        first = parts[0]
+        out["linked"] += 1
+        if len(out["examples"]) < 10:
+            out["examples"].append((v, d.get("invoice_number_clean"), d["amount_float"], [(p["normalized_external_ref"], p["bc_amount"]) for p in parts]))
+        for p in parts:
+            taken.add(p["bc_document_no"])
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
+                "bc_link": {"bc_document_no": first["bc_document_no"], "bc_entity": first["bc_entity_type"], "bc_status": first.get("bc_status"),
+                            "bc_vendor_no": first.get("bc_vendor_no"), "bc_vendor_name": first.get("bc_vendor_name"),
+                            "bc_amount": round(total, 2), "bc_order_number": first.get("bc_order_number"),
+                            "bc_posting_date": first.get("bc_posting_date"), "match": "numbers_in_one", "linked_at": stamp},
+                "bc_split_entries": [{"bc_document_no": p["bc_document_no"], "bc_external_document_no": p.get("bc_external_document_no"),
+                                      "bc_amount": p["bc_amount"], "bc_order_number": p.get("bc_order_number")} for p in parts]}})
+    return out
+
+
 async def drop_bad_number_links(db, apply: bool = True) -> Dict[str, Any]:
     """Links made on the number alone before the amount rule, where neither
     the vendor nor the amount agrees (25 on 2026-10-09, mostly Cargo Modules

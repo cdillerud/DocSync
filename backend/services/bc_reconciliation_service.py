@@ -26,6 +26,7 @@ I848946897 read as 1848946897). A match needs the amount or the vendor to
 agree, or a 7+ character number. Runs hourly (learning_cycle_service).
 """
 import logging
+import itertools
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
@@ -524,23 +525,44 @@ async def fetch_ship_to(db, limit: int = SHIP_TO_PER_RUN) -> Dict[str, Any]:
 
 
 
+def _shape(x: Any) -> str:
+    return re.sub(r"[A-Z]", "A", re.sub(r"\d", "9", _norm(x)))
+
+
 async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[str, Any]:
     """Invoices whose number could not be read (scans, multi-invoice PDFs)
     linked to the BC invoice AP entered, by vendor + exact amount - only when
     BC holds exactly one invoice from that vendor for that amount around
     receipt and no other Hub document claims it (Amcor repeats amounts:
-    7 x 29,439.15 stays with staff). The BC invoice's number is filled in."""
+    7 x 29,439.15 stays with staff). The BC invoice's number is filled in.
+    Also when the number read is not one of this vendor's (Vidrala "17",
+    Interstate's account-and-statement "MN2174-000115#0218"): not in BC, near
+    no BC number, and not shaped like the vendor's BC numbers - a well-formed
+    number is its own invoice (Tumalo load 0314831 next to 314830 at the
+    same 5,975). Measured on 9,900 documents linked by number and amount:
+    one vendor+amount entry in the window was the right one 2,665 times,
+    wrong 7 (2026-10-27)."""
     from datetime import timedelta
     now = datetime.now(timezone.utc)
     since = (now - timedelta(days=days)).isoformat()
-    stats = {"checked": 0, "linked": 0}
+    stats = {"checked": 0, "linked": 0, "number_not_vendors": 0}
+    refs: Dict[str, List[str]] = {}
     async for d in db.hub_documents.find({
             "created_utc": {"$gte": since}, "mailbox_category": "AP", "bc_link": {"$exists": False},
             "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "status": {"$ne": "batch_parent"},
             "is_duplicate": {"$ne": True},
-            "vendor_canonical": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0, 0.0]},
-            "$or": [{"invoice_number_clean": None}, {"invoice_number_clean": ""}, {"invoice_number_clean": {"$exists": False}}]},
-            {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "created_utc": 1}):
+            "vendor_canonical": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0, 0.0]}},
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "amount_float": 1, "created_utc": 1, "invoice_number_clean": 1}):
+        num = _norm(d.get("invoice_number_clean"))
+        if num:
+            v = d["vendor_canonical"]
+            if v not in refs:
+                refs[v] = [b.get("bc_external_document_no") async for b in db.bc_reference_cache.find(
+                    {"bc_vendor_no": v, "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]}},
+                    {"_id": 0, "bc_external_document_no": 1}) if b.get("bc_external_document_no")]
+            if len(num) >= 4 and (not refs[v] or any(_norm(r) == num or near_number(num, r) or _shape(r) == _shape(num) for r in refs[v])):
+                continue
+            stats["number_not_vendors"] += 1
         stats["checked"] += 1
         recv = datetime.fromisoformat(str(d["created_utc"])[:19])
         lo, hi = (recv - timedelta(days=30)).date().isoformat(), (recv + timedelta(days=45)).date().isoformat()
@@ -555,6 +577,8 @@ async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[
         if await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"]}, limit=1):
             continue
         stats["linked"] += 1
+        if num:
+            stats.setdefault("examples", []).append((d["vendor_canonical"], d.get("invoice_number_clean"), a, b.get("bc_external_document_no")))
         if apply:
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {
                 "bc_link": {"bc_document_no": b["bc_document_no"], "bc_entity": b["bc_entity_type"], "bc_status": b.get("bc_status"),
@@ -562,6 +586,7 @@ async def link_by_vendor_amount(db, days: int = 45, apply: bool = True) -> Dict[
                             "bc_order_number": b.get("bc_order_number"), "bc_posting_date": b.get("bc_posting_date"),
                             "match": "vendor+amount (no number on the document)", "linked_at": now.isoformat()},
                 "invoice_number_clean": b.get("bc_external_document_no"),
+                "invoice_number_extracted_previous": d.get("invoice_number_clean"),
                 "invoice_number_source": "BC invoice AP entered (vendor + exact amount)"}})
     return stats
 
@@ -636,7 +661,7 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
              "$or": [{"bc_link": {"$exists": False}}, {"bc_link.match": {"$in": ["number+vendor", "number"]}}],
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "vendor_canonical": {"$nin": [None, ""]},
              "invoice_number_clean": {"$nin": [None, ""]}, "amount_float": {"$nin": [None, 0]}},
-            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1, "bc_link": 1}):
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "amount_float": 1, "bc_link": 1, "file_name": 1}):
         linked = d.get("bc_link") or {}
         if linked.get("match") == "split_entries":
             continue
@@ -645,7 +670,12 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
             continue
         base = _norm(d["invoice_number_clean"])
         if len(base) < 4:
-            continue
+            # Vidrala "17" read from "Invoice_2500015824_3x40_Gamer.pdf"
+            # (= 2500015824 + A + B, one per container): the file name's number.
+            nums = re.findall(r"(?<![0-9])[0-9]{6,12}(?![0-9])", str(d.get("file_name") or ""))
+            if len(nums) != 1:
+                continue
+            base = nums[0]
         out["checked"] += 1
         # Letter parts (1101622017A..D) or dash-number parts AP adds per
         # container (Hwa Hsia HH-150813A-1, -2): digits only when BC's own
@@ -687,6 +717,10 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
 
 
 
+def _core(ref: str) -> str:
+    return re.sub(r"^[A-Z]+", "", ref or "")
+
+
 async def resolve_numbers_in_one(db, days: int = 120, apply: bool = True) -> Dict[str, Any]:
     """Several BC entries behind one Hub document read as a single number:
     SGC's "SGC-20-SEP-2026-1SGC-20-SEP-2026-2" (20,336.40) is BC SGC-20-SEP-
@@ -701,7 +735,10 @@ async def resolve_numbers_in_one(db, days: int = 120, apply: bool = True) -> Dic
     bc_since = (datetime.now(timezone.utc) - timedelta(days=days + 60)).strftime("%Y-%m-%d")
     taken = {d["bc_link"]["bc_document_no"] async for d in db.hub_documents.find(
         {"bc_link.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_link.bc_document_no": 1})}
-    async for d in db.hub_documents.find({"bc_split_entries.bc_document_no": {"$exists": True}}, {"_id": 0, "bc_split_entries": 1}):
+    # Parts held by a linked document are taken; parts left on an unlinked
+    # one (SGC CI_PL 118377/118378 lost its link but kept them) are not.
+    async for d in db.hub_documents.find({"bc_split_entries.bc_document_no": {"$exists": True}, "bc_link": {"$exists": True}},
+                                         {"_id": 0, "bc_split_entries": 1}):
         taken.update(p.get("bc_document_no") for p in d.get("bc_split_entries") or [])
     out: Dict[str, Any] = {"checked": 0, "linked": 0, "examples": []}
     by_vendor: Dict[str, List[Dict[str, Any]]] = {}
@@ -722,14 +759,27 @@ async def resolve_numbers_in_one(db, days: int = 120, apply: bool = True) -> Dic
             continue
         out["checked"] += 1
         hay = _norm(str(d.get("invoice_number_clean") or "") + " " + str(d.get("file_name") or ""))
-        parts = [b for b in cands if b["normalized_external_ref"] in hay]
-        # a number inside a longer one is the longer one's prefix, not a part
-        parts = [b for b in parts if not any(o is not b and b["normalized_external_ref"] in o["normalized_external_ref"] for o in parts)]
-        if len(parts) < 2 or len(parts) > 8:
+        found = [b for b in cands if b["normalized_external_ref"] in hay]
+        # The same number under another letter prefix is the same invoice's
+        # other entry: Happy Ann's deposit "PI26X207020" and balance
+        # "C26X207020" (INV-PI26X207020 & PI26X207021 = both deposits + both
+        # balances = 33,736.77).
+        cores = {_core(b["normalized_external_ref"]) for b in found}
+        found += [b for b in cands if b not in found and _core(b["normalized_external_ref"]) in cores
+                  and len(_core(b["normalized_external_ref"])) >= 5]
+        if len(found) < 2 or len(found) > 10:
             continue
+        # The entries that add up to the amount, to the cent: a number inside
+        # a longer one may be a prefix or a part, the sum decides. Exactly one
+        # such set, or the document stays with staff. No false sets on 9,900
+        # documents linked by number and amount (2026-10-27).
+        amt = abs(float(d["amount_float"]))
+        sets = [sub for k in range(2, min(len(found), 8) + 1) for sub in itertools.combinations(found, k)
+                if abs(sum(abs(float(p["bc_amount"])) for p in sub) - amt) <= 0.01 * k]
+        if len(sets) != 1:
+            continue
+        parts = list(sets[0])
         total = sum(abs(float(p["bc_amount"])) for p in parts)
-        if abs(total - abs(float(d["amount_float"]))) > 0.01 * len(parts):
-            continue
         parts.sort(key=lambda p: p["normalized_external_ref"])
         first = parts[0]
         out["linked"] += 1

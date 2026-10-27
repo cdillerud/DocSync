@@ -294,9 +294,12 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
             # one is in BC, not this one (Anchor 4909838-41 and Owens
             # 51591953/54 all 'matched' the first one AP entered, before
             # reconcile linked it).
-            ext = str(b.get("bc_external_document_no") or "").strip().upper()
-            if ext and ext != str(d.get("invoice_number_clean") or "").strip().upper() and await db.hub_documents.count_documents(
-                    {"vendor_canonical": d["vendor_canonical"], "invoice_number_clean": ext, "id": {"$ne": d["id"]}}, limit=1):
+            # Leading zeros dropped on both sides: AP keys Gypsum 0038292 as
+            # 38292, so its twin 0038268 (same $713) was held as a duplicate.
+            ext = str(b.get("bc_external_document_no") or "").strip().upper().lstrip("0")
+            if ext and ext != str(d.get("invoice_number_clean") or "").strip().upper().lstrip("0") and await db.hub_documents.count_documents(
+                    {"vendor_canonical": d["vendor_canonical"], "invoice_number_clean": {"$regex": "^0*" + re.escape(ext) + "$", "$options": "i"},
+                     "id": {"$ne": d["id"]}}, limit=1):
                 continue
             if not await db.hub_documents.count_documents({"bc_link.bc_document_no": b["bc_document_no"], "id": {"$ne": d["id"]}}, limit=1):
                 return (f"BC already has invoice {b.get('bc_external_document_no')} (BC {b.get('bc_document_no')}) "

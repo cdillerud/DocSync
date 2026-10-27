@@ -872,11 +872,18 @@ async def coder(db, refresh: bool = False) -> Coder:
     return _CODER
 
 
-def _same(pred: List[Tuple[str, float]], ap: List[Tuple[str, float]]) -> bool:
-    if len(pred) != len(ap):
+def _same(pred: List[Dict[str, Any]], ap: List[Dict[str, Any]]) -> bool:
+    """The coder's lines are AP's: the same items, quantities and unit costs,
+    by the test Production drafts are graded with (draft_readback_service).
+    Comparing (code, line amount) passed "1 x 24,096.51" for AP's
+    "204.225 x 117.99" and skipped AP's $0 returnable-dunnage lines: learned
+    lines scored 99.7% here and 4/41 against Production (2026-10-27)."""
+    from services.draft_readback_service import _lines_by_item
+    a, h = _lines_by_item(ap), _lines_by_item(pred)
+    if not a or set(a) != set(h):
         return False
-    a, b = sorted(pred), sorted(ap)
-    return all(x[0] == y[0] and abs(x[1] - y[1]) <= 0.02 for x, y in zip(a, b))
+    return all(abs(a[it]["q"] - h[it]["q"]) <= max(0.01, 0.002 * abs(a[it]["q"]))
+               and abs(a[it]["c"] - h[it]["c"]) <= max(0.005, 0.005 * abs(a[it]["c"])) for it in a)
 
 
 # --------------------------------------------------------------- evaluate
@@ -937,7 +944,7 @@ async def _out_of_time(db, months: int = OOT_MONTHS) -> Dict[str, collections.Co
                 continue
             o = out[d["vendor_canonical"]]
             o["attempted"] += 1
-            o["exact"] += _same([(l["lineObjectNumber"], round(l["quantity"] * l["unitCost"], 2)) for l in lines], ap)
+            o["exact"] += _same(lines, inv.get("purchaseInvoiceLines") or [])
     return out
 
 
@@ -977,7 +984,7 @@ async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
         if lines is None:
             tv["abstain"] += 1
             continue
-        ok = _same([(l["lineObjectNumber"], round(l["quantity"] * l["unitCost"], 2)) for l in lines], ap)
+        ok = _same(lines, inv.get("purchaseInvoiceLines") or [])
         tv["attempted"] += 1
         tv["exact"] += ok
         if "exact" in g:
@@ -1067,7 +1074,7 @@ async def evaluate_ai(db, force: bool = False) -> Dict[str, Any]:
             if lines is None:
                 continue
             att += 1
-            ok += _same([(l["lineObjectNumber"], round(l["quantity"] * l["unitCost"], 2)) for l in lines], ap)
+            ok += _same(lines, inv.get("purchaseInvoiceLines") or [])
         acc = ok / att if att else 0.0
         on = att >= AI_MIN_N and acc >= AI_MIN_ACC
         out[v] = {"n": n, "attempted": att, "exact": ok, "on": on}

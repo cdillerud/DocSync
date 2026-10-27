@@ -10,7 +10,7 @@ per vendor (draft_edit_stats) so drafting can learn from them.
 import logging
 import re
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
@@ -171,13 +171,21 @@ async def grade_against_production(db) -> Dict[str, Any]:
     return dict(stats)
 
 
-async def ap_draft_metrics(db) -> Dict[str, Any]:
-    c = Counter()
-    async for d in db.hub_documents.find({"ap_draft_vs_bc.graded_at": {"$exists": True}}, {"_id": 0, "ap_draft_vs_bc": 1}):
+async def ap_draft_metrics(db, recent_days: int = 14) -> Dict[str, Any]:
+    """All graded drafts, plus "recent": those AP entered in the last
+    recent_days. The all-time figure hid a week at 47% exact among 89%
+    (learned lump-sum drafts, 2026-10-27); the recent one shows a drop the
+    week it starts."""
+    since = (datetime.now(timezone.utc) - timedelta(days=recent_days)).date().isoformat()
+    c, r = Counter(), Counter()
+    async for d in db.hub_documents.find({"ap_draft_vs_bc.graded_at": {"$exists": True}},
+                                         {"_id": 0, "ap_draft_vs_bc": 1, "bc_link.bc_posting_date": 1}):
         g = d["ap_draft_vs_bc"]
-        c["drafts"] += 1
-        c["exact"] += bool(g.get("exact"))
-        c["total_right"] += bool(g.get("total_right"))
-        for k in ("ap_items", "items_right", "qty_right", "cost_right"):
-            c[k] += int(g.get(k) or 0)
-    return dict(c)
+        recent = str((d.get("bc_link") or {}).get("bc_posting_date") or "") >= since
+        for x in ((c, r) if recent else (c,)):
+            x["drafts"] += 1
+            x["exact"] += bool(g.get("exact"))
+            x["total_right"] += bool(g.get("total_right"))
+            for k in ("ap_items", "items_right", "qty_right", "cost_right"):
+                x[k] += int(g.get(k) or 0)
+    return {**dict(c), "recent": {**dict(r), "days": recent_days}}

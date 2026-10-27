@@ -158,7 +158,10 @@ export default function TodayPage() {
           <Accuracy title="Hub drafts vs what AP entered">
             {apAcc.drafts ? (
               <>
-                <p><b className="tabular-nums">{apAcc.exact}/{apAcc.drafts}</b> drafts exact ({pct(apAcc.exact, apAcc.drafts)}) · totals right {pct(apAcc.total_right, apAcc.drafts)}</p>
+                {apAcc.recent?.drafts ? (
+                  <p>Last {apAcc.recent.days} days: <b className="tabular-nums">{apAcc.recent.exact}/{apAcc.recent.drafts}</b> drafts exact ({pct(apAcc.recent.exact, apAcc.recent.drafts)}) · totals right {pct(apAcc.recent.total_right, apAcc.recent.drafts)}</p>
+                ) : null}
+                <p className={apAcc.recent?.drafts ? 'text-muted-foreground' : ''}>{apAcc.recent?.drafts ? 'All time: ' : ''}<b className="tabular-nums">{apAcc.exact}/{apAcc.drafts}</b> drafts exact ({pct(apAcc.exact, apAcc.drafts)}) · totals right {pct(apAcc.total_right, apAcc.drafts)}</p>
                 <p className="text-muted-foreground">Items {apAcc.items_right}/{apAcc.ap_items} · quantities {apAcc.qty_right}/{apAcc.items_right} · costs {apAcc.cost_right}/{apAcc.items_right}</p>
               </>
             ) : <p className="text-muted-foreground">Graded as AP enters drafted invoices in Production; nothing graded yet.</p>}

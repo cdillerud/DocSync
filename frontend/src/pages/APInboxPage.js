@@ -113,7 +113,9 @@ export default function APInboxPage() {
             </p>
             {data?.draft_accuracy?.drafts > 0 && (
               <p className="text-xs text-muted-foreground mt-1" data-testid="ap-draft-accuracy">
-                Sandbox drafts graded against what AP then entered in Production: <b className="text-foreground">{data.draft_accuracy.exact}/{data.draft_accuracy.drafts}</b> exact ·
+                Sandbox drafts graded against what AP then entered in Production:{' '}
+                {data.draft_accuracy.recent?.drafts ? <>last {data.draft_accuracy.recent.days} days <b className="text-foreground">{data.draft_accuracy.recent.exact}/{data.draft_accuracy.recent.drafts}</b> exact · all time </> : null}
+                <b className="text-foreground">{data.draft_accuracy.exact}/{data.draft_accuracy.drafts}</b> exact ·
                 items {data.draft_accuracy.items_right}/{data.draft_accuracy.ap_items} · totals right {data.draft_accuracy.total_right}/{data.draft_accuracy.drafts}
               </p>
             )}

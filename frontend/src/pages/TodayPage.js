@@ -27,6 +27,31 @@ function Tile({ to, label, value, help, tone = 'muted', icon: Icon }) {
   );
 }
 
+// Order lines with the same customer and the same problem (one PO split into
+// many BC orders) read as one row: 39 identical lines hid the other checks.
+function groupChecks(lines) {
+  const groups = new Map();
+  for (const o of lines || []) {
+    const k = (o.customer_no || o.customer_name) + '|' + o.why;
+    if (!groups.has(k)) groups.set(k, { ...o, orders: [], pos: new Set(), value: 0 });
+    const g = groups.get(k);
+    g.orders.push(o.order_no);
+    if (o.external_doc_no) g.pos.add(String(o.external_doc_no).replace(/-\d+$/, ''));
+    g.value += o.line_value || 0;
+  }
+  return [...groups.values()].sort((a, b) => b.value - a.value);
+}
+
+function CheckRow({ g }) {
+  const orders = [...g.orders].sort();
+  const n = orders.length;
+  return (
+    <li className="tabular-nums">
+      <b>{n === 1 ? orders[0] : `${n} orders ${orders[0]}–${orders[n - 1]}`}</b> · {g.customer_name || g.customer_no} · {[...g.pos].join(', ')} · {g.why} · {fmtMoney(g.value)}
+    </li>
+  );
+}
+
 // One half of the page: AP or Sales, each with its own colour band, so the
 // two jobs never mix (2026-10-10).
 function Side({ title, icon: Icon, accent, to, linkLabel, testid, children }) {
@@ -159,11 +184,7 @@ export default function TodayPage() {
               <div className="font-medium">BC orders to check: {checks.count} line{checks.count === 1 ? '' : 's'} with a quantity far above this customer's usual ({fmtMoney(checks.value)} in open orders)</div>
               <p className="text-xs text-muted-foreground">Most likely a unit slip (thousands entered as units). The Hub does not change BC; correct these in BC.</p>
               <ul className="space-y-0.5 text-xs max-h-48 overflow-y-auto">
-                {checks.orders.slice(0, 50).map(o => (
-                  <li key={o.order_no + o.item} className="tabular-nums">
-                    <b>{o.order_no}</b> · {o.customer_name || o.customer_no} · {o.external_doc_no} · {o.why} · {fmtMoney(o.line_value)}
-                  </li>
-                ))}
+                {groupChecks(checks.orders).slice(0, 50).map(g => <CheckRow key={g.customer_no + g.why} g={g} />)}
               </ul>
             </div>
           )}
@@ -172,11 +193,7 @@ export default function TodayPage() {
               <div className="font-medium">BC prices to check: {checks.price_count} open order line{checks.price_count === 1 ? '' : 's'} priced differently from the customer's PO ({fmtMoney(checks.price_gap)} difference)</div>
               <p className="text-xs text-muted-foreground">The customer will likely pay the PO price. Confirm the price with the customer, or correct the order in BC.</p>
               <ul className="space-y-0.5 text-xs max-h-48 overflow-y-auto">
-                {checks.prices.slice(0, 50).map(o => (
-                  <li key={o.order_no + o.item} className="tabular-nums">
-                    <b>{o.order_no}</b> · {o.customer_name || o.customer_no} · {o.external_doc_no} · {o.why} · {fmtMoney(o.line_value)}
-                  </li>
-                ))}
+                {groupChecks(checks.prices).slice(0, 50).map(g => <CheckRow key={g.customer_no + g.why} g={g} />)}
               </ul>
             </div>
           )}

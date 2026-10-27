@@ -639,17 +639,28 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
         # No total was read (XPO multi-invoice PDFs: the "amount" was the
         # shipment weight, 2,280 lbs): nothing to code the lines against.
         return {"problem": "no invoice total was read from the document"}
+    coding = await coding_for(db, d.get("vendor_canonical"))
+    po = str(d.get("po_number_clean") or "").strip().upper()
+    from services.vendor_line_coding_service import is_product_vendor
+    # A product vendor's invoice on a BC PO is drafted from its receipt or
+    # the PO (below), never from learned lines: AP invoices against the
+    # receipt, whose quantity, unit cost and returnable-dunnage lines
+    # (BALLPALLET, OITIERSHEET ... at $0, from 2026-10-26) a lump sum
+    # cannot carry. Graded against Production: receipt/PO drafts 312/322
+    # exact, learned lines on product vendors 4/41 (2026-10-27).
+    receipt_vendor = bool(po) and await is_product_vendor(db, coding) and await po_in_bc(db, po)
     # Lines learned from AP's own BC entries, for vendors where the learned
     # coder has proven at least as good as the methods below on AP's past
     # invoices (line_learning_service: leave-one-out, re-scored every cycle).
-    try:
-        from services.line_learning_service import plan as learned_plan
-        lp = await learned_plan(db, d)
-    except Exception:
-        lp = None
+    lp = None
+    if not receipt_vendor:
+        try:
+            from services.line_learning_service import plan as learned_plan
+            lp = await learned_plan(db, d)
+        except Exception:
+            lp = None
     if lp:
         return lp
-    coding = await coding_for(db, d.get("vendor_canonical"))
     if coding and coding.get("dominant"):
         lines = single_line(coding, d)
         if REBILL_WHSEFRT and lines and str(lines[0].get("lineObjectNumber")).upper() == "FREIGHT":
@@ -666,8 +677,6 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
         pp = None
     if pp:
         return {"lines": pp, "source": "prepay"}
-    po = str(d.get("po_number_clean") or "").strip().upper()
-    from services.vendor_line_coding_service import is_product_vendor
     if po and await is_product_vendor(db, coding):
         # No receipt yet: the PO's open lines, when they ARE the invoice
         # (to the cent - every draft's total is verified in BC).
@@ -750,7 +759,7 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
                     and main_code_known(coding, lines) is False:
                 problem = "drafted with lines AP does not use for this vendor; re-drafting from AP's coding or the BC receipt"
                 requeue = True
-            elif d.get("draft_lines_source") not in PLANNED_SOURCES - {"vendor_coding"} and d.get("po_number_clean") \
+            elif d.get("draft_lines_source") not in PLANNED_SOURCES - {"vendor_coding", "learned_coding", "learned_coding_ai"} and d.get("po_number_clean") \
                     and await is_product_vendor(db, coding) \
                     and str((max([l for l in lines if l.get("lineObjectNumber")], key=lambda l: abs(float(l.get("quantity") or 0) * float(l.get("unitCost") or 0)), default={}) or {}).get("lineType") or "Item") == "Item":
                 # A product vendor drafted from guessed lines (before receipts

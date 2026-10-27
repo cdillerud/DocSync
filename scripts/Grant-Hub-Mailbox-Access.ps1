@@ -105,8 +105,24 @@ try {
         Write-Host ''
         $recipient = Get-Recipient -Identity $m -ErrorAction SilentlyContinue
         if (-not $recipient) { Write-Host "${m}: no such address in Exchange Online." -ForegroundColor Red; continue }
-        Write-Host "${m}: $($recipient.RecipientTypeDetails)"
+        Write-Host "${m}: $($recipient.RecipientTypeDetails) (primary $($recipient.PrimarySmtpAddress); object $($recipient.ExternalDirectoryObjectId))"
+        if ($check.Mailboxes[$m] -eq 'NOT_FOUND' -and $recipient.RecipientTypeDetails -match 'Mailbox' -and
+            $recipient.RecipientTypeDetails -ne 'GroupMailbox') {
+            $mbxInfo = Get-EXOMailbox -Identity $m -Properties UserPrincipalName -ErrorAction SilentlyContinue
+            Write-Host ("  A mailbox, but Graph doesn't find it by this address (it's an alias). Its sign-in name is {0}: " +
+                        "run the price-list job with -Mailbox {0} (or -Mailbox {1}).") -f $mbxInfo.UserPrincipalName,
+                        $recipient.ExternalDirectoryObjectId -ForegroundColor Yellow
+            continue
+        }
+        if ($recipient.RecipientTypeDetails -eq 'GroupMailbox') {
+            Write-Host ("  A Microsoft 365 group (a Team or group inbox). Its mail is read through the group, not as a user mailbox; " +
+                        "tell Claude 'GamerSalesteam is an M365 group' so the job reads it that way (needs Group.Read.All for the Hub app).") `
+                -ForegroundColor Yellow
+            continue
+        }
         if ($recipient.RecipientTypeDetails -notmatch 'Mailbox') {
+            $members = @(Get-DistributionGroupMember -Identity $m -ResultSize 50 -ErrorAction SilentlyContinue)
+            if ($members) { Write-Host ("  Members: " + (($members | ForEach-Object { $_.PrimarySmtpAddress }) -join ', ')) }
             Write-Host ("  This is a {0}, not a mailbox: mail to it lands in its members' inboxes, so there is nothing for the app to read. " +
                         "Make it a shared mailbox (or add a shared mailbox as a member and point the job at that), then run this again.") `
                 -f $recipient.RecipientTypeDetails -ForegroundColor Yellow

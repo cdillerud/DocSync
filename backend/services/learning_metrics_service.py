@@ -15,6 +15,7 @@ a trend line rather than one-off measurements:
 
 Stored in learning_metrics (one row per day), shown on the readiness page.
 """
+import collections
 import csv
 import logging
 import os
@@ -104,6 +105,34 @@ def _n(x) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(x or "").upper()).lstrip("0")
 
 
+async def no_document_vendors(db) -> Dict[str, str]:
+    """Vendors whose BC entries have no source document to receive, so they
+    are not counted against "reached the Hub":
+      - learned: BC entries in the last year, no Hub document ever, and staff
+        attached no file to any of their BC invoices in Zetadocs (trusts,
+        state taxes, HealthPartners);
+      - owner_confirmed (learning_state no_document_vendors): out of Square9's
+        scope by the owner's word - benefits, insurance, trusts (2026-10-26).
+    Vendors whose invoices staff do attach (Sort and Stack, Taft, parking)
+    stay counted: their document exists and should come to the Hub."""
+    since = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
+    st = await db.learning_state.find_one({"_id": "no_document_vendors"}) or {}
+    out = {str(v).upper(): "owner_confirmed" for v in st.get("owner_confirmed") or []}
+    hub = set(await db.hub_documents.distinct("vendor_canonical")) | set(await db.hub_documents.distinct("bc_link.bc_vendor_no"))
+    attached = set(await db.zetadocs_memory.distinct("company_no", {
+        "record_type": {"$in": ["Purchase Invoice", "Posted Purchase Invoice", "Purchase Credit Memo", "Posted Purchase Credit Memo"]},
+        "created": {"$gte": since}}))
+    n = collections.Counter()
+    async for b in db.bc_reference_cache.find(
+            {"bc_entity_type": {"$in": ["draft_purchase_invoice", "posted_purchase_invoice", "purchase_credit_memo"]},
+             "bc_posting_date": {"$gte": since}, "bc_status": {"$ne": "Canceled"}}, {"_id": 0, "bc_vendor_no": 1}):
+        n[b.get("bc_vendor_no")] += 1
+    for v, c in n.items():
+        if v and c >= 2 and v not in hub and v not in attached and v not in out:
+            out[v] = "no_document_learned"
+    return out
+
+
 async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
     """Would today's Hub logic have drafted exactly what AP entered in BC?
     For every BC purchase invoice / credit memo posted in the last `days`:
@@ -186,6 +215,12 @@ async def _draft_replay(db, days: int = 30) -> Dict[str, Any]:
                 out["po_ok"] += _n(hub_po) == _n(b["bc_order_number"])
     t = out["bc_documents"] or 1
     out["received_pct"] = round(100 * out["received"] / t, 1)
+    # Against the documents that exist to be received (no_document_vendors).
+    nodoc = await no_document_vendors(db)
+    excl = [k for k, b in bc.items() if str(b.get("bc_vendor_no") or "").upper() in nodoc and k not in seen]
+    expected = max(len(bc) - len(excl), 1)
+    out["no_document_entries"] = len(excl)
+    out["received_pct_expected"] = round(100 * out["received"] / expected, 1)
     out["draft_exact_pct"] = round(100 * out["draft_exact"] / t, 1)
     out["draft_exact_of_received_pct"] = round(100 * out["draft_exact"] / max(out["received"], 1), 1)
     out["draft_right_of_received_pct"] = round(100 * out["draft_exact_or_ap_adjusted"] / max(out["received"], 1), 1)

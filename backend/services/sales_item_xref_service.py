@@ -483,6 +483,7 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
 # measured no change: off.
 BLOCKED_FALLBACK_FITS = True
 DESC_REVISIONS = True
+PRINTED_OVER_DESC = True
 DESC_IDF = True
 DESC_T = 4.0
 DESC_M = 1.5
@@ -771,6 +772,15 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                         and c[2]["fits"] is not False), None)
         pick = printed or next((c for c in valued if c[2]["fits"] is True), None) or \
             next((c for c in valued if c[2]["fits"] is None and strong[c[0]]), None)
+        if PRINTED_OVER_DESC and pick and pick[1].startswith("description matches") and valued \
+                and valued[0][1] == "item number on the PO" and strong[valued[0][0]] and valued[0][0] != pick[0]:
+            # The PO prints a Gamer item number this customer buys: a price
+            # that disagrees is a price change, not a reason to take an item
+            # that only shares description words (Watkins FX00399B at a new
+            # 0.02421 became FX00309, a 20-410 cap that happened to cost that).
+            c = valued[0]
+            c[2]["price_check"] = "; ".join(x for x in (c[2].get("price_check"), "PO value disagrees: check the price") if x)
+            pick = c
         if not pick and PRINTED_KEEPS and len(valued) == 1 and strong[valued[0][0]] and valued[0][1] == "item number on the PO":
             # The PO prints the Gamer item number this customer buys and nothing
             # else is proposed: a value that disagrees is the unit (House G14

@@ -220,8 +220,9 @@ async def learn(db) -> Dict[str, Any]:
         item, k = items.most_common(1)[0]
         docs.append({"customer_no": cust, "key": key, "item": item, "n": k, "share": round(k / sum(items.values()), 2), "updated_at": now})
     for (cust, item), rs in ratio.items():
-        r = Counter(rs).most_common(1)[0][0]
-        docs.append({"customer_no": cust, "key": "ratio:" + item, "item": item, "ratio": r, "n": len(rs), "updated_at": now})
+        r, k = Counter(rs).most_common(1)[0]
+        docs.append({"customer_no": cust, "key": "ratio:" + item, "item": item, "ratio": r, "n": len(rs), "k": k,
+                     "share": round(k / len(rs), 2), "updated_at": now})
     if docs:
         await db.sales_item_xref.insert_many(docs)
     await db.sales_item_xref.create_index([("customer_no", 1), ("key", 1)])
@@ -300,6 +301,26 @@ def _successor(item: str, hist: Dict[str, Dict[str, Any]], blocked: set) -> Opti
     return max(fam, key=lambda i: hist[i].get("last_seq", -1)) if fam else None
 
 
+RATIO_MIN_AGREE = 2
+PRINTED_KEEPS = True
+
+
+SHORT_CODES = True
+LONG_DIGITS = True
+SIZE_WORDS = True
+
+
+def _desc_words(t: Any) -> set:
+    """Description words; sizes written alike on PO and BC: "14 OZ" = "14oz",
+    "89MM" = "89" (BC "89-400"), "1 OUNCE" = "1OZ"."""
+    u = str(t or "").upper()
+    if SIZE_WORDS:
+        u = re.sub(r"(\d)\s*(OUNCES?|OZ\.?)(?![A-Z])", r"\1OZ", u)
+        u = re.sub(r"(\d)\s*(ML|CC|G|L)(?![A-Z])", r"\1\2", u)
+        u = re.sub(r"(\d+)\s*MM(?![A-Z])", r"\1", u)
+    return set(re.findall(r"[A-Z0-9]+", u)) - _STOP
+
+
 def _code_tokens(desc: Any, min_len: int = 4) -> List[str]:
     """Code-like tokens of a PO line, normalized: dots kept inside codes
     (Sun Bum 20-20750.002444104A) and each token also joined with the next
@@ -331,14 +352,18 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
     # 1. A Gamer item number this customer buys, written on the PO.
     desc_u = re.sub(r"(?<=\d),(?=\d{3})", "", str(e.get("description") or "").upper())   # 48,000/plt -> 48000/plt
     txt0 = txt.replace("O", "0")
-    hits = sorted({orig for code, orig in known.items() if len(code) >= 4 and (code in txt or code.replace("O", "0") in txt0)
+    hits = sorted({orig for code, orig in known.items() if (len(code) >= 4 and (code in txt or code.replace("O", "0") in txt0)
+                   # a short item number the customer buys that opens the line
+                   # ("G14 - 14 OZ GLASS MASON JAR", House G14 / G88 / G121)
+                   or SHORT_CODES and len(code) == 3 and re.search(r"[A-Z]", code) and re.search(r"\d", code)
+                   and re.match(r"\s*(ITEM\s*#?:?\s*)?" + re.escape(orig) + r"(?![A-Z0-9])", desc_u))
                    # pack counts are not item numbers: "48000/plt", "58,240/TL"
                    and not re.search(re.escape(orig) + r"\s*/\s*(PLT|PALLET|CS|CASE|TL|TRUCK|LAYER)", desc_u)}, key=len, reverse=True)
     if hits and all(n(h) in n(hits[0]) for h in hits[1:]):
         h0 = hits[0]
         # A bare number (48000) is an item number only where the PO labels it
         # one; anywhere else it may be a pack count or size: needs confirming.
-        labelled = not h0.isdigit() or bool(re.search(r"(^|ITEM\s*#?:?\s*|MATERIAL\s*:?\s*|PART\s*(?:NO\.?|#)?:?\s*|STOCK\s*CODE\s*:?\s*|SKU\s*:?\s*|P/N\s*:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
+        labelled = not h0.isdigit() or (LONG_DIGITS and len(h0) >= 7) or bool(re.search(r"(^|ITEM\s*#?:?\s*|MATERIAL\s*:?\s*|PART\s*(?:NO\.?|#)?:?\s*|STOCK\s*CODE\s*:?\s*|SKU\s*:?\s*|P/N\s*:?\s*|#\s*)" + re.escape(h0) + r"\b", desc_u.strip()))
         out.append((h0, "item number on the PO", labelled))
     # 2. The customer's own item code, learned from their BC orders.
     for code in customer_codes(e):
@@ -384,12 +409,12 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
             out.append((pool[0], f"{tok} starts Gamer item {pool[0]}" + ("" if own else " (new item for this customer)"), bool(own)))
             break
     # 6. The customer's own items by shared size / finish / colour words.
-    words = set(re.findall(r"[A-Z0-9]+", str(e.get("description") or "").upper())) - _STOP
+    words = _desc_words(e.get("description"))
     if DESC_IDF:
         # Words weighted by how rare they are among this customer's items:
         # "20-400 FLINT BOSTON ROUND" is every Apex bottle, "2OZ" picks one.
         import math
-        items = {it: set(re.findall(r"[A-Z0-9]+", str(h.get("description") or "").upper())) - _STOP
+        items = {it: _desc_words(h.get("description"))
                  for it, h in hist.items() if is_product(it)}
         df = Counter(w for ws in items.values() for w in ws)
         N = len(items)
@@ -476,7 +501,15 @@ async def po_price_honor(db, customer_no: str, before_order: Optional[str] = Non
         return _HONOR_CACHE[key]
     limit = _order_seq(before_order) if before_order else 0
     honored = overridden = 0
+    low_h = low_o = 0
     seen = set()
+    # BC's price per item and order, to know the price a PO was compared to.
+    seqp: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
+    async for o in db.bc_sales_orders.find({"customer_no": customer_no}, {"_id": 0, "order_no": 1, "lines": 1}):
+        sq = _order_seq(o.get("order_no"))
+        for l in o.get("lines") or []:
+            if l.get("lineType") == "Item" and float(l.get("unitPrice") or 0) > 0:
+                seqp[str(l.get("lineObjectNumber") or "").upper()].append((sq, float(l["unitPrice"])))
     async for d in db.hub_documents.find({"sales_link.role": "customer_po", "sales_link.bc_customer_no": customer_no,
                                           "sales_link.order_no": {"$ne": None}},
                                          {"_id": 0, "extracted_fields.line_items": 1, "sales_link.order_no": 1}):
@@ -493,12 +526,28 @@ async def po_price_honor(db, customer_no: str, before_order: Optional[str] = Non
             if not pp or bp <= 0:
                 continue
             c = min((pp, pp * 1000), key=lambda v: abs(v - bp))
+            it = str(b.get("lineObjectNumber") or "").upper()
+            before = [x for x in seqp.get(it, []) if x[0] < seq]
+            if before:
+                last = max(before)[1]
+                cl = min((pp, pp * 1000), key=lambda v: abs(v - last))
+                if cl < last * 0.995 and cl >= last * 0.5:
+                    if abs(bp - cl) <= 0.005 * cl:
+                        low_h += 1
+                    elif abs(bp - last) <= 0.005 * last:
+                        low_o += 1
             if abs(c - bp) <= 0.005 * bp:
                 honored += 1
             elif abs(c - bp) <= 0.5 * bp:
                 overridden += 1
     _HONOR_CACHE[key] = (honored, overridden)
+    _LOW_PO[key] = (low_h, low_o)
     return honored, overridden
+
+
+# (BC took a PO price below its last price, BC kept its last price instead)
+_LOW_PO: Dict[Tuple[str, str], Tuple[int, int]] = {}
+LOW_PO_KEEPS_LAST = True
 
 
 def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[str, Any]],
@@ -509,7 +558,7 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
     ctx = ctx or {}
     eq = num(e.get("quantity"))
     price, uom = h.get("last_price"), h.get("uom") or ctx.get("item_uom")
-    if eq and rr:
+    if eq and rr and not rr.get("weak"):
         qty = round(eq * rr["ratio"], 4)
     elif eq and str(uom or "").upper() == "M" and eq >= 1000:
         qty = round(eq / 1000, 4)       # BC sells per thousand; the PO counts units
@@ -526,6 +575,19 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
             if price and abs(cand - price) <= 0.5 * price and ctx.get("overrides_po"):
                 price_source = f"last BC price (this customer's PO prices are usually replaced; PO shows {cand:g})"
                 fit_price = cand          # item/unit judged as before; only the price shown changes
+                break
+            low_h, low_o, hon_all, ovr_all = ctx.get("low_po") or (0, 0, 0, 0)
+            # This customer's own record decides; with none on lower prices,
+            # a customer whose PO prices BC nearly always keeps (Ortho's tiers)
+            # keeps theirs.
+            keeps_po = low_h > low_o or (low_h == low_o and hon_all >= 5 and hon_all >= 0.85 * (hon_all + ovr_all))
+            if LOW_PO_KEEPS_LAST and price and cand < price * 0.995 and cand >= price * 0.5 and not keeps_po:
+                # A PO below BC's last price is usually the customer's old
+                # price after an increase: across customers BC kept its last
+                # price 22 times, took the lower PO price 9 (7 Ortho, which
+                # this customer's own history then shows).
+                price_source = f"last BC price (PO shows {cand:g}, below BC's last price)"
+                fit_price = cand
                 break
             if price and abs(cand - price) <= 0.5 * price:
                 # The customer's PO price (a new price list, a quote): BC's
@@ -619,14 +681,22 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
     blocked = await load_blocked(db) if BLOCKED_SUCCESSOR else set()
     hist = await customer_history(db, customer_no, as_of=as_of, before_order=before_order)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
+    if RATIO_MIN_AGREE:
+        # A unit ratio one order taught (a partial entry, a tooling line paired
+        # with the bottle: Apex 311987 x4000, Watkins FG10100B x0.012) is not
+        # this customer's unit: only one that orders agree on.
+        # Kept as a reading the PO line's value may confirm, never the default.
+        rows = {k: (r if not k.startswith("ratio:") or (r.get("k") or 0) >= RATIO_MIN_AGREE and (r.get("share") or 0) >= 0.6
+                    else {**r, "weak": True}) for k, r in rows.items()}
     hon, ovr = await po_price_honor(db, customer_no, before_order)
+    low_po = tuple(_LOW_PO.get((customer_no, before_order or "")) or (0, 0)) + (hon, ovr)
     overrides_po = ovr >= HONOR_MIN_IGNORED and ovr / max(1, hon + ovr) >= HONOR_MAX_RATE
     out = []
     for e in extracted:
         chosen = None
         cands = await _candidates(db, e, hist, rows)
         valued = [(item, how, _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
-                                     {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})) for item, how, _ in cands]
+                                     {"item_uom": await item_uom(db, item), "overrides_po": overrides_po, "low_po": low_po})) for item, how, _ in cands]
         # The first candidate the PO line's value confirms; else the first not
         # ruled out, in priority order.
         strong = {item: st for item, _, st in cands}
@@ -641,6 +711,13 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                         and c[2]["fits"] is not False), None)
         pick = printed or next((c for c in valued if c[2]["fits"] is True), None) or \
             next((c for c in valued if c[2]["fits"] is None and strong[c[0]]), None)
+        if not pick and PRINTED_KEEPS and len(valued) == 1 and strong[valued[0][0]] and valued[0][1] == "item number on the PO":
+            # The PO prints the Gamer item number this customer buys and nothing
+            # else is proposed: a value that disagrees is the unit (House G14
+            # by the case of 12) or a new price, not another item.
+            c = valued[0]
+            c[2]["price_check"] = "; ".join(x for x in (c[2].get("price_check"), "PO value disagrees: check the quantity and unit") if x)
+            pick = c
         if not pick and DESC_CONFIRMS:
             # A weak candidate (a code seen once: Horseshoe CN000112A from one
             # Ball invoice) whose BC description shares a word no other item
@@ -659,7 +736,7 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
             if newer:
                 item, how = newer, how + f" · newer revision {newer} the customer now buys"
                 v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
-                           {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})
+                           {"item_uom": await item_uom(db, item), "overrides_po": overrides_po, "low_po": low_po})
             if BLOCKED_SUCCESSOR and item in blocked:
                 # BC refuses a blocked item: the customer's replacement for it,
                 # else another candidate the PO line does not rule out.
@@ -669,7 +746,7 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                     how = how + f" · {item} is blocked in BC; the customer now buys {succ}"
                     item = succ
                     v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
-                               {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})
+                               {"item_uom": await item_uom(db, item), "overrides_po": overrides_po, "low_po": low_po})
             chosen = {"item": item, "how": how + (" · PO value agrees" if v["fits"] else ""), **v}
         chosen = chosen or {"item": None, "how": None, "quantity": None, "unit_price": None, "unit_of_measure": None, "price_source": None}
         chosen.pop("fits", None)

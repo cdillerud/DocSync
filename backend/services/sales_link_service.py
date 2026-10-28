@@ -195,7 +195,22 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
     # supplier's quote / acknowledgement, not a customer order.
     to_gamer = bool(re.search(r"^\s*gamer\b|\bgamer\s*packaging\b", str(ef.get("customer") or ""), re.I))
     po_words = bool(_PO_WORDS.search(f"{d.get('file_name')} {d.get('email_subject')}"))
-    if dt == "AP_Invoice" and internal:
+    fwd_cust = None
+    if (FORWARDED_PO and internal and pos and has_lines and not nums and not gamer_pos and not to_gamer
+            and dt in ("Sales_Order", "AP_Invoice", "Unknown_Document") and str(ef.get("customer") or "").strip()
+            and (order or re.match(r"\s*(fw|fwd)\s*:", str(d.get("email_subject") or ""), re.I))):
+        # A customer's PO forwarded by Gamer staff ("FW: New Sun Bum
+        # PO011095", 2026-10-28): it carries the customer's PO number and
+        # order lines and names no Gamer order number, so it is the order,
+        # not Gamer's copy. The sender is Gamer, so the customer comes from
+        # the document. Not yet in BC, only a forward counts: an older PO
+        # attached to a reply is conversation (Horseshoe P0028755 on
+        # "RE: New PO P0029742").
+        if not order:
+            from services.entity_resolution_service import resolve_customer
+            fwd_cust = getattr(await resolve_customer(d), "customer_no", None) or None
+        role = "customer_po"
+    elif dt == "AP_Invoice" and internal:
         # Gamer's own invoice / export paperwork forwarded by staff.
         role = "gamer_order_copy" if (order or nums) else "internal_other"
     elif dt == "AP_Invoice" and cp.get("customer") and not cp.get("vendor") and (pos or po_words or has_lines) and not gamer_pos:
@@ -258,7 +273,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
             if el and bl and not pair(el, bl):
                 order, match = None, None
     return {"role": role, "order_no": (order or {}).get("order_no"), "match": match,
-            "bc_customer_no": (order or {}).get("customer_no") or cp.get("customer"),
+            "bc_customer_no": (order or {}).get("customer_no") or cp.get("customer") or fwd_cust,
             "counterparty": "gamer" if internal else ("customer" if cp.get("customer") else ("vendor" if cp.get("vendor") else "unknown")),
             "sender_domain": sender_dom, "customer_po": sorted(pos)[:3], "gamer_order_refs": sorted(nums)[:5],
             "gamer_po_refs": sorted(gamer_pos)[:5]}
@@ -266,6 +281,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
 
 RELABEL_CUSTOMER_PO = True
 PAPERWORK_NOT_PO = True
+FORWARDED_PO = True
 
 
 async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:

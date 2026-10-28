@@ -17,6 +17,13 @@ from typing import Any, Dict
 
 from services.sales_item_xref_service import resolve_lines, is_product, load_item_categories, _charge_text
 
+def _line_value(e: Dict[str, Any]) -> float:
+    try:
+        return float(e.get("total") or 0) or float(e.get("quantity") or 0) * float(e.get("unit_price") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _po_side_price(l: Dict[str, Any]) -> float:
     m = re.search(r"PO shows ([0-9.]+)", str(l.get("price_source") or ""))
     return float(m.group(1)) if m else float(l["unit_price"])
@@ -203,8 +210,14 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         # expected, and each line carries the price check for the rep.
         replaced = all("usually replaced" in str(l.get("price_source") or "") for l in lines)
         with_charges_po = round(with_charges - planned + planned_po, 2)
+        # The PO's own freight / pallet / small-order lines are on its total
+        # but not among the product lines (Reeds freight 745, Ortho SMALL 300
+        # + pallets): count them at the PO's value.
+        po_own_charges = round(sum(_line_value(e) for e in ((d.get("extracted_fields") or {}).get("line_items") or [])
+                                   if all(e is not x for x in el)), 2)
         if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol and not replaced \
-                and abs(planned_po - float(po_total)) > tol and abs(with_charges_po - float(po_total)) > tol:
+                and abs(planned_po - float(po_total)) > tol and abs(with_charges_po - float(po_total)) > tol \
+                and not (po_own_charges and abs(planned_po + po_own_charges - float(po_total)) <= tol):
             return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "totals_differ",
                     "sales_stage_detail": f"lines {planned:,.2f} vs PO {float(po_total):,.2f}"}
     return {**out, "sales_stage": "ready"}

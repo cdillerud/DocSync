@@ -209,6 +209,7 @@ async def refresh(db, days: int = 45) -> Dict[str, Any]:
     docs = [d async for d in db.hub_documents.find(
         {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["SALES", "Sales"]}, "sales_link": {"$exists": True}},
         {"_id": 1, "id": 1, "status": 1, "pilot_mailbox": 1, "sales_link": 1, "sales_draft": 1, "sales_draft_skipped": 1,
+         "sales_stage": 1, "sales_stage_reason": 1,
          "extracted_fields.line_items": 1, "created_utc": 1, "amount_float": 1, "customer_canonical": 1, "file_name": 1, "email_subject": 1}).sort([("created_utc", 1)])]
     # Several copies / pages of one customer PO: the one with the most lines counts.
     best: Dict[str, Any] = {}
@@ -231,7 +232,14 @@ async def refresh(db, days: int = 45) -> Dict[str, Any]:
         st["sales_rep"] = rep_assign(d, rctx)
         stats[st["sales_stage"]] += 1
         unset = {k2: "" for k2 in ("sales_stage_reason", "sales_stage_detail", "sales_resolution", "bc_order_no", "bc_draft_no", "duplicate_of") if k2 not in st}
-        await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**st, "sales_stage_at": now}, **({"$unset": unset} if unset else {})})
+        upd: Dict[str, Any] = {"$set": {**st, "sales_stage_at": now}, **({"$unset": unset} if unset else {})}
+        if (d.get("sales_stage"), d.get("sales_stage_reason")) != (st["sales_stage"], st.get("sales_stage_reason")):
+            # Each change of stage, kept: whether a PO was draftable before
+            # inside sales entered it can only be told afterwards from this.
+            upd["$push"] = {"sales_stage_log": {"$each": [{"stage": st["sales_stage"], "reason": st.get("sales_stage_reason"), "at": now}],
+                                                "$slice": -20}}
+            stats["changed"] += 1
+        await db.hub_documents.update_one({"_id": d["_id"]}, upd)
     return dict(stats)
 
 

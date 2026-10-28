@@ -52,6 +52,17 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
     if doc_type not in AUTOFILE_TYPES:
         return {"success": False, "reason": f"not_a_shipping_type: {doc_type}", "skipped": True}
 
+    # A customer's PO that came to sales is not shipping paperwork, whatever
+    # its pack notes made the classifier think: 106 were filed under
+    # Warehouse Not International/Assembly (2026-09-28..10-27).
+    if str(doc.get("mailbox_category") or "").upper() == "SALES":
+        try:
+            from services.sales_link_service import counterparty_maps, link_one
+            if (await link_one(db, doc, await counterparty_maps(db))).get("role") == "customer_po":
+                return {"success": False, "skipped": True, "reason": "customer PO in the sales mailbox, not shipping paperwork"}
+        except Exception as e:
+            logger.warning("[AutoFile] sales role check failed for %s: %r", doc_id, e)
+
     # Already filed?
     if doc.get("filed_at") or doc.get("auto_filed"):
         return {"success": True, "skipped": True, "reason": "already_filed"}

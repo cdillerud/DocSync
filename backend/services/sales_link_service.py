@@ -144,7 +144,9 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
     internal = sender_dom.endswith(GAMER_DOMAIN)
     cp = maps.get(sender_dom, {}) if not internal else {}
     text = _texts(d)
-    dt = d.get("document_type") or ""
+    # The classifier's own type: run() relabels customer POs, which must not
+    # feed back into how the role is decided.
+    dt = d.get("document_type_classifier") or d.get("document_type") or ""
 
     # Customer PO -> BC order with that externalDocumentNumber.
     pos = set()
@@ -251,6 +253,9 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
             "gamer_po_refs": sorted(gamer_pos)[:5]}
 
 
+RELABEL_CUSTOMER_PO = True
+
+
 async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     maps = await counterparty_maps(db)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -259,7 +264,7 @@ async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     learned = Counter()
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["SALES", "Sales"]}, "status": {"$ne": "batch_parent"}},
-            {"_id": 1, "id": 1, "document_type": 1, "email_sender": 1, "email_subject": 1, "file_name": 1,
+            {"_id": 1, "id": 1, "document_type": 1, "document_type_classifier": 1, "email_sender": 1, "email_subject": 1, "file_name": 1,
              "extracted_fields": 1, "po_number_raw": 1, "po_number_clean": 1, "email_id": 1}):
         r = await link_one(db, d, maps)
         stats["role:" + r["role"]] += 1
@@ -269,7 +274,21 @@ async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
                 and r["sender_domain"] not in _FREE_MAIL:
             learned[(r["sender_domain"], r["bc_customer_no"])] += 1
         if apply:
-            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sales_link": {**r, "linked_at": now}}})
+            upd: Dict[str, Any] = {"sales_link": {**r, "linked_at": now}}
+            # Customer POs the classifier called a packing list (pack notes
+            # "4725/Plt, 89775/TL"), an order confirmation or an invoice: 178
+            # of 393 since 2026-09-28. The link (checked against BC orders)
+            # decides the label; the classifier's type is kept, and comes back
+            # if the role changes.
+            if RELABEL_CUSTOMER_PO and r["role"] == "customer_po" and d.get("document_type") != "Sales_Order":
+                stats["relabelled"] += 1
+                upd.update({"document_type": "Sales_Order", "document_type_classifier": d.get("document_type_classifier") or d.get("document_type"),
+                            "document_type_corrected": {"at": now, "reason": "customer PO (sales link)"}})
+            elif RELABEL_CUSTOMER_PO and r["role"] != "customer_po" and d.get("document_type_classifier") \
+                    and d.get("document_type") == "Sales_Order" and d["document_type_classifier"] != "Sales_Order":
+                upd.update({"document_type": d["document_type_classifier"],
+                            "document_type_corrected": {"at": now, "reason": f"no longer a customer PO ({r['role']})"}})
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": upd})
     if apply:
         for (dm, cust), n in learned.items():
             await db.sales_customer_domains.update_one({"domain": dm, "customer_no": cust},

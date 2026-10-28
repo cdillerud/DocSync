@@ -229,7 +229,10 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         role = "gamer_order_copy" if (order or nums) else "internal_other"
     elif dt == "AP_Invoice" and cp.get("customer") and not cp.get("vendor") and (pos or po_words or has_lines) and not gamer_pos:
         # A customer's PO the classifier called an invoice (Sun Bum PO010716).
-        role = "customer_po"
+        # Only "PO" in the file name, with no PO number or lines read: a
+        # blank or terms page split from the customer's PO (Hearthside
+        # 5501422099 page 3 of 7), customer mail, not a second order.
+        role = "customer_po" if (pos or has_lines) else "customer_other"
     elif dt == "AP_Invoice":
         role = "ap_invoice"
     elif dt == "AR_Invoice":

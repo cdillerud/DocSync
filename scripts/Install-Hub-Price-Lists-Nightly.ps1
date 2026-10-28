@@ -110,7 +110,8 @@ if ($Preview) {
           "printf 'SHELL=/bin/bash\nPATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\n$Time * * * root /opt/gpi-jobs/price-lists-nightly.sh\n' > /etc/cron.d/gpi-price-lists; " +
           "chmod 644 /etc/cron.d/gpi-price-lists; echo INSTALLED; tail -1 /etc/cron.d/gpi-price-lists; " +
           $(if ($RunNow) { "echo RUN_NOW; env $envs /opt/gpi-jobs/price-lists-nightly.sh; " } else { "" }) +
-          "echo LAST_RUNS; tail -3 /var/log/gpi-price-lists.log 2>/dev/null || echo none"
+          "echo LAST_RUNS; tail -3 /var/log/gpi-price-lists.log 2>/dev/null | cut -c1-160 || echo none; " +
+          "test -f /etc/cron.d/gpi-price-lists && echo INSTALLED"  # last: Azure returns only the end of long output
 }
 Write-Host $(if ($Preview) { 'Listing the price PDFs on OneGamer (nothing is sent) ...' } elseif ($RunNow) { 'Installing and running once now (the first run can take several minutes) ...' } else { 'Installing ...' })
 $text = Invoke-OnVm $sh

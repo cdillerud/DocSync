@@ -86,6 +86,14 @@ def tokens(d: Dict[str, Any], rule_path: str) -> set:
     for k in ("freight_direction", "freight_gl_classification"):
         if d.get(k):
             t.add(k + "=" + str(d.get(k))[:30])
+    # Who the load is from and to, as the bill names them (Tumalo: shipper
+    # "CANPACK, Olyphant PA" / "BALL CORP", consignee "Best Bev"): the
+    # carrier's PO alone does not say whose product it hauled. Replay
+    # 2026-10-27, 679 held-out filings: 591 -> 597 right, none lost.
+    for k, pre in (("shipper", "sh:"), ("consignee", "cn:")):
+        v = str(ef.get(k) or "").split(",")[0].lower()
+        for w in re.findall(r"[a-z]{3,}", v)[:3]:
+            t.add(pre + w)
     return t
 
 

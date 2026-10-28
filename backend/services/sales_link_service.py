@@ -138,6 +138,15 @@ async def _is_gamer_po_number(db, pos, cp: Dict[str, Any], d: Dict[str, Any]) ->
     return bool(cp.get("vendor")) and (await _gamer_po(db, pos) or await _thread_has_gamer_po(db, d))
 
 
+async def _doc_customer(db, d: Dict[str, Any]) -> Optional[str]:
+    """The BC customer named on the document itself. run() reads only a few
+    fields; the resolver needs the whole document (Shepherd Boy PO 421 came
+    out "customer_unknown")."""
+    from services.entity_resolution_service import resolve_customer
+    full = await db.hub_documents.find_one({"_id": d["_id"]}, {"file_content_b64": 0}) if d.get("_id") else None
+    return getattr(await resolve_customer(full or d), "customer_no", None) or None
+
+
 async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     ef = d.get("extracted_fields") or {}
     sender_dom = domain(d.get("email_sender"))
@@ -163,6 +172,12 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
             # Valley's PO 665 never linked to BC 120303.
             best = ([o for o in cands if o["customer_no"] == cp.get("customer")]
                     or [o for o in cands if o["customer_no"] in pref] or cands)
+            if len({o["customer_no"] for o in best}) > 1 and internal and FORWARDED_PO and not _ORDER_NO.search(text.upper()):
+                # A staff forward has no customer domain to prefer: the
+                # customer named on the document decides (Kill Cliff
+                # PO-02188 vs Hume Supply's PO 2188).
+                dc = await _doc_customer(db, d)
+                best = [o for o in best if o["customer_no"] == dc] or best
             if len({o["customer_no"] for o in best}) == 1:
                 order, match = best[0], "customer_po"
     # Gamer order number named on the document.
@@ -207,11 +222,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         # attached to a reply is conversation (Horseshoe P0028755 on
         # "RE: New PO P0029742").
         if not order:
-            from services.entity_resolution_service import resolve_customer
-            # run() reads only a few fields; the resolver needs the whole
-            # document (Shepherd Boy PO 421 came out "customer_unknown").
-            full = await db.hub_documents.find_one({"_id": d["_id"]}, {"file_content_b64": 0}) if d.get("_id") else None
-            fwd_cust = getattr(await resolve_customer(full or d), "customer_no", None) or None
+            fwd_cust = await _doc_customer(db, d)
         role = "customer_po"
     elif dt == "AP_Invoice" and internal:
         # Gamer's own invoice / export paperwork forwarded by staff.

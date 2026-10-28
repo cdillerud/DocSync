@@ -259,6 +259,7 @@ async def customer_history(db, customer_no: str, as_of: Optional[str] = None,
             it = str(l["lineObjectNumber"]).upper()
             h = hist.setdefault(it, {"n": 0, "last_seq": -1, "last_date": "", "description": l.get("description"), "prices": set(), "qtys": []})
             h["n"] += 1
+            h["seen_seq"] = max(h.get("seen_seq", -1), seq)
             if float(l.get("quantity") or 0) > 0:
                 h["qtys"].append(float(l["quantity"]))
             if float(l.get("unitPrice") or 0) > 0:
@@ -371,6 +372,12 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
         if r and r["share"] >= CODE_SHARE:
             out.append((r["item"], f"customer item {code} (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
             break
+    if NEWER_CODE_XREF and len(out) >= 2 and out[0][1] == "item number on the PO" and out[1][1].startswith("customer item") \
+            and out[1][0] != out[0][0] and (hist.get(out[1][0]) or {}).get("seen_seq", -1) > (hist.get(out[0][0]) or {}).get("seen_seq", -1):
+        # The customer's number now means another item: BC has entered it as
+        # that item since the customer last bought the one printed
+        # (Fischer & Wieser RM00002344 -> F23120-CPFISCHWI).
+        out[0], out[1] = (out[1][0], out[1][1] + f" (BC has used it since their last {out[0][0]})", True), out[0]
     # 3. Any Gamer item number written on the PO (new item for this customer).
     if not _charge_text(e):
         desc_up = str(e.get("description") or "").upper()
@@ -388,6 +395,8 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
                 break
     # 4. The customer's description, learned.
     r = rows.get("desc:" + desc_key(e))
+    if SPACELESS_DESC:
+        r = rows.get("dsk:" + _squash(desc_key(e))) or r
     if r and r["share"] >= DESC_SHARE:
         out.append((r["item"], f"customer description (learned from {r['n']} order{'s' if r['n'] > 1 else ''})", r["n"] >= 2))
     if _charge_text(e):
@@ -650,11 +659,27 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
                 checks.append(f"last BC price is from {str(h['last_date'])[:10]}")
         except Exception:
             pass
+    if ZERO_PRICE_LEARNED and price is None and not po_price and h.get("n") and not h.get("prices"):
+        # BC has entered this item for this customer only ever at 0
+        # (Fischer & Wieser's consigned glass and closures).
+        price, price_source = 0.0, f"0, as on all {h['n']} earlier BC line{'s' if h['n'] > 1 else ''} for this customer"
     return {"quantity": qty, "unit_price": price, "unit_of_measure": uom, "price_source": price_source, "fits": fits,
             "price_check": "; ".join(checks) or None}
 
 
 DESC_CONFIRMS = True
+NEWER_CODE_XREF = True
+ZERO_PRICE_LEARNED = True
+SPACELESS_DESC = 1
+ONCE_NO_VALUE = 1
+
+
+def _squash(k: str) -> str:
+    """One customer description however it is spaced ("VANILLA12KRP2" /
+    "VANILLA 12KRP2"); level 2 also drops a dated tail ("REQUIRED 2026 10 15")."""
+    if SPACELESS_DESC >= 2:
+        k = re.sub(r"\b(REQUIRED|REQUESTED|DELIVERY|UOM|DUE|SHIP DATE)\b.*$", "", k)
+    return k.replace(" ", "")
 
 
 def _desc_confirms(e: Dict[str, Any], item: str, hist: Dict[str, Dict[str, Any]]) -> bool:
@@ -688,6 +713,18 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
         # Kept as a reading the PO line's value may confirm, never the default.
         rows = {k: (r if not k.startswith("ratio:") or (r.get("k") or 0) >= RATIO_MIN_AGREE and (r.get("share") or 0) >= 0.6
                     else {**r, "weak": True}) for k, r in rows.items()}
+    if SPACELESS_DESC:
+        groups = defaultdict(list)
+        for k, r in list(rows.items()):
+            if k.startswith("desc:"):
+                groups[_squash(k[5:])].append(r)
+        for sk, rs in groups.items():
+            items, tot = Counter(), 0.0
+            for r in rs:
+                items[r["item"]] += r["n"]
+                tot += r["n"] / max(r.get("share") or 1, 0.01)
+            it, k = items.most_common(1)[0]
+            rows["dsk:" + sk] = {"item": it, "n": k, "share": round(k / max(tot, k), 2)}
     hon, ovr = await po_price_honor(db, customer_no, before_order)
     low_po = tuple(_LOW_PO.get((customer_no, before_order or "")) or (0, 0)) + (hon, ovr)
     overrides_po = ovr >= HONOR_MIN_IGNORED and ovr / max(1, hon + ovr) >= HONOR_MAX_RATE
@@ -728,6 +765,19 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                 if c[2]["fits"] is None and c[1].startswith("customer item") and _desc_confirms(e, c[0], hist):
                     pick = (c[0], c[1] + " · description agrees", c[2])
                     break
+        if not pick and ONCE_NO_VALUE and valued and not num(e.get("unit_price")) and not num(e.get("total")) \
+                and (ONCE_NO_VALUE >= 2 or len(valued) == 1):
+            # A price-less release (Horseshoe, Fischer's consigned glass): the
+            # customer's own code or description, learned from one order, is
+            # all there is to go on and nothing on the line disagrees.
+            c = valued[0]
+            # A code counts only where it opens the line, as an item number
+            # does ("RM00002406 - CLOS 63 MM"), not a pack code at the end
+            # ("HORSESHOE NURRI COOKIES 12KRP2", shared by every flavour).
+            m = re.match(r"customer item (\S+) ", c[1])
+            opens = bool(m) and n(e.get("description")).startswith(m.group(1))
+            if c[2]["fits"] is None and (c[1].startswith("customer description") or opens):
+                pick = c
         if pick:
             item, how, v = pick
             # The customer has since moved to a newer revision of this item

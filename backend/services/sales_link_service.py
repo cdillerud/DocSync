@@ -224,7 +224,11 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         role = "other"
     if role == "customer_po" and not pos and (
             (dt == "Order_Confirmation" and cp.get("vendor"))
-            or re.search(r"\bquot(e|ation)s?\b", str(d.get("file_name") or ""), re.I)):
+            or re.search(r"\bquot(e|ation)s?\b", str(d.get("file_name") or ""), re.I)
+            # Gamer's own quote sent back beside the customer's PO (Midwest
+            # Custom Bottling QUO-2025-20791 with PO 004758): the classifier
+            # read a quote and it carries no PO number of its own.
+            or dt == "Sales_Quote"):
         # An order confirmation from a party that is also a Gamer supplier
         # (Fast Track, O-I) confirms Gamer's PO; a quote file with no PO
         # number is not an order.

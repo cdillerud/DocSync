@@ -208,7 +208,10 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         # "RE: New PO P0029742").
         if not order:
             from services.entity_resolution_service import resolve_customer
-            fwd_cust = getattr(await resolve_customer(d), "customer_no", None) or None
+            # run() reads only a few fields; the resolver needs the whole
+            # document (Shepherd Boy PO 421 came out "customer_unknown").
+            full = await db.hub_documents.find_one({"_id": d["_id"]}, {"file_content_b64": 0}) if d.get("_id") else None
+            fwd_cust = getattr(await resolve_customer(full or d), "customer_no", None) or None
         role = "customer_po"
     elif dt == "AP_Invoice" and internal:
         # Gamer's own invoice / export paperwork forwarded by staff.

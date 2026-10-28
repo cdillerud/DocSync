@@ -288,6 +288,16 @@ async def load_blocked(db) -> set:
     return _BLOCKED
 
 
+def _same_family(a: str, b: str) -> bool:
+    """Two numbers of one item family: a long shared stem (80-25060.001R444102
+    and 80-25060.002), not a shared size or prefix alone."""
+    x, y = n(a), n(b)
+    k = 0
+    while k < min(len(x), len(y)) and x[k] == y[k]:
+        k += 1
+    return k >= 5 and k >= 0.6 * min(len(x), len(y))
+
+
 def _successor(item: str, hist: Dict[str, Dict[str, Any]], blocked: set) -> Optional[str]:
     """The item that replaced a blocked one for this customer: same BC
     description, not blocked, ordered after it (Giovanni's 14oz jar
@@ -428,6 +438,17 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
         df = Counter(w for ws in items.values() for w in ws)
         N = len(items)
         scored = sorted(((sum(math.log((N + 1) / (df[w] + 0.5)) for w in words & ws), it) for it, ws in items.items() if ws), reverse=True)
+        if DESC_REVISIONS:
+            # Print revisions match on the same words (Echelon Cherry Lime
+            # Landmine 3286-7M01-PFASNI / 3286-7M02): keep the one the
+            # customer bought last, so the margin is measured to a different item.
+            best_by = {}
+            for sc, it in scored:
+                k = (round(sc, 6), frozenset(words & items[it]))
+                if k not in best_by or (hist[it].get("seen_seq", -1), it) > (hist[best_by[k]].get("seen_seq", -1), best_by[k]):
+                    best_by[k] = it
+            keep = set(best_by.values())
+            scored = [x for x in scored if x[1] in keep]
         if scored and scored[0][0] >= DESC_T and (len(scored) == 1 or scored[0][0] >= scored[1][0] + DESC_M):
             sure = DESC_STRONG and scored[0][0] >= DESC_STRONG and (len(scored) == 1 or scored[0][0] >= 1.25 * scored[1][0])
             out.append((scored[0][1], "description matches an item this customer buys", bool(sure)))
@@ -460,6 +481,8 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
 # items confirmed on BC's price only, and no rule-out by value for
 # customers whose PO prices BC replaces. PRINTED_FIRST and AGREE_STRONG
 # measured no change: off.
+BLOCKED_FALLBACK_FITS = True
+DESC_REVISIONS = True
 DESC_IDF = True
 DESC_T = 4.0
 DESC_M = 1.5
@@ -790,8 +813,13 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
             if BLOCKED_SUCCESSOR and item in blocked:
                 # BC refuses a blocked item: the customer's replacement for it,
                 # else another candidate the PO line does not rule out.
+                # Another candidate only where the PO line's value confirms it
+                # or it is a revision of the blocked number (Sun Bum
+                # 80-25060.001R444102 -> 80-25060.002): "not ruled out" put
+                # Giovanni's 63mm cap 509341 on an 82mm line (AA012014, PO-63614).
                 succ = _successor(item, hist, blocked) or next(
-                    (c[0] for c in valued if c[0] not in blocked and c[2]["fits"] is not False), None)
+                    (c[0] for c in valued if c[0] not in blocked and c[2]["fits"] is not False
+                     and (not BLOCKED_FALLBACK_FITS or c[2]["fits"] is True or _same_family(item, c[0]))), None)
                 if succ:
                     how = how + f" · {item} is blocked in BC; the customer now buys {succ}"
                     item = succ

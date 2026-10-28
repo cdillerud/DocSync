@@ -17,6 +17,11 @@ from typing import Any, Dict
 
 from services.sales_item_xref_service import resolve_lines, is_product, load_item_categories, _charge_text
 
+def _po_side_price(l: Dict[str, Any]) -> float:
+    m = re.search(r"PO shows ([0-9.]+)", str(l.get("price_source") or ""))
+    return float(m.group(1)) if m else float(l["unit_price"])
+
+
 REASONS = {
     "customer_unknown": "Which customer is this? The sender is not linked to a BC customer.",
     "customer_po_missing": "No customer PO number was read from the document.",
@@ -182,6 +187,11 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
     out["sales_resolution"]["to_complete"] = await to_complete(db, cust, lines + charges)
     planned = round(sum(float(l["quantity"]) * float(l["unit_price"]) for l in lines), 2)
     with_charges = round(planned + sum(float(c["quantity"]) * float(c["unit_price"]) for c in charges), 2)
+    # Compared with the PO at the PO's own prices where the Hub chose BC's
+    # price on purpose ("last BC price (PO shows 97.69, below BC's last
+    # price)", Alberts 120855): the check is for a missing line or a wrong
+    # quantity, not for a price the rep will see flagged on the line.
+    planned_po = round(sum(float(l["quantity"]) * _po_side_price(l) for l in lines), 2)
     out["sales_resolution"]["planned_total"] = planned
     out["sales_resolution"]["planned_total_with_charges"] = with_charges
     po_total = d.get("amount_float")
@@ -192,7 +202,9 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         # prices (Horseshoe PO 145.75, BC 155.49): a different total is
         # expected, and each line carries the price check for the rep.
         replaced = all("usually replaced" in str(l.get("price_source") or "") for l in lines)
-        if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol and not replaced:
+        with_charges_po = round(with_charges - planned + planned_po, 2)
+        if abs(planned - float(po_total)) > tol and abs(with_charges - float(po_total)) > tol and not replaced \
+                and abs(planned_po - float(po_total)) > tol and abs(with_charges_po - float(po_total)) > tol:
             return {**out, "sales_stage": "needs_rep", "sales_stage_reason": "totals_differ",
                     "sales_stage_detail": f"lines {planned:,.2f} vs PO {float(po_total):,.2f}"}
     return {**out, "sales_stage": "ready"}

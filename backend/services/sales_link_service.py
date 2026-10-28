@@ -233,6 +233,13 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
         # (Fast Track, O-I) confirms Gamer's PO; a quote file with no PO
         # number is not an order.
         role = "supplier" if dt == "Order_Confirmation" else "customer_other"
+    if PAPERWORK_NOT_PO and role == "customer_po" and order and not has_lines and dt not in ("Sales_Order", "AP_Invoice"):
+        # Paperwork about an order already in BC that carries no order lines:
+        # a carrier's bill of lading and label (Ortho 119079), a supplier's
+        # confirmation of Gamer's PO for it (O-I for Giovanni 120989), a spec
+        # sheet. It stays filed against the order; it is not the order.
+        role = ("shipping" if dt in ("Shipping_Document", "Warehouse_Receipt")
+                else "supplier" if cp.get("vendor") else "customer_other")
     if role == "customer_po" and match == "gamer_order_no":
         # Only a Gamer order number links this "customer PO": not when its own
         # PO number is a Gamer purchase order (Gamer's PO to O-I naming the
@@ -258,6 +265,7 @@ async def link_one(db, d: Dict[str, Any], maps: Dict[str, Dict[str, Any]]) -> Di
 
 
 RELABEL_CUSTOMER_PO = True
+PAPERWORK_NOT_PO = True
 
 
 async def run(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:

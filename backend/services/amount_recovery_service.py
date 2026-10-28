@@ -2,9 +2,17 @@
 own text.
 
 Freight bills (XPO, TForce) had the shipment weight read as the amount
-("1,055 lbs" -> $1,055); intake now drops such amounts
-(amount_weight_suspect). The PDF text layer states the real figure
-("TOTAL DUE: US $532.85"); when it states exactly one, that is the amount.
+("1,055 lbs" -> $1,055); intake now drops such amounts. The PDF text
+layer states the real figure ("TOTAL DUE: US $532.85"); when it states
+exactly one, that is the amount.
+
+Any AP invoice left without an amount is tried, not only those intake
+marked: the marker never reached the stored document, so from 2026-10-12
+every XPO bill (39 of 39) sat without an amount. Measured on invoices
+linked to BC since 2026-08-15: a single printed total agreed with AP's
+amount 1,063 times, differed 25 (AP entering part of a Tumalo bill); on
+the 19 that had no amount it agreed 19 of 19. Last 60 days only; a June
+forwarder statement (Xolution 179,574.28 vs 5,695 entered) is why.
 """
 import base64
 import logging
@@ -64,12 +72,20 @@ async def recover(db, apply: bool = True, limit: int = 300) -> Dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
     out = {"checked": 0, "recovered": 0, "examples": [],
            "order_confirmations": await reclassify_order_confirmations(db, apply)}
-    async for d in db.hub_documents.find({"amount_weight_suspect": {"$exists": True}, "amount_float": None,
-                                          "amount_recovery_tried": {"$exists": False}}).limit(limit):
+    from datetime import timedelta
+    since = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
+    async for d in db.hub_documents.find({"amount_float": None, "document_type": "AP_Invoice", "mailbox_category": "AP", "created_utc": {"$gte": since},
+                                          "status": {"$ne": "batch_parent"}, "amount_recovery_tried": {"$exists": False}}).limit(limit):
         out["checked"] += 1
         amt = total_due(_pdf_text(d))
         upd: Dict[str, Any] = {"amount_recovery_tried": now}
-        if amt and abs(amt - float(d["amount_weight_suspect"])) > 0.001:
+        # never the figure intake dropped as the weight
+        dropped = d.get("amount_weight_suspect")
+        try:
+            dropped = float(dropped if dropped is not None else str(d.get("amount_raw") or "").replace(",", ""))
+        except ValueError:
+            dropped = None
+        if amt and (dropped is None or abs(amt - dropped) > 0.001):
             out["recovered"] += 1
             if len(out["examples"]) < 10:
                 out["examples"].append((d.get("vendor_canonical"), d.get("invoice_number_clean"), amt, (d.get("bc_link") or {}).get("bc_amount")))

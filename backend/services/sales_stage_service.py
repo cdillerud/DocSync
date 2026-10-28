@@ -104,7 +104,17 @@ async def stage_of(db, d: Dict[str, Any]) -> Dict[str, Any]:
         return {"sales_stage": "needs_rep", "sales_stage_reason": "customer_unknown"}
     if not sl.get("customer_po"):
         return {"sales_stage": "needs_rep", "sales_stage_reason": "customer_po_missing"}
-    el = [e for e in ((d.get("extracted_fields") or {}).get("line_items") or []) if not _charge_text(e) and not _dunnage(e)]
+    el = [e for e in ((d.get("extracted_fields") or {}).get("line_items") or []) if not _charge_text(e)]
+    dun = [e for e in el if _dunnage(e)]
+    if dun:
+        # A product's pack note ("Glass, 24oz, Bulk, 82mm, 2912/pallet") reads
+        # like a pallet line; Giovanni's P10218 / C-503003 POs sat as "no
+        # lines" (2026-10-27). Keep a line that resolves to a Gamer item that
+        # is not itself a pallet / tier sheet / top frame.
+        from services.sales_item_xref_service import _CATEGORY
+        res_d = await resolve_lines(db, cust, dun)
+        keep = {id(e) for e, r in zip(dun, res_d) if r.get("item") and _CATEGORY.get(r["item"]) != "PALLET"}
+        el = [e for e in el if not _dunnage(e) or id(e) in keep]
     if not el:
         return {"sales_stage": "needs_rep", "sales_stage_reason": "no_lines"}
     res = await resolve_lines(db, cust, el)

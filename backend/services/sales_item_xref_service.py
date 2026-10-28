@@ -268,6 +268,38 @@ async def customer_history(db, customer_no: str, as_of: Optional[str] = None,
     return hist
 
 
+_BLOCKED: set = set()
+_BLOCKED_AT = {"t": 0.0}
+BLOCKED_SUCCESSOR = True
+
+
+async def load_blocked(db) -> set:
+    """Items BC has blocked (bc_catalog_items, refreshed hourly)."""
+    import time
+    if time.time() - _BLOCKED_AT["t"] > 3600:
+        fresh = set()
+        async for x in db.bc_catalog_items.find({"blocked": True}, {"_id": 0, "item_no": 1}):
+            fresh.add(str(x.get("item_no") or "").upper())
+        _BLOCKED.clear()
+        _BLOCKED.update(fresh)
+        _BLOCKED_AT["t"] = time.time()
+    return _BLOCKED
+
+
+def _successor(item: str, hist: Dict[str, Dict[str, Any]], blocked: set) -> Optional[str]:
+    """The item that replaced a blocked one for this customer: same BC
+    description, not blocked, ordered after it (Giovanni's 14oz jar
+    C-8479-10000229, blocked 2026-09-14, is entered as C-500733-12034627)."""
+    key = lambda h: re.sub(r"[^A-Z0-9]", "", str((h or {}).get("description") or "").upper())
+    d = key(hist.get(item))
+    if not d:
+        return None
+    last = (hist.get(item) or {}).get("last_seq", -1)
+    fam = [i for i, h in hist.items() if i != item and i not in blocked and is_product(i)
+           and key(h) == d and h.get("last_seq", -1) > last]
+    return max(fam, key=lambda i: hist[i].get("last_seq", -1)) if fam else None
+
+
 def _code_tokens(desc: Any, min_len: int = 4) -> List[str]:
     """Code-like tokens of a PO line, normalized: dots kept inside codes
     (Sun Bum 20-20750.002444104A) and each token also joined with the next
@@ -584,6 +616,7 @@ def _desc_confirms(e: Dict[str, Any], item: str, hist: Dict[str, Dict[str, Any]]
 async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], as_of: Optional[str] = None,
                         before_order: Optional[str] = None) -> List[Dict[str, Any]]:
     await load_item_categories(db)
+    blocked = await load_blocked(db) if BLOCKED_SUCCESSOR else set()
     hist = await customer_history(db, customer_no, as_of=as_of, before_order=before_order)
     rows = {r["key"]: r async for r in db.sales_item_xref.find({"customer_no": customer_no}, {"_id": 0})}
     hon, ovr = await po_price_honor(db, customer_no, before_order)
@@ -627,6 +660,16 @@ async def resolve_lines(db, customer_no: str, extracted: List[Dict[str, Any]], a
                 item, how = newer, how + f" · newer revision {newer} the customer now buys"
                 v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
                            {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})
+            if BLOCKED_SUCCESSOR and item in blocked:
+                # BC refuses a blocked item: the customer's replacement for it,
+                # else another candidate the PO line does not rule out.
+                succ = _successor(item, hist, blocked) or next(
+                    (c[0] for c in valued if c[0] not in blocked and c[2]["fits"] is not False), None)
+                if succ:
+                    how = how + f" · {item} is blocked in BC; the customer now buys {succ}"
+                    item = succ
+                    v = _value(e, item, hist.get(item) or {}, rows.get("ratio:" + item),
+                               {"item_uom": await item_uom(db, item), "overrides_po": overrides_po})
             chosen = {"item": item, "how": how + (" · PO value agrees" if v["fits"] else ""), **v}
         chosen = chosen or {"item": None, "how": None, "quantity": None, "unit_price": None, "unit_of_measure": None, "price_source": None}
         chosen.pop("fits", None)

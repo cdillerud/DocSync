@@ -607,6 +607,10 @@ async def po_price_honor(db, customer_no: str, before_order: Optional[str] = Non
 # (BC took a PO price below its last price, BC kept its last price instead)
 _LOW_PO: Dict[Tuple[str, str], Tuple[int, int]] = {}
 LOW_PO_KEEPS_LAST = True
+PACK_QTY = True
+PACK_MAX = 500
+PACK_TOL = 0.001
+PACK_MIN_EQ = 500
 
 
 def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[str, Any]],
@@ -615,6 +619,7 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
     value agrees (None when the PO shows no value). ctx: item_uom (usual BC
     unit of the item), overrides_po (BC rarely keeps this customer's PO price)."""
     ctx = ctx or {}
+    pack_note = None
     eq = num(e.get("quantity"))
     price, uom = h.get("last_price"), h.get("uom") or ctx.get("item_uom")
     if eq and rr and not rr.get("weak"):
@@ -693,9 +698,28 @@ def _value(e: Dict[str, Any], item: str, h: Dict[str, Any], rr: Optional[Dict[st
         near = min(readings, key=lambda q: abs(math.log(q / med)) if q > 0 else 99)
         if qty and qty > 0 and near != qty and abs(math.log(near / med)) < math.log(5) and abs(math.log(qty / med)) > math.log(50):
             qty = near
+    if PACK_QTY and eq and eq >= PACK_MIN_EQ and fits is not True and qty not in (h.get("qtys") or ()):
+        # The PO counts cases or packs: the PO quantity times a whole pack
+        # size is exactly a quantity this customer has ordered in BC (House
+        # 5,355 cases of 12 = 64.26 M), or exactly the line's value at BC's
+        # last price (Fresh Pack 2,500 x 12 = 30 M = 12,478.75 / 415.96).
+        # A small count (DenMat "77" M) divides some past quantity by chance.
+        reads = set(h.get("qtys") or ())
+        if line_value and h.get("last_price"):
+            reads.add(round(line_value / h["last_price"], 4))
+        packs = set()
+        for q in reads:
+            for base in (q * 1000, q) if str(uom or "").upper() == "M" else (q,):
+                k = base / eq
+                if 2 <= round(k) <= PACK_MAX and abs(k - round(k)) <= PACK_TOL * k:
+                    packs.add((round(k), round(eq * round(k) / (1000 if base != q else 1), 4)))
+        if len(packs) == 1:
+            k, qty = packs.pop()
+            fits = True if line_value and h.get("last_price") and abs(qty * h["last_price"] - line_value) <= 0.03 * line_value else fits
+            pack_note = f"PO quantity in packs of {k}"
     # Price risk (replay 2026-10-08: lines with none of these signals were
     # wrong 12% of the time; PO differs 66%, no history 75%, stale 38%).
-    checks = []
+    checks = [pack_note] if pack_note else []
     if price and not h.get("last_price"):
         checks.append("no BC price for this customer yet")
     elif price_source and price_source.startswith("PO price"):

@@ -288,6 +288,17 @@ async def load_blocked(db) -> set:
     return _BLOCKED
 
 
+def _rare_shared(words: set, item: str, hist: Dict[str, Dict[str, Any]]) -> bool:
+    """The line shares a description word with `item` that few of this
+    customer's items have (a flavour, a size): "CAN" alone is not a match
+    (WestRock 7Brew Blondie for a Death Wish Vanilla line)."""
+    shared = words & _desc_words(hist[item].get("description"))
+    if not PRICE_PRINT_RARE:
+        return bool(shared)
+    df = Counter(w for it, h in hist.items() if is_product(it) for w in _desc_words(h.get("description")))
+    return any(df[w] <= PRICE_PRINT_RARE for w in shared)
+
+
 def _same_family(a: str, b: str) -> bool:
     """Two numbers of one item family: a long shared stem (80-25060.001R444102
     and 80-25060.002), not a shared size or prefix alone."""
@@ -464,6 +475,18 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
         scored.sort(reverse=True)
         if scored and scored[0][0] >= 3 and (len(scored) == 1 or scored[0][0] >= scored[1][0] + 1.5):
             out.append((scored[0][1], "description matches an item this customer buys", False))
+    if PRICE_PRINT and not out:
+        # 7. Nothing else: the one item this customer last bought at exactly
+        # the PO's price (no other item of theirs at it) that shares a
+        # distinctive description word with the line (Midwest's gold closure
+        # 0.01689 = G88303101942 at 16.89/M; VetsPlus 44oz jar 0.85162).
+        po = num(e.get("unit_price"))
+        if po:
+            vals = (po, po * 1000, po / 1000)
+            same = [it for it, h in hist.items() if is_product(it) and h.get("last_price")
+                    and any(abs(v - h["last_price"]) <= PRICE_PRINT_TOL * h["last_price"] for v in vals)]
+            if len(same) == 1 and _rare_shared(words, same[0], hist):
+                out.append((same[0], "the one item this customer last bought at the PO's price", False))
     seen, uniq = {}, []
     for c in out:
         if c[0] not in seen:
@@ -484,6 +507,9 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
 BLOCKED_FALLBACK_FITS = True
 DESC_REVISIONS = True
 PRINTED_OVER_DESC = True
+PRICE_PRINT = True
+PRICE_PRINT_TOL = 0.002
+PRICE_PRINT_RARE = 4
 DESC_IDF = True
 DESC_T = 4.0
 DESC_M = 1.5

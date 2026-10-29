@@ -782,6 +782,75 @@ async def get_document_timeline(doc_id: str, include_legacy: bool = Query(True))
     }
 
 
+# Fields that carry a Gamer order number (sales order 121111, purchase
+# order W119055) on a hub document.
+_ORDER_REF_FIELDS = ("sales_link.order_no", "bc_order_no", "bc_sales_order_no", "gamer_order_refs",
+                     "bc_order_refs", "po_number_clean", "reference_bc_document_no")
+_RELATED_INDEXED = {"done": False}
+
+
+def _order_refs(doc: dict) -> List[str]:
+    refs = [(doc.get("sales_link") or {}).get("order_no"), doc.get("bc_order_no"), doc.get("bc_sales_order_no"),
+            *(doc.get("gamer_order_refs") or []), *(doc.get("bc_order_refs") or [])]
+    if doc.get("reference_bc_type") in ("purchase_order", "sales_order"):
+        refs.append(doc.get("reference_bc_document_no"))
+    # On a supplier's paperwork the PO number is Gamer's own order (W119055, 119567).
+    pn = str(doc.get("po_number_clean") or "").upper()
+    if re.fullmatch(r"W?\d{6}", pn):
+        refs.append(pn)
+    return list(dict.fromkeys(str(r).strip().upper() for r in refs if r and re.fullmatch(r"W?\d{6}(RET)?", str(r).strip().upper())))
+
+
+@router.get("/{doc_id}/related")
+async def get_related_documents(doc_id: str, limit: int = Query(100, le=300)):
+    """Documents tied to this one: the same Gamer order (sales or purchase
+    order number), the same email, or pages split from the same file."""
+    db = get_db()
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not _RELATED_INDEXED["done"]:
+        for f in (*_ORDER_REF_FIELDS[1:], "email_id", "batch_parent_id"):
+            await db.hub_documents.create_index(f, background=True)
+        _RELATED_INDEXED["done"] = True
+    refs = _order_refs(doc)
+    email_id = doc.get("email_id") if doc.get("email_id") and not str(doc["email_id"]).startswith("batch-") else None
+    parent = doc.get("batch_parent_id") or (doc_id if doc.get("status") == "batch_parent" else None)
+    ors = []
+    if refs:
+        ors += [{f: {"$in": refs}} for f in _ORDER_REF_FIELDS]
+    if email_id:
+        ors.append({"email_id": email_id})
+    if parent:
+        ors += [{"batch_parent_id": parent}, {"id": parent}]
+    if not ors:
+        return {"document_id": doc_id, "order_refs": [], "related": [], "count": 0}
+    proj = {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "created_utc": 1, "email_subject": 1, "email_sender": 1,
+            "mailbox_category": 1, "status": 1, "sales_stage": 1, "ap_stage": 1, "sales_link": 1, "bc_order_no": 1,
+            "bc_sales_order_no": 1, "gamer_order_refs": 1, "bc_order_refs": 1, "po_number_clean": 1,
+            "reference_bc_document_no": 1, "reference_bc_type": 1, "email_id": 1, "batch_parent_id": 1, "vendor_canonical": 1,
+            "customer_canonical": 1}
+    related = []
+    async for d in db.hub_documents.find({"$or": ors, "id": {"$ne": doc_id}}, proj).sort("created_utc", 1).limit(limit):
+        why = []
+        shared = [r for r in _order_refs(d) if r in refs]
+        if shared:
+            why.append("order " + ", ".join(shared))
+        if email_id and d.get("email_id") == email_id:
+            why.append("same email")
+        if parent and (d.get("batch_parent_id") == parent or d.get("id") == parent):
+            why.append("same file (split pages)")
+        sl = d.get("sales_link") or {}
+        related.append({
+            "id": d["id"], "file_name": d.get("file_name"), "document_type": d.get("document_type"),
+            "created_utc": d.get("created_utc"), "email_subject": d.get("email_subject"), "email_sender": d.get("email_sender"),
+            "mailbox_category": d.get("mailbox_category"), "stage": d.get("sales_stage") or d.get("ap_stage") or d.get("status"),
+            "role": sl.get("role"), "party": sl.get("bc_customer_no") or d.get("customer_canonical") or d.get("vendor_canonical"),
+            "why": why or ["order reference"],
+        })
+    return {"document_id": doc_id, "order_refs": refs, "related": related, "count": len(related)}
+
+
 @router.get("/{doc_id}/derived-state")
 async def get_document_derived_state(doc_id: str):
     from services.derived_state_service import get_derived_state_service, format_state_for_display

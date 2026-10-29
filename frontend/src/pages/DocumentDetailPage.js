@@ -158,43 +158,79 @@ function ExtractedDataCard({ doc }) {
 }
 
 /**
- * RelatedDocsLink — v2.5.18
- * Surfaces a "Show related docs" CTA that deep-links to /order-graph
- * pre-seeded with this doc's PO (preferred) or SO. Hidden when neither
- * ref is present.
+ * RelatedDocsLink
+ * "Show related documents": lists the hub documents tied to this one —
+ * the same Gamer sales / purchase order, the same email, or pages split
+ * from the same file — from GET /documents/{id}/related. (The Order Graph
+ * page it used to open was removed in the 2026-09-24 nav cleanup.)
  */
 function RelatedDocsLink({ doc }) {
-  const ef = doc?.extracted_fields || {};
-  const nf = doc?.normalized_fields || {};
-  const po =
-    doc?.po_number_clean || doc?.po_number || doc?.linked_po ||
-    ef.po_number || nf.po_number || doc?.order_number || ef.order_number;
-  const so =
-    doc?.so_number || doc?.linked_so || doc?.sales_order_number ||
-    ef.so_number || nf.so_number;
-  if (!po && !so) return null;
-  const qs = po ? `po=${encodeURIComponent(po)}` : `so=${encodeURIComponent(so)}`;
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  useEffect(() => { setOpen(false); setData(null); setError(null); }, [doc?.id]);
+  if (!doc?.id) return null;
+  const toggle = async () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !data) {
+      try {
+        const res = await api.get(`/documents/${encodeURIComponent(doc.id)}/related`);
+        setData(res.data);
+      } catch (e) {
+        setError(e?.response?.data?.detail || e.message || 'Could not load related documents');
+      }
+    }
+  };
+  const rows = data?.related || [];
   return (
-    <a
-      href={`/order-graph?${qs}`}
-      className="block no-underline"
-      data-testid="related-docs-link"
-    >
-      <div className="rounded-lg border border-primary/30 bg-primary/5 hover:bg-primary/10 px-4 py-3 transition-colors flex items-center gap-3 group">
+    <div className="rounded-lg border border-primary/30 bg-primary/5" data-testid="related-docs-link">
+      <button type="button" onClick={toggle}
+        className="w-full text-left px-4 py-3 hover:bg-primary/10 transition-colors flex items-center gap-3 group rounded-lg">
         <div className="w-9 h-9 rounded-md bg-primary/10 border border-primary/30 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
           <svg className="w-4 h-4 text-primary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a2 2 0 100-4 2 2 0 000 4zm6-8a2 2 0 100-4 2 2 0 000 4zm0 16a2 2 0 100-4 2 2 0 000 4zM10.5 15.5l3-4m0 0l-3-4" />
           </svg>
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold">Show related documents</div>
-          <div className="text-xs text-muted-foreground font-mono truncate">
-            {po ? `PO ${po}` : `SO ${so}`} · timeline of every doc tied to this order
+          <div className="text-sm font-semibold">{open ? 'Hide related documents' : 'Show related documents'}</div>
+          <div className="text-xs text-muted-foreground truncate">
+            {data ? `${data.count} document${data.count === 1 ? '' : 's'}` + (data.order_refs?.length ? ` · order ${data.order_refs.join(', ')}` : '')
+                  : 'Same order, same email, or pages of the same file'}
           </div>
         </div>
-        <span className="text-xs text-primary font-semibold">Open →</span>
-      </div>
-    </a>
+        <span className="text-xs text-primary font-semibold">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="border-t border-primary/20 px-2 py-2" data-testid="related-docs-list">
+          {error && <div className="text-xs text-destructive px-2 py-1">{String(error)}</div>}
+          {!error && !data && <div className="text-xs text-muted-foreground px-2 py-1">Loading…</div>}
+          {data && rows.length === 0 && (
+            <div className="text-xs text-muted-foreground px-2 py-1">No other documents share this document's order, email or file.</div>
+          )}
+          {rows.length > 0 && (
+            <ul className="divide-y divide-border">
+              {rows.map(r => (
+                <li key={r.id}>
+                  <button type="button" onClick={() => navigate(`/documents/${encodeURIComponent(r.id)}`)}
+                    className="w-full text-left px-2 py-2 hover:bg-muted/60 rounded flex items-start gap-3">
+                    <span className="text-xs text-muted-foreground font-mono shrink-0 w-20">{(r.created_utc || '').slice(0, 10)}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm truncate">{r.file_name}</span>
+                      <span className="block text-xs text-muted-foreground truncate">
+                        {[(r.document_type || '').replace(/_/g, ' '), r.party, r.stage && String(r.stage).replace(/_/g, ' ')].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="text-xs text-primary shrink-0 text-right">{(r.why || []).join(' · ')}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1029,7 +1065,7 @@ export default function DocumentDetailPage() {
           {/* Extracted Data Card — consolidates extracted_fields, normalized_fields, and top-level fields */}
           <ExtractedDataCard doc={doc} />
 
-          {/* Show-related-docs action — links to Order Graph (v2.5.18) */}
+          {/* Show related documents: same order, email or file */}
           <RelatedDocsLink doc={doc} />
 
           <LegacySection on={!!(AP_STAGE_LABELS[doc.ap_stage] || doc.sales_stage)}>

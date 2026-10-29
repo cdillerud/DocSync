@@ -387,6 +387,84 @@ async def po_in_bc(db, po: str) -> bool:
     return False
 
 
+# Drop-ship invoices from can makers print Gamer's SALES order, not the PO
+# (Canpack "PO 119477" = sales order 119477 to Lovell, billed on blanket
+# PO PR10121 that covers several loads). The sales order is the load: its
+# item lines the vendor supplies, at the vendor's BC PO unit cost, adding up
+# to the invoice to the cent. Backtest on 13 such invoices AP entered
+# (2026-10-29): 10 with AP's priced lines, 3 where AP billed only part of
+# the load (the draft follows the paper), none with a wrong cost.
+DROPSHIP_SO = True
+_VENDOR_PO_LINES: Dict[str, Any] = {}
+
+
+async def vendor_po_lines(vendor: str) -> List[Dict[str, Any]]:
+    """Every line of the vendor's purchase orders in Production BC (read
+    only), cached for an hour."""
+    import time
+    import httpx
+    import services.bc_catalog_sync_service as bc
+    hit = _VENDOR_PO_LINES.get(vendor)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    token = await bc.get_bc_token(environment="Production")
+    cid = await bc.get_bc_company_id(environment="Production")
+    base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
+    out: List[Dict[str, Any]] = []
+    async with httpx.AsyncClient(timeout=120) as c:
+        url, params = f"{base}/purchaseOrders", {
+            "$filter": "vendorNumber eq '" + vendor.replace("'", "''") + "'",
+            "$expand": "purchaseOrderLines($select=lineType,lineObjectNumber,description,quantity,directUnitCost,receivedQuantity)",
+            "$select": "number"}
+        while url:
+            r = await c.get(url, headers={"Authorization": f"Bearer {token}"}, params=params)
+            if r.status_code != 200:
+                return []
+            j = r.json()
+            params = None
+            for po in j.get("value", []):
+                out += [{**l, "po": po["number"]} for l in po.get("purchaseOrderLines") or [] if l.get("lineObjectNumber")]
+            url = j.get("@odata.nextLink")
+    _VENDOR_PO_LINES[vendor] = (time.time(), out)
+    return out
+
+
+async def dropship_lines(db, d: Dict[str, Any], so_no: str) -> List[Dict[str, Any]]:
+    """Draft lines for an invoice that shows Gamer sales order so_no, or []."""
+    import itertools
+    so = await db.bc_sales_orders.find_one({"order_no": so_no}, {"_id": 0, "lines": 1})
+    vendor = str(d.get("vendor_canonical") or "")
+    amt = abs(float(d.get("amount_float") or 0))
+    if not so or not vendor or not amt:
+        return []
+    by_item: Dict[str, List[Dict[str, Any]]] = {}
+    for l in await vendor_po_lines(vendor):
+        by_item.setdefault(str(l["lineObjectNumber"]).upper(), []).append(l)
+    picks = []
+    for sl in so.get("lines") or []:
+        it, q = str(sl.get("lineObjectNumber") or "").upper(), float(sl.get("quantity") or 0)
+        if str(sl.get("lineType") or "").lower() != "item" or not q or it not in by_item:
+            continue   # freight and charges billed to the customer; items the vendor does not supply
+        # PO lines with this much still to receive.
+        cands = [l for l in by_item[it] if float(l.get("quantity") or 0) - float(l.get("receivedQuantity") or 0) >= q - 1e-6]
+        costs = sorted({round(float(l.get("directUnitCost") or 0), 5) for l in cands})
+        if not costs:
+            return []
+        picks.append(({"lineType": "Item", "lineObjectNumber": cands[0]["lineObjectNumber"], "quantity": q,
+                       "description": (cands[0].get("description") or "")[:100],
+                       "source": f"sales order {so_no} on the vendor's BC purchase order"}, costs))
+    if not picks:
+        return []
+    # Blanket POs price the same item differently: the invoice total picks
+    # the costs, and only one choice may add up.
+    fits = {cs for cs in itertools.islice(itertools.product(*[c for _, c in picks]), 4096)
+            if abs(sum(l["quantity"] * c for (l, _), c in zip(picks, cs)) - amt) <= 0.02}
+    if len(fits) != 1:
+        return []
+    cs = fits.pop()
+    return [{**l, "unitCost": c} for (l, _), c in zip(picks, cs)]
+
+
 async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:
     """The open (not yet invoiced) lines of a Gamer purchase order in
     Production BC, read-only. Dropship orders (Ball, O-I, Anchor, Amcor) have
@@ -726,6 +804,14 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
             return {"lines": pl, "source": "bc_purchase_order"}
         if await po_in_bc(db, po):
             return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
+    if DROPSHIP_SO and po and await is_product_vendor(db, coding) and not await po_in_bc(db, po):
+        try:
+            dl = await dropship_lines(db, d, po)
+        except Exception as e:
+            logger.warning("[SandboxDraft] drop-ship lines failed: %r", e)
+            dl = []
+        if dl:
+            return {"lines": dl, "source": "bc_sales_order_dropship"}
     if await is_product_vendor(db, coding):
         # A product vendor: the right lines are the PO's received items.
         return {"problem": (f"PO {po} is not a purchase order or receipt in BC" if po else "the invoice shows no PO")
@@ -755,7 +841,7 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
 
 # Lines built by a rule measured against AP's entries (not the old vendor
 # profile builder): the audit leaves them alone.
-PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "vendor_coding", "forwarder_split", "warehouse_split", "prepay",
+PLANNED_SOURCES = {"bc_receipt", "bc_purchase_order", "bc_sales_order_dropship", "vendor_coding", "forwarder_split", "warehouse_split", "prepay",
                    "learned_coding", "learned_coding_ai"}
 
 

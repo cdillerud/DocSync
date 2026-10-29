@@ -49,6 +49,41 @@ def refusal() -> str:
     return ""
 
 
+SANDBOX_GAP_PREFIX = "item not in the sandbox copy"
+
+
+async def sandbox_gap(db, lines: List[Dict[str, Any]], msg: str) -> List[str]:
+    """Item numbers a refused draft used that Production BC has and the
+    sandbox copy does not. PRE is a copy of Production from 2026-08-31:
+    items set up since (6075736, 10-2149-056) are missing there, so BC's
+    "Item does not exist" is the copy's age, not a wrong line - a draft in
+    Production would not hit it. Read-only GETs."""
+    import httpx
+    from services.sales_draft_service import _bc
+    kind = lambda l: str(l.get("lineType") or "").lower()
+    items = sorted({str(l["lineObjectNumber"]) for l in lines or [] if kind(l) == "item" and l.get("lineObjectNumber")})
+    charges = sorted({str(l["lineObjectNumber"]) for l in lines or [] if kind(l) == "charge" and l.get("lineObjectNumber")})
+    gap: List[str] = []
+    if "Item does not exist" in msg and items:
+        found = {}
+        prod = os.environ.get("BC_ENVIRONMENT") or "Production"
+        for env in (prod, ALLOWED_ENVIRONMENT):
+            base, h = await _bc(env)
+            async with httpx.AsyncClient(timeout=60) as c:
+                for it in items:
+                    r = await c.get(f"{base}/items", headers=h, params={"$filter": "number eq '" + it.replace("'", "''") + "'", "$select": "number"})
+                    found[(env, it)] = r.status_code == 200 and bool(r.json().get("value"))
+        gap += [it for it in items if found.get((prod, it)) and not found.get((ALLOWED_ENVIRONMENT, it))]
+    if "Item Charge does not exist" in msg and charges:
+        # BC's API has no item charge list: a charge AP has put on Production
+        # invoices exists there.
+        used = [ch for ch in charges if await db.bc_purchase_invoice_lines.find_one(
+            {"purchaseInvoiceLines": {"$elemMatch": {"lineObjectNumber": ch, "lineType": "Charge"}}}, {"_id": 1})]
+        if len(used) == len(charges):
+            gap += [f"{ch} (item charge)" for ch in charges]
+    return gap
+
+
 async def verify_draft_total(system_id: str, expected: float) -> Dict[str, Any]:
     """Read the draft just created back from BC and compare its total with
     the invoice (read-only GET)."""
@@ -915,8 +950,20 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
                 except Exception as e:
                     deleted = repr(e)[:120]
             why = (_re.search(r"message[^A-Za-z]{1,12}([A-Za-z][^\\\"]{3,160})", msg) or [None, msg[-200:]])[1]
+            gap = []
+            if "does not exist" in msg:
+                try:
+                    gap = await sandbox_gap(db, plan.get("lines") or d.get("draft_lines_planned") or [], msg)
+                except Exception as e:
+                    logger.warning("[SandboxDraft] sandbox gap check failed: %r", e)
+            if gap:
+                r["sandbox_gap"] = gap
+                reason = (f"{SANDBOX_GAP_PREFIX}: {', '.join(gap)} exists in Production BC but not in {ALLOWED_ENVIRONMENT} "
+                          f"(a copy of Production from 2026-08-31); a Production draft would not hit this")
+            else:
+                reason = f"BC refused the draft lines ({why}); line build failed"
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
-                "reason": f"BC refused the draft lines ({why}); line build failed", "header_removed": str(deleted)[:80],
+                "reason": reason, "header_removed": str(deleted)[:80], "sandbox_gap": gap or None, "environment": ALLOWED_ENVIRONMENT,
                 "at": datetime.now(timezone.utc).isoformat()}}})
         if r.get("success") and not r.get("already_exists") and r.get("bc_system_id"):
             # Verify in BC that the draft's total is the invoice total; a draft
@@ -943,7 +990,7 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
         await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sandbox_draft", "by": "hub",
                                                 "at": datetime.now(timezone.utc).isoformat(), "environment": write_target(),
                                                 "success": results[-1]["success"], "bc_record_no": r.get("bc_record_no"),
-                                                "detail": results[-1]["detail"]})
+                                                "detail": results[-1]["detail"], **({"sandbox_gap": r["sandbox_gap"]} if r.get("sandbox_gap") else {})})
     return {"target": write_target(), "drafted": sum(1 for x in results if x["success"]), "results": results,
             "skipped": skipped}
 
@@ -961,6 +1008,11 @@ async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
     time (Dayton "125" before the number was corrected to 838404656, a PO
     purchasing had not entered yet). Only BC purchase orders count: Gamer
     sales orders and shipments reuse the same number range."""
+    if reason.startswith(SANDBOX_GAP_PREFIX):
+        # Missing from the sandbox copy: the same draft fails again there.
+        # Retried only when drafting moves to another sandbox.
+        env = (d.get("sandbox_draft_skipped") or {}).get("environment")
+        return "drafting moved to another sandbox" if env and env != ALLOWED_ENVIRONMENT else None
     m = _SKIP_NUMBER.search(reason)
     if m and m.group(1).upper() != str(d.get("invoice_number_clean") or "").upper():
         return "invoice number corrected"

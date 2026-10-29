@@ -61,6 +61,7 @@ function why(doc) {
   if (doc.ap_hold) return doc.ap_hold.reason;
   if (doc.ap_approval) return `${doc.ap_approval.approver} to approve`;
   if (doc.suggested_approver) return `${doc.suggested_approver} to approve (suggested)`;
+  if (doc.no_draft_reason && doc.no_draft_reason.startsWith('item not in the sandbox copy')) return 'Item not in sandbox copy (Production would draft)';
   if (doc.no_draft_reason) return 'AP enters it (no sandbox draft)';
   if (doc.no_action_reason) return String(doc.no_action_reason).replace(/_/g, ' ').replace(/^excluded by staff:/, 'excluded by staff ');
   if (doc.bc_draft_no) return `Sandbox draft ${doc.bc_draft_no} (${doc.bc_draft_environment && doc.bc_draft_environment.startsWith('PRE') ? 'PRE' : doc.bc_draft_environment}), not a real invoice`;

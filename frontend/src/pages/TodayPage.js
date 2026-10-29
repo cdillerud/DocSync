@@ -16,13 +16,13 @@ function Tile({ to, label, value, help, tone = 'muted', icon: Icon }) {
     muted: 'border-border bg-muted/30',
   }[tone];
   return (
-    <Link to={to} className={`group rounded-lg border p-3 transition-colors hover:bg-muted ${toneCls}`} title={help}>
+    <Link to={to} className={`group flex h-full flex-col rounded-lg border p-3 transition-colors hover:bg-muted ${toneCls}`} title={help}>
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">{Icon && <Icon className="w-3.5 h-3.5" />}{label}</div>
       <div className="mt-1 flex items-end justify-between">
         <span className="text-2xl font-semibold tabular-nums">{value ?? '—'}</span>
         <ArrowRight className="w-4 h-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       </div>
-      {help && <div className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">{help}</div>}
+      <div className="mt-0.5 min-h-[2.5em] text-[11px] leading-tight text-muted-foreground line-clamp-2">{help}</div>
     </Link>
   );
 }
@@ -53,10 +53,11 @@ function CheckRow({ g }) {
 }
 
 // One half of the page: AP or Sales, each with its own colour band, so the
-// two jobs never mix (2026-10-10).
+// two jobs never mix (2026-10-10). Its six slots share the page's row tracks
+// (subgrid), so the sections line up across AP and Sales with or without data.
 function Side({ title, icon: Icon, accent, to, linkLabel, testid, children }) {
   return (
-    <section className={`rounded-xl border border-border border-t-4 ${accent} bg-card p-4 space-y-4`} data-testid={testid}>
+    <section className={`rounded-xl border border-border border-t-4 ${accent} bg-card p-4 flex flex-col gap-4 lg:grid lg:grid-rows-subgrid lg:row-span-6 lg:gap-y-4`} data-testid={testid}>
       <div className="flex items-center gap-2">
         <Icon className="w-5 h-5" />
         <h2 className="text-lg font-semibold">{title}</h2>
@@ -65,6 +66,10 @@ function Side({ title, icon: Icon, accent, to, linkLabel, testid, children }) {
       {children}
     </section>
   );
+}
+
+function Slot({ children }) {
+  return children ? <div className="space-y-4">{children}</div> : <div className="hidden lg:block" />;
 }
 
 function Sub({ title, children }) {
@@ -150,6 +155,7 @@ export default function TodayPage() {
             <Tile to="/ap-workflow" icon={PauseCircle} label="On hold" value={c.on_hold} tone={c.on_hold ? 'sky' : 'muted'} help="Held by staff with a reason" />
             <Tile to="/ap?stage=in_bc_check" icon={ClipboardList} label="Entered in BC, check" value={c.in_bc_check} tone={c.in_bc_check ? 'amber' : 'muted'} help="BC's amount or invoice number differs from the document" />
           </Sub>
+          <Slot />
           <Sub title="Handled by the Hub">
             <Tile to="/ap?stage=drafted" label="Drafted (sandbox)" value={c.drafted} tone="emerald" help="Purchase invoices drafted in the PRE sandbox" />
             <Tile to="/ap?stage=awaiting_receipt" label="Waiting for receipt" value={c.awaiting_receipt} help="Drafted once the goods are received in BC" />
@@ -171,6 +177,7 @@ export default function TodayPage() {
               </p>
             ) : null}
           </Accuracy>
+          <Slot />
         </Side>
 
         <Side title="Sales" icon={ShoppingCart} accent="border-t-sky-500" to="/sales" linkLabel="Sales inbox" testid="today-sales">
@@ -182,6 +189,7 @@ export default function TodayPage() {
               <Tile to="/sales?stage=drafted" icon={CheckCircle2} label="Drafts to review" value={st.drafted} tone={st.drafted ? 'sky' : 'muted'} help="Sales orders drafted in the sandbox for reps" />
             )}
           </Sub>
+          <Slot>{(checks?.count > 0 || checks?.price_count > 0) && (<>
           {checks?.count > 0 && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 space-y-1.5 text-sm" data-testid="bc-order-checks">
               <div className="font-medium">BC orders to check: {checks.count} line{checks.count === 1 ? '' : 's'} with a quantity far above this customer's usual ({fmtMoney(checks.value)} in open orders)</div>
@@ -200,6 +208,7 @@ export default function TodayPage() {
               </ul>
             </div>
           )}
+          </>)}</Slot>
           <Sub title="Handled by the Hub">
             <Tile to="/sales?stage=drafted" label="Drafted (sandbox)" value={st.drafted} tone="emerald" help="Sales orders drafted in the PRE sandbox" />
             <Tile to="/sales?stage=ready" label="Ready to draft" value={st.ready} help="Customer and every line known; drafted within about 10 minutes" />
@@ -213,7 +222,7 @@ export default function TodayPage() {
               </>
             ) : <p className="text-muted-foreground">Graded as inside sales enters drafted POs in Production; nothing graded yet.</p>}
           </Accuracy>
-          {reps?.reps?.length > 0 && (
+          <Slot>{reps?.reps?.length > 0 && (
             <div className="space-y-1.5">
               <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">By rep</div>
               <div className="flex flex-wrap gap-2">
@@ -225,7 +234,7 @@ export default function TodayPage() {
                 ))}
               </div>
             </div>
-          )}
+          )}</Slot>
         </Side>
       </div>
     </div>

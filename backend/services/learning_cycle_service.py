@@ -286,6 +286,7 @@ async def learning_cycle_scheduler() -> None:
 
 SALES_FAST_MINUTES = int(os.environ.get("SALES_FAST_MINUTES", "10"))
 SALES_FAST_ENABLED = os.environ.get("SALES_FAST_ENABLED", "true").strip().lower() != "false"
+AP_FAST_ENABLED = os.environ.get("AP_FAST_ENABLED", "true").strip().lower() != "false"
 
 
 async def sales_fast_scheduler() -> None:
@@ -315,4 +316,21 @@ async def sales_fast_scheduler() -> None:
                     logger.info("[SalesFast] %s", r)
         except Exception as e:
             logger.warning("[SalesFast] run failed: %r", e)
+        if AP_FAST_ENABLED:
+            try:
+                # AP invoices too: the learning cycle drafted them a median
+                # 1.4 h after arrival (a quarter after 4 h+), and AP entered
+                # 43 invoices since go-live the same day before the Hub got
+                # to them (2026-10-29).
+                from deps import get_db
+                from services.ap_stage_service import refresh_stages
+                from services.sandbox_draft_service import draft as ap_draft
+                db = get_db()
+                await refresh_stages(db, days=2)
+                ra = await ap_draft(db, limit=5)
+                if ra.get("drafted"):
+                    await refresh_stages(db, days=2)
+                    logger.info("[APFast] drafted %s", ra.get("drafted"))
+            except Exception as e:
+                logger.warning("[APFast] run failed: %r", e)
         await asyncio.sleep(SALES_FAST_MINUTES * 60)

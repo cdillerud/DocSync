@@ -922,7 +922,22 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
     return out
 
 
+_DRAFT_LOCK = None
+
+
 async def draft(db, limit: int = 5) -> Dict[str, Any]:
+    """Draft ready invoices; one run at a time (the learning cycle and the
+    10-minute fast loop both call this - two at once would draft an invoice
+    twice)."""
+    import asyncio
+    global _DRAFT_LOCK
+    if _DRAFT_LOCK is None:
+        _DRAFT_LOCK = asyncio.Lock()
+    async with _DRAFT_LOCK:
+        return await _draft(db, limit)
+
+
+async def _draft(db, limit: int = 5) -> Dict[str, Any]:
     reason = refusal()
     if reason:
         return {"drafted": 0, "refused": reason}

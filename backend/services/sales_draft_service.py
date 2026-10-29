@@ -74,6 +74,45 @@ async def splits_per_line(db, customer_no: str) -> bool:
     return split_share >= 0.8 and single >= 0.8
 
 
+# A PO for several truckloads of one item that inside sales enters as one
+# BC order per truck (Watson 2061702: 561.6 M as 4 orders of 140.4 M):
+# learned from the customer's past order sizes for the item, not listed.
+TRUCKLOAD_SPLIT = True
+
+
+async def truckload_split(db, customer_no: str, line: Dict[str, Any], before: Optional[str] = None) -> tuple:
+    """(quantity per order, number of orders). Splits when the PO quantity is
+    a whole multiple (2-12) of a size this customer has ordered the item in
+    on 2+ past orders and has never ordered the PO's own size. Backtest on
+    BC orders Apr-Oct 2026: 8 of 9 predicted splits right, each with the
+    right number of orders; without history it does not split. `before`
+    (an order date) limits the history, for replays."""
+    from collections import Counter
+    from services.sales_item_xref_service import is_product, load_item_categories
+    await load_item_categories(db)
+    item, tot = str(line.get("item") or "").upper(), float(line.get("quantity") or 0)
+    uom = str(line.get("unit_of_measure") or "").upper()
+    if tot <= 0 or not is_product(item):
+        return tot, 1
+    sizes: Counter = Counter()
+    flt = {"customer_no": customer_no, "lines.lineObjectNumber": item}
+    if before:
+        flt["order_date"] = {"$lt": before}
+    async for o in db.bc_sales_orders.find(flt,
+                                           {"_id": 0, "lines": 1}).sort([("order_no", -1)]).limit(200):
+        for l in o.get("lines") or []:
+            if (str(l.get("lineObjectNumber") or "").upper() == item and float(l.get("quantity") or 0) > 0
+                    and (not uom or str(l.get("unitOfMeasureCode") or "").upper() in ("", uom))):
+                sizes[round(float(l["quantity"]), 4)] += 1
+    if round(tot, 4) in sizes:
+        return tot, 1
+    for q, n in sizes.most_common():
+        k = tot / q
+        if q > 1 and n >= 2 and 2 <= round(k) <= 12 and abs(k - round(k)) < 1e-4:
+            return q, round(k)
+    return tot, 1
+
+
 def _split_base(sl: Dict[str, Any], po_text: str) -> str:
     """The PO as inside sales writes it before "-n": the customer_po token
     with its letter prefix (P0030199, not "P0030199, Rev. 1" or 30199)."""
@@ -176,6 +215,15 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                 base_po = _split_base(sl, po_text)
                 el = (d.get("extracted_fields") or {}).get("line_items") or []
                 groups = [(f"{base_po}-{n}"[:35], [l] + await charge_lines(db, cust, [l], el)) for n, l in enumerate(prods, 1)]
+            elif TRUCKLOAD_SPLIT and len(prods) == 1:
+                q, k = await truckload_split(db, cust, prods[0])
+                if k > 1:
+                    # Charges per truck, from the truck's own quantity (pallets,
+                    # tariff); the PO's freight is not repeated on every truck.
+                    from services.sales_charge_service import charge_lines
+                    one = {**prods[0], "quantity": q, "truckload": f"1 of {k} truckloads"}
+                    per_truck = [one] + await charge_lines(db, cust, [one], [])
+                    groups = [(po_text, per_truck) for _ in range(k)]
             made, failed = [], None
             for ext, glines in groups:
                 header = {"customerNumber": cust, "externalDocumentNumber": ext}
@@ -242,7 +290,7 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                          "to_complete": res.get("to_complete") or [], "total": total, "created_at": now(), "status": "Draft"}
             if len(made) > 1:
                 draft_rec["orders"] = [{k: m.get(k) for k in ("bc_order_no", "bc_system_id", "external_document_no", "total", "lines")} for m in made]
-                draft_rec["split_per_line"] = True
+                draft_rec["split_per_line" if groups[0][0] != groups[-1][0] else "split_per_truckload"] = True
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sales_draft": draft_rec, "sales_stage": "drafted"}})
             await db.ap_workflow_events.insert_one({"document_id": d["id"], "action": "sales_order_draft", "by": "hub", "at": now(),
                                                     "environment": ALLOWED_ENVIRONMENT, "bc_record_no": first["bc_order_no"],

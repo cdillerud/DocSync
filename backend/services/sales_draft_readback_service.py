@@ -138,7 +138,8 @@ async def readback(db) -> Dict[str, Any]:
                 gs, nos = [], []
                 for x in sd["orders"]:
                     ext = str(x.get("external_document_no") or "")
-                    o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"}},
+                    o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"},
+                                                           "order_no": {"$nin": nos}},
                                                           {"_id": 0, "order_no": 1, "lines": 1})
                     if o:
                         gs.append(compare(x["lines"], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"], later))

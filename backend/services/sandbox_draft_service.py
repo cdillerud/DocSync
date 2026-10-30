@@ -994,6 +994,24 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": problem, "at": datetime.now(timezone.utc).isoformat()}}})
             continue
+        # A code BC itself refused on this vendor's invoices (XPO
+        # "Destination redelivery" -> can 3286-TY02: "Vendor No. of the Item
+        # ... is different", re-sent every cycle on 2026-10-29) goes to AP
+        # instead of BC again.
+        if plan.get("lines"):
+            vend = str(d.get("vendor_canonical") or "").upper()
+            refused = []
+            for l in plan["lines"]:
+                code = str(l.get("lineObjectNumber") or "").upper()
+                x = await db.bc_line_refusals.find_one({"vendor": vend, "code": code}, {"_id": 0, "error": 1})
+                if x:
+                    refused.append(f"{code} ({x.get('error')})")
+            if refused:
+                reason = "BC refused " + "; ".join(refused) + " on this vendor's invoice before: left for AP"
+                skipped.append({"document_id": d["id"], "file_name": d.get("file_name"), "reason": reason})
+                await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
+                    "reason": reason, "at": datetime.now(timezone.utc).isoformat()}}})
+                continue
         # $0 marker lines (Z-COC "C of C required", Z-TAG, Z-POP) carry no
         # amount and grading ignores them; PRE refuses some (Z-COC is set up
         # under vendor MHPLAS there), which failed whole Berry drafts.
@@ -1074,6 +1092,18 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                           f"(a copy of Production from 2026-08-31); a Production draft would not hit this")
             else:
                 reason = f"BC refused the draft lines ({why}); line build failed"
+                # Remember which code BC refused for this vendor (not an item
+                # missing from the sandbox copy: that is the sandbox's gap).
+                planned = plan.get("lines") or d.get("draft_lines_planned") or []
+                for ln, err in _re.findall(r"'line': (\d+), 'status': 4\d\d, 'error': '.*?message[^A-Za-z]{1,12}([A-Za-z][^\\\"]{3,160})", msg):
+                    i = int(ln) - 1
+                    if 0 <= i < len(planned) and "does not exist" not in err:
+                        code = str(planned[i].get("lineObjectNumber") or "").upper()
+                        if code:
+                            await db.bc_line_refusals.update_one(
+                                {"vendor": str(d.get("vendor_canonical") or "").upper(), "code": code},
+                                {"$set": {"error": err.split("  CorrelationId")[0][:160], "document_id": d["id"],
+                                          "environment": ALLOWED_ENVIRONMENT, "at": datetime.now(timezone.utc).isoformat()}}, upsert=True)
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
                 "reason": reason, "header_removed": str(deleted)[:80], "sandbox_gap": gap or None, "environment": ALLOWED_ENVIRONMENT,
                 "at": datetime.now(timezone.utc).isoformat()}}})
@@ -1155,7 +1185,8 @@ async def retry_line_skips(db) -> Dict[str, Any]:
                                          {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1}):
         reason = str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")
         stale = await _skip_is_stale(db, d, reason)
-        if not stale and _LINE_PROBLEM.search(reason) and (await coding_for(db, d.get("vendor_canonical")) or {}).get("dominant"):
+        if not stale and _LINE_PROBLEM.search(reason) and not reason.startswith("BC refused") \
+                and (await coding_for(db, d.get("vendor_canonical")) or {}).get("dominant"):
             stale = "vendor now has a usual coding"
         if not stale:
             continue

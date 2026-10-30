@@ -84,6 +84,9 @@ async def sandbox_gap(db, lines: List[Dict[str, Any]], msg: str) -> List[str]:
     return gap
 
 
+ROUNDING_CENTS = 0.05
+
+
 async def verify_draft_total(system_id: str, expected: float) -> Dict[str, Any]:
     """Read the draft just created back from BC and compare its total with
     the invoice (read-only GET)."""
@@ -102,8 +105,16 @@ async def verify_draft_total(system_id: str, expected: float) -> Dict[str, Any]:
     v = r.json()
     total = float(v.get("totalAmountIncludingTax") or 0)
     excl = float(v.get("totalAmountExcludingTax") or 0)
-    ok = abs(total - abs(expected)) < 0.02 or abs(excl - abs(expected)) < 0.02
-    return {"ok": ok, "bc_total": total, "expected": expected}
+    off = min(abs(total - abs(expected)), abs(excl - abs(expected)))
+    if off < 0.02:
+        return {"ok": True, "bc_total": total, "expected": expected}
+    # BC rounds quantity x unit cost; the vendor priced with more decimals
+    # (Ball 202.4 x 132.95 = 26,909.08 on a 26,909.06 invoice) or rounded
+    # each line (Ark). AP posted 15 invoices since 09-01 whose BC total was
+    # 1-4 cents off the paper: such a draft is kept, the difference noted.
+    if off <= ROUNDING_CENTS:
+        return {"ok": True, "bc_total": total, "expected": expected, "rounding": round(off, 2)}
+    return {"ok": False, "bc_total": total, "expected": expected}
 
 
 async def candidates(db, limit: int = 25, days: int = 30) -> List[Dict[str, Any]]:
@@ -1074,6 +1085,10 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                 chk = await verify_draft_total(r["bc_system_id"], float(d["amount_float"]))
             except Exception as e:
                 chk = {"ok": None, "error": repr(e)[:120]}
+            if chk.get("rounding"):
+                await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"draft_total_rounding": {
+                    "bc_total": chk["bc_total"], "invoice_total": chk["expected"], "difference": chk["rounding"],
+                    "note": f"BC's total {chk['bc_total']} is {chk['rounding']:.2f} off the invoice {chk['expected']} by rounding quantity x unit cost"}}})
             if chk.get("ok") is False:
                 from routers.gpi_integration import _delete_orphan_pi_header
                 deleted = await _delete_orphan_pi_header(r["bc_system_id"])

@@ -273,21 +273,69 @@ async def learn(db) -> Dict[str, Any]:
     return {"rules": len(rules), "product_rules": len(product_rules), "usual": len(usual), "invoice_time_excluded": sorted(excluded)}
 
 
-def po_freight(extracted_lines: List[Dict[str, Any]]) -> Optional[float]:
+def po_freight(extracted_lines: List[Dict[str, Any]], product_desc: frozenset = frozenset()) -> Optional[float]:
     total = 0.0
     for e in extracted_lines or []:
+        if str(e.get("description") or "")[:120] in product_desc:
+            continue    # a product line ("OUAF BOTTLE; requested delivery date 2026-12-18")
         if _FREIGHT_WORDS.search(str(e.get("description") or "")):
             v = num(e.get("total")) or ((num(e.get("unit_price")) or 0) * (num(e.get("quantity")) or 1))
             total += v or 0
     return round(total, 2) if total > 0 else None
 
 
+_KEPT: Dict[tuple, tuple] = {}
+_KEPT_AT = {"t": 0.0}
+FREIGHT_KEPT_LEARNED = True
+
+
+async def po_freight_kept(db, customer_no: str, charge: str) -> tuple:
+    """(kept, entered otherwise, the usual other entry) on this customer's
+    linked POs that show freight: did inside sales put the PO's freight on
+    the BC order? Hearthside's POs say 675; the order says 0 on 12 of 14,
+    priced when it ships."""
+    import time
+    if time.time() - _KEPT_AT["t"] > 3600:
+        _KEPT.clear()
+        _KEPT_AT["t"] = time.time()
+    key = (customer_no, charge)
+    if key in _KEPT:
+        return _KEPT[key]
+    kept, others, seen = 0, Counter(), set()
+    async for d in db.hub_documents.find({"sales_link.role": "customer_po", "sales_link.bc_customer_no": customer_no, "sales_link.order_no": {"$ne": None}},
+                                         {"_id": 0, "sales_link.order_no": 1, "extracted_fields.line_items": 1}):
+        on = d["sales_link"]["order_no"]
+        if on in seen:
+            continue
+        seen.add(on)
+        el = (d.get("extracted_fields") or {}).get("line_items") or []
+        # Only a line that is freight alone, not a product line naming a delivery date.
+        f = po_freight([e for e in el if len(str(e.get("description") or "")) <= 40])
+        if f is None:
+            continue
+        o = await db.bc_sales_orders.find_one({"order_no": on}, {"_id": 0, "lines": 1})
+        vs = [float(l.get("unitPrice") or 0) * float(l.get("quantity") or 0) for l in (o or {}).get("lines") or []
+              if str(l.get("lineObjectNumber") or "").upper() == charge]
+        if not vs:
+            continue
+        v = round(sum(vs), 2)
+        if abs(v - f) < 0.01:
+            kept += 1
+        else:
+            others[v] += 1
+    n = sum(others.values())
+    top = others.most_common(1)[0] if others else None
+    _KEPT[key] = (kept, n, top[0] if top and top[1] / n >= MIN_RATE else None)
+    return _KEPT[key]
+
+
 async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]],
-                       extracted_lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                       extracted_lines: List[Dict[str, Any]], all_products: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     prods = [l for l in product_lines if l.get("item")]
     pq = sum(float(l.get("quantity") or 0) for l in prods)
     pv = sum(float(l.get("quantity") or 0) * float(l.get("unit_price") or 0) for l in prods)
-    freight = po_freight(extracted_lines)
+    pdesc = frozenset(str(l.get("po_description") or "")[:120] for l in (all_products or prods) if l.get("po_description"))
+    freight = po_freight(extracted_lines, pdesc)
     out = []
     async for r in db.sales_charge_rules.find({"customer_no": customer_no}, {"_id": 0}):
         if r["qty_mode"] == "fixed":
@@ -328,6 +376,12 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
             price = round(r["pct"] * pv / qty, 2)
         elif r["price_mode"] == "po_freight" and freight is not None:
             price, qty = freight, 1.0
+            kept, other, entry = await po_freight_kept(db, customer_no, r["charge"]) if FREIGHT_KEPT_LEARNED else (0, 0, None)
+            if entry is not None and other >= 3 and other > 2 * kept:
+                # Inside sales does not enter this customer's PO freight.
+                price = entry
+                r = {**r, "price_basis": f"{entry:g}, as inside sales entered it on {other} of {kept + other} of this customer's POs "
+                                        f"that showed freight (PO shows {freight:g})"}
         elif r["price_mode"] == "po_freight" and FREIGHT_PLACEHOLDER:
             # No freight on the PO: the line inside sales enters on open
             # orders - 1 at 0, priced when it ships (501 of 760 open orders).

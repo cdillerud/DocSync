@@ -214,7 +214,7 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                 from services.sales_charge_service import charge_lines
                 base_po = _split_base(sl, po_text)
                 el = (d.get("extracted_fields") or {}).get("line_items") or []
-                groups = [(f"{base_po}-{n}"[:35], [l] + await charge_lines(db, cust, [l], el)) for n, l in enumerate(prods, 1)]
+                groups = [(f"{base_po}-{n}"[:35], [l] + await charge_lines(db, cust, [l], el, all_products=prods)) for n, l in enumerate(prods, 1)]
             elif TRUCKLOAD_SPLIT and len(prods) == 1:
                 q, k = await truckload_split(db, cust, prods[0])
                 if k > 1:

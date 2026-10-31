@@ -74,6 +74,23 @@ async def sandbox_gap(db, lines: List[Dict[str, Any]], msg: str) -> List[str]:
                     r = await c.get(f"{base}/items", headers=h, params={"$filter": "number eq '" + it.replace("'", "''") + "'", "$select": "number"})
                     found[(env, it)] = r.status_code == 200 and bool(r.json().get("value"))
         gap += [it for it in items if found.get((prod, it)) and not found.get((ALLOWED_ENVIRONMENT, it))]
+    if "Blocked must be equal to" in msg and items:
+        # Items blocked in the copy and open in Production since (Berry
+        # T60785CPB/L607DS, unblocked 2026-10-16 for AP to use) are the
+        # copy's age too.
+        prod = os.environ.get("BC_ENVIRONMENT") or "Production"
+        blocked = {}
+        for env in (prod, ALLOWED_ENVIRONMENT):
+            base, h = await _bc(env)
+            async with httpx.AsyncClient(timeout=60) as c:
+                for it in items:
+                    if it not in msg:
+                        continue
+                    r = await c.get(f"{base}/items", headers=h, params={"$filter": "number eq '" + it.replace("'", "''") + "'", "$select": "number,blocked"})
+                    v = r.json().get("value") if r.status_code == 200 else None
+                    blocked[(env, it)] = v[0].get("blocked") if v else None
+        gap += [f"{it} (blocked in the sandbox copy, open in Production)" for it in items
+                if blocked.get((prod, it)) is False and blocked.get((ALLOWED_ENVIRONMENT, it)) is True]
     if "Item Charge does not exist" in msg and charges:
         # BC's API has no item charge list: a charge AP has put on Production
         # invoices exists there.
@@ -1079,9 +1096,10 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                     deleted = await _delete_orphan_pi_header(sid)
                 except Exception as e:
                     deleted = repr(e)[:120]
+            msg = msg.replace("\\'", "'")
             why = (_re.search(r"message[^A-Za-z]{1,12}([A-Za-z][^\\\"]{3,160})", msg) or [None, msg[-200:]])[1]
             gap = []
-            if "does not exist" in msg:
+            if "does not exist" in msg or "Blocked must be equal to" in msg:
                 try:
                     gap = await sandbox_gap(db, plan.get("lines") or d.get("draft_lines_planned") or [], msg)
                 except Exception as e:

@@ -64,6 +64,16 @@ ITEM_RATIO = True
 ITEM_RULES_INVOICED_ONLY = False   # replay switch: learn item charges from invoiced orders only
 
 
+UNIT_EACH = True
+
+
+def _each(q: float, uom: Any) -> float:
+    """Quantity in single units: Giovanni's 24oz jar was ordered by the M
+    (thousand) for years and by the each since, so pallets per M (2.8) and
+    per each (1/2,821) looked like no steady ratio at all."""
+    return q * 1000 if UNIT_EACH and str(uom or "").upper() == "M" else q
+
+
 def _lines(o: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [l for l in o.get("lines") or [] if l.get("lineType") == "Item" and l.get("lineObjectNumber")]
 
@@ -90,9 +100,34 @@ async def invoice_time_charges(db) -> set:
             if k >= 50 and tot["open"] and (open_n[c] / tot["open"]) / (k / tot["invoiced"]) < 0.6}
 
 
+CUSTOMER_ENTRY_TIME = True
+
+
+async def customer_entry_charges(db, excluded: set) -> set:
+    """(customer, charge) pairs where a charge most customers get at
+    invoicing is on this customer's orders from entry: O-I pallets / tier
+    sheets / top frames are on 7% of all open orders and 16% of invoiced
+    ones, but on every open Giovanni order (one pallet per 2,821 jars)."""
+    if not CUSTOMER_ENTRY_TIME or not excluded:
+        return set()
+    open_n, inv_n, tot = Counter(), Counter(), Counter()
+    async for o in db.bc_sales_orders.find({"status": {"$in": ["open", "invoiced"]}}, {"_id": 0, "status": 1, "customer_no": 1, "lines": 1}):
+        ls = _lines(o)
+        if not any(is_product(l["lineObjectNumber"]) for l in ls):
+            continue
+        cust = o.get("customer_no")
+        tot[(cust, o["status"])] += 1
+        for c in {str(l["lineObjectNumber"]).upper() for l in ls} & excluded:
+            (open_n if o["status"] == "open" else inv_n)[(cust, c)] += 1
+    return {(cust, c) for (cust, c), k in open_n.items()
+            if tot[(cust, "open")] >= 5 and k / tot[(cust, "open")] >= MIN_RATE
+            and (not inv_n[(cust, c)] or (k / tot[(cust, "open")]) / (inv_n[(cust, c)] / tot[(cust, "invoiced")]) >= 0.6)}
+
+
 async def learn(db) -> Dict[str, Any]:
     await load_item_categories(db)
     excluded = await invoice_time_charges(db)
+    entry = await customer_entry_charges(db, excluded)
     obs = defaultdict(lambda: defaultdict(list))      # cust -> charge -> [dict]
     prod_ratio = defaultdict(list)                    # (cust, product, charge) -> [ratio]
     prod_price = defaultdict(list)                    # (cust, product, charge) -> [unit price]
@@ -120,7 +155,8 @@ async def learn(db) -> Dict[str, Any]:
                 if not is_product(c) and float(l.get("quantity") or 0) > 0:
                     q = float(l["quantity"])
                     kind = "same" if abs(q - pq1) < 1e-6 else ("one" if q == 1 else "other")
-                    item_charge[(it1, c)].append((_order_seq(o.get("order_no")), kind, q, float(l.get("unitPrice") or 0), q / pq1 if pq1 else 0))
+                    item_charge[(it1, c)].append((_order_seq(o.get("order_no")), kind, q, float(l.get("unitPrice") or 0),
+                                                 q / _each(pq1, prods[0].get("unitOfMeasureCode")) if pq1 else 0))
         sigs = {size_signature(l["lineObjectNumber"], l.get("unitOfMeasureCode")) for l in prods}
         if len(sigs) == 1 and None not in sigs:
             sig = sigs.pop()
@@ -133,7 +169,7 @@ async def learn(db) -> Dict[str, Any]:
                     size_price[(sig, c)][round(float(l.get("unitPrice") or 0), 4)] += 1
         cust = o["customer_no"]
         orders[cust] += 1
-        pq = sum(float(l["quantity"]) for l in prods)
+        pq = sum(_each(float(l["quantity"]), l.get("unitOfMeasureCode")) for l in prods)
         pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
         agg = {}
         for l in ls:
@@ -145,14 +181,14 @@ async def learn(db) -> Dict[str, Any]:
         for c, a in agg.items():
             seen_any[cust][c] += 1
             all_q[cust][c].append(a["q"])
-            if c in excluded:
+            if c in excluded and (cust, c) not in entry:
                 continue
             obs[cust][c].append({"q": a["q"], "p": a["p"], "pq": pq, "pv": pv, "open": o.get("status") == "open"})
             if len(prods) == 1 and a["q"] > 0:
                 it = str(prods[0]["lineObjectNumber"]).upper()
-                prod_ratio[(cust, it, c)].append(a["q"] / float(prods[0]["quantity"]))
+                prod_ratio[(cust, it, c)].append(a["q"] / _each(float(prods[0]["quantity"]), prods[0].get("unitOfMeasureCode")))
                 prod_price[(cust, it, c)].append(round(a["p"], 4))
-                glob_ratio[(it, c)].append(a["q"] / float(prods[0]["quantity"]))
+                glob_ratio[(it, c)].append(a["q"] / _each(float(prods[0]["quantity"]), prods[0].get("unitOfMeasureCode")))
     # Sandbox drafts a rep completed (lines added in BC) count as orders too:
     # what reps add is what the Hub should learn to add.
     async for d in db.hub_documents.find({"sales_draft_readback.edits.0": {"$exists": True}, "sales_draft_readback.lines.0": {"$exists": True}},
@@ -163,11 +199,11 @@ async def learn(db) -> Dict[str, Any]:
         if not cust or not prods:
             continue
         orders[cust] += 1
-        pq = sum(float(l["quantity"]) for l in prods)
+        pq = sum(_each(float(l["quantity"]), l.get("unitOfMeasureCode")) for l in prods)
         pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
         for l in ls:
             c = str(l["lineObjectNumber"]).upper()
-            if not is_product(c) and c not in excluded:
+            if not is_product(c) and (c not in excluded or (cust, c) in entry):
                 obs[cust][c].append({"q": float(l.get("quantity") or 0), "p": float(l.get("unitPrice") or 0), "pq": pq, "pv": pv, "open": True})
     now = datetime.now(timezone.utc).isoformat()
     usual = []
@@ -179,7 +215,7 @@ async def learn(db) -> Dict[str, Any]:
             if rate >= 0.3:
                 qs = sorted(all_q[cust][c]) or [None]
                 usual.append({"customer_no": cust, "charge": c, "rate": round(min(rate, 1.0), 2), "orders": orders[cust],
-                              "typical_qty": qs[len(qs) // 2], "when": "shipping / invoicing" if c in excluded else "order entry",
+                              "typical_qty": qs[len(qs) // 2], "when": "shipping / invoicing" if c in excluded and (cust, c) not in entry else "order entry",
                               "updated_at": now})
     await db.sales_charge_usual.delete_many({})
     if usual:
@@ -270,7 +306,8 @@ async def learn(db) -> Dict[str, Any]:
     await db.sales_charge_rules.create_index("customer_no")
     await db.sales_charge_product_rules.create_index([("product", 1), ("charge", 1)])
     await db.sales_charge_product_rules.create_index([("size", 1), ("charge", 1)])
-    return {"rules": len(rules), "product_rules": len(product_rules), "usual": len(usual), "invoice_time_excluded": sorted(excluded)}
+    return {"rules": len(rules), "product_rules": len(product_rules), "usual": len(usual), "invoice_time_excluded": sorted(excluded),
+            "entry_time_for_customer": sorted(f"{a}:{b}" for a, b in entry)}
 
 
 def po_freight(extracted_lines: List[Dict[str, Any]], product_desc: frozenset = frozenset()) -> Optional[float]:
@@ -332,7 +369,7 @@ async def po_freight_kept(db, customer_no: str, charge: str) -> tuple:
 async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]],
                        extracted_lines: List[Dict[str, Any]], all_products: Optional[List[Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     prods = [l for l in product_lines if l.get("item")]
-    pq = sum(float(l.get("quantity") or 0) for l in prods)
+    pq = sum(_each(float(l.get("quantity") or 0), l.get("unit_of_measure")) for l in prods)
     pv = sum(float(l.get("quantity") or 0) * float(l.get("unit_price") or 0) for l in prods)
     pdesc = frozenset(str(l.get("po_description") or "")[:120] for l in (all_products or prods) if l.get("po_description"))
     freight = po_freight(extracted_lines, pdesc)
@@ -357,7 +394,7 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                 if not ratio:
                     known = False
                     break
-                qty += ratio * float(p["quantity"])
+                qty += ratio * _each(float(p["quantity"]), p.get("unit_of_measure"))
                 if (cp or {}).get("price") is not None:
                     prices.add(cp["price"])
             if not known or qty <= 0:
@@ -404,7 +441,7 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                     continue
                 have.add(ic["charge"])
                 if ic["qty_kind"] == "ratio":
-                    q = float(max(1, round(ic["ratio"] * float(p.get("quantity") or 0))))
+                    q = float(max(1, round(ic["ratio"] * _each(float(p.get("quantity") or 0), p.get("unit_of_measure")))))
                 else:
                     q = float(p.get("quantity") or 0) if ic["qty_kind"] == "same" else 1.0
                 out.append({"item": ic["charge"], "quantity": q, "unit_price": ic["price"], "charge": True,

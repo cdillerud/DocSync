@@ -11,16 +11,29 @@ import logging
 import re
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 
-async def readback(db, limit: int = 200) -> Dict[str, Any]:
+async def sandbox_envs(db, field: str = "bc_purchase_invoice.environment") -> List[str]:
+    """Every sandbox the Hub has drafted in. Drafting moved from PRE to
+    PROD_1029_RESTORE_DIAG on 2026-10-31; drafts already in PRE are still
+    read back and graded when AP enters the invoice."""
+    return [e for e in await db.hub_documents.distinct(field) if e and str(e).strip().lower() != "production"]
+
+
+async def readback(db, limit: int = 200, env: Optional[str] = None) -> Dict[str, Any]:
     import httpx
     import services.bc_catalog_sync_service as bc
-    from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
-    env = ALLOWED_ENVIRONMENT
+    if env is None:
+        out = {}
+        for e in await sandbox_envs(db):
+            try:
+                out[e] = await readback(db, limit, e)
+            except Exception as x:    # one sandbox down does not stop the others
+                out[e] = {"error": repr(x)[:200]}
+        return out
     token = await bc.get_bc_token(environment=env)
     now = datetime.now(timezone.utc).isoformat()
     stats = Counter()
@@ -125,10 +138,10 @@ async def grade_against_production(db) -> Dict[str, Any]:
     accuracy of AP drafting. Stored as ap_draft_vs_bc on the document."""
     import httpx
     import services.bc_catalog_sync_service as bc
-    from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
+    envs = await sandbox_envs(db)
     now = datetime.now(timezone.utc).isoformat()
     docs = [d async for d in db.hub_documents.find(
-        {"$or": [{"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"bc_purchase_invoice_removed.environment": ALLOWED_ENVIRONMENT}],
+        {"$or": [{"bc_purchase_invoice.environment": {"$in": envs}}, {"bc_purchase_invoice_removed.environment": {"$in": envs}}],
          "bc_link.bc_document_no": {"$exists": True}, "ap_draft_vs_bc": {"$exists": False}},
         {"_id": 1, "draft_lines_planned": 1, "bc_draft_readback": 1, "bc_link": 1, "amount_float": 1, "bc_purchase_invoice": 1,
          "bc_purchase_invoice_removed": 1})]

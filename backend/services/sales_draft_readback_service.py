@@ -17,7 +17,7 @@ import logging
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from services.sales_item_xref_service import is_product, load_item_categories
 
@@ -78,10 +78,19 @@ def _merge(gs: List[Dict[str, Any]]) -> Dict[str, Any]:
     return out
 
 
-async def readback(db) -> Dict[str, Any]:
+async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
     import httpx
-    from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
     from services.sales_draft_service import _bc
+    if env is None:
+        from services.draft_readback_service import sandbox_envs
+        out = {}
+        for e in await sandbox_envs(db, "sales_draft.environment"):
+            try:
+                out[e] = await readback(db, e)
+            except Exception as x:    # one sandbox down does not stop the others
+                out[e] = {"error": repr(x)[:200]}
+        return out
+    ALLOWED_ENVIRONMENT = env
     await load_item_categories(db)
     now = datetime.now(timezone.utc).isoformat()
     stats = Counter()

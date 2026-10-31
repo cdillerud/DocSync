@@ -302,7 +302,9 @@ async def sales_fast_scheduler() -> None:
         try:
             from deps import get_db
             from services.sales_draft_service import refusal, draft
+            from services.gpi_integration_service import verify_sandbox, BC_WRITE_ENVIRONMENT
             db = get_db()
+            await verify_sandbox(BC_WRITE_ENVIRONMENT)
             if not refusal():
                 from services.bc_sales_history_service import sync as sales_sync
                 from services.sales_link_service import run as sales_link

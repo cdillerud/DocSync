@@ -79,6 +79,47 @@ async def _get_token() -> str:
         return data["access_token"]
 
 
+# Copies of Production are sandboxes whose names can start with "prod"
+# (PROD_1029_RESTORE_DIAG, 2026-10-31). Such a name is writable only when it
+# is listed in BC_VERIFIED_SANDBOXES and BC's admin API says the environment
+# is a Sandbox (verify_sandbox, cached an hour; anything else stays blocked).
+# "Production" itself is always blocked.
+VERIFIED_SANDBOXES = {e.strip() for e in os.environ.get("BC_VERIFIED_SANDBOXES", "").split(",") if e.strip()}
+_SANDBOX_TYPE: Dict[str, Any] = {}
+
+
+async def verify_sandbox(env: str) -> bool:
+    import time
+    if env not in VERIFIED_SANDBOXES:
+        return False
+    hit = _SANDBOX_TYPE.get(env)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    ok = False
+    try:
+        token = await _get_token()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            r = await client.get("https://api.businesscentral.dynamics.com/admin/v2.21/applications/BusinessCentral/environments",
+                                 headers={"Authorization": f"Bearer {token}"})
+        ok = r.status_code == 200 and any(e.get("name") == env and e.get("type") == "Sandbox" and e.get("status") == "Active"
+                                          for e in r.json().get("value", []))
+    except Exception as e:
+        logger.warning("[BC] sandbox check for %s failed: %r", env, e)
+    _SANDBOX_TYPE[env] = (time.time(), ok)
+    return ok
+
+
+def production_name(env: Optional[str]) -> bool:
+    """True when env is, or may be, Production."""
+    t = (env or "").strip().lower()
+    if not t or t == "production":
+        return True
+    if t.startswith("prod") or "production" in t:
+        hit = _SANDBOX_TYPE.get(env)
+        return not (env in VERIFIED_SANDBOXES and hit and hit[1])
+    return False
+
+
 def _check_write_protection(operation: str):
     """Hard guard: refuse all writes unless BC_WRITE_ENABLED, and never write to Production."""
     # BC_WRITE_ENABLED is the master kill switch and blocks every BC write,
@@ -89,8 +130,7 @@ def _check_write_protection(operation: str):
         )
     if not BC_BLOCK_PRODUCTION_WRITES:
         return
-    target = BC_WRITE_ENVIRONMENT.lower()
-    if target == "production" or target.startswith("prod"):
+    if production_name(BC_WRITE_ENVIRONMENT):
         raise ValueError(
             f"BLOCKED: Write operation '{operation}' refused — target environment "
             f"'{BC_WRITE_ENVIRONMENT}' resolves to Production and BC_BLOCK_PRODUCTION_WRITES=true."

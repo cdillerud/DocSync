@@ -27,7 +27,8 @@ def refusal() -> str:
         return "Sales drafting is paused (SALES_DRAFTING_PAUSED)"
     if os.environ.get("BC_WRITE_ENABLED", "false").strip().lower() != "true":
         return "BC writes are disabled (BC_WRITE_ENABLED is not true)"
-    if write_target() != ALLOWED_ENVIRONMENT or "prod" in write_target().lower():
+    from services.gpi_integration_service import production_name
+    if write_target() != ALLOWED_ENVIRONMENT or production_name(write_target()):
         return f"Write environment is '{write_target()}', drafting is only allowed in '{ALLOWED_ENVIRONMENT}'"
     return ""
 
@@ -167,6 +168,8 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
 async def _draft(db, limit: int = 5) -> Dict[str, Any]:
     import httpx
     from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
+    from services.gpi_integration_service import verify_sandbox
+    await verify_sandbox(ALLOWED_ENVIRONMENT)
     reason = refusal()
     if reason:
         return {"drafted": 0, "refused": reason}

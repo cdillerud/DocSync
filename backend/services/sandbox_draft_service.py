@@ -44,7 +44,8 @@ def refusal() -> str:
     target = write_target()
     if target != ALLOWED_ENVIRONMENT:
         return f"Write environment is '{target}', drafting is only allowed in '{ALLOWED_ENVIRONMENT}'"
-    if "prod" in target.lower():
+    from services.gpi_integration_service import production_name
+    if production_name(target):
         return "Drafting never targets Production"
     return ""
 
@@ -881,6 +882,8 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
     goes to staff with the reason. Drafts AP edited are left alone.
     """
     from services.number_shape_service import vendor_shapes
+    from services.gpi_integration_service import verify_sandbox
+    await verify_sandbox(write_target())
     if refusal():
         return {"refused": refusal()}
     from routers.gpi_integration import _delete_orphan_pi_header

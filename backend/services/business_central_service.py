@@ -105,8 +105,8 @@ def _check_write_protection(operation: str):
         raise BCWritesDisabledError(operation)
     if not BC_BLOCK_PRODUCTION_WRITES:
         return
-    target = BC_WRITE_ENVIRONMENT.lower()
-    if target == "production" or target.startswith("prod"):
+    from services.gpi_integration_service import production_name
+    if production_name(BC_WRITE_ENVIRONMENT):
         raise ProductionWriteBlockedError(operation)
 
 

@@ -60,6 +60,13 @@ def compare(planned: List[Dict[str, Any]], actual: List[Dict[str, Any]], later: 
     return out
 
 
+def _as_entered(o: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """The order's lines as inside sales entered them (first seen by the
+    sales sync), else as they are now: a draft is the order at entry, and
+    shipping later changes quantities, prices and dunnage."""
+    return o.get("entered_lines") or o.get("lines") or []
+
+
 async def _later_charges(db, customer_no: Any) -> frozenset:
     return frozenset([u["charge"] async for u in db.sales_charge_usual.find(
         {"customer_no": customer_no, "when": "shipping / invoicing"}, {"_id": 0, "charge": 1})])
@@ -149,9 +156,9 @@ async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
                     ext = str(x.get("external_document_no") or "")
                     o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"},
                                                            "order_no": {"$nin": nos}},
-                                                          {"_id": 0, "order_no": 1, "lines": 1})
+                                                          {"_id": 0, "order_no": 1, "lines": 1, "entered_lines": 1})
                     if o:
-                        gs.append(compare(x["lines"], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"], later))
+                        gs.append(compare(x["lines"], [l for l in _as_entered(o) if l.get("lineType") == "Item"], later))
                         nos.append(o["order_no"])
                 if gs:
                     g = _merge(gs)
@@ -160,10 +167,11 @@ async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
                     stats["graded"] += 1
                     stats["graded_exact"] += bool(g["exact"])
             elif order_no:
-                o = await db.bc_sales_orders.find_one({"order_no": order_no}, {"_id": 0, "lines": 1})
+                o = await db.bc_sales_orders.find_one({"order_no": order_no}, {"_id": 0, "lines": 1, "entered_lines": 1})
                 if o:
-                    g = compare(sd.get("lines") or [], [l for l in o.get("lines") or [] if l.get("lineType") == "Item"], later)
-                    upd["sales_draft_vs_bc"] = {**g, "bc_order_no": order_no, "graded_at": now}
+                    g = compare(sd.get("lines") or [], [l for l in _as_entered(o) if l.get("lineType") == "Item"], later)
+                    upd["sales_draft_vs_bc"] = {**g, "bc_order_no": order_no, "graded_at": now,
+                                                "graded_on": "as entered" if o.get("entered_lines") else "current order"}
                     stats["graded"] += 1
                     stats["graded_exact"] += bool(g["exact"])
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": upd})

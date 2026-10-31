@@ -102,7 +102,11 @@ async def sync(db, days: int = 365, full: bool = False) -> Dict[str, Any]:
                 "requested_delivery_date": v.get("requestedDeliveryDate"), "ship_to": _ship_to(v),
                 "salesperson": v.get("salesperson"), "currency": v.get("currencyCode") or "USD",
                 "total": v.get("totalAmountExcludingTax"), "lines": _lines(ls),
-                "bc_modified": v.get("lastModifiedDateTime"), "synced_at": now}}, upsert=True)
+                "bc_modified": v.get("lastModifiedDateTime"), "synced_at": now},
+                # The order as inside sales entered it, before shipping
+                # changes it (Giovanni PO 64087: entered as the PO's 56,420
+                # jars, 62,062 at a new price once O-I shipped 22 pallets).
+                "$setOnInsert": {"entered_lines": _lines(ls), "entered_seen_at": now}}, upsert=True)
             stats["open_orders"] += 1
         await db.bc_sales_orders.update_many({"status": "open", "order_no": {"$nin": list(open_nos)}},
                                              {"$set": {"status": "closed_or_invoiced", "synced_at": now}})

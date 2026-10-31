@@ -44,6 +44,29 @@ async def vendor_shapes(db) -> Dict[str, Dict[str, Any]]:
     return shapes
 
 
+async def credit_memo_shapes(db) -> Dict[str, Dict[str, Any]]:
+    """Credit memos measured against the vendor's own BC credit memos, not
+    its invoices: Pretium RMA credits are "16945-02RMA" in BC, and the
+    invoice shape cut 6 of 6 of them to "16945" (2026-10-31). Vendors with
+    fewer than 5 BC credit memos have no shape (no correction)."""
+    per: Dict[str, list] = {}
+    async for c in db.bc_purchase_credit_memos.find({"vendorCreditMemoNumber": {"$nin": [None, ""]}},
+                                                    {"_id": 0, "vendorNumber": 1, "vendorCreditMemoNumber": 1}):
+        # One BC credit can carry several ("59809-07RMA, 59825-07RMA").
+        for part in re.split(r"\s*(?:,|&|;|\band\b)\s*", str(c["vendorCreditMemoNumber"])):
+            if _norm(part):
+                per.setdefault(str(c.get("vendorNumber") or "").upper(), []).append(_norm(part))
+    shapes = {}
+    for v, nums in per.items():
+        nums = nums[-300:]
+        if len(nums) < 5:
+            continue
+        lens = Counter(len(n) for n in nums)
+        shapes[v] = {"lengths": {l for l, c in lens.items() if c / len(nums) >= 0.05}, "prefixes": None, "n": len(nums),
+                     "digits_share": sum(1 for n in nums if n.isdigit()) / len(nums)}
+    return shapes
+
+
 def fits(shape: Optional[Dict[str, Any]], number: Any) -> Optional[bool]:
     """True / False when the vendor has a learned shape, None when unknown."""
     if not shape:
@@ -115,14 +138,16 @@ async def _suffix_dropped(db, vendor: Any, suffix: str) -> bool:
 async def correct_recent(db, days: int = 30, apply: bool = True) -> Dict[str, Any]:
     from services.non_ap_reclassifier import NUMBER_IN_TEXT
     shapes = await vendor_shapes(db)
+    cm_shapes = await credit_memo_shapes(db)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     stats = {"checked": 0, "misfit": 0, "corrected": 0}
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": "AP", "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]},
              "bc_link": {"$exists": False}, "invoice_number_clean": {"$nin": [None, ""]}},
-            {"_id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "email_subject": 1, "file_name": 1, "po_number_clean": 1, "amount_float": 1}):
-        shape = shapes.get(str(d.get("vendor_canonical") or "").upper())
+            {"_id": 1, "vendor_canonical": 1, "invoice_number_clean": 1, "email_subject": 1, "file_name": 1, "po_number_clean": 1, "amount_float": 1,
+             "document_type": 1}):
+        shape = (cm_shapes if d.get("document_type") == "Credit_Memo" else shapes).get(str(d.get("vendor_canonical") or "").upper())
         stats["checked"] += 1
         if fits(shape, d["invoice_number_clean"]) is not False:
             continue
@@ -206,6 +231,7 @@ async def fill_missing(db, days: int = 30, apply: bool = True) -> Dict[str, Any]
     number in the subject / file name that fits the vendor's BC shape."""
     from services.non_ap_reclassifier import NUMBER_IN_TEXT
     shapes = await vendor_shapes(db)
+    cm_shapes = await credit_memo_shapes(db)
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     stats = {"checked": 0, "filled": 0, "examples": []}
@@ -218,7 +244,7 @@ async def fill_missing(db, days: int = 30, apply: bool = True) -> Dict[str, Any]
             {"_id": 1, "id": 1, "vendor_canonical": 1, "document_type": 1, "email_subject": 1, "file_name": 1,
              "po_number_clean": 1, "extracted_fields.credit_memo_number": 1}):
         stats["checked"] += 1
-        shape = shapes.get(str(d.get("vendor_canonical") or "").upper())
+        shape = (cm_shapes if d.get("document_type") == "Credit_Memo" else shapes).get(str(d.get("vendor_canonical") or "").upper())
         po = _norm(d.get("po_number_clean"))
         number, src = None, None
         cm = str(((d.get("extracted_fields") or {}).get("credit_memo_number")) or "").strip()

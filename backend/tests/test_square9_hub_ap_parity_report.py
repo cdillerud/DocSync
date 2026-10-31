@@ -743,3 +743,25 @@ def test_triage_csv_not_written_when_path_omitted(tmp_path):
     )
     assert result["triage_out_csv"] is None
     assert result["triage_rows_written"] == 0
+
+
+def test_hub_invoice_number_with_separator_in_square9_name():
+    # B&B numbers its invoices "1026-13"; no filename token pattern reads it.
+    sq = _sq("_B&B Packaging_10192026_1026-13.pdf")
+    hub = _hub("Invoice_102613_from_BB_Packaging_and_Warehouse_LLC.pdf",
+               vendor_canonical="BB Packaging", invoice_number_clean="1026-13", amount_float=812.5)
+    res = parity.score_pair(sq, hub)
+    assert res.bucket == "strong_evidence_match"
+
+
+def test_hub_invoice_number_in_name_needs_a_shared_vendor():
+    sq = _sq("_Acme Freight_10192026_1026-13.pdf")
+    hub = _hub("Invoice_102613_from_BB_Packaging_and_Warehouse_LLC.pdf",
+               vendor_canonical="BB Packaging", invoice_number_clean="1026-13", amount_float=812.5)
+    assert parity.score_pair(sq, hub).bucket != "strong_evidence_match"
+
+
+def test_hub_invoice_number_in_name_is_whole_parts_only():
+    assert parity._number_in_name("1026-13", "_B&B Packaging_10192026_1026-13.pdf")
+    assert not parity._number_in_name("1026-1", "_B&B Packaging_10192026_1026-13.pdf")
+    assert not parity._number_in_name("6-13", "_B&B Packaging_10192026_1026-13.pdf")

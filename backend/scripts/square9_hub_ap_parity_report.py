@@ -306,6 +306,19 @@ def _date_close_days(a: Optional[datetime], b: Optional[datetime], days: int) ->
     return abs((a - b).total_seconds()) <= days * 86400
 
 
+def _number_in_name(number: str, name: str) -> bool:
+    """The Hub's extracted invoice number, spelled out in a file name with
+    any separators: B&B's "1026-13" is in "_B&B Packaging_10192026_1026-13"
+    but no token pattern reads a 4-2 digit number (2026-10-31)."""
+    parts = re.findall(r"[a-z0-9]+", (number or "").lower())
+    joined = "".join(parts)
+    if len(joined) < 5 or not any(c.isdigit() for c in joined):
+        return False
+    base = name.rsplit(".", 1)[0] if "." in (name or "") else (name or "")
+    seq = "-" + "-".join(re.findall(r"[a-z0-9]+", base.lower())) + "-"
+    return "-" + "-".join(parts) + "-" in seq
+
+
 def score_pair(sq: SquareDoc, hub: HubDoc,
                invoice_date_tolerance_days: Optional[int] = None) -> MatchResult:
     """Layered evidence-based matching between a Square9 doc and a Hub doc.
@@ -348,6 +361,8 @@ def score_pair(sq: SquareDoc, hub: HubDoc,
 
     # 2. Strong evidence: invoice number match + (vendor match OR amount match)
     inv_overlap = sq_inv & hub_inv
+    if not inv_overlap and (sq_vendors & hub_vendors) and _number_in_name(hub.invoice_number_clean, sq.name):
+        inv_overlap = {hub.invoice_number_clean.upper().lstrip("0")}
     bd["inv_overlap"] = sorted(inv_overlap)
     bd["vendor_overlap"] = sorted(sq_vendors & hub_vendors)
 

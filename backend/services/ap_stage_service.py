@@ -133,10 +133,13 @@ async def load_reliability(db) -> Dict[str, Dict[str, Any]]:
         n, ok = g["n"], g["ok"]
         pct = round(100 * ok / n, 1) if n else 0.0
         out[f"{g['_id']['k']}|{g['_id']['v']}"] = {"n": n, "pct": pct, "reliable": n >= RELIABLE_MIN_N and pct >= RELIABLE_PCT}
-    ai = await db.folder_model.find_one({"_id": "ai_routing"}, {"_id": 0, "on": 1, "reliable_conf": 1, "calibration": 1}) or {}
+    ai = await db.folder_model.find_one({"_id": "ai_routing"}, {"_id": 0, "on": 1, "reliable_conf": 1, "calibration": 1, "by_folder": 1}) or {}
     if ai.get("on") and ai.get("reliable_conf"):
         c = (ai.get("calibration") or {}).get(str(ai["reliable_conf"])) or {}
         out["__ai__"] = {"conf": float(ai["reliable_conf"]), "n": c.get("n"), "pct": c.get("pct")}
+    for fam, c in ((ai.get("by_folder") or {}) if ai.get("on") else {}).items():
+        if c.get("conf"):
+            out[f"__ai__|{_root(fam)}"] = {"conf": float(c["conf"]), "n": c.get("n"), "pct": c.get("pct")}
     return out
 
 SUPPORTING_TYPES = {"Shipping_Document", "Warehouse_Receipt", "Freight_Document", "Inspection_Form",
@@ -284,7 +287,8 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
             rel = {**vrel, "via": "this vendor's filings on this path"}
         # The AI decided the folder: measured by its own replay on staff's
         # unsure filings, at the confidence it gave this document.
-        aic, air = reliability.get("__ai__"), d.get("ai_routing") or {}
+        air = d.get("ai_routing") or {}
+        aic = reliability.get("__ai__") or reliability.get(f"__ai__|{_root(air.get('folder') or '')}")
         if (not rel["reliable"] and aic and (why or "").startswith("AI decided") and air.get("folder")
                 and _root(air["folder"]) == _root(folder) and float(air.get("confidence") or 0) >= aic["conf"]):
             rel = {"n": aic["n"], "pct": aic["pct"], "reliable": True,

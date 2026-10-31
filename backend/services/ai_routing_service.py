@@ -347,7 +347,7 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         r["n"] += 1
         r["current_right"] += cur == truth
         r["ai_right"] += (ai or cur) == truth
-        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0]))
+        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0], (ai or "").split("/")[0]))
         if len(rows) < 15 and ai and ai != cur:
             rows.append({"file": d.get("file_name"), "staff": truth, "current": cur, "ai": ai, "why": why})
     on = r["n"] >= MIN_N and r["ai_right"] >= r["current_right"] + max(2, round(MIN_GAIN * r["n"]))
@@ -357,17 +357,30 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     # document sat in Needs staff as an unmeasured path - 13 of 30 on
     # 2026-10-26, most at 0.97-0.99).
     from services.ap_stage_service import RELIABLE_MIN_N, RELIABLE_PCT
-    calibration, reliable_conf = {}, None
-    for t in (0.99, 0.97, 0.95, 0.9, 0.85, 0.8):
-        hit = [ok for c, has, ok in cal if has and c >= t]
-        pct = round(100 * sum(hit) / len(hit), 1) if hit else None
-        calibration[str(t)] = {"n": len(hit), "pct": pct}
-        if len(hit) >= RELIABLE_MIN_N and pct >= RELIABLE_PCT:
-            reliable_conf = t
-        elif reliable_conf is not None:
-            break
+
+    def _calibrate(rows):
+        calibration, reliable_conf = {}, None
+        for t in (0.99, 0.97, 0.95, 0.9, 0.85, 0.8):
+            hit = [ok for c, has, ok, _ in rows if has and c >= t]
+            pct = round(100 * sum(hit) / len(hit), 1) if hit else None
+            calibration[str(t)] = {"n": len(hit), "pct": pct}
+            if len(hit) >= RELIABLE_MIN_N and pct >= RELIABLE_PCT:
+                reliable_conf = t
+            elif reliable_conf is not None:
+                break
+        return calibration, reliable_conf
+
+    calibration, reliable_conf = _calibrate(cal)
+    # Per top folder the AI chose: overall it was 86% right at 0.99
+    # (2026-10-31), so every AI-routed document waited for staff - Pretium
+    # RMA credits included, where the folder is never in doubt. A folder
+    # family the AI is measured reliable on is trusted on its own.
+    by_root = {}
+    for fam in sorted({x[3] for x in cal if x[1] and x[3]}):
+        cb, rc = _calibrate([x for x in cal if x[3] == fam])
+        by_root[fam] = {"conf": rc, **(cb.get(str(rc)) if rc else {"n": max((v["n"] for v in cb.values()), default=0)})}
     res = {"evaluated_at": _now(), "on": on, "n": r["n"], "ai_right": r["ai_right"], "current_right": r["current_right"],
-           "calibration": calibration, "reliable_conf": reliable_conf,
+           "calibration": calibration, "reliable_conf": reliable_conf, "by_folder": by_root,
            "unsure_below": UNSURE, "test_from": te[0][0][:10], "allowed": allowed, "examples": rows}
     await db.folder_model.update_one({"_id": "ai_routing"}, {"$set": res}, upsert=True)
     return {k: v for k, v in res.items() if k not in ("allowed", "examples")}

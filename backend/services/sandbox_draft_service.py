@@ -177,6 +177,39 @@ def _line_type(raw: str) -> str:
     return t or "Item"
 
 
+_AP_TYPES: Dict[str, Any] = {"at": None, "dom": {}}
+
+
+async def as_ap_enters(db, lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Item vs Charge as AP enters that number on its BC invoices. Purchasing
+    put DUNNAGEMGMT on October Ball POs as an item charge; AP invoiced it as
+    the service item 693 times and as a charge twice, and the 13 drafts that
+    copied the PO were refused. Switched only when one type has 90% of 20+
+    posted lines (FREIGHT, PALLET, TARIFF are used both ways: left alone)."""
+    now = datetime.now(timezone.utc)
+    if not _AP_TYPES["at"] or now - _AP_TYPES["at"] > timedelta(hours=6):
+        per: Dict[str, Dict[str, int]] = {}
+        async for g in db.bc_purchase_invoice_lines.aggregate([
+                {"$unwind": "$purchaseInvoiceLines"},
+                {"$match": {"purchaseInvoiceLines.lineType": {"$in": ["Item", "Charge"]},
+                            "purchaseInvoiceLines.lineObjectNumber": {"$nin": [None, ""]}}},
+                {"$group": {"_id": {"o": "$purchaseInvoiceLines.lineObjectNumber", "t": "$purchaseInvoiceLines.lineType"}, "n": {"$sum": 1}}}]):
+            per.setdefault(g["_id"]["o"], {})[g["_id"]["t"]] = g["n"]
+        dom = {}
+        for o, c in per.items():
+            t = max(c, key=c.get)
+            if sum(c.values()) >= 20 and c[t] >= 0.9 * sum(c.values()):
+                dom[o] = t
+        _AP_TYPES.update(at=now, dom=dom)
+    out = []
+    for l in lines:
+        t = _AP_TYPES["dom"].get(l.get("lineObjectNumber"))
+        if t and l.get("lineType") in ("Item", "Charge") and l["lineType"] != t:
+            l = {**l, "lineType": t, "line_type_from": f"{l['lineType']} on the PO; AP enters {l['lineObjectNumber']} as {t}"}
+        out.append(l)
+    return out
+
+
 async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
     """Draft lines from the BC purchase receipt this invoice is for.
 
@@ -779,7 +812,7 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     from routers.gpi_integration import _build_pi_lines_with_mapping
     from services.vendor_line_coding_service import coding_for, single_line, main_code_known
     if rec.get("lines"):
-        return {"lines": rec["lines"], "source": "bc_receipt"}
+        return {"lines": await as_ap_enters(db, rec["lines"]), "source": "bc_receipt"}
     if d.get("amount_float") in (None, ""):
         # No total was read (XPO multi-invoice PDFs: the "amount" was the
         # shipment weight, 2,280 lbs): nothing to code the lines against.
@@ -830,7 +863,7 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
         except Exception:
             pl = []
         if pl and abs(sum(l["quantity"] * l["unitCost"] for l in pl) - abs(float(d.get("amount_float") or 0))) <= 0.02:
-            return {"lines": pl, "source": "bc_purchase_order"}
+            return {"lines": await as_ap_enters(db, pl), "source": "bc_purchase_order"}
         if await po_in_bc(db, po):
             return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
     if DROPSHIP_SO and po and await is_product_vendor(db, coding) and not await po_in_bc(db, po):

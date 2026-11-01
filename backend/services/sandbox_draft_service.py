@@ -1074,6 +1074,11 @@ async def draft(db, limit: int = 5) -> Dict[str, Any]:
 
 
 async def _draft(db, limit: int = 5) -> Dict[str, Any]:
+    # The sandbox is confirmed (BC admin API, cached 1h) here, not left to
+    # whichever job ran first: after a restart, refusal() read a name-only
+    # "prod..." sandbox as Production until something else had checked it.
+    from services.gpi_integration_service import verify_sandbox
+    await verify_sandbox(write_target())
     reason = refusal()
     if reason:
         return {"drafted": 0, "refused": reason}

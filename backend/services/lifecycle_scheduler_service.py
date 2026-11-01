@@ -727,7 +727,11 @@ async def po_retry_scheduler(
             # status string (confirmed 2026-09-24).
             DONE_STATUSES = ["Completed", "Posted", "Archived", "completed", "posted",
                              "archived", "FileMissing", "Exception", "exception",
-                             "Validated", "validated", "ReadyForPost"]
+                             "Validated", "validated", "ReadyForPost",
+                             # A split container, not an invoice: 55 were parked
+                             # and un-parked every cycle, workflow_status left
+                             # "po_pending" (2026-11-01).
+                             "batch_parent"]
 
             # Doc types that should NEVER enter the PO retry loop
             NON_PO_TYPES = [
@@ -747,6 +751,10 @@ async def po_retry_scheduler(
                     "po_pending_parked": {"$ne": True},
                     "doc_type": {"$nin": NON_PO_TYPES},
                     "document_type": {"$nin": NON_PO_TYPES},
+                    # Ready already (a po_missing warning only): un-parked as
+                    # resolved on the next retry, then parked again - each
+                    # round re-ran readiness and its gap closers.
+                    "readiness.status": {"$not": {"$regex": "^ready"}},
                     "$or": [
                         {"readiness.warning_reasons": "po_missing"},
                         {"readiness.blocking_reasons": {"$regex": "po"}},
@@ -773,7 +781,7 @@ async def po_retry_scheduler(
             pending = await db.hub_documents.find(
                 {
                     "po_pending_parked": True,
-                    "status": {"$nin": ["Completed", "Posted", "Exception", "exception"]},
+                    "status": {"$nin": ["Completed", "Posted", "Exception", "exception", "batch_parent"]},
                     "auto_cleared": {"$ne": True},
                     "doc_type": {"$nin": NON_PO_TYPES},
                 },

@@ -65,14 +65,33 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _release_base(po: str) -> str:
+    """The order a lettered release belongs to (assembly WA2318F -> WA2318), or ''."""
+    m = re.match(r"^([A-Z]*[0-9]{3,})[A-Z]{1,2}$", str(po or "").strip().upper())
+    return m.group(1) if m else ""
+
+
+async def _receipts(db, po: str, proj: Dict[str, Any], limit: int = 5) -> Tuple[List[Dict[str, Any]], str]:
+    """BC receipts of the order, else of its other releases (WA2318F, not
+    received yet: WA2318B, components from MONARCH; staff file an assembly
+    order's bills by the site its components go to, ANCH 89/89 GT B&B,
+    MONARCH 18/19 Kent)."""
+    rs = [r async for r in db.bc_purchase_receipts.find({"orderNumber": po}, proj).limit(limit)]
+    base = "" if rs else _release_base(po)
+    if base:
+        rs = [r async for r in db.bc_purchase_receipts.find({"orderNumber": {"$regex": f"^{base}[A-Z]{{0,2}}$"}}, proj).limit(limit)]
+    return rs, base
+
+
 async def order_facts(db, po: str) -> str:
     if not po:
         return "no order number on the document"
     out = []
-    async for r in db.bc_purchase_receipts.find({"orderNumber": po}, {"_id": 0, "vendorNumber": 1, "postingDate": 1,
-                                                                      "purchaseReceiptLines": 1}).limit(5):
+    rs, base = await _receipts(db, po, {"_id": 0, "orderNumber": 1, "vendorNumber": 1, "postingDate": 1, "purchaseReceiptLines": 1})
+    for r in rs:
         items = [str(l.get("description") or "")[:50] for l in (r.get("purchaseReceiptLines") or []) if l.get("lineObjectNumber")][:3]
-        out.append(f"received from {r.get('vendorNumber')} on {r.get('postingDate')}: {items}")
+        rel = f"its release {r.get('orderNumber')} " if base else ""
+        out.append(f"{rel}received from {r.get('vendorNumber')} on {r.get('postingDate')}: {items}")
     so = await db.bc_sales_orders.find_one({"number": po}, {"_id": 0, "customerName": 1, "customerNumber": 1, "shipToName": 1})
     if so:
         out.append(f"sales order for {so.get('customerName') or so.get('customerNumber')} ship to {so.get('shipToName')}")
@@ -96,9 +115,12 @@ async def _order_kind(db, po: Any) -> str:
     po = str(po or "").strip().upper()
     if not po:
         return "no order number"
-    rec = await db.bc_purchase_receipts.count_documents({"orderNumber": po}, limit=1)
+    rs, base = await _receipts(db, po, {"_id": 0, "vendorNumber": 1}, limit=3)
+    vendors = sorted({str(r.get("vendorNumber")) for r in rs})
     so = await db.bc_sales_orders.count_documents({"number": po}, limit=1)
-    return f"order {po}: " + ("received in BC" if rec else "no BC receipt") + ("; also a sales order number" if so else "")
+    rec = (f"releases of {base} received in BC from {', '.join(vendors)}" if base else
+           f"received in BC from {', '.join(vendors)}") if rs else "no BC receipt"
+    return f"order {po}: " + rec + ("; also a sales order number" if so else "")
 
 
 async def _note(db, h: Dict[str, Any], why: str) -> str:
@@ -257,7 +279,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
         return None
     cached = d.get("ai_routing") or {}
     flow = (d.get("order_flow") or {}).get("order")
-    if cached.get("rule_path") == rule_path and cached.get("v") == 4 and cached.get("flow") == flow:
+    if cached.get("rule_path") == rule_path and cached.get("v") == 5 and cached.get("flow") == flow:
         lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
                                      cached.get("why") or "", cached.get("folder") or "")
     else:
@@ -270,7 +292,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
             "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
-            "model_top": top3, "at": _now(), "v": 4, "flow": flow}}})
+            "model_top": top3, "at": _now(), "v": 5, "flow": flow}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)

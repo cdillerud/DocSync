@@ -1301,6 +1301,7 @@ _LINE_PROBLEM = re.compile(r"do not add up|negative balancing|line build failed|
 _SKIP_NUMBER = re.compile(r"invoice number (\S+) (?:is too short|does not look like)", re.I)
 _SKIP_PO = re.compile(r"PO (\S+) is not a purchase order or receipt in BC", re.I)
 STALE_SKIP_HOURS = 72
+_SKIP_REFUSED_ITEM = re.compile(r"BC refused the draft lines \(Vendor No\. of the Item (.+?) is different", re.I)
 
 
 async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
@@ -1321,6 +1322,16 @@ async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
     m = _SKIP_NUMBER.search(reason)
     if m and m.group(1).upper() != str(d.get("invoice_number_clean") or "").upper():
         return "invoice number corrected"
+    m = _SKIP_REFUSED_ITEM.search(reason)
+    if m:
+        # BC refused an item planned from what was known then (Pratt
+        # 2453414: MNCORRU on 10-31; PO 120564's own AL262715-01 since):
+        # retried once today's plan no longer uses it.
+        full = await db.hub_documents.find_one({"_id": d["_id"]})
+        plan = await plan_lines(db, full, await receipt_lines_for(db, full)) if full else {}
+        items = {str(l.get("lineObjectNumber") or "").upper() for l in plan.get("lines") or []}
+        if items and m.group(1).strip().upper() not in items:
+            return f"plan no longer uses {m.group(1).strip()}"
     m = _SKIP_PO.search(reason)
     if m and await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": m.group(1)}, {"_id": 1}):
         return "PO now in BC"

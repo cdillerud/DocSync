@@ -569,25 +569,48 @@ async def dropship_lines(db, d: Dict[str, Any], so_no: str) -> List[Dict[str, An
     for sl in so.get("lines") or []:
         it, q = str(sl.get("lineObjectNumber") or "").upper(), float(sl.get("quantity") or 0)
         if str(sl.get("lineType") or "").lower() != "item" or not q or it not in by_item:
-            continue   # freight and charges billed to the customer; items the vendor does not supply
-        # PO lines with this much still to receive.
-        cands = [l for l in by_item[it] if float(l.get("quantity") or 0) - float(l.get("receivedQuantity") or 0) >= q - 1e-6]
-        costs = sorted({round(float(l.get("directUnitCost") or 0), 5) for l in cands})
-        if not costs:
+            continue   # charges billed to the customer; items the vendor does not supply
+        # (quantity, cost) choices: PO lines with this much still to receive;
+        # a short shipment (Ball 120595: 204.225 M ordered, 171.549 on the
+        # PO and the invoice) at what the PO line still has open.
+        opts = set()
+        for l in by_item[it]:
+            rem = float(l.get("quantity") or 0) - float(l.get("receivedQuantity") or 0)
+            c = round(float(l.get("directUnitCost") or 0), 5)
+            if rem >= q - 1e-6 or not c:
+                # $0 dunnage at the order quantity only: any short quantity
+                # at $0 adds up the same, and the match would be ambiguous.
+                if rem >= q - 1e-6:
+                    opts.add((q, c))
+            elif rem >= 0.5 * q:
+                # Not a line kept in another unit (O-I 62.062 M beside the
+                # order's 62,062 EA: the same total, an ambiguous match).
+                opts.add((round(rem, 5), c))
+        if not opts:
             return []
-        picks.append(({"lineType": "Item", "lineObjectNumber": cands[0]["lineObjectNumber"], "quantity": q,
-                       "description": (cands[0].get("description") or "")[:100],
-                       "source": f"sales order {so_no} on the vendor's BC purchase order"}, costs))
+        # A line the vendor only ever prices (the customer's FREIGHT on Ball
+        # 120588; Ball POs carry FREIGHT at 213.21..5,975) may be off the
+        # invoice; $0 dunnage is always kept, as AP enters it.
+        if all(c for _, c in opts):
+            opts.add((0.0, None))
+        picks.append((sl, it, sorted(opts, key=lambda o: (o[1] is None, o))))
     if not picks:
         return []
     # Blanket POs price the same item differently: the invoice total picks
-    # the costs, and only one choice may add up.
-    fits = {cs for cs in itertools.islice(itertools.product(*[c for _, c in picks]), 4096)
-            if abs(sum(l["quantity"] * c for (l, _), c in zip(picks, cs)) - amt) <= 0.02}
+    # the costs, and only one choice may add up (to ROUNDING_CENTS: Ball's
+    # per-line rounding, 171.549 x 125.99 = 21,613.46 billed 21,613.43).
+    fits = {cs for cs in itertools.islice(itertools.product(*[o for _, _, o in picks]), 20000)
+            if abs(sum(q * (c or 0) for q, c in cs) - amt) <= ROUNDING_CENTS}
     if len(fits) != 1:
         return []
-    cs = fits.pop()
-    return [{**l, "unitCost": c} for (l, _), c in zip(picks, cs)]
+    out = []
+    for (sl, it, _), (q, c) in zip(picks, fits.pop()):
+        if c is None:
+            continue
+        l0 = by_item[it][0]
+        out.append({"lineType": "Item", "lineObjectNumber": l0["lineObjectNumber"], "quantity": q, "unitCost": c,
+                    "description": (l0.get("description") or "")[:100], "source": f"sales order {so_no} on the vendor's BC purchase order"})
+    return out
 
 
 async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:

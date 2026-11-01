@@ -133,7 +133,11 @@ async def load_reliability(db) -> Dict[str, Dict[str, Any]]:
         n, ok = g["n"], g["ok"]
         pct = round(100 * ok / n, 1) if n else 0.0
         out[f"{g['_id']['k']}|{g['_id']['v']}"] = {"n": n, "pct": pct, "reliable": n >= RELIABLE_MIN_N and pct >= RELIABLE_PCT}
-    ai = await db.folder_model.find_one({"_id": "ai_routing"}, {"_id": 0, "on": 1, "reliable_conf": 1, "calibration": 1, "by_folder": 1}) or {}
+    ai = await db.folder_model.find_one({"_id": "ai_routing"}, {"_id": 0, "on": 1, "reliable_conf": 1, "calibration": 1, "by_folder": 1,
+                                                                 "agree_conf": 1, "agree_calibration": 1}) or {}
+    if ai.get("on") and ai.get("agree_conf"):
+        c = (ai.get("agree_calibration") or {}).get(str(ai["agree_conf"])) or {}
+        out["__ai_agree__"] = {"conf": float(ai["agree_conf"]), "n": c.get("n"), "pct": c.get("pct")}
     if ai.get("on") and ai.get("reliable_conf"):
         c = (ai.get("calibration") or {}).get(str(ai["reliable_conf"])) or {}
         out["__ai__"] = {"conf": float(ai["reliable_conf"]), "n": c.get("n"), "pct": c.get("pct")}
@@ -293,6 +297,14 @@ def stage_of(d: Dict[str, Any], bc_vendors: set, route: Optional[Tuple[str, str]
                 and _root(air["folder"]) == _root(folder) and float(air.get("confidence") or 0) >= aic["conf"]):
             rel = {"n": aic["n"], "pct": aic["pct"], "reliable": True,
                    "via": f"AI routing: {aic['pct']}% right at confidence >= {aic['conf']} on staff's unsure filings"}
+        # The AI and the rules name the same folder family: measured on
+        # staff's unsure filings where the two agreed.
+        agc = reliability.get("__ai_agree__")
+        if (not rel["reliable"] and agc and (why or "").startswith("AI decided") and air.get("folder")
+                and _root(air["folder"]) == _root(folder) == _root(air.get("rule_path") or "")
+                and float(air.get("confidence") or 0) >= agc["conf"]):
+            rel = {"n": agc["n"], "pct": agc["pct"], "reliable": True,
+                   "via": f"AI and rules agree: {agc['pct']}% right at confidence >= {agc['conf']} on staff's unsure filings"}
         if s9 and _root(folder) == _root(s9):
             rel = {**rel, "reliable": True, "via": "staff filed it here in Square9"}
         # A folder staff created and named for this invoice's own PO
@@ -353,6 +365,12 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
     staff_filed = {}
     async for o in db.routing_outcomes.find({"source": {"$ne": "staff_decision"}}, {"_id": 0, "hub_doc_id": 1, "staff_folder": 1}):
         staff_filed[o["hub_doc_id"]] = o
+    # A copy staff filed counts for the original: Pretium credit 16929-02RMA
+    # came twice, staff's Square9 filing matched the copy the Hub marked a
+    # duplicate, and the original sat in Needs staff (2026-11-01).
+    async for x in db.hub_documents.find({"id": {"$in": list(staff_filed)}, "duplicate_of_document_id": {"$nin": [None, ""]}},
+                                         {"_id": 0, "id": 1, "duplicate_of_document_id": 1}):
+        staff_filed.setdefault(x["duplicate_of_document_id"], staff_filed[x["id"]])
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     counts, reasons, uncertain = Counter(), Counter(), Counter()

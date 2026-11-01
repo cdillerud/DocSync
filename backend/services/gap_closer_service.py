@@ -535,6 +535,14 @@ async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
         ],
         "is_duplicate": {"$ne": True},
     }
+    # BC is the truth: a vendor whose posted invoices carry an order or
+    # external reference (CanPack 95% orders) uses POs, whatever the Hub's own
+    # PO resolution did.
+    prof = await db.vendor_invoice_profiles.find_one(
+        {"vendor_no": vendor_no}, {"_id": 0, "order_number_rate": 1, "external_ref_rate": 1}) or {}
+    bc_rate = max(float(prof.get("order_number_rate") or 0), float(prof.get("external_ref_rate") or 0))
+    if bc_rate >= 0.20:
+        return {"learned": False, "reason": f"BC invoices carry orders ({bc_rate:.0%})"}
     total_all = await db.hub_documents.count_documents(vendor_query)
 
     # Count docs where PO was attempted
@@ -545,13 +553,14 @@ async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
     total_attempted = await db.hub_documents.count_documents(po_attempted_query)
 
     # Count docs where PO was NOT attempted (no PO extracted at all)
-    no_po_query = {
-        **vendor_query,
+    # $and: a second "$or" key would replace the vendor filter and count every
+    # vendor's documents (12,769 "failures" against TUMALOC's 4,348).
+    no_po_query = {"$and": [vendor_query, {
         "$or": [
             {"po_resolution": {"$exists": False}},
             {"po_resolution.status": {"$in": ["skipped", "no_po_extracted"]}},
         ],
-    }
+    }]}
     await db.hub_documents.count_documents(no_po_query)  # Count for threshold calc
 
     # Use the larger of attempted-with-failures or total docs for threshold check
@@ -560,14 +569,13 @@ async def learn_vendor_po_validation_rate(db, vendor_no: str, min_docs: int = 3,
         return {"learned": False, "reason": f"insufficient_docs ({total}<{min_docs})", "total": total}
 
     # Count PO resolution failures (not_found, ambiguous, skipped, no_po_extracted)
-    failure_query = {
-        **vendor_query,
+    failure_query = {"$and": [vendor_query, {
         "$or": [
             {"po_resolution.status": {"$in": ["not_found", "ambiguous"]}},
             {"po_resolution": {"$exists": False}},
             {"po_resolution.status": {"$in": ["skipped", "no_po_extracted"]}},
         ],
-    }
+    }]}
     failures = await db.hub_documents.count_documents(failure_query)
     rate = failures / total if total > 0 else 0.0
 

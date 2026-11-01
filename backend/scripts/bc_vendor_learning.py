@@ -60,7 +60,13 @@ async def m():
                     **({} if ex else {"alias_string": sorted(raws[key])[0], "alias": sorted(raws[key])[0], "normalized_alias": key}),
                     "vendor_no": vno, "canonical_vendor_id": vno, "vendor_name": names.get(vno), "source": "bc_ground_truth",
                     "learned_at": now, "evidence_count": sum(maps[key].values())}, "$setOnInsert": {"alias_id": str(uuid.uuid4()), "created_at": now}}, upsert=True)
-        async for d in db.hub_documents.find({"vendor_canonical": {"$ne": vno}, "$or": [{"vendor_raw": {"$in": sorted(raws[key])}}, {"extracted_fields.vendor": {"$in": sorted(raws[key])}}]}, {"_id": 1, "vendor_canonical": 1}):
+        # A document linked to its own BC invoice keeps that invoice's vendor:
+        # Logistics Warehouse 0115338 is entered under TUMALOC (BC 657681), and
+        # reconciliation and this alias flipped it back and forth 343 times.
+        async for d in db.hub_documents.find({"vendor_canonical": {"$ne": vno}, "$and": [
+                {"$or": [{"vendor_raw": {"$in": sorted(raws[key])}}, {"extracted_fields.vendor": {"$in": sorted(raws[key])}}]},
+                {"$or": [{"bc_link.bc_vendor_no": {"$exists": False}}, {"bc_link.bc_vendor_no": {"$in": [None, "", vno]}}]}]},
+                {"_id": 1, "vendor_canonical": 1}):
             docs_fixed += 1; per[(d.get("vendor_canonical"), vno)] += 1
             if APPLY:
                 await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"vendor_canonical": vno, "vendor_canonical_backfill": {"at": now, "previous": d.get("vendor_canonical"), "from": "bc_ground_truth", "alias": key}}})

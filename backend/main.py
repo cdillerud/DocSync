@@ -327,6 +327,14 @@ async def startup():
     from services.document_memory_service import document_memory_scheduler
     _asyncio.create_task(document_memory_scheduler())
     _start_loop_watchdog(_asyncio.get_running_loop())
+    try:
+        # LiteLLM prints "Provider List: ..." around every Azure call (32 a
+        # day, red, in the logs) though the calls succeed: a cost lookup for
+        # the deployment name.
+        import litellm
+        litellm.suppress_debug_info = True
+    except Exception:
+        pass
 
     register_doc_routes(app)
     register_wf_routes(app)

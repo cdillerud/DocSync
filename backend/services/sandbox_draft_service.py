@@ -1213,6 +1213,11 @@ async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
         # Retried only when drafting moves to another sandbox.
         env = (d.get("sandbox_draft_skipped") or {}).get("environment")
         return "drafting moved to another sandbox" if env and env != ALLOWED_ENVIRONMENT else None
+    if reason.startswith("the invoice shows no PO") and str(d.get("po_number_clean") or "").strip():
+        # The order found after the skip (O-I Giovanni "Cust Release
+        # No:120415/63209", read from the PDF an hour later): drafted then,
+        # not 72h on.
+        return "PO found since"
     m = _SKIP_NUMBER.search(reason)
     if m and m.group(1).upper() != str(d.get("invoice_number_clean") or "").upper():
         return "invoice number corrected"
@@ -1236,7 +1241,7 @@ async def retry_line_skips(db) -> Dict[str, Any]:
     why = {}
     async for d in db.hub_documents.find({"sandbox_draft_skipped.reason": {"$exists": True}, "bc_link": {"$exists": False},
                                           "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}},
-                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1}):
+                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1, "po_number_clean": 1}):
         reason = str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")
         stale = await _skip_is_stale(db, d, reason)
         if not stale and _LINE_PROBLEM.search(reason) and not reason.startswith("BC refused") \

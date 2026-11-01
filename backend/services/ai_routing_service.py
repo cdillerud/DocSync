@@ -41,6 +41,7 @@ EVAL_HOURS = 20
 EVAL_MAX = 120          # unsure filings replayed per evaluation (one AI call each)
 EVAL_CUT = 0.65         # model trained on the earliest 65% of filings, replayed on the rest
 MIN_N = 30
+POOL_ROWS = 360         # replayed AI answers kept for calibration (about three evaluations)
 MIN_GAIN = 0.03         # share of the replayed documents the AI must get right beyond current routing (at least 2)
 SAME_VENDOR = 8
 SIMILAR = 5
@@ -347,7 +348,8 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         r["n"] += 1
         r["current_right"] += cur == truth
         r["ai_right"] += (ai or cur) == truth
-        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0], (ai or "").split("/")[0]))
+        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0], (ai or "").split("/")[0],
+                    str(d.get("id") or "")))
         if len(rows) < 15 and ai and ai != cur:
             rows.append({"file": d.get("file_name"), "staff": truth, "current": cur, "ai": ai, "why": why})
     on = r["n"] >= MIN_N and r["ai_right"] >= r["current_right"] + max(2, round(MIN_GAIN * r["n"]))
@@ -361,7 +363,7 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     def _calibrate(rows):
         calibration, reliable_conf = {}, None
         for t in (0.99, 0.97, 0.95, 0.9, 0.85, 0.8):
-            hit = [ok for c, has, ok, _ in rows if has and c >= t]
+            hit = [ok for c, has, ok, *_ in rows if has and c >= t]
             pct = round(100 * sum(hit) / len(hit), 1) if hit else None
             calibration[str(t)] = {"n": len(hit), "pct": pct}
             if len(hit) >= RELIABLE_MIN_N and pct >= RELIABLE_PCT:
@@ -370,6 +372,15 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
                 break
         return calibration, reliable_conf
 
+    # Pooled with the previous replays (latest answer per document, up to
+    # POOL_ROWS): one 120-document replay swung from 86% to 97% at 0.99 on
+    # the same day (2026-10-31), and a low one sent every AI-routed document
+    # to staff.
+    pooled = {x[4]: x for x in (tuple(y) for y in (st.get("cal_rows") or [])) if len(x) == 5}
+    for x in cal:
+        pooled.pop(x[4], None)
+        pooled[x[4]] = x
+    cal = list(pooled.values())[-POOL_ROWS:]
     calibration, reliable_conf = _calibrate(cal)
     # Per top folder the AI chose: overall it was 86% right at 0.99
     # (2026-10-31), so every AI-routed document waited for staff - Pretium
@@ -380,7 +391,7 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         cb, rc = _calibrate([x for x in cal if x[3] == fam])
         by_root[fam] = {"conf": rc, **(cb.get(str(rc)) if rc else {"n": max((v["n"] for v in cb.values()), default=0)})}
     res = {"evaluated_at": _now(), "on": on, "n": r["n"], "ai_right": r["ai_right"], "current_right": r["current_right"],
-           "calibration": calibration, "reliable_conf": reliable_conf, "by_folder": by_root,
+           "calibration": calibration, "reliable_conf": reliable_conf, "by_folder": by_root, "cal_rows": [list(x) for x in cal],
            "unsure_below": UNSURE, "test_from": te[0][0][:10], "allowed": allowed, "examples": rows}
     await db.folder_model.update_one({"_id": "ai_routing"}, {"$set": res}, upsert=True)
-    return {k: v for k, v in res.items() if k not in ("allowed", "examples")}
+    return {k: v for k, v in res.items() if k not in ("allowed", "examples", "cal_rows")}

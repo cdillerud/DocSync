@@ -1507,7 +1507,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         from services.event_service import get_event_service
         es = get_event_service()
         if es:
-            await es.emit_event(
+            await es.emit(
                 document_id=doc_id,
                 event_type="bc.sales_order.created" if created_ok else "bc.sales_order.failed",
                 source_service="gpi_integration",
@@ -2154,7 +2154,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
             from services.event_service import get_event_service
             es = get_event_service()
             if es:
-                await es.emit_event(
+                await es.emit(
                     document_id=doc_id,
                     event_type="bc.purchase_invoice.auto_created",
                     source_service="auto_pipeline",
@@ -2624,7 +2624,7 @@ async def create_purchase_invoice_from_document(
         from services.event_service import get_event_service
         es = get_event_service()
         if es:
-            await es.emit_event(
+            await es.emit(
                 document_id=doc_id,
                 event_type="bc.purchase_invoice.created" if result.get("success") else "bc.purchase_invoice.failed",
                 source_service="gpi_integration",

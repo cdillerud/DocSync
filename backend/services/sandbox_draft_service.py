@@ -261,6 +261,69 @@ async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+def _code_segments(code: str) -> set:
+    # "NK3286-473L-QM04-06224-5MHE" / "3286-QM04-PFASNI" -> {"QM04", ...}:
+    # segments with letters and digits (not the bare "3286" both share).
+    return {x for x in re.split(r"[^A-Z0-9]+", str(code or "").upper())
+            if len(x) >= 3 and re.search(r"[A-Z]", x) and re.search(r"\d", x)}
+
+
+async def receipt_by_items(db, d: Dict[str, Any]) -> Dict[str, Any]:
+    """The BC receipt an invoice with no usable PO is for, by what was
+    received. Canpack bills its blanket production orders (PR10117: 40
+    invoices) without the order number; the invoice's product code
+    "NK3286-473L-QM04-..." and quantity 155.6 name receipt 269628
+    (3286-QM04-PFASNI x 155.6) where the amount alone fits 4 identical
+    loads. Replay on 2026-06..10 Canpack invoices: a single receipt with
+    the same quantities, matching product segments and total was AP's
+    order 113 of 115 times (PR orders 22/22). Cached receipts (nightly),
+    posted 30 days before to 10 days after the invoice; one match only.
+    Re-run with every received quantity on the invoice: 134 of 136."""
+    from services.folder_routing_service import _pdf_text
+    amount = abs(float(d.get("amount_float") or 0))
+    qtys = sorted(round(float(l.get("quantity") or 0), 3) for l in d.get("line_items") or [] if float(l.get("quantity") or 0) > 0)
+    if not amount or not qtys or not d.get("vendor_canonical"):
+        return {}
+    full = await db.hub_documents.find_one({"id": d.get("id")}, {"file_content_b64": 1, "file_name": 1}) or {}
+    texts = [_pdf_text(full).upper()] + [str(l.get("description") or "").upper() for l in d.get("line_items") or []]
+    codes = set()
+    for t in texts:
+        for m in re.finditer(r"\b[A-Z]{2}\d{4}-[A-Z0-9-]{6,40}", t):
+            codes |= _code_segments(m.group(0))
+    if not codes:
+        return {}
+    try:
+        day = datetime.fromisoformat(str(d.get("invoice_date") or d.get("created_utc"))[:10]).date()
+    except ValueError:
+        return {}
+    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"id": {"$ne": d.get("id")}}))
+    found = []
+    async for r in db.bc_purchase_receipts.find(
+            {"vendorNumber": str(d["vendor_canonical"]).upper(),
+             "postingDate": {"$gte": (day - timedelta(days=30)).isoformat(), "$lte": (day + timedelta(days=10)).isoformat()}},
+            {"_id": 0, "number": 1, "orderNumber": 1, "purchaseReceiptLines": 1}):
+        if r.get("number") in used:
+            continue
+        rl = [l for l in r.get("purchaseReceiptLines") or [] if l.get("lineObjectNumber") and float(l.get("quantity") or 0)]
+        priced = [l for l in rl if float(l["quantity"]) > 0 and float(l.get("unitCost") or 0) > 0]
+        if abs(round(sum(float(l["quantity"]) * float(l.get("unitCost") or 0) for l in rl), 2) - amount) > max(1.0, 0.002 * amount):
+            continue
+        # Every received quantity is on the invoice (Canpack also lists the
+        # returnable dunnage at its not-returned price: 134/136 with this).
+        if not all(round(float(l["quantity"]), 3) in qtys for l in priced):
+            continue
+        if not priced or not all(_code_segments(l["lineObjectNumber"]) & codes for l in priced):
+            continue
+        found.append((r, rl))
+    if len(found) != 1:
+        return {}
+    r, rl = found[0]
+    lines = [{"lineType": _line_type(l.get("lineType")), "lineObjectNumber": l["lineObjectNumber"], "description": (l.get("description") or "")[:100],
+              "quantity": float(l["quantity"]), "unitCost": float(l.get("unitCost") or 0),
+              "source": f"bc_receipt {r['number']} (order {r.get('orderNumber')}, matched by item and quantity)"} for l in rl]
+    return {"lines": lines, "receipts": [r["number"]], "order": r.get("orderNumber")}
+
+
 def lines_problem(planned) -> str:
     """A draft AP can stand behind: no invented negative balancing lines on
     an invoice (the line builder forces the total with a negative line when
@@ -560,6 +623,7 @@ async def po_open_lines(db, po: str) -> List[Dict[str, Any]]:
 
 
 PROFILE_TO_STAFF = True
+RECEIPT_BY_ITEMS = True
 WAREHOUSE_SPLIT = True
 
 
@@ -866,6 +930,14 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
             return {"lines": await as_ap_enters(db, pl), "source": "bc_purchase_order"}
         if await po_in_bc(db, po):
             return {"wait": f"PO {po} has no BC receipt that adds up to this invoice yet; AP invoices this vendor against receipts"}
+    if RECEIPT_BY_ITEMS and await is_product_vendor(db, coding) and not (po and await po_in_bc(db, po)):
+        try:
+            ri = await receipt_by_items(db, d)
+        except Exception as e:
+            logger.warning("[SandboxDraft] receipt by items failed: %r", e)
+            ri = {}
+        if ri:
+            return {"lines": await as_ap_enters(db, ri["lines"]), "source": "bc_receipt", "receipts": ri["receipts"], "order": ri["order"]}
     if DROPSHIP_SO and po and await is_product_vendor(db, coding) and not await po_in_bc(db, po):
         try:
             dl = await dropship_lines(db, d, po)
@@ -1083,7 +1155,7 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
         legacy = d.get("bc_purchase_invoice") and (d["bc_purchase_invoice"].get("environment") != ALLOWED_ENVIRONMENT)
         if plan.get("source") == "bc_receipt":
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {
-                "draft_lines_override": plan["lines"], "draft_receipt_numbers": rec_probe["receipts"],
+                "draft_lines_override": plan["lines"], "draft_receipt_numbers": plan.get("receipts") or rec_probe.get("receipts"),
                 "draft_lines_source": "bc_receipt"}, "$unset": {"draft_waiting_receipt": ""}})
         elif plan.get("source") == "bc_purchase_order":
             await db.hub_documents.update_one({"id": d["id"]}, {"$set": {

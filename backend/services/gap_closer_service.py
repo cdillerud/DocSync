@@ -841,7 +841,9 @@ async def auto_resolve_unmatched_vendor(db, doc: Dict, min_score: float = 0.72) 
     await db.hub_documents.update_one(
         {"id": doc.get("id")},
         {"$set": {
-            "vendor_canonical": best_match["vendor_name"],
+            # vendor_canonical is the BC vendor number everywhere else
+            # (drafting and AP stages look it up among BC vendors).
+            "vendor_canonical": best_match["vendor_no"],
             "bc_vendor_number": best_match["vendor_no"],
             "vendor_no": best_match["vendor_no"],
             "vendor_match_method": "auto_gap_closer",

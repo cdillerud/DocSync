@@ -254,19 +254,39 @@ def _start_loop_watchdog(loop, stall_seconds: float = 5.0):
     loop.call_soon(tick)
     main_id = threading.get_ident()
 
+    def save(rec):
+        # Kept in loop_stalls as well: container logs go with every deploy
+        # (the 504s of 2026-10-29 20:03 and 11-01 08:26 left no stack).
+        async def _ins():
+            try:
+                import deps
+                await deps.get_db().loop_stalls.insert_one(rec)
+            except Exception:
+                pass
+        loop.create_task(_ins())
+
     def watch():
         last = None
+        cur = None
         while True:
             _time.sleep(1.0)
             lag = _time.monotonic() - beat["t"]
             if lag < stall_seconds:
                 last = None
+                if cur:
+                    loop.call_soon_threadsafe(save, cur)
+                    cur = None
                 continue
             frame = sys._current_frames().get(main_id)
             stack = "".join(traceback.format_stack(frame)[-12:]) if frame else "?"
             where = stack.strip().splitlines()[-2:] if stack else []
+            if cur is None:
+                from datetime import datetime as _dt, timezone as _tz
+                cur = {"at": _dt.now(_tz.utc).isoformat(), "stacks": []}
+            cur["seconds"] = round(lag)
             if where != last:
                 logger.warning("[LoopStall] event loop blocked %.0fs at:\n%s", lag, stack)
+                cur["stacks"] = (cur["stacks"] + [stack])[-5:]
                 last = where
 
     threading.Thread(target=watch, name="loop-watchdog", daemon=True).start()

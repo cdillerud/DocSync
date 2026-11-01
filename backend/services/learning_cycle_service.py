@@ -40,9 +40,27 @@ async def _script(*args: str, timeout: int = 900) -> str:
     return lines[-1] if lines else f"rc={proc.returncode}"
 
 
+class _Timed(dict):
+    """The cycle summary, timing each step: seconds since the previous
+    step's result was stored (a cycle runs about an hour; which steps?)."""
+
+    def __init__(self, *a, **k):
+        import time
+        super().__init__(*a, **k)
+        self._t = time.monotonic()
+        self.seconds: Dict[str, float] = {}
+
+    def __setitem__(self, key, value):
+        import time
+        now = time.monotonic()
+        self.seconds[key] = round(self.seconds.get(key, 0) + now - self._t, 1)
+        self._t = now
+        super().__setitem__(key, value)
+
+
 async def run_learning_cycle(db) -> Dict[str, Any]:
     started = datetime.now(timezone.utc)
-    summary: Dict[str, Any] = {"started_at": started.isoformat()}
+    summary: Dict[str, Any] = _Timed({"started_at": started.isoformat()})
     try:
         # CFDI XML (Mexican e-invoices) first: exact numbers/amounts for the
         # companion PDFs, so they can link to BC in this same cycle.
@@ -260,6 +278,7 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["extraction_retry"] = {"error": repr(e)}
     summary["finished_at"] = datetime.now(timezone.utc).isoformat()
+    summary["step_seconds"] = dict(summary.seconds)
     try:
         await db.learning_cycle_runs.insert_one(dict(summary))
     except Exception:

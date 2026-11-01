@@ -278,7 +278,8 @@ def _start_loop_watchdog(loop, stall_seconds: float = 5.0):
                     cur = None
                 continue
             frame = sys._current_frames().get(main_id)
-            stack = "".join(traceback.format_stack(frame)[-12:]) if frame else "?"
+            # 40 frames: the last 12 were all httpx/ssl and named no caller.
+            stack = "".join(traceback.format_stack(frame)[-40:]) if frame else "?"
             where = stack.strip().splitlines()[-2:] if stack else []
             if cur is None:
                 from datetime import datetime as _dt, timezone as _tz
@@ -335,6 +336,11 @@ async def startup():
         litellm.suppress_debug_info = True
     except Exception:
         pass
+    try:
+        from services import llm_offloop
+        llm_offloop.install()
+    except Exception as e:
+        logger.warning("LLM off-loop install failed: %s", e)
 
     register_doc_routes(app)
     register_wf_routes(app)

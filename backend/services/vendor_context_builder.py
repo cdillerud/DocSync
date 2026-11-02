@@ -230,8 +230,10 @@ async def _get_vendor_entity_distribution(db, vendor_no: str) -> Dict[str, int]:
 
 async def _get_domain_vendor_hint(db, domain: str) -> str:
     """Check if this sender domain is mapped to a vendor."""
+    # Not for a domain BC shows sending for several vendors (amcor.com:
+    # AMCOR 123 / BERRY 113): the hint named one of them for every invoice.
     mapping = await db.sender_vendor_map.find_one(
-        {"sender_domain": domain},
+        {"sender_domain": domain, "domain_ambiguous": {"$ne": True}},
         {"_id": 0, "vendor_canonical": 1, "vendor_no": 1}
     )
     if mapping and mapping.get("vendor_canonical"):

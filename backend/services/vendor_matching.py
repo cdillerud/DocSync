@@ -138,7 +138,7 @@ async def lookup_vendor_by_sender(
         domain = email_lower.split("@")[-1] if "@" in email_lower else ""
         if domain:
             domain_mapping = await db.sender_vendor_map.find_one(
-                {"sender_domain": domain, "domain_confidence": {"$gte": 2}},
+                {"sender_domain": domain, "domain_confidence": {"$gte": 2}, "domain_ambiguous": {"$ne": True}},
                 {"_id": 0}
             )
             if domain_mapping and domain_mapping.get("vendor_canonical"):

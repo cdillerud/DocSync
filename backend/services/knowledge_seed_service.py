@@ -209,67 +209,52 @@ async def seed_sender_domain_mappings(db) -> Dict[str, Any]:
     created_domain = 0
     skipped = 0
 
-    # Source 1: Documents with sender_email OR sender field + resolved vendor
-    # Note: Some documents use "sender" instead of "sender_email" — check both
-    cursor = db.hub_documents.find(
-        {
-            "$or": [
-                {"sender_email": {"$exists": True, "$nin": [None, ""]}},
-                {"sender": {"$exists": True, "$nin": [None, ""]}},
-            ],
-            "$and": [
-                {"$or": [
-                    {"bc_vendor_number": {"$exists": True, "$nin": [None, ""]}},
-                    {"vendor_canonical": {"$exists": True, "$nin": [None, ""]}},
-                    {"vendor_no": {"$exists": True, "$nin": [None, ""]}},
-                ]}
-            ],
-        },
-        {"_id": 0, "sender_email": 1, "sender": 1, "sender_domain": 1,
-         "bc_vendor_number": 1, "vendor_canonical": 1, "vendor_no": 1}
-    )
-
+    # Source 1: the vendor BC booked each linked invoice to, per sender
+    # domain. The old source read "sender_email" / "sender", fields no
+    # document has (the Hub stores email_sender): it read all 13 GB twice an
+    # hour and learned nothing (2026-11-02), while domains that send for
+    # several vendors kept a single mapping - amcor.com -> BERRY although BC
+    # booked 123 of its 244 invoices to AMCOR, ardaghgroup.com -> ARDAGHM
+    # (36 of 48 are LEONE). A domain with one vendor on 90%+ of 3+ BC
+    # invoices is mapped; one BC splits is marked domain_ambiguous, and
+    # domain lookups (vendor matching, the extraction prompt) skip it.
+    # Exact-address mappings are untouched (141 of 142 agree with BC).
+    import re as _re
     domain_vendor_map = defaultdict(lambda: defaultdict(int))
+    async for doc in db.hub_documents.find(
+            {"email_sender": {"$nin": [None, ""]}, "bc_link.bc_vendor_no": {"$nin": [None, ""]}},
+            {"_id": 0, "email_sender": 1, "bc_link.bc_vendor_no": 1}):
+        m = _re.search(r"@([a-z0-9.-]+)", str(doc.get("email_sender") or "").lower())
+        if m:
+            domain_vendor_map[m.group(1)][doc["bc_link"]["bc_vendor_no"]] += 1
 
-    async for doc in cursor:
-        sender = doc.get("sender_email") or doc.get("sender") or ""
-        domain = doc.get("sender_domain", "")
-        if not domain and "@" in sender:
-            domain = sender.split("@")[1].lower()
-
-        vendor_no = doc.get("bc_vendor_number") or doc.get("vendor_no") or ""
-        vendor_canonical = doc.get("vendor_canonical") or vendor_no
-
-        if domain and vendor_canonical:
-            domain_vendor_map[domain][vendor_canonical] += 1
-
-    # For each domain, pick the vendor with the most documents
+    ambiguous = 0
     for domain, vendors in domain_vendor_map.items():
-        if not vendors:
+        n = sum(vendors.values())
+        vendor_canonical, count = max(vendors.items(), key=lambda x: x[1])
+        if n < 3 or domain in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "gamerpackaging.com"):
             continue
-        top_vendor = max(vendors.items(), key=lambda x: x[1])
-        vendor_canonical = top_vendor[0]
-        count = top_vendor[1]
-
-        # Skip generic/internal domains
-        if domain in ("gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
-                       "gamerpackaging.com"):
+        evidence = {"domain_bc_evidence": dict(vendors), "domain_bc_checked_at": t0.isoformat()}
+        if count / n < 0.9:
+            ambiguous += 1
+            await db.sender_vendor_map.update_many({"sender_domain": domain},
+                                                   {"$set": {**evidence, "domain_ambiguous": True}})
             continue
-
-        existing = await db.sender_vendor_map.find_one({
-            "sender_domain": domain, "vendor_canonical": vendor_canonical
-        })
-        if existing:
+        await db.sender_vendor_map.update_many({"sender_domain": domain},
+                                               {"$set": {**evidence, "domain_ambiguous": False}})
+        if await db.sender_vendor_map.find_one({"sender_domain": domain, "vendor_canonical": vendor_canonical}, {"_id": 1}):
             skipped += 1
             continue
-
         await db.sender_vendor_map.insert_one({
             "sender_domain": domain,
             "vendor_canonical": vendor_canonical,
             "vendor_name": vendor_canonical,
-            "vendor_no": "",
+            "vendor_no": vendor_canonical,
             "domain_confidence": count,
-            "source": "document_history_seed",
+            "bc_evidence": {vendor_canonical: count},
+            **evidence,
+            "domain_ambiguous": False,
+            "source": "bc_booked_invoices",
             "created_at": t0.isoformat(),
             "updated_at": t0.isoformat(),
         })
@@ -281,6 +266,7 @@ async def seed_sender_domain_mappings(db) -> Dict[str, Any]:
     elapsed = (datetime.now(timezone.utc) - t0).total_seconds()
     result = {
         "domains_from_documents": created_domain,
+        "domains_ambiguous": ambiguous,
         "domains_from_spiro": spiro_domains,
         "skipped": skipped,
         "total_sender_mappings": await db.sender_vendor_map.count_documents({}),

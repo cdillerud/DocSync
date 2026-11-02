@@ -250,7 +250,7 @@ async def _sender_candidate(db: Any, evidence: Dict[str, Any]) -> Dict[str, Any]
         domain = sender.split("@", 1)[1] if "@" in sender else ""
         if domain:
             mapping = await db.sender_vendor_map.find_one(
-                {"sender_domain": domain, "domain_confidence": {"$gte": 2}},
+                {"sender_domain": domain, "domain_confidence": {"$gte": 2}, "domain_ambiguous": {"$ne": True}},
                 {"_id": 0},
             )
             matched_kind = "sender_domain"

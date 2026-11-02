@@ -35,6 +35,61 @@ LEADING_GLUED = re.compile(r"^((?:WTR|WR|W)-?1\d{5}|1\d{5})(?=[0-9A-Z])", re.I)
 # miss on a two-letter "label" - single words under 3 letters are skipped.
 LABEL_MIN_VENDOR, LABEL_MIN_ALL, LABEL_PRECISION = 3, 10, 0.95
 
+# Several known orders and no trusted label (CanPack prints its blanket order
+# 103286 and a contract order beside the real one, 119371): the one order
+# this vendor had already delivered against in BC by the day the invoice
+# arrived. Measured per vendor on invoices whose BC order is known and used
+# only where it held (replay 2026-11-02, receipts as of arrival day: CanPack
+# 186 right / 2 wrong; O-I 3 / 5 - an old order received, the new one not
+# yet - so O-I stays out).
+RECEIPT_PICK_MIN_N, RECEIPT_PICK_PRECISION, RECEIPT_PICK_DAYS = 10, 0.90, 75
+
+
+async def _received_by(db, order: str, vendor: str, day: str) -> bool:
+    return await db.bc_purchase_receipts.count_documents(
+        {"orderNumber": order, "vendorNumber": vendor, "postingDate": {"$lte": day}}, limit=1) > 0
+
+
+async def learn_receipt_pick(db, known, days: int = RECEIPT_PICK_DAYS) -> Dict[str, Any]:
+    """Per vendor, how often "the one candidate already received from this
+    vendor by arrival day" was BC's order, on entered invoices (daily)."""
+    from services.folder_routing_service import _pdf_text
+    st = await db.po_receipt_pick.find_one({"_id": "__run__"}) or {}
+    if st.get("at") and st["at"] > (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat():
+        return {"skipped": "learned " + st["at"]}
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    per: Dict[str, Dict[str, int]] = {}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
+             "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "status": {"$ne": "batch_parent"},
+             "bc_link.bc_order_number": {"$nin": [None, ""]}},
+            {"_id": 0, "id": 1, "file_name": 1, "vendor_canonical": 1, "bc_link.bc_order_number": 1, "created_utc": 1}):
+        v = str(d.get("vendor_canonical") or "")
+        if not v:
+            continue
+        text = _pdf_text(d)[:20000]
+        txt = []
+        for c in candidates_from(text):
+            if c not in txt and await known(c):
+                txt.append(c)
+        if len(txt) < 2:
+            continue
+        day = str(d.get("created_utc") or "")[:10]
+        left = [c for c in txt if await _received_by(db, c, v, day)]
+        if len(left) != 1:
+            continue
+        r = per.setdefault(v, {"right": 0, "wrong": 0})
+        r["right" if left[0] == str(d["bc_link"]["bc_order_number"]).strip().upper() else "wrong"] += 1
+    now = datetime.now(timezone.utc).isoformat()
+    for v, r in per.items():
+        n = r["right"] + r["wrong"]
+        await db.po_receipt_pick.update_one({"_id": v}, {"$set": {
+            **r, "n": n, "trusted": n >= RECEIPT_PICK_MIN_N and r["right"] / n >= RECEIPT_PICK_PRECISION, "at": now}}, upsert=True)
+    await db.po_receipt_pick.update_one({"_id": "__run__"}, {"$set": {"at": now, "vendors": len(per)}}, upsert=True)
+    return {"vendors": len(per), "trusted": sorted(v for v, r in per.items()
+                                                   if r["right"] + r["wrong"] >= RECEIPT_PICK_MIN_N
+                                                   and r["right"] / (r["right"] + r["wrong"]) >= RECEIPT_PICK_PRECISION)}
+
 
 def order_labels(text: str, cand: str) -> set:
     out = set()
@@ -121,13 +176,20 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
     except Exception as e:
         logger.warning("[POCorrection] label learning failed: %r", e)
     labels = {x["_id"]: x async for x in db.po_order_labels.find({})}
+    try:
+        stats["receipt_pick"] = await learn_receipt_pick(db, known)
+    except Exception as e:
+        logger.warning("[POCorrection] receipt-pick learning failed: %r", e)
+    receipt_trusted = {x["_id"] async for x in db.po_receipt_pick.find({"trusted": True}, {"_id": 1})}
+    stats["fixed_by_receipt"] = 0
 
     async for d in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "po_from_text": {"$exists": False},
              "status": {"$ne": "batch_parent"}},
             {"_id": 1, "id": 1, "po_number_clean": 1, "po_number_previous": 1, "bc_link": 1,
-             "file_name": 1, "extracted_fields.po_number": 1, "batch_parent_id": 1, "invoice_number_clean": 1, "vendor_canonical": 1}):
+             "file_name": 1, "extracted_fields.po_number": 1, "batch_parent_id": 1, "invoice_number_clean": 1, "vendor_canonical": 1,
+             "created_utc": 1}):
         raw = d.get("po_number_previous") or d.get("po_number_clean") or (d.get("extracted_fields") or {}).get("po_number") or ""
         stats["checked"] += 1
         if raw and await known(str(raw).strip().upper()):
@@ -150,6 +212,13 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
                 picked = [(c, lab) for c in txt for lab in [_trusted_label(labels, v, order_labels(text, c))] if lab]
                 if len(picked) == 1:
                     found, source = picked[0][0], f"pdf_text (label '{picked[0][1]}')"
+                elif v in receipt_trusted:
+                    day = str(d.get("created_utc") or "")[:10]
+                    rec = [c for c in txt if await _received_by(db, c, v, day)]
+                    if len(rec) == 1:
+                        found, source = rec[0], "pdf_text (received from vendor)"
+                    else:
+                        stats["ambiguous"] += 1
                 else:
                     stats["ambiguous"] += 1
         else:
@@ -167,7 +236,9 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
             stats["none_found"] += 0 if (field or source) else 1
             continue
         stats["fixed_from_po_field" if source == "po_field" else ("fixed_from_sibling" if source == "split_sibling"
-                                                                  else "fixed_by_label" if source.startswith("pdf_text (label") else "fixed_from_text")] += 1
+                                                                  else "fixed_by_label" if source.startswith("pdf_text (label")
+                                                                  else "fixed_by_receipt" if source.startswith("pdf_text (received")
+                                                                  else "fixed_from_text")] += 1
         upd: Dict[str, Any] = {"po_from_text": {"value": found, "source": source, "raw": raw, "at": now}}
         if not d.get("bc_link"):
             upd.update({"po_number_clean": found, "po_number_before_text": raw})

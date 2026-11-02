@@ -1,6 +1,6 @@
 import "@/App.css";
 import "@/index.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
@@ -22,7 +22,7 @@ import APInboxPage from "@/pages/APInboxPage";
 import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
 import SettingsHubPage from "@/pages/SettingsHubPage";
 import BakeOffPage from "@/pages/BakeOffPage";
-import SalesOrderReviewPage from "@/pages/SalesOrderReviewPage";
+import UploadPage from "@/pages/UploadPage";
 import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
 import InvoiceTracePage from "@/pages/InvoiceTracePage";
 import ReviewQueuePage from "@/pages/ReviewQueuePage";
@@ -35,6 +35,13 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
+// The old sales review page approved straight into BC, beside the Hub's own
+// sales drafting: its links (legacy queues) open the document page instead.
+function RedirectToDoc() {
+  const { id } = useParams();
+  return <Navigate to={`/documents/${encodeURIComponent(id)}`} replace />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -44,7 +51,7 @@ function AppRoutes() {
         <Route path="documents" element={<Navigate to="/search" replace />} />
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="search" element={<SearchPage />} />
-        <Route path="review/:id" element={<SalesOrderReviewPage />} />
+        <Route path="review/:id" element={<RedirectToDoc />} />
         <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
         <Route path="intake/learning" element={<IntakeLearningPage />} />
         <Route path="config" element={<SettingsHubPage />} />
@@ -65,7 +72,7 @@ function AppRoutes() {
         <Route path="intake-benchmark" element={<BakeOffPage />} />
         {/* Redirects */}
         <Route path="queue" element={<Navigate to="/" replace />} />
-        <Route path="upload" element={<Navigate to="/?tab=upload" replace />} />
+        <Route path="upload" element={<UploadPage />} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

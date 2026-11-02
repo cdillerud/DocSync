@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { Fragment, useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -86,12 +86,20 @@ export default function SalesInboxPage() {
   const [open, setOpen] = useState({});
   const [loading, setLoading] = useState(false);
   const [reps, setReps] = useState(null);
-  const [rep, setRep] = useState(null);      // null until we know who is signed in
+  const [params] = useSearchParams();
+  // ?rep= from Today's "By rep" chips; null until we know who is signed in
+  const [rep, setRep] = useState(() => params.get('rep'));
 
   const loadReps = useCallback(async () => {
-    const { data: r } = await api.get('/sales-inbox/reps');
-    setReps(r);
-    setRep(cur => (cur === null ? (r.me || '') : cur));
+    try {
+      const { data: r } = await api.get('/sales-inbox/reps');
+      setReps(r);
+      setRep(cur => (cur === null ? (r.me || '') : cur));
+    } catch {
+      // Without the rep list the inbox still loads, for everyone.
+      toast.error('Could not load the list of reps');
+      setRep(cur => (cur === null ? '' : cur));
+    }
   }, []);
   useEffect(() => { loadReps(); }, [loadReps]);
 
@@ -105,6 +113,8 @@ export default function SalesInboxPage() {
       ]);
       setSummary(s);
       setData(l);
+    } catch {
+      toast.error('Could not load the sales inbox');
     } finally {
       setLoading(false);
     }
@@ -211,7 +221,7 @@ export default function SalesInboxPage() {
                 </thead>
                 <tbody>
                   {data.rows.map(r => (
-                    <>
+                    <Fragment key={r.id}>
                       <tr key={r.id} className="border-b border-border align-top hover:bg-muted/40 cursor-pointer" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
                         <td className="py-2 pr-2">{r.resolution ? (open[r.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : null}</td>
                         <td className="py-2 pr-3 whitespace-nowrap text-xs">{(r.received || '').slice(0, 10)}</td>
@@ -250,7 +260,7 @@ export default function SalesInboxPage() {
                       {open[r.id] && r.resolution && (
                         <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3"><Lines resolution={r.resolution} /></td></tr>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

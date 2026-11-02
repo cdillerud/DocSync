@@ -561,6 +561,7 @@ export default function DocumentDetailPage() {
   const [derivedState, setDerivedState] = useState(null);
   const [showIntake, setShowIntake] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
   const [linking, setLinking] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editData, setEditData] = useState({});
@@ -577,14 +578,16 @@ export default function DocumentDetailPage() {
       setWorkflows(res.data.workflows || []);
       setEventTimeline(res.data.event_timeline || []);
       setDerivedState(res.data.derived_state);
+      setLoadError(null);
     } catch (err) {
       const status = err.response?.status;
       if (status === 404) {
         toast.error('Document not found');
+        navigate('/search');
       } else {
-        toast.error(`Failed to load document (${status || 'network error'})`);
+        // A passing server error keeps the user on the document with a retry.
+        setLoadError(`Failed to load the document (${status || 'network error'})`);
       }
-      navigate('/search');
     } finally {
       setLoading(false);
     }
@@ -677,7 +680,15 @@ export default function DocumentDetailPage() {
     );
   }
 
-  if (!doc) return null;
+  if (!doc) {
+    if (!loadError) return null;
+    return (
+      <div className="max-w-xl mx-auto mt-16 text-center space-y-3" role="alert">
+        <p className="text-sm text-destructive">{loadError}</p>
+        <Button variant="outline" size="sm" onClick={() => { setLoading(true); fetchDoc(); }}>Retry</Button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-[1600px] mx-auto" data-testid="document-detail-page">
@@ -1151,7 +1162,7 @@ export default function DocumentDetailPage() {
             documentId={id} 
             onRetry={(result) => {
               toast.success(`Retry ${result.retry_count} completed`);
-              fetchData(); // Refresh document data
+              fetchDoc(); // Refresh document data
             }}
           />
           </LegacySection>

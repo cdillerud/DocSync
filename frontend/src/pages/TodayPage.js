@@ -105,9 +105,12 @@ export default function TodayPage() {
   const [reps, setReps] = useState(null);
   const [mine, setMine] = useState(null);
   const [checks, setChecks] = useState(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     (async () => {
+      setFailed(false);
       const [a, s, r, k] = await Promise.allSettled([
         api.get('/ap-workflow/worklist', { params: { stage: 'needs_staff', days: 30, limit: 1 } }),
         api.get('/sales-inbox/summary'),
@@ -117,6 +120,8 @@ export default function TodayPage() {
       if (a.status === 'fulfilled') setAp(a.value.data);
       if (s.status === 'fulfilled') setSales(s.value.data);
       if (k.status === 'fulfilled') setChecks(k.value.data);
+      // Both AP and sales unreachable: say so instead of "Loading…" forever.
+      if (a.status === 'rejected' && s.status === 'rejected') setFailed(true);
       if (r.status === 'fulfilled') {
         setReps(r.value.data);
         if (r.value.data.me) {
@@ -125,7 +130,7 @@ export default function TodayPage() {
         }
       }
     })();
-  }, []);
+  }, [attempt]);
 
   const c = new Proxy(ap?.counts || {}, { get: (o, k) => (k in o ? o[k] : (ap ? 0 : undefined)) });
   const st = new Proxy(sales?.stages || {}, { get: (o, k) => (k in o ? o[k] : (sales ? 0 : undefined)) });
@@ -133,7 +138,7 @@ export default function TodayPage() {
   const lineReplay = ap?.line_replay?.ap_lines || null;
   const sAcc = sales?.draft_accuracy || {};
   const first = (user?.display_name || '').split(' ')[0];
-  const loading = !ap && !sales;
+  const loading = !ap && !sales && !failed;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12" data-testid="today-page">
@@ -142,10 +147,16 @@ export default function TodayPage() {
           <h1 className="text-2xl font-semibold flex items-center gap-2"><Sun className="w-5 h-5 text-amber-500" /> {first ? `Good day, ${first}` : 'Today'}</h1>
           <p className="text-sm text-muted-foreground">Accounts payable and sales side by side: what needs a person, what the Hub handled, and how its drafts compare with what your team entered in BC.</p>
         </div>
-        <Button asChild variant="outline" size="sm"><Link to="/documents?tab=upload"><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload documents</Link></Button>
+        <Button asChild variant="outline" size="sm"><Link to="/upload"><Upload className="w-3.5 h-3.5 mr-1.5" /> Upload documents</Link></Button>
       </div>
 
       {loading && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>}
+      {failed && !ap && !sales && (
+        <div className="flex items-center gap-3 text-sm text-destructive" role="alert">
+          Could not reach the Hub to load today's work.
+          <Button size="sm" variant="outline" onClick={() => setAttempt(n => n + 1)}>Retry</Button>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-2 gap-5">
         <Side title="Accounts payable" icon={Receipt} accent="border-t-violet-500" to="/ap" linkLabel="AP workspace" testid="today-ap">
@@ -227,7 +238,7 @@ export default function TodayPage() {
               <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">By rep</div>
               <div className="flex flex-wrap gap-2">
                 {reps.reps.filter(r => r.email !== 'unassigned' || (r.counts.needs_rep + r.counts.ready + r.counts.drafted) > 0).map(r => (
-                  <Link key={r.email} to="/sales" className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted">
+                  <Link key={r.email} to={`/sales?rep=${encodeURIComponent(r.email)}`} className="rounded-full border border-border px-3 py-1 text-xs hover:bg-muted">
                     {r.name || r.email.split('@')[0]} <b className="tabular-nums ml-1">{r.counts.needs_rep + r.counts.ready + r.counts.drafted}</b>
                     {r.counts.needs_rep > 0 && <span className="ml-1 text-amber-600">({r.counts.needs_rep} need them)</span>}
                   </Link>

@@ -63,7 +63,8 @@ export default function Layout() {
       } catch { /* ignore */ }
     };
     fetchBadge();
-    const interval = setInterval(fetchBadge, 60000); // Poll every 60s
+    // Background tabs skip the poll: dozens of open tabs each polled every minute.
+    const interval = setInterval(() => { if (document.visibilityState === 'visible') fetchBadge(); }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -99,7 +100,8 @@ export default function Layout() {
       }
     };
     fetchBCStatus();
-    const bcInterval = setInterval(fetchBCStatus, 60000); // Poll every 60s so a transient fetch failure self-heals
+    // Poll every 60s so a transient fetch failure self-heals (visible tabs only).
+    const bcInterval = setInterval(() => { if (document.visibilityState === 'visible') fetchBCStatus(); }, 60000);
     return () => clearInterval(bcInterval);
   }, []);
 

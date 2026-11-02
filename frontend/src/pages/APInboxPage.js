@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -72,12 +72,20 @@ function why(doc) {
 
 export default function APInboxPage() {
   const navigate = useNavigate();
-  // ?stage=drafted opens that stage (links from Today)
-  const [stage, setStage] = useState(() => new URLSearchParams(window.location.search).get('stage') || 'needs_staff');
-  const [query, setQuery] = useState('');
-  const [search, setSearch] = useState('');
-  const [days, setDays] = useState(30);
-  const [page, setPage] = useState(0);
+  // Stage, search, period and page live in the URL (?stage=drafted from
+  // Today): Back from a document returns to the same list, not page 1 of
+  // Needs staff.
+  const [params, setParams] = useSearchParams();
+  const stage = params.get('stage') || 'needs_staff';
+  const search = params.get('q') || '';
+  const days = Number(params.get('days')) || 30;
+  const page = Number(params.get('page')) || 0;
+  const [query, setQuery] = useState(search);
+  const update = useCallback(patch => setParams(prev => {
+    const next = new URLSearchParams(prev);
+    Object.entries(patch).forEach(([k, v]) => (v === '' || v == null || v === 0 ? next.delete(k) : next.set(k, String(v))));
+    return next;
+  }, { replace: true }), [setParams]);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const PAGE = 50;
@@ -123,7 +131,7 @@ export default function APInboxPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <select value={days} onChange={event => { setDays(Number(event.target.value)); setPage(0); }}
+          <select value={days} onChange={event => update({ days: Number(event.target.value) === 30 ? '' : Number(event.target.value), page: 0 })}
             className="rounded-md border border-border bg-background px-2 py-1.5 text-sm" aria-label="Period">
             <option value={7}>Last 7 days</option>
             <option value={30}>Last 30 days</option>
@@ -145,7 +153,7 @@ export default function APInboxPage() {
                   key={s.key}
                   type="button"
                   title={s.help}
-                  onClick={() => { setStage(s.key); setPage(0); }}
+                  onClick={() => update({ stage: s.key === 'needs_staff' ? '' : s.key, page: 0 })}
                   className={`rounded-md border p-2 text-left transition-colors bg-background/60 ${
                     stage === s.key ? 'border-primary ring-1 ring-primary' : 'border-border hover:border-foreground/30'}`}
                   data-testid={`ap-stage-${s.key}`}
@@ -173,7 +181,7 @@ export default function APInboxPage() {
                 </Button>
               )}
               <form
-                onSubmit={event => { event.preventDefault(); setSearch(query); setPage(0); }}
+                onSubmit={event => { event.preventDefault(); update({ q: query.trim(), page: 0 }); }}
                 className="flex items-center gap-1"
               >
                 <input
@@ -220,12 +228,23 @@ export default function APInboxPage() {
                       </td>
                       <td className="py-1.5 pr-3 text-right whitespace-nowrap">{money(doc.amount_float, doc.currency)}</td>
                       <td className="py-1.5 pr-3 font-mono text-xs">{doc.po_number_clean || '—'}</td>
-                      <td className="py-1.5 pr-3 text-xs">{doc.suggested_folder || '—'}</td>
+                      <td className="py-1.5 pr-3 text-xs">{doc.suggested_folder || '—'}
+                        {doc.suggested_folder && (doc.routing_path_accuracy?.pct != null || doc.routing_path_accuracy?.via) && (
+                          <div className="text-[11px] text-muted-foreground" title={[doc.routing_path_accuracy?.via, doc.routing_reason].filter(Boolean).join(' — ') || undefined}>
+                            {doc.routing_path_accuracy?.pct != null
+                              ? `matched staff ${doc.routing_path_accuracy.pct}% of ${doc.routing_path_accuracy.n}`
+                              : doc.routing_path_accuracy.via}
+                          </div>
+                        )}
+                      </td>
                       <td className="py-1.5 pr-3 text-xs">
                         <Badge variant="outline" className={TONE[current?.tone || 'muted']} title={doc.no_draft_reason || doc.sandbox_draft_skipped?.reason || doc.routing_reason || undefined}>{why(doc) || current?.label}</Badge>
                       </td>
                       <td className="py-1.5 pr-3 text-xs">
                         <Link className="hover:underline" to={`/documents/${encodeURIComponent(doc.id)}`}>{doc.file_name}</Link>
+                        {doc.mailbox_category === 'Operations' && (
+                          <Badge variant="outline" className="ml-1 text-[10px]" title="Arrived in the Operations mailbox; shown to AP because AP files these in Square9">Operations mail</Badge>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -236,8 +255,8 @@ export default function APInboxPage() {
           {data && data.total > PAGE && (
             <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
               {page * PAGE + 1}–{Math.min((page + 1) * PAGE, data.total)} of {data.total}
-              <Button type="button" size="sm" variant="outline" disabled={page === 0} onClick={() => setPage(p => p - 1)}>Previous</Button>
-              <Button type="button" size="sm" variant="outline" disabled={(page + 1) * PAGE >= data.total} onClick={() => setPage(p => p + 1)}>Next</Button>
+              <Button type="button" size="sm" variant="outline" disabled={page === 0} onClick={() => update({ page: page - 1 })}>Previous</Button>
+              <Button type="button" size="sm" variant="outline" disabled={(page + 1) * PAGE >= data.total} onClick={() => update({ page: page + 1 })}>Next</Button>
             </div>
           )}
         </CardContent>

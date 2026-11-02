@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { MsalProvider } from "@azure/msal-react";
 import "@/index.css";
 import App from "@/App";
-import TodayIntakeDrilldown from "@/components/TodayIntakeDrilldown";
 import { getMsalInstance } from "@/lib/msalConfig";
 import { installFetchAuthGuard } from "@/lib/fetchAuthGuard";
 
@@ -14,12 +13,9 @@ installFetchAuthGuard();
 // the flag off, we render <App/> directly so the legacy login keeps working.
 const msalInstance = getMsalInstance();
 
-const appTree = (
-  <>
-    <App />
-    <TodayIntakeDrilldown />
-  </>
-);
+// TodayIntakeDrilldown was mounted here for the retired unified queue: its
+// page-wide MutationObserver re-scanned the DOM on every change of every page.
+const appTree = <App />;
 
 const tree = msalInstance ? (
   <MsalProvider instance={msalInstance}>

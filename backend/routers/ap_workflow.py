@@ -310,6 +310,9 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
               "ap_stage": 1, "staff_reason": 1, "suggested_folder": 1, "suggested_approver": 1, "ap_hold": 1,
               "ap_approval": 1, "no_action_reason": 1, "check_reason": 1, "bc_link.bc_document_no": 1, "no_draft_reason": 1,
               "sandbox_draft_skipped.reason": 1,
+              # Shown under the folder in the AP Inbox (the tooltip read
+              # routing_reason, which the list never returned).
+              "routing_reason": 1, "routing_path_accuracy": 1, "mailbox_category": 1,
               "bc_link.bc_status": 1, "staff_decided": 1, "bc_draft_no": 1, "bc_draft_environment": 1}
     items = [d async for d in db.hub_documents.find(query, fields).sort([("created_utc", -1)])
              .skip(max(0, skip)).limit(max(1, min(limit, 200)))]

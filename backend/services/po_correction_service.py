@@ -193,8 +193,18 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
         raw = d.get("po_number_previous") or d.get("po_number_clean") or (d.get("extracted_fields") or {}).get("po_number") or ""
         stats["checked"] += 1
         if raw and await known(str(raw).strip().upper()):
-            stats["already_gamer_order"] += 1
-            continue
+            # "118092-4500754718", "120051-Insigna-18861": the order plus the
+            # vendor's own reference. The known-order check accepts the whole
+            # string, but a draft needs the order alone (3 of 12 PO misses vs
+            # BC since 10-26 were this shape, fixed only once BC linked them).
+            whole = str(raw).strip().upper()
+            parts = [c for c in dict.fromkeys(candidates_from(raw)) if await known(c)]
+            # Only a reference after a separator: a letter right after the
+            # number is a release BC keeps (WA2318F, W118907D, 116704A).
+            if not (len(parts) == 1 and whole.startswith(parts[0])
+                    and re.match(r"[\s/_,-]+\S{3,}", whole[len(parts[0]):])):
+                stats["already_gamer_order"] += 1
+                continue
         field = [c for c in candidates_from(raw) if await known(c)]
         found, source = None, None
         if len(set(field)) == 1:

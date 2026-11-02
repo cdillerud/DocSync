@@ -411,7 +411,9 @@ async def list_documents(
     # for this request's filter and the page of rows are live.
     global _LIST_STATS, _LIST_STATS_AT
     import time as _time
-    if _LIST_STATS is None or _time.time() - _LIST_STATS_AT > 300:
+
+    async def _refresh_list_stats():
+        global _LIST_STATS
         _LIST_STATS = await asyncio.gather(
             db.hub_documents.count_documents(not_dup),
             db.hub_documents.count_documents({"auto_cleared": True, **not_dup}),
@@ -430,7 +432,16 @@ async def list_documents(
                 {"$sort": {"count": -1}},
             ]).to_list(50),
         )
+
+    # Only the first request after a restart waits; later expiries are
+    # served the previous counts while one background refresh runs (the
+    # pending count alone is a 4.7 s scan of 13 GB).
+    if _LIST_STATS is None:
         _LIST_STATS_AT = _time.time()
+        await _refresh_list_stats()
+    elif _time.time() - _LIST_STATS_AT > 300:
+        _LIST_STATS_AT = _time.time()
+        asyncio.create_task(_refresh_list_stats())
     base_filter = fq == {"is_duplicate": {"$ne": True}}
     # The filtered total scans every matching document (0.3-0.4 s on 26k
     # docs) while the page itself takes ~4 ms: totals are cached per filter
@@ -596,7 +607,12 @@ async def search_documents(
         if amount_match is not None:
             or_clauses.append({"amount_float": amount_match})
         regex_query = {"$or": or_clauses, "is_duplicate": {"$ne": True}}
-        docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit).to_list(limit)
+        # Capped: the substring scan reads every document when nothing matches.
+        try:
+            docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit) \
+                .max_time_ms(1500).to_list(limit)
+        except Exception:
+            docs = []
 
     # Compute match_fields for each result
     pattern = re.compile(re.escape(search_term), re.IGNORECASE)
@@ -1374,7 +1390,7 @@ async def analyze_document_boundaries_endpoint(doc_id: str):
     from services.document_boundary_service import analyze_document_boundaries
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_name": 1, "filename": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1382,10 +1398,13 @@ async def analyze_document_boundaries_endpoint(doc_id: str):
     if not file_path:
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    with open(file_path, "rb") as f:
-        file_content = f.read()
+    # pypdf over every page is CPU-bound: off the event loop (a 121-page
+    # file froze every request for 9.7 s, speed audit 2026-11-01).
+    def _analyze():
+        with open(file_path, "rb") as f:
+            return analyze_document_boundaries(f.read())
 
-    analysis = analyze_document_boundaries(file_content)
+    analysis = await asyncio.to_thread(_analyze)
     return {
         "document_id": doc_id,
         "filename": doc.get("filename") or doc.get("file_name") or "",

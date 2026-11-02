@@ -236,7 +236,7 @@ async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
             "$select": "number,orderNumber,postingDate"})
     if r.status_code != 200:
         return {}
-    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"id": {"$ne": doc.get("id")}}))
+    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"draft_receipt_numbers": {"$exists": True}, "id": {"$ne": doc.get("id")}}))
     recs = [x for x in r.json().get("value", []) if x.get("number") not in used]
 
     def item_lines(rec):
@@ -296,7 +296,7 @@ async def receipt_by_items(db, d: Dict[str, Any]) -> Dict[str, Any]:
         day = datetime.fromisoformat(str(d.get("invoice_date") or d.get("created_utc"))[:10]).date()
     except ValueError:
         return {}
-    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"id": {"$ne": d.get("id")}}))
+    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"draft_receipt_numbers": {"$exists": True}, "id": {"$ne": d.get("id")}}))
     found = []
     async for r in db.bc_purchase_receipts.find(
             {"vendorNumber": str(d["vendor_canonical"]).upper(),

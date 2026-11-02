@@ -703,8 +703,6 @@ async def ensure_resolution_indexes():
             unique=True,
         )
         await db.vendor_match_rejections.create_index("last_rejected_at")
-        await db.hub_documents.create_index("vendor_resolution.status")
-        await db.hub_documents.create_index("vendor_resolution.method")
         logger.info("[VendorResolution] Indexes ensured")
     except Exception as e:
         logger.warning("[VendorResolution] Index creation note: %s", e)

@@ -15,20 +15,15 @@ async def initialize_core_indexes(*, db, logger) -> None:
     await db.hub_documents.create_index("document_type")
     await db.hub_documents.create_index("created_utc")
     await db.hub_documents.create_index("source")
-    await db.hub_documents.create_index("suggested_job_type")
     await db.hub_documents.create_index([("extracted_fields.vendor", 1)])
     # Phase 7: Indexes for new flat normalized fields
     await db.hub_documents.create_index("vendor_normalized")
     await db.hub_documents.create_index("invoice_number_clean")
     await db.hub_documents.create_index("vendor_canonical")
-    await db.hub_documents.create_index("draft_candidate")
     await db.hub_documents.create_index("possible_duplicate")
     # AP Review indexes
-    await db.hub_documents.create_index("review_status")
-    await db.hub_documents.create_index("bc_posting_status")
     await db.hub_documents.create_index("vendor_id")
     # Legacy indexes (keep for backward compat)
-    await db.hub_documents.create_index([("canonical_fields.vendor_normalized", 1)])
     await db.hub_workflow_runs.create_index("id", unique=True)
     await db.hub_workflow_runs.create_index("document_id")
     await db.hub_workflow_runs.create_index("started_utc")
@@ -90,8 +85,6 @@ async def initialize_core_indexes(*, db, logger) -> None:
             unique=True,
         )
         await db.vendor_match_rejections.create_index("last_rejected_at")
-        await db.hub_documents.create_index("vendor_resolution.status")
-        await db.hub_documents.create_index("vendor_resolution.method")
     except Exception:
         pass
     # Phase C1: Mail intake log indexes

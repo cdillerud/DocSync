@@ -1149,5 +1149,3 @@ async def ensure_pilot_indexes(db):
         [("internet_message_id", 1), ("attachment_name", 1), ("status", 1)]
     )
     # Index on hub_documents for pilot queries
-    await db.hub_documents.create_index("inside_sales_pilot")
-    await db.hub_documents.create_index("pilot_mailbox")

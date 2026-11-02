@@ -1278,9 +1278,9 @@ async def poll_mailbox_for_documents(mailbox_address: str, default_category: str
                             )
 
     except Exception as e:
-        stats["errors"].append(f"Poll error: {str(e)}")
+        stats["errors"].append(f"Poll error: {e!r}")
         stats["status"] = "failed_exception"
-        logger.error("[MailboxPoll:%s] Error: %s", run_id, str(e))
+        logger.error("[MailboxPoll:%s] Error: %r", run_id, e)
 
     stats["completed_at"] = datetime.now(timezone.utc).isoformat()
 

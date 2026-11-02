@@ -1,5 +1,6 @@
 """GPI Document Hub SharePoint operations and pre-upload routing guard."""
 
+import asyncio
 import logging
 import os
 import re
@@ -138,14 +139,34 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
         safe_folder = quote(folder_for_url, safe="/")
         safe_name = quote(file_name, safe="")
         destination = f"{safe_folder}/{safe_name}" if safe_folder else safe_name
-        upload_resp = await client.put(
-            f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{destination}:/content",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/octet-stream",
-            },
-            content=file_content,
-        )
+
+        async def _put(conflict: str = ""):
+            # One retry on a network timeout: 8 of 9 documents without a
+            # SharePoint copy (2026-10-20..11-02) were single Connect/Read
+            # timeouts and never tried again.
+            url = f"https://graph.microsoft.com/v1.0/drives/{drive_id}/root:/{destination}:/content"
+            if conflict:
+                url += "?@microsoft.graph.conflictBehavior=" + conflict
+            for attempt in (1, 2):
+                try:
+                    return await client.put(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type": "application/octet-stream",
+                        },
+                        content=file_content,
+                    )
+                except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+                    if attempt == 2:
+                        raise
+                    await asyncio.sleep(5)
+
+        upload_resp = await _put()
+        if upload_resp.status_code == 409:
+            # Same name already in the folder (a vendor resending invoice
+            # 0000327657 from another mailbox): keep both, never overwrite.
+            upload_resp = await _put("rename")
         item = upload_resp.json()
         if upload_resp.status_code in (401, 403):
             raise Exception(
@@ -162,7 +183,7 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
             "drive_id": drive_id,
             "item_id": item["id"],
             "web_url": item.get("webUrl", ""),
-            "name": file_name,
+            "name": item.get("name") or file_name,
         }
 
 
@@ -641,7 +662,7 @@ async def upload_to_sharepoint_with_routing(
         "routing_details": routing_details,
         "routing_snapshot": snapshot,
         "po_resolution_status": (po_result or {}).get("status", "not_run"),
-        "uploaded_file_name": upload_file_name,
+        "uploaded_file_name": result.get("name") or upload_file_name,
         "original_file_name": file_name,
     })
     return result

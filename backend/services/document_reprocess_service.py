@@ -44,7 +44,7 @@ async def reprocess_document(doc_id: str, reclassify: bool = False) -> Dict[str,
     documents, or create draft invoices.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -100,12 +100,21 @@ async def reprocess_document_inner(
     file_content = file_path.read_bytes() if file_path.exists() else None
 
     if reclassify and not file_path.exists():
-        file_b64 = doc.get("file_content_b64")
-        if file_b64:
-            try:
-                import base64
+        # MongoDB backup: document_files, or the legacy hub_documents field
+        # until it is backfilled (2026-11-01).
+        try:
+            from services.file_bytes import load_backup
 
-                recovered_bytes = base64.b64decode(file_b64)
+            recovered_bytes = await load_backup(db, doc_id)
+        except Exception as exc:
+            recovered_bytes = None
+            logger.warning(
+                "[REPROCESS] MongoDB backup lookup failed for %s: %s",
+                doc_id[:8],
+                str(exc),
+            )
+        if recovered_bytes:
+            try:
                 file_path.write_bytes(recovered_bytes)
                 file_content = recovered_bytes
                 logger.info(

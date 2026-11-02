@@ -1434,14 +1434,26 @@ def _pdf_text(doc: dict) -> str:
     if "_pdf_text" in doc:
         return doc["_pdf_text"]
     text = ""
-    b64 = doc.get("file_content_b64")
     name = str(doc.get("file_name") or "").lower()
-    if isinstance(b64, str) and b64 and len(b64) <= _TEXT_REF_MAX_B64 and (name.endswith(".pdf") or b64.startswith("JVBER")):
+    # The uploads volume first (2026-11-01: the base64 copy is leaving
+    # hub_documents); a legacy file_content_b64 on the dict still counts.
+    # Same size cap as before, in raw bytes.
+    from services.file_bytes import read_upload
+    data = read_upload(str(doc.get("id") or ""), str(doc.get("file_name") or ""),
+                       max_bytes=_TEXT_REF_MAX_B64 * 3 // 4)
+    if data is None:
+        b64 = doc.get("file_content_b64")
+        if isinstance(b64, str) and b64 and len(b64) <= _TEXT_REF_MAX_B64:
+            try:
+                import base64
+                data = base64.b64decode(b64)
+            except Exception:
+                data = None
+    if data and (name.endswith(".pdf") or data[:5] == b"%PDF-"):
         try:
-            import base64
             import io
             from pypdf import PdfReader
-            reader = PdfReader(io.BytesIO(base64.b64decode(b64)))
+            reader = PdfReader(io.BytesIO(data))
             text = " ".join((pg.extract_text() or "") for pg in reader.pages[:3])
         except Exception:
             text = ""

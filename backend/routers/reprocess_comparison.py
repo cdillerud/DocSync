@@ -11,7 +11,6 @@ The comparison stores:
 """
 
 import asyncio
-import base64
 import logging
 import os
 import uuid
@@ -36,25 +35,22 @@ async def _recover_file_to_disk(doc: dict, doc_id: str, db) -> Optional[Path]:
     """
     file_path = UPLOAD_DIR / doc_id
 
-    # Method 1: Recover from file_content_b64 stored in MongoDB
-    b64_content = doc.get("file_content_b64")
-    if not b64_content:
-        # Re-fetch from DB with the b64 field (excluded from default queries)
-        full_doc = await db.hub_documents.find_one(
-            {"id": doc_id},
-            {"_id": 0, "file_content_b64": 1}
-        )
-        if full_doc:
-            b64_content = full_doc.get("file_content_b64")
+    # Method 1: Recover from the MongoDB backup (document_files, or the legacy
+    # hub_documents field until it is backfilled)
+    from services.file_bytes import load_backup
+    try:
+        content = await load_backup(db, doc_id)
+    except Exception as e:
+        content = None
+        logger.warning("[FileRecover] backup lookup failed for %s: %s", doc_id[:8], e)
 
-    if b64_content:
+    if content:
         try:
-            content = base64.b64decode(b64_content)
             file_path.write_bytes(content)
             logger.info("[FileRecover] Recovered %s from b64 (%d bytes)", doc_id[:8], len(content))
             return file_path
         except Exception as e:
-            logger.warning("[FileRecover] b64 decode failed for %s: %s", doc_id[:8], e)
+            logger.warning("[FileRecover] restore to disk failed for %s: %s", doc_id[:8], e)
 
     # Method 2: Download from SharePoint via Graph API
     drive_id = doc.get("sharepoint_drive_id", "")

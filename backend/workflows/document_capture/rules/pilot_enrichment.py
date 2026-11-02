@@ -55,12 +55,11 @@ async def _maybe_stage_inventory_xls(doc_id: str) -> None:
       - file hasn't been backfilled before
       - classifier confidently recognizes it as inventory
     """
-    import base64 as _b64
     db = get_db()
     doc = await db.hub_documents.find_one(
         {"id": doc_id},
         {"_id": 0, "id": 1, "file_name": 1, "email_sender": 1,
-         "file_content_b64": 1, "inventory_xls_backfilled": 1},
+         "inventory_xls_backfilled": 1},
     )
     if not doc:
         return
@@ -70,8 +69,9 @@ async def _maybe_stage_inventory_xls(doc_id: str) -> None:
         return
     if doc.get("inventory_xls_backfilled"):
         return
-    b64 = doc.get("file_content_b64")
-    if not b64:
+    from services.file_bytes import load_bytes
+    raw = await load_bytes(db, doc)
+    if not raw:
         return
 
     from services.file_ingestion_service import FileIngestionService
@@ -83,7 +83,6 @@ async def _maybe_stage_inventory_xls(doc_id: str) -> None:
         stage_import, suggest_customer_workspace,
     )
 
-    raw = _b64.b64decode(b64)
     ingestor = FileIngestionService()
     if ext == "csv":
         headers, rows = ingestor.parse_csv(raw, fname)

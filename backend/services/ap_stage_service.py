@@ -101,6 +101,10 @@ async def measure_reason_accuracy(db, csv_path: str, source: str) -> Dict[str, A
             continue
         d.pop("bc_link", None)
         d.pop("bc_credit_of", None)
+        # Routed without PDF text, as before 2026-11-01: this fetch never carried
+        # the base64 copy, and folder routing's _pdf_text now reads the uploads
+        # volume -- here that would parse a PDF per document and move the numbers.
+        d["_pdf_text"] = ""
         try:
             path, why, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")), ai=False)
         except Exception:
@@ -402,6 +406,10 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
             # AP's workflow; the draft is only the BC side).
             x = {k: v for k, v in d.items() if k != "_id"}
             x.pop("bc_link", None)
+            # Routed without PDF text, as before 2026-11-01: this fetch never carried
+            # the base64 copy, and folder routing's _pdf_text now reads the uploads
+            # volume -- here that would parse a PDF per document and move the numbers.
+            x["_pdf_text"] = ""
             try:
                 folder, why, _ = await route_with_feedback(x, is_international=bool(d.get("is_international")))
                 res = {**pre, "suggested_folder": folder, "routing_reason": why}
@@ -410,6 +418,10 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
         if pre["ap_stage"] in ("ready", "file_only") and not pre.get("staff_decided"):
             x = {k: v for k, v in d.items() if k != "_id"}
             x.pop("bc_link", None)
+            # Routed without PDF text, as before 2026-11-01: this fetch never carried
+            # the base64 copy, and folder routing's _pdf_text now reads the uploads
+            # volume -- here that would parse a PDF per document and move the numbers.
+            x["_pdf_text"] = ""
             try:
                 folder, why, _ = await route_with_feedback(x, is_international=bool(d.get("is_international")))
                 res = stage_of(d, bc_vendors, (folder, why), reliability, sf, learned)

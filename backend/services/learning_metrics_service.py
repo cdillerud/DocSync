@@ -63,6 +63,10 @@ async def _routing_replay(db) -> Dict[str, Any]:
             continue
         d.pop("bc_link", None)
         d.pop("bc_credit_of", None)
+        # Routed without PDF text, as before 2026-11-01: this fetch never carried
+        # the base64 copy, and folder routing's _pdf_text now reads the uploads
+        # volume -- here that would parse a PDF per document and move the numbers.
+        d["_pdf_text"] = ""
         try:
             path, _, _ = await route_with_feedback(d, is_international=bool(d.get("is_international")), ai=False)
         except Exception:

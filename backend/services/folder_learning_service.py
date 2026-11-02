@@ -152,6 +152,10 @@ async def train(db, force: bool = False) -> Dict[str, Any]:
         dd = dict(d)
         dd.pop("bc_link", None)
         dd.pop("bc_credit_of", None)
+        # Routed without PDF text, as before 2026-11-01: this fetch never carried
+        # the base64 copy, and folder routing's _pdf_text now reads the uploads
+        # volume -- here that would parse a PDF per document and move the numbers.
+        dd["_pdf_text"] = ""
         try:
             rule = (await route_with_feedback(dd, is_international=bool(dd.get("is_international")), learned=False))[0] or ""
         except Exception:

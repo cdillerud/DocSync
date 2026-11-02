@@ -278,23 +278,23 @@ async def harvest_hub(db, limit: int = 0) -> Dict[str, Any]:
     """The Hub's own documents, with what became of each: the Hub's type,
     where staff filed it (folder_filings) and whether AP entered it in BC
     (bc_link). Text from the stored file; incremental by document id."""
-    import base64
+    from services.file_bytes import has_bytes_filter, load_bytes
     stats = collections.Counter()
     filed = {f["hub_doc_id"]: (f.get("top") or "") + ("/" + f["subpath"] if f.get("subpath") else "")
              async for f in db.folder_filings.find({}, {"_id": 0, "hub_doc_id": 1, "top": 1, "subpath": 1})}
     have = set(await db.document_memory.distinct("item_id", {"source": "hub"}))
-    q = {"file_content_b64": {"$exists": True, "$ne": None}}
+    q = has_bytes_filter()
     async for d in db.hub_documents.find(q, {"_id": 0, "id": 1}).sort("created_utc", 1):
         if d["id"] in have:
             continue
-        full = await db.hub_documents.find_one({"id": d["id"]}, {"_id": 0, "id": 1, "file_name": 1, "file_content_b64": 1, "document_type": 1,
+        full = await db.hub_documents.find_one({"id": d["id"]}, {"_id": 0, "id": 1, "file_name": 1, "document_type": 1,
                                                                 "vendor_canonical": 1, "created_utc": 1, "bc_link.bc_document_no": 1,
                                                                 "email_subject": 1, "content_type": 1})
         name = full.get("file_name") or ""
         text = ""
         if name.lower().endswith(".pdf") or "pdf" in str(full.get("content_type") or ""):
             try:
-                data = base64.b64decode(full.get("file_content_b64") or "")
+                data = await load_bytes(db, full) or b""
                 text = await asyncio.get_running_loop().run_in_executor(None, pdf_text, data)
             except Exception:
                 text = ""

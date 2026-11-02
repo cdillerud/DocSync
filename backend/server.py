@@ -1322,6 +1322,12 @@ async def startup():
         await ensure_hub_documents_dedup_index()
     except Exception as _e:
         logger.warning("ensure_hub_documents_dedup_index failed (non-fatal): %s", _e)
+    try:
+        from services.file_bytes import ensure_document_files_index
+        from database import db as _files_db
+        await ensure_document_files_index(_files_db)
+    except Exception as _e:
+        logger.warning("ensure_document_files_index failed (non-fatal): %s", _e)
     from services.lifecycle_scheduler_service import start_email_polling_tasks
     polling_tasks = start_email_polling_tasks(
         logger=logger, register_background_task=register_background_task,

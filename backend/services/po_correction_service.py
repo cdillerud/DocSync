@@ -66,7 +66,7 @@ async def learn_labels(db, known, limit: int = 400) -> int:
     async for d in db.hub_documents.find(
             {"bc_link.bc_order_number": {"$nin": [None, ""]}, "po_labels_learned": {"$exists": False}, "mailbox_category": "AP",
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "is_duplicate": {"$ne": True}, "status": {"$ne": "batch_parent"}},
-            {"_id": 1, "vendor_canonical": 1, "bc_link.bc_order_number": 1, "file_content_b64": 1, "file_name": 1}).limit(limit):
+            {"_id": 1, "id": 1, "vendor_canonical": 1, "bc_link.bc_order_number": 1, "file_name": 1}).limit(limit):
         truth = str(d["bc_link"]["bc_order_number"]).strip().upper()
         text, txt = await _text_orders(db, d, known)
         v = str(d.get("vendor_canonical") or "")
@@ -126,7 +126,7 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
             {"created_utc": {"$gte": since}, "mailbox_category": "AP", "is_duplicate": {"$ne": True},
              "document_type": {"$in": ["AP_Invoice", "Credit_Memo"]}, "po_from_text": {"$exists": False},
              "status": {"$ne": "batch_parent"}},
-            {"_id": 1, "po_number_clean": 1, "po_number_previous": 1, "bc_link": 1, "file_content_b64": 1,
+            {"_id": 1, "id": 1, "po_number_clean": 1, "po_number_previous": 1, "bc_link": 1,
              "file_name": 1, "extracted_fields.po_number": 1, "batch_parent_id": 1, "invoice_number_clean": 1, "vendor_canonical": 1}):
         raw = d.get("po_number_previous") or d.get("po_number_clean") or (d.get("extracted_fields") or {}).get("po_number") or ""
         stats["checked"] += 1

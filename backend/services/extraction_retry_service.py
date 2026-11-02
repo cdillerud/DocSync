@@ -14,6 +14,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict
 
+from services.file_bytes import has_bytes_filter
+
 logger = logging.getLogger(__name__)
 
 MAX_ATTEMPTS = 2
@@ -37,7 +39,7 @@ async def retry_failed_extractions(db, days: int = 30, limit: int = 60, delay_se
         "mailbox_category": "AP",
         "status": {"$nin": ["batch_parent", "Posted"]},
         "is_duplicate": {"$ne": True},
-        "file_content_b64": {"$exists": True, "$ne": None},
+        **has_bytes_filter(),
         "amount_float": None,
         "invoice_number_clean": {"$in": [None, ""]},
         "$or": [{"extraction_retry_count": {"$exists": False}}, {"extraction_retry_count": {"$lt": MAX_ATTEMPTS}}],
@@ -87,7 +89,7 @@ async def retry_po_lines(db, days: int = 21, limit: int = 10, delay_seconds: flo
     # Sales orders only: BOLs, labels and pick tickets filed under a customer
     # PO have no lines to find (20 of 22 non-recoveries, 2026-10-21).
     query = {"created_utc": {"$gte": since}, "sales_link.role": "customer_po", "document_type": "Sales_Order",
-             "status": {"$ne": "batch_parent"}, "file_content_b64": {"$exists": True, "$ne": None},
+             "status": {"$ne": "batch_parent"}, **has_bytes_filter(),
              "$or": [{"extracted_fields.line_items": {"$exists": False}}, {"extracted_fields.line_items": {"$size": 0}},
                      {"extracted_fields.line_items": None}],
              "line_retry_count": {"$exists": False}}

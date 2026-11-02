@@ -17,7 +17,6 @@ For each recent CFDI XML document:
 * an XML with no PDF gets the fields itself and stays active.
 Idempotent; runs hourly in the learning cycle, before BC reconciliation.
 """
-import base64
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -82,18 +81,19 @@ def _fields_from(c: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def process_recent(db, days: int = 120, apply: bool = True) -> Dict[str, Any]:
+    from services.file_bytes import has_bytes_filter, load_bytes
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
     stats = {"xml": 0, "not_cfdi": 0, "pdf_filled": 0, "pdf_mismatch": 0, "xml_marked_companion": 0,
              "xml_standalone_filled": 0, "credit_notes": 0}
     async for x in db.hub_documents.find(
             {"created_utc": {"$gte": since}, "file_name": {"$regex": r"\.xml$", "$options": "i"},
-             "file_content_b64": {"$exists": True, "$ne": None}},
-            {"_id": 1, "id": 1, "file_name": 1, "email_id": 1, "file_content_b64": 1, "is_duplicate": 1,
+             **has_bytes_filter()},
+            {"_id": 1, "id": 1, "file_name": 1, "email_id": 1, "is_duplicate": 1,
              "vendor_canonical": 1, "cfdi": 1, "amount_float": 1, "invoice_number_clean": 1}):
         stats["xml"] += 1
         try:
-            c = parse_cfdi(base64.b64decode(x["file_content_b64"]))
+            c = parse_cfdi(await load_bytes(db, x) or b"")
         except Exception:
             c = None
         if not c:

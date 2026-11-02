@@ -14,8 +14,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Largest base64 file copy kept inside a hub_documents record.
-MAX_INLINE_B64_BYTES = 12 * 1024 * 1024
+# The base64 backup moved from hub_documents to document_files
+# (services.file_bytes, 2026-11-01); the limit lives there now and is
+# re-exported here for existing importers.
+from services.file_bytes import MAX_INLINE_B64_BYTES, save_backup  # noqa: F401
 
 
 async def ensure_hub_documents_dedup_index():
@@ -194,18 +196,6 @@ async def intake_document_from_bytes(
     file_path = UPLOAD_DIR / doc_id
     file_path.write_bytes(file_content)
 
-    # Also store file content in MongoDB as backup (survives container restarts).
-    # Skip it for large files: base64 adds a third, and a PDF over ~12 MB would
-    # push the record past the 16 MB MongoDB document limit and fail the whole
-    # intake. The copy on the uploads volume stays the primary source.
-    import base64 as b64mod
-    file_content_b64 = None
-    if (len(file_content) + 2) // 3 * 4 <= MAX_INLINE_B64_BYTES:
-        file_content_b64 = b64mod.b64encode(file_content).decode("ascii")
-    else:
-        logger.info("[Intake] %s is %d bytes; not storing the base64 backup in MongoDB",
-                    filename, len(file_content))
-
     # Apply pilot capture channel if pilot mode is enabled
     base_capture_channel = CaptureChannel.EMAIL.value if "email" in source.lower() else CaptureChannel.UPLOAD.value
     capture_channel = get_pilot_capture_channel(base_capture_channel) if PILOT_MODE_ENABLED else base_capture_channel
@@ -217,7 +207,6 @@ async def intake_document_from_bytes(
         "file_name": filename,
         "sha256_hash": computed_hash,
         "file_size": len(file_content),
-        "file_content_b64": file_content_b64,
         "content_type": content_type,
         "email_sender": sender,
         "email_subject": subject,
@@ -290,6 +279,15 @@ async def intake_document_from_bytes(
                 "message": "Duplicate of concurrently-inserted document (race detected)",
             }
         raise
+
+    # MongoDB backup copy of the file, in document_files rather than inside
+    # the hub_documents record (2026-11-01: base64 there was ~90% of the
+    # collection and every scan paid for it). The uploads volume stays the
+    # primary copy, so a failed backup is logged, never an intake failure.
+    try:
+        await save_backup(db, doc_id, filename, file_content)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("[Intake] base64 backup for %s (%s) not stored: %s", doc_id, filename, e)
 
     # Emit document.received event (Phase 1)
     event_service = get_event_service()

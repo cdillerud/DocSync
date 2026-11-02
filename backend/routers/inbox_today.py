@@ -450,6 +450,11 @@ async def _add_current_rule_suggestion(doc: Dict[str, Any]) -> None:
     try:
         from services.folder_routing_service import route_with_feedback
 
+        # The Today list (TODAY_PROJECTION) never carried the base64 copy, so
+        # this suggestion was always made without PDF text; keep it that way
+        # now that _pdf_text reads the uploads volume (2026-11-01) -- one PDF
+        # parse per row would land on the home page.
+        doc.setdefault("_pdf_text", "")
         extracted = doc.get("extracted_fields") or {}
         is_international = _is_truthy(doc.get("is_international")) or _is_truthy(
             extracted.get("is_international")

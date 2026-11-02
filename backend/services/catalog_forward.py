@@ -250,21 +250,13 @@ async def _graph_token() -> str:
 async def load_document_bytes(doc: Dict[str, Any]) -> Optional[bytes]:
     """Read a document's bytes the way the Hub serves files: local upload copy,
     then the MongoDB base64 backup, then SharePoint through Microsoft Graph."""
-    doc_id = doc.get("id") or ""
     try:
-        from paths import UPLOAD_DIR
-        local = UPLOAD_DIR / doc_id
-        if doc_id and local.is_file():
-            return local.read_bytes()
+        from services.file_bytes import load_bytes
+        data = await load_bytes(get_db(), doc)
+        if data:
+            return data
     except Exception as exc:  # noqa: BLE001
-        logger.debug("[CatalogForward] no local copy for %s: %s", doc_id, exc)
-
-    b64 = doc.get("file_content_b64")
-    if b64:
-        try:
-            return base64.b64decode(b64)
-        except Exception:  # noqa: BLE001
-            pass
+        logger.debug("[CatalogForward] no stored copy for %s: %s", doc.get("id"), exc)
 
     drive_id, item_id = doc.get("sharepoint_drive_id"), doc.get("sharepoint_item_id")
     link = doc.get("sharepoint_web_url") or doc.get("sharepoint_share_link_url") or doc.get("sharepoint_url")

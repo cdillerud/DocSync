@@ -284,7 +284,7 @@ async def receipt_by_items(db, d: Dict[str, Any]) -> Dict[str, Any]:
     qtys = sorted(round(float(l.get("quantity") or 0), 3) for l in d.get("line_items") or [] if float(l.get("quantity") or 0) > 0)
     if not amount or not qtys or not d.get("vendor_canonical"):
         return {}
-    full = await db.hub_documents.find_one({"id": d.get("id")}, {"file_content_b64": 1, "file_name": 1}) or {}
+    full = await db.hub_documents.find_one({"id": d.get("id")}, {"_id": 0, "id": 1, "file_name": 1}) or {}
     texts = [_pdf_text(full).upper()] + [str(l.get("description") or "").upper() for l in d.get("line_items") or []]
     codes = set()
     for t in texts:

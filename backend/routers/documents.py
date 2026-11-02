@@ -21,6 +21,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from deps import get_db
+from services.file_bytes import delete_backup, load_backup, load_bytes, save_backup, upload_path
 from services.document_detail_truth_service import normalize_document_detail_authoritative_truth
 
 logger = logging.getLogger(__name__)
@@ -1086,6 +1087,7 @@ async def delete_document(doc_id: str):
         raise HTTPException(status_code=404, detail="Document not found")
     await db.hub_documents.delete_one({"id": doc_id})
     await db.hub_workflow_runs.delete_many({"document_id": doc_id})
+    await delete_backup(db, doc_id)
     file_path = UPLOAD_DIR / doc_id
     if file_path.exists():
         file_path.unlink()
@@ -1097,7 +1099,7 @@ async def delete_document(doc_id: str):
 async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
     """Upload a replacement file for an existing document, then re-run AI extraction."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "file_name": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1111,6 +1113,12 @@ async def upload_replacement_file(doc_id: str, file: UploadFile = File(...)):
             "file_size": len(content),
             "content_type": file.content_type or "application/pdf",
         }})
+        # Replace the MongoDB backup too, or a lost disk copy would come back
+        # as the old file (2026-11-01).
+        try:
+            await save_backup(db, doc_id, file.filename or doc.get("file_name") or "", content)
+        except Exception as be:  # noqa: BLE001
+            logger.warning("[UPLOAD-FILE] backup for %s not stored: %s", doc_id[:8], be)
         
         logger.info("[UPLOAD-FILE] Saved replacement file for %s: %s (%d bytes)", doc_id[:8], file.filename, len(content))
         
@@ -1129,7 +1137,7 @@ async def get_document_file(doc_id: str):
     import httpx
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1138,20 +1146,23 @@ async def get_document_file(doc_id: str):
 
     # 1. Local file takes priority
     file_path = UPLOAD_DIR / doc_id
-    if file_path.exists():
+    local_path = upload_path(doc_id, filename)
+    if local_path:
         return FileResponse(
-            path=file_path,
+            path=local_path,
             media_type=content_type,
             filename=filename,
             headers={"Content-Disposition": f'inline; filename="{filename}"'}
         )
 
-    # 1b. Recover from MongoDB backup (file_content_b64)
-    file_b64 = doc.get("file_content_b64")
-    if file_b64:
+    # 1b. Recover from the MongoDB backup (document_files, or the legacy
+    # hub_documents field until it is backfilled)
+    try:
+        recovered = await load_backup(db, doc_id)
+    except Exception:
+        recovered = None
+    if recovered:
         try:
-            import base64 as b64mod
-            recovered = b64mod.b64decode(file_b64)
             # Restore to disk for future use
             file_path.write_bytes(recovered)
             return FileResponse(
@@ -1326,16 +1337,7 @@ async def get_preview_url(doc_id: str):
 
 def _resolve_file_path(doc_id: str, file_name: str = "") -> Optional[Path]:
     """Resolve the file path for a document on disk."""
-    path = UPLOAD_DIR / doc_id
-    if path.exists():
-        return path
-    if file_name:
-        ext = Path(file_name).suffix
-        if ext:
-            path_with_ext = UPLOAD_DIR / f"{doc_id}{ext}"
-            if path_with_ext.exists():
-                return path_with_ext
-    return None
+    return upload_path(doc_id, file_name)
 
 
 @router.get("/{doc_id}/pages")
@@ -1344,7 +1346,9 @@ async def get_document_pages(doc_id: str):
     from pypdf import PdfReader
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    # Only what the response needs: a bare {"_id": 0} pulled the whole record,
+    # base64 file copy included (2026-11-01).
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_name": 1, "sharepoint_web_url": 1})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1357,24 +1361,29 @@ async def get_document_pages(doc_id: str):
             "doc_id": doc_id,
         }
 
-    try:
+    def _read_pages():
         reader = PdfReader(str(file_path))
+        out = []
+        for i, page in enumerate(reader.pages):
+            try:
+                text = page.extract_text() or ""
+            except Exception:
+                text = ""
+            out.append({
+                "page_number": i + 1,
+                "text_preview": text[:200].strip(),
+            })
+        return out
+
+    # Parsing and text extraction are CPU-bound: a worker thread, so a long
+    # PDF does not stall every other request (2026-11-01).
+    try:
+        pages = await asyncio.to_thread(_read_pages)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Cannot read PDF: {str(e)[:200]}")
 
-    pages = []
-    for i, page in enumerate(reader.pages):
-        try:
-            text = page.extract_text() or ""
-        except Exception:
-            text = ""
-        pages.append({
-            "page_number": i + 1,
-            "text_preview": text[:200].strip(),
-        })
-
     return {
-        "page_count": len(reader.pages),
+        "page_count": len(pages),
         "pages": pages,
         "doc_id": doc_id,
         "file_name": doc.get("file_name", ""),
@@ -1485,7 +1494,7 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
     from pypdf import PdfReader, PdfWriter
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1582,8 +1591,14 @@ async def split_document(doc_id: str, request: SplitRequest, background_tasks: B
             "email_subject": doc.get("email_subject", ""),
             "source": doc.get("source", "split"),
             "ingestion_source": "split",
+            # has_bytes_filter() keys on file_size (2026-11-01)
+            "file_size": new_file_path.stat().st_size,
         }
         await db.hub_documents.insert_one(new_doc)
+        try:
+            await save_backup(db, new_doc_id, new_file_name, new_file_path.read_bytes())
+        except Exception as be:  # noqa: BLE001
+            logger.warning("[Split] backup for %s not stored: %s", new_doc_id[:8], be)
 
         # Trigger classification pipeline in background
         background_tasks.add_task(_trigger_classification, new_doc_id)
@@ -1710,7 +1725,7 @@ async def _run_batch_split(db, parent_doc_id, parent_filename, file_content, sen
 async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
     """Re-process an existing batch parent: delete old children, re-split, re-run full pipeline."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1718,13 +1733,7 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=400, detail="Document is not a batch parent")
 
     # Need the PDF content
-    file_content = None
-    file_path = _resolve_file_path(doc_id, doc.get("file_name", ""))
-    if file_path:
-        file_content = file_path.read_bytes()
-    elif doc.get("file_content_b64"):
-        import base64
-        file_content = base64.b64decode(doc["file_content_b64"])
+    file_content = await load_bytes(db, doc)
 
     if not file_content:
         raise HTTPException(status_code=400, detail="No PDF content found for this batch parent")
@@ -1734,6 +1743,7 @@ async def reprocess_batch(doc_id: str, background_tasks: BackgroundTasks):
     if old_children_ids:
         await db.hub_documents.delete_many({"id": {"$in": old_children_ids}})
         await db.workflow_events.delete_many({"document_id": {"$in": old_children_ids}})
+        await delete_backup(db, old_children_ids)
         logger.info("[ReprocessBatch] Deleted %d old children for %s", len(old_children_ids), doc_id[:8])
 
     # Reset parent metadata
@@ -1825,7 +1835,7 @@ async def delete_pages(doc_id: str, payload: dict = Body(...)):
     from pypdf import PdfReader, PdfWriter
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1879,11 +1889,19 @@ async def delete_pages(doc_id: str, payload: dict = Body(...)):
     # Overwrite the file
     with open(file_path, "wb") as f:
         writer.write(f)
+    # The MongoDB backup must follow, or a lost disk copy would come back
+    # with the deleted pages (2026-11-01).
+    new_bytes = file_path.read_bytes()
+    try:
+        await save_backup(db, doc_id, doc.get("file_name", ""), new_bytes)
+    except Exception as be:  # noqa: BLE001
+        logger.warning("[DeletePages] backup for %s not stored: %s", doc_id[:8], be)
 
     now = datetime.now(timezone.utc).isoformat()
     await db.hub_documents.update_one(
         {"id": doc_id},
         {"$set": {
+            "file_size": len(new_bytes),
             "pages_deleted": sorted(pages_to_delete),
             "page_count_original": total_pages,
             "page_count_current": len(remaining_pages),

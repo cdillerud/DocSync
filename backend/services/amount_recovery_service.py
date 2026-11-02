@@ -27,10 +27,10 @@ _TOTAL_DUE = re.compile(r"(?:TOTAL\s+(?:AMOUNT\s+)?DUE|AMOUNT\s+DUE|BALANCE\s+DU
 
 def _pdf_text(doc: Dict[str, Any]) -> str:
     import pymupdf
-    from paths import UPLOAD_DIR
-    p = UPLOAD_DIR / doc["id"]
+    from services.file_bytes import upload_path
+    p = upload_path(doc.get("id") or "", doc.get("file_name") or "")
     try:
-        if p.exists():
+        if p:
             pdf = pymupdf.open(str(p))
         elif doc.get("file_content_b64"):
             pdf = pymupdf.open(stream=base64.b64decode(doc["file_content_b64"]), filetype="pdf")
@@ -57,7 +57,8 @@ async def reclassify_order_confirmations(db, apply: bool = True, days: int = 30)
     n = 0
     async for d in db.hub_documents.find({"created_utc": {"$gte": since}, "mailbox_category": "AP", "document_type": "AP_Invoice",
                                           "invoice_number_clean": {"$in": [None, ""]}, "bc_link": {"$exists": False},
-                                          "order_confirmation_checked": {"$exists": False}}):
+                                          "order_confirmation_checked": {"$exists": False}},
+                                         {"file_content_b64": 0}):
         upd: Dict[str, Any] = {"order_confirmation_checked": True}
         if not re.search(r"invoice", str(d.get("file_name") or ""), re.I) and re.search(r"ORDER\s+(CONFIRMATION|ACKNOWLEDG)", _pdf_text(d).upper()):
             n += 1
@@ -75,7 +76,8 @@ async def recover(db, apply: bool = True, limit: int = 300) -> Dict[str, Any]:
     from datetime import timedelta
     since = (datetime.now(timezone.utc) - timedelta(days=60)).isoformat()
     async for d in db.hub_documents.find({"amount_float": None, "document_type": "AP_Invoice", "mailbox_category": "AP", "created_utc": {"$gte": since},
-                                          "status": {"$ne": "batch_parent"}, "amount_recovery_tried": {"$exists": False}}).limit(limit):
+                                          "status": {"$ne": "batch_parent"}, "amount_recovery_tried": {"$exists": False}},
+                                         {"file_content_b64": 0}).limit(limit):
         out["checked"] += 1
         amt = total_due(_pdf_text(d))
         upd: Dict[str, Any] = {"amount_recovery_tried": now}

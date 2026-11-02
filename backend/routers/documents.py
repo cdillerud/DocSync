@@ -605,16 +605,27 @@ async def search_documents(
     # Fallback to regex if $text failed or returned nothing
     if not docs:
         regex_cond = {"$regex": re.escape(search_term), "$options": "i"}
-        or_clauses = [{f: regex_cond} for f in SEARCH_FIELDS]
+        # Substring match on each field's own index (keys only, ~0.15 s),
+        # then fetch just the matches. A $or regex over the documents read
+        # all 13 GB (2-4 s), and capping it at 1.5 s returned "no results"
+        # for rare partial numbers ("30018", "16945") that exist (2026-11-02).
+        ids = set()
+        for f in SEARCH_FIELDS:
+            try:
+                async for x in db.hub_documents.find({f: regex_cond}, {"_id": 1}).hint([(f, 1)]).limit(500):
+                    ids.add(x["_id"])
+            except Exception:
+                # No index on this field (yet): the unhinted query, bounded.
+                try:
+                    async for x in db.hub_documents.find({f: regex_cond}, {"_id": 1}).limit(500).max_time_ms(5000):
+                        ids.add(x["_id"])
+                except Exception:
+                    pass
         if amount_match is not None:
-            or_clauses.append({"amount_float": amount_match})
-        regex_query = {"$or": or_clauses, "is_duplicate": {"$ne": True}}
-        # Capped: the substring scan reads every document when nothing matches.
-        try:
-            docs = await db.hub_documents.find(regex_query, projection).sort("created_utc", -1).limit(limit) \
-                .max_time_ms(1500).to_list(limit)
-        except Exception:
-            docs = []
+            async for x in db.hub_documents.find({"amount_float": amount_match}, {"_id": 1}).limit(500):
+                ids.add(x["_id"])
+        docs = await db.hub_documents.find({"_id": {"$in": list(ids)}, "is_duplicate": {"$ne": True}}, projection) \
+            .sort("created_utc", -1).limit(limit).to_list(limit) if ids else []
 
     # Compute match_fields for each result
     pattern = re.compile(re.escape(search_term), re.IGNORECASE)

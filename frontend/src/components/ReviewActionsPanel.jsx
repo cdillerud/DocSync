@@ -53,6 +53,11 @@ function advice(doc) {
   }
   if (st === 'needs_staff') {
     const a = STAFF_REASON_ADVICE[doc.staff_reason] || ['A person needs to decide.', 'Use one of the actions below.'];
+    if (doc.staff_reason === 'routing_uncertain' && doc.suggested_folder) {
+      // What the Hub would pick and how that route has done against staff.
+      const acc = doc.routing_path_accuracy?.pct != null ? ` (that route matched staff ${doc.routing_path_accuracy.pct}% of ${doc.routing_path_accuracy.n})` : '';
+      return [a[0], `Hub's pick: ${doc.suggested_folder}${acc}. ${a[1]}`, 'amber'];
+    }
     return [...a, 'amber'];
   }
   if (st === 'awaiting_approval') return [`Waiting for ${doc.ap_approval?.approver || doc.suggested_approver || 'an approver'} to approve.`, 'Approve or reject it below.', 'sky'];
@@ -197,7 +202,7 @@ export default function ReviewActionsPanel({ doc, onChanged, onEditType, onRepla
               ? <Action icon={PlayCircle} label="Release hold" help="Let it continue where it left off" onClick={() => toggle('release')} active={open === 'release'} testid="act-release" />
               : <Action icon={PauseCircle} label="Put on hold" help="Park it with a reason and a review date" onClick={() => toggle('hold')} active={open === 'hold'} testid="act-hold" />)}
             {isAp && ['routing_uncertain', 'routing_error'].includes(doc.staff_reason) && (
-              <Action icon={FolderInput} label="Pick the folder" help="Opens the Decision Queue for this choice" onClick={() => navigate('/decision-queue')} testid="act-folder" />
+              <Action icon={FolderInput} label="Pick the folder" help="Opens the Decision Queue for this choice" onClick={() => navigate(`/decision-queue?doc=${encodeURIComponent(doc.id)}`)} testid="act-folder" />
             )}
             {isSales && (
               <Action icon={UserRound} label={doc.sales_rep?.name ? `Reassign (now ${doc.sales_rep.name})` : 'Assign to a rep'} help="Give it to the inside sales rep who owns it" onClick={() => toggle('rep')} active={open === 'rep'} testid="act-assign-rep" />

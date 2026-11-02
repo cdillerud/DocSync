@@ -585,6 +585,7 @@ export function APReviewPanel({ document, onUpdate }) {
                       size="icon" 
                       className="h-6 w-6 text-muted-foreground hover:text-destructive"
                       onClick={() => removeLineItem(idx)}
+                      aria-label={`Remove line ${idx + 1}`}
                     >
                       <Trash2 className="w-3 h-3" />
                     </Button>

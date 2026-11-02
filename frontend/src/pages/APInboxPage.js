@@ -191,7 +191,7 @@ export default function APInboxPage() {
                   className="w-64 rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   aria-label="Search"
                 />
-                <Button type="submit" size="sm" variant="outline"><Search className="w-3.5 h-3.5" /></Button>
+                <Button type="submit" size="sm" variant="outline" aria-label="Search"><Search className="w-3.5 h-3.5" /></Button>
               </form>
             </div>
           </div>

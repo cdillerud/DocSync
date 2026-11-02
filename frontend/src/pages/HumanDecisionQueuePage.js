@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -111,6 +112,9 @@ export default function HumanDecisionQueuePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
+  // ?doc= from a document's "Pick the folder": show that document's decision first-hand.
+  const [params, setParams] = useSearchParams();
+  const docParam = params.get('doc');
   const [resolvedKeys, setResolvedKeys] = useState(new Set());
   const [submittingKey, setSubmittingKey] = useState(null);
   const [apReason, setApReason] = useState('all');
@@ -139,10 +143,11 @@ export default function HumanDecisionQueuePage() {
       ? groups
       : groups.filter(group => group[0].issue_type === activeTab);
     return filtered
+      .filter(group => !docParam || group[0].doc_id === docParam)
       .filter(group => !resolvedKeys.has(`${group[0].doc_id}|${group[0].issue_type}`))
       .filter(group => apReason === 'all'
         || (group[0].issue_type === 'ap_needs_staff' && group[0].context?.staff_reason === apReason));
-  }, [groups, activeTab, resolvedKeys, apReason]);
+  }, [groups, activeTab, resolvedKeys, apReason, docParam]);
 
   const apReasonCounts = useMemo(() => {
     const counts = {};
@@ -376,6 +381,13 @@ export default function HumanDecisionQueuePage() {
           </button>
         ))}
       </div>
+
+      {docParam && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="dq-one-doc">
+          Showing the decision for one document.
+          <Button size="sm" variant="ghost" onClick={() => setParams({}, { replace: true })}>Show all</Button>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center py-16 text-muted-foreground">

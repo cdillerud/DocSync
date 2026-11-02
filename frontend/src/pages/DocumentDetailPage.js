@@ -895,7 +895,7 @@ export default function DocumentDetailPage() {
                   <p className="text-xs text-muted-foreground mb-1">Share Link</p>
                   <div className="flex items-center gap-2">
                     <code className="text-xs bg-muted px-2 py-1 rounded flex-1 truncate">{doc.sharepoint_share_link_url}</code>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => copyToClipboard(doc.sharepoint_share_link_url)} data-testid="copy-share-link-btn">
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => copyToClipboard(doc.sharepoint_share_link_url)} data-testid="copy-share-link-btn" aria-label="Copy share link">
                       <Copy className="w-3 h-3" />
                     </Button>
                   </div>
@@ -1582,7 +1582,7 @@ function InfoRow({ label, value, mono, copyable, onCopy }) {
       <div className="flex items-center gap-1.5 min-w-0">
         <span className={`text-xs text-right truncate ${mono ? 'font-mono' : ''}`}>{value}</span>
         {copyable && onCopy && (
-          <button onClick={() => onCopy(copyable)} className="text-muted-foreground hover:text-foreground shrink-0">
+          <button onClick={() => onCopy(copyable)} className="text-muted-foreground hover:text-foreground shrink-0" aria-label={`Copy ${label}`}>
             <Copy className="w-3 h-3" />
           </button>
         )}

@@ -1,5 +1,6 @@
 import "@/App.css";
 import "@/index.css";
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useParams } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,27 +8,37 @@ import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "@/components/Layout";
 import LoginPage from "@/pages/LoginPage";
 import DocumentDetailPage from "@/pages/DocumentDetailPage";
-import OperationsQueuePage from "@/pages/OperationsQueuePage";
+const OperationsQueuePage = lazy(() => import("@/pages/OperationsQueuePage"));
 
 // Hub pages (consolidated)
-import SalesInventoryHubPage from "@/pages/SalesInventoryHubPage";
-import IntakeLearningPage from "@/pages/IntakeLearningPage";
-import IntelligenceHubPage from "@/pages/IntelligenceHubPage";
+const SalesInventoryHubPage = lazy(() => import("@/pages/SalesInventoryHubPage"));
+const IntakeLearningPage = lazy(() => import("@/pages/IntakeLearningPage"));
+const IntelligenceHubPage = lazy(() => import("@/pages/IntelligenceHubPage"));
 import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
-import APWorkflowPage from "@/pages/APWorkflowPage";
-import APTestingPage from "@/pages/APTestingPage";
+const APWorkflowPage = lazy(() => import("@/pages/APWorkflowPage"));
+const APTestingPage = lazy(() => import("@/pages/APTestingPage"));
 import SalesInboxPage from "@/pages/SalesInboxPage";
 import TodayPage from "@/pages/TodayPage";
 import APInboxPage from "@/pages/APInboxPage";
-import IntegrationsHubPage from "@/pages/IntegrationsHubPage";
-import SettingsHubPage from "@/pages/SettingsHubPage";
-import BakeOffPage from "@/pages/BakeOffPage";
-import UploadPage from "@/pages/UploadPage";
-import PostingPatternsDashboard from "@/pages/PostingPatternsDashboard";
-import InvoiceTracePage from "@/pages/InvoiceTracePage";
-import ReviewQueuePage from "@/pages/ReviewQueuePage";
-import Square9ReadinessPage from "@/pages/Square9ReadinessPage";
+const IntegrationsHubPage = lazy(() => import("@/pages/IntegrationsHubPage"));
+const SettingsHubPage = lazy(() => import("@/pages/SettingsHubPage"));
+const BakeOffPage = lazy(() => import("@/pages/BakeOffPage"));
+const UploadPage = lazy(() => import("@/pages/UploadPage"));
+const PostingPatternsDashboard = lazy(() => import("@/pages/PostingPatternsDashboard"));
+const InvoiceTracePage = lazy(() => import("@/pages/InvoiceTracePage"));
+const ReviewQueuePage = lazy(() => import("@/pages/ReviewQueuePage"));
+const Square9ReadinessPage = lazy(() => import("@/pages/Square9ReadinessPage"));
 import SearchPage from "@/pages/SearchPage";
+
+// Settings, legacy and rarely used pages load on first visit, not with every
+// sign-in: the bundle carried about 41k lines of pages up front.
+function page(Component) {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading…</div>}>
+      <Component />
+    </Suspense>
+  );
+}
 
 function ProtectedRoute({ children }) {
   const { isAuthenticated } = useAuth();
@@ -52,27 +63,27 @@ function AppRoutes() {
         <Route path="documents/:id" element={<DocumentDetailPage />} />
         <Route path="search" element={<SearchPage />} />
         <Route path="review/:id" element={<RedirectToDoc />} />
-        <Route path="sales-inventory" element={<SalesInventoryHubPage />} />
-        <Route path="intake/learning" element={<IntakeLearningPage />} />
-        <Route path="config" element={<SettingsHubPage />} />
+        <Route path="sales-inventory" element={page(SalesInventoryHubPage)} />
+        <Route path="intake/learning" element={page(IntakeLearningPage)} />
+        <Route path="config" element={page(SettingsHubPage)} />
         {/* Keep old pages accessible but not in nav */}
-        <Route path="intelligence" element={<IntelligenceHubPage />} />
-        <Route path="operations-queue" element={<OperationsQueuePage />} />
-        <Route path="integrations" element={<IntegrationsHubPage />} />
-        <Route path="posting-intelligence" element={<PostingPatternsDashboard />} />
-        <Route path="invoice-trace" element={<InvoiceTracePage />} />
+        <Route path="intelligence" element={page(IntelligenceHubPage)} />
+        <Route path="operations-queue" element={page(OperationsQueuePage)} />
+        <Route path="integrations" element={page(IntegrationsHubPage)} />
+        <Route path="posting-intelligence" element={page(PostingPatternsDashboard)} />
+        <Route path="invoice-trace" element={page(InvoiceTracePage)} />
         <Route path="monitor" element={<Navigate to="/" replace />} />
-        <Route path="square9-readiness" element={<Square9ReadinessPage />} />
+        <Route path="square9-readiness" element={page(Square9ReadinessPage)} />
         <Route path="decision-queue" element={<HumanDecisionQueuePage />} />
-        <Route path="ap-workflow" element={<APWorkflowPage />} />
-        <Route path="ap-testing" element={<APTestingPage />} />
+        <Route path="ap-workflow" element={page(APWorkflowPage)} />
+        <Route path="ap-testing" element={page(APTestingPage)} />
         <Route path="sales" element={<SalesInboxPage />} />
         <Route path="ap" element={<APInboxPage />} />
-        <Route path="review-queue" element={<ReviewQueuePage />} />
-        <Route path="intake-benchmark" element={<BakeOffPage />} />
+        <Route path="review-queue" element={page(ReviewQueuePage)} />
+        <Route path="intake-benchmark" element={page(BakeOffPage)} />
         {/* Redirects */}
         <Route path="queue" element={<Navigate to="/" replace />} />
-        <Route path="upload" element={<UploadPage />} />
+        <Route path="upload" element={page(UploadPage)} />
         <Route path="dashboard" element={<Navigate to="/" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

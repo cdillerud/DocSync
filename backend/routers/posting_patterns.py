@@ -1124,7 +1124,7 @@ async def preview_draft_pi(doc_id: str):
     using the vendor's posting template. Does NOT create anything in BC.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found"}
 
@@ -1244,7 +1244,7 @@ async def create_draft_from_template(doc_id: str, force: bool = Query(False)):
     This uses the learned posting patterns to build lines that match human behavior.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found", "success": False}
 
@@ -1461,7 +1461,7 @@ async def sync_item_to_sandbox(
 async def check_document_draft_eligibility(doc_id: str):
     """Check if a specific document qualifies for auto-draft PI creation."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found", "eligible": False}
 
@@ -3664,7 +3664,7 @@ async def find_similar_documents(doc_id: str):
     from deps import get_db
     from services.deep_learning_engine import find_similar_documents as _find_similar
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found"}
     results = await _find_similar(db, doc)
@@ -3746,7 +3746,7 @@ async def get_field_predictions(doc_id: str):
     from deps import get_db
     from services.advanced_learning_engine import get_field_predictions as _predict
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found"}
     predictions = await _predict(db, doc)

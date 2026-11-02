@@ -493,7 +493,7 @@ async def intake_document_from_bytes(
     # This runs for EVERY document, not just shipping docs.
     try:
         from services.po_resolution_service import resolve_po_from_document, attempt_bc_link
-        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if current_doc:
             po_result = await resolve_po_from_document(current_doc)
             bc_link_result = await attempt_bc_link(doc_id, po_result)
@@ -942,7 +942,7 @@ async def intake_document_from_bytes(
         auto_clear_result = {"decision": "skipped", "reason": "AP invoices use strict auto-post service", "cleared": False}
     else:
         try:
-            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            doc_for_eval = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             if doc_for_eval:
                 auto_clear_decision, auto_clear_reason, auto_clear_details = evaluate_auto_clear(
                     doc_for_eval,

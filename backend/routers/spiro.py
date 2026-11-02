@@ -326,7 +326,7 @@ async def get_document_spiro_context(doc_id: str):
     db = get_db()
     
     # Get document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     

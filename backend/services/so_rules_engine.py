@@ -54,7 +54,7 @@ async def evaluate_sales_order(doc_id: str) -> Dict[str, Any]:
     blocking issues, controls present/missing, and recommended action.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": f"Document {doc_id} not found"}
 

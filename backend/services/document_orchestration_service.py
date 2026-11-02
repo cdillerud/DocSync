@@ -147,7 +147,7 @@ async def run_upload_and_link_workflow(
         if bc_linked:
             try:
                 from services.classification_feedback_service import record_confirmation, _build_doc_context
-                doc_fresh = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                doc_fresh = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                 if doc_fresh:
                     await record_confirmation(
                         doc_id=doc_id,

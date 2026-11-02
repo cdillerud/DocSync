@@ -155,7 +155,7 @@ async def get_folder_options():
 async def get_routing_suggestion(doc_id: str):
     """Return the current folder and the AI/learned routing suggestion for one document."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -186,7 +186,7 @@ async def get_routing_suggestion(doc_id: str):
 async def assign_reviewed_folder(doc_id: str, assignment: HumanRoutingAssignment, user=Depends(get_current_user)):
     """Save a human folder decision and immediately teach the live routing learner."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 

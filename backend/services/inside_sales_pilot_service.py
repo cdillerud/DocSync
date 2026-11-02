@@ -545,7 +545,7 @@ async def _extract_sales_fields(
     vendor matching, customer resolution, and PO resolution.
     We leverage all of it.
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return None
 

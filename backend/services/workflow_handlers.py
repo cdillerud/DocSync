@@ -98,7 +98,7 @@ async def set_vendor_for_document(doc_id: str, request: SetVendorRequest):
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -233,7 +233,7 @@ async def update_document_fields(doc_id: str, request: UpdateFieldsRequest):
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -319,7 +319,7 @@ async def override_bc_validation(doc_id: str, request: BCValidationOverrideReque
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, _DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -378,7 +378,7 @@ async def start_approval(doc_id: str, request: ApprovalActionRequest):
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, _DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -430,7 +430,7 @@ async def approve_document(doc_id: str, request: ApprovalActionRequest):
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -500,7 +500,7 @@ async def reject_document(doc_id: str, request: ApprovalActionRequest):
     db = get_db()
     WorkflowEngine, WorkflowStatus, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -571,7 +571,7 @@ async def mark_ready_for_review(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -624,7 +624,7 @@ async def mark_reviewed(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -677,7 +677,7 @@ async def start_approval_generic(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -736,7 +736,7 @@ async def approve_generic(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -795,7 +795,7 @@ async def reject_generic(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -854,7 +854,7 @@ async def complete_triage(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -913,7 +913,7 @@ async def link_credit_to_invoice(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -979,7 +979,7 @@ async def tag_quality_doc(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
@@ -1047,7 +1047,7 @@ async def export_document(
     db = get_db()
     WorkflowEngine, _WS, WorkflowEvent, DocType = _get_workflow_deps()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 

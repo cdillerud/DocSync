@@ -827,7 +827,7 @@ async def sales_order_preflight(doc_id: str):
     mapped_values, warnings, errors, and overall readiness.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1192,7 +1192,7 @@ async def create_sales_order_from_document(doc_id: str, body: CreateSOFromDocume
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1648,7 +1648,7 @@ async def _auto_approve_dropship_so(db, doc_id: str, bc_record_no: str, so_type:
 
     from workflows.core.engine import WorkflowEngine, WorkflowEvent
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         logger.warning("[DS-AutoApprove] Document %s not found", doc_id)
         return False
@@ -1709,7 +1709,7 @@ async def ds_po_auto_create(doc_id: str):
     Idempotent: if ds_po_created is already True, returns existing PO info.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1952,7 +1952,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
     Returns a result dict with success/failure info. Never raises — all errors are caught.
     """
     try:
-        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if not doc:
             return {"success": False, "reason": "document_not_found"}
 
@@ -2191,7 +2191,7 @@ async def auto_create_pi_from_document(doc_id: str, db) -> dict:
 async def purchase_invoice_preflight(doc_id: str):
     """Preflight validation: check if a document is ready for BC Purchase Invoice creation."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2311,7 +2311,7 @@ async def retry_purchase_invoice_lines(doc_id: str):
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2388,7 +2388,7 @@ async def create_purchase_invoice_from_document(
         raise HTTPException(status_code=503, detail="BC credentials not configured")
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -3801,7 +3801,7 @@ async def create_cost_only_so_from_document(doc_id: str):
       - A customer must be resolvable
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 

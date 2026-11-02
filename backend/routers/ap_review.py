@@ -328,7 +328,7 @@ async def save_ap_review(doc_id: str, data: APReviewData):
         logger.debug("Feedback recording skipped: %s", e)
     
     # Fetch updated document
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     
     logger.info(f"AP Review Save SUCCESS: doc_id={doc_id}")
     
@@ -385,7 +385,7 @@ async def mark_ready_for_post(doc_id: str):
     from services.ap_auto_post_service import attempt_ap_auto_post
     result = await attempt_ap_auto_post(doc_id, db, source="mark_ready")
     
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     
     return {
         "success": result.get("success", False),
@@ -424,7 +424,7 @@ async def override_po_check(doc_id: str):
     from services.ap_auto_post_service import attempt_ap_auto_post
     result = await attempt_ap_auto_post(doc_id, db, source="manual_override")
     
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     
     return {
         "success": True,
@@ -843,7 +843,7 @@ async def post_document_to_bc(
                 attempt=attempt,
             )
 
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             
             return PostToBCResponse(
                 success=True,
@@ -975,7 +975,7 @@ async def get_bc_posting_status(
     """Get the BC posting status for a document. JWT-protected (hygiene patch 2026-04-22)."""
     db = get_db()
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1058,7 +1058,7 @@ async def extract_invoice_data_endpoint(doc_id: str):
             logger.info(f"AI Invoice Extraction SUCCESS: doc_id={doc_id}, confidence={result.get('confidence')}, lines={result.get('line_items_count')}")
             
             # Fetch updated document
-            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             
             return {
                 "success": True,
@@ -1091,7 +1091,7 @@ async def get_extraction_status(doc_id: str):
     """Get the AI extraction status for a document."""
     db = get_db()
     
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1222,7 +1222,7 @@ async def pi_preflight(doc_id: str):
     )
     
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     

@@ -257,7 +257,7 @@ async def similar_customers_preview(
     db = get_db()
     line_items: list = []
     if doc_id:
-        d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if d:
             ef = d.get("extracted_fields") or {}
             nf = d.get("normalized_fields") or {}

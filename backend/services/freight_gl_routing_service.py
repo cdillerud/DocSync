@@ -572,7 +572,7 @@ class FreightGLRoutingService:
 
     async def classify_and_save(self, doc_id: str) -> Dict:
         """Classify a document, save the result, and update the document."""
-        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if not doc:
             return {"error": "Document not found", "document_id": doc_id}
 

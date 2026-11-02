@@ -770,7 +770,7 @@ async def predict_readiness(db, doc: Dict) -> Dict:
 
 async def predict_and_store(db, doc_id: str) -> Dict:
     """Predict readiness and store the prediction."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "doc_not_found"}
 
@@ -796,7 +796,7 @@ async def run_deep_learning(db, doc_id: str, trigger: str = "ingestion"):
     Run all deep learning engines on a document.
     Called alongside the per-document learning service.
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"learned": False}
 

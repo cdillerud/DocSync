@@ -444,7 +444,7 @@ async def forward_documents(doc_ids: Iterable[str], settings: Optional[CatalogFo
     send_ready = bool(settings.url and settings.key)
     groups: Dict[str, List[Dict[str, Any]]] = {}
     for doc_id in ids:
-        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if not doc:
             continue
         qualifies, reason = evaluate_document(doc)

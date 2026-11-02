@@ -421,7 +421,7 @@ async def retry_workflow(wf_id: str):
     doc_id = wf.get("document_id")
     if not doc_id:
         raise HTTPException(status_code=400, detail="No document associated with this workflow")
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Associated document not found")
     if doc.get("sharepoint_share_link_url") and (doc.get("bc_record_id") or doc.get("bc_document_no")):

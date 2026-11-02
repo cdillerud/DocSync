@@ -27,7 +27,7 @@ async def sync_draft_from_bc(doc_id: str, db) -> Dict:
 
     Returns: {success, changes_detected, diff, bc_current_lines, original_lines}
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"success": False, "error": "Document not found"}
 

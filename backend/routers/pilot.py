@@ -1126,7 +1126,7 @@ async def run_simulation_for_document(doc_id: str):
     This simulates all applicable BC operations based on doc_type
     and stores results in workflow history and simulation_results collection.
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1190,7 +1190,7 @@ async def run_simulation_for_document(doc_id: str):
 async def simulate_ap_invoice_export(doc_id: str):
     db = get_db()
     """Simulate AP invoice export to BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1220,7 +1220,7 @@ async def simulate_ap_invoice_export(doc_id: str):
 async def simulate_sales_invoice_export_endpoint(doc_id: str):
     db = get_db()
     """Simulate sales invoice export to BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1250,7 +1250,7 @@ async def simulate_sales_invoice_export_endpoint(doc_id: str):
 async def simulate_po_linkage_endpoint(doc_id: str):
     db = get_db()
     """Simulate PO linkage in BC."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1277,7 +1277,7 @@ async def simulate_po_linkage_endpoint(doc_id: str):
 async def simulate_attachment_endpoint(doc_id: str):
     db = get_db()
     """Simulate PDF attachment to BC record."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1712,7 +1712,7 @@ async def reingest_single_document(doc_id: str):
     4. Run simulation
     """
     # Get document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise ValueError(f"Document {doc_id} not found")
     

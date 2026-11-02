@@ -1036,7 +1036,7 @@ async def retry_captured_docs(
         # Attempt reprocess
         try:
             from services.document_reprocess_service import reprocess_document_inner as _reprocess_document_inner
-            full_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            full_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             if full_doc:
                 await _reprocess_document_inner(doc_id, full_doc, reclassify=True)
         except Exception as e:

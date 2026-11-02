@@ -644,7 +644,7 @@ async def evaluate_automation_intelligence(doc_id: str) -> dict:
     from deps import get_db
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found", "doc_id": doc_id}
 

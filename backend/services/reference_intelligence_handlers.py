@@ -109,7 +109,7 @@ async def resolve_document_reference(doc_id: str):
     """
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -163,7 +163,7 @@ async def resolve_document_intelligence(doc_id: str):
     """
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -213,7 +213,7 @@ async def get_document_reference_intelligence(doc_id: str):
     """
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -232,7 +232,7 @@ async def trigger_auto_resolve(doc_id: str):
     """Manually enqueue a document for auto-resolution (re-run)."""
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -328,7 +328,7 @@ async def rerun_matching_with_diagnostics(doc_id: str):
     """
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 

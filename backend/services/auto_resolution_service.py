@@ -227,7 +227,7 @@ class AutoResolutionService:
 
     async def _process_document(self, doc_id: str, retry_count: int, worker_id: int):
         """Process a single document through auto-resolution."""
-        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if not doc:
             logger.warning("[AutoResolve:W%d] Doc %s not found", worker_id, doc_id[:8])
             return
@@ -321,7 +321,7 @@ class AutoResolutionService:
             # Update vendor intelligence profile (async, non-blocking)
             if self._vendor_intel:
                 try:
-                    updated_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    updated_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                     if updated_doc:
                         await self._vendor_intel.update_from_document(updated_doc)
                 except Exception as ve:
@@ -360,7 +360,7 @@ class AutoResolutionService:
             # ---------------------------------------------------------
             if self._label_correction_service and resolution.best_match:
                 try:
-                    doc_for_correction = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    doc_for_correction = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                     if doc_for_correction:
                         corrections = await self._label_correction_service.detect_and_record(
                             document_id=doc_id,
@@ -447,7 +447,7 @@ class AutoResolutionService:
             # the corresponding Purchase Order in BC.
             # ---------------------------------------------------------
             try:
-                refreshed_for_ds = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                refreshed_for_ds = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                 if refreshed_for_ds:
                     ds_doc_type = refreshed_for_ds.get("suggested_job_type") or refreshed_for_ds.get("document_type") or ""
                     ds_po_pending = refreshed_for_ds.get("ds_po_pending", False)
@@ -499,7 +499,7 @@ class AutoResolutionService:
             # Evaluate automation rules (async, non-blocking)
             if self._rules_engine:
                 try:
-                    rules_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    rules_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                     if rules_doc:
                         rule_result = await self._rules_engine.evaluate(rules_doc)
                         if rule_result and rule_result.get("matched"):
@@ -516,7 +516,7 @@ class AutoResolutionService:
             # ---------------------------------------------------------
             if self._stable_vendor_service:
                 try:
-                    sv_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                    sv_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                     if sv_doc:
                         sv_result = await self._stable_vendor_service.evaluate_document(sv_doc)
                         routing = sv_result.get("routing", "manual_review")
@@ -561,7 +561,7 @@ class AutoResolutionService:
                 from services.po_resolution_service import (
                     resolve_po_from_document, attempt_bc_link, requires_po_resolution, PO_REQUIRED_DOC_TYPES
                 )
-                refreshed_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                refreshed_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                 if refreshed_doc and requires_po_resolution(refreshed_doc.get("document_type", "")):
                     po_result = await resolve_po_from_document(refreshed_doc)
                     bc_link_result = await attempt_bc_link(doc_id, po_result)
@@ -595,7 +595,7 @@ class AutoResolutionService:
                 from routers.gpi_integration import auto_create_pi_from_document
                 from services.automation_helpers import create_activity
 
-                ap_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                ap_doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                 if ap_doc:
                     doc_type = ap_doc.get("document_type") or ""
 
@@ -791,7 +791,7 @@ class AutoResolutionService:
         5. Updates derived state
         6. Emits validation events
         """
-        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if not doc:
             return
         

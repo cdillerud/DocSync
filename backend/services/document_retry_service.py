@@ -27,7 +27,7 @@ async def retry_document(doc_id: str):
         determine_square9_stage,
     )
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -69,7 +69,7 @@ async def retry_document(doc_id: str):
         "updated_utc": datetime.now(timezone.utc).isoformat(),
     }})
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     return {
         "success": True,
         "document": updated_doc,

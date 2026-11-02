@@ -309,7 +309,7 @@ async def get_document_suggested_folder(doc_id: str):
     db = get_db()
     from services.folder_routing_service import determine_folder_path
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(404, f"Document {doc_id} not found")
 
@@ -361,7 +361,7 @@ async def move_document_to_sharepoint(doc_id: str):
     from services.folder_routing_service import determine_folder_path
     from services.config_service import DEMO_MODE
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(404, f"Document {doc_id} not found")
 

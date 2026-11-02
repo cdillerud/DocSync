@@ -172,7 +172,7 @@ async def run_intake_learning(
     document under `intake_insights`.
     """
     db = db if db is not None else get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "document not found", "doc_id": doc_id}
 

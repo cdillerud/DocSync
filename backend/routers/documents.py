@@ -136,7 +136,7 @@ async def diagnose_document(doc_id: str):
     import os
     from pathlib import Path
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": "Document not found"}
     
@@ -878,7 +878,7 @@ async def get_document_derived_state(doc_id: str):
         raise HTTPException(status_code=503, detail="Derived state service not initialized")
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -897,7 +897,7 @@ async def refresh_document_state(doc_id: str):
         raise HTTPException(status_code=503, detail="Derived state service not initialized")
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -911,7 +911,7 @@ async def update_document(doc_id: str, update: DocumentUpdate):
     db = get_db()
     
     # Fetch current doc to detect classification changes
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     
@@ -1008,7 +1008,7 @@ async def update_document(doc_id: str, update: DocumentUpdate):
         logger.debug("Feedback recording skipped: %s", e)
     
     await db.hub_documents.update_one({"id": doc_id}, {"$set": update_data})
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     return updated_doc
 
 
@@ -1082,7 +1082,7 @@ async def disposition_non_transactional_document(
 @router.delete("/{doc_id}")
 async def delete_document(doc_id: str):
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
     await db.hub_documents.delete_one({"id": doc_id})
@@ -1278,7 +1278,7 @@ async def get_document_file(doc_id: str):
 async def get_preview_url(doc_id: str):
     """Return the best available URL for previewing the document."""
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1432,7 +1432,7 @@ async def auto_split_document(doc_id: str):
     from services.batch_po_splitter import split_and_ingest_batch
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1636,7 +1636,7 @@ async def split_batch_po(doc_id: str, background_tasks: BackgroundTasks):
     on each one. Designed for multi-PO PDFs where each page = 1 PO.
     """
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1943,7 +1943,7 @@ async def get_square9_status(doc_id: str):
     from services.square9_workflow import get_workflow_summary
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1960,7 +1960,7 @@ async def reset_document_retries(doc_id: str, reason: str = "Manual reset"):
     from services.square9_workflow import reset_retry_counter
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -1991,7 +1991,7 @@ async def file_and_clear_document(doc_id: str):
     from services.folder_routing_service import determine_folder_path
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -2090,7 +2090,7 @@ async def bulk_file_and_clear(doc_ids: list = Body(None)):
 
     for doc_id in doc_ids:
         try:
-            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             if not doc:
                 results["failed"].append({"doc_id": doc_id, "error": "Not found"})
                 continue

@@ -91,7 +91,7 @@ async def route_document(doc_id: str) -> Dict[str, Any]:
     from deps import get_db
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 

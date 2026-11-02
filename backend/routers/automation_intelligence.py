@@ -63,7 +63,7 @@ async def get_decision_explanation(doc_id: str):
         compute_automation_confidence,
     )
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -87,7 +87,7 @@ async def get_automation_confidence(doc_id: str):
     from deps import get_db
     from services.automation_intelligence_service import compute_automation_confidence
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -109,7 +109,7 @@ async def review_assist(doc_id: str):
     from deps import get_db
     from services.automation_intelligence_service import generate_review_suggestions
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 

@@ -136,5 +136,5 @@ async def upload_document(
     if derived_state_service:
         await derived_state_service.update_document_derived_state(doc_id)
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     return {"document": updated_doc, "workflow_id": workflow_id}

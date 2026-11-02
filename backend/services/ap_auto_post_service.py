@@ -141,7 +141,7 @@ async def attempt_ap_auto_post(doc_id: str, db, source: str = "auto") -> Dict:
     
     Returns: {success, posted, reason, bc_record_no, status}
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"success": False, "posted": False, "reason": "Document not found", "status": "error"}
 
@@ -697,7 +697,7 @@ async def attempt_auto_draft_pi(doc_id: str, db, source: str = "confidence_gate"
 
     Returns: {success, drafted, reason, bc_record_no, eligibility}
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"success": False, "drafted": False, "reason": "Document not found"}
 

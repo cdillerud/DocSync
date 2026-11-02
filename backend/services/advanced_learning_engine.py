@@ -769,7 +769,7 @@ async def learn_from_validation_failure(db, doc: Dict):
 
 async def run_advanced_learning(db, doc_id: str, trigger: str = "ingestion"):
     """Run all 7 advanced learning engines on a document."""
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"learned": False}
 

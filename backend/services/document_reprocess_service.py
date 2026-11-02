@@ -236,7 +236,7 @@ async def reprocess_document_inner(
                     await db.hub_documents.update_one({"id": doc_id}, {"$set": refresh})
             except Exception as exc:
                 logger.warning("[REPROCESS] flat-field refresh failed for %s: %r", doc_id[:8], exc)
-            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         except Exception as exc:
             logger.error(
                 "[REPROCESS] AI classification crashed for %s: %s",
@@ -627,7 +627,7 @@ async def reprocess_document_inner(
     }
     await db.hub_workflow_runs.insert_one(workflow)
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     return {
         "reprocessed": True,
         "status_changed": old_status != new_status,

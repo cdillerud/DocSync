@@ -206,7 +206,7 @@ async def _run_layout(doc_id: str, ctx: Dict) -> StageResult:
     from deps import get_db
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         # Attempted work (DB lookup) and failed → "error"
         return StageResult(stage="layout", status="error",
@@ -260,7 +260,7 @@ async def _run_po_resolution(doc_id: str, ctx: Dict) -> StageResult:
     from deps import get_db
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return StageResult(stage="po_resolution", status="error", error="document not found")
 
@@ -380,7 +380,7 @@ async def _run_lifecycle_check(doc_id: str, ctx: Dict) -> StageResult:
     from deps import get_db
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         # Attempted DB lookup and failed → "error"
         return StageResult(stage="lifecycle_check", status="error",

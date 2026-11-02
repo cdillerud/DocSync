@@ -428,7 +428,7 @@ async def _prepare_routing_document(doc: Dict[str, Any]):
         db = get_db()
         doc_id = routing_doc.get("id")
         if db is not None and doc_id:
-            fresh = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+            fresh = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
             routing_doc = _merge_routing_document(fresh or {}, routing_doc)
     except Exception as error:
         logger.warning("[PreUpload] Could not refresh document: %s", error)

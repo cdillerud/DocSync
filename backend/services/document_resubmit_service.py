@@ -22,7 +22,7 @@ from paths import UPLOAD_DIR  # unified upload path (matches paths.py / document
 async def resubmit_document(doc_id: str):
     db = get_db()
 
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
@@ -45,5 +45,5 @@ async def resubmit_document(doc_id: str):
         doc.get("bc_record_id"), doc.get("bc_document_no"),
     )
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     return {"document": updated_doc, "workflow_id": workflow_id}

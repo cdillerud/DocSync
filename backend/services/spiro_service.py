@@ -297,7 +297,7 @@ async def match_document_to_spiro(doc_id: str) -> Dict[str, Any]:
         return {"skipped": True, "reason": "Spiro integration not configured"}
 
     db = get_db()
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         return {"error": f"Document {doc_id} not found"}
 

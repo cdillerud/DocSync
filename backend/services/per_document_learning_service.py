@@ -587,7 +587,7 @@ async def learn_from_document(db, doc_id: str, trigger: str = "ingestion"):
     trigger: ingestion, classification, validation, approval, rejection,
              auto_file, bc_post, field_edit, link, reclassify, reprocess
     """
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         logger.warning("[PerDocLearn] Document not found: %s", doc_id)
         return {"learned": False, "reason": "doc_not_found"}

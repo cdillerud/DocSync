@@ -447,7 +447,7 @@ async def intake_document(
         match_method = validation_results.get("match_method", "none")
         match_score = validation_results.get("match_score", 0.0)
 
-        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        current_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         is_draft_eligible, draft_reason = _is_eligible_for_draft(
             job_type=suggested_type, match_method=match_method,
             match_score=match_score, ai_confidence=confidence,
@@ -571,7 +571,7 @@ async def intake_document(
             normalized_fields,
         )
 
-    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
 
     # Incremental vendor profile update
     try:

@@ -177,7 +177,7 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     db = get_db()
 
     # 1) Fetch document
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 
@@ -267,7 +267,7 @@ async def process_document(doc_id: str) -> Dict[str, Any]:
     # 8b) Compute and store SharePoint folder suggestion
     try:
         from services.folder_routing_service import route_with_feedback
-        updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+        updated_doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
         if updated_doc:
             ef = ai_extracted_fields or {}
             if ef.get("is_international"):
@@ -801,7 +801,7 @@ async def create_auto_draft(doc_id: str) -> Dict[str, Any]:
     db = get_db()
 
     # 1) Validate document exists
-    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
     if not doc:
         raise ValueError(f"Document not found: {doc_id}")
 

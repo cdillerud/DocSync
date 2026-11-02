@@ -975,7 +975,7 @@ class LayoutFingerprintService:
 
         for doc_id in missing_ids:
             try:
-                doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0})
+                doc = await self.db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "file_content_b64": 0})
                 if not doc:
                     skipped += 1
                     continue

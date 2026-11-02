@@ -6,6 +6,7 @@ on a modular APIRouter so server.py's api_router can be cleaned up.
 Simple CRUD routes are implemented directly using deps.get_db().
 """
 
+import asyncio
 import io
 import logging
 import hashlib

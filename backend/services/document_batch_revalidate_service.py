@@ -38,7 +38,7 @@ async def batch_revalidate_documents(
     if skip_completed:
         query["status"] = {"$nin": ["Completed", "Posted", "Archived", "LinkedToBC"]}
 
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(limit)
     docs = await cursor.to_list(limit)
 
     if not docs:

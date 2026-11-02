@@ -51,7 +51,7 @@ async def preview_migration(
     if source_filter:
         query["legacy_system"] = source_filter
 
-    docs = await db.hub_documents.find(query, {"_id": 0}).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(limit).to_list(limit)
     return {"preview": docs, "count": len(docs), "filters": {"doc_type": doc_type_filter, "source": source_filter}}
 
 

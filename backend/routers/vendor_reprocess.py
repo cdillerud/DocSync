@@ -224,7 +224,7 @@ async def run_reprocess(
     if not force_all:
         match_filter["vendor_reprocessed_at"] = {"$exists": False}
 
-    cursor = db.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
+    cursor = db.hub_documents.find(match_filter, {"_id": 0, "file_content_b64": 0}).limit(limit)
     docs = await cursor.to_list(limit)
 
     results = {
@@ -340,7 +340,7 @@ async def dry_run_reprocess(limit: int = Query(500, ge=1, le=5000)):
         ]
     }
 
-    cursor = db.hub_documents.find(match_filter, {"_id": 0}).limit(limit)
+    cursor = db.hub_documents.find(match_filter, {"_id": 0, "file_content_b64": 0}).limit(limit)
     docs = await cursor.to_list(limit)
 
     results = {

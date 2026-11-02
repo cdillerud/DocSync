@@ -288,7 +288,7 @@ async def _run_comparison(run_id: str, limit: int, doc_type_filter: str):
         "started_at": datetime.now(timezone.utc).isoformat(),
     })
 
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(actual_limit)
     docs = await cursor.to_list(actual_limit)
 
     results = []
@@ -765,7 +765,7 @@ async def _run_full_reprocess(run_id: str, limit: int, doc_type_filter: str, ski
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(actual_limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(actual_limit)
     docs = await cursor.to_list(actual_limit)
 
     for i, doc in enumerate(docs):

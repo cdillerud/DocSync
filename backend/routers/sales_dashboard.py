@@ -190,7 +190,7 @@ async def sales_queue(
     sort_spec = sort_map.get(sort, [("created_utc", -1)])
 
     total = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).sort(sort_spec).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     # Assess readiness for each doc
@@ -380,7 +380,7 @@ async def my_queue(
     sort_spec = sort_map.get(sort, [("created_utc", -1)])
 
     total = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).sort(sort_spec).skip(skip).limit(limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).sort(sort_spec).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     items = []
@@ -460,7 +460,7 @@ async def triage_queue(
         }
 
     total = await db.hub_documents.count_documents(combined_query)
-    cursor = db.hub_documents.find(combined_query, {"_id": 0}).sort([("created_utc", -1)]).skip(skip).limit(limit)
+    cursor = db.hub_documents.find(combined_query, {"_id": 0, "file_content_b64": 0}).sort([("created_utc", -1)]).skip(skip).limit(limit)
     docs = await cursor.to_list(limit)
 
     items = []
@@ -1002,7 +1002,7 @@ async def run_auto_assign():
         ],
     }
 
-    docs = await db.hub_documents.find(query, {"_id": 0}).to_list(1000)
+    docs = await db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).to_list(1000)
     results = {"assigned": 0, "triage": 0, "skipped": 0, "errors": 0}
 
     for doc in docs:

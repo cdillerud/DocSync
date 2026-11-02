@@ -1400,7 +1400,7 @@ async def run_batch_simulation(
         query["workflow_status"] = status
     
     # Get documents
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(limit)
     docs = await cursor.to_list(limit)
     
     results = []

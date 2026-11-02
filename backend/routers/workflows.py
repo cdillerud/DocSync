@@ -173,7 +173,7 @@ async def get_vendor_pending_queue(
         fq.setdefault("created_utc", {})["$lte"] = f"{date_to}T23:59:59.999999"
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "vendor_pending"}
 
 
@@ -202,7 +202,7 @@ async def get_bc_validation_pending_queue(
         fq.setdefault("amount_float", {})["$lte"] = max_amount
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "bc_validation_pending"}
 
 
@@ -225,7 +225,7 @@ async def get_bc_validation_failed_queue(
         fq["vendor_canonical"] = vendor_canonical
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "bc_validation_failed"}
 
 
@@ -248,7 +248,7 @@ async def get_data_correction_pending_queue(
         fq["vendor_canonical"] = vendor_canonical
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "data_correction_pending"}
 
 
@@ -277,7 +277,7 @@ async def get_ready_for_approval_queue(
         fq.setdefault("amount_float", {})["$lte"] = max_amount
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "ready_for_approval"}
 
 
@@ -301,7 +301,7 @@ async def get_generic_workflow_queue(
         fq["category"] = category
 
     total = await db.hub_documents.count_documents(fq)
-    docs = await db.hub_documents.find(fq, {"_id": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
+    docs = await db.hub_documents.find(fq, {"_id": 0, "file_content_b64": 0}).sort("created_utc", -1).skip(skip).limit(limit).to_list(limit)
     return {"documents": docs, "total": total, "queue": "generic"}
 
 

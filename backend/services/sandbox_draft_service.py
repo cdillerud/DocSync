@@ -1018,7 +1018,7 @@ async def audit_existing(db, apply: bool = True) -> Dict[str, Any]:
     shapes = await vendor_shapes(db)
     now = datetime.now(timezone.utc).isoformat()
     out = {"checked": 0, "removed": [], "kept_edited": 0}
-    async for d in db.hub_documents.find({"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"_id": 0}):
+    async for d in db.hub_documents.find({"bc_purchase_invoice.environment": ALLOWED_ENVIRONMENT}, {"_id": 0, "file_content_b64": 0}):
         out["checked"] += 1
         rb = d.get("bc_draft_readback") or {}
         if rb.get("edits"):

@@ -2218,7 +2218,7 @@ async def bulk_approve_and_file(
         }
 
     total_matching = await db.hub_documents.count_documents(query)
-    cursor = db.hub_documents.find(query, {"_id": 0}).limit(limit)
+    cursor = db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).limit(limit)
 
     filed = 0
     failed = 0

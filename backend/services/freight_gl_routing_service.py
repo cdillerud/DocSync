@@ -793,7 +793,7 @@ class FreightGLRoutingService:
         if document_ids:
             query["id"] = {"$in": document_ids}
 
-        docs = await self.db.hub_documents.find(query, {"_id": 0}).to_list(1000)
+        docs = await self.db.hub_documents.find(query, {"_id": 0, "file_content_b64": 0}).to_list(1000)
 
         results = {
             "total_processed": 0,

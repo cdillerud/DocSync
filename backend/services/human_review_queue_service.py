@@ -460,7 +460,7 @@ async def _ap_stage_items(db, days: int = 30) -> List[Dict[str, Any]]:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     items = []
     async for d in db.hub_documents.find(
-            {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": "needs_staff",
+            {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["AP", "Operations"]}, "ap_stage": "needs_staff",
              "non_transactional": {"$ne": True}, "excluded_from_processing": {"$ne": True}},
             {"_id": 0, "id": 1, "file_name": 1, "document_type": 1, "mailbox_category": 1, "vendor_canonical": 1,
              "vendor_raw": 1, "email_sender": 1, "staff_reason": 1, "suggested_folder": 1, "routing_reason": 1,

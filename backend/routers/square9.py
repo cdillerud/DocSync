@@ -666,7 +666,8 @@ async def get_ap_stages(days: int = 30):
     from services.ap_stage_service import load_reliability, RELIABLE_PCT, RELIABLE_MIN_N
     db = get_db()
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    base = {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$exists": True}}
+    # Operations documents carry an ap_stage only when mirrored to AP (ap_mirror_sources).
+    base = {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["AP", "Operations"]}, "ap_stage": {"$exists": True}}
     stages, reasons = {}, {}
     async for g in db.hub_documents.aggregate([{"$match": base}, {"$group": {"_id": "$ap_stage", "n": {"$sum": 1}}}]):
         stages[g["_id"]] = g["n"]

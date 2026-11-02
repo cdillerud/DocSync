@@ -292,7 +292,8 @@ async def worklist(stage: str = "needs_staff", q: str = "", days: int = 30, skip
     from datetime import datetime, timedelta, timezone
     db = get_db()
     since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 365)))).isoformat()
-    base = {"created_utc": {"$gte": since}, "mailbox_category": "AP", "ap_stage": {"$exists": True}}
+    # Operations documents carry an ap_stage only when mirrored to AP (ap_mirror_sources).
+    base = {"created_utc": {"$gte": since}, "mailbox_category": {"$in": ["AP", "Operations"]}, "ap_stage": {"$exists": True}}
     counts = {}
     async for g in db.hub_documents.aggregate([{"$match": base}, {"$group": {"_id": "$ap_stage", "n": {"$sum": 1}}}]):
         counts[g["_id"]] = g["n"]

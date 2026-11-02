@@ -376,12 +376,22 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
     counts, reasons, uncertain = Counter(), Counter(), Counter()
     # Recent documents, plus older ones still in an active stage (a stage is
     # never left stale: Fort Dearborn's 9/7 statement sat in approvals).
-    q = {"mailbox_category": "AP", "$or": [{"created_utc": {"$gte": since}},
-                                           {"ap_stage": {"$in": ["needs_staff", "awaiting_approval", "on_hold", "ready",
-                                                                 "drafted", "awaiting_receipt", "in_bc_check"]}}]}
+    # Operations-mailbox documents AP also files, listed as data in
+    # ap_mirror_sources ({"active": true, "query": {...}}): Victor Allen's
+    # consignment receipts and Koch Logistics' receiver scans reach only the
+    # Operations mailbox while AP files them in Square9 (mirrored for AP to
+    # review from 2026-11-02 at Chad's request). Only lane documents get an
+    # ap_stage, so AP's queues read "AP or Operations with a stage".
+    lane = [{"mailbox_category": "AP"}]
+    async for m in db.ap_mirror_sources.find({"active": True}, {"_id": 0, "query": 1}):
+        if m.get("query"):
+            lane.append({**m["query"], "mailbox_category": "Operations"})
+    q = {"$and": [{"$or": lane}, {"$or": [{"created_utc": {"$gte": since}},
+                                          {"ap_stage": {"$in": ["needs_staff", "awaiting_approval", "on_hold", "ready",
+                                                                "drafted", "awaiting_receipt", "in_bc_check"]}}]}]}
     if doc_id:
         # One document, right after a person acted on it (document page).
-        q = {"mailbox_category": "AP", "id": doc_id}
+        q = {"$or": lane, "id": doc_id}
     async for d in db.hub_documents.find(q, {"file_content_b64": 0}):
         sf = staff_filed.get(d.get("id"))
         learned = {"p": DD.score(dm, d), "threshold": dm.get("threshold") or 0, "retired": dm_retired}

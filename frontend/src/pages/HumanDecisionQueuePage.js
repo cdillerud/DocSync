@@ -30,7 +30,7 @@ import NonTransactionalDispositionDialog from '@/components/NonTransactionalDisp
 import DecisionQueueClassificationDialog from '@/components/DecisionQueueClassificationDialog';
 
 const ISSUE_TYPE_META = {
-  ap_needs_staff: { label: 'AP: staff decision', icon: FolderOpen, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
+  ap_needs_staff: { label: 'AP: needs staff', icon: FolderOpen, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   isolated_misroute: { label: 'Wrong routing lane', icon: Building2, cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   ambiguous_classification: { label: 'Needs a type picked', icon: HelpCircle, cls: 'bg-sky-500/15 text-sky-400 border-sky-500/30' },
   ambiguous_match: { label: 'Match unclear', icon: HelpCircle, cls: 'bg-muted text-muted-foreground border-border' },

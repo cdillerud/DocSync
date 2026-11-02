@@ -40,7 +40,7 @@ const TESTS = [
   {
     key: 't4', title: 'Work the Decision Queue', time: '15 min',
     steps: [
-      <>Open the <Link className="text-primary underline" to="/decision-queue">Decision Queue</Link>, tab <b>AP: staff decision</b>. Use the <b>Show</b> chips to filter by reason.</>,
+      <>Open the <Link className="text-primary underline" to="/decision-queue">Decision Queue</Link>, tab <b>AP: needs staff</b>. Use the <b>Show</b> chips to filter by reason.</>,
       <>For five items you understand: read the question, click <b>Review document</b>, then <b>Use suggested folder</b>, <b>Choose a different folder</b>, or <b>Exclude from processing</b> (not AP work). Type a short <b>Why?</b> each time.</>,
       <>Try one <b>Put on hold</b> with a reason, and one <b>Send for approval</b>.</>,
     ],

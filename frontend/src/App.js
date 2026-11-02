@@ -7,14 +7,15 @@ import { Toaster } from "@/components/ui/sonner";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import Layout from "@/components/Layout";
 import LoginPage from "@/pages/LoginPage";
-import DocumentDetailPage from "@/pages/DocumentDetailPage";
+const DocumentDetailPage = lazy(() => import("@/pages/DocumentDetailPage"));
+const HumanDecisionQueuePage = lazy(() => import("@/pages/HumanDecisionQueuePage"));
+const SearchPage = lazy(() => import("@/pages/SearchPage"));
 const OperationsQueuePage = lazy(() => import("@/pages/OperationsQueuePage"));
 
 // Hub pages (consolidated)
 const SalesInventoryHubPage = lazy(() => import("@/pages/SalesInventoryHubPage"));
 const IntakeLearningPage = lazy(() => import("@/pages/IntakeLearningPage"));
 const IntelligenceHubPage = lazy(() => import("@/pages/IntelligenceHubPage"));
-import HumanDecisionQueuePage from "@/pages/HumanDecisionQueuePage";
 const APWorkflowPage = lazy(() => import("@/pages/APWorkflowPage"));
 const APTestingPage = lazy(() => import("@/pages/APTestingPage"));
 import SalesInboxPage from "@/pages/SalesInboxPage";
@@ -28,7 +29,6 @@ const PostingPatternsDashboard = lazy(() => import("@/pages/PostingPatternsDashb
 const InvoiceTracePage = lazy(() => import("@/pages/InvoiceTracePage"));
 const ReviewQueuePage = lazy(() => import("@/pages/ReviewQueuePage"));
 const Square9ReadinessPage = lazy(() => import("@/pages/Square9ReadinessPage"));
-import SearchPage from "@/pages/SearchPage";
 
 // Settings, legacy and rarely used pages load on first visit, not with every
 // sign-in: the bundle carried about 41k lines of pages up front.

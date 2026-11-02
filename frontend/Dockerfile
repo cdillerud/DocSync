@@ -22,6 +22,9 @@ ARG REACT_APP_ENTRA_CLIENT_ID=
 ENV REACT_APP_ENTRA_AUTH_ENABLED=$REACT_APP_ENTRA_AUTH_ENABLED REACT_APP_ENTRA_TENANT_ID=$REACT_APP_ENTRA_TENANT_ID REACT_APP_ENTRA_CLIENT_ID=$REACT_APP_ENTRA_CLIENT_ID
 
 # Build production bundle
+# No source maps in the served image: they published the full app source
+# (6.8 MB for main alone) to anyone who opened devtools.
+ENV GENERATE_SOURCEMAP=false
 RUN yarn build
 
 # Production stage with nginx

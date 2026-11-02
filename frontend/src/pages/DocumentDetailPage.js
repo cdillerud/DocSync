@@ -820,7 +820,7 @@ export default function DocumentDetailPage() {
                 </div>
               ) : (
                 <div className="space-y-3 text-sm">
-                  <InfoRow label="Document Type" value={<Badge variant="secondary">{doc.document_type}</Badge>} />
+                  <InfoRow label="Document Type" value={<Badge variant="secondary">{DOC_TYPES.find(t => t.value === doc.document_type)?.label || (doc.document_type || '').replace(/_/g, ' ')}</Badge>} />
                   {doc.bc_document_no && <InfoRow label="BC Document No" value={doc.bc_document_no} mono />}
                   {doc.bc_record_id && <InfoRow label="BC Record ID" value={doc.bc_record_id.slice(0, 12) + '...'} mono />}
                   {(doc.ai_confidence || doc.classification_method) && (

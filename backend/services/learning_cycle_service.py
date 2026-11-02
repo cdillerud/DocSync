@@ -345,8 +345,14 @@ async def sales_fast_scheduler() -> None:
                 # to them (2026-10-29).
                 from deps import get_db
                 from services.ap_stage_service import refresh_stages
-                from services.sandbox_draft_service import draft as ap_draft
+                from services.sandbox_draft_service import draft as ap_draft, retry_line_skips
                 db = get_db()
+                # A skip that no longer holds (the PO read from the PDF an hour
+                # later, a number corrected) is retried here, not at the next
+                # learning cycle: O-I 10-30 waited 28 h for that (2026-11-02).
+                rs = await retry_line_skips(db)
+                if rs.get("retried"):
+                    logger.info("[APFast] skips retried %s", rs)
                 await refresh_stages(db, days=2)
                 ra = await ap_draft(db, limit=5)
                 if ra.get("drafted"):

@@ -217,6 +217,24 @@ def normalize_name(name: str) -> str:
     return n
 
 
+def _is_calendar_date(tok: str) -> bool:
+    """An 8-digit token that reads as a date (20261029 or 10262026). Staff and
+    vendors put dates in file names; matched as "invoice" tokens they paired
+    23 unrelated documents by day alone in one week (2026-11-01: GAMMIN
+    statements with a Straitlink invoice, Anchor invoices with Advance)."""
+    from datetime import date
+    if not re.fullmatch(r"\d{8}", tok):
+        return False
+    for y, m, d in ((tok[:4], tok[4:6], tok[6:]), (tok[4:], tok[:2], tok[2:4])):
+        if 2015 <= int(y) <= 2040:
+            try:
+                date(int(y), int(m), int(d))
+                return True
+            except ValueError:
+                pass
+    return False
+
+
 def extract_invoice_po_tokens(name: str) -> List[str]:
     if not name:
         return []
@@ -239,6 +257,8 @@ def extract_invoice_po_tokens(name: str) -> List[str]:
             if tok.split("-")[-1].lower() in {"inv", "po", "so", "doc", "ea", "cp"}:
                 continue
             stripped = tok.lstrip("0") or tok
+            if _is_calendar_date(tok):
+                continue
             if len(stripped) >= 4 and stripped not in found:
                 found.append(stripped)
     return found

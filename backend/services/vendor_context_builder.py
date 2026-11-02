@@ -295,13 +295,13 @@ def _format_profile_context(profile: Dict) -> str:
     po_pat = profile.get("po_patterns", {})
     if po_pat.get("has_patterns"):
         parts.append(
-            f"  - Typical reference format: avg length {po_pat.get('avg_length', '?')}, "
-            f"{po_pat.get('numeric_only_pct', 0)*100:.0f}% are numeric-only"
+            f"  - Gamer order (PO) numbers on this vendor's BC invoices: avg length {po_pat.get('avg_length', '?')}, "
+            f"{po_pat.get('numeric_only_pct', 0)*100:.0f}% numeric-only"
         )
         prefixes = po_pat.get("common_prefixes", [])
         if prefixes:
             prefix_str = ", ".join(f"'{p['prefix']}'" for p in prefixes[:3])
-            parts.append(f"  - Common reference prefixes: {prefix_str}")
+            parts.append(f"  - Common Gamer order prefixes: {prefix_str}")
 
     freq = profile.get("posting_frequency", {})
     if freq.get("frequency") and freq["frequency"] != "unknown":

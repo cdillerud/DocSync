@@ -415,7 +415,12 @@ async def seed_vendor_profiles_from_bc_cache(db) -> Dict[str, Any]:
         po_expected = has_external_ref_rate >= 0.20 or has_order_number_rate >= 0.20
 
         # Detect PO format patterns
-        po_patterns = _detect_po_patterns(ext_refs + order_nums)
+        # Gamer's order numbers only: BC's external document number is the
+        # vendor's own invoice number (CanPack 1101619194), and mixed in it
+        # told extraction that POs run 8-10 digits - the AI then took
+        # CanPack's 9-digit customer PO 210087334 over order 119371 beside it
+        # (2026-11-01).
+        po_patterns = _detect_po_patterns(order_nums)
 
         # Posting frequency
         dates = [d for d in vendor_data.get("posting_dates", []) if d]

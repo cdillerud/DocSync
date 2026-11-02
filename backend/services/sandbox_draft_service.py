@@ -1339,9 +1339,16 @@ async def retry_line_skips(db) -> Dict[str, Any]:
     from services.vendor_line_coding_service import coding_for
     n = 0
     why = {}
-    async for d in db.hub_documents.find({"sandbox_draft_skipped.reason": {"$exists": True}, "bc_link": {"$exists": False},
-                                          "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}},
-                                         {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1, "po_number_clean": 1}):
+    q = {"sandbox_draft_skipped.reason": {"$exists": True}, "bc_link": {"$exists": False},
+         "bc_purchase_invoice.environment": {"$ne": ALLOWED_ENVIRONMENT}}
+    proj = {"_id": 1, "vendor_canonical": 1, "sandbox_draft_skipped": 1, "invoice_number_clean": 1, "po_number_clean": 1}
+    # The planner prefers the environment index ($ne: nearly every document,
+    # 2.7 s); the partial index on skip reasons holds only skipped ones.
+    try:
+        docs = await db.hub_documents.find(q, proj).hint("sandbox_draft_skipped.reason_1").to_list(5000)
+    except Exception:
+        docs = await db.hub_documents.find(q, proj).to_list(5000)
+    for d in docs:
         reason = str((d.get("sandbox_draft_skipped") or {}).get("reason") or "")
         stale = await _skip_is_stale(db, d, reason)
         if not stale and _LINE_PROBLEM.search(reason) and not reason.startswith("BC refused") \

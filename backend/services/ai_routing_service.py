@@ -403,6 +403,17 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         pooled.pop(x[4], None)
         pooled[x[4]] = x
     cal = list(pooled.values())[-POOL_ROWS:]
+
+    # Graded again against staff's latest filing: a document staff later
+    # moved from a holding folder kept the verdict of the day it was replayed
+    # (4 of 32 "misses" on 2026-11-01 had the AI and staff on the same root).
+    def _regrade(x):
+        f = fil.get(x[4])
+        if not f:
+            return x
+        return (x[0], x[1], bool(x[1]) and x[3] == FL.label(f).split("/")[0], *x[3:])
+
+    cal = [_regrade(x) for x in cal]
     calibration, reliable_conf = _calibrate(cal)
     # Per top folder the AI chose: overall it was 86% right at 0.99
     # (2026-10-31), so every AI-routed document waited for staff - Pretium

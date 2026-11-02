@@ -206,7 +206,9 @@ async def reconcile_recent(db, days: int = 45, bc_days: int = 120, apply: bool =
     cursor = db.hub_documents.find(
         {"created_utc": {"$gte": since}, "is_duplicate": {"$ne": True},
          "status": {"$nin": ["batch_parent"]}, "document_type": {"$in": sorted(LINKABLE_TYPES)},
-         "fraud_risk.flagged": {"$ne": True}},
+         "fraud_risk.flagged": {"$ne": True},
+         # a statement cites invoices it is not (non_ap_reclassifier)
+         "statement_evidence": {"$exists": False}},
         {"_id": 1, "id": 1, "document_type": 1, "invoice_number_clean": 1, "amount_float": 1, "mailbox_category": 1,
          "vendor_canonical": 1, "file_name": 1, "bc_link": 1, "invoice_number_extracted_previous": 1,
          "vendor_canonical_backfill": 1, "po_number_clean": 1, "po_number_previous": 1, "batch_parent_id": 1,

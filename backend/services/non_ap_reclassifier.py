@@ -87,6 +87,65 @@ def classify(sender: str, subject: str):
     return None
 
 
+# A statement lists invoices the vendor sent earlier; a new invoice is not in
+# BC yet when it arrives. Measured 2026-11-02 over AP mail since 08-15: of
+# 4,960 documents typed AP_Invoice, the 4 whose text cites >= 3 of their
+# vendor's invoices BC had already booked before arrival were all statements
+# or reports (Fast Track x3, Warehouse Basics); at >= 2 real invoices crept in
+# (an XPO bundle, Ardagh). Credit memos legitimately cite old invoices, so
+# only AP_Invoice is checked. The false "number+vendor" BC link such a
+# statement picks up (Fast Track 10-13 statement -> a $100 invoice, "paid")
+# is set aside, and reconciliation skips flagged documents.
+STATEMENT_MIN_BOOKED = 3
+_TOK = re.compile(r"[A-Z0-9][A-Z0-9-]{3,20}")
+
+
+async def statements_by_bc_evidence(db, since: str, now: str, apply: bool = True, limit: int = 600) -> Dict[str, int]:
+    import asyncio
+    from services.folder_routing_service import _pdf_text
+    books: Dict[str, Dict[str, str]] = {}
+    st = {"checked": 0, "retyped": 0, "links_set_aside": 0}
+    async for d in db.hub_documents.find(
+            {"created_utc": {"$gte": since}, "document_type": "AP_Invoice", "statement_check_at": {"$exists": False},
+             "status": {"$nin": ["batch_parent", "Posted"]}, "vendor_canonical": {"$nin": [None, ""]}},
+            {"_id": 1, "id": 1, "file_name": 1, "file_path": 1, "vendor_canonical": 1, "created_utc": 1,
+             "invoice_number_clean": 1, "bc_link": 1}).sort("created_utc", -1).limit(limit):
+        st["checked"] += 1
+        v = d["vendor_canonical"]
+        if v not in books:
+            book: Dict[str, str] = {}
+            async for b in db.bc_reference_cache.find({"bc_vendor_no": v, "bc_entity_type": "posted_purchase_invoice"},
+                                                      {"_id": 0, "bc_external_document_no": 1, "bc_posting_date": 1}):
+                n = re.sub(r"[^A-Z0-9]", "", str(b.get("bc_external_document_no") or "").upper())
+                if len(n) >= 4:
+                    book[n] = min(str(b.get("bc_posting_date") or "9"), book.get(n, "9"))
+            books[v] = book
+        book = books[v]
+        found = []
+        if book:
+            text = (await asyncio.to_thread(_pdf_text, d))[:40000].upper()
+            day = str(d.get("created_utc") or "")[:10]
+            own = re.sub(r"[^A-Z0-9]", "", str(d.get("invoice_number_clean") or "").upper())
+            found = sorted({k for k in (re.sub(r"[^A-Z0-9]", "", m) for m in _TOK.findall(text))
+                            if k in book and book[k] < day and k != own})
+        upd: Dict[str, Any] = {"$set": {"statement_check_at": now}}
+        if len(found) >= STATEMENT_MIN_BOOKED:
+            st["retyped"] += 1
+            upd["$set"].update({
+                "document_type": "Statement", "suggested_job_type": "Statement",
+                "document_type_previous": "AP_Invoice", "non_ap_kind": "account_statement",
+                "statement_evidence": {"booked_invoices_cited": found[:20], "at": now},
+                "document_type_corrected": {"at": now, "reason": f"cites {len(found)} invoices BC booked before it arrived"}})
+            link = d.get("bc_link") or {}
+            if link and link.get("match") != "number+amount":
+                st["links_set_aside"] += 1
+                upd["$set"]["bc_link_set_aside"] = {**link, "reason": "statement", "at": now}
+                upd["$unset"] = {"bc_link": "", "bc_amount_mismatch": ""}
+        if apply:
+            await db.hub_documents.update_one({"_id": d["_id"]}, upd)
+    return st
+
+
 async def reclassify_recent(db, days: int = 120, apply: bool = True) -> Dict[str, Any]:
     since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     now = datetime.now(timezone.utc).isoformat()
@@ -162,5 +221,9 @@ async def reclassify_recent(db, days: int = 120, apply: bool = True) -> Dict[str
                 "invoice_number_clean": num, "invoice_number_source": "subject_or_file_name",
                 "invoice_number_filled_at": now}})
     stats["invoice_number_from_text"] = filled
+    try:
+        stats["statements_by_bc"] = await statements_by_bc_evidence(db, since, now, apply)
+    except Exception as e:
+        logger.warning("[NonAP] statement check failed: %r", e)
     logger.info("[NonAP] %s", stats)
     return stats

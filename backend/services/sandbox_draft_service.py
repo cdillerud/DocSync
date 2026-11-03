@@ -989,6 +989,28 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
     wl = warehouse_split(d, coding)
     if wl:
         return {"lines": wl, "source": "warehouse_split"}
+    try:
+        from services.vendor_line_coding_service import folder_dominant, folder_label
+        f = await db.folder_filings.find_one({"hub_doc_id": d.get("id")}, {"_id": 0, "top": 1, "subpath": 1})
+        if f:
+            lab = folder_label(f)
+        else:
+            path = str(d.get("suggested_folder") or d.get("sharepoint_folder_path") or "").strip("/")
+            if path.lower().startswith("temp folder/"):
+                path = path[12:]
+            parts = path.split("/")
+            lab = (parts[0] + ("/" + parts[1] if len(parts) > 1 else "")).lower()
+        fdom = folder_dominant(coding, lab)
+    except Exception:
+        fdom = None
+    if fdom:
+        # Varying for the vendor, settled for the folder (Tumalo dropship
+        # freight: FREIGHT on 413 of 425): AP's coding for this folder.
+        sl = single_line({**(coding or {}), "dominant": fdom}, d)
+        for l in sl:
+            if l.get("lineObjectNumber") == fdom["lineObjectNumber"]:
+                l["source"] = f"AP codes this vendor {fdom['lineObjectNumber']} in {lab} ({int(fdom['share'] * 100)}% of {fdom['n']})"
+        return {"lines": sl, "source": "vendor_folder_coding"}
     if PROFILE_TO_STAFF:
         # Replay vs AP's BC entries (2026-10-08): these lines were right 4 of
         # 16 times (warehouse storage/handling splits, customs + tariff).

@@ -230,7 +230,11 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     try:
         # Draft (never post) up to 10 ready AP invoices per hour in the PRE
         # sandbox; refuses unless writes are on and the target is PRE.
-        from services.vendor_line_coding_service import rebuild as rebuild_line_coding
+        from services.vendor_line_coding_service import rebuild as rebuild_line_coding, learn_folder_coding
+        try:
+            summary["line_coding_by_folder"] = await learn_folder_coding(db)
+        except Exception as e:
+            summary["line_coding_by_folder"] = {"error": repr(e)}
         summary["vendor_line_coding"] = await rebuild_line_coding(db)
         from services.sandbox_draft_service import audit_existing, retry_line_skips
         summary["sandbox_retry"] = await retry_line_skips(db)

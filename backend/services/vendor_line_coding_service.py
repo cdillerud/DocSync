@@ -97,6 +97,58 @@ async def rebuild(db, days: int = 60, max_age_hours: int = 24) -> Dict[str, Any]
     return {"vendors": len(vendors), "rebuilt": n}
 
 
+FOLDER_MIN_N, FOLDER_SHARE = 5, 0.9
+
+
+def folder_label(f: Dict[str, Any]) -> str:
+    top = str(f.get("top") or "").strip().lower()
+    sub = str(f.get("subpath") or "").strip("/").split("/")[0].strip().lower()
+    return top + ("/" + sub if sub else "")
+
+
+async def learn_folder_coding(db) -> Dict[str, Any]:
+    """The main line AP enters, per vendor and the folder staff filed the
+    invoice in. Tumalo is "varying" as a vendor but not per folder: Dropship
+    / Freight 413 of 425 FREIGHT (Item), Warehouse / Ball Orders 194 of 209
+    FREIGHT (Charge), Warehouse International DRAYAGE (2026-11-03). Item and
+    Account lines only: drafts with Charge lines matched AP 0 of 9."""
+    labels = {}
+    async for f in db.folder_filings.find({"hub_doc_id": {"$nin": [None, ""]}, "top": {"$nin": [None, ""]}},
+                                          {"_id": 0, "hub_doc_id": 1, "top": 1, "subpath": 1}):
+        labels[f["hub_doc_id"]] = folder_label(f)
+    by_bc = {}
+    async for d in db.hub_documents.find({"id": {"$in": list(labels)}, "bc_link.bc_document_no": {"$nin": [None, ""]}},
+                                         {"_id": 0, "id": 1, "bc_link.bc_document_no": 1}):
+        by_bc[d["bc_link"]["bc_document_no"]] = labels[d["id"]]
+    counts: Dict[Any, Counter] = {}
+    async for inv in db.bc_purchase_invoice_lines.find({"number": {"$in": list(by_bc)}},
+                                                       {"_id": 0, "number": 1, "vendorNumber": 1, "purchaseInvoiceLines": 1}):
+        m = _main([l for l in inv.get("purchaseInvoiceLines") or [] if l.get("lineObjectNumber")])
+        if not m:
+            continue
+        lab = by_bc[inv["number"]]
+        key = (str(m.get("lineType") or "Item"), str(m["lineObjectNumber"]).upper())
+        for k in (lab, lab.split("/")[0]):
+            counts.setdefault((inv.get("vendorNumber"), k), Counter())[key] += 1
+    out: Dict[str, Dict[str, Any]] = {}
+    for (v, lab), c in counts.items():
+        n = sum(c.values())
+        (t, code), k = c.most_common(1)[0]
+        if n >= FOLDER_MIN_N and k / n >= FOLDER_SHARE and t in ("Item", "Account"):
+            out.setdefault(v, {})[lab] = {"lineType": t, "lineObjectNumber": code, "share": round(k / n, 2), "n": n}
+    for v, fd in out.items():
+        await db.vendor_line_coding.update_one({"vendor": v}, {"$set": {"by_folder": fd}}, upsert=True)
+    await db.vendor_line_coding.update_many({"vendor": {"$nin": list(out)}, "by_folder": {"$exists": True}},
+                                            {"$unset": {"by_folder": ""}})
+    return {"vendors": len(out), "folders": sum(len(x) for x in out.values())}
+
+
+def folder_dominant(coding: Optional[Dict[str, Any]], label: str) -> Optional[Dict[str, Any]]:
+    fd = (coding or {}).get("by_folder") or {}
+    label = str(label or "").strip().lower()
+    return fd.get(label) or fd.get(label.split("/")[0]) if label else None
+
+
 async def coding_for(db, vendor: str) -> Optional[Dict[str, Any]]:
     return await db.vendor_line_coding.find_one({"vendor": str(vendor or "").upper()}, {"_id": 0})
 

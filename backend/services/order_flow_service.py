@@ -436,9 +436,50 @@ async def link(db, text: str, vendor: str = "", created: str = "", key: str = ""
     return {"order": v[1], "orders": [v[1]], "via": via, "from": frm, "shape": shape(via), "p": round(v[0], 3)}
 
 
+_SNAPSHOT = "/tmp/order_flow_index.pkl"
+RELEARN_HOURS = 6
+
+
+async def _learned(db) -> Dict[str, Any]:
+    """The learned index, retrained at most every RELEARN_HOURS. Each cycle
+    runs this in a fresh process, so the in-memory index was always empty
+    and every cycle re-walked ~274,000 documents (753 of 763 s, 2026-11-03);
+    link() already accepts an index up to 6 hours old. Kept on local disk;
+    a restart or redeploy just retrains."""
+    import os
+    import pickle
+    st = await db.learning_state.find_one({"_id": STATE_ID}) or {}
+    try:
+        fresh = time.time() - os.path.getmtime(_SNAPSHOT) < RELEARN_HOURS * 3600
+    except OSError:
+        fresh = False
+    if fresh and st:
+        try:
+            snap = await asyncio.to_thread(lambda: pickle.load(open(_SNAPSHOT, "rb")))
+            if snap.get("state_at") == st.get("at"):
+                _IDX.clear()
+                _IDX.update({**snap["idx"], "at": time.time()})
+                return {**st, "reused_snapshot": True}
+        except Exception as e:  # noqa: BLE001
+            logger.info("[OrderFlow] snapshot not reused: %r", e)
+    st = await learn(db)
+    try:
+        snap = {"state_at": st.get("at"), "idx": {k: v for k, v in _IDX.items() if k != "at"}}
+
+        def dump():
+            tmp = _SNAPSHOT + ".tmp"
+            with open(tmp, "wb") as f:
+                pickle.dump(snap, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp, _SNAPSHOT)
+        await asyncio.to_thread(dump)
+    except Exception as e:  # noqa: BLE001
+        logger.info("[OrderFlow] snapshot not saved: %r", e)
+    return st
+
+
 async def apply_recent(db, days: int = 30) -> Dict[str, Any]:
     """Note the linked order on recent AP documents with no order BC knows."""
-    st = await learn(db)
+    st = await _learned(db)
     if not st.get("on"):
         return {"skipped": f"off: precision {st.get('precision')} on {st.get('right', 0) + st.get('wrong', 0)}"}
     from services.sharepoint_service import _is_known_gamer_order

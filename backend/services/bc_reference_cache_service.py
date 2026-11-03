@@ -522,6 +522,9 @@ def evaluate_cache_health(
 
 
 
+_LAST_AUTO_SEED: Optional[datetime] = None
+
+
 def _typed_or(branches, entity_types=None):
     """An $or over number fields, restricted to entity types inside every
     branch. With bc_entity_type at the top level the planner sometimes caches
@@ -769,8 +772,14 @@ class BCReferenceCacheService:
             total_records, duration_ms, "incremental" if incremental else "bulk"
         )
 
-        # Auto-seed knowledge base after successful cache sync
-        if total_records > 0:
+        # Auto-seed knowledge base after successful cache sync - at most
+        # hourly: every 10-minute incremental sync re-ran three full
+        # aggregations over the cache (141 runs, ~200 s in 24 h; 2026-11-03).
+        # knowledge_seed_scheduler still runs it every 6 hours.
+        global _LAST_AUTO_SEED
+        if total_records > 0 and (_LAST_AUTO_SEED is None
+                                  or datetime.now(timezone.utc) - _LAST_AUTO_SEED > timedelta(hours=1)):
+            _LAST_AUTO_SEED = datetime.now(timezone.utc)
             try:
                 from services.knowledge_seed_service import run_full_knowledge_seed
                 logger.info("[BC Cache] Triggering auto knowledge seed after sync (%d new records)", total_records)
@@ -1160,13 +1169,14 @@ class BCReferenceCacheService:
 
     async def get_status(self) -> Dict[str, Any]:
         """Return read-only cache counts, freshness, thresholds, and alerts."""
-        pipeline = [
-            {"$group": {"_id": "$bc_entity_type", "count": {"$sum": 1}}}
-        ]
+        # Per type from the bc_entity_type index: a $group over the whole
+        # collection read all ~330,000 rows (158 calls, 81 s in 24 h).
         entity_counts = {}
-
-        async for doc in self.collection.aggregate(pipeline):
-            entity_counts[doc["_id"]] = doc["count"]
+        for t in await self.collection.distinct("bc_entity_type"):
+            entity_counts[t] = await self.collection.count_documents({"bc_entity_type": t})
+        missing = await self.collection.count_documents({"bc_entity_type": None})
+        if missing:
+            entity_counts[None] = missing
 
         item_numbered_count = await self.collection.count_documents({
             "bc_entity_type": "item",

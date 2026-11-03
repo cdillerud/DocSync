@@ -14,6 +14,7 @@ from collections import defaultdict
 logger = logging.getLogger(__name__)
 
 _db = None
+_FEW_SHOT_CACHE: Dict[str, Any] = {"at": None, "groups": []}
 
 
 def init_classification_feedback(db):
@@ -219,8 +220,15 @@ async def get_few_shot_examples(limit_per_type: int = 2, vendor_no: str = "") ->
         {"$sort": {"correction_count": -1}},
     ]
 
-    results = await _db.classification_corrections.aggregate(pipeline).to_list(50)
-    
+    # The groups change only when staff correct a type; kept 15 minutes
+    # (a full sort + group on every classification: 165 calls, 53 s / 24 h).
+    now = datetime.now(timezone.utc)
+    if _FEW_SHOT_CACHE["at"] and (now - _FEW_SHOT_CACHE["at"]).total_seconds() < 900:
+        results = _FEW_SHOT_CACHE["groups"]
+    else:
+        results = await _db.classification_corrections.aggregate(pipeline).to_list(50)
+        _FEW_SHOT_CACHE.update(at=now, groups=results)
+
     for group in results:
         count = group.get("correction_count", 0)
         
@@ -231,7 +239,7 @@ async def get_few_shot_examples(limit_per_type: int = 2, vendor_no: str = "") ->
         elif count >= 5:
             type_limit = 2
 
-        for ex in group["examples"][:type_limit]:
+        for ex in [dict(x) for x in group["examples"][:type_limit]]:
             # Include examples even without text_snippet — use filename+vendor as context
             if len(examples) < 12:
                 # Skip same-type "corrections" (AP_Invoice -> AP_Invoice is noise, not signal)

@@ -239,6 +239,7 @@ async def decide(db, d: Dict[str, Any], top3: str, rule_lbl: str, allowed: List[
             f"Hub type: {d.get('document_type')}  PO/order: {po or '-'}  International flag: {d.get('is_international')}  Amount: {d.get('amount_float')}\n"
             f"Lines: {lines}\nFirst text: {(m.get('text') or '')[:500]}\n\n"
             f"Order in Business Central: {await order_facts(db, po)}{flow_line}\n\n"
+            f"How staff file this vendor: {await vendor_habits(db, d.get('vendor_canonical'))}\n"
             f"Model trained on staff's filings, most likely: {top3}\nHand-written rules propose: {rule_lbl}\n\n"
             "Folders staff use (count): " + ", ".join(f"{c} ({n})" for c, n in allowed[:45]) + "\n\n"
             "Past documents and where staff filed them:\n"
@@ -252,6 +253,29 @@ async def decide(db, d: Dict[str, Any], top3: str, rule_lbl: str, allowed: List[
     if lbl not in {c for c, _ in allowed} and lbl not in seen:
         return "", 0.0, "not a folder staff use", ""
     return lbl, float(j.get("confidence") or 0), str(j.get("why") or "")[:200], seen.get(lbl, "")
+
+
+async def vendor_habits(db, vendor: Any) -> str:
+    """How staff file this vendor: lane shares and top folders from their
+    filings. The AI routed StraitLink (customs broker) "international"
+    because of customs wording, and MOL / Tapi orders to Warehouse, against
+    32 / 23 / 13 staff filings that say domestic dropship (2026-11-02)."""
+    v = str(vendor or "").upper()
+    if not v:
+        return "-"
+    lane = await db.vendor_lane_profiles.find_one({"vendor": v}, {"_id": 0}) or {}
+    tops = [x async for x in db.vendor_subfolder_profiles.find({"vendor": v}, {"_id": 0, "top": 1, "n": 1})]
+    tops.sort(key=lambda x: -(x.get("n") or 0))
+    n = int(lane.get("n_all") or lane.get("n") or 0)
+    if not n and not tops:
+        return "no staff filings yet"
+    parts = []
+    if n:
+        parts.append(f"{n} filings: international {lane.get('intl_share', 0):.0%}, warehouse {lane.get('warehouse_share', 0):.0%}, "
+                     f"S&H {lane.get('sh_share', 0):.0%}")
+    if tops:
+        parts.append("top folders " + ", ".join(f"{t.get('top')} ({t.get('n')})" for t in tops[:4]))
+    return "; ".join(parts)
 
 
 def _view(m: Dict[str, Any], d: Dict[str, Any], rule_path: str):
@@ -279,7 +303,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
         return None
     cached = d.get("ai_routing") or {}
     flow = (d.get("order_flow") or {}).get("order")
-    if cached.get("rule_path") == rule_path and cached.get("v") == 5 and cached.get("flow") == flow:
+    if cached.get("rule_path") == rule_path and cached.get("v") == 6 and cached.get("flow") == flow:
         lbl_ai, conf, why, folder = (cached.get("label") or "", cached.get("confidence") or 0.0,
                                      cached.get("why") or "", cached.get("folder") or "")
     else:
@@ -292,7 +316,7 @@ async def route(db, d: Dict[str, Any], rule_path: str) -> Optional[Tuple[str, fl
             return None
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"ai_routing": {
             "rule_path": rule_path, "label": lbl_ai, "confidence": conf, "why": why, "folder": folder,
-            "model_top": top3, "at": _now(), "v": 5, "flow": flow}}})
+            "model_top": top3, "at": _now(), "v": 6, "flow": flow}}})
     if not lbl_ai:
         return None
     top, sub = m["names"].get(lbl_ai) or (None, None)

@@ -22,7 +22,14 @@ TREE = {
              "lastModifiedDateTime": "2026-10-02T00:00:00Z"},
             {"id": "xl", "name": "notes.xlsx", "file": {}, "lastModifiedDateTime": "2026-10-02T00:00:00Z"}],
     "ad": [{"id": "dwg", "name": "bottle.pdf", "file": {}, "lastModifiedDateTime": "2026-10-02T00:00:00Z"}],
-    "berry": [{"id": "bp", "name": "Pricing", "folder": {}}],
+    "berry": [{"id": "bp", "name": "Pricing", "folder": {}}, {"id": "bd", "name": "Dunnage", "folder": {}}],
+    "bd": [{"id": "bdr", "name": "Dunnage Reports", "folder": {}},
+           {"id": "sop", "name": "GAMER Dunnage SOP.pdf", "file": {}, "eTag": "s1",
+            "lastModifiedDateTime": "2026-06-01T00:00:00Z"}],
+    "bdr": [{"id": "trk", "name": "GAMER Tracking report September 2026.xlsx", "file": {}, "eTag": "t1",
+             "lastModifiedDateTime": "2026-10-05T00:00:00Z"},
+            {"id": "old2", "name": "GAMER Tracking report May 2024.xlsx", "file": {},
+             "lastModifiedDateTime": "2024-06-05T00:00:00Z"}],
     "bp": [{"id": "letter", "name": "2026-11-02 2026-10-27 1548 --- 100 GAMER PACKAGING.PDF", "file": {}, "eTag": "e2",
             "lastModifiedDateTime": "2026-10-27T00:00:00Z"}],
 }
@@ -34,6 +41,9 @@ def _handler(request: httpx.Request) -> httpx.Response:
     if request.method == "POST":
         body = json.loads(request.content)
         SENT.append(body)
+        if url.endswith("/dunnage-reports"):
+            ok = "Tracking report" in body["name"]
+            return httpx.Response(200, json={"status": "ACCEPTED" if ok else "NOT_A_DUNNAGE_REPORT", "kept": 2 if ok else 0})
         read = [{"supplier": "X"}] if "Price Book" in body["name"] else []
         return httpx.Response(200, json={"status": "OK", "read": read})
     if url.endswith("/content"):
@@ -89,3 +99,14 @@ def test_sends_once_then_only_changes(tmp_path):
 def test_preview_sends_nothing(tmp_path):
     out = asyncio.run(pli.run(send_it=False, since="2025-01-01", state_path=str(tmp_path / "s.json")))
     assert out["status"] == "LISTED" and len(out["would_send"]) == 2 and not SENT
+
+
+def test_dunnage_reports_go_to_their_own_intake(tmp_path):
+    listing = asyncio.run(pli.crawl(since="2025-01-01", host="example.sharepoint.com", kind="dunnage"))
+    assert sorted(f["name"] for f in listing["files"]) == ["GAMER Dunnage SOP.pdf",
+                                                           "GAMER Tracking report September 2026.xlsx"]
+    assert pli._intake_url("dunnage") == "https://svc/api/v70/catalog/intake/dunnage-reports"
+    out = asyncio.run(pli.run(send_it=True, since="2025-01-01", state_path=str(tmp_path / "d.json"), kind="dunnage"))
+    assert out["files_read"] == 1 and out["not_a_price_list_it_reads"] == 1
+    sent = {b["name"]: b for b in SENT}
+    assert "file_b64" in sent["GAMER Tracking report September 2026.xlsx"] and "pdf_b64" not in sent["GAMER Dunnage SOP.pdf"]

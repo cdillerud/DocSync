@@ -59,6 +59,14 @@ async def _children(client: httpx.AsyncClient, token: str, drive_id: str, item_i
     return out
 
 PRICING_FOLDER = re.compile(r"pric", re.IGNORECASE)
+DUNNAGE_FOLDER = re.compile(r"dunnage", re.IGNORECASE)
+# What each kind of job walks and where it sends: price letters / books (PDF) to the price audit; suppliers'
+# dunnage reports (Ball tracking reports, Anchor statements, CanPack returns logs) to the dunnage report.
+KINDS: Dict[str, Dict[str, Any]] = {
+    "price": {"folder": PRICING_FOLDER, "exts": (".pdf",), "endpoint": "/price-lists", "body": "pdf_b64"},
+    "dunnage": {"folder": DUNNAGE_FOLDER, "exts": (".pdf", ".xlsx", ".xlsm"), "endpoint": "/dunnage-reports",
+                "body": "file_b64"},
+}
 MAX_DEPTH = 5
 MAX_BYTES = 14 * 1024 * 1024  # base64 grows a third; the intake takes 20 MB
 STATE_PATH = os.environ.get("GPI_PRICE_LIST_STATE", "/tmp/price-lists-sent.json")
@@ -69,8 +77,10 @@ def _since_default() -> str:
 
 
 async def crawl(since: str = "", site_path: str = SITE_PATH, root: str = ROOT, host: str = "",
-                suppliers: Optional[List[str]] = None) -> Dict[str, Any]:
-    """{'files': [...], 'drive_id': ..., 'folders': n}: PDFs in each supplier's pricing folders modified since ``since``."""
+                suppliers: Optional[List[str]] = None, kind: str = "price") -> Dict[str, Any]:
+    """{'files': [...], 'drive_id': ..., 'folders': n}: the files of this kind (PDFs in each supplier's pricing
+    folders, or reports in its dunnage folders) modified since ``since``."""
+    folder_re, exts = KINDS[kind]["folder"], KINDS[kind]["exts"]
     since = since or _since_default()
     if not host:
         from services.config_service import SHAREPOINT_SITE_HOSTNAME
@@ -97,7 +107,7 @@ async def crawl(since: str = "", site_path: str = SITE_PATH, root: str = ROOT, h
                 continue
             folders_read += 1
             stack = [(child, 1, child.get("name") or "") for child in await _children(client, token, drive["id"], sup["id"])
-                     if "folder" in child and PRICING_FOLDER.search(str(child.get("name") or ""))]
+                     if "folder" in child and folder_re.search(str(child.get("name") or ""))]
             while stack:
                 folder, depth, rel = stack.pop()
                 folders_read += 1
@@ -105,17 +115,17 @@ async def crawl(since: str = "", site_path: str = SITE_PATH, root: str = ROOT, h
                     nm = str(it.get("name") or "")
                     if "folder" in it and depth < MAX_DEPTH:
                         stack.append((it, depth + 1, f"{rel}/{nm}"))
-                    elif "file" in it and nm.lower().endswith(".pdf") and str(it.get("lastModifiedDateTime") or "")[:10] >= since:
+                    elif "file" in it and nm.lower().endswith(exts) and str(it.get("lastModifiedDateTime") or "")[:10] >= since:
                         files.append({"id": it["id"], "supplier": name, "name": nm, "path": rel,
                                       "modified": it.get("lastModifiedDateTime") or "",
                                       "etag": it.get("eTag") or it.get("lastModifiedDateTime") or ""})
     return {"files": files, "drive_id": drive["id"], "folders": folders_read, "since": since}
 
 
-def _intake_url() -> str:
+def _intake_url(kind: str = "price") -> str:
     from services.new_item_requests import get_settings
     url = get_settings().url
-    return re.sub(r"/new-items/?$", "/price-lists", url) if url else ""
+    return re.sub(r"/new-items/?$", KINDS[kind]["endpoint"], url) if url else ""
 
 
 def _load_state(path: str) -> Dict[str, Any]:
@@ -135,11 +145,11 @@ def _save_state(path: str, state: Dict[str, Any]) -> None:
 
 
 async def run(send_it: bool = False, since: str = "", suppliers: Optional[List[str]] = None, resend: bool = False,
-              state_path: str = STATE_PATH, limit: int = 0) -> Dict[str, Any]:
+              state_path: str = STATE_PATH, limit: int = 0, kind: str = "price") -> Dict[str, Any]:
     """Crawl, then (with ``send_it``) send the new and changed files. Counts and file names only."""
     started = datetime.now(timezone.utc)
     try:
-        listing = await crawl(since=since, suppliers=suppliers)
+        listing = await crawl(since=since, suppliers=suppliers, kind=kind)
     except PriceListIndexError as exc:
         return {"status": "SHAREPOINT_ERROR", "reason": str(exc)}
     files = listing["files"]
@@ -157,7 +167,7 @@ async def run(send_it: bool = False, since: str = "", suppliers: Optional[List[s
         return out
     from services.new_item_requests import get_settings
     settings = get_settings()
-    url = _intake_url()
+    url = _intake_url(kind)
     if not (url and settings.key):
         out["status"] = "NOT_CONFIGURED"
         return out
@@ -173,7 +183,7 @@ async def run(send_it: bool = False, since: str = "", suppliers: Optional[List[s
                 if resp.status_code >= 400 or not resp.content or len(resp.content) > MAX_BYTES:
                     failed += 1
                     continue
-                body = {"name": f["name"], "pdf_b64": base64.b64encode(resp.content).decode("ascii"),
+                body = {"name": f["name"], KINDS[kind]["body"]: base64.b64encode(resp.content).decode("ascii"),
                         "source": f"OneGamer {f['supplier']}/{f['path']}"}
                 answer = await client.post(url, json=body, headers={"X-GPI-Intake-Key": settings.key,
                                                                    "Content-Type": "application/json"})
@@ -181,7 +191,8 @@ async def run(send_it: bool = False, since: str = "", suppliers: Optional[List[s
                     failed += 1
                     continue
                 result = answer.json()
-                read = len(result.get("read") or [])
+                read = len(result.get("read") or []) if kind == "price" else \
+                    (1 if result.get("status") == "ACCEPTED" else 0)
                 if read:
                     kept += 1
                     lists += read

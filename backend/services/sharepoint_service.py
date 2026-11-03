@@ -116,6 +116,33 @@ async def _resolve_site_and_drive(client: httpx.AsyncClient, token: str) -> Tupl
     return site_id, drive["id"]
 
 
+_SITE_DRIVE: Dict[str, Any] = {}
+_TRANSIENT = (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.RemoteProtocolError)
+
+
+async def _site_and_drive(client, token):
+    """Site and library ids (fixed per configuration), looked up once and
+    retried once on a transient error. Both uploads that failed 11-02/11-03
+    failed here, before the file was sent (ConnectError; Graph "Service
+    unavailable" listing drives), and were never tried again."""
+    key = f"{SHAREPOINT_SITE_HOSTNAME}|{SHAREPOINT_SITE_PATH}|{SHAREPOINT_LIBRARY_NAME}"
+    if _SITE_DRIVE.get("key") == key:
+        return _SITE_DRIVE["site_id"], _SITE_DRIVE["drive_id"]
+    for attempt in (1, 2):
+        try:
+            site_id, drive_id = await _resolve_site_and_drive(client, token)
+            break
+        except _TRANSIENT:
+            if attempt == 2:
+                raise
+        except Exception as e:  # noqa: BLE001
+            if attempt == 2 or not re.search(r"unavailable|timeout|throttl|HTTP 5\d\d|too many", str(e), re.I):
+                raise
+        await asyncio.sleep(5)
+    _SITE_DRIVE.update(key=key, site_id=site_id, drive_id=drive_id)
+    return site_id, drive_id
+
+
 async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
     folder_for_url = str(folder or "").strip("/")
     if DEMO_MODE or not GRAPH_CLIENT_ID:
@@ -133,7 +160,7 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
 
     token = await _get_graph_token()
     async with httpx.AsyncClient(timeout=30.0) as client:
-        _, drive_id = await _resolve_site_and_drive(client, token)
+        _, drive_id = await _site_and_drive(client, token)
         from urllib.parse import quote
 
         safe_folder = quote(folder_for_url, safe="/")
@@ -149,7 +176,7 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
                 url += "?@microsoft.graph.conflictBehavior=" + conflict
             for attempt in (1, 2):
                 try:
-                    return await client.put(
+                    resp = await client.put(
                         url,
                         headers={
                             "Authorization": f"Bearer {token}",
@@ -157,7 +184,13 @@ async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str)
                         },
                         content=file_content,
                     )
-                except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError):
+                    # Throttled / service unavailable comes back as a status,
+                    # not an exception: retried once the same way.
+                    if resp.status_code in (429, 500, 502, 503, 504) and attempt == 1:
+                        await asyncio.sleep(5)
+                        continue
+                    return resp
+                except _TRANSIENT:
                     if attempt == 2:
                         raise
                     await asyncio.sleep(5)
@@ -216,7 +249,7 @@ async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
 
     token = await _get_graph_token()
     async with httpx.AsyncClient(timeout=30.0) as client:
-        _, drive_id = await _resolve_site_and_drive(client, token)
+        _, drive_id = await _site_and_drive(client, token)
         from urllib.parse import quote
 
         current_parts = []

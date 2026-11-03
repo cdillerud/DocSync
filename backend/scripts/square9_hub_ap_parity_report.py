@@ -530,8 +530,9 @@ def _assign_one_to_one(square_docs: List["SquareDoc"], hub_docs: List["HubDoc"],
 # Hub-side mongo loader
 # ---------------------------------------------------------------------------
 
-def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
-    """Read AP-lane docs from hub_documents within the requested window."""
+def load_hub_ap_docs(since_hours: int, limit: int, lanes: Tuple[str, ...] = ("AP",)) -> List[HubDoc]:
+    """Read AP-lane docs (or the given mailbox lanes) from hub_documents
+    within the requested window."""
     from pymongo import MongoClient  # local import keeps unit tests dep-free
 
     client = MongoClient(os.environ["MONGO_URL"])
@@ -542,7 +543,7 @@ def load_hub_ap_docs(since_hours: int, limit: int) -> List[HubDoc]:
     # Split children of a backfilled batch file carry source=auto_split, so they
     # are excluded through batch_parent_id.
     backfill_ids = db.hub_documents.distinct("id", {"source": "square9_backfill"})
-    query = {"mailbox_category": "AP", "created_utc": {"$gte": cutoff},
+    query = {"mailbox_category": {"$in": list(lanes)}, "created_utc": {"$gte": cutoff},
              "source": {"$ne": "square9_backfill"},
              "batch_parent_id": {"$nin": backfill_ids}}
     backfilled = db.hub_documents.count_documents(
@@ -670,6 +671,9 @@ def filter_square_docs_by_non_transactional_pattern(
 TRIAGE_OUTPUT_COLUMNS = [
     "square9_name", "square9_parent_path", "square9_modified",
     "best_hub_candidate", "best_score", "best_reason",
+    "other_lane_match",
+    "other_lane_hub_doc_id",
+    "other_lane_hub_file_name",
 ]
 
 
@@ -962,6 +966,9 @@ def format_summary_text(
     if llm_assist_enabled:
         out.append(f"  llm_assisted_match:        {bucket_counts.get('llm_assisted_match', 0)}")
     out.append(f"  square9_only (no_match):   {bucket_counts.get('no_match', 0)}")
+    if bucket_counts.get("no_match_found_in_other_lane"):
+        out.append(f"    of which in Hub's Operations/Sales lane: {bucket_counts['no_match_found_in_other_lane']}"
+                   " (not counted as matched)")
     out.append(f"  hub_only:                  {bucket_counts.get('hub_only', 0)}")
     if recycle_bin_check_enabled:
         out.append(f"  recently_deleted_match:    {bucket_counts.get('recently_deleted_match', 0)}  "
@@ -1119,8 +1126,15 @@ def run_compare(
     recycle_bin_since_hours: int = 168,
     recycle_bin_site_path: Optional[str] = None,
     hub_window_start: Optional[datetime] = None,
+    other_lane_docs: Optional[List[HubDoc]] = None,
 ) -> Dict[str, Any]:
-    """Pure function — accepts loaded inputs, returns summary + rows."""
+    """Pure function — accepts loaded inputs, returns summary + rows.
+
+    other_lane_docs: Hub documents from the Operations / Sales mailboxes.
+    A Square9 AP filing left unmatched is looked up there and counted as
+    no_match_found_in_other_lane: the Hub has it, but not in the AP lane,
+    so it stays out of the match rate (2026-11-03: Martin Warehousing,
+    Koch WA2318F and Ortho W119235 arrived via Operations / Sales)."""
     poll_health = poll_health or {"failed_runs": [], "failed_run_count": 0}
     # hub_docs may include a lookback before the comparison window so a
     # Square9 doc can pair with a Hub copy received earlier (Hub caught it
@@ -1133,6 +1147,7 @@ def run_compare(
     bucket_counts["hub_only"] = 0
     bucket_counts["llm_assisted_match"] = 0
     bucket_counts["recently_deleted_match"] = 0
+    bucket_counts["no_match_found_in_other_lane"] = 0
 
     inv_tol = invoice_date_tolerance_days if match_by_invoice_date else None
 
@@ -1189,6 +1204,18 @@ def run_compare(
             bucket_counts["llm_assisted_match"] += 1
             matched_hub_ids.add(matched_hub.doc_id)
             llm_assist_count += 1
+
+    if other_lane_docs:
+        for sq, row_idx in no_match_entries:
+            if rows[row_idx].get("match_bucket") != "no_match":
+                continue
+            od, r = best_match(sq, other_lane_docs, invoice_date_tolerance_days=inv_tol)
+            if od is None or r.bucket == "no_match":
+                continue
+            rows[row_idx]["other_lane_match"] = f"{r.bucket}:{r.reason}"
+            rows[row_idx]["other_lane_hub_doc_id"] = od.doc_id
+            rows[row_idx]["other_lane_hub_file_name"] = od.file_name
+            bucket_counts["no_match_found_in_other_lane"] += 1
 
     # Recycle-bin adjustment: for Hub docs that still have no Square9
     # counterpart, check whether the reason is that Square9 deleted
@@ -1713,6 +1740,12 @@ def main() -> int:
     # Pull Hub side from Mongo
     hub_docs = load_hub_ap_docs(args.since_hours + args.hub_lookback_days * 24, args.limit)
     hub_window_start = datetime.now(timezone.utc) - timedelta(hours=args.since_hours)
+    try:
+        other_lane_docs = load_hub_ap_docs(args.since_hours + args.hub_lookback_days * 24, args.limit,
+                                           lanes=("Operations", "SALES", "Sales"))
+    except Exception as e:  # noqa: BLE001
+        print(f"Other-lane lookup skipped: {e!r}", file=sys.stderr)
+        other_lane_docs = None
     poll_health = load_recent_poll_health(args.since_hours)
 
     print(
@@ -1750,6 +1783,7 @@ def main() -> int:
         recycle_bin_since_hours=prod_window_hours,
         recycle_bin_site_path=args.recycle_bin_site_path,
         hub_window_start=hub_window_start,
+        other_lane_docs=other_lane_docs,
     )
     if not args.no_record_efficacy:
         record_daily_efficacy(result["rows"], prod_window_hours)

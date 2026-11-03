@@ -543,7 +543,17 @@ def load_hub_ap_docs(since_hours: int, limit: int, lanes: Tuple[str, ...] = ("AP
     # Split children of a backfilled batch file carry source=auto_split, so they
     # are excluded through batch_parent_id.
     backfill_ids = db.hub_documents.distinct("id", {"source": "square9_backfill"})
-    query = {"mailbox_category": {"$in": list(lanes)}, "created_utc": {"$gte": cutoff},
+    lane_q = {"mailbox_category": {"$in": list(lanes)}}
+    if lanes == ("AP",):
+        # Operations documents mirrored into AP queue (ap_mirror_sources: Koch
+        # receivers, Victor Allen consignment, Operations invoices) carry an
+        # ap_stage: AP works them, so they are AP-lane here too.
+        lane_q = {"$or": [{"mailbox_category": "AP"},
+                           {"mailbox_category": "Operations", "ap_stage": {"$exists": True}}]}
+    elif "Operations" in lanes:
+        lane_q = {"$or": [{"mailbox_category": {"$in": [l for l in lanes if l != "Operations"]}},
+                           {"mailbox_category": "Operations", "ap_stage": {"$exists": False}}]}
+    query = {**lane_q, "created_utc": {"$gte": cutoff},
              "source": {"$ne": "square9_backfill"},
              "batch_parent_id": {"$nin": backfill_ids}}
     backfilled = db.hub_documents.count_documents(

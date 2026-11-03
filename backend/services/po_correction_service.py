@@ -144,6 +144,17 @@ def _trusted_label(table: Dict[str, Any], vendor: str, labs: set):
     return None
 
 
+def _never_label(table: Dict[str, Any], vendor: str, labs: set) -> bool:
+    """A number whose label is learned as never the order on BC-entered
+    invoices (Canpack "customer" 0 of 646, "usa delivery to" 0 of 637)."""
+    for lab in labs:
+        for key, need in ((f"{vendor}|{lab}", LABEL_MIN_VENDOR), (f"*|{lab}", LABEL_MIN_ALL)):
+            t = table.get(key)
+            if t and t["tot"] >= need and t["hit"] <= (1 - LABEL_PRECISION) * t["tot"]:
+                return True
+    return False
+
+
 def candidates_from(value: str) -> List[str]:
     v = str(value or "").strip().upper()
     out: List[str] = []
@@ -222,15 +233,22 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
                 picked = [(c, lab) for c in txt for lab in [_trusted_label(labels, v, order_labels(text, c))] if lab]
                 if len(picked) == 1:
                     found, source = picked[0][0], f"pdf_text (label '{picked[0][1]}')"
-                elif v in receipt_trusted:
+                if not found and v in receipt_trusted:
                     day = str(d.get("created_utc") or "")[:10]
                     rec = [c for c in txt if await _received_by(db, c, v, day)]
                     if len(rec) == 1:
                         found, source = rec[0], "pdf_text (received from vendor)"
+                if not found:
+                    # The other numbers' labels are learned as never the order
+                    # (Canpack's customer number and delivery-to reference
+                    # beside the order). Replay on BC-entered invoices since
+                    # 08-15: 276 resolved, 238 BC's order, 26 a prepayment (PR)
+                    # order AP booked instead, 12 a release of the same order.
+                    left = [c for c in txt if not _never_label(labels, v, order_labels(text, c))]
+                    if len(left) == 1:
+                        found, source = left[0], "pdf_text (other numbers' labels are never the order)"
                     else:
                         stats["ambiguous"] += 1
-                else:
-                    stats["ambiguous"] += 1
         else:
             stats["ambiguous"] += 1
         if not found and not raw and d.get("batch_parent_id") and d.get("invoice_number_clean"):
@@ -247,6 +265,7 @@ async def correct_recent(db, days: int = 14, apply: bool = True) -> Dict[str, An
             continue
         stats["fixed_from_po_field" if source == "po_field" else ("fixed_from_sibling" if source == "split_sibling"
                                                                   else "fixed_by_label" if source.startswith("pdf_text (label")
+                                                                  else "fixed_by_ruling_out" if source.startswith("pdf_text (other")
                                                                   else "fixed_by_receipt" if source.startswith("pdf_text (received")
                                                                   else "fixed_from_text")] += 1
         upd: Dict[str, Any] = {"po_from_text": {"value": found, "source": source, "raw": raw, "at": now}}

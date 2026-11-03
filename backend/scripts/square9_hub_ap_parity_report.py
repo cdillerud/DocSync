@@ -791,6 +791,7 @@ OUTPUT_COLUMNS = [
     "hub_suggested_job_type", "hub_classification_method",
     "hub_vendor_canonical", "hub_invoice_number_clean", "hub_amount_float",
     "hub_po_number_clean", "hub_email_sender", "hub_email_subject", "hub_created_utc",
+    "other_lane_match", "other_lane_hub_doc_id", "other_lane_hub_file_name",
 ]
 
 

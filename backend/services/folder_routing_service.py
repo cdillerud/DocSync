@@ -1736,7 +1736,12 @@ async def _route_with_feedback_core(
     if feedback_folder and not _is_working_folder(feedback_folder):
         logger.info("[Routing] ignoring learned folder outside Square9 working folders: %r", feedback_folder)
         feedback_folder = None
-    if feedback_folder and _lane_root(feedback_folder) in _LANE_ROOTS and _order_number_of(doc, {}, doc.get("routing_details") or {}):
+    # The order printed on the document counts too: intake routes before the
+    # PO is read from the text, and a Tumalo bill carries its W-order only as
+    # the bill of lading (W119113 at intake -> vendor rule "Warehouse
+    # International"; staff: Warehouse Not International / Ball Orders).
+    if feedback_folder and _lane_root(feedback_folder) in _LANE_ROOTS and (
+            _order_number_of(doc, {}, doc.get("routing_details") or {}) or _text_order_refs(doc)):
         # Warehouse vs dropship is a property of the order, not the vendor
         # (Ball ships both ways); with an order number the rules decide it.
         logger.info("[Routing] order number present; ignoring vendor-level lane rule %r", feedback_folder)

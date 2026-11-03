@@ -152,6 +152,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
             "--limit", "20000", "--no-record-efficacy", "--out-csv", "prod_reports/parity_hourly.csv", timeout=1200)
         summary["routing_learning"] = await _script(
             "scripts/square9_daily_learning.py", "--csv", "prod_reports/parity_hourly.csv", "--confirm", "APPLY")
+        from services.routing_feedback_service import self_check as feedback_self_check
+        summary["feedback_self_check"] = await feedback_self_check(db)
         from services.lane_profile_service import learn_from_csv
         summary["lane_profiles"] = await learn_from_csv(db, "/app/prod_reports/parity_hourly.csv")
         from services.lane_profile_service import learn_folders_from_csv

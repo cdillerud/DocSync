@@ -331,11 +331,67 @@ async def _profile_alias_rules(
     ]
 
 
+# One folder per vendor / type / has-PO is right only for a vendor staff
+# file in one place. Measured 2026-11-02 on staff filings since 10-01: the
+# entries routed 240 documents, 120 right; Tumalo 49 of 145 (staff file it
+# Dropship 60% / Warehouse 40%, by load), and its "no PO" entry flipped
+# between folders day to day. An entry whose top folder is under 80% of the
+# vendor's last 60 days of filings (5+) is retired, re-checked each learning cycle; replay
+# of those 240 as intake routed them: 111 -> 226 right, none lost.
+SELF_CHECK_DAYS, SELF_CHECK_MIN_N, SELF_CHECK_MIN_SHARE = 60, 5, 0.8
+
+
+def _fb_root(p: Any) -> str:
+    p = str(p or "").strip("/")
+    if p.lower().startswith("temp folder/"):
+        p = p[12:]
+    r = p.split("/")[0].strip().lower()
+    return "s&h" if r.startswith("s&h") else r   # waiting / approved: one decision
+
+
+async def self_check(db) -> Dict[str, Any]:
+    from collections import Counter, defaultdict
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    since = (now - timedelta(days=SELF_CHECK_DAYS)).isoformat()
+    fil = {}
+    async for f in db.folder_filings.find({"filed_at": {"$gte": since}, "hub_doc_id": {"$nin": [None, ""]}},
+                                          {"_id": 0, "hub_doc_id": 1, "top": 1, "vendor": 1}):
+        fil[f["hub_doc_id"]] = f
+    counts: Dict[Any, Counter] = defaultdict(Counter)
+    ids = list(fil)
+    for i in range(0, len(ids), 2000):
+        async for d in db.hub_documents.find({"id": {"$in": ids[i:i + 2000]}},
+                                             {"_id": 0, "id": 1, "document_type": 1, "vendor_canonical": 1}):
+            f = fil[d["id"]]
+            counts[(str(f.get("vendor") or d.get("vendor_canonical") or "").lower(),
+                    str(d.get("document_type") or "").upper())][_fb_root(f.get("top"))] += 1
+    st = {"retired": 0, "kept": 0, "unmeasured": 0}
+    async for r in db[COLLECTION].find({}, {"_id": 1, "vendor_pattern": 1, "doc_type": 1, "correct_folder": 1}):
+        c = counts.get((str(r.get("vendor_pattern") or "").lower(), str(r.get("doc_type") or "").upper()))
+        n = sum(c.values()) if c else 0
+        if n < SELF_CHECK_MIN_N:
+            st["unmeasured"] += 1
+            await db[COLLECTION].update_one({"_id": r["_id"]}, {"$set": {"retired": False}})
+            continue
+        share = c[_fb_root(r.get("correct_folder"))] / n
+        retired = share < SELF_CHECK_MIN_SHARE
+        st["retired" if retired else "kept"] += 1
+        await db[COLLECTION].update_one({"_id": r["_id"]}, {"$set": {
+            "retired": retired, "self_check": {"n": n, "share": round(share, 3), "at": now.isoformat(),
+                                               "staff_tops": dict(c.most_common(3))}}})
+    logger.info("[Feedback] self-check %s", st)
+    return st
+
+
 def _deduplicate_rules(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """De-duplicate exact-key and compatibility-query results."""
+    """De-duplicate exact-key and compatibility-query results; entries the
+    self-check retired are not used."""
     deduped: List[Dict[str, Any]] = []
     seen = set()
     for rule in rules:
+        if rule.get("retired"):
+            continue
         identity = (
             str(rule.get("routing_key") or ""),
             str(rule.get("correct_folder") or ""),

@@ -192,7 +192,25 @@ def tokens(desc: str, ctx: List[str], unit_price: Optional[float] = None) -> fro
     return frozenset(out)
 
 
+# Per-run memo of context(), keyed by document and PO. build_examples,
+# _out_of_time and evaluate each computed it for the same ~8,000 invoices
+# (about 20,000 calls at ~18 ms, mostly the re-bill lookup: 375 of ~1,550 s
+# per learning cycle, 2026-11-03). Only run() turns it on, inside its own
+# process; plan() in the backend always computes it fresh.
+_CTX_MEMO: Optional[Dict[Tuple[str, str], List[str]]] = None
+
+
 async def context(db, d: Dict[str, Any]) -> List[str]:
+    key = (str(d.get("id") or ""), str(d.get("po_number_clean") or "").strip().upper())
+    if _CTX_MEMO is not None and key[0] and key in _CTX_MEMO:
+        return list(_CTX_MEMO[key])
+    ctx = await _context(db, d)
+    if _CTX_MEMO is not None and key[0]:
+        _CTX_MEMO[key] = list(ctx)
+    return ctx
+
+
+async def _context(db, d: Dict[str, Any]) -> List[str]:
     from services.sandbox_draft_service import rebill_order
     po = str(d.get("po_number_clean") or "").strip().upper()
     ctx = []
@@ -948,8 +966,26 @@ async def _out_of_time(db, months: int = OOT_MONTHS) -> Dict[str, collections.Co
     return out
 
 
-async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
+async def _out_of_time_daily(db) -> Dict[str, collections.Counter]:
+    """_out_of_time once per UTC day. It rebuilds a coder per month of the
+    window (621 of ~1,550 s per learning cycle, 2026-11-03) and only feeds
+    the daily-scale promotion decision; the coder itself still retrains
+    every cycle."""
+    today = datetime.now(timezone.utc).date().isoformat()
+    st = await db.line_learning_state.find_one({"_id": "oot"}) or {}
+    if st.get("date") == today and isinstance(st.get("by_vendor"), dict):
+        return collections.defaultdict(collections.Counter,
+                                       {v: collections.Counter(c) for v, c in st["by_vendor"].items()})
     oot = await _out_of_time(db)
+    await db.line_learning_state.update_one({"_id": "oot"}, {"$set": {
+        "date": today, "by_vendor": {v: dict(c) for v, c in oot.items()}}}, upsert=True)
+    return oot
+
+
+async def evaluate(db, scores: str = "line_learning_scores") -> Dict[str, Any]:
+    # Live scores reuse today's out-of-time test; shadow evaluations of a
+    # changed coder compute their own.
+    oot = await (_out_of_time_daily(db) if scores == "line_learning_scores" else _out_of_time(db))
     C = await coder(db, refresh=True)
     t: Dict[str, collections.Counter] = collections.defaultdict(collections.Counter)
     seen = set()
@@ -1110,13 +1146,18 @@ async def plan(db, d: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 async def run(db) -> Dict[str, Any]:
+    global _CTX_MEMO
     out: Dict[str, Any] = {}
     try:
         out["harvest"] = await harvest(db)
     except Exception as e:
         out["harvest"] = {"error": repr(e)[:200]}
-    out["examples"] = await build_examples(db)
-    out["evaluate"] = await evaluate(db)
+    _CTX_MEMO = {}
+    try:
+        out["examples"] = await build_examples(db)
+        out["evaluate"] = await evaluate(db)
+    finally:
+        _CTX_MEMO = None
     try:
         out["ai"] = await evaluate_ai(db)
     except Exception as e:

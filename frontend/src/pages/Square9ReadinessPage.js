@@ -754,7 +754,10 @@ export default function Square9ReadinessPage() {
         <Card><CardContent className="p-4"><StatBlock label="Square9 docs" value={latest?.square_count ?? '—'} /></CardContent></Card>
         <Card><CardContent className="p-4"><StatBlock label="Matched" value={latest?.matched_count ?? '—'} /></CardContent></Card>
         <Card><CardContent className="p-4"><StatBlock label="Strong evidence" value={bucketCounts.strong_evidence_match ?? '—'} /></CardContent></Card>
-        <Card><CardContent className="p-4"><StatBlock label="No match" value={bucketCounts.no_match ?? '—'} /></CardContent></Card>
+        <Card><CardContent className="p-4"><StatBlock label="No match" value={bucketCounts.no_match ?? '—'}
+          sublabel={bucketCounts.no_match_found_in_other_lane
+            ? `${bucketCounts.no_match_found_in_other_lane} reached the Hub in Operations/Sales, not AP`
+            : undefined} /></CardContent></Card>
       </div>
 
       {/* Real remaining gaps */}

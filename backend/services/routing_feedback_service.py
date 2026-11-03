@@ -484,6 +484,13 @@ async def record_correction(
 
     primary = next((c for c in candidates if c.get("stable")), candidates[0])
     key = _make_routing_key(primary["normalized"], doc_type, has_po, is_international)
+    # A key the self-check retired is left to the self-check, which re-reads
+    # staff's filings each cycle and brings it back if they settle. Inserting
+    # it again raised a duplicate key and stopped the whole learning run
+    # (4 of 9 cycles, 2026-11-03: tumaloc|AP_Invoice|no_po|domestic).
+    if any(r.get("retired") for r in exact_rules) or await _db[COLLECTION].find_one(
+            {"routing_key": key, "retired": True}, {"_id": 1}):
+        return {"status": "retired", "key": key}
     await _db[COLLECTION].insert_one({
         "vendor_pattern": primary["normalized"],
         "vendor_canonical_key": primary["value"],

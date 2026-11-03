@@ -59,6 +59,12 @@ CAUGHT = {"exact_match", "strong_evidence_match", "likely_match", "possible_matc
 def reason_key(why: str) -> str:
     """A routing reason with its specifics (orders, vendors, folders) removed,
     so decisions of the same kind are measured together."""
+    # The AI's explanation differs every time: each AI decision was its own
+    # "route" of 1-2 filings and never measurable (Tumalo: 11 AI-routed
+    # filings, 10 right, all in Needs staff, 2026-11-02). Measured together,
+    # per vendor like the other routes.
+    if (why or "").startswith("AI decided"):
+        return "AI decided where the learned model was unsure"
     w = re.sub(r"\d+", "#", why or "")
     w = re.sub(r"→ .*", "→ X", w)
     w = re.sub(r"\(was: .*", "(was: ...)", w)

@@ -137,6 +137,20 @@ def normalize_mailbox_category(raw: Optional[str]) -> Optional[str]:
 # Email Watcher Config
 # =========================================================================
 
+
+async def _stamp_received(db, doc_id, msg) -> None:
+    """The mailbox's receivedDateTime on the document. Intake stamped
+    email_received_utc with its own clock, so it always equalled
+    created_utc and mail-to-Hub delay could not be measured (2026-11-02)."""
+    rec = (msg or {}).get("receivedDateTime")
+    if not doc_id or not rec:
+        return
+    try:
+        await db.hub_documents.update_one({"id": doc_id}, {"$set": {"email_received_utc": rec,
+                                                                   "email_received_source": "graph"}})
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[EmailPoll] received time not stamped on %s: %r", doc_id, e)
+
 async def get_email_watcher_config() -> dict:
     """Load email watcher configuration from database."""
     db = get_db()
@@ -702,6 +716,7 @@ async def _poll_mailbox_for_attachments_unlocked():
                                 intake_result.get("document_id")
                                 or intake_result.get("document", {}).get("id")
                             )
+                            await _stamp_received(db, doc_id, msg)
                             await record_mail_intake_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=att_hash,
@@ -994,6 +1009,7 @@ async def run_sales_email_poll():
                                 result.get("document_id")
                                 or result.get("document", {}).get("id")
                             )
+                            await _stamp_received(db, doc_id, msg)
                             await record_sales_mail_log(
                                 message_id=msg_id, internet_message_id=internet_msg_id,
                                 attachment_id=att_id, attachment_hash=content_hash,

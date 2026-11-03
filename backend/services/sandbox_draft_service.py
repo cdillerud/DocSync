@@ -1139,6 +1139,17 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
         await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sandbox_draft_skipped": {
             "reason": reason, "at": datetime.now(timezone.utc).isoformat()}}})
 
+    # Waits past 10 days end here, whatever the invoice's age: candidates()
+    # holds the newest 50 of the last 30 days, so older waits were never
+    # re-checked and sat in "Waiting for receipt" (Hwa Hsia since 10-01,
+    # Canpack since 09-25, 8 on 2026-11-03).
+    overdue = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    async for d in db.hub_documents.find(
+            {"ap_stage": "awaiting_receipt", "draft_waiting_receipt.since": {"$lt": overdue},
+             "sandbox_draft_skipped": {"$exists": False}, "is_duplicate": {"$ne": True}},
+            {"_id": 0, "id": 1, "file_name": 1, "draft_waiting_receipt": 1}).limit(200):
+        await skip(d, "waited 10 days for a BC receipt that adds up to this invoice: "
+                   + str((d.get("draft_waiting_receipt") or {}).get("reason") or ""))
     for d in await candidates(db, limit * 10):
         if len(results) >= limit:
             break

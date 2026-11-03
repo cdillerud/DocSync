@@ -343,9 +343,16 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     from services.folder_routing_service import route_with_feedback
     from services.llm_router import get_provider
     fil = {}
+    # Every folder staff put the document in: a combined PDF filed to two
+    # folders, or one staff moved, kept only the filing read last, so the
+    # AI was graded wrong on 120760OBG (Warehouse / B&B and Dropship /
+    # Dunnage) and Tumalo 0315575 (2026-11-02).
+    staff_labels = collections.defaultdict(set)
     async for f in db.folder_filings.find({}):
         if f.get("hub_doc_id") and f.get("top"):
             fil[f["hub_doc_id"]] = f
+            staff_labels[f["hub_doc_id"]].add(FL.label(f))
+    staff_roots = {k: {v.split("/")[0] for v in vs} for k, vs in staff_labels.items()}
     data = []
     async for d in db.hub_documents.find({"id": {"$in": list(fil)}}, {"_id": 0, "file_content_b64": 0}):
         f = fil[d["id"]]
@@ -395,10 +402,13 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
         except Exception:
             ai, conf, why = "", 0.0, "error"
         await asyncio.sleep(2)
+        did = str(d.get("id") or "")
+        ok_labels = staff_labels.get(did) or {truth}
+        ok_roots = staff_roots.get(did) or {truth.split("/")[0]}
         r["n"] += 1
-        r["current_right"] += cur == truth
-        r["ai_right"] += (ai or cur) == truth
-        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] == truth.split("/")[0], (ai or "").split("/")[0],
+        r["current_right"] += cur in ok_labels
+        r["ai_right"] += (ai or cur) in ok_labels
+        cal.append((float(conf or 0), bool(ai), (ai or "").split("/")[0] in ok_roots, (ai or "").split("/")[0],
                     str(d.get("id") or ""), bool(ai) and (ai or "").split("/")[0] == (rule_lbl or "").split("/")[0]))
         if len(rows) < 15 and ai and ai != cur:
             rows.append({"file": d.get("file_name"), "staff": truth, "current": cur, "ai": ai, "why": why})
@@ -436,10 +446,10 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     # moved from a holding folder kept the verdict of the day it was replayed
     # (4 of 32 "misses" on 2026-11-01 had the AI and staff on the same root).
     def _regrade(x):
-        f = fil.get(x[4])
-        if not f:
+        roots = staff_roots.get(x[4])
+        if not roots:
             return x
-        return (x[0], x[1], bool(x[1]) and x[3] == FL.label(f).split("/")[0], *x[3:])
+        return (x[0], x[1], bool(x[1]) and x[3] in roots, *x[3:])
 
     cal = [_regrade(x) for x in cal]
     calibration, reliable_conf = _calibrate(cal)

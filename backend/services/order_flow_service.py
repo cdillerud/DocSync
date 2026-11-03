@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import logging
+import os
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -436,7 +437,9 @@ async def link(db, text: str, vendor: str = "", created: str = "", key: str = ""
     return {"order": v[1], "orders": [v[1]], "via": via, "from": frm, "shape": shape(via), "p": round(v[0], 3)}
 
 
-_SNAPSHOT = "/tmp/order_flow_index.pkl"
+# On the host-mounted prod_reports volume so a redeploy does not force a
+# 13-minute retrain (container /tmp is wiped by every deploy).
+_SNAPSHOT = os.environ.get("ORDER_FLOW_SNAPSHOT", "/app/prod_reports/.cache/order_flow_index.pkl")
 RELEARN_HOURS = 6
 
 
@@ -467,6 +470,7 @@ async def _learned(db) -> Dict[str, Any]:
         snap = {"state_at": st.get("at"), "idx": {k: v for k, v in _IDX.items() if k != "at"}}
 
         def dump():
+            os.makedirs(os.path.dirname(_SNAPSHOT), exist_ok=True)
             tmp = _SNAPSHOT + ".tmp"
             with open(tmp, "wb") as f:
                 pickle.dump(snap, f, protocol=pickle.HIGHEST_PROTOCOL)

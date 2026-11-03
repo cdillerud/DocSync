@@ -521,6 +521,18 @@ def evaluate_cache_health(
     }
 
 
+
+def _typed_or(branches, entity_types=None):
+    """An $or over number fields, restricted to entity types inside every
+    branch. With bc_entity_type at the top level the planner sometimes caches
+    a plan on the bc_entity_type index and reads ~312,000 keys for one row
+    (372 such lookups, 282 s in 24 h, up to 0.9 s each; 2026-11-03); per
+    branch it can only union the number indexes (3-7 keys)."""
+    if not entity_types:
+        return {"$or": list(branches)}
+    t = {"$in": list(entity_types)}
+    return {"$or": [{**b, "bc_entity_type": t} for b in branches]}
+
 class BCReferenceCacheService:
     """
     Local cache of BC reference entities stored in MongoDB.
@@ -1057,17 +1069,13 @@ class BCReferenceCacheService:
         if not normalized:
             return []
 
-        query = {
-            "$or": [
-                {"normalized_document_no": normalized},
-                {"normalized_external_ref": normalized},
-                {"bc_document_no": raw},
-                {"bc_external_document_no": raw},
-                {"bc_order_number": raw},
-            ]
-        }
-        if entity_types:
-            query["bc_entity_type"] = {"$in": entity_types}
+        query = _typed_or([
+            {"normalized_document_no": normalized},
+            {"normalized_external_ref": normalized},
+            {"bc_document_no": raw},
+            {"bc_external_document_no": raw},
+            {"bc_order_number": raw},
+        ], entity_types)
 
         cursor = self.collection.find(query, {"_id": 0}).limit(20)
         results = await cursor.to_list(length=20)
@@ -1104,16 +1112,13 @@ class BCReferenceCacheService:
         shipment_entity_types = ["salesShipments", "salesOrders"]
 
         # Primary search: find shipments/orders matching the reference
-        primary_query = {
-            "$or": [
-                {"normalized_document_no": normalized},
-                {"normalized_external_ref": normalized},
-                {"bc_document_no": raw},
-                {"bc_external_document_no": raw},
-                {"bc_order_number": raw},
-            ],
-            "bc_entity_type": {"$in": shipment_entity_types}
-        }
+        primary_query = _typed_or([
+            {"normalized_document_no": normalized},
+            {"normalized_external_ref": normalized},
+            {"bc_document_no": raw},
+            {"bc_external_document_no": raw},
+            {"bc_order_number": raw},
+        ], shipment_entity_types)
         primary = await self.collection.find(primary_query, {"_id": 0}).limit(10).to_list(10)
 
         if not primary:
@@ -1128,14 +1133,11 @@ class BCReferenceCacheService:
 
             # Find shipments linked to the same order
             if order_no:
-                cluster_query = {
-                    "$or": [
-                        {"bc_order_number": order_no},
-                        {"bc_document_no": order_no},
-                        {"normalized_document_no": normalize_document_no(order_no)},
-                    ],
-                    "bc_entity_type": {"$in": shipment_entity_types}
-                }
+                cluster_query = _typed_or([
+                    {"bc_order_number": order_no},
+                    {"bc_document_no": order_no},
+                    {"normalized_document_no": normalize_document_no(order_no)},
+                ], shipment_entity_types)
                 cluster_results = await self.collection.find(
                     cluster_query, {"_id": 0}
                 ).limit(10).to_list(10)

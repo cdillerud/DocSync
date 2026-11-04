@@ -441,6 +441,8 @@ async def link(db, text: str, vendor: str = "", created: str = "", key: str = ""
 # 13-minute retrain (container /tmp is wiped by every deploy).
 _SNAPSHOT = os.environ.get("ORDER_FLOW_SNAPSHOT", "/app/prod_reports/.cache/order_flow_index.pkl")
 RELEARN_HOURS = 6
+STALE_OK_HOURS = 48
+_BG_RELEARN: Dict[str, Any] = {}
 
 
 async def _learned(db) -> Dict[str, Any]:
@@ -452,8 +454,12 @@ async def _learned(db) -> Dict[str, Any]:
     import os
     import pickle
     st = await db.learning_state.find_one({"_id": STATE_ID}) or {}
+    # A cycle whose snapshot has aged past RELEARN_HOURS uses it while a
+    # separate process relearns (run_isolated): the inline retrain was 811 s
+    # of a 24-minute cycle every 6 hours (2026-11-04).
+    max_age = STALE_OK_HOURS if os.environ.get("ORDER_FLOW_ALLOW_STALE") else RELEARN_HOURS
     try:
-        fresh = time.time() - os.path.getmtime(_SNAPSHOT) < RELEARN_HOURS * 3600
+        fresh = time.time() - os.path.getmtime(_SNAPSHOT) < max_age * 3600
     except OSError:
         fresh = False
     if fresh and st:
@@ -465,6 +471,13 @@ async def _learned(db) -> Dict[str, Any]:
                 return {**st, "reused_snapshot": True}
         except Exception as e:  # noqa: BLE001
             logger.info("[OrderFlow] snapshot not reused: %r", e)
+    return await _relearn(db)
+
+
+async def _relearn(db) -> Dict[str, Any]:
+    """Retrain and save the snapshot."""
+    import os
+    import pickle
     st = await learn(db)
     try:
         snap = {"state_at": st.get("at"), "idx": {k: v for k, v in _IDX.items() if k != "at"}}
@@ -516,10 +529,27 @@ async def run_isolated(timeout: int = 2400) -> Dict[str, Any]:
     the backend's health checks to time out (2026-10-25 21:20 and 22:06 UTC).
     A separate process leaves the API untouched; results go to the database."""
     import json
+    import os
     import sys
+    env = dict(os.environ)
+    relearning = False
+    try:
+        age = time.time() - os.path.getmtime(_SNAPSHOT)
+    except OSError:
+        age = None
+    if age is not None and RELEARN_HOURS * 3600 <= age < STALE_OK_HOURS * 3600:
+        # Snapshot past its age but recent: link with it now, relearn in a
+        # separate process the cycle does not wait for (one at a time).
+        bg = _BG_RELEARN.get("proc")
+        if bg is None or bg.returncode is not None:
+            _BG_RELEARN["proc"] = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "services.order_flow_service", "--relearn",
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+        relearning = True
+        env["ORDER_FLOW_ALLOW_STALE"] = "1"
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "services.order_flow_service",
-        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, env=env)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout)
     except asyncio.TimeoutError:
@@ -527,7 +557,10 @@ async def run_isolated(timeout: int = 2400) -> Dict[str, Any]:
         return {"error": f"timed out after {timeout}s"}
     line = (out or b"").decode(errors="replace").strip().splitlines()
     try:
-        return json.loads(line[-1]) if line else {"error": f"no output, exit {proc.returncode}"}
+        r = json.loads(line[-1]) if line else {"error": f"no output, exit {proc.returncode}"}
+        if relearning and isinstance(r, dict):
+            r["relearning_in_background"] = True
+        return r
     except ValueError:
         return {"error": line[-1][:200]}
 
@@ -535,12 +568,17 @@ async def run_isolated(timeout: int = 2400) -> Dict[str, Any]:
 if __name__ == "__main__":
     import json
     import os
+    import sys
     from motor.motor_asyncio import AsyncIOMotorClient
 
     async def _main():
         db = AsyncIOMotorClient(os.environ["MONGO_URL"])[os.environ["DB_NAME"]]
         import deps
         deps.set_db(db)
+        if "--relearn" in sys.argv:
+            st = await _relearn(db)
+            print(json.dumps({"relearned": st.get("at"), "seconds": st.get("seconds")}, default=str))
+            return
         r = await apply_recent(db)
         print(json.dumps(r, default=str))
 

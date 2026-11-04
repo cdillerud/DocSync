@@ -1375,6 +1375,18 @@ async def startup():
     await db.migration_candidates.create_index("status")
     await db.migration_candidates.create_index("doc_type")
     logger.info("Migration candidate indexes initialized")
+
+    # Indexes behind the learning cycle's and staff pages' hot lookups
+    # (added 2026-11-03/04; each was a full scan, up to 7.9 s per call).
+    for coll, key, kw in (("bc_purchase_invoice_lines", "number", {}),
+                          ("hub_documents", "matched_vendor_no", {}),
+                          ("hub_documents", "bc_posting_status", {}),
+                          ("hub_documents", "auto_file_failed",
+                           {"name": "auto_file_failed_true", "partialFilterExpression": {"auto_file_failed": True}})):
+        try:
+            await db[coll].create_index(key, **kw)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("index %s.%s: %s", coll, key, e)
     
     # Initialize Event-Driven Workflow Services (Phase 1 & 2)
     set_event_service(db)

@@ -87,6 +87,17 @@ async def queue(view: str = "approvals", approver: Optional[str] = None, limit: 
     return {"view": view, "items": items, "awaiting_by_approver": by_approver, "holds": holds}
 
 
+@router.get("/my-approvals")
+async def my_approvals(user=Depends(get_current_user)):
+    """What the signed-in approver has waiting (requested of them, or
+    suggested for them from their Square 9 filings)."""
+    a = await wf.actor_for(get_db(), user)
+    if not a.get("person") or "approver" not in (a.get("roles") or []):
+        return {"approver": None, "count": 0, "items": []}
+    q = await queue(view="approvals", approver=a["name"], limit=50)
+    return {"approver": a["name"], "count": len(q["items"]), "items": q["items"]}
+
+
 @router.post("/document/{doc_id}/hold")
 async def hold(doc_id: str, req: HoldRequest, user=Depends(get_current_user)):
     await _doc(doc_id)

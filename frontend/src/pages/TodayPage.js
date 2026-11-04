@@ -105,6 +105,7 @@ export default function TodayPage() {
   const [reps, setReps] = useState(null);
   const [mine, setMine] = useState(null);
   const [checks, setChecks] = useState(null);
+  const [myAppr, setMyAppr] = useState(null);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
@@ -117,6 +118,7 @@ export default function TodayPage() {
         api.get('/sales-inbox/reps'),
         api.get('/sales-inbox/order-checks'),
       ]);
+      api.get('/ap-workflow/my-approvals').then(x => setMyAppr(x.data)).catch(() => null);
       if (a.status === 'fulfilled') setAp(a.value.data);
       if (s.status === 'fulfilled') setSales(s.value.data);
       if (k.status === 'fulfilled') setChecks(k.value.data);
@@ -162,7 +164,11 @@ export default function TodayPage() {
         <Side title="Accounts payable" icon={Receipt} accent="border-t-violet-500" to="/ap" linkLabel="AP workspace" testid="today-ap">
           <Sub title="Needs a person">
             <Tile to="/decision-queue" icon={ClipboardList} label="Needs staff" value={c.needs_staff} tone={c.needs_staff ? 'amber' : 'muted'} help="A person must decide; the reason is on each one" />
-            <Tile to="/ap-workflow" icon={CheckCircle2} label="Awaiting approval" value={c.awaiting_approval} tone={c.awaiting_approval ? 'sky' : 'muted'} help="Waiting for a named approver" />
+            {myAppr?.approver ? (
+              <Tile to="/ap-workflow" icon={UserRound} label="My approvals" value={myAppr.count} tone={myAppr.count ? 'sky' : 'muted'} help={`Invoices waiting for you to approve (${c.awaiting_approval ?? 0} awaiting approval in all)`} />
+            ) : (
+              <Tile to="/ap-workflow" icon={CheckCircle2} label="Awaiting approval" value={c.awaiting_approval} tone={c.awaiting_approval ? 'sky' : 'muted'} help="Waiting for a named approver" />
+            )}
             <Tile to="/ap-workflow" icon={PauseCircle} label="On hold" value={c.on_hold} tone={c.on_hold ? 'sky' : 'muted'} help="Held by staff with a reason" />
             <Tile to="/ap?stage=in_bc_check" icon={ClipboardList} label="Entered in BC, check" value={c.in_bc_check} tone={c.in_bc_check ? 'amber' : 'muted'} help="BC's amount or invoice number differs from the document" />
           </Sub>

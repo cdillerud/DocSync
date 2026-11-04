@@ -110,11 +110,66 @@ async def release_hold(db, doc_id: str, by: str, notes: str = "") -> None:
     await _event(db, doc_id, "release_hold", by, notes=notes)
 
 
+TEAMS_APPROVALS_WEBHOOK_ENV = "TEAMS_APPROVALS_WEBHOOK_URL"
+
+
+def _approval_card(doc: Dict[str, Any], appr: Dict[str, Any]) -> Dict[str, Any]:
+    """Adaptive Card for a Teams Workflows webhook: who should approve what."""
+    import os
+    base = (os.environ.get("APP_PUBLIC_URL") or "https://docsync.gamerpackaging.com").rstrip("/")
+    amt = doc.get("amount_float")
+    facts = [{"title": "Vendor", "value": str(doc.get("vendor_canonical") or doc.get("vendor_raw") or "?")},
+             {"title": "Invoice", "value": str(doc.get("invoice_number_clean") or "?")},
+             {"title": "Amount", "value": f"${amt:,.2f}" if isinstance(amt, (int, float)) else "?"},
+             {"title": "Requested by", "value": str(appr.get("requested_by") or "?")}]
+    if appr.get("round", 1) > 1:
+        facts.append({"title": "Round", "value": f"{appr['round']} (resent after rejection)"})
+    if appr.get("notes"):
+        facts.append({"title": "Notes", "value": str(appr["notes"])[:300]})
+    body = [{"type": "TextBlock", "weight": "Bolder", "size": "Medium", "wrap": True,
+             "text": f"{appr.get('approver')}: invoice waiting for your approval"},
+            {"type": "FactSet", "facts": facts}]
+    return {"type": "message", "attachments": [{
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {"$schema": "http://adaptivecards.io/schemas/adaptive-card.json", "type": "AdaptiveCard",
+                    "version": "1.4", "body": body,
+                    "actions": [{"type": "Action.OpenUrl", "title": "Open in the Hub",
+                                 "url": f"{base}/documents/{doc.get('id')}"}]}}]}
+
+
+async def notify_approver(db, doc_id: str, appr: Dict[str, Any]) -> Dict[str, Any]:
+    """Post the approval request to Teams. Off until the webhook is set;
+    never blocks or fails the approval itself."""
+    import os
+    url = os.environ.get(TEAMS_APPROVALS_WEBHOOK_ENV)
+    if not url:
+        return {"skipped": f"{TEAMS_APPROVALS_WEBHOOK_ENV} not set"}
+    try:
+        import httpx
+        doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "id": 1, "vendor_canonical": 1, "vendor_raw": 1,
+                                                               "invoice_number_clean": 1, "amount_float": 1}) or {"id": doc_id}
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(url, json=_approval_card(doc, appr))
+        res = {"status": r.status_code}
+    except Exception as e:  # noqa: BLE001
+        res = {"error": str(e)[:200]}
+    await _event(db, doc_id, "notify_teams", "hub", approver=appr.get("approver"), result=res)
+    return res
+
+
 async def request_approval(db, doc_id: str, approver: str, by: str, notes: str = "") -> Dict[str, Any]:
-    appr = {"approver": approver, "status": "pending", "requested_by": by, "requested_at": _now(), "notes": notes}
-    await db.hub_documents.update_one({"id": doc_id}, {"$set": {"ap_approval": appr, "ap_stage": "awaiting_approval",
-                                                                "ap_stage_updated_at": appr["requested_at"]}})
-    await _event(db, doc_id, "request_approval", by, approver=approver, notes=notes)
+    """Ask a person to approve. A decided earlier round (e.g. rejected, then
+    fixed) is kept in ap_approval_history and the new round is numbered."""
+    doc = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "ap_approval": 1})
+    prev = (doc or {}).get("ap_approval") or {}
+    appr = {"approver": approver, "status": "pending", "requested_by": by, "requested_at": _now(), "notes": notes,
+            "round": int(prev.get("round") or 1) + 1 if prev.get("status") in ("rejected", "approved") else int(prev.get("round") or 1)}
+    upd = {"$set": {"ap_approval": appr, "ap_stage": "awaiting_approval", "ap_stage_updated_at": appr["requested_at"]}}
+    if prev.get("status") in ("rejected", "approved"):
+        upd["$push"] = {"ap_approval_history": prev}
+    await db.hub_documents.update_one({"id": doc_id}, upd)
+    await _event(db, doc_id, "request_approval", by, approver=approver, notes=notes, round=appr["round"])
+    appr["notified"] = await notify_approver(db, doc_id, appr)
     return appr
 
 

@@ -445,9 +445,17 @@ async def refresh_stages(db, days: int = 30, apply: bool = True, doc_id: Optiona
             unset = {k: "" for k in ("staff_reason", "no_draft_reason", "suggested_folder", "routing_reason", "routing_path_accuracy",
                                      "no_action_reason", "check_reason", "staff_decided", "suggested_approver", "approval_kind",
                                      "bc_draft_no", "bc_draft_environment", "learned_p_entered", "file_only_reason") if k not in res}
+            # Unchanged documents are not rewritten: rewriting all ~2,600
+            # every hour was 32 of this step's 45 s (2026-11-04).
+            # ap_stage_updated_at now marks the last change; the refresh
+            # time itself is kept in ap_stage_state.
+            if all(d.get(k) == v for k, v in res.items()) and not any(k in d for k in unset):
+                continue
             await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {**res, "ap_stage_updated_at": now},
                                                                   **({"$unset": unset} if unset else {})})
     out = {"stages": dict(counts), "staff_reasons": dict(reasons), "uncertain_paths": dict(uncertain.most_common(15))}
+    if apply and not doc_id:
+        await db.ap_stage_state.update_one({"_id": "refresh"}, {"$set": {"at": now}}, upsert=True)
     logger.info("[APStage] %s", out)
     return out
 

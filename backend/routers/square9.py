@@ -684,6 +684,10 @@ async def get_ap_stages(days: int = 30):
     rel = await load_reliability(db)
     paths = sorted(({"path": k, **v} for k, v in rel.items()), key=lambda x: -x["n"])[:25]
     last = await db.hub_documents.find_one(base, {"_id": 0, "ap_stage_updated_at": 1}, sort=[("ap_stage_updated_at", -1)])
+    # Stages are refreshed hourly but only changed documents are rewritten,
+    # so the refresh time is read from its own record.
+    ran = (await db.ap_stage_state.find_one({"_id": "refresh"}) or {}).get("at")
+    last = {"ap_stage_updated_at": max(filter(None, [ran, (last or {}).get("ap_stage_updated_at")]), default=None)}
     return {"days": days, "stages": stages, "staff_reasons": reasons, "staff_queue": queue,
             "routing_paths": paths, "reliable_pct": RELIABLE_PCT, "reliable_min_n": RELIABLE_MIN_N,
             "updated_at": (last or {}).get("ap_stage_updated_at")}

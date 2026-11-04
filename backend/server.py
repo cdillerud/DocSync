@@ -1379,6 +1379,10 @@ async def startup():
     # Indexes behind the learning cycle's and staff pages' hot lookups
     # (added 2026-11-03/04; each was a full scan, up to 7.9 s per call).
     for coll, key, kw in (("bc_purchase_invoice_lines", "number", {}),
+                          # Customer lookups in entity resolution still match the
+                          # older cache shape (number + entity_type): 335 ms -> 10 ms.
+                          ("bc_reference_cache", [("number", 1), ("entity_type", 1)],
+                           {"name": "number_entity_type_partial", "partialFilterExpression": {"number": {"$exists": True}}}),
                           ("hub_documents", "matched_vendor_no", {}),
                           ("hub_documents", "bc_posting_status", {}),
                           ("hub_documents", "auto_file_failed",

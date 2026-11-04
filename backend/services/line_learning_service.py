@@ -644,11 +644,21 @@ class Coder:
     def _w(self, t: str) -> float:
         return self.idf.get(t, 3.0)
 
+    def _wsum(self, s: frozenset) -> float:
+        m = self.__dict__.setdefault("_wsums", {})
+        w = m.get(s)
+        if w is None:
+            w = m[s] = sum(self._w(t) for t in s)
+        return w
+
     def _sim(self, a: frozenset, b: frozenset) -> float:
         inter = sum(self._w(t) for t in a & b)
         if not inter:
             return 0.0
-        return inter / sum(self._w(t) for t in a | b)
+        # Weight of the union = both sets' weights less the shared part; each
+        # set's weight is summed once. Summing the union per comparison was
+        # ~90% of coder training (570M calls, 2026-11-04).
+        return inter / (self._wsum(a) + self._wsum(b) - inter)
 
     def code(self, desc: str, ctx: List[str], vendor: str, exclude_doc: Optional[str] = None) -> Tuple[Optional[str], float]:
         q = tokens(desc, ctx)

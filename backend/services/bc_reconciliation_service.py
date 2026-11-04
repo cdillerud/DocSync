@@ -687,7 +687,10 @@ async def resolve_split_entries(db, days: int = 180, apply: bool = True) -> Dict
              "bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
              "bc_status": {"$ne": "Canceled"}},
             {"_id": 0, "bc_document_no": 1, "bc_external_document_no": 1, "normalized_external_ref": 1, "bc_amount": 1,
-             "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1})]
+             "bc_entity_type": 1, "bc_status": 1, "bc_vendor_no": 1, "bc_vendor_name": 1, "bc_order_number": 1, "bc_posting_date": 1}
+            # The planner picked vendor+type+date and fetched every entry of
+            # the vendor (Tumalo: 21,900 per invoice, 199 ms vs 20 ms).
+            ).hint([("bc_vendor_no", 1), ("normalized_external_ref", 1)])]
         parts = [p for p in parts if p["normalized_external_ref"] == base or p["normalized_external_ref"][len(base):].isalpha()
                  or _re.search(r"-\d{1,2}$", str(p.get("bc_external_document_no") or "").strip())]
         if not any(p["normalized_external_ref"] != base for p in parts) or any(p.get("bc_amount") is None for p in parts):

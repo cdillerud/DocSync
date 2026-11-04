@@ -1379,6 +1379,7 @@ async def startup():
     # Indexes behind the learning cycle's and staff pages' hot lookups
     # (added 2026-11-03/04; each was a full scan, up to 7.9 s per call).
     for coll, key, kw in (("bc_purchase_invoice_lines", "number", {}),
+                          ("bc_reference_cache", [("bc_vendor_no", 1), ("normalized_external_ref", 1)], {}),
                           # Customer lookups in entity resolution still match the
                           # older cache shape (number + entity_type): 335 ms -> 10 ms.
                           ("bc_reference_cache", [("number", 1), ("entity_type", 1)],

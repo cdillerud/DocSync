@@ -882,13 +882,33 @@ async def rebill_order(db, d: Dict[str, Any]):
         t = str(t or "").strip().upper()
         refs += re.findall(r"\bW\d{6}\b", t)
         refs += ["W" + x for x in re.findall(r"^(\d{6})$", t)]   # ATS writes BOL 119285 for W119285
+    if not refs:
+        return None
+    idx = await _rebill_index(db)
     for w in dict.fromkeys(refs):
-        o = await db.bc_sales_orders.find_one(
-            {"external_doc_no": {"$regex": r"FREIGHT COST FOR\s*(PO\s*)?" + w + r"\b", "$options": "i"}},
-            {"_id": 0, "order_no": 1})
-        if o:
-            return w, o["order_no"]
+        if w in idx:
+            return w, idx[w]
     return None
+
+
+_REBILL: Dict[str, Any] = {}
+_REBILL_RE = re.compile(r"FREIGHT COST FOR\s*(?:PO\s*)?(W\d{6})\b", re.I)
+
+
+async def _rebill_index(db) -> Dict[str, str]:
+    """W-PO -> the sales order that re-bills its freight, read once per 5
+    minutes. One unanchored regex scan of all sales orders per W reference
+    was 148 s of every hourly line-learning run (2026-11-04)."""
+    import time as _t
+    if _REBILL.get("db") is db and _t.monotonic() - _REBILL.get("t", 0) < 300:
+        return _REBILL["idx"]
+    idx: Dict[str, str] = {}
+    async for o in db.bc_sales_orders.find({"external_doc_no": {"$regex": "FREIGHT COST FOR", "$options": "i"}},
+                                           {"_id": 0, "order_no": 1, "external_doc_no": 1}):
+        for m in _REBILL_RE.finditer(str(o.get("external_doc_no") or "")):
+            idx.setdefault(m.group(1).upper(), o.get("order_no"))
+    _REBILL.update(db=db, t=_t.monotonic(), idx=idx)
+    return idx
 
 
 async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, Any]:

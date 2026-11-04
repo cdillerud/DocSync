@@ -390,18 +390,28 @@ async def evaluate(db, force: bool = False) -> Dict[str, Any]:
     rows = []
     cal = []
     unsure = [i for i in range(len(te)) if float(P[i].max()) < UNSURE][-EVAL_MAX:]
-    for i in unsure:
+    # Three AI calls at a time, each worker still pausing 2 s between its
+    # calls: one at a time this step took 713 s of a 30-minute cycle
+    # (2026-11-03). Tallied below in the original order, so results match.
+    sem = asyncio.Semaphore(3)
+
+    async def _one(i):
         when, toks, truth, rule_lbl, f, d = te[i]
         order = P[i].argsort()[::-1]
         lbl, p = classes[order[0]], float(P[i][order[0]])
         cur = lbl if FL._takes(lbl, p, th, rule_lbl) else rule_lbl
         top3 = ", ".join(f"{classes[k]} ({P[i][k]:.0%})" for k in order[:3])
-        try:
-            ai, conf, why, _ = await decide(db, d, top3, rule_lbl, allowed, before=str(d.get("created_utc") or ""),
-                                            own_name=str(f.get("_id") or "").rsplit("/", 1)[-1], provider=prov)
-        except Exception:
-            ai, conf, why = "", 0.0, "error"
-        await asyncio.sleep(2)
+        async with sem:
+            try:
+                ai, conf, why, _ = await decide(db, d, top3, rule_lbl, allowed, before=str(d.get("created_utc") or ""),
+                                                own_name=str(f.get("_id") or "").rsplit("/", 1)[-1], provider=prov)
+            except Exception:
+                ai, conf, why = "", 0.0, "error"
+            await asyncio.sleep(2)
+        return truth, rule_lbl, f, d, cur, ai, conf, why
+
+    answers = await asyncio.gather(*[_one(i) for i in unsure])
+    for truth, rule_lbl, f, d, cur, ai, conf, why in answers:
         did = str(d.get("id") or "")
         ok_labels = staff_labels.get(did) or {truth}
         ok_roots = staff_roots.get(did) or {truth.split("/")[0]}

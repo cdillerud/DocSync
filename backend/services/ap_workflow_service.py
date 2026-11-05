@@ -120,7 +120,7 @@ def _approval_card(doc: Dict[str, Any], appr: Dict[str, Any]) -> Dict[str, Any]:
     amt = doc.get("amount_float")
     facts = [{"title": "Vendor", "value": str(doc.get("vendor_canonical") or doc.get("vendor_raw") or "?")},
              {"title": "Invoice", "value": str(doc.get("invoice_number_clean") or "?")},
-             {"title": "Amount", "value": f"${amt:,.2f}" if isinstance(amt, (int, float)) else "?"},
+             {"title": "Amount", "value": f"${amt:,.2f}" if isinstance(amt, (int, float)) and amt else "not read from the document"},
              {"title": "Requested by", "value": str(appr.get("requested_by") or "?")}]
     if appr.get("round", 1) > 1:
         facts.append({"title": "Round", "value": f"{appr['round']} (resent after rejection)"})

@@ -184,8 +184,8 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] max-w-5xl overflow-hidden p-0">
-        <DialogHeader className="border-b border-border px-6 py-5 pr-12">
+      <DialogContent className="flex max-h-[92vh] max-w-5xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b border-border px-6 py-5 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <FolderOpen className="h-5 w-5 text-sky-400" />
             Review routing
@@ -195,8 +195,8 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-0 lg:grid-cols-[310px_minmax(0,1fr)]">
-          <aside className="space-y-4 border-b border-border bg-muted/20 p-5 lg:border-b-0 lg:border-r">
+        <div className="grid min-h-0 flex-1 gap-0 overflow-y-auto lg:grid-cols-[310px_minmax(0,1fr)] lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden">
+          <aside className="space-y-4 border-b border-border bg-muted/20 p-5 lg:overflow-y-auto lg:border-b-0 lg:border-r">
             <div>
               <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-sky-400">
                 <Brain className="h-3.5 w-3.5" /> AI suggestion
@@ -262,7 +262,7 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
             )}
           </aside>
 
-          <section className="flex min-h-[560px] min-w-0 flex-col">
+          <section className="flex min-h-[420px] min-w-0 flex-col lg:min-h-0">
             <div className="border-b border-border px-5 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex min-w-0 flex-wrap items-center gap-1 text-sm">
@@ -396,7 +396,7 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
         </div>
 
         {result && (
-          <div className={`mx-6 mb-2 rounded-md border px-4 py-3 text-sm ${
+          <div className={`mx-6 my-2 shrink-0 rounded-md border px-4 py-3 text-sm ${
             result.learning?.status === 'conflict'
               ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
               : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
@@ -408,7 +408,7 @@ export default function HumanRoutingBrowserDialog({ open, onOpenChange, document
           </div>
         )}
 
-        <DialogFooter className="border-t border-border px-6 py-4">
+        <DialogFooter className="shrink-0 border-t border-border px-6 py-4">
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>

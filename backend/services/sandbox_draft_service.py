@@ -446,6 +446,14 @@ async def header_problem(db, d: Dict[str, Any], shapes: Dict[str, Any]) -> str:
             # (119147) under the PO - those twins are this invoice.
             other = str(b.get("bc_external_document_no") or "")
             po_digits = re.sub(r"-0+$", "", str(d.get("po_number_clean") or "").upper())
+            # The twin is on another Gamer PO: a different invoice. AP enters
+            # an invoice against the PO printed on it (plain PO on both sides:
+            # 3,517 of 3,524 linked invoices; O-I 687 of 687). O-I bills
+            # identical Giovanni loads, 51600894-98 on five POs were held as
+            # duplicates of 51600858 on PO 121238 (2026-11-05).
+            bc_order = str(b.get("bc_order_number") or "").strip()
+            if re.fullmatch(r"\d{6}", po_digits) and re.fullmatch(r"\d{6}", bc_order) and bc_order != po_digits:
+                continue
             if shape_fit and fits(shapes.get(str(d.get("vendor_canonical") or "").upper()), other) \
                     and other.upper() not in (po_digits, str(b.get("bc_order_number") or "").upper()) \
                     and _edit_distance(num.lstrip("0"), other.upper().lstrip("0")) > 2:

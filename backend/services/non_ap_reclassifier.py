@@ -154,14 +154,19 @@ async def reclassify_recent(db, days: int = 120, apply: bool = True) -> Dict[str
             {"created_utc": {"$gte": since}, "document_type": {"$in": ["AP_Invoice", "AP_INVOICE"]},
              "bc_link": {"$exists": False}, "amount_float": {"$in": [None, 0, 0.0]},
              "status": {"$ne": "Posted"}},
-            {"_id": 1, "email_sender": 1, "email_subject": 1, "document_type": 1, "invoice_number_clean": 1}):
+            {"_id": 1, "email_sender": 1, "email_subject": 1, "document_type": 1, "invoice_number_clean": 1,
+             "invoice_number_source": 1}):
         hit = classify(d.get("email_sender"), d.get("email_subject"))
         if not hit:
             continue
         kind, new_type = hit
         # Statement / notice e-mails also carry real invoices ("Your Account
         # Statement & Invoices"): only retype when no invoice number either.
-        if kind != "tax_exemption_request" and d.get("invoice_number_clean"):
+        # A number this module itself took from the subject / file name is a
+        # guess, not proof of an invoice (MRP "Price Change Notification ...
+        # - 153700" is the account number; 2026-11-05).
+        guessed = str(d.get("invoice_number_source") or "").startswith("subject_or_file_name")
+        if kind != "tax_exemption_request" and d.get("invoice_number_clean") and not guessed:
             continue
         stats[kind] = stats.get(kind, 0) + 1
         if apply:

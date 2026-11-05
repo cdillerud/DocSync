@@ -247,28 +247,51 @@ async def _line_replay(db, days: int = 21, limit: int = 400) -> Dict[str, Any]:
     base = f"{bc.BC_API_BASE}/{bc.BC_TENANT_ID}/Production/api/{bc.BC_API_VERSION}/companies({cid})"
     c_ = Counter()
     seen = set()
-    async with httpx.AsyncClient(timeout=60) as c:
-        async for d in db.hub_documents.find({"mailbox_category": "AP", "created_utc": {"$gte": since}, "document_type": "AP_Invoice",
-                                              "is_duplicate": {"$ne": True}, "bc_link.bc_document_no": {"$exists": True},
-                                              "amount_float": {"$gt": 0}}, {"_id": 0, "file_content_b64": 0}).limit(limit):
+    import asyncio
+    docs = []
+    async for d in db.hub_documents.find({"mailbox_category": "AP", "created_utc": {"$gte": since}, "document_type": "AP_Invoice",
+                                          "is_duplicate": {"$ne": True}, "bc_link.bc_document_no": {"$exists": True},
+                                          "amount_float": {"$gt": 0}}, {"_id": 0, "file_content_b64": 0}).limit(limit):
+        no = d["bc_link"]["bc_document_no"]
+        if no in seen:
+            continue
+        seen.add(no)
+        docs.append(d)
+    sem = asyncio.Semaphore(6)
+
+    async def _one(c, d):
+        # Plan + BC read-back for one invoice; several run at once (was serial, ~280 s).
+        async with sem:
             no = d["bc_link"]["bc_document_no"]
-            if no in seen:
-                continue
-            seen.add(no)
             x = dict(d)
             x.pop("bc_link", None)
             try:
                 plan = await plan_lines(db, x, await receipt_lines_for(db, x))
             except Exception:
+                return None, None
+            if not plan.get("lines"):
+                return plan, None
+            r = await c.get(f"{base}/purchaseInvoices", headers={"Authorization": f"Bearer {token}"}, params={
+                "$filter": f"number eq '{no}'", "$expand": "purchaseInvoiceLines($select=lineObjectNumber,quantity,unitCost)", "$select": "number"})
+            return plan, (r.json().get("value", []) if r.status_code == 200 else [])
+
+    async with httpx.AsyncClient(timeout=60) as c:
+        # Plans share one line coder (~2 min to build): build it once up
+        # front, else parallel plans each start their own build.
+        try:
+            from services.line_learning_service import coder as _coder
+            await _coder(db)
+        except Exception:
+            pass
+        results = await asyncio.gather(*[_one(c, d) for d in docs])
+        for plan, vals in results:
+            if plan is None:
                 c_["error"] += 1
                 continue
             src = plan.get("source") or ("wait" if plan.get("wait") else "problem")
             c_[src + "_n"] += 1
             if not plan.get("lines"):
                 continue
-            r = await c.get(f"{base}/purchaseInvoices", headers={"Authorization": f"Bearer {token}"}, params={
-                "$filter": f"number eq '{no}'", "$expand": "purchaseInvoiceLines($select=lineObjectNumber,quantity,unitCost)", "$select": "number"})
-            vals = r.json().get("value", []) if r.status_code == 200 else []
             if not vals:
                 continue
             ap, hub = _lines_by_item(vals[0]["purchaseInvoiceLines"]), _lines_by_item(plan["lines"])

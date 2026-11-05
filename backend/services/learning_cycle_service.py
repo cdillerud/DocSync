@@ -168,6 +168,12 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["non_ap_reclassified"] = {"error": repr(e)}
     try:
+        # ...and their test-site copies out of the invoice folders.
+        from services.non_ap_filing_service import move_non_ap
+        summary["non_ap_moved"] = await move_non_ap(db)
+    except Exception as e:
+        summary["non_ap_moved"] = {"error": repr(e)}
+    try:
         # Routing path accuracy from the newest staff filings, then one stage
         # (and, when staff must act, one reason) per AP document.
         from services.ap_workflow_service import learn_people_and_approvers

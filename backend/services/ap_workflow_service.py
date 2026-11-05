@@ -151,10 +151,34 @@ async def notify_approver(db, doc_id: str, appr: Dict[str, Any]) -> Dict[str, An
         async with httpx.AsyncClient(timeout=15) as c:
             r = await c.post(url, json=_approval_card(doc, appr))
         res = {"status": r.status_code}
+        if 200 <= r.status_code < 300:
+            await db.hub_documents.update_one({"id": doc_id}, {"$set": {"ap_approval_notified_at": _now()}})
     except Exception as e:  # noqa: BLE001
         res = {"error": str(e)[:200]}
     await _event(db, doc_id, "notify_teams", "hub", approver=appr.get("approver"), result=res)
     return res
+
+
+async def notify_waiting(db, days: int = 3, limit: int = 20) -> Dict[str, Any]:
+    """Teams card, once, for invoices that went to awaiting approval on
+    their own (S&H, "need approval" folder) with a suggested approver."""
+    import os
+    from datetime import timedelta
+    if not os.environ.get(TEAMS_APPROVALS_WEBHOOK_ENV):
+        return {"skipped": f"{TEAMS_APPROVALS_WEBHOOK_ENV} not set"}
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    sent = 0
+    async for d in db.hub_documents.find({"ap_stage": "awaiting_approval", "ap_stage_updated_at": {"$gte": since},
+                                          "ap_approval_notified_at": {"$exists": False}},
+                                         {"_id": 0, "id": 1, "ap_approval": 1, "suggested_approver": 1}).limit(limit):
+        appr = dict(d.get("ap_approval") or {})
+        appr.setdefault("approver", d.get("suggested_approver"))
+        appr.setdefault("requested_by", "the Hub (learned from Square 9 filings)")
+        if not appr.get("approver"):
+            continue
+        res = await notify_approver(db, d["id"], appr)
+        sent += 1 if str(res.get("status", "")).startswith("2") else 0
+    return {"sent": sent}
 
 
 async def request_approval(db, doc_id: str, approver: str, by: str, notes: str = "") -> Dict[str, Any]:

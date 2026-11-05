@@ -178,6 +178,11 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
     except Exception as e:
         summary["ap_stages"] = {"error": repr(e)}
     try:
+        from services.ap_workflow_service import notify_waiting
+        summary["approval_notices"] = await notify_waiting(db)
+    except Exception as e:
+        summary["approval_notices"] = {"error": repr(e)}
+    try:
         # BC -> Hub: read the Hub's sandbox drafts back (still there? edited?
         # posted?) before drafting more.
         from services.draft_readback_service import readback

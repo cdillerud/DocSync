@@ -1944,6 +1944,14 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
     others there). learned=False: the rules alone. ai=False: no new AI
     call (replays over history, pages); a decision already kept on the
     document is still used."""
+    # Same international fallback as live intake (sharepoint_service): the
+    # document field is rarely set, the extractor's flag is. Replays, stage
+    # re-routing and model training passed doc.get("is_international") and so
+    # routed every international document as domestic; staff corrections made
+    # in the decision queue (keyed international) never matched (2026-11-05).
+    if not is_international:
+        ex = (doc.get("extracted_fields") or {}).get("is_international")
+        is_international = bool(doc.get("is_international")) or ex is True or str(ex or "").lower() == "true"
     path, reason, details = await _route_rules(doc, is_international=is_international, **kwargs)
     if not learned or not path:
         return path, reason, details
@@ -1959,6 +1967,13 @@ async def route_with_feedback(doc: Dict[str, Any], is_international: bool = Fals
     except Exception as e:
         logger.warning("[FolderLearning] override failed: %r", e)
     try:
+        # A path from staff corrections (decision queue, Square 9 learning)
+        # is not overruled by the AI's guess; the learned model above, which
+        # is trained on staff filings, still can. StraitLink 2026-11-05: Meg
+        # and the model said Freight (staff: Freight 37 vs All Others 13), a
+        # cached AI call said Drop Ship All Others and won.
+        if (details or {}).get("source") == "feedback_loop":
+            return path, reason, details
         if ai or (doc.get("ai_routing") or {}).get("rule_path") == path:
             from deps import get_db
             from services.ai_routing_service import route as ai_route

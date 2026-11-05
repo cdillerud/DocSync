@@ -28,7 +28,7 @@ async def move_non_ap(db, apply: bool = True, limit: int = 200) -> Dict[str, Any
     base = (S.SHAREPOINT_BASE_FOLDER or "").strip("/")
     folder = f"{base}/{NON_AP_FOLDER}" if base else NON_AP_FOLDER
     q = {"non_ap_kind": {"$exists": True}, "sharepoint_item_id": {"$nin": [None, ""]},
-         "sharepoint_folder_path": {"$ne": folder}}
+         "sharepoint_folder_path": {"$ne": folder}, "sharepoint_missing_at": {"$exists": False}}
     todo = [d async for d in db.hub_documents.find(q, {"_id": 0, "id": 1, "sharepoint_drive_id": 1, "sharepoint_item_id": 1,
                                                        "sharepoint_folder_path": 1}).limit(limit)]
     out = {"to_move": len(todo), "moved": 0, "other_drive": 0, "gone": 0, "errors": 0, "folder": folder}
@@ -52,7 +52,10 @@ async def move_non_ap(db, apply: bool = True, limit: int = 200) -> Dict[str, Any
                               json={"parentReference": {"id": folder_id},
                                     "@microsoft.graph.conflictBehavior": "rename"})
             if r.status_code == 404:
+                # Old uploads (May-July layout) since removed from the test
+                # site; the Hub keeps the file. Stop retrying them.
                 out["gone"] += 1
+                await db.hub_documents.update_one({"id": d["id"]}, {"$set": {"sharepoint_missing_at": now}})
                 continue
             if r.status_code not in (200, 201):
                 out["errors"] += 1

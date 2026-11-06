@@ -496,6 +496,14 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
             # Two independent signals name the same item: as good as strong.
             i = seen[c[0]]
             uniq[i] = (c[0], uniq[i][1] + " · " + c[1], True)
+        elif KEEP_STRONGER and c[2] and not uniq[seen[c[0]]][2]:
+            # A weak signal (a lot number or code seen on one order) named the
+            # item first; the item number printed on the PO names it too and
+            # is strong on its own. Sun Bum "Item No. 20-20750.002444104A"
+            # and Ortho "Item 2033295" were drafted as the customer's older
+            # look-alike items; BC entered the printed ones.
+            i = seen[c[0]]
+            uniq[i] = (c[0], c[1] + " · " + uniq[i][1], True)
     return uniq
 
 
@@ -515,6 +523,7 @@ DESC_T = 4.0
 DESC_M = 1.5
 DESC_STRONG = 8.0
 AGREE_STRONG = False
+KEEP_STRONGER = True
 PRINTED_FIRST = False
 NO_RULEOUT_WHEN_OVERRIDDEN = True
 FIT_ON_BC = True

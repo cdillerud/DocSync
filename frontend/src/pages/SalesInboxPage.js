@@ -232,7 +232,11 @@ export default function SalesInboxPage() {
           Last {summary.days} days: <b className="text-foreground">{summary.customer_pos}</b> customer POs, <b className="text-foreground">{summary.customer_pos_in_bc}</b> already on a BC sales order.
           {summary.draft_accuracy?.orders > 0 && (
             <> Hub drafts graded against inside sales' own orders: <b className="text-foreground">{summary.draft_accuracy.exact}/{summary.draft_accuracy.orders}</b> exact,
-              products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}.{' '}
+              products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}
+              {summary.draft_accuracy.as_entered?.orders > 0 && (
+                <span title="Only orders the Hub saw as inside sales first entered them, before shipping changed quantities or added invoicing charges"> (as entered: <b className="text-foreground">{summary.draft_accuracy.as_entered.exact}/{summary.draft_accuracy.as_entered.orders}</b> exact,
+                  qty {summary.draft_accuracy.as_entered.qty_right || 0}/{summary.draft_accuracy.as_entered.products_right || 0}, price {summary.draft_accuracy.as_entered.price_right || 0}/{summary.draft_accuracy.as_entered.products_right || 0})</span>
+              )}.{' '}
               <button type="button" className="text-primary underline" onClick={() => setStage('graded')} data-testid="open-draft-vs-production">Compare line by line</button></>
           )}
         </p>

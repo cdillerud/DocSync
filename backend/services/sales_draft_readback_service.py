@@ -243,12 +243,17 @@ async def side_by_side(db, d: Dict[str, Any]) -> Dict[str, Any]:
 
 async def metrics(db) -> Dict[str, Any]:
     """Drafting accuracy against inside sales' own Production orders."""
-    c = Counter()
+    c, e = Counter(), Counter()
     async for d in db.hub_documents.find({"sales_draft_vs_bc.graded_at": {"$exists": True}}, {"_id": 0, "sales_draft_vs_bc": 1}):
         g = d["sales_draft_vs_bc"]
-        c["orders"] += 1
-        c["exact"] += bool(g.get("exact"))
-        for k in ("products", "products_right", "qty_right", "price_right", "charges", "charges_right"):
-            c[k] += int(g.get(k) or 0)
-    return dict(c)
+        # A draft is the order at entry: the honest grade is against the
+        # order as inside sales entered it. Orders first seen after shipping
+        # (quantities trimmed to the truck, charges added at invoicing) are
+        # counted in the total but also reported apart.
+        for T in ((c, e) if g.get("graded_on") == "as entered" else (c,)):
+            T["orders"] += 1
+            T["exact"] += bool(g.get("exact"))
+            for k in ("products", "products_right", "qty_right", "price_right", "charges", "charges_right"):
+                T[k] += int(g.get(k) or 0)
+    return {**dict(c), "as_entered": dict(e)}
 

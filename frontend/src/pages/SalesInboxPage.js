@@ -159,6 +159,103 @@ function VsBc({ id }) {
   );
 }
 
+// One BC order per PO line (Horseshoe): the rep reviews the orders, confirms
+// the price once, and the Hub creates them all in the BC sandbox.
+function BulkOrders({ id }) {
+  const [plan, setPlan] = useState(null);
+  const [err, setErr] = useState(null);
+  const [prices, setPrices] = useState({});
+  const [dates, setDates] = useState({});
+  const [perDay, setPerDay] = useState('');
+  const [start, setStart] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const load = useCallback(async () => {
+    setErr(null);
+    try {
+      const { data } = await api.get(`/sales-inbox/document/${id}/bulk-plan`);
+      setPlan(data);
+      setPrices(Object.fromEntries(data.items.map(it => [it, data.prices[it]?.template ?? data.prices[it]?.hub ?? ''])));
+      setDates(Object.fromEntries(data.orders.map(o => [o.external_document_no, o.shipment_date || ''])));
+      setPerDay(data.trucks_per_day || '');
+      setStart(data.ship_start || '');
+    } catch (e) {
+      setErr(e?.response?.data?.detail || 'Could not plan the orders');
+    }
+  }, [id]);
+  useEffect(() => { load(); }, [load]);
+  const spread = () => {
+    const n = parseInt(perDay, 10);
+    if (!start || !n) return;
+    const d0 = new Date(`${start}T12:00:00Z`);
+    setDates(Object.fromEntries(plan.orders.map((o, i) => {
+      const d = new Date(d0.getTime() + Math.floor(i / n) * 86400000);
+      return [o.external_document_no, d.toISOString().slice(0, 10)];
+    })));
+  };
+  const create = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/sales-inbox/document/${id}/bulk-create`, { prices, ship_dates: dates });
+      setResult(data);
+      toast.success(`${data.created} order${data.created === 1 ? '' : 's'} created in the BC sandbox${data.skipped ? ` (${data.skipped} already there)` : ''}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not create the orders');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (err) return <p className="text-xs text-muted-foreground">{err}</p>;
+  if (!plan) return <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Planning orders…</div>;
+  const done = result || plan.bulk;
+  return (
+    <div className="rounded-md border border-border p-3 space-y-2 text-xs" data-testid="bulk-orders">
+      <div className="font-semibold text-sm">Create all {plan.orders.length} orders <span className="font-normal text-muted-foreground">· one per PO line, as inside sales enters {plan.customer_no} · BC sandbox (PRE), not Production</span></div>
+      {plan.already_in_production?.length > 0 && <div className="text-amber-700 dark:text-amber-400">Already in Production BC: {plan.already_in_production.slice(0, 6).join(', ')}{plan.already_in_production.length > 6 ? '…' : ''}</div>}
+      {plan.problems?.length > 0 && <div className="text-red-600">{plan.problems.join('; ')}</div>}
+      <div className="flex flex-wrap gap-4">
+        {plan.items.map(it => (
+          <label key={it} className="flex items-center gap-2">
+            <span>Price for <span className="font-mono">{it}</span> /{plan.orders.find(o => o.item === it)?.unit_of_measure || 'unit'}</span>
+            <Input className="h-7 w-28" value={prices[it] ?? ''} onChange={e => setPrices(p => ({ ...p, [it]: e.target.value }))} />
+            <span className="text-muted-foreground">last order {plan.prices[it]?.template_order || '—'}: {plan.prices[it]?.template ?? '—'} · Hub {plan.prices[it]?.hub ?? '—'}</span>
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span>Ship</span><Input className="h-7 w-16" value={perDay} onChange={e => setPerDay(e.target.value)} /><span>trucks a day from</span>
+        <Input type="date" className="h-7 w-40" value={start} onChange={e => setStart(e.target.value)} />
+        <Button size="sm" variant="outline" className="h-7" onClick={spread}>Spread dates</Button>
+      </div>
+      <div className="overflow-x-auto max-h-72 overflow-y-auto">
+        <table className="w-full">
+          <thead><tr className="text-left text-muted-foreground border-b border-border">
+            <th className="py-1 pr-3">Order</th><th className="py-1 pr-3">Item</th><th className="py-1 pr-3 text-right">Qty</th>
+            <th className="py-1 pr-3">PO delivery</th><th className="py-1 pr-3">Ship date</th><th className="py-1">Also on the order (from {plan.prices[plan.items[0]]?.template_order || 'last order'})</th>
+          </tr></thead>
+          <tbody>
+            {plan.orders.map(o => (
+              <tr key={o.external_document_no} className="border-b border-border/60">
+                <td className="py-1 pr-3 font-mono">{o.external_document_no}</td><td className="py-1 pr-3 font-mono">{o.item}</td>
+                <td className="py-1 pr-3 text-right tabular-nums">{o.quantity} {o.unit_of_measure}</td><td className="py-1 pr-3">{o.delivery_date || '—'}</td>
+                <td className="py-1 pr-3"><Input type="date" className="h-7 w-40" value={dates[o.external_document_no] || ''} onChange={e => setDates(d => ({ ...d, [o.external_document_no]: e.target.value }))} /></td>
+                <td className="py-1 text-muted-foreground">{(plan.templates[o.item]?.charges || []).map(c => `${c.item} ${c.quantity} @ ${c.unit_price}`).join(', ')}{plan.templates[o.item]?.comments?.length ? ` · ${plan.templates[o.item].comments.length} comment lines` : ''}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={busy || plan.problems?.length > 0} onClick={create} data-testid="bulk-create">
+          {busy && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}Create {plan.orders.length} orders in the BC sandbox
+        </Button>
+        {done && <span className="text-muted-foreground">Last run{done.at ? ` ${String(done.at).slice(0, 16).replace('T', ' ')}` : ''}: {(done.orders || []).length} created{done.skipped?.length || typeof done.skipped === 'number' ? `, ${Array.isArray(done.skipped) ? done.skipped.length : done.skipped} already there` : ''}{done.failed?.length ? `, failed: ${done.failed[0].error}` : ''}
+          {(done.orders || []).length > 0 && <> · BC {done.orders[0].bc_order_no}–{done.orders[done.orders.length - 1].bc_order_no}</>}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function SalesInboxPage() {
   const [summary, setSummary] = useState(null);
   // ?stage=drafted opens that stage (links from Today)
@@ -310,7 +407,7 @@ export default function SalesInboxPage() {
                   {data.rows.map(r => (
                     <Fragment key={r.id}>
                       <tr key={r.id} className="border-b border-border align-top hover:bg-muted/40 cursor-pointer" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
-                        <td className="py-2 pr-2">{(r.resolution || r.vs_bc) ? (open[r.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : null}</td>
+                        <td className="py-2 pr-2">{(r.resolution || r.vs_bc || (r.role === 'customer_po' && r.split_per_line)) ? (open[r.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : null}</td>
                         <td className="py-2 pr-3 whitespace-nowrap text-xs">{(r.received || '').slice(0, 10)}</td>
                         <td className="py-2 pr-3">{r.customer_name || r.customer_on_doc || '—'}{r.customer_no && <span className="text-xs text-muted-foreground"> ({r.customer_no})</span>}
                           <div className="text-xs text-muted-foreground truncate max-w-[220px]">{r.sender}</div></td>
@@ -345,8 +442,9 @@ export default function SalesInboxPage() {
                         <td className="py-2 pr-3 text-right text-xs tabular-nums">{r.resolution ? `${r.resolution.resolved}/${r.resolution.total}` : '—'}
                           {r.resolution?.price_checks > 0 && <div className="text-[10px] text-amber-600 dark:text-amber-400">{r.resolution.price_checks} price{r.resolution.price_checks > 1 ? 's' : ''} to check</div>}</td>
                       </tr>
-                      {open[r.id] && (r.resolution || r.vs_bc) && (
+                      {open[r.id] && (r.resolution || r.vs_bc || (r.role === 'customer_po' && r.split_per_line)) && (
                         <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3 space-y-3">
+                          {r.role === 'customer_po' && r.split_per_line && <BulkOrders id={r.id} />}
                           {r.vs_bc && <VsBc id={r.id} />}
                           {r.resolution && <Lines resolution={r.resolution} />}
                         </td></tr>

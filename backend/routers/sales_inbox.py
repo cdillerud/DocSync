@@ -53,6 +53,9 @@ async def order_checks():
             "prices": prices, "price_count": len(prices), "price_gap": round(sum(r.get("line_value") or 0 for r in prices), 2)}
 
 
+_SPLITS: dict = {}          # customer -> (splits per PO line, checked at)
+
+
 @router.get("/list")
 async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: int = 45, skip: int = 0, limit: int = 50):
     db = get_db()
@@ -98,8 +101,17 @@ async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: 
         async for c in db.bc_reference_cache.find({"bc_entity_type": "customer", "bc_customer_no": {"$in": list(custs)}},
                                                   {"_id": 0, "bc_customer_no": 1, "bc_customer_name": 1}):
             names[c["bc_customer_no"]] = c["bc_customer_name"]
+    import time
+    from services.sales_draft_service import splits_per_line
+    splits = {}
+    for c in custs:
+        hit = _SPLITS.get(c)
+        if not hit or time.time() - hit[1] > 3600:
+            hit = _SPLITS[c] = (await splits_per_line(db, c), time.time())
+        splits[c] = hit[0]
     for r in rows:
         r["customer_name"] = names.get(r["customer_no"])
+        r["split_per_line"] = bool(splits.get(r["customer_no"]))
     return {"total": total, "rows": rows}
 
 
@@ -114,6 +126,37 @@ async def draft_vs_bc(doc_id: str):
     if not d or not d.get("sales_draft"):
         raise HTTPException(status_code=404, detail="No Hub draft for this document")
     return await side_by_side(db, d)
+
+
+class BulkCreateRequest(BaseModel):
+    prices: dict = {}                 # item -> unit price the rep confirmed
+    ship_dates: dict = {}             # external document no -> yyyy-mm-dd
+
+
+@router.get("/document/{doc_id}/bulk-plan")
+async def bulk_plan(doc_id: str):
+    """One BC order per PO line (customers inside sales enters that way):
+    the orders the Hub would create, from the customer's latest order of
+    each item (read-only)."""
+    from services.sales_bulk_order_service import plan
+    p = await plan(get_db(), doc_id)
+    if p.get("error"):
+        raise HTTPException(status_code=400, detail=p["error"])
+    return p
+
+
+@router.post("/document/{doc_id}/bulk-create")
+async def bulk_create(doc_id: str, req: BulkCreateRequest, user=Depends(get_current_user)):
+    """Create every planned order in the BC SANDBOX (PRE), never Production."""
+    from services.sales_bulk_order_service import create
+    try:
+        prices = {str(k).upper(): float(v) for k, v in (req.prices or {}).items()}
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Prices must be numbers")
+    r = await create(get_db(), doc_id, prices, {str(k): str(v)[:10] for k, v in (req.ship_dates or {}).items()}, user or {})
+    if r.get("refused"):
+        raise HTTPException(status_code=400, detail=r["refused"])
+    return r
 
 
 ACTIVE = ["needs_rep", "ready", "drafted"]

@@ -46,15 +46,21 @@ async def template(db, customer_no: str, item: str, before: Optional[str] = None
         prods = [l for l in ls if l.get("lineType") == "Item" and is_product(str(l.get("lineObjectNumber") or ""))]
         if len(prods) != 1 or str(prods[0].get("lineObjectNumber")).upper() != item.upper():
             continue
-        key = (o.get("status") == "open" or bool(o.get("entered_lines")), _order_seq(o["order_no"]))
+        # Open orders first: an order first seen invoiced carries what was
+        # added at invoicing (WHSEFRT 2550 on 121428), not what was entered.
+        key = (o.get("status") == "open", _order_seq(o["order_no"]))
         if best is None or key > best[0]:
             best = (key, o, ls, prods[0])
     if not best:
         return None
     _, o, ls, prod = best
+    # Charges this customer gets at shipping / invoicing are not entered.
+    later = {u["charge"] async for u in db.sales_charge_usual.find({"customer_no": customer_no, "when": "shipping / invoicing"},
+                                                                   {"_id": 0, "charge": 1})}
     charges = [{"item": l["lineObjectNumber"], "quantity": float(l.get("quantity") or 0), "unit_price": float(l.get("unitPrice") or 0),
                 "unit_of_measure": l.get("unitOfMeasureCode") or None, "description": l.get("description")}
-               for l in ls if l.get("lineType") == "Item" and l is not prod and l.get("lineObjectNumber")]
+               for l in ls if l.get("lineType") == "Item" and l is not prod and l.get("lineObjectNumber")
+               and str(l["lineObjectNumber"]).upper() not in later]
     comments = [str(l.get("description") or "") for l in ls if l.get("lineType") == "Comment" and str(l.get("description") or "").strip()]
     return {"order_no": o["order_no"], "external_doc_no": o.get("external_doc_no"), "price": float(prod.get("unitPrice") or 0),
             "unit_of_measure": prod.get("unitOfMeasureCode"), "quantity": float(prod.get("quantity") or 0),

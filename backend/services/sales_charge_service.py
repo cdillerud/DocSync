@@ -64,6 +64,11 @@ FREIGHT_PLACEHOLDER = True
 # (presence predicted 66% -> 83% on 13,104 orders, earlier orders only).
 CUST_PRODUCT_PRESENCE = True
 CP_MIN_ORDERS = 5
+# A customer's open orders are its orders as entered: Horseshoe FREIGHT on
+# 98 of 99 open orders (swapped for WHSEFRT at invoicing, 30% overall);
+# FRTSURCHARGE on 0 of 99 open, 361 of 1307 invoiced (added at invoicing).
+OPEN_PRESENCE = True
+OPEN_MIN_ORDERS = 10
 
 
 async def _cp_vote(db, cust: str, prods: List[Dict[str, Any]], charge: str) -> Optional[bool]:
@@ -178,6 +183,7 @@ async def learn(db) -> Dict[str, Any]:
     item_charge = defaultdict(list)                   # (item, charge) -> [(seq, qty_kind, qty, price)]
     cust_seqs = defaultdict(list)                     # cust -> order sequence numbers
     cp_orders = Counter()                             # (cust, product) -> orders
+    open_orders = Counter()                           # cust -> open orders
     cp_charge = Counter()                             # (cust, product, charge) -> orders with the charge
     reviewed = 10 ** 9                                # sandbox drafts a rep completed: newest
     async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1, "order_no": 1}):
@@ -210,6 +216,8 @@ async def learn(db) -> Dict[str, Any]:
         orders[cust] += 1
         seq = _order_seq(o.get("order_no"))
         cust_seqs[cust].append(seq)
+        if o.get("status") == "open":
+            open_orders[cust] += 1
         its = {str(l["lineObjectNumber"]).upper() for l in prods}
         for it in its:
             cp_orders[(cust, it)] += 1
@@ -332,6 +340,15 @@ async def learn(db) -> Dict[str, Any]:
             rate = len(xs) / n
             if recent is not None:
                 rate = max(rate, sum(1 for x in xs if x["seq"] in recent) / len(recent))
+            entry_rate = None
+            if OPEN_PRESENCE and open_orders[cust] >= OPEN_MIN_ORDERS:
+                k_open = sum(1 for x in xs if x["open"])
+                entry_rate = min(1.0, k_open / open_orders[cust])
+                closed = n - open_orders[cust]
+                later_rate = (len(xs) - k_open) / closed if closed > 0 else 0.0
+                if entry_rate <= 1 - MIN_RATE and later_rate >= 3 * entry_rate + 0.05:
+                    continue      # this customer gets it after entry (shipping / invoicing)
+                rate = max(rate, entry_rate)
             if rate < MIN_RATE and (cust, c) not in cond:
                 continue
             latest = recent is not None and rate > len(xs) / n

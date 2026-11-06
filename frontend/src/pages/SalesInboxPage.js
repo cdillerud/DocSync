@@ -193,10 +193,10 @@ function BulkOrders({ id }) {
       return [o.external_document_no, d.toISOString().slice(0, 10)];
     })));
   };
-  const create = async () => {
+  const create = async (testCopy = false) => {
     setBusy(true);
     try {
-      const { data } = await api.post(`/sales-inbox/document/${id}/bulk-create`, { prices, ship_dates: dates });
+      const { data } = await api.post(`/sales-inbox/document/${id}/bulk-create`, { prices, ship_dates: dates, test_copy: testCopy });
       setResult(data);
       toast.success(`${data.created} order${data.created === 1 ? '' : 's'} created in the BC sandbox${data.skipped ? ` (${data.skipped} already there)` : ''}`);
     } catch (e) {
@@ -246,12 +246,26 @@ function BulkOrders({ id }) {
         </table>
       </div>
       <div className="flex items-center gap-3">
-        <Button size="sm" disabled={busy || plan.problems?.length > 0} onClick={create} data-testid="bulk-create">
-          {busy && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}Create {plan.orders.length} orders in the BC sandbox
-        </Button>
+        {plan.already_in_production?.length > 0 ? (
+          <Button size="sm" disabled={busy || plan.problems?.length > 0} onClick={() => create(true)} data-testid="bulk-create-test"
+            title="Inside sales already entered this PO; the sandbox (a copy of Production) holds those orders. The Hub's are made beside them as T-..., to compare in BC.">
+            {busy && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}Create {plan.orders.length} test copies (T-{plan.orders[0]?.external_document_no}…) beside the entered orders
+          </Button>
+        ) : (
+          <Button size="sm" disabled={busy || plan.problems?.length > 0} onClick={() => create(false)} data-testid="bulk-create">
+            {busy && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}Create {plan.orders.length} orders in the BC sandbox
+          </Button>
+        )}
         {done && <span className="text-muted-foreground">Last run{done.at ? ` ${String(done.at).slice(0, 16).replace('T', ' ')}` : ''}: {(done.orders || []).length} created{done.skipped?.length || typeof done.skipped === 'number' ? `, ${Array.isArray(done.skipped) ? done.skipped.length : done.skipped} already there` : ''}{done.failed?.length ? `, failed: ${done.failed[0].error}` : ''}
           {(done.orders || []).length > 0 && <> · BC {done.orders[0].bc_order_no}–{done.orders[done.orders.length - 1].bc_order_no}</>}</span>}
       </div>
+      {done?.vs_bc && (
+        <div className={`rounded px-2 py-1 ${done.vs_bc.exact === done.vs_bc.orders ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}>
+          Compared with inside sales' Production orders: <b>{done.vs_bc.exact}/{done.vs_bc.orders}</b> identical
+          {['item', 'quantity', 'price', 'ship date', 'charges', 'comments'].filter(k => done.vs_bc[k]).map(k => ` · ${k} differs on ${done.vs_bc[k]}`).join('')}
+          {done.vs_bc.not_entered_yet ? ` · ${done.vs_bc.not_entered_yet} not entered yet` : ''}
+        </div>
+      )}
     </div>
   );
 }

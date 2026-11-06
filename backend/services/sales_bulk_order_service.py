@@ -167,9 +167,15 @@ async def plan(db, doc_id: str, before: Optional[str] = None) -> Dict[str, Any]:
             "already_in_production": existing, "bulk": d.get("sales_bulk_orders")}
 
 
+TEST_PREFIX = "T-"
+
+
 async def create(db, doc_id: str, prices: Dict[str, float], ship_dates: Optional[Dict[str, str]] = None,
-                 user: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Create the planned orders in the PRE sandbox. Never Production."""
+                 user: Optional[Dict[str, Any]] = None, test_copy: bool = False) -> Dict[str, Any]:
+    """Create the planned orders in the PRE sandbox. Never Production.
+    test_copy: the sandbox (a Production copy) already holds inside sales'
+    orders for this PO; the Hub's are made beside them as "T-P0030203-1" so
+    the rep compares the two in BC (Horseshoe test, phase 1)."""
     import httpx
     from services.sandbox_draft_service import ALLOWED_ENVIRONMENT
     from services.gpi_integration_service import verify_sandbox, production_name
@@ -192,7 +198,7 @@ async def create(db, doc_id: str, prices: Dict[str, float], ship_dates: Optional
     made, skipped, failed = [], [], []
     async with httpx.AsyncClient(timeout=90) as c:
         for o in p["orders"]:
-            ext = o["external_document_no"]
+            ext = (TEST_PREFIX + o["external_document_no"])[:35] if test_copy else o["external_document_no"]
             # Idempotent: an order with this PO line number already in the sandbox is kept.
             r = await c.get(f"{base}/salesOrders", headers=h, params={
                 "$filter": f"customerNumber eq '{p['customer_no']}' and externalDocumentNumber eq '{ext}'", "$select": "number"})
@@ -225,12 +231,13 @@ async def create(db, doc_id: str, prices: Dict[str, float], ship_dates: Optional
             ok = not errors and len(got) == len(want) and all(
                 any(str(g["lineObjectNumber"]).upper() == str(b["lineObjectNumber"]).upper() and abs(float(g["quantity"]) - b["quantity"]) < 0.001
                     and abs(float(g.get("unitPrice") or 0) - b["unitPrice"]) < 0.005 for g in got) for b in want)
-            made.append({"external_document_no": ext, "bc_order_no": sno, "bc_system_id": sid, "ok": ok, "errors": errors,
+            made.append({"external_document_no": ext, "po_line_no": o["external_document_no"], "lines": lines,
+                         "bc_order_no": sno, "bc_system_id": sid, "ok": ok, "errors": errors,
                          "total": rb.json().get("totalAmountExcludingTax") if rb.status_code == 200 else None, "shipment_date": ship})
             if not ok:
                 failed.append({"external_document_no": ext, "error": "; ".join(errors)[:200] or "lines differ on read back"})
                 break
-    rec = {"environment": ALLOWED_ENVIRONMENT, "at": now, "by": (user or {}).get("email"), "prices": prices,
+    rec = {"environment": ALLOWED_ENVIRONMENT, "at": now, "by": (user or {}).get("email"), "prices": prices, "test_copy": test_copy,
            "orders": made, "skipped": skipped, "failed": failed}
     await db.hub_documents.update_one({"id": doc_id}, {"$set": {"sales_bulk_orders": rec}})
     await db.ap_workflow_events.insert_one({"document_id": doc_id, "action": "sales_bulk_orders", "by": rec["by"] or "hub", "at": now,
@@ -239,6 +246,68 @@ async def create(db, doc_id: str, prices: Dict[str, float], ship_dates: Optional
                                                        "skipped": len(skipped), "failed": failed[:3]}})
     logger.info("[SalesBulkOrders] %s %s created=%d skipped=%d failed=%d", p["customer_no"], p["customer_po"], len(made), len(skipped), len(failed))
     return {"created": len(made), "skipped": len(skipped), "failed": failed, "orders": made, "environment": ALLOWED_ENVIRONMENT}
+
+
+def _diff(want: List[Dict[str, Any]], got: List[Dict[str, Any]]) -> List[str]:
+    """What differs between the order the Hub made and the one inside sales
+    entered: item, quantity, price, ship date, charges, comment lines."""
+    from services.sales_item_xref_service import is_product
+    wp = [b for b in want if b.get("lineType") == "Item" and is_product(str(b.get("lineObjectNumber") or ""))]
+    gp = [l for l in got if l.get("lineType") == "Item" and is_product(str(l.get("lineObjectNumber") or ""))]
+    out = []
+    if not wp or not gp or str(wp[0]["lineObjectNumber"]).upper() != str(gp[0].get("lineObjectNumber") or "").upper():
+        return ["item"]
+    w, g = wp[0], gp[0]
+    if abs(float(w["quantity"]) - float(g.get("quantity") or 0)) > 0.001:
+        out.append("quantity")
+    if abs(float(w["unitPrice"]) - float(g.get("unitPrice") or 0)) > 0.005:
+        out.append("price")
+    gs = str(g.get("shipmentDate") or "")[:10]
+    if w.get("shipmentDate") and gs[:4] not in ("", "0001") and gs != w["shipmentDate"]:
+        out.append("ship date")
+    wc = sorted((str(b["lineObjectNumber"]).upper(), float(b["quantity"]), round(float(b["unitPrice"]), 2)) for b in want
+                if b.get("lineType") == "Item" and b is not w)
+    gc = sorted((str(l["lineObjectNumber"]).upper(), float(l.get("quantity") or 0), round(float(l.get("unitPrice") or 0), 2)) for l in got
+                if l.get("lineType") == "Item" and l is not g and l.get("lineObjectNumber"))
+    if wc != gc:
+        out.append("charges")
+    if [b["description"] for b in want if b.get("lineType") == "Comment"] != \
+            [str(l.get("description") or "") for l in got if l.get("lineType") == "Comment" and str(l.get("description") or "").strip()]:
+        out.append("comments")
+    return out
+
+
+async def grade(db) -> Dict[str, Any]:
+    """Hourly: each bulk run's orders against the orders inside sales
+    entered in Production for the same PO lines (as entered when the Hub
+    saw them entered). sales_bulk_orders.vs_bc."""
+    stats = Counter()
+    async for d in db.hub_documents.find({"sales_bulk_orders.orders.0": {"$exists": True}},
+                                         {"_id": 1, "sales_link.bc_customer_no": 1, "sales_bulk_orders": 1}):
+        cust = (d.get("sales_link") or {}).get("bc_customer_no")
+        rows, c = [], Counter()
+        for m in d["sales_bulk_orders"]["orders"]:
+            if not m.get("lines"):
+                continue
+            ext = m.get("po_line_no") or m["external_document_no"]
+            prod = await db.bc_sales_orders.find_one({"customer_no": cust, "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"}},
+                                                     {"_id": 0, "order_no": 1, "lines": 1, "entered_lines": 1})
+            if not prod:
+                c["not_entered_yet"] += 1
+                continue
+            diffs = _diff(m["lines"], _lines_of(prod))
+            c["orders"] += 1
+            c["exact"] += not diffs
+            for x in diffs:
+                c[x] += 1
+            rows.append({"external_document_no": m["external_document_no"], "bc_order_no": m.get("bc_order_no"),
+                         "production_order_no": prod["order_no"], "diffs": diffs})
+        if c["orders"]:
+            await db.hub_documents.update_one({"_id": d["_id"]}, {"$set": {"sales_bulk_orders.vs_bc": {
+                **dict(c), "orders_detail": rows, "graded_at": datetime.now(timezone.utc).isoformat()}}})
+            stats["runs"] += 1
+            stats.update({k: v for k, v in c.items()})
+    return dict(stats)
 
 
 async def compare_with_production(db, doc_id: str) -> Dict[str, Any]:

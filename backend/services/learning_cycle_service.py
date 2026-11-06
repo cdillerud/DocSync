@@ -277,6 +277,8 @@ async def run_learning_cycle(db) -> Dict[str, Any]:
         from services.sales_stage_service import move_ap_invoices
         summary["sales"]["to_ap"] = await move_ap_invoices(db)
         summary["sales"]["drafts"] = await sales_draft(db, limit=10)
+        from services.sales_bulk_order_service import grade as bulk_grade
+        summary["sales"]["bulk_vs_bc"] = await bulk_grade(db)
         if summary["sales"]["drafts"].get("drafted"):
             summary["sales"]["stages"] = await sales_stages(db, days=45)
     except Exception as e:

@@ -47,6 +47,7 @@ async def _bc(env: str):
 # Customers whose POs inside sales enters as one BC order per PO line
 # ("P0028021-1/W118463", "-2", ...): learned from BC, not listed.
 SPLIT_PER_LINE = True
+BULK_FOR_SPLIT_CUSTOMERS = True
 _SPLIT_EXT = None
 
 
@@ -203,6 +204,11 @@ async def _draft(db, limit: int = 5) -> Dict[str, Any]:
                                                                              "duplicate_of": twin["id"]}})
                 continue
             prods = [l for l in res.get("lines") or [] if l.get("item")]
+            if BULK_FOR_SPLIT_CUSTOMERS and await splits_per_line(db, cust):
+                # Horseshoe: left to the Sales Inbox bulk screen, where the rep
+                # confirms the price once and the Hub creates every order with
+                # the previous order's charges, comments and ship dates.
+                continue
             lines = prods + list(res.get("charges") or [])
             if not lines or any(not l.get("quantity") for l in lines):
                 await skip(d, "a line has no quantity")

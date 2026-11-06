@@ -131,6 +131,7 @@ async def draft_vs_bc(doc_id: str):
 class BulkCreateRequest(BaseModel):
     prices: dict = {}                 # item -> unit price the rep confirmed
     ship_dates: dict = {}             # external document no -> yyyy-mm-dd
+    test_copy: bool = False           # beside inside sales' orders already in the sandbox ("T-...")
 
 
 @router.get("/document/{doc_id}/bulk-plan")
@@ -153,7 +154,8 @@ async def bulk_create(doc_id: str, req: BulkCreateRequest, user=Depends(get_curr
         prices = {str(k).upper(): float(v) for k, v in (req.prices or {}).items()}
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Prices must be numbers")
-    r = await create(get_db(), doc_id, prices, {str(k): str(v)[:10] for k, v in (req.ship_dates or {}).items()}, user or {})
+    r = await create(get_db(), doc_id, prices, {str(k): str(v)[:10] for k, v in (req.ship_dates or {}).items()}, user or {},
+                     test_copy=bool(req.test_copy))
     if r.get("refused"):
         raise HTTPException(status_code=400, detail=r["refused"])
     return r

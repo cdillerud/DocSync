@@ -157,8 +157,9 @@ async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
                     o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"},
                                                            "order_no": {"$nin": nos}},
                                                           {"_id": 0, "order_no": 1, "lines": 1, "entered_lines": 1})
-                    if o:
-                        gs.append(compare(x["lines"], [l for l in _as_entered(o) if l.get("lineType") == "Item"], later))
+                    act = [l for l in _as_entered(o) if l.get("lineType") == "Item" and l.get("lineObjectNumber")] if o else []
+                    if act:
+                        gs.append(compare(x["lines"], act, later))
                         nos.append(o["order_no"])
                 if gs:
                     g = _merge(gs)
@@ -168,8 +169,13 @@ async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
                     stats["graded_exact"] += bool(g["exact"])
             elif order_no:
                 o = await db.bc_sales_orders.find_one({"order_no": order_no}, {"_id": 0, "lines": 1, "entered_lines": 1})
-                if o:
-                    g = compare(sd.get("lines") or [], [l for l in _as_entered(o) if l.get("lineType") == "Item"], later)
+                # An order inside sales has opened but not filled in yet
+                # (Albertsons 121433: header only) is not graded.
+                act = [l for l in _as_entered(o) if l.get("lineType") == "Item" and l.get("lineObjectNumber")] if o else []
+                if not act:
+                    await db.hub_documents.update_one({"_id": d["_id"]}, {"$unset": {"sales_draft_vs_bc": ""}})
+                if act:
+                    g = compare(sd.get("lines") or [], act, later)
                     upd["sales_draft_vs_bc"] = {**g, "bc_order_no": order_no, "graded_at": now,
                                                 "graded_on": "as entered" if o.get("entered_lines") else "current order"}
                     stats["graded"] += 1

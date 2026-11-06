@@ -57,6 +57,9 @@ async def order_checks():
 async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: int = 45, skip: int = 0, limit: int = 50):
     db = get_db()
     flt = {"created_utc": {"$gte": _since(days)}, "sales_stage": stage}
+    if stage == "graded":
+        # Hub drafts whose customer PO inside sales has entered in Production.
+        flt = {"created_utc": {"$gte": _since(days)}, "sales_draft_vs_bc.graded_at": {"$exists": True}}
     if rep == "unassigned":
         flt["sales_rep.email"] = None
     elif rep:
@@ -70,7 +73,7 @@ async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: 
     async for d in db.hub_documents.find(flt, {
             "_id": 0, "id": 1, "file_name": 1, "email_subject": 1, "email_sender": 1, "created_utc": 1, "document_type": 1,
             "sales_link": 1, "sales_stage": 1, "sales_stage_reason": 1, "sales_stage_detail": 1, "sales_resolution": 1,
-            "sales_draft": 1, "sales_draft_readback": 1, "duplicate_of": 1, "sales_rep": 1, "extracted_fields.po_number": 1, "extracted_fields.customer": 1,
+            "sales_draft": 1, "sales_draft_readback": 1, "sales_draft_vs_bc": 1, "duplicate_of": 1, "sales_rep": 1, "extracted_fields.po_number": 1, "extracted_fields.customer": 1,
             "amount_float": 1}).sort([("created_utc", -1)]).skip(skip).limit(limit):
         sl = d.get("sales_link") or {}
         if sl.get("bc_customer_no"):
@@ -86,6 +89,9 @@ async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: 
             "draft": {k: (d.get("sales_draft") or {}).get(k) for k in ("bc_order_no", "environment", "total", "created_at", "to_complete")} if d.get("sales_draft") else None,
             "readback": {k: (d.get("sales_draft_readback") or {}).get(k) for k in ("state", "edits", "checked_at")} if d.get("sales_draft_readback") else None,
             "resolution": d.get("sales_resolution"), "po_total": d.get("amount_float"), "duplicate_of": d.get("duplicate_of"),
+            "vs_bc": {k: (d.get("sales_draft_vs_bc") or {}).get(k) for k in (
+                "exact", "products", "products_right", "qty_right", "price_right", "charges", "charges_right", "missing", "extra",
+                "bc_order_no", "graded_on")} if d.get("sales_draft_vs_bc") else None,
             "rep": d.get("sales_rep")})
     names = {}
     if custs:
@@ -96,6 +102,18 @@ async def list_docs(stage: str = "needs_rep", q: str = "", rep: str = "", days: 
         r["customer_name"] = names.get(r["customer_no"])
     return {"total": total, "rows": rows}
 
+
+
+@router.get("/document/{doc_id}/vs-bc")
+async def draft_vs_bc(doc_id: str):
+    """The Hub's sandbox draft next to inside sales' Production order, line
+    by line (read-only)."""
+    from services.sales_draft_readback_service import side_by_side
+    db = get_db()
+    d = await db.hub_documents.find_one({"id": doc_id}, {"_id": 0, "sales_draft": 1, "sales_draft_vs_bc": 1, "sales_link": 1})
+    if not d or not d.get("sales_draft"):
+        raise HTTPException(status_code=404, detail="No Hub draft for this document")
+    return await side_by_side(db, d)
 
 
 ACTIVE = ["needs_rep", "ready", "drafted"]

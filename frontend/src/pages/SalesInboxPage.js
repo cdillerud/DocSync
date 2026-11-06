@@ -19,6 +19,7 @@ const STAGES = [
   { key: 'purchasing', label: 'Purchasing', help: "A supplier's document about a Gamer purchase order", tone: 'muted' },
   { key: 'to_ap', label: 'To AP', help: 'An AP invoice that came to sales', tone: 'muted' },
   { key: 'filed', label: 'Filed', help: "Gamer's own order copies, AR invoices and other customer mail: evidence, not work", tone: 'muted' },
+  { key: 'graded', label: 'Draft vs Production', help: "Hub sandbox drafts whose customer PO inside sales has entered in Production BC, compared line by line. Open a row to see every line side by side", tone: 'muted' },
 ];
 const GROUPS = [
   { title: 'Needs a person', keys: ['needs_rep'], cls: 'border-amber-500/30 bg-amber-500/5' },
@@ -73,6 +74,87 @@ function Lines({ resolution }) {
       {(resolution.planned_total != null || resolution.po_total != null) && (
         <p className="mt-1 text-xs text-muted-foreground tabular-nums">Products {money(resolution.planned_total)}{resolution.charges?.length ? ` · with charges ${money(resolution.planned_total_with_charges)}` : ''} · PO total {money(resolution.po_total)}</p>
       )}
+    </div>
+  );
+}
+
+function fmt(v, d = 5) {
+  return v == null ? '—' : Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
+}
+
+function VsBadge({ g }) {
+  if (!g) return null;
+  if (g.exact) return <div className="mt-0.5 inline-block rounded bg-emerald-500/15 px-1.5 text-[11px] text-emerald-700 dark:text-emerald-400">vs Production: exact</div>;
+  const bits = [];
+  if ((g.products_right || 0) < (g.products || 0)) bits.push(`items ${g.products_right || 0}/${g.products}`);
+  if ((g.qty_right || 0) < (g.products_right || 0)) bits.push(`qty ${g.qty_right || 0}/${g.products_right}`);
+  if ((g.price_right || 0) < (g.products_right || 0)) bits.push(`price ${g.price_right || 0}/${g.products_right}`);
+  if ((g.charges_right || 0) < (g.charges || 0)) bits.push(`charges ${g.charges_right || 0}/${g.charges}`);
+  if (g.extra?.length) bits.push(`${g.extra.length} extra`);
+  return <div className="mt-0.5 inline-block rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700 dark:text-amber-400" title="Hub draft compared with inside sales' Production order">vs Production: {bits.join(' · ') || 'differs'}</div>;
+}
+
+const STATUS = {
+  match: { text: 'Same', cls: 'text-emerald-700 dark:text-emerald-400' },
+  qty: { text: 'Quantity differs', cls: 'text-amber-700 dark:text-amber-400' },
+  price: { text: 'Price differs', cls: 'text-amber-700 dark:text-amber-400' },
+  qty_price: { text: 'Quantity and price differ', cls: 'text-amber-700 dark:text-amber-400' },
+  missing: { text: 'Hub left it out', cls: 'text-red-600 dark:text-red-400' },
+  extra: { text: 'Hub added it; not in BC', cls: 'text-red-600 dark:text-red-400' },
+  later: { text: 'Added at shipping (not graded)', cls: 'text-muted-foreground' },
+};
+
+// The Hub's sandbox draft next to the order inside sales entered in
+// Production, line by line; differences highlighted (read-only).
+function VsBc({ id }) {
+  const [v, setV] = useState(null);
+  const [err, setErr] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.get(`/sales-inbox/document/${id}/vs-bc`).then(({ data }) => live && setV(data)).catch(() => live && setErr(true));
+    return () => { live = false; };
+  }, [id]);
+  if (err) return <p className="text-xs text-red-600">Could not load the comparison.</p>;
+  if (!v) return <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Comparing with Production…</div>;
+  const hi = (bad) => (bad ? 'bg-amber-500/15 font-semibold' : '');
+  return (
+    <div className="space-y-3">
+      {v.orders.map((o, i) => (
+        <div key={i} className="overflow-x-auto">
+          <div className="mb-1 text-xs">
+            <b>Hub draft</b> <span className="font-mono">{o.hub_order_no}</span> (sandbox {v.environment}) <b>vs Production order</b> <span className="font-mono">{o.bc_order_no || 'not entered yet'}</span>
+            {o.graded_on && <span className="text-muted-foreground"> · compared with the {o.graded_on}{o.bc_status ? `, ${o.bc_status}` : ''}</span>}
+          </div>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-muted-foreground border-b border-border">
+                <th className="py-1 pr-3">Item</th><th className="py-1 pr-3">Description</th>
+                <th className="py-1 pr-3 text-right">Hub qty</th><th className="py-1 pr-3 text-right">BC qty</th>
+                <th className="py-1 pr-3 text-right">Hub price</th><th className="py-1 pr-3 text-right">BC price</th><th className="py-1">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {o.rows.map(r => {
+                const st = STATUS[r.status] || { text: r.status, cls: '' };
+                const qBad = ['qty', 'qty_price'].includes(r.status);
+                const pBad = ['price', 'qty_price'].includes(r.status);
+                const rowCls = ['missing', 'extra'].includes(r.status) ? 'bg-red-500/5' : '';
+                return (
+                  <tr key={r.item} className={`border-b border-border/60 align-top ${rowCls}`}>
+                    <td className="py-1 pr-3 font-mono">{r.item}{r.kind === 'charge' && <span className="ml-1 rounded bg-muted px-1 text-[10px] font-sans">charge</span>}</td>
+                    <td className="py-1 pr-3 max-w-[280px] truncate" title={r.description || ''}>{r.description || '—'}</td>
+                    <td className={`py-1 pr-3 text-right tabular-nums ${hi(qBad)}`}>{fmt(r.hub_qty, 3)}</td>
+                    <td className={`py-1 pr-3 text-right tabular-nums ${hi(qBad)}`}>{fmt(r.bc_qty, 3)}</td>
+                    <td className={`py-1 pr-3 text-right tabular-nums ${hi(pBad)}`}>{fmt(r.hub_price)}</td>
+                    <td className={`py-1 pr-3 text-right tabular-nums ${hi(pBad)}`}>{fmt(r.bc_price)}</td>
+                    <td className={`py-1 ${st.cls}`}>{st.text}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }
@@ -150,7 +232,8 @@ export default function SalesInboxPage() {
           Last {summary.days} days: <b className="text-foreground">{summary.customer_pos}</b> customer POs, <b className="text-foreground">{summary.customer_pos_in_bc}</b> already on a BC sales order.
           {summary.draft_accuracy?.orders > 0 && (
             <> Hub drafts graded against inside sales' own orders: <b className="text-foreground">{summary.draft_accuracy.exact}/{summary.draft_accuracy.orders}</b> exact,
-              products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}.</>
+              products {summary.draft_accuracy.products_right}/{summary.draft_accuracy.products}, charges {summary.draft_accuracy.charges_right || 0}/{summary.draft_accuracy.charges || 0}.{' '}
+              <button type="button" className="text-primary underline" onClick={() => setStage('graded')} data-testid="open-draft-vs-production">Compare line by line</button></>
           )}
         </p>
       )}
@@ -223,7 +306,7 @@ export default function SalesInboxPage() {
                   {data.rows.map(r => (
                     <Fragment key={r.id}>
                       <tr key={r.id} className="border-b border-border align-top hover:bg-muted/40 cursor-pointer" onClick={() => setOpen(o => ({ ...o, [r.id]: !o[r.id] }))}>
-                        <td className="py-2 pr-2">{r.resolution ? (open[r.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : null}</td>
+                        <td className="py-2 pr-2">{(r.resolution || r.vs_bc) ? (open[r.id] ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />) : null}</td>
                         <td className="py-2 pr-3 whitespace-nowrap text-xs">{(r.received || '').slice(0, 10)}</td>
                         <td className="py-2 pr-3">{r.customer_name || r.customer_on_doc || '—'}{r.customer_no && <span className="text-xs text-muted-foreground"> ({r.customer_no})</span>}
                           <div className="text-xs text-muted-foreground truncate max-w-[220px]">{r.sender}</div></td>
@@ -238,6 +321,7 @@ export default function SalesInboxPage() {
                           {r.stage === 'needs_rep' && <span className="text-amber-700 dark:text-amber-400">{r.reason_text}{r.detail ? ` (${plainBcError(r.detail)})` : ''}</span>}
                           {r.stage === 'duplicate' && <>Copy of <Link className="underline" to={`/documents/${r.duplicate_of}`} onClick={e => e.stopPropagation()}>another document</Link></>}
                           {['filed', 'purchasing', 'to_ap', 'ready'].includes(r.stage) && <span className="text-muted-foreground">{(r.role || '').replace(/_/g, ' ')}</span>}
+                          {r.vs_bc && <div><VsBadge g={r.vs_bc} /></div>}
                         </td>
                         <td className="py-2 pr-3 text-xs" onClick={e => e.stopPropagation()}>
                           <div title={r.rep?.how}>{r.rep?.name || 'Unassigned'}</div>
@@ -257,8 +341,11 @@ export default function SalesInboxPage() {
                         <td className="py-2 pr-3 text-right text-xs tabular-nums">{r.resolution ? `${r.resolution.resolved}/${r.resolution.total}` : '—'}
                           {r.resolution?.price_checks > 0 && <div className="text-[10px] text-amber-600 dark:text-amber-400">{r.resolution.price_checks} price{r.resolution.price_checks > 1 ? 's' : ''} to check</div>}</td>
                       </tr>
-                      {open[r.id] && r.resolution && (
-                        <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3"><Lines resolution={r.resolution} /></td></tr>
+                      {open[r.id] && (r.resolution || r.vs_bc) && (
+                        <tr key={`${r.id}-lines`} className="border-b border-border bg-muted/20"><td></td><td colSpan={7} className="py-2 pr-3 space-y-3">
+                          {r.vs_bc && <VsBc id={r.id} />}
+                          {r.resolution && <Lines resolution={r.resolution} />}
+                        </td></tr>
                       )}
                     </Fragment>
                   ))}

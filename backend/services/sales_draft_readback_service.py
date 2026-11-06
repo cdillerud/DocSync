@@ -179,6 +179,68 @@ async def readback(db, env: Optional[str] = None) -> Dict[str, Any]:
     return dict(stats)
 
 
+def _side_rows(planned: List[Dict[str, Any]], actual: List[Dict[str, Any]], later: frozenset, desc: Dict[str, str]) -> List[Dict[str, Any]]:
+    """Line by line: the Hub's draft next to the order inside sales entered,
+    with the same tolerances the grade uses."""
+    p, a = _norm_lines(planned), _norm_lines(actual)
+    rows = []
+    for it in list(dict.fromkeys(list(a) + list(p))):
+        x, y = p.get(it), a.get(it)
+        r = {"item": it, "description": desc.get(it), "kind": "product" if is_product(it) else "charge",
+             "hub_qty": x["q"] if x else None, "hub_price": x["p"] if x else None,
+             "bc_qty": y["q"] if y else None, "bc_price": y["p"] if y else None}
+        if not x and it in later:
+            r["status"] = "later"
+        elif not x:
+            r["status"] = "missing"
+        elif not y:
+            r["status"] = "extra"
+        else:
+            q_ok = abs(x["q"] - y["q"]) <= max(0.01, 0.002 * y["q"])
+            p_ok = abs(x["p"] - y["p"]) <= max(0.005, 0.005 * y["p"])
+            r["status"] = "match" if q_ok and p_ok else ("qty" if p_ok else ("price" if q_ok else "qty_price"))
+        rows.append(r)
+    return rows
+
+
+async def side_by_side(db, d: Dict[str, Any]) -> Dict[str, Any]:
+    """A Hub sandbox draft next to the Production order(s) inside sales
+    entered for the same customer PO (Sales Inbox, 'Draft vs Production')."""
+    await load_item_categories(db)
+    sd = d.get("sales_draft") or {}
+    later = await _later_charges(db, sd.get("customer_no"))
+    pairs = []
+    if sd.get("orders") and all(x.get("lines") for x in sd["orders"]):
+        nos = []
+        for x in sd["orders"]:
+            ext = str(x.get("external_document_no") or "")
+            o = await db.bc_sales_orders.find_one({"customer_no": sd.get("customer_no"), "external_doc_no": {"$regex": "^" + re.escape(ext) + r"(\s*/|$)"},
+                                                   "order_no": {"$nin": nos}}, {"_id": 0})
+            if o:
+                nos.append(o["order_no"])
+            pairs.append((x.get("bc_order_no"), x.get("lines") or [], o))
+    else:
+        on = (d.get("sales_link") or {}).get("order_no") or (d.get("sales_draft_vs_bc") or {}).get("bc_order_no")
+        o = await db.bc_sales_orders.find_one({"order_no": on}, {"_id": 0}) if on else None
+        pairs.append((sd.get("bc_order_no"), sd.get("lines") or [], o))
+    items = {str(l.get("lineObjectNumber") or l.get("item") or "").upper() for _, ls, o in pairs
+             for l in list(ls) + (_as_entered(o) if o else [])}
+    desc = {}
+    async for i in db.bc_reference_cache.find({"bc_entity_type": "item", "bc_document_no": {"$in": sorted(items)}},
+                                              {"_id": 0, "bc_document_no": 1, "description": 1}):
+        desc[str(i["bc_document_no"]).upper()] = i.get("description")
+    out = []
+    for hub_no, ls, o in pairs:
+        actual = [l for l in _as_entered(o) if l.get("lineType") == "Item"] if o else []
+        for l in actual:
+            desc.setdefault(str(l.get("lineObjectNumber") or "").upper(), l.get("description"))
+        out.append({"hub_order_no": hub_no, "bc_order_no": (o or {}).get("order_no"),
+                    "graded_on": None if not o else ("as entered" if o.get("entered_lines") else "current order (after shipping changes)"),
+                    "bc_status": (o or {}).get("status"),
+                    "rows": _side_rows(ls, actual, later, desc) if o else _side_rows(ls, [], frozenset(), desc)})
+    return {"environment": sd.get("environment"), "customer_no": sd.get("customer_no"), "grade": d.get("sales_draft_vs_bc"), "orders": out}
+
+
 async def metrics(db) -> Dict[str, Any]:
     """Drafting accuracy against inside sales' own Production orders."""
     c = Counter()

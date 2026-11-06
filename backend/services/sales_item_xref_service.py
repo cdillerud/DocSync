@@ -411,6 +411,9 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
                 # a bare number (48000) may be anything and must be confirmed.
                 # A bare number the PO labels as the item ("Item 612000046") counts too.
                 labelled = bool(re.search(r"(ITEM|PART|SKU|STOCK\s*CODE|P/N|MATERIAL)\s*(NO\.?|#)?\s*:?\s*" + re.escape(_ITEM_BY_NORM[tok]), desc_up))
+                # A 7+ digit Gamer item number is not a pack count or size
+                # (Kill Cliff "(Supplier Code 6073202)"), as in step 1.
+                labelled = labelled or (LONG_DIGITS_PRINTED and tok.isdigit() and len(tok) >= 7)
                 strong = (bool(re.search(r"[A-Z]", tok)) and len(tok) >= 6 or labelled) and is_product(_ITEM_BY_NORM[tok])
                 out.append((_ITEM_BY_NORM[tok], "Gamer item number on the PO (new for this customer)", strong))
                 break
@@ -524,6 +527,7 @@ DESC_M = 1.5
 DESC_STRONG = 8.0
 AGREE_STRONG = False
 KEEP_STRONGER = True
+LONG_DIGITS_PRINTED = True
 PRINTED_FIRST = False
 NO_RULEOUT_WHEN_OVERRIDDEN = True
 FIT_ON_BC = True

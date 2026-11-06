@@ -562,7 +562,12 @@ async def intake_document_from_bytes(
         "id": doc_id,
         "document_type": suggested_type,
         "suggested_job_type": suggested_type,
-        "vendor_canonical": doc.get("vendor_canonical") or normalized_fields.get("vendor"),
+        # The vendor resolved above (sender email, alias, BC match): routing
+        # with the raw invoice name ("O-I Packaging Solutions LLC") missed the
+        # vendor's filing history and sent 111 Owens / Anchor / Canworks
+        # invoices to Drop Ship All Others instead of Dunnage Vendors
+        # (2026-10-15..11-06; split 58% -> 96% right on 444 filings).
+        "vendor_canonical": (vendor_alias_result or {}).get("vendor_canonical") or doc.get("vendor_canonical") or normalized_fields.get("vendor"),
         "po_number_extracted": normalized_fields.get("po_number") or extracted_fields.get("po_number"),
         "bol_number_extracted": normalized_fields.get("bol_number") or extracted_fields.get("bol_number"),
         "extracted_fields": extracted_fields,

@@ -184,6 +184,7 @@ async def learn(db) -> Dict[str, Any]:
     cust_seqs = defaultdict(list)                     # cust -> order sequence numbers
     cp_orders = Counter()                             # (cust, product) -> orders
     open_orders = Counter()                           # cust -> open orders
+    readbacks = Counter()                             # cust -> sandbox readbacks counted as orders
     cp_charge = Counter()                             # (cust, product, charge) -> orders with the charge
     reviewed = 10 ** 9                                # sandbox drafts a rep completed: newest
     async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1, "order_no": 1}):
@@ -253,6 +254,7 @@ async def learn(db) -> Dict[str, Any]:
         if not cust or not prods:
             continue
         orders[cust] += 1
+        readbacks[cust] += 1
         reviewed += 1
         pq = sum(_each(float(l["quantity"]), l.get("unitOfMeasureCode")) for l in prods)
         pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
@@ -260,7 +262,7 @@ async def learn(db) -> Dict[str, Any]:
             c = str(l["lineObjectNumber"]).upper()
             if not is_product(c) and (c not in excluded or (cust, c) in entry):
                 obs[cust][c].append({"q": float(l.get("quantity") or 0), "p": float(l.get("unitPrice") or 0), "pq": pq, "pv": pv, "open": True,
-                                     "seq": reviewed})
+                                     "seq": reviewed, "readback": True})
     now = datetime.now(timezone.utc).isoformat()
     usual = []
     for cust, charges in seen_any.items():
@@ -342,10 +344,12 @@ async def learn(db) -> Dict[str, Any]:
                 rate = max(rate, sum(1 for x in xs if x["seq"] in recent) / len(recent))
             entry_rate = None
             if OPEN_PRESENCE and open_orders[cust] >= OPEN_MIN_ORDERS:
-                k_open = sum(1 for x in xs if x["open"])
+                # BC open orders only: a readback can hold the Hub's own drafted
+                # charge (Horseshoe FRTSURCHARGE on 8 readbacks, all drafted).
+                k_open = sum(1 for x in xs if x["open"] and not x.get("readback"))
                 entry_rate = min(1.0, k_open / open_orders[cust])
-                closed = n - open_orders[cust]
-                later_rate = (len(xs) - k_open) / closed if closed > 0 else 0.0
+                closed = n - open_orders[cust] - readbacks[cust]
+                later_rate = sum(1 for x in xs if not x["open"]) / closed if closed > 0 else 0.0
                 if entry_rate <= 1 - MIN_RATE and later_rate >= 3 * entry_rate + 0.05:
                     continue      # this customer gets it after entry (shipping / invoicing)
                 rate = max(rate, entry_rate)

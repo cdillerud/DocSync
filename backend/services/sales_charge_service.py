@@ -65,6 +65,15 @@ ITEM_RULES_INVOICED_ONLY = False   # replay switch: learn item charges from invo
 
 
 UNIT_EACH = True
+# Customer charge rules learned from the customer's latest orders, not all
+# history: Horseshoe's DUNNAGEMGMT is on 98 of 101 open orders but 46% of
+# 1,331 invoiced ones, and its FREIGHT at 1970 on 98 open orders - an
+# all-history rate (50%) never reached the 80% bar. 0 = all history.
+RECENT_ORDERS = 40
+# Size a ratio charge from each item's own learned ratio when every product
+# has one (Giovanni: one O-I pallet per 2,821 24oz jars, per 4,725 of
+# C-500733); the customer-wide ratio drafted 32 pallets where BC had 19.
+ITEM_RATIO_FIRST = True
 
 
 def _each(q: float, uom: Any) -> float:
@@ -141,6 +150,8 @@ async def learn(db) -> Dict[str, Any]:
     size_orders = Counter()                           # size signature -> single-size orders
     item_orders = Counter()                           # item -> orders
     item_charge = defaultdict(list)                   # (item, charge) -> [(seq, qty_kind, qty, price)]
+    cust_seqs = defaultdict(list)                     # cust -> order sequence numbers
+    reviewed = 10 ** 9                                # sandbox drafts a rep completed: newest
     async for o in db.bc_sales_orders.find({}, {"_id": 0, "customer_no": 1, "lines": 1, "status": 1, "order_no": 1}):
         ls = _lines(o)
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
@@ -169,6 +180,8 @@ async def learn(db) -> Dict[str, Any]:
                     size_price[(sig, c)][round(float(l.get("unitPrice") or 0), 4)] += 1
         cust = o["customer_no"]
         orders[cust] += 1
+        seq = _order_seq(o.get("order_no"))
+        cust_seqs[cust].append(seq)
         pq = sum(_each(float(l["quantity"]), l.get("unitOfMeasureCode")) for l in prods)
         pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
         agg = {}
@@ -183,7 +196,7 @@ async def learn(db) -> Dict[str, Any]:
             all_q[cust][c].append(a["q"])
             if c in excluded and (cust, c) not in entry:
                 continue
-            obs[cust][c].append({"q": a["q"], "p": a["p"], "pq": pq, "pv": pv, "open": o.get("status") == "open"})
+            obs[cust][c].append({"q": a["q"], "p": a["p"], "pq": pq, "pv": pv, "open": o.get("status") == "open", "seq": seq})
             if len(prods) == 1 and a["q"] > 0:
                 it = str(prods[0]["lineObjectNumber"]).upper()
                 prod_ratio[(cust, it, c)].append(a["q"] / _each(float(prods[0]["quantity"]), prods[0].get("unitOfMeasureCode")))
@@ -199,12 +212,14 @@ async def learn(db) -> Dict[str, Any]:
         if not cust or not prods:
             continue
         orders[cust] += 1
+        reviewed += 1
         pq = sum(_each(float(l["quantity"]), l.get("unitOfMeasureCode")) for l in prods)
         pv = sum(float(l["quantity"]) * float(l.get("unitPrice") or 0) for l in prods)
         for l in ls:
             c = str(l["lineObjectNumber"]).upper()
             if not is_product(c) and (c not in excluded or (cust, c) in entry):
-                obs[cust][c].append({"q": float(l.get("quantity") or 0), "p": float(l.get("unitPrice") or 0), "pq": pq, "pv": pv, "open": True})
+                obs[cust][c].append({"q": float(l.get("quantity") or 0), "p": float(l.get("unitPrice") or 0), "pq": pq, "pv": pv, "open": True,
+                                     "seq": reviewed})
     now = datetime.now(timezone.utc).isoformat()
     usual = []
     for cust, charges in seen_any.items():
@@ -265,11 +280,18 @@ async def learn(db) -> Dict[str, Any]:
         n = orders[cust]
         if n < MIN_ORDERS:
             continue
+        # Whether the charge is on the customer's orders today: its latest
+        # Production orders. How it is sized and priced: all of them.
+        recent = set(sorted(cust_seqs[cust])[-RECENT_ORDERS:]) if RECENT_ORDERS and len(cust_seqs[cust]) > RECENT_ORDERS else None
         for c, xs in charges.items():
             rate = len(xs) / n
+            if recent is not None:
+                rate = max(rate, sum(1 for x in xs if x["seq"] in recent) / len(recent))
             if rate < MIN_RATE:
                 continue
-            rule = {"customer_no": cust, "charge": c, "orders": n, "rate": round(rate, 2), "updated_at": now}
+            latest = recent is not None and rate > len(xs) / n
+            rule = {"customer_no": cust, "charge": c, "orders": len(recent) if latest else n, "rate": round(rate, 2), "updated_at": now,
+                    "latest": latest}
             qs = Counter(round(x["q"], 4) for x in xs)
             q_top, q_k = qs.most_common(1)[0]
             ratio = _steady([x["q"] / x["pq"] for x in xs if x["pq"]])
@@ -379,6 +401,18 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
             qty = r["qty"]
         elif r["qty_mode"] == "ratio":
             qty = r["ratio"] * pq
+            if ITEM_RATIO_FIRST and prods:
+                q_items = 0.0
+                for p in prods:
+                    cp = await db.sales_charge_product_rules.find_one(
+                        {"scope": "customer_product", "customer_no": customer_no, "product": str(p["item"]).upper(), "charge": r["charge"]},
+                        {"_id": 0, "ratio": 1})
+                    if not (cp or {}).get("ratio"):
+                        q_items = None
+                        break
+                    q_items += cp["ratio"] * _each(float(p.get("quantity") or 0), p.get("unit_of_measure"))
+                if q_items:
+                    qty = q_items
         else:
             qty, known, prices = 0.0, True, set()
             for p in prods:
@@ -427,7 +461,7 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
         else:
             continue
         out.append({"item": r["charge"], "quantity": qty, "unit_price": price, "charge": True,
-                    "how": f"on {int(r['rate'] * 100)}% of this customer's {r['orders']} BC orders"
+                    "how": f"on {int(r['rate'] * 100)}% of this customer's {'latest ' if r.get('latest') else ''}{r['orders']} BC orders"
                            + ("; quantity per product" if r["qty_mode"] in ("ratio", "per_product") else ""),
                     "price_source": r.get("price_basis")})
     if ITEM_CHARGES:

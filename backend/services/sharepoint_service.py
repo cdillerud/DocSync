@@ -144,7 +144,8 @@ async def _site_and_drive(client, token):
 
 
 async def upload_to_sharepoint(file_content: bytes, file_name: str, folder: str):
-    folder_for_url = str(folder or "").strip("/")
+    from services.folder_layout_service import to_new
+    folder_for_url = str(to_new(folder) or "").strip("/")
     if DEMO_MODE or not GRAPH_CLIENT_ID:
         item_id = str(uuid.uuid4())
         drive_id = "mock-drive-" + str(uuid.uuid4())[:8]
@@ -243,7 +244,8 @@ async def create_sharing_link(drive_id: str, item_id: str):
 
 async def ensure_sharepoint_folder_exists(folder_path: str) -> bool:
     """Create the requested folder hierarchy when it does not already exist."""
-    normalized_path = str(folder_path or "").strip("/")
+    from services.folder_layout_service import to_new
+    normalized_path = str(to_new(folder_path) or "").strip("/")
     if not normalized_path or DEMO_MODE or not GRAPH_CLIENT_ID:
         return True
 
@@ -674,7 +676,11 @@ async def upload_to_sharepoint_with_routing(
         (po_result or {}).get("status", "not_run"),
     )
 
-    await ensure_sharepoint_folder_exists(full_folder_path)
+    # Meghan's Temp Folder layout: written in the new folders, recorded in
+    # the layout the Hub learns and measures in (folder_layout_service).
+    from services.folder_layout_service import final_path
+    actual_folder_path = final_path(routing_doc, full_folder_path)
+    await ensure_sharepoint_folder_exists(actual_folder_path)
     upload_file_name = generate_square9_style_filename(routing_doc, file_name)
     if upload_file_name != file_name:
         logger.info(
@@ -687,10 +693,11 @@ async def upload_to_sharepoint_with_routing(
     result = await upload_to_sharepoint(
         file_content,
         upload_file_name,
-        full_folder_path,
+        actual_folder_path,
     )
     result.update({
         "folder_path": full_folder_path,
+        "actual_folder_path": actual_folder_path,
         "routing_reason": routing_reason,
         "routing_details": routing_details,
         "routing_snapshot": snapshot,

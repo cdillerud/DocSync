@@ -23,7 +23,8 @@ FULL_MATCH = {"exact_match", "strong_evidence_match", "likely_match", "possible_
 
 
 def _root(p: str) -> str:
-    p = (p or "").strip("/")
+    from services.folder_layout_service import to_old
+    p = (to_old(p) or "").strip("/")
     if p.lower().startswith("temp folder/"):
         p = p[12:]
     return p.split("/")[0].lower()
@@ -104,7 +105,8 @@ _EXCEPTION_SUB = _re.compile(r"hold|issue|missing|not posted|previous month|retu
 
 
 def _path_parts(p: str):
-    x = [t.strip() for t in (p or "").strip("/").split("/") if t.strip()]
+    from services.folder_layout_service import to_old
+    x = [t.strip() for t in (to_old(p) or "").strip("/").split("/") if t.strip()]
     if x and x[0].lower().startswith("temp folder"):
         x = x[1:]
     return x

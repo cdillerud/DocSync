@@ -377,6 +377,8 @@ async def move_document_to_sharepoint(doc_id: str):
     from services.sharepoint_service import SHAREPOINT_BASE_FOLDER
     if not folder_path.startswith(SHAREPOINT_BASE_FOLDER):
         folder_path = f"{SHAREPOINT_BASE_FOLDER}/{folder_path}" if folder_path else SHAREPOINT_BASE_FOLDER
+    from services.folder_layout_service import final_path
+    folder_path = final_path(doc, folder_path)     # Meghan's Temp Folder layout
 
     if DEMO_MODE:
         # In demo mode, simulate the move

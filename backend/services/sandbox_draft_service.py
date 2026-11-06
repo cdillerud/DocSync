@@ -261,6 +261,63 @@ async def receipt_lines_for(db, doc: Dict[str, Any]) -> Dict[str, Any]:
     return {}
 
 
+# An invoice whose PO is not one of this vendor's BC purchase orders (a
+# digit dropped: Ball "11772" for 117722 - also an old sales order number;
+# a sales order or vendor reference) and whose total is the value of the
+# receipts of exactly one of the vendor's BC orders received 30 days before
+# to 10 days after it. Replay 2026-07..11 on entered invoices: 334 of 340
+# were AP's order; 4 misses read a glued PO ("1144802060698" = 114480 +
+# a customer number, its leading order now counts as the vendor's PO), 2
+# were identical loads on sibling orders (SGC 111780-83).
+RECEIPT_BY_AMOUNT = True
+
+
+async def _po_not_vendors(db, po: str, vendor: str) -> bool:
+    from services.sharepoint_service import _LEADING_ORDER
+    po = str(po or "").strip().upper()
+    vendor = str(vendor or "").strip().upper()
+    if not vendor:
+        return False
+    if not po:
+        return True
+    lead = _LEADING_ORDER.match(po)
+    vals = list(dict.fromkeys([po] + ([lead.group(0)] if lead else [])))
+    if await db.bc_purchase_receipts.find_one({"orderNumber": {"$in": vals}, "vendorNumber": vendor}, {"_id": 1}):
+        return False
+    return not await db.bc_reference_cache.find_one({"bc_vendor_no": vendor, "$or": [
+        {"bc_entity_type": "purchase_order", "bc_document_no": {"$in": vals}},
+        {"bc_entity_type": {"$in": ["posted_purchase_invoice", "draft_purchase_invoice", "purchase_credit_memo"]},
+         "bc_order_number": {"$in": vals}}]}, {"_id": 1})
+
+
+async def receipt_by_amount(db, d: Dict[str, Any]) -> Dict[str, Any]:
+    amount = abs(float(d.get("amount_float") or 0))
+    if not amount or not d.get("vendor_canonical"):
+        return {}
+    try:
+        day = datetime.fromisoformat(str(d.get("invoice_date") or d.get("created_utc"))[:10]).date()
+    except ValueError:
+        return {}
+    used = set(await db.hub_documents.distinct("draft_receipt_numbers", {"draft_receipt_numbers": {"$exists": True}, "id": {"$ne": d.get("id")}}))
+    found = []
+    async for r in db.bc_purchase_receipts.find(
+            {"vendorNumber": str(d["vendor_canonical"]).upper(),
+             "postingDate": {"$gte": (day - timedelta(days=30)).isoformat(), "$lte": (day + timedelta(days=10)).isoformat()}},
+            {"_id": 0, "number": 1, "orderNumber": 1, "postingDate": 1, "purchaseReceiptLines": 1}).sort("postingDate", 1):
+        if r.get("number") in used:
+            continue
+        rl = [l for l in r.get("purchaseReceiptLines") or [] if l.get("lineObjectNumber") and float(l.get("quantity") or 0)]
+        if rl and abs(round(sum(float(l["quantity"]) * float(l.get("unitCost") or 0) for l in rl), 2) - amount) < 0.02:
+            found.append((r, rl))
+    if len({r.get("orderNumber") for r, _ in found}) != 1:
+        return {}
+    r, rl = found[0]
+    lines = [{"lineType": _line_type(l.get("lineType")), "lineObjectNumber": l["lineObjectNumber"], "description": (l.get("description") or "")[:100],
+              "quantity": float(l["quantity"]), "unitCost": float(l.get("unitCost") or 0),
+              "source": f"bc_receipt {r['number']} (order {r.get('orderNumber')}, the one receipt worth this invoice's total)"} for l in rl]
+    return {"lines": lines, "receipts": [r["number"]], "order": r.get("orderNumber")}
+
+
 def _code_segments(code: str) -> set:
     # "NK3286-473L-QM04-06224-5MHE" / "3286-QM04-PFASNI" -> {"QM04", ...}:
     # segments with letters and digits (not the bare "3286" both share).
@@ -989,6 +1046,14 @@ async def plan_lines(db, d: Dict[str, Any], rec: Dict[str, Any]) -> Dict[str, An
             ri = {}
         if ri:
             return {"lines": await as_ap_enters(db, ri["lines"]), "source": "bc_receipt", "receipts": ri["receipts"], "order": ri["order"]}
+    if RECEIPT_BY_AMOUNT and await is_product_vendor(db, coding) and await _po_not_vendors(db, po, d.get("vendor_canonical")):
+        try:
+            ra = await receipt_by_amount(db, d)
+        except Exception as e:
+            logger.warning("[SandboxDraft] receipt by amount failed: %r", e)
+            ra = {}
+        if ra:
+            return {"lines": await as_ap_enters(db, ra["lines"]), "source": "bc_receipt", "receipts": ra["receipts"], "order": ra["order"]}
     if DROPSHIP_SO and po and await is_product_vendor(db, coding) and not await po_in_bc(db, po):
         try:
             dl = await dropship_lines(db, d, po)

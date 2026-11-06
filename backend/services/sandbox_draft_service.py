@@ -1385,6 +1385,16 @@ async def _skip_is_stale(db, d, reason: str) -> Optional[str]:
     m = _SKIP_PO.search(reason)
     if m and await db.bc_reference_cache.find_one({"bc_entity_type": "purchase_order", "bc_document_no": m.group(1)}, {"_id": 1}):
         return "PO now in BC"
+    # A receipt from this vendor posted since the skip: the invoice may be
+    # for it (receipt_by_items / drop-ship). Canpack 119479 arrived 10-14,
+    # its receipt on PR10121 posted 10-16 and AP entered it that day, while
+    # the skip waited 72h: 50 of 57 such skips since 2026-09-01 were entered
+    # by AP with no Hub draft (2026-11-06). Receipts are harvested hourly.
+    at0 = str((d.get("sandbox_draft_skipped") or {}).get("at") or "")
+    if m and at0 and d.get("vendor_canonical") and await db.bc_purchase_receipts.find_one(
+            {"vendorNumber": str(d["vendor_canonical"]).upper(), "postingDate": {"$gte": at0[:10]}, "cached_at": {"$gt": at0}},
+            {"_id": 1}):
+        return "new BC receipt from this vendor"
     at = str((d.get("sandbox_draft_skipped") or {}).get("at") or "")
     if at and at < (datetime.now(timezone.utc) - timedelta(hours=STALE_SKIP_HOURS)).isoformat():
         return f"re-checked after {STALE_SKIP_HOURS}h"

@@ -405,7 +405,11 @@ async def _candidates(db, e: Dict[str, Any], hist: Dict[str, Dict[str, Any]], ro
         for tok in _code_tokens(desc_up, 5):
             if tok not in _ITEM_BY_NORM and tok.replace("O", "0") in _ITEM_BY_NORM:
                 tok = tok.replace("O", "0")
-            if tok in _ITEM_BY_NORM and _CATEGORY.get(_ITEM_BY_NORM[tok]) and not _SIZE.match(tok) and re.search(r"\d", tok):
+            # A number the PO labels as the item is not a size, even one shaped
+            # like a neck finish (BioMed "Material 46447" read as 46-447).
+            named = LABELLED_NOT_SIZE and tok in _ITEM_BY_NORM and bool(re.search(
+                r"(ITEM|PART|SKU|STOCK\s*CODE|P/N|MATERIAL)\s*(NO\.?|#)?\s*:?\s*" + re.escape(_ITEM_BY_NORM[tok]) + r"(?![A-Z0-9])", desc_up))
+            if tok in _ITEM_BY_NORM and _CATEGORY.get(_ITEM_BY_NORM[tok]) and (named or not _SIZE.match(tok)) and re.search(r"\d", tok):
                 # A full alphanumeric Gamer item number printed on the PO
                 # (VetsPlus 0PA-5OZCAP) is the customer using Gamer's number;
                 # a bare number (48000) may be anything and must be confirmed.
@@ -528,6 +532,7 @@ DESC_STRONG = 8.0
 AGREE_STRONG = False
 KEEP_STRONGER = True
 LONG_DIGITS_PRINTED = True
+LABELLED_NOT_SIZE = True
 PRINTED_FIRST = False
 NO_RULEOUT_WHEN_OVERRIDDEN = True
 FIT_ON_BC = True

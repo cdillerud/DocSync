@@ -9,6 +9,7 @@ Implements the Warehouse Workflow logic:
   5. Auto-file to the correct SharePoint folder
 """
 
+import re
 import logging
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Tuple
@@ -93,8 +94,20 @@ async def auto_file_shipping_document(doc_id: str, db=None) -> Dict[str, Any]:
         is_international=is_international,
     )
 
-    # Attempt SharePoint upload
-    move_result = await _move_to_sharepoint(doc_id, folder_path)
+    # Intake already filed it with the learned routing (staff history, the
+    # model, the AI): keep it there. The rules-only path here moved warehouse
+    # BOLs from the Warehouse Not International root, where staff file them,
+    # to ".../Assembly" (57 of 107 staff-filed documents, 2026-10-07..11-06;
+    # never the other way), and under the new Temp Folder layout into
+    # Warehouse Assembly Orders, which is for WA orders only.
+    if KEEP_INTAKE_FOLDER and doc.get("sharepoint_item_id") and doc.get("sharepoint_folder_path"):
+        rule_path = folder_path
+        folder_path = re.sub(r"^/?Temp Folder/?", "", str(doc["sharepoint_folder_path"]))
+        reason = f"kept where intake routing filed it (rules alone said {rule_path})"
+        move_result = {"success": True, "folder_path": folder_path, "kept": True}
+    else:
+        # Attempt SharePoint upload
+        move_result = await _move_to_sharepoint(doc_id, folder_path)
 
     # 2026-09-23 fix: this previously marked EVERY document as auto_filed,
     # auto_cleared, and status=Completed regardless of whether the SharePoint
@@ -387,6 +400,9 @@ async def _bc_lookup_so(bc, so_number: str) -> Optional[Tuple[str, bool]]:
         logger.debug("[AutoFile] BC SO lookup failed for %s: %s", so_number, e)
 
     return None
+
+
+KEEP_INTAKE_FOLDER = True
 
 
 async def _move_to_sharepoint(doc_id: str, folder_path: str) -> Dict[str, Any]:

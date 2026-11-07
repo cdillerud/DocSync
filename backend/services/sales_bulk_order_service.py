@@ -61,8 +61,22 @@ async def template(db, customer_no: str, item: str, before: Optional[str] = None
                 "unit_of_measure": l.get("unitOfMeasureCode") or None, "description": l.get("description")}
                for l in ls if l.get("lineType") == "Item" and l is not prod and l.get("lineObjectNumber")
                and str(l["lineObjectNumber"]).upper() not in later]
+    charges_from = "template order"
+    if o.get("status") != "open":
+        # An invoiced order carries what was added at invoicing (Horseshoe
+        # FRTSURCHARGE 220 for the FREIGHT 1970 entered): use the charges
+        # the Hub learned this customer's orders are entered with.
+        from services.sales_charge_service import charge_lines
+        learned = await charge_lines(db, customer_no, [{"item": item, "quantity": float(prod.get("quantity") or 0),
+                                                        "unit_of_measure": prod.get("unitOfMeasureCode"),
+                                                        "unit_price": float(prod.get("unitPrice") or 0)}], [])
+        if learned:
+            charges = [{"item": c["item"], "quantity": float(c["quantity"]), "unit_price": float(c["unit_price"] or 0),
+                        "unit_of_measure": None, "description": None} for c in learned]
+            charges_from = "learned entry charges (template order is invoiced)"
     comments = [str(l.get("description") or "") for l in ls if l.get("lineType") == "Comment" and str(l.get("description") or "").strip()]
     return {"order_no": o["order_no"], "external_doc_no": o.get("external_doc_no"), "price": float(prod.get("unitPrice") or 0),
+            "charges_from": charges_from,
             "unit_of_measure": prod.get("unitOfMeasureCode"), "quantity": float(prod.get("quantity") or 0),
             "charges": charges, "comments": comments}
 

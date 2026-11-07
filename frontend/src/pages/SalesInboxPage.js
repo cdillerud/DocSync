@@ -202,6 +202,9 @@ function SupplierPOs({ id }) {
     <div className="rounded-md border border-border p-3 space-y-2" data-testid="supplier-pos">
       <div className="font-semibold text-sm">{plan.orders.length} {plan.supplier.vendor_no} POs <span className="font-normal text-muted-foreground">· one per PO line, as purchasing enters them · ship to {plan.templates[plan.items[0]]?.ship_to || '—'} · BC sandbox, not Production</span></div>
       {plan.problems?.length > 0 && <div className="text-red-600">{plan.problems.join('; ')}</div>}
+      {[...new Set(plan.items.map(it => plan.templates[it]?.order_address).filter(Boolean))].map(a => (
+        <div key={a} className="text-amber-700 dark:text-amber-400">Purchasing orders these from the order address {a}: set it on the POs in BC (the Hub cannot select an order address).</div>
+      ))}
       {openN > 0 && <div className="text-amber-700 dark:text-amber-400">{openN} open {plan.supplier.vendor_no} POs for {plan.items.join(', ')} are not yet on a sales order: check purchasing has not entered this PO already.</div>}
       <div className="flex flex-wrap gap-4">
         {plan.items.map(it => (

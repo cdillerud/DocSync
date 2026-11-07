@@ -175,7 +175,7 @@ async def supplier_plan(doc_id: str):
         raise HTTPException(status_code=400, detail=p["error"])
     d = await get_db().hub_documents.find_one({"id": doc_id}, {"_id": 0, "sales_supplier_pos": 1})
     p["supplier_pos"] = (d or {}).get("sales_supplier_pos")
-    p["templates"] = {it: {k: t.get(k) for k in ("po_no", "order_date", "cost", "comments", "charges")} | {"ship_to": (t.get("header") or {}).get("shipToName")}
+    p["templates"] = {it: {k: t.get(k) for k in ("po_no", "order_date", "cost", "comments", "charges", "order_address")} | {"ship_to": (t.get("header") or {}).get("shipToName")}
                       for it, t in (p.get("templates") or {}).items() if t}
     return p
 

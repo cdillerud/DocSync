@@ -28,11 +28,12 @@ logger = logging.getLogger(__name__)
 _HEADER_COPY = ("shipToName", "shipToContact", "shipToAddressLine1", "shipToAddressLine2", "shipToCity", "shipToState",
                 "shipToCountry", "shipToPostCode", "shortcutDimension1Code", "shortcutDimension2Code", "paymentTermsId",
                 "shipmentMethodId", "currencyCode")
-# Set after the lines: BC fills these from the vendor card and the location
-# (Ball's Westminster address, contact "Receiving") as the PO is built; the
-# buyer's PO orders from the Pittston plant for Jennifer Schuman.
-_HEADER_AFTER = ("buyFromAddressLine1", "buyFromAddressLine2", "buyFromCity", "buyFromState", "buyFromCountry", "buyFromPostCode",
-                 "shipToContact", "purchaser")
+# Set after the lines: BC refills these from the location as the PO is built
+# (contact "Receiving"). The buy-from address is not set: the buyer's PO
+# orders from Ball's Pittston order address, which API v2.0 cannot select,
+# and writing the address copies it into the read-only pay-to address (where
+# Ball is paid, Westminster) - the review screen tells the buyer instead.
+_HEADER_AFTER = ("shipToContact", "purchaser")
 _W = re.compile(r"/\s*(W\d+)")
 
 
@@ -105,6 +106,8 @@ def _template_from(pos: List[Dict[str, Any]], item: str) -> Optional[Dict[str, A
     ls = p["purchaseOrderLines"]
     return {"po_no": p["number"], "order_date": p.get("orderDate"), "header": {k: p[k] for k in _HEADER_COPY if p.get(k) not in (None, "")},
             "header_after": {k: p[k] for k in _HEADER_AFTER if p.get(k) not in (None, "")},
+            "order_address": (f"{p.get('vendorName')}, {p.get('buyFromAddressLine1')}, {p.get('buyFromCity')} {p.get('buyFromState')}"
+                              if p.get("buyFromAddressLine1") and p.get("buyFromAddressLine1") != p.get("payToAddressLine1") else None),
             "cost": float(prod.get("directUnitCost") or 0), "unit_of_measure": prod.get("unitOfMeasureCode") or None,
             "location_id": prod.get("locationId"),
             "comments": [str(l.get("description") or "") for l in ls if l.get("lineType") == "Comment" and str(l.get("description") or "").strip()],

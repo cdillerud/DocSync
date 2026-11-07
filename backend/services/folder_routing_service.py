@@ -2029,6 +2029,14 @@ async def _route_rules(doc: Dict[str, Any], is_international: bool = False, **kw
         details = dict(details or {})
         details["subfolder_from"] = "vendor_profile" if prof else "folder_default"
         details["rule_path"] = path
+        # The reason staff read must name the folder actually chosen, not the
+        # rule's ("Domestic vendor invoice (All Others)" filed in Dunnage).
+        import re as _re
+        m = _re.search(r"\(([^)]*)\)", reason or "")
+        if m and m.group(1).strip():          # the rule's subfolder guess, e.g. "(All Others)"
+            reason = reason[:m.start()] + "(" + (sub or t["top"]) + ")" + reason[m.end():]
+        if "staff file" not in (reason or ""):
+            reason = (reason or "") + ("; staff file this vendor there" if prof else "; where staff file most of this folder")
         return new_path, reason, details
     except Exception:
         return path, reason, details

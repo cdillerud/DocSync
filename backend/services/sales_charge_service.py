@@ -426,6 +426,8 @@ async def learn(db) -> Dict[str, Any]:
                 if kind != "same" or kk / len(obs_r) < 0.8:
                     continue          # order-level charges (freight, fuel) are not the item's
                 share = _steady([t[3] for t in obs_r if t[3]]) if kind == "same" else None
+                if share and abs(round(share * 400) / 400 - share) < 0.0005:
+                    share = round(share * 400) / 400     # BC prices are rounded; staff set a whole share (25%)
                 product_rules.append({"scope": "item_charge", "product": it, "charge": c, "presence": round(pres, 3),
                                       "n": len(last), "qty_kind": kind, "price": obs_r[-1][2], "recent": True,
                                       "price_share": share})

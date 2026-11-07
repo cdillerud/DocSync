@@ -159,6 +159,70 @@ function VsBc({ id }) {
   );
 }
 
+// The supplier side of the same PO: one supplier PO per line (Horseshoe ->
+// Ball, shipped to consignment), learned from the buyer's latest PO of each
+// item. The buyer confirms the cost once; each sales order is linked
+// "P0030198-1/W119643" the way inside sales does.
+function SupplierPOs({ id }) {
+  const [plan, setPlan] = useState(null);
+  const [err, setErr] = useState(null);
+  const [costs, setCosts] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data } = await api.get(`/sales-inbox/document/${id}/supplier-plan`);
+        setPlan(data);
+        setCosts(Object.fromEntries(data.items.map(it => [it, data.costs[it]?.template ?? ''])));
+      } catch (e) {
+        setErr(e?.response?.data?.detail || 'Could not plan the supplier POs');
+      }
+    })();
+  }, [id]);
+  const create = async () => {
+    setBusy(true);
+    try {
+      const { data } = await api.post(`/sales-inbox/document/${id}/supplier-create`, { costs });
+      setResult(data);
+      toast.success(`${data.created} supplier PO${data.created === 1 ? '' : 's'} created in the BC sandbox${data.already ? ` (${data.already} already there)` : ''}`);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || 'Could not create the supplier POs');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (err) return <p className="text-xs text-muted-foreground">Supplier POs: {err}</p>;
+  if (!plan) return <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="w-3 h-3 animate-spin" /> Planning supplier POs…</div>;
+  const done = result || plan.supplier_pos;
+  const made = (done?.orders || []).filter(o => o.ok);
+  const linked = made.filter(o => o.linked_sales_order?.ok).length;
+  const openN = Object.values(plan.open_unreceived_supplier_pos || {}).reduce((a, b) => a + b, 0);
+  return (
+    <div className="rounded-md border border-border p-3 space-y-2" data-testid="supplier-pos">
+      <div className="font-semibold text-sm">{plan.orders.length} {plan.supplier.vendor_no} POs <span className="font-normal text-muted-foreground">· one per PO line, as purchasing enters them · ship to {plan.templates[plan.items[0]]?.ship_to || '—'} · BC sandbox, not Production</span></div>
+      {plan.problems?.length > 0 && <div className="text-red-600">{plan.problems.join('; ')}</div>}
+      {openN > 0 && <div className="text-amber-700 dark:text-amber-400">{openN} open {plan.supplier.vendor_no} POs for {plan.items.join(', ')} are not yet on a sales order: check purchasing has not entered this PO already.</div>}
+      <div className="flex flex-wrap gap-4">
+        {plan.items.map(it => (
+          <label key={it} className="flex items-center gap-2">
+            <span>Cost for <span className="font-mono">{it}</span></span>
+            <Input className="h-7 w-28" value={costs[it] ?? ''} onChange={e => setCosts(c => ({ ...c, [it]: e.target.value }))} />
+            <span className="text-muted-foreground">last PO {plan.costs[it]?.template_po || '—'} ({plan.costs[it]?.template_date || '—'}): {plan.costs[it]?.template ?? '—'}
+              {plan.templates[it] ? ` · ${(plan.templates[it].charges || []).map(c => `${c.item} ${c.quantity} @ ${c.cost}`).join(', ')}${plan.templates[it].comments?.length ? ` · ${plan.templates[it].comments.length} comment lines` : ''}` : ''}</span>
+          </label>
+        ))}
+      </div>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={busy || plan.problems?.length > 0} onClick={create} data-testid="supplier-create">
+          {busy && <Loader2 className="w-3 h-3 mr-1 animate-spin" />}Create {plan.orders.length} {plan.supplier.vendor_no} POs in the BC sandbox and link the orders
+        </Button>
+        {made.length > 0 && <span className="text-muted-foreground">{made.length} created · {made[0].bc_po_no}–{made[made.length - 1].bc_po_no} · {linked} sales orders linked{done.failed?.length ? ` · failed: ${done.failed[0].error}` : ''}</span>}
+      </div>
+    </div>
+  );
+}
+
 // One BC order per PO line (Horseshoe): the rep reviews the orders, confirms
 // the price once, and the Hub creates them all in the BC sandbox.
 function BulkOrders({ id }) {
@@ -259,6 +323,7 @@ function BulkOrders({ id }) {
         {done && <span className="text-muted-foreground">Last run{done.at ? ` ${String(done.at).slice(0, 16).replace('T', ' ')}` : ''}: {(done.orders || []).length} created{done.skipped?.length || typeof done.skipped === 'number' ? `, ${Array.isArray(done.skipped) ? done.skipped.length : done.skipped} already there` : ''}{done.failed?.length ? `, failed: ${done.failed[0].error}` : ''}
           {(done.orders || []).length > 0 && <> · BC {done.orders[0].bc_order_no}–{done.orders[done.orders.length - 1].bc_order_no}</>}</span>}
       </div>
+      <SupplierPOs id={id} />
       {done?.vs_bc && (
         <div className={`rounded px-2 py-1 ${done.vs_bc.exact === done.vs_bc.orders ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-amber-500/10 text-amber-700 dark:text-amber-400'}`}>
           Compared with inside sales' Production orders: <b>{done.vs_bc.exact}/{done.vs_bc.orders}</b> identical

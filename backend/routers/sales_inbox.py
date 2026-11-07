@@ -161,6 +161,40 @@ async def bulk_create(doc_id: str, req: BulkCreateRequest, user=Depends(get_curr
     return r
 
 
+class SupplierCreateRequest(BaseModel):
+    costs: dict = {}                  # item -> unit cost the buyer confirmed
+
+
+@router.get("/document/{doc_id}/supplier-plan")
+async def supplier_plan(doc_id: str):
+    """The supplier PO per PO line (Horseshoe -> Ball), learned from BC
+    (Production read only)."""
+    from services.sales_supplier_po_service import plan
+    p = await plan(get_db(), doc_id)
+    if p.get("error"):
+        raise HTTPException(status_code=400, detail=p["error"])
+    d = await get_db().hub_documents.find_one({"id": doc_id}, {"_id": 0, "sales_supplier_pos": 1})
+    p["supplier_pos"] = (d or {}).get("sales_supplier_pos")
+    p["templates"] = {it: {k: t.get(k) for k in ("po_no", "order_date", "cost", "comments", "charges")} | {"ship_to": (t.get("header") or {}).get("shipToName")}
+                      for it, t in (p.get("templates") or {}).items() if t}
+    return p
+
+
+@router.post("/document/{doc_id}/supplier-create")
+async def supplier_create(doc_id: str, req: SupplierCreateRequest, user=Depends(get_current_user)):
+    """Create the supplier POs in the BC SANDBOX, never Production, and link
+    each sandbox sales order to its PO."""
+    from services.sales_supplier_po_service import create
+    try:
+        costs = {str(k).upper(): float(v) for k, v in (req.costs or {}).items()}
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Costs must be numbers")
+    r = await create(get_db(), doc_id, costs, user or {})
+    if r.get("refused"):
+        raise HTTPException(status_code=400, detail=r["refused"])
+    return r
+
+
 ACTIVE = ["needs_rep", "ready", "drafted"]
 
 

@@ -93,6 +93,17 @@ DUNNAGE_BY_SIZE = True
 ITEM_CHARGES = True
 ITEM_RATIO = True
 ITEM_RULES_INVOICED_ONLY = False   # replay switch: learn item charges from invoiced orders only
+# An item's charge rule also weighs the orders it shares with other products.
+# A charge line whose quantity is another product's quantity belongs to that
+# product. Berk B02372R: 3 solo 2025 orders had TARIFF 1 + PALLET; its next 4
+# orders (with J110CT, whose TARIFF matched J110CT's qty) had neither.
+ITEM_MULTI_EVIDENCE = True
+# Customer x product charge ratios learn from multi-product orders too (a
+# charge line whose quantity is exactly one product's quantity is that
+# product's), and when the customer changed how it bills the charge the
+# latest steady run (3+ orders) is the ratio. Berk TARIFF: 1 per order in
+# 2025, then TARIFF qty = J110CT qty on its last 5 lines.
+MULTI_CP_RATIO = True
 
 
 UNIT_EACH = True
@@ -170,6 +181,7 @@ async def learn(db) -> Dict[str, Any]:
     entry = await customer_entry_charges(db, excluded)
     obs = defaultdict(lambda: defaultdict(list))      # cust -> charge -> [dict]
     prod_ratio = defaultdict(list)                    # (cust, product, charge) -> [ratio]
+    prod_seq = defaultdict(list)                      # (cust, product, charge) -> [(seq, ratio, price)]
     prod_price = defaultdict(list)                    # (cust, product, charge) -> [unit price]
     glob_ratio = defaultdict(list)                    # (product, charge) -> [ratio]
     orders = Counter()
@@ -181,6 +193,8 @@ async def learn(db) -> Dict[str, Any]:
     size_orders = Counter()                           # size signature -> single-size orders
     item_orders = Counter()                           # item -> orders
     item_charge = defaultdict(list)                   # (item, charge) -> [(seq, qty_kind, qty, price)]
+    multi_orders = Counter()                          # item -> multi-product orders with it
+    multi_has = Counter()                             # (item, charge) -> of those, charge possibly its
     cust_seqs = defaultdict(list)                     # cust -> order sequence numbers
     cp_orders = Counter()                             # (cust, product) -> orders
     open_orders = Counter()                           # cust -> open orders
@@ -192,6 +206,24 @@ async def learn(db) -> Dict[str, Any]:
         prods = [l for l in ls if is_product(l["lineObjectNumber"]) and float(l.get("quantity") or 0) > 0]
         if not prods:
             continue
+        if (ITEM_MULTI_EVIDENCE and len({str(l["lineObjectNumber"]).upper() for l in prods}) > 1
+                and not (ITEM_RULES_INVOICED_ONLY and o.get("status") == "open")):
+            pq_of = defaultdict(set)
+            for l in prods:
+                pq_of[str(l["lineObjectNumber"]).upper()].add(round(float(l["quantity"]), 6))
+            for it_m in pq_of:
+                multi_orders[it_m] += 1
+                mine = set()
+                for l in ls:
+                    c = str(l["lineObjectNumber"]).upper()
+                    if is_product(c) or float(l.get("quantity") or 0) <= 0:
+                        continue
+                    q = round(float(l["quantity"]), 6)
+                    owners = {i for i, qs in pq_of.items() if q in qs}
+                    if not owners or it_m in owners:
+                        mine.add(c)
+                for c in mine:
+                    multi_has[(it_m, c)] += 1
         if len(prods) == 1 and not (ITEM_RULES_INVOICED_ONLY and o.get("status") == "open"):
             it1 = str(prods[0]["lineObjectNumber"]).upper()
             item_orders[it1] += 1
@@ -243,6 +275,27 @@ async def learn(db) -> Dict[str, Any]:
                 it = str(prods[0]["lineObjectNumber"]).upper()
                 prod_ratio[(cust, it, c)].append(a["q"] / _each(float(prods[0]["quantity"]), prods[0].get("unitOfMeasureCode")))
                 prod_price[(cust, it, c)].append(round(a["p"], 4))
+                prod_seq[(cust, it, c)].append((seq, prod_ratio[(cust, it, c)][-1], round(a["p"], 4)))
+            elif MULTI_CP_RATIO and len(its) > 1:
+                owned = set()
+                for l in ls:
+                    if str(l["lineObjectNumber"]).upper() == c and float(l.get("quantity") or 0) > 0:
+                        own_ = {str(p["lineObjectNumber"]).upper() for p in prods if abs(float(p["quantity"]) - float(l["quantity"])) < 1e-6}
+                        owned |= own_ if own_ else set(its)
+                for it0 in its - owned:
+                    prod_seq[(cust, it0, c)].append((seq, 0.0, None))     # the charge was another product's
+                for l in ls:
+                    if str(l["lineObjectNumber"]).upper() != c or float(l.get("quantity") or 0) <= 0:
+                        continue
+                    q = float(l["quantity"])
+                    own = [p for p in prods if abs(float(p["quantity"]) - q) < 1e-6]
+                    if len({str(p["lineObjectNumber"]).upper() for p in own}) != 1:
+                        continue
+                    it = str(own[0]["lineObjectNumber"]).upper()
+                    r_ = q / _each(q, own[0].get("unitOfMeasureCode"))
+                    prod_ratio[(cust, it, c)].append(r_)
+                    prod_price[(cust, it, c)].append(round(float(l.get("unitPrice") or 0), 4))
+                    prod_seq[(cust, it, c)].append((seq, r_, round(float(l.get("unitPrice") or 0), 4)))
                 glob_ratio[(it, c)].append(a["q"] / _each(float(prods[0]["quantity"]), prods[0].get("unitOfMeasureCode")))
     # Sandbox drafts a rep completed (lines added in BC) count as orders too:
     # what reps add is what the Hub should learn to add.
@@ -280,11 +333,30 @@ async def learn(db) -> Dict[str, Any]:
         await db.sales_charge_usual.insert_many(usual)
     await db.sales_charge_usual.create_index("customer_no")
     rules, product_rules = [], []
-    for (cust, it, c), rs in prod_ratio.items():
+    for key in set(prod_ratio) | set(prod_seq):
+        cust, it, c = key
+        rs = prod_ratio[key]
+        ss0 = sorted(prod_seq[key], key=lambda t: t[0])
+        if MULTI_CP_RATIO and len(ss0) >= 3 and all(t[1] == 0 for t in ss0[-3:]):
+            product_rules.append({"scope": "customer_product", "customer_no": cust, "product": it, "charge": c,
+                                  "ratio": 0.0, "zero": True, "price": None, "n": len(ss0)})
+            continue
         r = _steady(rs)
+        recent_price = None
+        if r is None and MULTI_CP_RATIO and len(prod_seq[(cust, it, c)]) >= 3:
+            ss = sorted(prod_seq[(cust, it, c)], key=lambda t: t[0])
+            for k in range(len(ss), 2, -1):
+                r = _steady([t[1] for t in ss[-k:]])
+                if r:
+                    rs = [t[1] for t in ss[-k:]]
+                    prod_price[(cust, it, c)] = [t[2] for t in ss[-k:]]
+                    recent_price = ss[-1][2]
+                    break
         pc = Counter(prod_price[(cust, it, c)])
         p_top, p_k = pc.most_common(1)[0] if pc else (None, 0)
         price = p_top if pc and p_k / sum(pc.values()) >= MIN_RATE and len(rs) >= 3 else None
+        if price is None and recent_price is not None:
+            price = recent_price        # a changed pattern: its latest price
         if r or price is not None:
             product_rules.append({"scope": "customer_product", "customer_no": cust, "product": it, "charge": c,
                                   "ratio": r, "price": price, "n": len(rs)})
@@ -293,6 +365,8 @@ async def learn(db) -> Dict[str, Any]:
         if n_it < 3 or c in excluded:
             continue
         pres = len(obs_) / n_it
+        if ITEM_MULTI_EVIDENCE and multi_orders[it]:
+            pres = (len(obs_) + multi_has[(it, c)]) / (n_it + multi_orders[it])
         kinds = Counter(t[1] for t in obs_)
         kind, kk = kinds.most_common(1)[0]
         last = max(obs_, key=lambda t: t[0])
@@ -478,6 +552,8 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
                     cp = await db.sales_charge_product_rules.find_one(
                         {"scope": "customer_product", "customer_no": customer_no, "product": str(p["item"]).upper(), "charge": r["charge"]},
                         {"_id": 0, "ratio": 1})
+                    if (cp or {}).get("zero"):
+                        continue
                     if not (cp or {}).get("ratio"):
                         q_items = None
                         break
@@ -489,6 +565,8 @@ async def charge_lines(db, customer_no: str, product_lines: List[Dict[str, Any]]
             for p in prods:
                 cp = await db.sales_charge_product_rules.find_one(
                     {"scope": "customer_product", "customer_no": customer_no, "product": str(p["item"]).upper(), "charge": r["charge"]}, {"_id": 0})
+                if (cp or {}).get("zero"):
+                    continue          # this customer's charge goes on its other products
                 gp = await db.sales_charge_product_rules.find_one({"scope": "product", "product": str(p["item"]).upper(), "charge": r["charge"]}, {"_id": 0})
                 ratio = (cp or {}).get("ratio") or (gp or {}).get("ratio")
                 if not ratio and SIZE_FALLBACK:
